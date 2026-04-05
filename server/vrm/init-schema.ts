@@ -344,5 +344,23 @@ export async function initVrmSchema(): Promise<void> {
     );
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_repair_tracker (
+      id                VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      truck_number      TEXT NOT NULL,
+      tech_name         TEXT NOT NULL,
+      tech_phone        TEXT,
+      repair_shop_address TEXT,
+      repair_shop_phone TEXT,
+      main_status       TEXT NOT NULL,
+      sub_status        TEXT,
+      notes             TEXT,
+      created_at        TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_at        TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_repair_tracker_truck_idx ON vrm_repair_tracker(truck_number);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_repair_tracker_status_idx ON vrm_repair_tracker(main_status);`);
+
   console.log("[VRM] Schema initialised");
 }

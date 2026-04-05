@@ -14,12 +14,14 @@ import {
   vrmRentalDecisionActions,
   vrmRentalChecks,
   vrmNewRentalLog,
+  vrmRepairTracker,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
   type InsertVrmRentalCheck,
   type InsertVrmNewRentalLog,
+  type InsertVrmRepairTracker,
 } from "../../shared/vrm-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
@@ -516,4 +518,28 @@ export async function updateNewRentalLogEntry(
 
 export async function deleteNewRentalLogEntry(id: string) {
   await db.delete(vrmNewRentalLog).where(eq(vrmNewRentalLog.id, id));
+}
+
+// ─── Repair Tracker ──────────────────────────────────────────────────────────
+
+export async function listRepairTracker() {
+  return db.select().from(vrmRepairTracker).orderBy(desc(vrmRepairTracker.createdAt));
+}
+
+export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
+  const [row] = await db.insert(vrmRepairTracker).values(data).returning();
+  return row;
+}
+
+export async function updateRepairTrackerEntry(id: string, data: Partial<InsertVrmRepairTracker>) {
+  const [row] = await db
+    .update(vrmRepairTracker)
+    .set({ ...data, updatedAt: new Date() })
+    .where(eq(vrmRepairTracker.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function deleteRepairTrackerEntry(id: string) {
+  await db.delete(vrmRepairTracker).where(eq(vrmRepairTracker.id, id));
 }

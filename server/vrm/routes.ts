@@ -37,12 +37,17 @@ import {
   bulkCreateNewRentalLogEntries,
   updateNewRentalLogEntry,
   deleteNewRentalLogEntry,
+  listRepairTracker,
+  createRepairTrackerEntry,
+  updateRepairTrackerEntry,
+  deleteRepairTrackerEntry,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
 import {
   vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
   insertVrmNewRentalLogSchema,
+  insertVrmRepairTrackerSchema,
 } from "../../shared/vrm-schema";
 
 export function registerVrmRoutes(): Router {
@@ -769,6 +774,47 @@ export function registerVrmRoutes(): Router {
   router.delete("/new-rental-log/:id", async (req, res) => {
     try {
       await deleteNewRentalLogEntry(req.params.id);
+      res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Repair Tracker ──────────────────────────────────────────────────────────
+
+  router.get("/repair-tracker", async (_req, res) => {
+    try {
+      res.json(await listRepairTracker());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker", async (req, res) => {
+    try {
+      const parsed = insertVrmRepairTrackerSchema.safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      res.status(201).json(await createRepairTrackerEntry(parsed.data));
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch("/repair-tracker/:id", async (req, res) => {
+    try {
+      const parsed = insertVrmRepairTrackerSchema.partial().safeParse(req.body);
+      if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+      const row = await updateRepairTrackerEntry(req.params.id, parsed.data);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.delete("/repair-tracker/:id", async (req, res) => {
+    try {
+      await deleteRepairTrackerEntry(req.params.id);
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

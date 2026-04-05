@@ -1,0 +1,563 @@
+import { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, X, Pencil, Trash2, Search } from "lucide-react";
+import { fonts, colors } from "../lib/constants";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RepairTrackerEntry {
+  id: string;
+  truckNumber: string;
+  techName: string;
+  techPhone: string | null;
+  repairShopAddress: string | null;
+  repairShopPhone: string | null;
+  mainStatus: string;
+  subStatus: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface FormData {
+  truckNumber: string;
+  techName: string;
+  techPhone: string;
+  repairShopAddress: string;
+  repairShopPhone: string;
+  mainStatus: string;
+  subStatus: string;
+  notes: string;
+}
+
+const EMPTY_FORM: FormData = {
+  truckNumber: "",
+  techName: "",
+  techPhone: "",
+  repairShopAddress: "",
+  repairShopPhone: "",
+  mainStatus: "",
+  subStatus: "",
+  notes: "",
+};
+
+// ─── Status badge colour map ──────────────────────────────────────────────────
+
+const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
+  "Repairing":              { fg: "#B45309", bg: "#FFFBEB" },
+  "Decision Pending":       { fg: "#B45309", bg: "#FFFBEB" },
+  "Confirming Status":      { fg: "#1A56DB", bg: "#EFF4FF" },
+  "Declined Repair":        { fg: "#DC2626", bg: "#FEF2F2" },
+  "Approved for sale":      { fg: "#0D9668", bg: "#ECFDF5" },
+  "Tags":                   { fg: "#1A56DB", bg: "#EFF4FF" },
+  "Scheduling":             { fg: "#1A56DB", bg: "#EFF4FF" },
+  "PMF":                    { fg: "#1A56DB", bg: "#EFF4FF" },
+  "In Transit":             { fg: "#1A56DB", bg: "#EFF4FF" },
+  "On Road":                { fg: "#0D9668", bg: "#ECFDF5" },
+  "Needs truck assigned":   { fg: "#B45309", bg: "#FFFBEB" },
+  "Available to be assigned": { fg: "#0D9668", bg: "#ECFDF5" },
+  "Relocate Van":           { fg: "#B45309", bg: "#FFFBEB" },
+  "NLWC - Return Rental":   { fg: "#B45309", bg: "#FFFBEB" },
+  "Truck Swap":             { fg: "#B45309", bg: "#FFFBEB" },
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const c = STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: colors.surface };
+  return (
+    <span
+      style={{
+        fontFamily: fonts.dmSans,
+        fontWeight: 500,
+        fontSize: 11,
+        color: c.fg,
+        backgroundColor: c.bg,
+        borderRadius: 6,
+        padding: "3px 8px",
+        display: "inline-block",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {status || "—"}
+    </span>
+  );
+}
+
+// ─── Side Panel ───────────────────────────────────────────────────────────────
+
+interface PanelProps {
+  entry: RepairTrackerEntry | null;
+  onClose: () => void;
+  onSaved: () => void;
+}
+
+function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const isEdit = !!entry;
+
+  const [form, setForm] = useState<FormData>(
+    entry
+      ? {
+          truckNumber: entry.truckNumber,
+          techName: entry.techName,
+          techPhone: entry.techPhone ?? "",
+          repairShopAddress: entry.repairShopAddress ?? "",
+          repairShopPhone: entry.repairShopPhone ?? "",
+          mainStatus: entry.mainStatus,
+          subStatus: entry.subStatus ?? "",
+          notes: entry.notes ?? "",
+        }
+      : { ...EMPTY_FORM },
+  );
+
+  const subOptions: readonly string[] =
+    form.mainStatus && MAIN_STATUSES.includes(form.mainStatus as MainStatus)
+      ? SUB_STATUSES[form.mainStatus as MainStatus]
+      : [];
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const payload = {
+        truckNumber: form.truckNumber.trim(),
+        techName: form.techName.trim(),
+        techPhone: form.techPhone.trim() || null,
+        repairShopAddress: form.repairShopAddress.trim() || null,
+        repairShopPhone: form.repairShopPhone.trim() || null,
+        mainStatus: form.mainStatus,
+        subStatus: form.subStatus || null,
+        notes: form.notes.trim() || null,
+      };
+      if (isEdit) {
+        return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
+      }
+      return apiRequest("POST", "/api/vrm/repair-tracker", payload);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      toast({ title: isEdit ? "Entry updated" : "Entry created" });
+      onSaved();
+    },
+    onError: (e: any) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => apiRequest("DELETE", `/api/vrm/repair-tracker/${entry!.id}`),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      toast({ title: "Entry deleted" });
+      onSaved();
+    },
+    onError: (e: any) => {
+      toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const set = (field: keyof FormData, val: string) => {
+    if (field === "mainStatus") {
+      setForm((f) => ({ ...f, mainStatus: val, subStatus: "" }));
+    } else {
+      setForm((f) => ({ ...f, [field]: val }));
+    }
+  };
+
+  const inputStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontSize: 13,
+    color: colors.ink,
+    backgroundColor: "#fff",
+    border: `1px solid ${colors.rule}`,
+    borderRadius: 6,
+    padding: "6px 10px",
+    width: "100%",
+    outline: "none",
+    boxSizing: "border-box",
+  };
+
+  const labelStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontWeight: 500,
+    fontSize: 12,
+    color: colors.inkSoft,
+    marginBottom: 4,
+    display: "block",
+  };
+
+  function Field({ label, field, type = "text" }: { label: string; field: keyof FormData; type?: "text" | "textarea" }) {
+    return (
+      <div style={{ marginBottom: 14 }}>
+        <label style={labelStyle}>{label}</label>
+        {type === "textarea" ? (
+          <textarea
+            rows={3}
+            value={form[field]}
+            onChange={(e) => set(field, e.target.value)}
+            style={{ ...inputStyle, resize: "vertical" }}
+          />
+        ) : (
+          <input
+            type="text"
+            value={form[field]}
+            onChange={(e) => set(field, e.target.value)}
+            style={inputStyle}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
+      <div style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.3)" }} onClick={onClose} />
+      <div
+        style={{
+          width: 480,
+          height: "100%",
+          backgroundColor: "#fff",
+          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
+        }}
+      >
+        {/* Header */}
+        <div
+          style={{
+            padding: "20px 24px 16px",
+            borderBottom: `1px solid ${colors.rule}`,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 15, color: colors.ink }}>
+            {isEdit ? "Edit Entry" : "Add Entry"}
+          </span>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+            <X size={18} color={colors.inkMuted} />
+          </button>
+        </div>
+
+        {/* Form body */}
+        <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+          <SectionHeading>Vehicle & Tech Info</SectionHeading>
+          <Field label="Truck Number" field="truckNumber" />
+          <Field label="Tech Name" field="techName" />
+          <Field label="Tech Phone" field="techPhone" />
+
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Repair Shop
+          </SectionHeading>
+          <Field label="Repair Shop Address" field="repairShopAddress" />
+          <Field label="Repair Shop Phone" field="repairShopPhone" />
+
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Status
+          </SectionHeading>
+
+          {/* Main status */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>Main Status</label>
+            <select
+              value={form.mainStatus}
+              onChange={(e) => set("mainStatus", e.target.value)}
+              style={{ ...inputStyle, cursor: "pointer" }}
+            >
+              <option value="">— select —</option>
+              {MAIN_STATUSES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Sub-status — cascades from main */}
+          <div style={{ marginBottom: 14 }}>
+            <label style={labelStyle}>Sub-Status</label>
+            <select
+              value={form.subStatus}
+              onChange={(e) => set("subStatus", e.target.value)}
+              disabled={!form.mainStatus || subOptions.length === 0}
+              style={{ ...inputStyle, cursor: form.mainStatus ? "pointer" : "default", opacity: form.mainStatus ? 1 : 0.5 }}
+            >
+              <option value="">— select —</option>
+              {subOptions.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Notes
+          </SectionHeading>
+          <Field label="Notes" field="notes" type="textarea" />
+        </div>
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: "16px 24px",
+            borderTop: `1px solid ${colors.rule}`,
+            display: "flex",
+            gap: 10,
+            flexShrink: 0,
+          }}
+        >
+          <button
+            onClick={() => saveMutation.mutate()}
+            disabled={saveMutation.isPending || !form.truckNumber.trim() || !form.techName.trim() || !form.mainStatus}
+            style={{
+              flex: 1,
+              fontFamily: fonts.dmSans,
+              fontWeight: 600,
+              fontSize: 13,
+              color: "#fff",
+              backgroundColor: colors.accent,
+              border: "none",
+              borderRadius: 8,
+              padding: "10px 0",
+              cursor: "pointer",
+              opacity: saveMutation.isPending ? 0.7 : 1,
+            }}
+          >
+            {saveMutation.isPending ? "Saving…" : isEdit ? "Save Changes" : "Add Entry"}
+          </button>
+          {isEdit && (
+            <button
+              onClick={() => {
+                if (window.confirm("Delete this entry?")) deleteMutation.mutate();
+              }}
+              disabled={deleteMutation.isPending}
+              style={{
+                fontFamily: fonts.dmSans,
+                fontWeight: 600,
+                fontSize: 13,
+                color: colors.red,
+                backgroundColor: "#FEF2F2",
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 14px",
+                cursor: "pointer",
+              }}
+            >
+              <Trash2 size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SectionHeading({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) {
+  return (
+    <div
+      style={{
+        fontFamily: fonts.dmSans,
+        fontWeight: 600,
+        fontSize: 11,
+        color: colors.inkMuted,
+        textTransform: "uppercase",
+        letterSpacing: "0.06em",
+        marginBottom: 14,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export default function RentalRepairTracker() {
+  const { toast } = useToast();
+  const [search, setSearch] = useState("");
+  const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
+
+  const { data: entries = [], isLoading } = useQuery<RepairTrackerEntry[]>({
+    queryKey: ["/api/vrm/repair-tracker"],
+  });
+
+  const filtered = entries.filter((e) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return (
+      e.truckNumber.toLowerCase().includes(q) ||
+      e.techName.toLowerCase().includes(q)
+    );
+  });
+
+  const thStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontWeight: 600,
+    fontSize: 11,
+    color: colors.inkMuted,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    padding: "10px 14px",
+    textAlign: "left",
+    borderBottom: `1px solid ${colors.rule}`,
+    whiteSpace: "nowrap",
+  };
+
+  const tdStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontSize: 13,
+    color: colors.ink,
+    padding: "11px 14px",
+    borderBottom: `1px solid ${colors.rule}`,
+    verticalAlign: "middle",
+  };
+
+  return (
+    <div>
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
+        <div>
+          <h1 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 22, color: colors.ink, margin: 0 }}>
+            Rental Repair Tracker
+          </h1>
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: "4px 0 0" }}>
+            Track techs denied a rental — truck number, shop details, and current status.
+          </p>
+        </div>
+        <button
+          onClick={() => setPanelEntry("new")}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: fonts.dmSans,
+            fontWeight: 600,
+            fontSize: 13,
+            color: "#fff",
+            backgroundColor: colors.accent,
+            border: "none",
+            borderRadius: 8,
+            padding: "9px 16px",
+            cursor: "pointer",
+          }}
+        >
+          <Plus size={16} />
+          Add Entry
+        </button>
+      </div>
+
+      {/* Search bar */}
+      <div style={{ position: "relative", maxWidth: 320, marginBottom: 20 }}>
+        <Search
+          size={15}
+          color={colors.inkMuted}
+          style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+        />
+        <input
+          type="text"
+          placeholder="Search truck # or tech name…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            fontFamily: fonts.dmSans,
+            fontSize: 13,
+            color: colors.ink,
+            backgroundColor: "#fff",
+            border: `1px solid ${colors.rule}`,
+            borderRadius: 8,
+            padding: "8px 12px 8px 32px",
+            width: "100%",
+            outline: "none",
+          }}
+        />
+      </div>
+
+      {/* Table */}
+      <div
+        style={{
+          backgroundColor: "#fff",
+          border: `1px solid ${colors.rule}`,
+          borderRadius: 10,
+          overflow: "hidden",
+        }}
+      >
+        {isLoading ? (
+          <div style={{ padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            Loading…
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" to get started."}
+          </div>
+        ) : (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr style={{ backgroundColor: colors.surface }}>
+                <th style={thStyle}>Truck #</th>
+                <th style={thStyle}>Tech Name</th>
+                <th style={thStyle}>Tech Phone</th>
+                <th style={thStyle}>Repair Shop Address</th>
+                <th style={thStyle}>Shop Phone</th>
+                <th style={thStyle}>Status</th>
+                <th style={{ ...thStyle, width: 40 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((entry) => (
+                <tr
+                  key={entry.id}
+                  onClick={() => setPanelEntry(entry)}
+                  style={{ cursor: "pointer" }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  <td style={{ ...tdStyle, fontWeight: 600 }}>{entry.truckNumber}</td>
+                  <td style={tdStyle}>{entry.techName}</td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft }}>{entry.techPhone ?? "—"}</td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
+                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.repairShopAddress ?? "—"}
+                    </span>
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft }}>{entry.repairShopPhone ?? "—"}</td>
+                  <td style={tdStyle}>
+                    <div>
+                      <StatusBadge status={entry.mainStatus} />
+                      {entry.subStatus && (
+                        <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 3 }}>
+                          {entry.subStatus}
+                        </div>
+                      )}
+                    </div>
+                  </td>
+                  <td style={tdStyle}>
+                    <Pencil size={14} color={colors.inkMuted} />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {/* Count */}
+      {!isLoading && filtered.length > 0 && (
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, marginTop: 12 }}>
+          {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
+          {search && ` matching "${search}"`}
+        </div>
+      )}
+
+      {/* Slide-over panel */}
+      {panelEntry !== null && (
+        <EntryPanel
+          entry={panelEntry === "new" ? null : panelEntry}
+          onClose={() => setPanelEntry(null)}
+          onSaved={() => setPanelEntry(null)}
+        />
+      )}
+    </div>
+  );
+}
