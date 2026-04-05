@@ -150,6 +150,7 @@ interface TruckDetailPanelProps {
   onOpenChange: (open: boolean) => void;
   onUpdateAms?: (truckNumber: string, vin?: string) => void;
   amsOpen?: boolean;
+  fromPage?: string;
 }
 
 type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
@@ -429,7 +430,7 @@ function EditableBoolRow({
   );
 }
 
-export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, amsOpen }: TruckDetailPanelProps) {
+export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, amsOpen, fromPage = "dashboard" }: TruckDetailPanelProps) {
   const { toast } = useToast();
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
@@ -622,7 +623,7 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                     </Button>
                   )}
                 </div>
-                <Link href={`/fleet-scope/trucks/${truck.id}?from=dashboard`}>
+                <Link href={`/fleet-scope/trucks/${truck.id}?from=${fromPage}`}>
                   <Button variant="outline" size="sm" data-testid="button-open-full-detail">
                     <ExternalLink className="w-3.5 h-3.5 mr-1.5" />
                     Full Details

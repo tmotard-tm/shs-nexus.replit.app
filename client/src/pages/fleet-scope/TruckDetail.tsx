@@ -144,6 +144,9 @@ export default function TruckDetail() {
     if (from === "dashboard") {
       return "/fleet-scope/dashboard";
     }
+    if (from === "queue") {
+      return "/fleet-scope/queue";
+    }
     return "/fleet-scope";
   };
 

@@ -532,6 +532,7 @@ export default function TodaysQueue() {
         truckId={selectedTruckId}
         open={detailPanelOpen}
         onOpenChange={(open) => setDetailPanelOpen(open)}
+        fromPage="queue"
       />
     </div>
   );
