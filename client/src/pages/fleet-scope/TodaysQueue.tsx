@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Loader2 } from "lucide-react";
+import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Loader2, Bot } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -24,6 +24,7 @@ interface QueueItem {
   suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
   repairPhone: string | null;
   techState: string | null;
+  readyReason?: 'luca' | 'holman' | 'date';
 }
 
 interface NoActionItem {
@@ -198,6 +199,13 @@ function QueueRow({
           {item.isConflict && <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />}
           <span>→ {item.actionText}</span>
         </div>
+
+        {item.step === 3 && item.readyReason === 'luca' && !item.isConflict && (
+          <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
+            <Bot className="h-3.5 w-3.5 text-green-600 dark:text-green-400 flex-shrink-0" />
+            <span className="text-xs font-semibold text-green-700 dark:text-green-400">LucaAI confirmed READY via phone call</span>
+          </div>
+        )}
 
         {item.step === 7 && (
           <div className="mt-1.5 space-y-0.5">

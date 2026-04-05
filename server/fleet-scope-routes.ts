@@ -3799,6 +3799,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         isConflict?: boolean;
         repairPhone: string | null;
         techState: string | null;
+        readyReason?: 'luca' | 'holman' | 'date';
       };
 
       // Helper: call log is authoritative over denormalized truck fields for luca status/date
@@ -3875,17 +3876,27 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const isConflict = t.mainStatus === 'Repairing' || t.mainStatus === 'Confirming Status';
         const cl = callLogMap[t.id];
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
+        const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
+        const lucaReady = lucaStatus === 'Ready';
+        const holmanReady = getHolmanStatus(t.truckNumber) === 'Repair Complete';
+        const readyReason: 'luca' | 'holman' | 'date' = lucaReady ? 'luca' : holmanReady ? 'holman' : 'date';
+        const actionText = isConflict
+          ? 'STATUS CONFLICT — Holman/Luca shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
+          : readyReason === 'luca'
+            ? 'LucaAI confirmed vehicle is READY — arrange same-day pickup'
+            : readyReason === 'holman'
+              ? 'Holman shows Repair Complete — verify with shop and arrange pickup'
+              : 'Estimated ready date has passed — call shop to confirm, then arrange pickup';
         items.push({
           step: 3, stepTitle: 'VEHICLE READY — RETRIEVE ASAP',
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
-          actionText: isConflict
-            ? 'STATUS CONFLICT — Holman/Luca shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
-            : 'Vehicle appears ready — verify with shop and arrange same-day pickup if confirmed',
+          actionText,
           sortKey: erd ? new Date(erd).getTime() : 0,
           isConflict,
           repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
+          readyReason,
         });
       }
 
