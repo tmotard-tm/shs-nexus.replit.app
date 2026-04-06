@@ -313,7 +313,8 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
     transition: "all 120ms",
   });
 
-  const isOverride = decision.recommendation.toLowerCase() !== decision.decision.toLowerCase() && decision.recommendation !== "No Data";
+  const decisionAsRec = decision.decision === "approved" ? "Approve" : decision.decision === "denied" ? "Deny" : decision.decision;
+  const isOverride = decisionAsRec !== decision.recommendation && decision.recommendation !== "No Data";
 
   return (
     <>
@@ -1175,8 +1176,8 @@ export default function NewRentals() {
               </thead>
               <tbody>
                 {decisionLog.map((d) => {
-                  const isOverride = d.recommendation.toLowerCase() !== d.decision.toLowerCase() &&
-                    d.recommendation !== "No Data";
+                  const decisionAsRec = d.decision === "approved" ? "Approve" : d.decision === "denied" ? "Deny" : d.decision;
+                  const isOverride = decisionAsRec !== d.recommendation && d.recommendation !== "No Data";
                   return (
                     <tr
                       key={d.id}

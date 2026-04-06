@@ -619,9 +619,6 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   ]);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
-  const existingLdaps = new Set(
-    existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
-  );
 
   // LDAPs already in the Full Log — skip these on import
   const fullLogLdaps = new Set(
@@ -631,11 +628,12 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   const isAlreadyInFullLog = (ldap: string | null | undefined) =>
     fullLogLdaps.has((ldap ?? "").toUpperCase());
 
-  // Step 4: Filter to only genuinely new denied decisions not already tracked
+  // Step 4: Filter to only genuinely new denied decisions not already tracked.
+  // Dedup by decision ID only — not by LDAP — so a tech who was previously denied
+  // can still generate a new tracker row when a new denial decision is recorded.
   const newDecisions = deniedDecisions.filter(
     (d) =>
       !existingDecisionIds.has(d.id) &&
-      !existingLdaps.has((d.techLdap ?? "").toUpperCase()) &&
       !isAlreadyInFullLog(d.techLdap),
   );
 
