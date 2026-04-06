@@ -177,12 +177,33 @@ function parseCSV(text: string): Record<string, string>[] {
 type StringField = Exclude<keyof FormData, "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman">;
 type BooleanField = "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman";
 
+const DATE_FIELDS = new Set<keyof FormData>(["dateOfRequest", "startRentalDate", "techServiceDate"]);
+
 function isBooleanField(field: keyof FormData): field is BooleanField {
   return BOOLEAN_FIELDS.has(field);
 }
 
+function isDateField(field: keyof FormData): boolean {
+  return DATE_FIELDS.has(field);
+}
+
 function normalizeHeader(h: string): string {
   return h.toLowerCase().trim().replace(/[:\?]+\s*$/, "").trim();
+}
+
+function parseDateToISO(raw: string): string | null {
+  const s = raw.trim();
+  if (!s) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if (mdy) {
+    const m = mdy[1].padStart(2, "0");
+    const d = mdy[2].padStart(2, "0");
+    let y = parseInt(mdy[3], 10);
+    if (y < 100) y += y < 50 ? 2000 : 1900;
+    return `${y}-${m}-${d}`;
+  }
+  return null;
 }
 
 function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
@@ -193,6 +214,8 @@ function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
     if (isBooleanField(field)) {
       const lower = rawVal.toLowerCase().trim();
       entry[field] = lower === "yes" || lower === "true" || lower === "1";
+    } else if (isDateField(field)) {
+      entry[field as StringField] = parseDateToISO(rawVal);
     } else {
       entry[field as StringField] = rawVal || null;
     }
@@ -217,6 +240,7 @@ function parseXLSX(
   const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
     raw: false,
     defval: "",
+    dateNF: "YYYY-MM-DD",
   });
   return rows.filter((row) => Object.values(row).some((v) => String(v).trim() !== ""));
 }
