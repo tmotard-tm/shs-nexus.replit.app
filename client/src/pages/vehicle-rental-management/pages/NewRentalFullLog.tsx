@@ -790,6 +790,10 @@ export default function NewRentalFullLog() {
       render: (e) => e.vanRentalPo ?? "—",
     },
     {
+      label: "Rental Approved",
+      render: (e) => <BoolBadge value={e.rentalApproved} />,
+    },
+    {
       label: "Name",
       sortKey: "name",
       render: (e) => e.name ?? "—",
