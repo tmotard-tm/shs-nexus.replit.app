@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, Search, RefreshCw } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -95,6 +95,62 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+// ─── Module-level style constants (not re-created on every render) ────────────
+
+const INPUT_STYLE: React.CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontSize: 13,
+  color: colors.ink,
+  backgroundColor: "#fff",
+  border: `1px solid ${colors.rule}`,
+  borderRadius: 6,
+  padding: "6px 10px",
+  width: "100%",
+  outline: "none",
+  boxSizing: "border-box",
+};
+
+const LABEL_STYLE: React.CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontWeight: 500,
+  fontSize: 12,
+  color: colors.inkSoft,
+  marginBottom: 4,
+  display: "block",
+};
+
+// ─── Field — defined at module level so React never remounts it on re-render ──
+
+interface FieldProps {
+  label: string;
+  value: string;
+  onChange: (val: string) => void;
+  type?: "text" | "textarea";
+}
+
+function Field({ label, value, onChange, type = "text" }: FieldProps) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={LABEL_STYLE}>{label}</label>
+      {type === "textarea" ? (
+        <textarea
+          rows={3}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ ...INPUT_STYLE, resize: "vertical" }}
+        />
+      ) : (
+        <input
+          type="text"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={INPUT_STYLE}
+        />
+      )}
+    </div>
+  );
+}
+
 // ─── Side Panel ───────────────────────────────────────────────────────────────
 
 interface PanelProps {
@@ -167,58 +223,13 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
     },
   });
 
-  const set = (field: keyof FormData, val: string) => {
+  const set = useCallback((field: keyof FormData, val: string) => {
     if (field === "mainStatus") {
       setForm((f) => ({ ...f, mainStatus: val, subStatus: "" }));
     } else {
       setForm((f) => ({ ...f, [field]: val }));
     }
-  };
-
-  const inputStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans,
-    fontSize: 13,
-    color: colors.ink,
-    backgroundColor: "#fff",
-    border: `1px solid ${colors.rule}`,
-    borderRadius: 6,
-    padding: "6px 10px",
-    width: "100%",
-    outline: "none",
-    boxSizing: "border-box",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans,
-    fontWeight: 500,
-    fontSize: 12,
-    color: colors.inkSoft,
-    marginBottom: 4,
-    display: "block",
-  };
-
-  function Field({ label, field, type = "text" }: { label: string; field: keyof FormData; type?: "text" | "textarea" }) {
-    return (
-      <div style={{ marginBottom: 14 }}>
-        <label style={labelStyle}>{label}</label>
-        {type === "textarea" ? (
-          <textarea
-            rows={3}
-            value={form[field]}
-            onChange={(e) => set(field, e.target.value)}
-            style={{ ...inputStyle, resize: "vertical" }}
-          />
-        ) : (
-          <input
-            type="text"
-            value={form[field]}
-            onChange={(e) => set(field, e.target.value)}
-            style={inputStyle}
-          />
-        )}
-      </div>
-    );
-  }
+  }, []);
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
@@ -256,15 +267,15 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         {/* Form body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
           <SectionHeading>Vehicle & Tech Info</SectionHeading>
-          <Field label="Truck Number" field="truckNumber" />
-          <Field label="Tech Name" field="techName" />
-          <Field label="Tech Phone" field="techPhone" />
+          <Field label="Truck Number" value={form.truckNumber} onChange={(v) => set("truckNumber", v)} />
+          <Field label="Tech Name" value={form.techName} onChange={(v) => set("techName", v)} />
+          <Field label="Tech Phone" value={form.techPhone} onChange={(v) => set("techPhone", v)} />
 
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Repair Shop
           </SectionHeading>
-          <Field label="Repair Shop Address" field="repairShopAddress" />
-          <Field label="Repair Shop Phone" field="repairShopPhone" />
+          <Field label="Repair Shop Address" value={form.repairShopAddress} onChange={(v) => set("repairShopAddress", v)} />
+          <Field label="Repair Shop Phone" value={form.repairShopPhone} onChange={(v) => set("repairShopPhone", v)} />
 
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Status
@@ -272,11 +283,11 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
           {/* Main status */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Main Status</label>
+            <label style={LABEL_STYLE}>Main Status</label>
             <select
               value={form.mainStatus}
               onChange={(e) => set("mainStatus", e.target.value)}
-              style={{ ...inputStyle, cursor: "pointer" }}
+              style={{ ...INPUT_STYLE, cursor: "pointer" }}
             >
               <option value="">— select —</option>
               {MAIN_STATUSES.map((s) => (
@@ -287,12 +298,12 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
           {/* Sub-status — cascades from main */}
           <div style={{ marginBottom: 14 }}>
-            <label style={labelStyle}>Sub-Status</label>
+            <label style={LABEL_STYLE}>Sub-Status</label>
             <select
               value={form.subStatus}
               onChange={(e) => set("subStatus", e.target.value)}
               disabled={!form.mainStatus || subOptions.length === 0}
-              style={{ ...inputStyle, cursor: form.mainStatus ? "pointer" : "default", opacity: form.mainStatus ? 1 : 0.5 }}
+              style={{ ...INPUT_STYLE, cursor: form.mainStatus ? "pointer" : "default", opacity: form.mainStatus ? 1 : 0.5 }}
             >
               <option value="">— select —</option>
               {subOptions.map((s) => (
@@ -304,7 +315,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Notes
           </SectionHeading>
-          <Field label="Notes" field="notes" type="textarea" />
+          <Field label="Notes" value={form.notes} onChange={(v) => set("notes", v)} type="textarea" />
         </div>
 
         {/* Footer */}
