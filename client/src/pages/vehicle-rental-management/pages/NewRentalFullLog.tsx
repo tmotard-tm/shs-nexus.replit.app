@@ -251,6 +251,8 @@ function parseXLSX(
 
 type SortKey = "dateOfRequest" | "name" | "startRentalDate" | "vanRentalPo" | "enterpriseId";
 
+const PAGE_SIZE = 15;
+
 // ─── Shared form styles ───────────────────────────────────────────────────────
 
 const inputStyle: CSSProperties = {
@@ -643,6 +645,7 @@ export default function NewRentalFullLog() {
   const [sortKey, setSortKey] = useState<SortKey>("dateOfRequest");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const { data: entries = [], isLoading } = useQuery<RentalLogEntry[]>({
     queryKey: ["/api/vrm/new-rental-log"],
@@ -719,6 +722,7 @@ export default function NewRentalFullLog() {
       setSortKey(key);
       setSortDir("asc");
     }
+    setPage(1);
   }
 
   const filtered = entries.filter((e) => {
@@ -739,6 +743,10 @@ export default function NewRentalFullLog() {
     const cmp = av.localeCompare(bv);
     return sortDir === "asc" ? cmp : -cmp;
   });
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const paged = sorted.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const thStyle: CSSProperties = {
     fontFamily: fonts.dmSans,
@@ -903,7 +911,7 @@ export default function NewRentalFullLog() {
             type="text"
             placeholder="Search name, ID, PO, location…"
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={(e) => { setSearch(e.target.value); setPage(1); }}
             style={{
               fontFamily: fonts.dmSans,
               fontSize: 13,
@@ -1025,7 +1033,7 @@ export default function NewRentalFullLog() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((entry) => (
+              {paged.map((entry) => (
                 <tr
                   key={entry.id}
                   onClick={() => setPanelEntry(entry)}
@@ -1046,6 +1054,68 @@ export default function NewRentalFullLog() {
               ))}
             </tbody>
           </table>
+        )}
+
+        {/* Pagination footer */}
+        {!isLoading && sorted.length > PAGE_SIZE && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              padding: "12px 16px",
+              borderTop: `1px solid ${colors.rule}`,
+              fontFamily: fonts.dmSans,
+              fontSize: 13,
+              color: colors.inkMuted,
+            }}
+          >
+            <span>
+              Showing {Math.min((safePage - 1) * PAGE_SIZE + 1, sorted.length)}–
+              {Math.min(safePage * PAGE_SIZE, sorted.length)} of {sorted.length}
+            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                disabled={safePage <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 500,
+                  fontSize: 13,
+                  color: colors.inkSoft,
+                  backgroundColor: "#fff",
+                  border: `1px solid ${colors.rule}`,
+                  borderRadius: 6,
+                  padding: "6px 14px",
+                  cursor: safePage <= 1 ? "not-allowed" : "pointer",
+                  opacity: safePage <= 1 ? 0.4 : 1,
+                }}
+              >
+                Previous
+              </button>
+              <span style={{ padding: "0 4px" }}>
+                Page {safePage} of {totalPages}
+              </span>
+              <button
+                disabled={safePage >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 500,
+                  fontSize: 13,
+                  color: colors.inkSoft,
+                  backgroundColor: "#fff",
+                  border: `1px solid ${colors.rule}`,
+                  borderRadius: 6,
+                  padding: "6px 14px",
+                  cursor: safePage >= totalPages ? "not-allowed" : "pointer",
+                  opacity: safePage >= totalPages ? 0.4 : 1,
+                }}
+              >
+                Next
+              </button>
+            </div>
+          </div>
         )}
       </div>
 
