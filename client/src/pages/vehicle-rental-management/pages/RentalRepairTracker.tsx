@@ -558,6 +558,7 @@ export default function RentalRepairTracker() {
                 <th style={thStyle}>Tech Name</th>
                 <th style={thStyle}>Truck #</th>
                 <th style={thStyle}>Repair Shop</th>
+                <th style={thStyle}>Repair Phone</th>
                 <th style={thStyle}>Denied Date</th>
                 <th style={thStyle}>Status</th>
                 <th style={{ ...thStyle, width: 40 }}></th>
@@ -579,10 +580,13 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
                     {entry.truckNumber ?? "—"}
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 180 }}>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
                     <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {entry.repairShopAddress ?? "—"}
                     </span>
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.repairShopPhone ?? "—"}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.deniedAt
