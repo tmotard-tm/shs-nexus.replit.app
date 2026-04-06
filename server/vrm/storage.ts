@@ -531,6 +531,22 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
   return row;
 }
 
+/**
+ * Backfill truck_number on any repair tracker row that has a tech_ldap
+ * but no truck number, by joining against the TPMS tech profiles cache.
+ */
+export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
+  const result = await db.execute(sql`
+    UPDATE vrm_repair_tracker rt
+    SET truck_number = tp.truck_no
+    FROM tpms_tech_profiles tp
+    WHERE UPPER(tp.enterprise_id) = UPPER(rt.tech_ldap)
+      AND rt.tech_ldap IS NOT NULL
+      AND (rt.truck_number IS NULL OR rt.truck_number = '')
+  `);
+  return (result as any).rowCount ?? 0;
+}
+
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
   // Fetch denied from both sources
   const [deniedDecisions, deniedChecks] = await Promise.all([
@@ -582,10 +598,29 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   if (totalNew === 0) return { imported: 0, skipped: totalSkipped };
 
+  // Look up truck numbers from TPMS for all LDAPs being inserted
+  const allNewLdaps = [
+    ...newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()),
+    ...newChecks.map((c) => (c.techLdap ?? "").toUpperCase()),
+  ].filter(Boolean);
+
+  const tpmsRows = allNewLdaps.length
+    ? await db.execute(sql`
+        SELECT UPPER(enterprise_id) AS ldap, truck_no
+        FROM tpms_tech_profiles
+        WHERE UPPER(enterprise_id) = ANY(${allNewLdaps})
+      `)
+    : { rows: [] };
+
+  const truckByLdap = new Map<string, string>(
+    ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.truck_no as string]),
+  );
+
   const rows: InsertVrmRepairTracker[] = [
     ...newDecisions.map((d) => ({
       techLdap: d.techLdap,
       techName: d.techName ?? d.techLdap ?? "Unknown",
+      truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
       mainStatus: "Decision Pending",
       recommendation: d.recommendation,
       deniedAt: d.createdAt,
@@ -594,6 +629,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     ...newChecks.map((c) => ({
       techLdap: c.techLdap,
       techName: c.techName ?? c.techLdap ?? "Unknown",
+      truckNumber: truckByLdap.get((c.techLdap ?? "").toUpperCase()) ?? null,
       mainStatus: "Decision Pending",
       recommendation: c.recommendation,
       deniedAt: c.checkedAt,
@@ -602,6 +638,9 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   ];
 
   await db.insert(vrmRepairTracker).values(rows);
+
+  // Also backfill any existing rows that were imported without a truck number
+  await backfillRepairTrackerTruckNumbers();
 
   return { imported: totalNew, skipped: totalSkipped };
 }

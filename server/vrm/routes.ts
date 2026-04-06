@@ -42,6 +42,7 @@ import {
   updateRepairTrackerEntry,
   deleteRepairTrackerEntry,
   importDeniedToRepairTracker,
+  backfillRepairTrackerTruckNumbers,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
@@ -53,6 +54,11 @@ import {
 
 export function registerVrmRoutes(): Router {
   const router = Router();
+
+  // Backfill any tracker rows that have a tech_ldap but no truck_number
+  backfillRepairTrackerTruckNumbers()
+    .then((n) => { if (n > 0) console.log(`[VRM] Backfilled truck numbers on ${n} repair tracker rows`); })
+    .catch((e) => console.error("[VRM] Truck-number backfill failed:", e.message));
 
   // ─── Dashboard ──────────────────────────────────────────────────────────────
 
