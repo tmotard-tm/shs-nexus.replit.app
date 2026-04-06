@@ -409,6 +409,8 @@ export default function WeeklyOffboarding() {
     approved_date: string | null;
     created_at: string;
     updated_at: string;
+    mobile_phone: string | null;
+    home_address: string | null;
   }
 
   const { data: byovEnrollments = [], isLoading: byovLoading, refetch: refetchByov } = useQuery<ByovEnrollment[]>({
@@ -442,7 +444,9 @@ export default function WeeklyOffboarding() {
       (e.enterprise_id || '').toLowerCase().includes(q) ||
       (e.full_name || '').toLowerCase().includes(q) ||
       (e.truck_number || '').toLowerCase().includes(q) ||
-      (e.district || '').toLowerCase().includes(q)
+      (e.district || '').toLowerCase().includes(q) ||
+      (e.mobile_phone || '').toLowerCase().includes(q) ||
+      (e.home_address || '').toLowerCase().includes(q)
     );
   });
 
@@ -953,6 +957,8 @@ export default function WeeklyOffboarding() {
                           <TableHead>District</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Approved Date</TableHead>
+                          <TableHead>Phone</TableHead>
+                          <TableHead>Home Address</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -976,6 +982,12 @@ export default function WeeklyOffboarding() {
                               </Badge>
                             </TableCell>
                             <TableCell className="text-sm whitespace-nowrap">{e.approved_date ? formatDate(e.approved_date) : '-'}</TableCell>
+                            <TableCell className="text-sm whitespace-nowrap font-mono">
+                              {e.mobile_phone || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                            <TableCell className="text-sm max-w-[220px]">
+                              {e.home_address || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>

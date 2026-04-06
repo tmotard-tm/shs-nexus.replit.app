@@ -16215,7 +16215,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         FROM byov_enrollments
         ORDER BY approved_date DESC NULLS LAST, created_at DESC
       `);
-      return res.json(rows.rows);
+      const enrollments: any[] = rows.rows as any[];
+
+      // Enrich with TPMS_EXTRACT contact + address data from Snowflake
+      if (enrollments.length > 0) {
+        try {
+          const ids = enrollments
+            .map((e: any) => e.enterprise_id?.toString().trim())
+            .filter(Boolean);
+          if (ids.length > 0) {
+            const safeIds = ids.map((id: string) => `'${id.replace(/'/g, "''")}'`).join(',');
+            const tpmsRows = await executeQuery<{
+              ENTERPRISE_ID: string;
+              MOBILEPHONENUMBER: string | null;
+              PRIMARYADDR1: string | null;
+              PRIMARYADDR2: string | null;
+              PRIMARYCITY: string | null;
+              PRIMARYSTATE: string | null;
+              PRIMARYZIP: string | null;
+            }>(`
+              SELECT ENTERPRISE_ID, MOBILEPHONENUMBER,
+                     PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
+              FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+              WHERE ENTERPRISE_ID IN (${safeIds})
+            `);
+            const tpmsMap = new Map<string, typeof tpmsRows[0]>();
+            for (const row of tpmsRows) {
+              if (row.ENTERPRISE_ID) {
+                tpmsMap.set(row.ENTERPRISE_ID.toString().trim(), row);
+              }
+            }
+            for (const enrollment of enrollments) {
+              const tpms = tpmsMap.get(enrollment.enterprise_id?.toString().trim());
+              if (tpms) {
+                enrollment.mobile_phone = tpms.MOBILEPHONENUMBER?.toString().trim() || null;
+                const addrParts = [
+                  tpms.PRIMARYADDR1?.trim(),
+                  tpms.PRIMARYADDR2?.trim(),
+                  tpms.PRIMARYCITY?.trim(),
+                  tpms.PRIMARYSTATE?.trim(),
+                  tpms.PRIMARYZIP?.trim(),
+                ].filter(Boolean);
+                enrollment.home_address = addrParts.length > 0 ? addrParts.join(', ') : null;
+              } else {
+                enrollment.mobile_phone = null;
+                enrollment.home_address = null;
+              }
+            }
+          }
+        } catch (snowflakeErr: any) {
+          console.warn('[BYOV] Snowflake enrich failed (non-fatal):', snowflakeErr.message);
+        }
+      }
+
+      return res.json(enrollments);
     } catch (err: any) {
       console.error('[BYOV] GET /api/byov-enrollments error:', err.message);
       return res.status(500).json({ message: 'Failed to fetch BYOV enrollments' });
