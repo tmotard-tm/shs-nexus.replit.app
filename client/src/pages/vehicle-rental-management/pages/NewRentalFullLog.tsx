@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Upload, X, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -190,6 +190,129 @@ function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
 
 type SortKey = "dateOfRequest" | "name" | "startRentalDate" | "vanRentalPo" | "enterpriseId";
 
+// ─── Shared form styles ───────────────────────────────────────────────────────
+
+const inputStyle: CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontSize: 13,
+  color: colors.ink,
+  backgroundColor: "#fff",
+  border: `1px solid ${colors.rule}`,
+  borderRadius: 6,
+  padding: "6px 10px",
+  width: "100%",
+  outline: "none",
+  boxSizing: "border-box",
+};
+
+const labelStyle: CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontWeight: 500,
+  fontSize: 12,
+  color: colors.inkSoft,
+  marginBottom: 4,
+  display: "block",
+};
+
+// ─── Form sub-components (must live outside EntryPanel to avoid remount on each keystroke) ──
+
+function Field({
+  label,
+  field,
+  type = "text",
+  form,
+  set,
+}: {
+  label: string;
+  field: keyof FormData;
+  type?: "text" | "date" | "textarea";
+  form: FormData;
+  set: (field: keyof FormData, val: any) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={labelStyle}>{label}</label>
+      {type === "textarea" ? (
+        <textarea
+          rows={3}
+          value={(form[field] as string) ?? ""}
+          onChange={(e) => set(field, e.target.value)}
+          style={{ ...inputStyle, resize: "vertical" }}
+        />
+      ) : (
+        <input
+          type={type}
+          value={(form[field] as string) ?? ""}
+          onChange={(e) => set(field, e.target.value)}
+          style={inputStyle}
+        />
+      )}
+    </div>
+  );
+}
+
+function CheckField({
+  label,
+  field,
+  form,
+  set,
+}: {
+  label: string;
+  field: keyof FormData;
+  form: FormData;
+  set: (field: keyof FormData, val: any) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+      <input
+        type="checkbox"
+        id={`check-${field}`}
+        checked={!!(form[field] as boolean)}
+        onChange={(e) => set(field, e.target.checked)}
+        style={{ width: 16, height: 16, cursor: "pointer", accentColor: colors.accent }}
+      />
+      <label
+        htmlFor={`check-${field}`}
+        style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}
+      >
+        {label}
+      </label>
+    </div>
+  );
+}
+
+function SelectField({
+  label,
+  field,
+  options,
+  form,
+  set,
+}: {
+  label: string;
+  field: keyof FormData;
+  options: string[];
+  form: FormData;
+  set: (field: keyof FormData, val: any) => void;
+}) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <label style={labelStyle}>{label}</label>
+      <select
+        value={(form[field] as string) ?? ""}
+        onChange={(e) => set(field, e.target.value)}
+        style={{ ...inputStyle, cursor: "pointer" }}
+      >
+        <option value="">— select —</option>
+        {options.map((o) => (
+          <option key={o} value={o}>
+            {o}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 // ─── Side Panel ───────────────────────────────────────────────────────────────
 
 interface PanelProps {
@@ -275,107 +398,6 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
   const set = (field: keyof FormData, val: any) =>
     setForm((f) => ({ ...f, [field]: val }));
 
-  const inputStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans,
-    fontSize: 13,
-    color: colors.ink,
-    backgroundColor: "#fff",
-    border: `1px solid ${colors.rule}`,
-    borderRadius: 6,
-    padding: "6px 10px",
-    width: "100%",
-    outline: "none",
-    boxSizing: "border-box",
-  };
-
-  const labelStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans,
-    fontWeight: 500,
-    fontSize: 12,
-    color: colors.inkSoft,
-    marginBottom: 4,
-    display: "block",
-  };
-
-  function Field({
-    label,
-    field,
-    type = "text",
-  }: {
-    label: string;
-    field: keyof FormData;
-    type?: "text" | "date" | "textarea";
-  }) {
-    return (
-      <div style={{ marginBottom: 14 }}>
-        <label style={labelStyle}>{label}</label>
-        {type === "textarea" ? (
-          <textarea
-            rows={3}
-            value={(form[field] as string) ?? ""}
-            onChange={(e) => set(field, e.target.value)}
-            style={{ ...inputStyle, resize: "vertical" }}
-          />
-        ) : (
-          <input
-            type={type}
-            value={(form[field] as string) ?? ""}
-            onChange={(e) => set(field, e.target.value)}
-            style={inputStyle}
-          />
-        )}
-      </div>
-    );
-  }
-
-  function CheckField({ label, field }: { label: string; field: keyof FormData }) {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <input
-          type="checkbox"
-          id={`check-${field}`}
-          checked={!!(form[field] as boolean)}
-          onChange={(e) => set(field, e.target.checked)}
-          style={{ width: 16, height: 16, cursor: "pointer", accentColor: colors.accent }}
-        />
-        <label
-          htmlFor={`check-${field}`}
-          style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}
-        >
-          {label}
-        </label>
-      </div>
-    );
-  }
-
-  function SelectField({
-    label,
-    field,
-    options,
-  }: {
-    label: string;
-    field: keyof FormData;
-    options: string[];
-  }) {
-    return (
-      <div style={{ marginBottom: 14 }}>
-        <label style={labelStyle}>{label}</label>
-        <select
-          value={(form[field] as string) ?? ""}
-          onChange={(e) => set(field, e.target.value)}
-          style={{ ...inputStyle, cursor: "pointer" }}
-        >
-          <option value="">— select —</option>
-          {options.map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      </div>
-    );
-  }
-
   return (
     <div
       style={{
@@ -442,31 +464,35 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           >
             Rental Request Details
           </div>
-          <Field label="Date of Request" field="dateOfRequest" type="date" />
-          <Field label="Van Rental PO (Holman)" field="vanRentalPo" />
-          <Field label="Name" field="name" />
-          <Field label="Enterprise ID" field="enterpriseId" />
-          <Field label="Trim / Van Num" field="trimVanNum" />
-          <Field label="Tech Phone Number" field="techPhNum" />
-          <Field label="Van Assigned in TPMS" field="vanAssignedInTpms" />
-          <Field label="Start Rental Date" field="startRentalDate" type="date" />
-          <Field label="Repair Location" field="repairLocation" />
-          <Field label="Issue" field="issue" type="textarea" />
-          <Field label="Unit Number" field="unitNumber" />
-          <Field label="Team Members" field="teamMembers" />
-          <Field label="Existing Rental on Truck #" field="existingRentalOnTruck" />
+          <Field label="Date of Request" field="dateOfRequest" type="date" form={form} set={set} />
+          <Field label="Van Rental PO (Holman)" field="vanRentalPo" form={form} set={set} />
+          <Field label="Name" field="name" form={form} set={set} />
+          <Field label="Enterprise ID" field="enterpriseId" form={form} set={set} />
+          <Field label="Trim / Van Num" field="trimVanNum" form={form} set={set} />
+          <Field label="Tech Phone Number" field="techPhNum" form={form} set={set} />
+          <Field label="Van Assigned in TPMS" field="vanAssignedInTpms" form={form} set={set} />
+          <Field label="Start Rental Date" field="startRentalDate" type="date" form={form} set={set} />
+          <Field label="Repair Location" field="repairLocation" form={form} set={set} />
+          <Field label="Issue" field="issue" type="textarea" form={form} set={set} />
+          <Field label="Unit Number" field="unitNumber" form={form} set={set} />
+          <Field label="Team Members" field="teamMembers" form={form} set={set} />
+          <Field label="Existing Rental on Truck #" field="existingRentalOnTruck" form={form} set={set} />
           <SelectField
             label="New Rental or Extension"
             field="newRentalOrExtension"
             options={["New Rental", "Extension"]}
+            form={form}
+            set={set}
           />
           <SelectField
             label="Truck Breakdown or New Hire"
             field="truckBreakdownOrNewHire"
             options={["Truck Breakdown", "New Hire"]}
+            form={form}
+            set={set}
           />
-          <Field label="Existing Rental Open How Long" field="existingRentalOpenHowLong" />
-          <Field label="Tech Service Date" field="techServiceDate" type="date" />
+          <Field label="Existing Rental Open How Long" field="existingRentalOpenHowLong" form={form} set={set} />
+          <Field label="Tech Service Date" field="techServiceDate" type="date" form={form} set={set} />
 
           <div
             style={{
@@ -484,11 +510,11 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           >
             Completion Status
           </div>
-          <CheckField label="Permanent Solution in Place" field="permanentSolution" />
-          <CheckField label="AMS Updated" field="amsUpdated" />
-          <CheckField label="Fleet Tracker Updated" field="fleetTrackerUpdated" />
-          <CheckField label="Rental Approved" field="rentalApproved" />
-          <CheckField label="Approved in Holman" field="approvedInHolman" />
+          <CheckField label="Permanent Solution in Place" field="permanentSolution" form={form} set={set} />
+          <CheckField label="AMS Updated" field="amsUpdated" form={form} set={set} />
+          <CheckField label="Fleet Tracker Updated" field="fleetTrackerUpdated" form={form} set={set} />
+          <CheckField label="Rental Approved" field="rentalApproved" form={form} set={set} />
+          <CheckField label="Approved in Holman" field="approvedInHolman" form={form} set={set} />
         </div>
 
         {/* Footer */}
@@ -625,7 +651,7 @@ export default function NewRentalFullLog() {
     return sortDir === "asc" ? cmp : -cmp;
   });
 
-  const thStyle: React.CSSProperties = {
+  const thStyle: CSSProperties = {
     fontFamily: fonts.dmSans,
     fontWeight: 600,
     fontSize: 11,
@@ -640,7 +666,7 @@ export default function NewRentalFullLog() {
     cursor: "pointer",
   };
 
-  const tdStyle: React.CSSProperties = {
+  const tdStyle: CSSProperties = {
     fontFamily: fonts.dmSans,
     fontSize: 13,
     color: colors.ink,
