@@ -364,6 +364,7 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS repair_shop_address TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS repair_shop_phone TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_new_rental_log ADD COLUMN IF NOT EXISTS repair_phone TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_new_rental_log ADD COLUMN IF NOT EXISTS declined_repair BOOLEAN NOT NULL DEFAULT FALSE;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN truck_number DROP NOT NULL;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_ldap TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS recommendation TEXT;`);

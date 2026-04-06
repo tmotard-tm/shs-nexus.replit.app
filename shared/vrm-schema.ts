@@ -359,6 +359,7 @@ export const vrmNewRentalLog = pgTable("vrm_new_rental_log", {
   truckBreakdownOrNewHire: text("truck_breakdown_or_new_hire"),
   existingRentalOpenHowLong: text("existing_rental_open_how_long"),
   techServiceDate: date("tech_service_date"),
+  declinedRepair: boolean("declined_repair").notNull().default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

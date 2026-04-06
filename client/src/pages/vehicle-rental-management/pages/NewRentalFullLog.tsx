@@ -33,6 +33,7 @@ interface RentalLogEntry {
   truckBreakdownOrNewHire: string | null;
   existingRentalOpenHowLong: string | null;
   techServiceDate: string | null;
+  declinedRepair: boolean;
   createdAt: string;
 }
 
@@ -62,6 +63,7 @@ const EMPTY_FORM: FormData = {
   truckBreakdownOrNewHire: "",
   existingRentalOpenHowLong: "",
   techServiceDate: "",
+  declinedRepair: false,
 };
 
 // ─── CSV header → field map ───────────────────────────────────────────────────
@@ -130,6 +132,7 @@ const BOOLEAN_FIELDS: Set<keyof FormData> = new Set([
   "fleetTrackerUpdated",
   "rentalApproved",
   "approvedInHolman",
+  "declinedRepair",
 ]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -176,8 +179,8 @@ function parseCSV(text: string): Record<string, string>[] {
   return rows;
 }
 
-type StringField = Exclude<keyof FormData, "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman">;
-type BooleanField = "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman";
+type StringField = Exclude<keyof FormData, "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair">;
+type BooleanField = "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair";
 
 const DATE_FIELDS = new Set<keyof FormData>(["dateOfRequest", "startRentalDate", "techServiceDate"]);
 
@@ -414,6 +417,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           truckBreakdownOrNewHire: entry.truckBreakdownOrNewHire ?? "",
           existingRentalOpenHowLong: entry.existingRentalOpenHowLong ?? "",
           techServiceDate: entry.techServiceDate ?? "",
+          declinedRepair: entry.declinedRepair ?? false,
         }
       : { ...EMPTY_FORM },
   );
@@ -444,6 +448,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         truckBreakdownOrNewHire: form.truckBreakdownOrNewHire?.trim() || null,
         existingRentalOpenHowLong: form.existingRentalOpenHowLong?.trim() || null,
         techServiceDate: form.techServiceDate?.trim() || null,
+        declinedRepair: form.declinedRepair,
       };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, payload);
@@ -530,6 +535,13 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
             Rental Request Details
           </div>
           <Field label="Date of Request" field="dateOfRequest" type="date" form={form} set={set} />
+          <SelectField
+            label="New Rental or Extension"
+            field="newRentalOrExtension"
+            options={["New Rental", "Extension"]}
+            form={form}
+            set={set}
+          />
           <Field label="Van Rental PO (Holman)" field="vanRentalPo" form={form} set={set} />
           <Field label="Name" field="name" form={form} set={set} />
           <Field label="Enterprise ID" field="enterpriseId" form={form} set={set} />
@@ -541,15 +553,6 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           <Field label="Repair Phone" field="repairPhone" form={form} set={set} />
           <Field label="Issue" field="issue" type="textarea" form={form} set={set} />
           <Field label="Unit Number" field="unitNumber" form={form} set={set} />
-          <Field label="Team Members" field="teamMembers" form={form} set={set} />
-          <Field label="Existing Rental on Truck #" field="existingRentalOnTruck" form={form} set={set} />
-          <SelectField
-            label="New Rental or Extension"
-            field="newRentalOrExtension"
-            options={["New Rental", "Extension"]}
-            form={form}
-            set={set}
-          />
           <SelectField
             label="Truck Breakdown or New Hire"
             field="truckBreakdownOrNewHire"
@@ -557,7 +560,6 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
             form={form}
             set={set}
           />
-          <Field label="Existing Rental Open How Long" field="existingRentalOpenHowLong" form={form} set={set} />
           <Field label="Tech Service Date" field="techServiceDate" type="date" form={form} set={set} />
 
           <div
@@ -579,7 +581,73 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           <CheckField label="Permanent Solution in Place" field="permanentSolution" form={form} set={set} />
           <CheckField label="AMS Updated" field="amsUpdated" form={form} set={set} />
           <CheckField label="Fleet Tracker Updated" field="fleetTrackerUpdated" form={form} set={set} />
-          <CheckField label="Rental Approved" field="rentalApproved" form={form} set={set} />
+
+          {/* Rental Approved inline Approve / Deny buttons */}
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Rental Approved</span>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => set("rentalApproved", true)}
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 500,
+                  fontSize: 12,
+                  padding: "5px 18px",
+                  borderRadius: 6,
+                  border: `1px solid ${form.rentalApproved ? "#15803d" : colors.rule}`,
+                  backgroundColor: form.rentalApproved ? "#dcfce7" : "#fff",
+                  color: form.rentalApproved ? "#15803d" : colors.inkMuted,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                onClick={() => set("rentalApproved", false)}
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 500,
+                  fontSize: 12,
+                  padding: "5px 18px",
+                  borderRadius: 6,
+                  border: `1px solid ${!form.rentalApproved ? "#b91c1c" : colors.rule}`,
+                  backgroundColor: !form.rentalApproved ? "#fee2e2" : "#fff",
+                  color: !form.rentalApproved ? "#b91c1c" : colors.inkMuted,
+                  cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+
+          {/* Declined Repair toggle */}
+          <div style={{ marginBottom: 12 }}>
+            <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Declined Repair</span>
+            <button
+              type="button"
+              onClick={() => set("declinedRepair", !form.declinedRepair)}
+              style={{
+                fontFamily: fonts.dmSans,
+                fontWeight: 500,
+                fontSize: 12,
+                padding: "5px 18px",
+                borderRadius: 6,
+                border: `1px solid ${form.declinedRepair ? "#b91c1c" : colors.rule}`,
+                backgroundColor: form.declinedRepair ? "#fee2e2" : "#fff",
+                color: form.declinedRepair ? "#b91c1c" : colors.inkMuted,
+                cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              {form.declinedRepair ? "Declined" : "Not Declined"}
+            </button>
+          </div>
+
           <CheckField label="Approved in Holman" field="approvedInHolman" form={form} set={set} />
         </div>
 
@@ -808,7 +876,44 @@ export default function NewRentalFullLog() {
     },
     {
       label: "Rental Approved",
-      render: (e) => <BoolBadge value={e.rentalApproved} />,
+      render: (e) => (
+        <span
+          style={{
+            fontFamily: fonts.dmSans,
+            fontWeight: 500,
+            fontSize: 11,
+            color: e.rentalApproved ? "#15803d" : "#b91c1c",
+            backgroundColor: e.rentalApproved ? "#dcfce7" : "#fee2e2",
+            borderRadius: 6,
+            padding: "2px 8px",
+            display: "inline-block",
+          }}
+        >
+          {e.rentalApproved ? "Approved" : "Denied"}
+        </span>
+      ),
+    },
+    {
+      label: "Declined Repair",
+      render: (e) =>
+        e.declinedRepair ? (
+          <span
+            style={{
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 11,
+              color: "#b91c1c",
+              backgroundColor: "#fee2e2",
+              borderRadius: 6,
+              padding: "2px 8px",
+              display: "inline-block",
+            }}
+          >
+            Declined Repair
+          </span>
+        ) : (
+          <span style={{ color: colors.inkMuted, fontSize: 12 }}>—</span>
+        ),
     },
     {
       label: "Name",
