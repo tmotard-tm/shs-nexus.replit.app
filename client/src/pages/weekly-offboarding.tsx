@@ -8,6 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -394,6 +395,48 @@ export default function WeeklyOffboarding() {
     return 'secondary';
   };
 
+  // ===== BYOV Tab state & data fetching =====
+  const [byovSearch, setByovSearch] = useState("");
+
+  interface ByovEnrollment {
+    enterprise_id: string;
+    full_name: string | null;
+    truck_number: string | null;
+    enrollment_type: string | null;
+    in_rental: boolean;
+    district: string | null;
+    status: string;
+    approved_date: string | null;
+    created_at: string;
+    updated_at: string;
+  }
+
+  const { data: byovEnrollments = [], isLoading: byovLoading, refetch: refetchByov } = useQuery<ByovEnrollment[]>({
+    queryKey: ['/api/byov-enrollments'],
+  });
+
+  const backfillByovMutation = useMutation({
+    mutationFn: () => apiRequest('POST', '/api/byov-enrollments/backfill'),
+    onSuccess: (data: any) => {
+      toast({ title: 'Backfill complete', description: `${data.upserted ?? 0} records synced from BYOV app.` });
+      queryClient.invalidateQueries({ queryKey: ['/api/byov-enrollments'] });
+    },
+    onError: (err: any) => {
+      toast({ title: 'Backfill failed', description: err.message || 'Unknown error', variant: 'destructive' });
+    },
+  });
+
+  const filteredByov = byovEnrollments.filter(e => {
+    if (!byovSearch.trim()) return true;
+    const q = byovSearch.toLowerCase();
+    return (
+      (e.enterprise_id || '').toLowerCase().includes(q) ||
+      (e.full_name || '').toLowerCase().includes(q) ||
+      (e.truck_number || '').toLowerCase().includes(q) ||
+      (e.district || '').toLowerCase().includes(q)
+    );
+  });
+
   return (
     <MainContent>
       <TopBar title="Weekly Offboarding" breadcrumbs={["Home", "Weekly Offboarding"]} />
@@ -408,6 +451,19 @@ export default function WeeklyOffboarding() {
           </p>
         </div>
 
+        <Tabs defaultValue="term-roster" className="space-y-4">
+          <TabsList>
+            <TabsTrigger value="term-roster" className="flex items-center gap-1">
+              <UserMinus className="h-4 w-4" />
+              Term Roster
+            </TabsTrigger>
+            <TabsTrigger value="byov" className="flex items-center gap-1">
+              <CarFront className="h-4 w-4" />
+              BYOV Offboarding
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="term-roster">
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -788,6 +844,125 @@ export default function WeeklyOffboarding() {
             )}
           </CardContent>
         </Card>
+          </TabsContent>
+
+          <TabsContent value="byov">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <CarFront className="h-5 w-5 text-blue-600" />
+                      BYOV Offboarding
+                    </CardTitle>
+                    <CardDescription>
+                      Bring-Your-Own-Vehicle enrollments requiring offboarding
+                    </CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refetchByov()}
+                      disabled={byovLoading}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-1 ${byovLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={() => backfillByovMutation.mutate()}
+                      disabled={backfillByovMutation.isPending}
+                    >
+                      {backfillByovMutation.isPending ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4 mr-1" />
+                      )}
+                      Backfill from BYOV App
+                    </Button>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name, enterprise ID, truck, or district..."
+                      value={byovSearch}
+                      onChange={(e) => setByovSearch(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <span className="text-sm text-muted-foreground">
+                    {filteredByov.length} of {byovEnrollments.length} record{byovEnrollments.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {byovLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
+                    <span className="text-muted-foreground">Loading BYOV enrollments...</span>
+                  </div>
+                ) : filteredByov.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    {byovEnrollments.length === 0 ? (
+                      <div>
+                        <p>No BYOV enrollments found.</p>
+                        <p className="text-sm mt-2">Click "Backfill from BYOV App" to sync records.</p>
+                      </div>
+                    ) : (
+                      <p>No results match your search.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-md border overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Enterprise ID</TableHead>
+                          <TableHead>Full Name</TableHead>
+                          <TableHead>Truck</TableHead>
+                          <TableHead>Enrollment Type</TableHead>
+                          <TableHead>In Rental</TableHead>
+                          <TableHead>District</TableHead>
+                          <TableHead>Status</TableHead>
+                          <TableHead>Approved Date</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredByov.map((e) => (
+                          <TableRow key={e.enterprise_id}>
+                            <TableCell className="font-mono text-sm">{e.enterprise_id.toUpperCase()}</TableCell>
+                            <TableCell>{e.full_name || '-'}</TableCell>
+                            <TableCell className="font-mono text-sm">{e.truck_number || '-'}</TableCell>
+                            <TableCell className="text-sm capitalize">{e.enrollment_type?.replace(/_/g, ' ') || '-'}</TableCell>
+                            <TableCell>
+                              {e.in_rental ? (
+                                <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300">Rental</Badge>
+                              ) : (
+                                <span className="text-muted-foreground text-sm">No</span>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm">{e.district || '-'}</TableCell>
+                            <TableCell>
+                              <Badge variant={e.status === 'approved' ? 'default' : 'secondary'} className="text-xs capitalize">
+                                {e.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">{e.approved_date ? formatDate(e.approved_date) : '-'}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Employee Detail Drawer */}

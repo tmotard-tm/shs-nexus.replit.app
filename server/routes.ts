@@ -541,6 +541,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error("[VRM] Failed to initialise:", e.message);
   }
 
+  // BYOV Enrollments — idempotent table init
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS byov_enrollments (
+        enterprise_id text PRIMARY KEY,
+        full_name text,
+        truck_number text,
+        enrollment_type text,
+        in_rental boolean DEFAULT false,
+        district text,
+        status text DEFAULT 'approved',
+        approved_date text,
+        created_at timestamp DEFAULT NOW(),
+        updated_at timestamp DEFAULT NOW()
+      )
+    `);
+    console.log("[BYOV] byov_enrollments table ready");
+  } catch (e: any) {
+    console.error("[BYOV] Failed to init byov_enrollments table:", e.message);
+  }
+
   // Mount WMS Engine routes at /api/wms/*
   const wmsRouter = registerWmsRoutes(requireAuth);
   app.use("/api/wms", wmsRouter);
@@ -16178,6 +16199,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('[UnifiedOffboarding] POST /admin/run-task-creation error:', err.message);
       return res.status(500).json({ message: 'Failed to run task creation' });
+    }
+  });
+
+  // ===== BYOV Enrollments API =====
+
+  app.get('/api/byov-enrollments', requireAuth, async (_req, res) => {
+    try {
+      const rows = await db.execute(sql`
+        SELECT enterprise_id, full_name, truck_number, enrollment_type, in_rental,
+               district, status, approved_date, created_at, updated_at
+        FROM byov_enrollments
+        ORDER BY approved_date DESC NULLS LAST, created_at DESC
+      `);
+      return res.json(rows.rows);
+    } catch (err: any) {
+      console.error('[BYOV] GET /api/byov-enrollments error:', err.message);
+      return res.status(500).json({ message: 'Failed to fetch BYOV enrollments' });
+    }
+  });
+
+  app.post('/api/byov-enrollments/backfill', requireAuth, async (_req, res) => {
+    try {
+      const apiKey = process.env.BYOV_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ message: 'BYOV_API_KEY not configured in Replit Secrets' });
+      }
+      const baseUrl = 'https://byov-enrollment.replit.app/api/external/enrollments';
+      let page = 1;
+      let totalUpserted = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const url = `${baseUrl}?limit=500&page=${page}`;
+        const resp = await fetch(url, { headers: { 'x-api-key': apiKey } });
+        if (!resp.ok) {
+          const errText = await resp.text();
+          throw new Error(`BYOV API error ${resp.status}: ${errText}`);
+        }
+        const json = await resp.json() as { data: any[]; pagination: { page: number; limit: number; total: number } };
+        const records: any[] = json.data || [];
+        for (const r of records) {
+          await db.execute(sql`
+            INSERT INTO byov_enrollments
+              (enterprise_id, full_name, truck_number, enrollment_type, in_rental, district, status, approved_date, updated_at)
+            VALUES
+              (${r.enterprise_id}, ${r.full_name}, ${r.truck_number}, ${r.enrollment_type},
+               ${r.in_rental ?? false}, ${r.district}, ${r.status || 'approved'}, ${r.approved_date || null}, NOW())
+            ON CONFLICT (enterprise_id) DO UPDATE SET
+              full_name = EXCLUDED.full_name,
+              truck_number = EXCLUDED.truck_number,
+              enrollment_type = EXCLUDED.enrollment_type,
+              in_rental = EXCLUDED.in_rental,
+              district = EXCLUDED.district,
+              status = EXCLUDED.status,
+              approved_date = EXCLUDED.approved_date,
+              updated_at = NOW()
+          `);
+          totalUpserted++;
+        }
+        const { total, limit } = json.pagination;
+        hasMore = page * limit < total && records.length > 0;
+        page++;
+      }
+      console.log(`[BYOV] Backfill complete: ${totalUpserted} records upserted`);
+      return res.json({ success: true, upserted: totalUpserted });
+    } catch (err: any) {
+      console.error('[BYOV] POST /api/byov-enrollments/backfill error:', err.message);
+      return res.status(500).json({ message: err.message || 'Backfill failed' });
     }
   });
 

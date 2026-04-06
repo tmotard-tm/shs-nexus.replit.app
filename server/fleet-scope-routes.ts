@@ -2630,6 +2630,52 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // ===== BYOV Enrollment Webhook Receiver =====
+  // Called by the BYOV Enrollment App when an enrollment is approved.
+  // Authentication: x-api-key header must match FS_BYOV_WEBHOOK_SECRET.
+  app.post("/public/byov-enrollment-webhook", async (req, res) => {
+    try {
+      const apiKey = req.headers['x-api-key'];
+      const expectedKey = process.env.FS_BYOV_WEBHOOK_SECRET;
+      if (!expectedKey) {
+        console.error("[BYOV Webhook] FS_BYOV_WEBHOOK_SECRET not configured");
+        return res.status(503).json({ success: false, message: "Webhook not configured" });
+      }
+      if (!apiKey || apiKey !== expectedKey) {
+        console.warn("[BYOV Webhook] Unauthorized webhook call rejected");
+        return res.status(401).json({ success: false, message: "Unauthorized" });
+      }
+      const body = req.body;
+      if (!body || !body.enterprise_id) {
+        return res.status(400).json({ success: false, message: "enterprise_id is required" });
+      }
+      const { db } = await import("./db");
+      const { sql } = await import("drizzle-orm");
+      await db.execute(sql`
+        INSERT INTO byov_enrollments
+          (enterprise_id, full_name, truck_number, enrollment_type, in_rental, district, status, approved_date, updated_at)
+        VALUES
+          (${body.enterprise_id}, ${body.full_name ?? null}, ${body.truck_number ?? null},
+           ${body.enrollment_type ?? null}, ${body.in_rental ?? false}, ${body.district ?? null},
+           ${body.status ?? 'approved'}, ${body.approved_date ?? null}, NOW())
+        ON CONFLICT (enterprise_id) DO UPDATE SET
+          full_name = EXCLUDED.full_name,
+          truck_number = EXCLUDED.truck_number,
+          enrollment_type = EXCLUDED.enrollment_type,
+          in_rental = EXCLUDED.in_rental,
+          district = EXCLUDED.district,
+          status = EXCLUDED.status,
+          approved_date = EXCLUDED.approved_date,
+          updated_at = NOW()
+      `);
+      console.log(`[BYOV Webhook] Upserted enrollment for enterprise_id=${body.enterprise_id}`);
+      return res.status(200).json({ success: true });
+    } catch (err: any) {
+      console.error("[BYOV Webhook] Error:", err.message);
+      return res.status(500).json({ success: false, message: "Internal error" });
+    }
+  });
+
   // PUBLIC API: Get all spare vehicle data
   // Requires X-API-Key header for authentication
   app.get("/public/spares", async (req, res) => {
