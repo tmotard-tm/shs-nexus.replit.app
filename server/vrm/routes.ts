@@ -37,6 +37,7 @@ import {
   bulkCreateNewRentalLogEntries,
   updateNewRentalLogEntry,
   deleteNewRentalLogEntry,
+  clearAllNewRentalLogEntries,
   listRepairTracker,
   createRepairTrackerEntry,
   updateRepairTrackerEntry,
@@ -773,6 +774,15 @@ export function registerVrmRoutes(): Router {
       }
       const row = await updateNewRentalLogEntry(req.params.id, parsed.data);
       res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.delete("/new-rental-log", async (_req, res) => {
+    try {
+      await clearAllNewRentalLogEntries();
+      res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

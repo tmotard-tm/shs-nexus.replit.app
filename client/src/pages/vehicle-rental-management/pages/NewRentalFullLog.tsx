@@ -675,6 +675,15 @@ export default function NewRentalFullLog() {
     onError: (e: any) => toast({ title: "Import failed", description: e.message, variant: "destructive" }),
   });
 
+  const clearAllMutation = useMutation({
+    mutationFn: () => apiRequest("DELETE", "/api/vrm/new-rental-log"),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      toast({ title: "Database cleared", description: "All Full Log entries have been deleted." });
+    },
+    onError: (e: any) => toast({ title: "Clear failed", description: e.message, variant: "destructive" }),
+  });
+
   const handleSpreadsheetFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -924,6 +933,34 @@ export default function NewRentalFullLog() {
               width: 240,
             }}
           />
+
+          {/* Clear Database */}
+          <button
+            onClick={() => {
+              if (window.confirm("Clear ALL entries from the Full Log database? This cannot be undone.")) {
+                clearAllMutation.mutate();
+              }
+            }}
+            disabled={clearAllMutation.isPending}
+            style={{
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 13,
+              color: "#b91c1c",
+              backgroundColor: "#fff",
+              border: "1px solid #fca5a5",
+              borderRadius: 6,
+              padding: "7px 14px",
+              cursor: clearAllMutation.isPending ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: clearAllMutation.isPending ? 0.7 : 1,
+            }}
+          >
+            <Trash2 size={14} />
+            {clearAllMutation.isPending ? "Clearing…" : "Clear Database"}
+          </button>
 
           {/* Import CSV / XLSX */}
           <input
