@@ -501,7 +501,14 @@ export async function createNewRentalLogEntry(data: InsertVrmNewRentalLog) {
 
 export async function bulkCreateNewRentalLogEntries(rows: InsertVrmNewRentalLog[]) {
   if (!rows.length) return [];
-  return db.insert(vrmNewRentalLog).values(rows).returning();
+  const CHUNK = 500;
+  const results: (typeof vrmNewRentalLog.$inferSelect)[] = [];
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const batch = rows.slice(i, i + CHUNK);
+    const inserted = await db.insert(vrmNewRentalLog).values(batch).returning();
+    results.push(...inserted);
+  }
+  return results;
 }
 
 export async function updateNewRentalLogEntry(

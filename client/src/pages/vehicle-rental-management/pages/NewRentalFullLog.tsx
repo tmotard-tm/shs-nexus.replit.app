@@ -92,6 +92,8 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "repair_location": "repairLocation",
   "repair phone": "repairPhone",
   "repair_phone": "repairPhone",
+  "shop phone number": "repairPhone",
+  "shop phone": "repairPhone",
   "issue": "issue",
   "permanent solution": "permanentSolution",
   "permanent_solution": "permanentSolution",
