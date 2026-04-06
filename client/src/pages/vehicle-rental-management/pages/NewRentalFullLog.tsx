@@ -136,7 +136,7 @@ const BOOLEAN_FIELDS: Set<keyof FormData> = new Set([
 
 function fmtDate(d: string | null) {
   if (!d) return "—";
-  const dt = new Date(d);
+  const dt = new Date(d.length === 10 ? d + "T00:00:00" : d);
   if (isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
@@ -215,7 +215,7 @@ function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
     if (!field) continue;
     if (isBooleanField(field)) {
       const lower = rawVal.toLowerCase().trim();
-      entry[field] = lower === "yes" || lower === "true" || lower === "1";
+      entry[field] = ["yes", "y", "true", "1", "x", "approved"].includes(lower);
     } else if (isDateField(field)) {
       entry[field as StringField] = parseDateToISO(rawVal);
     } else {
