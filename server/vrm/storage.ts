@@ -528,7 +528,7 @@ export async function deleteNewRentalLogEntry(id: string) {
 }
 
 export async function clearAllNewRentalLogEntries() {
-  await db.delete(vrmNewRentalLog);
+  await db.execute(sql`DELETE FROM vrm_new_rental_log`);
 }
 
 // ─── Repair Tracker ──────────────────────────────────────────────────────────
