@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, Upload, X, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import * as XLSX from "xlsx";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -68,9 +69,11 @@ const EMPTY_FORM: FormData = {
 const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "date of request": "dateOfRequest",
   "date_of_request": "dateOfRequest",
+  "date of this request": "dateOfRequest",
   "van rental po": "vanRentalPo",
   "van_rental_po": "vanRentalPo",
   "holman po": "vanRentalPo",
+  "van rental po is opened up on in holman": "vanRentalPo",
   "name": "name",
   "enterprise id": "enterpriseId",
   "enterprise_id": "enterpriseId",
@@ -106,12 +109,15 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "team_members": "teamMembers",
   "existing rental on truck": "existingRentalOnTruck",
   "existing_rental_on_truck": "existingRentalOnTruck",
+  "existing rental opened on truck #": "existingRentalOnTruck",
   "new rental or extension": "newRentalOrExtension",
   "new_rental_or_extension": "newRentalOrExtension",
   "truck breakdown or new hire": "truckBreakdownOrNewHire",
   "truck_breakdown_or_new_hire": "truckBreakdownOrNewHire",
   "existing rental open how long": "existingRentalOpenHowLong",
   "existing_rental_open_how_long": "existingRentalOpenHowLong",
+  "existing rental open for how long": "existingRentalOpenHowLong",
+  "permanent solution in place": "permanentSolution",
   "tech service date": "techServiceDate",
   "tech_service_date": "techServiceDate",
 };
@@ -175,10 +181,14 @@ function isBooleanField(field: keyof FormData): field is BooleanField {
   return BOOLEAN_FIELDS.has(field);
 }
 
+function normalizeHeader(h: string): string {
+  return h.toLowerCase().trim().replace(/[:\?]+\s*$/, "").trim();
+}
+
 function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
   const entry: Partial<FormData> = {};
   for (const [csvHeader, rawVal] of Object.entries(raw)) {
-    const field = CSV_HEADER_MAP[csvHeader.toLowerCase()];
+    const field = CSV_HEADER_MAP[normalizeHeader(csvHeader)];
     if (!field) continue;
     if (isBooleanField(field)) {
       const lower = rawVal.toLowerCase().trim();
@@ -188,6 +198,27 @@ function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
     }
   }
   return entry;
+}
+
+function parseXLSX(
+  buf: ArrayBuffer,
+  onFallback?: (usedSheet: string) => void,
+): Record<string, string>[] {
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
+  const targetName = wb.SheetNames.find((n) => n.trim() === "Rental Approvals");
+  let sheetName: string;
+  if (targetName) {
+    sheetName = targetName;
+  } else {
+    sheetName = wb.SheetNames[0];
+    onFallback?.(sheetName.trim());
+  }
+  const ws = wb.Sheets[sheetName];
+  const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, {
+    raw: false,
+    defval: "",
+  });
+  return rows.filter((row) => Object.values(row).some((v) => String(v).trim() !== ""));
 }
 
 // ─── Sort state ───────────────────────────────────────────────────────────────
@@ -601,8 +632,10 @@ export default function NewRentalFullLog() {
   });
 
   const importMutation = useMutation({
-    mutationFn: (rows: Partial<FormData>[]) =>
-      apiRequest("POST", "/api/vrm/new-rental-log/import", rows),
+    mutationFn: async (rows: Partial<FormData>[]) => {
+      const res = await apiRequest("POST", "/api/vrm/new-rental-log/import", rows);
+      return res.json();
+    },
     onSuccess: (data: any) => {
       qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
       toast({
@@ -613,21 +646,44 @@ export default function NewRentalFullLog() {
     onError: (e: any) => toast({ title: "Import failed", description: e.message, variant: "destructive" }),
   });
 
-  const handleCSVFile = useCallback(
+  const handleSpreadsheetFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const text = ev.target?.result as string;
-        const rawRows = parseCSV(text);
-        const mapped = rawRows.map(mapCSVRowToForm);
-        importMutation.mutate(mapped);
-      };
-      reader.readAsText(file);
+      const isXlsx = file.name.toLowerCase().endsWith(".xlsx");
+      if (isXlsx) {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const buf = ev.target?.result as ArrayBuffer;
+          let rawRows: Record<string, string>[];
+          try {
+            rawRows = parseXLSX(buf, (usedSheet) => {
+              toast({
+                title: "Sheet not found",
+                description: `"Rental Approvals" sheet not found. Using first sheet: "${usedSheet}".`,
+              });
+            });
+          } catch (err: any) {
+            toast({ title: "XLSX parse error", description: err.message, variant: "destructive" });
+            return;
+          }
+          const mapped = rawRows.map(mapCSVRowToForm);
+          importMutation.mutate(mapped);
+        };
+        reader.readAsArrayBuffer(file);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+          const text = ev.target?.result as string;
+          const rawRows = parseCSV(text);
+          const mapped = rawRows.map(mapCSVRowToForm);
+          importMutation.mutate(mapped);
+        };
+        reader.readAsText(file);
+      }
       e.target.value = "";
     },
-    [importMutation],
+    [importMutation, toast],
   );
 
   function toggleSort(key: SortKey) {
@@ -831,13 +887,13 @@ export default function NewRentalFullLog() {
             }}
           />
 
-          {/* Import CSV */}
+          {/* Import CSV / XLSX */}
           <input
             ref={csvInputRef}
             type="file"
-            accept=".csv"
+            accept=".csv,.xlsx"
             style={{ display: "none" }}
-            onChange={handleCSVFile}
+            onChange={handleSpreadsheetFile}
           />
           <button
             onClick={() => csvInputRef.current?.click()}
@@ -859,7 +915,7 @@ export default function NewRentalFullLog() {
             }}
           >
             <Upload size={14} />
-            {importMutation.isPending ? "Importing…" : "Import CSV"}
+            {importMutation.isPending ? "Importing…" : "Import CSV / XLSX"}
           </button>
 
           {/* Add Entry */}
@@ -917,7 +973,7 @@ export default function NewRentalFullLog() {
               color: colors.inkMuted,
             }}
           >
-            {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" or import a CSV."}
+            {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" or import a CSV / XLSX file."}
           </div>
         ) : (
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
