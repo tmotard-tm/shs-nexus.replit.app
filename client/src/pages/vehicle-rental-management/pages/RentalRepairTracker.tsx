@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Search, RefreshCw } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -386,11 +386,31 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
 
 export default function RentalRepairTracker() {
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
 
   const { data: entries = [], isLoading } = useQuery<RepairTrackerEntry[]>({
     queryKey: ["/api/vrm/repair-tracker"],
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/vrm/repair-tracker/import-denied");
+      return res.json() as Promise<{ imported: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      toast({
+        title: data.imported === 0 ? "Already up to date" : "Sync complete",
+        description:
+          data.imported === 0
+            ? "No new denied entries found."
+            : `${data.imported} new entry${data.imported !== 1 ? "s" : ""} added.`,
+      });
+    },
+    onError: (e: any) =>
+      toast({ title: "Sync failed", description: e.message, variant: "destructive" }),
   });
 
   const filtered = entries.filter((e) => {
@@ -437,26 +457,54 @@ export default function RentalRepairTracker() {
             Track techs denied a rental — truck number, shop details, and current status.
           </p>
         </div>
-        <button
-          onClick={() => setPanelEntry("new")}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontFamily: fonts.dmSans,
-            fontWeight: 600,
-            fontSize: 13,
-            color: "#fff",
-            backgroundColor: colors.accent,
-            border: "none",
-            borderRadius: 8,
-            padding: "9px 16px",
-            cursor: "pointer",
-          }}
-        >
-          <Plus size={16} />
-          Add Entry
-        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={() => syncMutation.mutate()}
+            disabled={syncMutation.isPending}
+            title="Sync denied entries now (also runs automatically at 7 AM & 1 PM ET)"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 13,
+              color: colors.inkSoft,
+              backgroundColor: "#fff",
+              border: `1px solid ${colors.rule}`,
+              borderRadius: 8,
+              padding: "8px 14px",
+              cursor: syncMutation.isPending ? "not-allowed" : "pointer",
+              opacity: syncMutation.isPending ? 0.6 : 1,
+            }}
+          >
+            <RefreshCw
+              size={14}
+              className={syncMutation.isPending ? "animate-spin" : ""}
+            />
+            {syncMutation.isPending ? "Syncing…" : "Sync Now"}
+          </button>
+          <button
+            onClick={() => setPanelEntry("new")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: fonts.dmSans,
+              fontWeight: 600,
+              fontSize: 13,
+              color: "#fff",
+              backgroundColor: colors.accent,
+              border: "none",
+              borderRadius: 8,
+              padding: "9px 16px",
+              cursor: "pointer",
+            }}
+          >
+            <Plus size={16} />
+            Add Entry
+          </button>
+        </div>
       </div>
 
       {/* Search bar */}
