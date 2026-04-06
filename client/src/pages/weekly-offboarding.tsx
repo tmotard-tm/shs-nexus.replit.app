@@ -416,8 +416,11 @@ export default function WeeklyOffboarding() {
   });
 
   const backfillByovMutation = useMutation({
-    mutationFn: () => apiRequest('POST', '/api/byov-enrollments/backfill'),
-    onSuccess: (data: any) => {
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/byov-enrollments/backfill');
+      return res.json() as Promise<{ success: boolean; upserted: number }>;
+    },
+    onSuccess: (data) => {
       toast({ title: 'Backfill complete', description: `${data.upserted ?? 0} records synced from BYOV app.` });
       queryClient.invalidateQueries({ queryKey: ['/api/byov-enrollments'] });
     },
@@ -425,6 +428,12 @@ export default function WeeklyOffboarding() {
       toast({ title: 'Backfill failed', description: err.message || 'Unknown error', variant: 'destructive' });
     },
   });
+
+  const byovLastSynced = byovEnrollments.length > 0
+    ? byovEnrollments.reduce((latest, e) => {
+        return new Date(e.updated_at) > new Date(latest) ? e.updated_at : latest;
+      }, byovEnrollments[0].updated_at)
+    : null;
 
   const filteredByov = byovEnrollments.filter(e => {
     if (!byovSearch.trim()) return true;
@@ -857,6 +866,11 @@ export default function WeeklyOffboarding() {
                     </CardTitle>
                     <CardDescription>
                       Bring-Your-Own-Vehicle enrollments requiring offboarding
+                      {byovLastSynced && (
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          • Last synced {formatDate(byovLastSynced)}
+                        </span>
+                      )}
                     </CardDescription>
                   </div>
                   <div className="flex items-center gap-2">
@@ -886,6 +900,15 @@ export default function WeeklyOffboarding() {
                 </div>
               </CardHeader>
               <CardContent>
+                <div className="mb-4 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950 px-3 py-2 text-xs text-blue-800 dark:text-blue-200">
+                  <AlertCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <div>
+                    <span className="font-semibold">Webhook URL for Tyler: </span>
+                    <code className="font-mono">POST /public/byov-enrollment-webhook</code>
+                    <span className="mx-1">·</span>
+                    auth header: <code className="font-mono">x-api-key: FS_BYOV_WEBHOOK_SECRET</code>
+                  </div>
+                </div>
                 <div className="flex items-center gap-4 mb-4">
                   <div className="relative flex-1 max-w-sm">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />

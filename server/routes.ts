@@ -558,6 +558,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       )
     `);
     console.log("[BYOV] byov_enrollments table ready");
+    const byovWebhookSecret = process.env.FS_BYOV_WEBHOOK_SECRET ? '(configured)' : '(NOT SET — set FS_BYOV_WEBHOOK_SECRET)';
+    console.log(`[BYOV] Webhook receiver: POST /public/byov-enrollment-webhook  |  x-api-key: FS_BYOV_WEBHOOK_SECRET ${byovWebhookSecret}`);
+    console.log(`[BYOV] Backfill API key: BYOV_API_KEY ${process.env.BYOV_API_KEY ? '(configured)' : '(NOT SET — set BYOV_API_KEY)'}`);
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_enrollments table:", e.message);
   }
