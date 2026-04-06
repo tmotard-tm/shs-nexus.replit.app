@@ -650,7 +650,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     ? await db.execute(sql`
         SELECT UPPER(enterprise_id) AS ldap, truck_no, mobile_phone
         FROM tpms_tech_profiles
-        WHERE UPPER(enterprise_id) = ANY(${allNewLdaps})
+        WHERE UPPER(enterprise_id) IN (${sql.join(allNewLdaps.map((l) => sql`${l}`), sql`, `)})
       `)
     : { rows: [] };
 
