@@ -309,6 +309,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [spareExpanded, setSpareExpanded] = useState<{ confirmed: boolean; needs: boolean }>({ confirmed: false, needs: false });
   const [amsViewMode, setAmsViewMode] = useState(false);
+  const [savedFleetState, setSavedFleetState] = useState<{
+    selections: MapSelection[];
+    visibleCategories: Set<CategoryKey>;
+  } | null>(null);
 
   const statusKeys: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'];
 
@@ -680,7 +684,16 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
             >
               <button
                 className={`px-3 py-1.5 transition-colors ${!amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
-                onClick={() => setAmsViewMode(false)}
+                onClick={() => {
+                  setAmsViewMode(false);
+                  // Restore saved Fleet state if any, so prior category/selection settings are preserved
+                  if (onMapFiltersChange) {
+                    if (savedFleetState) {
+                      onMapFiltersChange({ selections: savedFleetState.selections, visibleCategories: savedFleetState.visibleCategories });
+                    }
+                  }
+                  setSavedFleetState(null);
+                }}
                 data-testid="toggle-fleet-view"
               >
                 Fleet View
@@ -688,10 +701,12 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
               <button
                 className={`px-3 py-1.5 transition-colors ${amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
                 onClick={() => {
+                  // Snapshot current Fleet state so it can be fully restored on return
+                  setSavedFleetState({ selections: activeSelections, visibleCategories: new Set(visibleCategories) });
                   setAmsViewMode(true);
-                  // Reset category filters so no Fleet categories are silently hidden in AMS mode
+                  // Reset category filters for AMS mode — no category restrictions apply
                   if (onMapFiltersChange) {
-                    onMapFiltersChange({ selections: activeSelections, visibleCategories: new Set(statusKeys) });
+                    onMapFiltersChange({ selections: [], visibleCategories: new Set(statusKeys) });
                   }
                 }}
                 data-testid="toggle-ams-view"
@@ -740,7 +755,8 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                     className="gap-1 cursor-pointer text-xs"
                     onClick={() => {
                       const newSelections = activeSelections.filter((_, i) => i !== idx);
-                      onMapFiltersChange({ selections: newSelections, visibleCategories });
+                      // Use full category set in AMS mode — never restrict by Fleet category filters
+                      onMapFiltersChange({ selections: newSelections, visibleCategories: new Set(statusKeys) });
                     }}
                     data-testid={`chip-ams-selection-${idx}`}
                   >
