@@ -556,6 +556,7 @@ export default function RentalRepairTracker() {
               <tr style={{ backgroundColor: colors.surface }}>
                 <th style={thStyle}>LDAP</th>
                 <th style={thStyle}>Tech Name</th>
+                <th style={thStyle}>Tech Phone</th>
                 <th style={thStyle}>Truck #</th>
                 <th style={thStyle}>Repair Shop</th>
                 <th style={thStyle}>Repair Phone</th>
@@ -577,6 +578,9 @@ export default function RentalRepairTracker() {
                     {entry.techLdap ?? "—"}
                   </td>
                   <td style={tdStyle}>{entry.techName}</td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.techPhone ?? "—"}
+                  </td>
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
                     {entry.truckNumber ?? "—"}
                   </td>

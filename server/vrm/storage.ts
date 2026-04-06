@@ -538,11 +538,16 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
 export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
   const result = await db.execute(sql`
     UPDATE vrm_repair_tracker rt
-    SET truck_number = tp.truck_no
+    SET
+      truck_number = COALESCE(NULLIF(rt.truck_number, ''), tp.truck_no),
+      tech_phone   = COALESCE(NULLIF(rt.tech_phone,   ''), tp.mobile_phone)
     FROM tpms_tech_profiles tp
     WHERE UPPER(tp.enterprise_id) = UPPER(rt.tech_ldap)
       AND rt.tech_ldap IS NOT NULL
-      AND (rt.truck_number IS NULL OR rt.truck_number = '')
+      AND (
+        rt.truck_number IS NULL OR rt.truck_number = '' OR
+        rt.tech_phone   IS NULL OR rt.tech_phone   = ''
+      )
   `);
   return (result as any).rowCount ?? 0;
 }
@@ -606,7 +611,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   const tpmsRows = allNewLdaps.length
     ? await db.execute(sql`
-        SELECT UPPER(enterprise_id) AS ldap, truck_no
+        SELECT UPPER(enterprise_id) AS ldap, truck_no, mobile_phone
         FROM tpms_tech_profiles
         WHERE UPPER(enterprise_id) = ANY(${allNewLdaps})
       `)
@@ -615,12 +620,16 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   const truckByLdap = new Map<string, string>(
     ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.truck_no as string]),
   );
+  const phoneByLdap = new Map<string, string>(
+    ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.mobile_phone as string]),
+  );
 
   const rows: InsertVrmRepairTracker[] = [
     ...newDecisions.map((d) => ({
       techLdap: d.techLdap,
       techName: d.techName ?? d.techLdap ?? "Unknown",
       truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
+      techPhone: phoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
       mainStatus: "Decision Pending",
       recommendation: d.recommendation,
       deniedAt: d.createdAt,
@@ -630,6 +639,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
       techLdap: c.techLdap,
       techName: c.techName ?? c.techLdap ?? "Unknown",
       truckNumber: truckByLdap.get((c.techLdap ?? "").toUpperCase()) ?? null,
+      techPhone: phoneByLdap.get((c.techLdap ?? "").toUpperCase()) ?? null,
       mainStatus: "Decision Pending",
       recommendation: c.recommendation,
       deniedAt: c.checkedAt,
