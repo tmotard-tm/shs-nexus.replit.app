@@ -363,6 +363,7 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_repair_tracker_status_idx ON vrm_repair_tracker(main_status);`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS repair_shop_address TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS repair_shop_phone TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_new_rental_log ADD COLUMN IF NOT EXISTS repair_phone TEXT;`);
 
   console.log("[VRM] Schema initialised");
 }

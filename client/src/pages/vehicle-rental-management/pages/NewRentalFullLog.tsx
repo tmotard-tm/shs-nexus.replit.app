@@ -18,6 +18,7 @@ interface RentalLogEntry {
   vanAssignedInTpms: string | null;
   startRentalDate: string | null;
   repairLocation: string | null;
+  repairPhone: string | null;
   issue: string | null;
   permanentSolution: boolean;
   amsUpdated: boolean;
@@ -46,6 +47,7 @@ const EMPTY_FORM: FormData = {
   vanAssignedInTpms: "",
   startRentalDate: "",
   repairLocation: "",
+  repairPhone: "",
   issue: "",
   permanentSolution: false,
   amsUpdated: false,
@@ -85,6 +87,8 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "start_rental_date": "startRentalDate",
   "repair location": "repairLocation",
   "repair_location": "repairLocation",
+  "repair phone": "repairPhone",
+  "repair_phone": "repairPhone",
   "issue": "issue",
   "permanent solution": "permanentSolution",
   "permanent_solution": "permanentSolution",
@@ -337,6 +341,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           vanAssignedInTpms: entry.vanAssignedInTpms ?? "",
           startRentalDate: entry.startRentalDate ?? "",
           repairLocation: entry.repairLocation ?? "",
+          repairPhone: entry.repairPhone ?? "",
           issue: entry.issue ?? "",
           permanentSolution: entry.permanentSolution,
           amsUpdated: entry.amsUpdated,
@@ -371,6 +376,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         vanAssignedInTpms: form.vanAssignedInTpms?.trim() || null,
         startRentalDate: form.startRentalDate?.trim() || null,
         repairLocation: form.repairLocation?.trim() || null,
+        repairPhone: form.repairPhone?.trim() || null,
         issue: form.issue?.trim() || null,
         unitNumber: form.unitNumber?.trim() || null,
         teamMembers: form.teamMembers?.trim() || null,
@@ -473,6 +479,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           <Field label="Van Assigned in TPMS" field="vanAssignedInTpms" form={form} set={set} />
           <Field label="Start Rental Date" field="startRentalDate" type="date" form={form} set={set} />
           <Field label="Repair Location" field="repairLocation" form={form} set={set} />
+          <Field label="Repair Phone" field="repairPhone" form={form} set={set} />
           <Field label="Issue" field="issue" type="textarea" form={form} set={set} />
           <Field label="Unit Number" field="unitNumber" form={form} set={set} />
           <Field label="Team Members" field="teamMembers" form={form} set={set} />

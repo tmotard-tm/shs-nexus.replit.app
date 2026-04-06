@@ -345,6 +345,7 @@ export const vrmNewRentalLog = pgTable("vrm_new_rental_log", {
   vanAssignedInTpms: text("van_assigned_in_tpms"),
   startRentalDate: date("start_rental_date"),
   repairLocation: text("repair_location"),
+  repairPhone: text("repair_phone"),
   issue: text("issue"),
   permanentSolution: boolean("permanent_solution").notNull().default(false),
   amsUpdated: boolean("ams_updated").notNull().default(false),
