@@ -123,12 +123,13 @@ const LABEL_STYLE: React.CSSProperties = {
 
 interface FieldProps {
   label: string;
+  field: keyof FormData;
   value: string;
-  onChange: (val: string) => void;
+  onChange: (field: keyof FormData, val: string) => void;
   type?: "text" | "textarea";
 }
 
-function Field({ label, value, onChange, type = "text" }: FieldProps) {
+function Field({ label, field, value, onChange, type = "text" }: FieldProps) {
   return (
     <div style={{ marginBottom: 14 }}>
       <label style={LABEL_STYLE}>{label}</label>
@@ -136,14 +137,14 @@ function Field({ label, value, onChange, type = "text" }: FieldProps) {
         <textarea
           rows={3}
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(field, e.target.value)}
           style={{ ...INPUT_STYLE, resize: "vertical" }}
         />
       ) : (
         <input
           type="text"
           value={value}
-          onChange={(e) => onChange(e.target.value)}
+          onChange={(e) => onChange(field, e.target.value)}
           style={INPUT_STYLE}
         />
       )}
@@ -267,15 +268,15 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         {/* Form body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
           <SectionHeading>Vehicle & Tech Info</SectionHeading>
-          <Field label="Truck Number" value={form.truckNumber} onChange={(v) => set("truckNumber", v)} />
-          <Field label="Tech Name" value={form.techName} onChange={(v) => set("techName", v)} />
-          <Field label="Tech Phone" value={form.techPhone} onChange={(v) => set("techPhone", v)} />
+          <Field label="Truck Number" field="truckNumber" value={form.truckNumber} onChange={set} />
+          <Field label="Tech Name" field="techName" value={form.techName} onChange={set} />
+          <Field label="Tech Phone" field="techPhone" value={form.techPhone} onChange={set} />
 
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Repair Shop
           </SectionHeading>
-          <Field label="Repair Shop Address" value={form.repairShopAddress} onChange={(v) => set("repairShopAddress", v)} />
-          <Field label="Repair Shop Phone" value={form.repairShopPhone} onChange={(v) => set("repairShopPhone", v)} />
+          <Field label="Repair Shop Address" field="repairShopAddress" value={form.repairShopAddress} onChange={set} />
+          <Field label="Repair Shop Phone" field="repairShopPhone" value={form.repairShopPhone} onChange={set} />
 
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Status
