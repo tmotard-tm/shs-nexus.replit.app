@@ -16220,13 +16220,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Enrich with TPMS_EXTRACT contact + address data from Snowflake
       if (enrollments.length > 0) {
         try {
+          const { executeQuery: sfQuery } = await import("./fleet-scope-snowflake");
           const ids = enrollments
             .map((e: any) => e.enterprise_id?.toString().trim())
             .filter(Boolean);
           if (ids.length > 0) {
-            const safeIds = ids.map((id: string) => `'${id.replace(/'/g, "''")}'`).join(',');
-            const tpmsRows = await executeQuery<{
-              ENTERPRISE_ID: string;
+            const upperIds = ids.map((id: string) => id.toUpperCase());
+            const safeIds = upperIds.map((id: string) => `'${id.replace(/'/g, "''")}'`).join(',');
+            const tpmsRows = await sfQuery<{
+              TECH_NO: string;
               MOBILEPHONENUMBER: string | null;
               PRIMARYADDR1: string | null;
               PRIMARYADDR2: string | null;
@@ -16234,19 +16236,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
               PRIMARYSTATE: string | null;
               PRIMARYZIP: string | null;
             }>(`
-              SELECT ENTERPRISE_ID, MOBILEPHONENUMBER,
+              SELECT UPPER(TECH_NO) AS TECH_NO, MOBILEPHONENUMBER,
                      PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
               FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-              WHERE ENTERPRISE_ID IN (${safeIds})
+              WHERE UPPER(TECH_NO) IN (${safeIds})
             `);
             const tpmsMap = new Map<string, typeof tpmsRows[0]>();
             for (const row of tpmsRows) {
-              if (row.ENTERPRISE_ID) {
-                tpmsMap.set(row.ENTERPRISE_ID.toString().trim(), row);
+              if (row.TECH_NO) {
+                tpmsMap.set(row.TECH_NO.toString().trim().toUpperCase(), row);
               }
             }
             for (const enrollment of enrollments) {
-              const tpms = tpmsMap.get(enrollment.enterprise_id?.toString().trim());
+              const tpms = tpmsMap.get(enrollment.enterprise_id?.toString().trim().toUpperCase());
               if (tpms) {
                 enrollment.mobile_phone = tpms.MOBILEPHONENUMBER?.toString().trim() || null;
                 const addrParts = [
