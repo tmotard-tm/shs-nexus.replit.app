@@ -347,12 +347,12 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS vrm_repair_tracker (
       id                VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      truck_number      TEXT NOT NULL,
-      tech_name         TEXT NOT NULL,
+      truck_number      TEXT,
+      tech_name         TEXT,
       tech_phone        TEXT,
       repair_shop_address TEXT,
       repair_shop_phone TEXT,
-      main_status       TEXT NOT NULL,
+      main_status       TEXT,
       sub_status        TEXT,
       notes             TEXT,
       created_at        TIMESTAMP DEFAULT NOW() NOT NULL,
@@ -366,6 +366,8 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_new_rental_log ADD COLUMN IF NOT EXISTS repair_phone TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_new_rental_log ADD COLUMN IF NOT EXISTS declined_repair BOOLEAN NOT NULL DEFAULT FALSE;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN truck_number DROP NOT NULL;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN tech_name DROP NOT NULL;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN main_status DROP NOT NULL;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_ldap TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS recommendation TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS denied_at TIMESTAMPTZ;`);

@@ -169,11 +169,11 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
     entry
       ? {
           truckNumber: entry.truckNumber ?? "",
-          techName: entry.techName,
+          techName: entry.techName ?? "",
           techPhone: entry.techPhone ?? "",
           repairShopAddress: entry.repairShopAddress ?? "",
           repairShopPhone: entry.repairShopPhone ?? "",
-          mainStatus: entry.mainStatus,
+          mainStatus: entry.mainStatus ?? "",
           subStatus: entry.subStatus ?? "",
           notes: entry.notes ?? "",
         }
@@ -188,12 +188,12 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
-        truckNumber: form.truckNumber.trim(),
-        techName: form.techName.trim(),
+        truckNumber: form.truckNumber.trim() || null,
+        techName: form.techName.trim() || null,
         techPhone: form.techPhone.trim() || null,
         repairShopAddress: form.repairShopAddress.trim() || null,
         repairShopPhone: form.repairShopPhone.trim() || null,
-        mainStatus: form.mainStatus,
+        mainStatus: form.mainStatus || null,
         subStatus: form.subStatus || null,
         notes: form.notes.trim() || null,
       };
@@ -331,7 +331,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         >
           <button
             onClick={() => saveMutation.mutate()}
-            disabled={saveMutation.isPending || !form.truckNumber.trim() || !form.techName.trim() || !form.mainStatus}
+            disabled={saveMutation.isPending}
             style={{
               flex: 1,
               fontFamily: fonts.dmSans,
