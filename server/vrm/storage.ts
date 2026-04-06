@@ -560,13 +560,18 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   ]);
 
   // Fetch everything already in the repair tracker for dedup
-  const existingRows = await db
-    .select({
-      sourceDecisionId: vrmRepairTracker.sourceDecisionId,
-      sourceCheckId: vrmRepairTracker.sourceCheckId,
-      techLdap: vrmRepairTracker.techLdap,
-    })
-    .from(vrmRepairTracker);
+  const [existingRows, fullLogRows] = await Promise.all([
+    db
+      .select({
+        sourceDecisionId: vrmRepairTracker.sourceDecisionId,
+        sourceCheckId: vrmRepairTracker.sourceCheckId,
+        techLdap: vrmRepairTracker.techLdap,
+      })
+      .from(vrmRepairTracker),
+    // Also grab enterprise IDs already present in the Full Log so we never
+    // add a tech to the Repair Tracker if they are already in the Full Log
+    db.select({ enterpriseId: vrmNewRentalLog.enterpriseId }).from(vrmNewRentalLog),
+  ]);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
   const existingCheckIds = new Set(existingRows.map((r) => r.sourceCheckId).filter(Boolean) as string[]);
@@ -574,15 +579,26 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
 
-  // Filter decisions: not already imported by ID, and ldap not already present
+  // LDAPs already in the Full Log — skip these on import
+  const fullLogLdaps = new Set(
+    fullLogRows.map((r) => (r.enterpriseId ?? "").toUpperCase()).filter(Boolean),
+  );
+
+  const isAlreadyInFullLog = (ldap: string | null | undefined) =>
+    fullLogLdaps.has((ldap ?? "").toUpperCase());
+
+  // Filter decisions: not already imported by ID, ldap not already in tracker, and not in Full Log
   const newDecisions = deniedDecisions.filter(
-    (d) => !existingDecisionIds.has(d.id) && !existingLdaps.has((d.techLdap ?? "").toUpperCase()),
+    (d) =>
+      !existingDecisionIds.has(d.id) &&
+      !existingLdaps.has((d.techLdap ?? "").toUpperCase()) &&
+      !isAlreadyInFullLog(d.techLdap),
   );
 
   // Collect the ldaps being added from decisions to prevent duplicate tech from check history
   const addingLdaps = new Set(newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()).filter(Boolean));
 
-  // Filter checks: not already imported by ID, and ldap not in tracker or being added from decisions
+  // Filter checks: not already imported by ID, ldap not in tracker or being added from decisions, not in Full Log
   // Use most recent check per ldap to avoid duplicates within the check table itself
   const latestCheckByLdap = new Map<string, typeof deniedChecks[number]>();
   for (const c of deniedChecks) {
@@ -595,7 +611,8 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     (c) =>
       !existingCheckIds.has(c.id) &&
       !existingLdaps.has((c.techLdap ?? "").toUpperCase()) &&
-      !addingLdaps.has((c.techLdap ?? "").toUpperCase()),
+      !addingLdaps.has((c.techLdap ?? "").toUpperCase()) &&
+      !isAlreadyInFullLog(c.techLdap),
   );
 
   const totalNew = newDecisions.length + newChecks.length;
