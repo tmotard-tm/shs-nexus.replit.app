@@ -609,8 +609,9 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     } else {
       newSelections = [...activeSelections, { state: abbr, label: `All vehicles in ${abbr}` }];
     }
-    onMapFiltersChange({ selections: newSelections, visibleCategories });
-  }, [onMapFiltersChange, activeSelections, isSelectionActive, visibleCategories]);
+    // Always pass full category set in AMS mode so no vehicles are hidden by Fleet category filters
+    onMapFiltersChange({ selections: newSelections, visibleCategories: new Set(statusKeys) });
+  }, [onMapFiltersChange, activeSelections, isSelectionActive, statusKeys]);
 
   const statesWithData = Object.keys(stateData);
   
@@ -686,7 +687,13 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
               </button>
               <button
                 className={`px-3 py-1.5 transition-colors ${amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
-                onClick={() => setAmsViewMode(true)}
+                onClick={() => {
+                  setAmsViewMode(true);
+                  // Reset category filters so no Fleet categories are silently hidden in AMS mode
+                  if (onMapFiltersChange) {
+                    onMapFiltersChange({ selections: activeSelections, visibleCategories: new Set(statusKeys) });
+                  }
+                }}
                 data-testid="toggle-ams-view"
               >
                 AMS View
@@ -745,7 +752,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs text-muted-foreground"
-                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories })}
+                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories: new Set(statusKeys) })}
                   data-testid="button-clear-ams-selections"
                 >
                   Clear
