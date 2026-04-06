@@ -585,7 +585,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
          source_decision_id IS NOT NULL
          AND source_decision_id IN (
            SELECT id FROM vrm_rental_decisions
-           WHERE LOWER(decision) <> 'denied'
+           WHERE decision IS NULL OR LOWER(decision) <> 'denied'
          )
        )
   `);
