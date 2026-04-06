@@ -16224,6 +16224,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const ids = enrollments
             .map((e: any) => e.enterprise_id?.toString().trim())
             .filter(Boolean);
+          console.log(`[BYOV] Enriching ${enrollments.length} enrollments, IDs: ${ids.slice(0,5).join(', ')}`);
           if (ids.length > 0) {
             const upperIds = ids.map((id: string) => id.toUpperCase());
             const safeIds = upperIds.map((id: string) => `'${id.replace(/'/g, "''")}'`).join(',');
@@ -16241,6 +16242,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
               WHERE UPPER(TECH_NO) IN (${safeIds})
             `);
+            console.log(`[BYOV] TPMS_EXTRACT returned ${tpmsRows.length} rows for ${upperIds.length} IDs`);
             const tpmsMap = new Map<string, typeof tpmsRows[0]>();
             for (const row of tpmsRows) {
               if (row.TECH_NO) {
