@@ -37,7 +37,7 @@ interface RentalLogEntry {
   createdAt: string;
 }
 
-type FormData = Omit<RentalLogEntry, "id" | "createdAt">;
+type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong">;
 
 const EMPTY_FORM: FormData = {
   dateOfRequest: "",
@@ -57,11 +57,8 @@ const EMPTY_FORM: FormData = {
   rentalApproved: false,
   approvedInHolman: false,
   unitNumber: "",
-  teamMembers: "",
-  existingRentalOnTruck: "",
   newRentalOrExtension: "",
   truckBreakdownOrNewHire: "",
-  existingRentalOpenHowLong: "",
   techServiceDate: "",
   declinedRepair: false,
 };
@@ -109,18 +106,10 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "approved_in_holman": "approvedInHolman",
   "unit number": "unitNumber",
   "unit_number": "unitNumber",
-  "team members": "teamMembers",
-  "team_members": "teamMembers",
-  "existing rental on truck": "existingRentalOnTruck",
-  "existing_rental_on_truck": "existingRentalOnTruck",
-  "existing rental opened on truck #": "existingRentalOnTruck",
   "new rental or extension": "newRentalOrExtension",
   "new_rental_or_extension": "newRentalOrExtension",
   "truck breakdown or new hire": "truckBreakdownOrNewHire",
   "truck_breakdown_or_new_hire": "truckBreakdownOrNewHire",
-  "existing rental open how long": "existingRentalOpenHowLong",
-  "existing_rental_open_how_long": "existingRentalOpenHowLong",
-  "existing rental open for how long": "existingRentalOpenHowLong",
   "permanent solution in place": "permanentSolution",
   "tech service date": "techServiceDate",
   "tech_service_date": "techServiceDate",
@@ -411,11 +400,8 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
           rentalApproved: entry.rentalApproved,
           approvedInHolman: entry.approvedInHolman,
           unitNumber: entry.unitNumber ?? "",
-          teamMembers: entry.teamMembers ?? "",
-          existingRentalOnTruck: entry.existingRentalOnTruck ?? "",
           newRentalOrExtension: entry.newRentalOrExtension ?? "",
           truckBreakdownOrNewHire: entry.truckBreakdownOrNewHire ?? "",
-          existingRentalOpenHowLong: entry.existingRentalOpenHowLong ?? "",
           techServiceDate: entry.techServiceDate ?? "",
           declinedRepair: entry.declinedRepair ?? false,
         }
@@ -442,11 +428,8 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         repairPhone: form.repairPhone?.trim() || null,
         issue: form.issue?.trim() || null,
         unitNumber: form.unitNumber?.trim() || null,
-        teamMembers: form.teamMembers?.trim() || null,
-        existingRentalOnTruck: form.existingRentalOnTruck?.trim() || null,
         newRentalOrExtension: form.newRentalOrExtension?.trim() || null,
         truckBreakdownOrNewHire: form.truckBreakdownOrNewHire?.trim() || null,
-        existingRentalOpenHowLong: form.existingRentalOpenHowLong?.trim() || null,
         techServiceDate: form.techServiceDate?.trim() || null,
         declinedRepair: form.declinedRepair,
       };
