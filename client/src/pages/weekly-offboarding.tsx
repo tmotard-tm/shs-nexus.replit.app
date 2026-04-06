@@ -431,8 +431,8 @@ export default function WeeklyOffboarding() {
 
   const byovLastSynced = byovEnrollments.length > 0
     ? byovEnrollments.reduce((latest, e) => {
-        return new Date(e.updated_at) > new Date(latest) ? e.updated_at : latest;
-      }, byovEnrollments[0].updated_at)
+        return new Date(e.created_at) > new Date(latest) ? e.created_at : latest;
+      }, byovEnrollments[0].created_at)
     : null;
 
   const filteredByov = byovEnrollments.filter(e => {
