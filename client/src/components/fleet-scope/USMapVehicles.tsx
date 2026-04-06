@@ -185,6 +185,21 @@ const categories: { key: CategoryKey; color: string; stroke: string; label: stri
   { key: 'unassigned', color: 'rgba(239, 68, 68, 0.9)', stroke: '#dc2626', label: 'Unassigned', bgClass: 'bg-red-50 dark:bg-red-900/20', borderClass: 'border-red-200 dark:border-red-800', dotClass: 'bg-red-500', textClass: 'text-red-700 dark:text-red-300' },
 ];
 
+const AMS_COLOR_PALETTE: Array<{ color: string; stroke: string; bg: string; text: string }> = [
+  { color: 'rgba(34, 197, 94, 0.9)',  stroke: '#16a34a', bg: 'bg-green-100 dark:bg-green-900/30',   text: 'text-green-700 dark:text-green-300' },
+  { color: 'rgba(59, 130, 246, 0.9)', stroke: '#2563eb', bg: 'bg-blue-100 dark:bg-blue-900/30',    text: 'text-blue-700 dark:text-blue-300' },
+  { color: 'rgba(239, 68, 68, 0.9)',  stroke: '#dc2626', bg: 'bg-red-100 dark:bg-red-900/30',      text: 'text-red-700 dark:text-red-300' },
+  { color: 'rgba(245, 158, 11, 0.9)', stroke: '#d97706', bg: 'bg-amber-100 dark:bg-amber-900/30',  text: 'text-amber-700 dark:text-amber-300' },
+  { color: 'rgba(147, 51, 234, 0.9)', stroke: '#7c3aed', bg: 'bg-purple-100 dark:bg-purple-900/30',text: 'text-purple-700 dark:text-purple-300' },
+  { color: 'rgba(20, 184, 166, 0.9)', stroke: '#0d9488', bg: 'bg-teal-100 dark:bg-teal-900/30',   text: 'text-teal-700 dark:text-teal-300' },
+  { color: 'rgba(236, 72, 153, 0.9)', stroke: '#db2777', bg: 'bg-pink-100 dark:bg-pink-900/30',   text: 'text-pink-700 dark:text-pink-300' },
+  { color: 'rgba(249, 115, 22, 0.9)', stroke: '#ea580c', bg: 'bg-orange-100 dark:bg-orange-900/30',text: 'text-orange-700 dark:text-orange-300' },
+  { color: 'rgba(99, 102, 241, 0.9)', stroke: '#4338ca', bg: 'bg-indigo-100 dark:bg-indigo-900/30',text: 'text-indigo-700 dark:text-indigo-300' },
+  { color: 'rgba(6, 182, 212, 0.9)',  stroke: '#0891b2', bg: 'bg-cyan-100 dark:bg-cyan-900/30',   text: 'text-cyan-700 dark:text-cyan-300' },
+  { color: 'rgba(234, 179, 8, 0.9)',  stroke: '#ca8a04', bg: 'bg-yellow-100 dark:bg-yellow-900/30',text: 'text-yellow-700 dark:text-yellow-300' },
+  { color: 'rgba(16, 185, 129, 0.9)', stroke: '#059669', bg: 'bg-emerald-100 dark:bg-emerald-900/30',text: 'text-emerald-700 dark:text-emerald-300' },
+];
+
 const DEFAULT_CENTER: [number, number] = [-96, 38];
 const DEFAULT_ZOOM = 1;
 const MIN_ZOOM = 1;
@@ -293,6 +308,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [spareExpanded, setSpareExpanded] = useState<{ confirmed: boolean; needs: boolean }>({ confirmed: false, needs: false });
+  const [amsViewMode, setAmsViewMode] = useState(false);
 
   const statusKeys: CategoryKey[] = ['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'];
 
@@ -536,6 +552,66 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
     };
   }, [vehicles, byovVehicleNumbers, visibleCategories]);
 
+  // AMS view: group vehicles by locationState × truckStatus
+  const amsStateData = useMemo(() => {
+    const data: Record<string, Record<string, number>> = {};
+    for (const vehicle of vehicles) {
+      const state = vehicle.locationState?.toUpperCase().trim();
+      if (!state || !stateCoordinates[state]) continue;
+      const status = vehicle.truckStatus?.trim() || 'Unknown';
+      if (!data[state]) data[state] = {};
+      data[state][status] = (data[state][status] || 0) + 1;
+    }
+    return data;
+  }, [vehicles]);
+
+  // Stable color map: sort unique statuses alphabetically then assign palette colors
+  const amsColorMap = useMemo(() => {
+    const uniqueStatuses = Array.from(
+      new Set(vehicles.map(v => v.truckStatus?.trim() || 'Unknown'))
+    ).sort();
+    const map: Record<string, typeof AMS_COLOR_PALETTE[number]> = {};
+    uniqueStatuses.forEach((status, idx) => {
+      map[status] = AMS_COLOR_PALETTE[idx % AMS_COLOR_PALETTE.length];
+    });
+    return map;
+  }, [vehicles]);
+
+  // Sorted list of [status, total] for the AMS legend
+  const amsTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const statuses of Object.values(amsStateData)) {
+      for (const [status, count] of Object.entries(statuses)) {
+        totals[status] = (totals[status] || 0) + count;
+      }
+    }
+    return Object.entries(totals).sort((a, b) => b[1] - a[1]);
+  }, [amsStateData]);
+
+  // Max single-status count per state for AMS bubble radius scaling
+  const amsMaxCount = useMemo(() => {
+    let max = 1;
+    for (const statuses of Object.values(amsStateData)) {
+      for (const count of Object.values(statuses)) {
+        if (count > max) max = count;
+      }
+    }
+    return max;
+  }, [amsStateData]);
+
+  const handleAmsStateClick = useCallback((abbr: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onMapFiltersChange) return;
+    const alreadySelected = isSelectionActive(abbr, undefined);
+    let newSelections: MapSelection[];
+    if (alreadySelected) {
+      newSelections = activeSelections.filter(s => !(s.state === abbr && !s.category));
+    } else {
+      newSelections = [...activeSelections, { state: abbr, label: `All vehicles in ${abbr}` }];
+    }
+    onMapFiltersChange({ selections: newSelections, visibleCategories });
+  }, [onMapFiltersChange, activeSelections, isSelectionActive, visibleCategories]);
+
   const statesWithData = Object.keys(stateData);
   
   if (statesWithData.length === 0) {
@@ -595,38 +671,91 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
             <MapPin className="w-5 h-5" />
             Vehicle Distribution by State
           </CardTitle>
-          {(activeSelections.length > 0 || visibleCategories.size < categories.length) && onMapFiltersChange && (
-            <div className="flex items-center gap-1 flex-wrap">
-              {activeSelections.map((sel, idx) => (
-                <Badge 
-                  key={`${sel.state}-${sel.category || 'all'}`}
-                  variant="secondary" 
-                  className="gap-1 cursor-pointer text-xs"
-                  onClick={() => {
-                    const newSelections = activeSelections.filter((_, i) => i !== idx);
-                    onMapFiltersChange({ selections: newSelections, visibleCategories });
-                  }}
-                  data-testid={`chip-map-selection-${idx}`}
-                >
-                  {sel.label}
-                  <X className="w-3 h-3" />
-                </Badge>
-              ))}
-              {(activeSelections.length > 0 || assignedToggleOn || unassignedToggleOn || statusKeys.some(k => !visibleCategories.has(k))) && (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Fleet View / AMS View toggle */}
+            <div
+              className="flex rounded-lg border overflow-hidden text-xs font-semibold"
+              data-testid="toggle-map-view-mode"
+            >
+              <button
+                className={`px-3 py-1.5 transition-colors ${!amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
+                onClick={() => setAmsViewMode(false)}
+                data-testid="toggle-fleet-view"
+              >
+                Fleet View
+              </button>
+              <button
+                className={`px-3 py-1.5 transition-colors ${amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
+                onClick={() => setAmsViewMode(true)}
+                data-testid="toggle-ams-view"
+              >
+                AMS View
+              </button>
+            </div>
+            {/* Active selection chips (Fleet mode only) */}
+            {!amsViewMode && (activeSelections.length > 0 || visibleCategories.size < categories.length) && onMapFiltersChange && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {activeSelections.map((sel, idx) => (
+                  <Badge
+                    key={`${sel.state}-${sel.category || 'all'}`}
+                    variant="secondary"
+                    className="gap-1 cursor-pointer text-xs"
+                    onClick={() => {
+                      const newSelections = activeSelections.filter((_, i) => i !== idx);
+                      onMapFiltersChange({ selections: newSelections, visibleCategories });
+                    }}
+                    data-testid={`chip-map-selection-${idx}`}
+                  >
+                    {sel.label}
+                    <X className="w-3 h-3" />
+                  </Badge>
+                ))}
+                {(activeSelections.length > 0 || assignedToggleOn || unassignedToggleOn || statusKeys.some(k => !visibleCategories.has(k))) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 px-2 text-xs text-muted-foreground"
+                    onClick={() => onMapFiltersChange({ selections: [], visibleCategories: new Set(statusKeys) })}
+                    data-testid="button-clear-all-map-filters"
+                  >
+                    Clear All
+                  </Button>
+                )}
+              </div>
+            )}
+            {/* AMS mode: active selection chips */}
+            {amsViewMode && activeSelections.length > 0 && onMapFiltersChange && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {activeSelections.map((sel, idx) => (
+                  <Badge
+                    key={`ams-${sel.state}-${idx}`}
+                    variant="secondary"
+                    className="gap-1 cursor-pointer text-xs"
+                    onClick={() => {
+                      const newSelections = activeSelections.filter((_, i) => i !== idx);
+                      onMapFiltersChange({ selections: newSelections, visibleCategories });
+                    }}
+                    data-testid={`chip-ams-selection-${idx}`}
+                  >
+                    {sel.label}
+                    <X className="w-3 h-3" />
+                  </Badge>
+                ))}
                 <Button
                   variant="ghost"
                   size="sm"
                   className="h-6 px-2 text-xs text-muted-foreground"
-                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories: new Set(statusKeys) })}
-                  data-testid="button-clear-all-map-filters"
+                  onClick={() => onMapFiltersChange({ selections: [], visibleCategories })}
+                  data-testid="button-clear-ams-selections"
                 >
-                  Clear All
+                  Clear
                 </Button>
-              )}
-            </div>
-          )}
+              </div>
+            )}
+          </div>
         </div>
-        {/* Overarching assignment filter toggles */}
+        {/* Overarching assignment filter toggles — Fleet View only */}
+        {!amsViewMode && (
         <div className="flex items-center gap-2 mt-2 flex-wrap">
           <span className="text-xs font-medium text-muted-foreground">Filter:</span>
           <button
@@ -667,8 +796,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
             </span>
           )}
         </div>
+        )}
 
-        {/* Status category toggles */}
+        {/* Status category toggles — Fleet View only */}
+        {!amsViewMode && (
         <div className="flex items-center gap-1.5 mt-2 flex-wrap">
           {statusKeys.map(k => categories.find(c => c.key === k)!).filter(Boolean).map(cat => {
             const isSpare = cat.key === 'confirmedSpare' || cat.key === 'needsReconfirmation';
@@ -716,9 +847,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
           })}
           <span className="text-xs text-muted-foreground self-center">({statesWithData.length} states)</span>
         </div>
+        )}
 
-        {/* AMS truck status breakdown for spare categories */}
-        {(spareExpanded.confirmed || spareExpanded.needs) && (
+        {/* AMS truck status breakdown for spare categories — Fleet View only */}
+        {!amsViewMode && (spareExpanded.confirmed || spareExpanded.needs) && (
           <div className="mt-2 flex gap-6 flex-wrap">
             {spareExpanded.confirmed && spareBreakdown.confirmed.length > 0 && (
               <div className="flex flex-col gap-1">
@@ -755,9 +887,37 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
           </div>
         )}
 
+        {/* AMS legend — shown only in AMS View */}
+        {amsViewMode && amsTotals.length > 0 && (
+          <div className="mt-2 flex flex-wrap gap-1.5" data-testid="ams-status-legend">
+            {amsTotals.map(([status, count]) => {
+              const palette = amsColorMap[status] || AMS_COLOR_PALETTE[0];
+              return (
+                <span
+                  key={status}
+                  className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full border text-xs font-medium ${palette.bg} ${palette.text} border-current/20`}
+                  data-testid={`ams-legend-${status.replace(/\s+/g, '-')}`}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                    style={{ backgroundColor: palette.stroke }}
+                  />
+                  {status}
+                  <span className="font-mono font-bold ml-0.5 tabular-nums">{count.toLocaleString()}</span>
+                </span>
+              );
+            })}
+            <span className="text-xs text-muted-foreground self-center ml-1">
+              ({Object.keys(amsStateData).length} states)
+            </span>
+          </div>
+        )}
+
         {onMapFiltersChange && (
           <p className="text-xs text-muted-foreground mt-1">
-            Click bubbles or states to filter the table below (multi-select supported)
+            {amsViewMode
+              ? 'AMS View — bubbles show truck status from AMS. Click a state to filter the table below.'
+              : 'Click bubbles or states to filter the table below (multi-select supported)'}
           </p>
         )}
       </CardHeader>
@@ -846,10 +1006,10 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                 }
               </Geographies>
               
-              {statesWithData.map((state) => {
+              {/* Offshore connector lines — shown in both modes */}
+              {(amsViewMode ? Object.keys(amsStateData) : statesWithData).map((state) => {
                 const offshoreData = offshoreStates[state];
                 if (!offshoreData) return null;
-                
                 return (
                   <Marker key={`line-${state}`} coordinates={offshoreData.anchor}>
                     <line
@@ -865,8 +1025,9 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                   </Marker>
                 );
               })}
-              
-              {statesWithData.map((state) => {
+
+              {/* Fleet View: category bubbles */}
+              {!amsViewMode && statesWithData.map((state) => {
                 const isOffshore = offshoreStates[state] !== undefined;
                 const coords = isOffshore ? offshoreStates[state].offshore : stateCoordinates[state];
                 const data = stateData[state];
@@ -960,6 +1121,104 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                             {count}
                           </text>
                           <title>{`${state}: ${count} ${cat.label} — Click to filter table`}</title>
+                        </Marker>
+                      );
+                    })}
+                  </g>
+                );
+              })}
+
+              {/* AMS View: truck-status bubbles */}
+              {amsViewMode && Object.keys(amsStateData).map((state) => {
+                const isOffshore = offshoreStates[state] !== undefined;
+                const coords = isOffshore ? offshoreStates[state].offshore : stateCoordinates[state];
+                if (!coords) return null;
+
+                const statusEntries = Object.entries(amsStateData[state]).filter(([, cnt]) => cnt > 0);
+                if (statusEntries.length === 0) return null;
+
+                const circleCount = statusEntries.length;
+                const spacing = isOffshore ? 0.7 : 0.85;
+                const offsets: number[] = [];
+                if (circleCount === 1) {
+                  offsets.push(0);
+                } else if (circleCount === 2) {
+                  offsets.push(-spacing / 2, spacing / 2);
+                } else if (circleCount === 3) {
+                  offsets.push(-spacing, 0, spacing);
+                } else if (circleCount === 4) {
+                  offsets.push(-spacing * 1.5, -spacing * 0.5, spacing * 0.5, spacing * 1.5);
+                } else if (circleCount === 5) {
+                  offsets.push(-spacing * 2, -spacing, 0, spacing, spacing * 2);
+                } else {
+                  const half = (circleCount - 1) / 2;
+                  for (let i = 0; i < circleCount; i++) {
+                    offsets.push((i - half) * spacing);
+                  }
+                }
+
+                const isStateActive = isSelectionActive(state, undefined);
+                const firstCount = statusEntries[0][1];
+                const firstRadius = Math.max(5, Math.min(14, 5 + (firstCount / amsMaxCount) * 9));
+                const leftmostOffset = offsets[0] || 0;
+                const labelXOffset = leftmostOffset - (firstRadius / 12) - 0.5;
+
+                return (
+                  <g key={`ams-${state}`}>
+                    {isOffshore && (
+                      <Marker coordinates={[coords[0] + labelXOffset, coords[1]]}>
+                        <text
+                          textAnchor="end"
+                          y={3}
+                          style={{
+                            fontFamily: 'system-ui, sans-serif',
+                            fontSize: '9px',
+                            fontWeight: '600',
+                            fill: '#374151',
+                          }}
+                        >
+                          {state}
+                        </text>
+                      </Marker>
+                    )}
+                    {statusEntries.map(([statusLabel, count], idx) => {
+                      const palette = amsColorMap[statusLabel] || AMS_COLOR_PALETTE[idx % AMS_COLOR_PALETTE.length];
+                      const radius = Math.max(5, Math.min(14, 5 + (count / amsMaxCount) * 9));
+                      const offset = offsets[idx] || 0;
+                      return (
+                        <Marker key={statusLabel} coordinates={[coords[0] + offset, coords[1]]}>
+                          <circle
+                            r={radius}
+                            fill={palette.color}
+                            stroke={isStateActive ? '#ffffff' : palette.stroke}
+                            strokeWidth={isStateActive ? 2 : 0.8}
+                            style={{ cursor: onMapFiltersChange ? 'pointer' : 'default' }}
+                            onClick={(e) => handleAmsStateClick(state, e)}
+                            data-testid={`marker-ams-${statusLabel.replace(/\s+/g, '-')}-${state}`}
+                          />
+                          {isStateActive && (
+                            <circle
+                              r={radius + 2}
+                              fill="none"
+                              stroke={palette.stroke}
+                              strokeWidth={1.5}
+                              style={{ pointerEvents: 'none' }}
+                            />
+                          )}
+                          <text
+                            textAnchor="middle"
+                            y={3}
+                            style={{
+                              fontFamily: 'system-ui, sans-serif',
+                              fontSize: count > 999 ? '5px' : count > 99 ? '6px' : '7px',
+                              fontWeight: 'bold',
+                              fill: '#ffffff',
+                              pointerEvents: 'none',
+                            }}
+                          >
+                            {count}
+                          </text>
+                          <title>{`${state}: ${count} ${statusLabel} — Click to filter table`}</title>
                         </Marker>
                       );
                     })}
