@@ -536,7 +536,8 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
  * but no truck number, by joining against the TPMS tech profiles cache.
  */
 export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
-  const result = await db.execute(sql`
+  // 1. Fill truck_number + tech_phone from TPMS
+  const tpmsResult = await db.execute(sql`
     UPDATE vrm_repair_tracker rt
     SET
       truck_number = COALESCE(NULLIF(rt.truck_number, ''), tp.truck_no),
@@ -549,7 +550,26 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
         rt.tech_phone   IS NULL OR rt.tech_phone   = ''
       )
   `);
-  return (result as any).rowCount ?? 0;
+
+  // 2. Fill repair_shop_address from the most-recent Full Log record per LDAP
+  const fullLogResult = await db.execute(sql`
+    UPDATE vrm_repair_tracker rt
+    SET repair_shop_address = flog.repair_location
+    FROM (
+      SELECT DISTINCT ON (UPPER(enterprise_id))
+        enterprise_id,
+        repair_location
+      FROM vrm_new_rental_log
+      WHERE enterprise_id   IS NOT NULL AND enterprise_id   <> ''
+        AND repair_location IS NOT NULL AND repair_location <> ''
+      ORDER BY UPPER(enterprise_id), date_of_request DESC NULLS LAST
+    ) flog
+    WHERE UPPER(flog.enterprise_id) = UPPER(rt.tech_ldap)
+      AND rt.tech_ldap IS NOT NULL
+      AND (rt.repair_shop_address IS NULL OR rt.repair_shop_address = '')
+  `);
+
+  return ((tpmsResult as any).rowCount ?? 0) + ((fullLogResult as any).rowCount ?? 0);
 }
 
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
