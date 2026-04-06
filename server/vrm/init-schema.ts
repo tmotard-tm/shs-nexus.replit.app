@@ -369,6 +369,7 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS recommendation TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS denied_at TIMESTAMPTZ;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS source_decision_id VARCHAR;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS source_check_id VARCHAR;`);
 
   console.log("[VRM] Schema initialised");
 }

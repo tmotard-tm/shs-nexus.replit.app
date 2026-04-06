@@ -22,6 +22,7 @@ interface RepairTrackerEntry {
   recommendation: string | null;
   deniedAt: string | null;
   sourceDecisionId: string | null;
+  sourceCheckId: string | null;
   createdAt: string;
   updatedAt: string;
 }

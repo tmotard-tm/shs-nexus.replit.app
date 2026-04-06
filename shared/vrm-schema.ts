@@ -456,6 +456,7 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   recommendation: text("recommendation"),
   deniedAt: timestamp("denied_at"),
   sourceDecisionId: varchar("source_decision_id"),
+  sourceCheckId: varchar("source_check_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

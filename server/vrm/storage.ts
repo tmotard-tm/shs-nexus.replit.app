@@ -532,33 +532,78 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
 }
 
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
-  const denied = await db
-    .select()
-    .from(vrmRentalDecisions)
-    .where(sql`LOWER(${vrmRentalDecisions.recommendation}) = 'deny'`);
+  // Fetch denied from both sources
+  const [deniedDecisions, deniedChecks] = await Promise.all([
+    db.select().from(vrmRentalDecisions).where(sql`LOWER(${vrmRentalDecisions.recommendation}) = 'deny'`),
+    db.select().from(vrmRentalChecks).where(sql`LOWER(${vrmRentalChecks.recommendation}) = 'deny'`),
+  ]);
 
-  const existing = await db
-    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId })
-    .from(vrmRepairTracker)
-    .where(sql`${vrmRepairTracker.sourceDecisionId} IS NOT NULL`);
+  // Fetch everything already in the repair tracker for dedup
+  const existingRows = await db
+    .select({
+      sourceDecisionId: vrmRepairTracker.sourceDecisionId,
+      sourceCheckId: vrmRepairTracker.sourceCheckId,
+      techLdap: vrmRepairTracker.techLdap,
+    })
+    .from(vrmRepairTracker);
 
-  const alreadyImported = new Set(existing.map((r) => r.sourceDecisionId).filter(Boolean));
+  const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
+  const existingCheckIds = new Set(existingRows.map((r) => r.sourceCheckId).filter(Boolean) as string[]);
+  const existingLdaps = new Set(
+    existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
+  );
 
-  const toInsert = denied.filter((d) => !alreadyImported.has(d.id));
-  if (toInsert.length === 0) return { imported: 0, skipped: denied.length };
+  // Filter decisions: not already imported by ID, and ldap not already present
+  const newDecisions = deniedDecisions.filter(
+    (d) => !existingDecisionIds.has(d.id) && !existingLdaps.has((d.techLdap ?? "").toUpperCase()),
+  );
 
-  await db.insert(vrmRepairTracker).values(
-    toInsert.map((d) => ({
+  // Collect the ldaps being added from decisions to prevent duplicate tech from check history
+  const addingLdaps = new Set(newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()).filter(Boolean));
+
+  // Filter checks: not already imported by ID, and ldap not in tracker or being added from decisions
+  // Use most recent check per ldap to avoid duplicates within the check table itself
+  const latestCheckByLdap = new Map<string, typeof deniedChecks[number]>();
+  for (const c of deniedChecks) {
+    const ldap = (c.techLdap ?? "").toUpperCase();
+    if (!ldap) continue;
+    const prev = latestCheckByLdap.get(ldap);
+    if (!prev || c.checkedAt > prev.checkedAt) latestCheckByLdap.set(ldap, c);
+  }
+  const newChecks = [...latestCheckByLdap.values()].filter(
+    (c) =>
+      !existingCheckIds.has(c.id) &&
+      !existingLdaps.has((c.techLdap ?? "").toUpperCase()) &&
+      !addingLdaps.has((c.techLdap ?? "").toUpperCase()),
+  );
+
+  const totalNew = newDecisions.length + newChecks.length;
+  const totalSkipped = (deniedDecisions.length - newDecisions.length) + (deniedChecks.length - newChecks.length);
+
+  if (totalNew === 0) return { imported: 0, skipped: totalSkipped };
+
+  const rows: InsertVrmRepairTracker[] = [
+    ...newDecisions.map((d) => ({
       techLdap: d.techLdap,
-      techName: d.techName ?? d.techLdap,
+      techName: d.techName ?? d.techLdap ?? "Unknown",
       mainStatus: "Decision Pending",
       recommendation: d.recommendation,
       deniedAt: d.createdAt,
       sourceDecisionId: d.id,
     })),
-  );
+    ...newChecks.map((c) => ({
+      techLdap: c.techLdap,
+      techName: c.techName ?? c.techLdap ?? "Unknown",
+      mainStatus: "Decision Pending",
+      recommendation: c.recommendation,
+      deniedAt: c.checkedAt,
+      sourceCheckId: c.id,
+    })),
+  ];
 
-  return { imported: toInsert.length, skipped: denied.length - toInsert.length };
+  await db.insert(vrmRepairTracker).values(rows);
+
+  return { imported: totalNew, skipped: totalSkipped };
 }
 
 export async function updateRepairTrackerEntry(id: string, data: Partial<InsertVrmRepairTracker>) {
