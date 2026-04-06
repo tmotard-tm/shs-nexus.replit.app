@@ -371,5 +371,20 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS source_decision_id VARCHAR;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS source_check_id VARCHAR;`);
 
+  // One-time cleanup: remove rows that were incorrectly imported from Check History
+  // (source_check_id IS NOT NULL) or from Decision Log entries whose final decision
+  // was not 'denied' (e.g. recommendation=Deny but manager overrode to Approved).
+  await db.execute(sql`
+    DELETE FROM vrm_repair_tracker
+    WHERE source_check_id IS NOT NULL
+       OR (
+         source_decision_id IS NOT NULL
+         AND source_decision_id IN (
+           SELECT id FROM vrm_rental_decisions
+           WHERE LOWER(decision) <> 'denied'
+         )
+       )
+  `);
+
   console.log("[VRM] Schema initialised");
 }

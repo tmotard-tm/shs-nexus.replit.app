@@ -573,28 +573,41 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
 }
 
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
-  // Fetch denied from both sources
-  const [deniedDecisions, deniedChecks] = await Promise.all([
-    db.select().from(vrmRentalDecisions).where(sql`LOWER(${vrmRentalDecisions.recommendation}) = 'deny'`),
-    db.select().from(vrmRentalChecks).where(sql`LOWER(${vrmRentalChecks.recommendation}) = 'deny'`),
-  ]);
+  // Step 1: Clean up any rows that were incorrectly imported in the past:
+  //   - Rows sourced from Check History (source_check_id IS NOT NULL) — checks have no
+  //     final decision field so they should never drive Repair Tracker entries
+  //   - Rows sourced from Decision Log where the actual decision was NOT 'denied' (e.g.
+  //     recommendation=Deny but manager overrode to Approved)
+  await db.execute(sql`
+    DELETE FROM vrm_repair_tracker
+    WHERE source_check_id IS NOT NULL
+       OR (
+         source_decision_id IS NOT NULL
+         AND source_decision_id IN (
+           SELECT id FROM vrm_rental_decisions
+           WHERE LOWER(decision) <> 'denied'
+         )
+       )
+  `);
 
-  // Fetch everything already in the repair tracker for dedup
+  // Step 2: Fetch only truly denied decisions from the Decision Log
+  const deniedDecisions = await db
+    .select()
+    .from(vrmRentalDecisions)
+    .where(sql`LOWER(${vrmRentalDecisions.decision}) = 'denied'`);
+
+  // Step 3: Fetch existing Repair Tracker rows and Full Log LDAPs for dedup
   const [existingRows, fullLogRows] = await Promise.all([
     db
       .select({
         sourceDecisionId: vrmRepairTracker.sourceDecisionId,
-        sourceCheckId: vrmRepairTracker.sourceCheckId,
         techLdap: vrmRepairTracker.techLdap,
       })
       .from(vrmRepairTracker),
-    // Also grab enterprise IDs already present in the Full Log so we never
-    // add a tech to the Repair Tracker if they are already in the Full Log
     db.select({ enterpriseId: vrmNewRentalLog.enterpriseId }).from(vrmNewRentalLog),
   ]);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
-  const existingCheckIds = new Set(existingRows.map((r) => r.sourceCheckId).filter(Boolean) as string[]);
   const existingLdaps = new Set(
     existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
@@ -607,7 +620,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   const isAlreadyInFullLog = (ldap: string | null | undefined) =>
     fullLogLdaps.has((ldap ?? "").toUpperCase());
 
-  // Filter decisions: not already imported by ID, ldap not already in tracker, and not in Full Log
+  // Step 4: Filter to only genuinely new denied decisions not already tracked
   const newDecisions = deniedDecisions.filter(
     (d) =>
       !existingDecisionIds.has(d.id) &&
@@ -615,36 +628,12 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
       !isAlreadyInFullLog(d.techLdap),
   );
 
-  // Collect the ldaps being added from decisions to prevent duplicate tech from check history
-  const addingLdaps = new Set(newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()).filter(Boolean));
+  const totalSkipped = deniedDecisions.length - newDecisions.length;
 
-  // Filter checks: not already imported by ID, ldap not in tracker or being added from decisions, not in Full Log
-  // Use most recent check per ldap to avoid duplicates within the check table itself
-  const latestCheckByLdap = new Map<string, typeof deniedChecks[number]>();
-  for (const c of deniedChecks) {
-    const ldap = (c.techLdap ?? "").toUpperCase();
-    if (!ldap) continue;
-    const prev = latestCheckByLdap.get(ldap);
-    if (!prev || c.checkedAt > prev.checkedAt) latestCheckByLdap.set(ldap, c);
-  }
-  const newChecks = [...latestCheckByLdap.values()].filter(
-    (c) =>
-      !existingCheckIds.has(c.id) &&
-      !existingLdaps.has((c.techLdap ?? "").toUpperCase()) &&
-      !addingLdaps.has((c.techLdap ?? "").toUpperCase()) &&
-      !isAlreadyInFullLog(c.techLdap),
-  );
+  if (newDecisions.length === 0) return { imported: 0, skipped: totalSkipped };
 
-  const totalNew = newDecisions.length + newChecks.length;
-  const totalSkipped = (deniedDecisions.length - newDecisions.length) + (deniedChecks.length - newChecks.length);
-
-  if (totalNew === 0) return { imported: 0, skipped: totalSkipped };
-
-  // Look up truck numbers from TPMS for all LDAPs being inserted
-  const allNewLdaps = [
-    ...newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()),
-    ...newChecks.map((c) => (c.techLdap ?? "").toUpperCase()),
-  ].filter(Boolean);
+  // Step 5: Look up truck numbers and phone from TPMS for all new LDAPs
+  const allNewLdaps = newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()).filter(Boolean);
 
   const tpmsRows = allNewLdaps.length
     ? await db.execute(sql`
@@ -661,35 +650,23 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.mobile_phone as string]),
   );
 
-  const rows: InsertVrmRepairTracker[] = [
-    ...newDecisions.map((d) => ({
-      techLdap: d.techLdap,
-      techName: d.techName ?? d.techLdap ?? "Unknown",
-      truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-      techPhone: phoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-      mainStatus: "Decision Pending",
-      recommendation: d.recommendation,
-      deniedAt: d.createdAt,
-      sourceDecisionId: d.id,
-    })),
-    ...newChecks.map((c) => ({
-      techLdap: c.techLdap,
-      techName: c.techName ?? c.techLdap ?? "Unknown",
-      truckNumber: truckByLdap.get((c.techLdap ?? "").toUpperCase()) ?? null,
-      techPhone: phoneByLdap.get((c.techLdap ?? "").toUpperCase()) ?? null,
-      mainStatus: "Decision Pending",
-      recommendation: c.recommendation,
-      deniedAt: c.checkedAt,
-      sourceCheckId: c.id,
-    })),
-  ];
+  const rows: InsertVrmRepairTracker[] = newDecisions.map((d) => ({
+    techLdap: d.techLdap,
+    techName: d.techName ?? d.techLdap ?? "Unknown",
+    truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
+    techPhone: phoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
+    mainStatus: "Decision Pending",
+    recommendation: d.recommendation,
+    deniedAt: d.createdAt,
+    sourceDecisionId: d.id,
+  }));
 
   await db.insert(vrmRepairTracker).values(rows);
 
-  // Also backfill any existing rows that were imported without a truck number
+  // Backfill any rows still missing truck/phone/repair-shop data
   await backfillRepairTrackerTruckNumbers();
 
-  return { imported: totalNew, skipped: totalSkipped };
+  return { imported: newDecisions.length, skipped: totalSkipped };
 }
 
 export async function updateRepairTrackerEntry(id: string, data: Partial<InsertVrmRepairTracker>) {
