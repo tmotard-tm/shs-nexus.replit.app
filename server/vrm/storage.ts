@@ -607,34 +607,20 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     .from(vrmRentalDecisions)
     .where(sql`LOWER(${vrmRentalDecisions.decision}) = 'denied'`);
 
-  // Step 3: Fetch existing Repair Tracker rows and Full Log LDAPs for dedup
-  const [existingRows, fullLogRows] = await Promise.all([
-    db
-      .select({
-        sourceDecisionId: vrmRepairTracker.sourceDecisionId,
-        techLdap: vrmRepairTracker.techLdap,
-      })
-      .from(vrmRepairTracker),
-    db.select({ enterpriseId: vrmNewRentalLog.enterpriseId }).from(vrmNewRentalLog),
-  ]);
+  // Step 3: Fetch existing Repair Tracker rows for dedup by decision ID only
+  const existingRows = await db
+    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId })
+    .from(vrmRepairTracker);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
 
-  // LDAPs already in the Full Log — skip these on import
-  const fullLogLdaps = new Set(
-    fullLogRows.map((r) => (r.enterpriseId ?? "").toUpperCase()).filter(Boolean),
-  );
-
-  const isAlreadyInFullLog = (ldap: string | null | undefined) =>
-    fullLogLdaps.has((ldap ?? "").toUpperCase());
-
   // Step 4: Filter to only genuinely new denied decisions not already tracked.
-  // Dedup by decision ID only — not by LDAP — so a tech who was previously denied
-  // can still generate a new tracker row when a new denial decision is recorded.
+  // Dedup by decision ID only — the Full Log guard has been removed because the Full
+  // Log and Repair Tracker serve different purposes and one should not block the other.
+  // A tech present in the Full Log (e.g. from historical XLSX import) can still have a
+  // new denied decision that needs to appear in the Repair Tracker.
   const newDecisions = deniedDecisions.filter(
-    (d) =>
-      !existingDecisionIds.has(d.id) &&
-      !isAlreadyInFullLog(d.techLdap),
+    (d) => !existingDecisionIds.has(d.id),
   );
 
   const totalSkipped = deniedDecisions.length - newDecisions.length;
