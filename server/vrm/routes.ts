@@ -850,5 +850,46 @@ export function registerVrmRoutes(): Router {
     }
   });
 
+  // ─── Denied-import scheduler (7 AM + 1 PM ET) ──────────────────────────────
+
+  function msUntilETHour(hourET: number): number {
+    const now = new Date();
+    const fmt = new Intl.DateTimeFormat("en-US", {
+      timeZone: "America/New_York",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      hour12: false,
+    });
+    const parts = fmt.formatToParts(now);
+    const h = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0");
+    const m = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0");
+    const s = parseInt(parts.find((p) => p.type === "second")?.value ?? "0");
+    let minUntil = hourET * 60 - (h * 60 + m);
+    if (minUntil <= 0) minUntil += 24 * 60;
+    const ms = (minUntil * 60 - s) * 1000;
+    return ms > 0 && Number.isFinite(ms) ? ms : 24 * 60 * 60 * 1000;
+  }
+
+  function scheduleImportAt(hourET: number, label: string) {
+    const ms = msUntilETHour(hourET);
+    const next = new Date(Date.now() + ms);
+    console.log(`[VRM Scheduler] ${label} import scheduled for ${next.toISOString()}`);
+    setTimeout(async () => {
+      console.log(`[VRM Scheduler] Running ${label} importDeniedToRepairTracker`);
+      try {
+        const result = await importDeniedToRepairTracker();
+        console.log(`[VRM Scheduler] ${label} complete — ${result.imported} imported, ${result.skipped} skipped`);
+      } catch (e: any) {
+        console.error(`[VRM Scheduler] ${label} failed:`, e.message);
+      }
+      scheduleImportAt(hourET, label);
+    }, ms);
+  }
+
+  scheduleImportAt(7, "7 AM ET");
+  scheduleImportAt(13, "1 PM ET");
+  console.log("[VRM Scheduler] Denied-import scheduler initialised (7 AM ET + 1 PM ET daily)");
+
   return router;
 }

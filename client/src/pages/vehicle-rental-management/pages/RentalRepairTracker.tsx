@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, Search, Download } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Search } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -385,31 +385,11 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
 
 export default function RentalRepairTracker() {
   const { toast } = useToast();
-  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
 
   const { data: entries = [], isLoading } = useQuery<RepairTrackerEntry[]>({
     queryKey: ["/api/vrm/repair-tracker"],
-  });
-
-  const importDeniedMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", "/api/vrm/repair-tracker/import-denied");
-      return res.json();
-    },
-    onSuccess: (data: { imported: number; skipped: number }) => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
-      if (data.imported === 0) {
-        toast({ title: "All caught up", description: "No new denied entries to import." });
-      } else {
-        toast({
-          title: "Import complete",
-          description: `${data.imported} denied entry${data.imported !== 1 ? "s" : ""} imported${data.skipped ? `, ${data.skipped} already existed` : ""}.`,
-        });
-      }
-    },
-    onError: (e: any) => toast({ title: "Import failed", description: e.message, variant: "destructive" }),
   });
 
   const filtered = entries.filter((e) => {
@@ -456,50 +436,26 @@ export default function RentalRepairTracker() {
             Track techs denied a rental — truck number, shop details, and current status.
           </p>
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <button
-            onClick={() => importDeniedMutation.mutate()}
-            disabled={importDeniedMutation.isPending}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontFamily: fonts.dmSans,
-              fontWeight: 500,
-              fontSize: 13,
-              color: colors.inkSoft,
-              backgroundColor: "#fff",
-              border: `1px solid ${colors.rule}`,
-              borderRadius: 8,
-              padding: "8px 14px",
-              cursor: importDeniedMutation.isPending ? "not-allowed" : "pointer",
-              opacity: importDeniedMutation.isPending ? 0.7 : 1,
-            }}
-          >
-            <Download size={14} />
-            {importDeniedMutation.isPending ? "Importing…" : "Import Denied"}
-          </button>
-          <button
-            onClick={() => setPanelEntry("new")}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              fontFamily: fonts.dmSans,
-              fontWeight: 600,
-              fontSize: 13,
-              color: "#fff",
-              backgroundColor: colors.accent,
-              border: "none",
-              borderRadius: 8,
-              padding: "9px 16px",
-              cursor: "pointer",
-            }}
-          >
-            <Plus size={16} />
-            Add Entry
-          </button>
-        </div>
+        <button
+          onClick={() => setPanelEntry("new")}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            fontFamily: fonts.dmSans,
+            fontWeight: 600,
+            fontSize: 13,
+            color: "#fff",
+            backgroundColor: colors.accent,
+            border: "none",
+            borderRadius: 8,
+            padding: "9px 16px",
+            cursor: "pointer",
+          }}
+        >
+          <Plus size={16} />
+          Add Entry
+        </button>
       </div>
 
       {/* Search bar */}
