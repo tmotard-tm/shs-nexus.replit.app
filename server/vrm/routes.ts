@@ -41,6 +41,7 @@ import {
   createRepairTrackerEntry,
   updateRepairTrackerEntry,
   deleteRepairTrackerEntry,
+  importDeniedToRepairTracker,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
@@ -781,6 +782,15 @@ export function registerVrmRoutes(): Router {
   });
 
   // ─── Repair Tracker ──────────────────────────────────────────────────────────
+
+  router.post("/repair-tracker/import-denied", async (_req, res) => {
+    try {
+      const result = await importDeniedToRepairTracker();
+      res.json(result);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   router.get("/repair-tracker", async (_req, res) => {
     try {

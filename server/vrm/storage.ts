@@ -531,6 +531,36 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
   return row;
 }
 
+export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
+  const denied = await db
+    .select()
+    .from(vrmRentalDecisions)
+    .where(sql`LOWER(${vrmRentalDecisions.recommendation}) = 'deny'`);
+
+  const existing = await db
+    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId })
+    .from(vrmRepairTracker)
+    .where(sql`${vrmRepairTracker.sourceDecisionId} IS NOT NULL`);
+
+  const alreadyImported = new Set(existing.map((r) => r.sourceDecisionId).filter(Boolean));
+
+  const toInsert = denied.filter((d) => !alreadyImported.has(d.id));
+  if (toInsert.length === 0) return { imported: 0, skipped: denied.length };
+
+  await db.insert(vrmRepairTracker).values(
+    toInsert.map((d) => ({
+      techLdap: d.techLdap,
+      techName: d.techName ?? d.techLdap,
+      mainStatus: "Decision Pending",
+      recommendation: d.recommendation,
+      deniedAt: d.createdAt,
+      sourceDecisionId: d.id,
+    })),
+  );
+
+  return { imported: toInsert.length, skipped: denied.length - toInsert.length };
+}
+
 export async function updateRepairTrackerEntry(id: string, data: Partial<InsertVrmRepairTracker>) {
   const [row] = await db
     .update(vrmRepairTracker)

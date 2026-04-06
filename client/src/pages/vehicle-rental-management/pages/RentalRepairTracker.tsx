@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, Search } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Search, Download } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -10,7 +10,8 @@ import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scop
 
 interface RepairTrackerEntry {
   id: string;
-  truckNumber: string;
+  truckNumber: string | null;
+  techLdap: string | null;
   techName: string;
   techPhone: string | null;
   repairShopAddress: string | null;
@@ -18,6 +19,9 @@ interface RepairTrackerEntry {
   mainStatus: string;
   subStatus: string | null;
   notes: string | null;
+  recommendation: string | null;
+  deniedAt: string | null;
+  sourceDecisionId: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,7 +110,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
   const [form, setForm] = useState<FormData>(
     entry
       ? {
-          truckNumber: entry.truckNumber,
+          truckNumber: entry.truckNumber ?? "",
           techName: entry.techName,
           techPhone: entry.techPhone ?? "",
           repairShopAddress: entry.repairShopAddress ?? "",
@@ -381,6 +385,7 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
 
 export default function RentalRepairTracker() {
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
 
@@ -388,12 +393,32 @@ export default function RentalRepairTracker() {
     queryKey: ["/api/vrm/repair-tracker"],
   });
 
+  const importDeniedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/vrm/repair-tracker/import-denied");
+      return res.json();
+    },
+    onSuccess: (data: { imported: number; skipped: number }) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      if (data.imported === 0) {
+        toast({ title: "All caught up", description: "No new denied entries to import." });
+      } else {
+        toast({
+          title: "Import complete",
+          description: `${data.imported} denied entry${data.imported !== 1 ? "s" : ""} imported${data.skipped ? `, ${data.skipped} already existed` : ""}.`,
+        });
+      }
+    },
+    onError: (e: any) => toast({ title: "Import failed", description: e.message, variant: "destructive" }),
+  });
+
   const filtered = entries.filter((e) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
-      e.truckNumber.toLowerCase().includes(q) ||
-      e.techName.toLowerCase().includes(q)
+      (e.truckNumber ?? "").toLowerCase().includes(q) ||
+      e.techName.toLowerCase().includes(q) ||
+      (e.techLdap ?? "").toLowerCase().includes(q)
     );
   });
 
@@ -431,26 +456,50 @@ export default function RentalRepairTracker() {
             Track techs denied a rental — truck number, shop details, and current status.
           </p>
         </div>
-        <button
-          onClick={() => setPanelEntry("new")}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            fontFamily: fonts.dmSans,
-            fontWeight: 600,
-            fontSize: 13,
-            color: "#fff",
-            backgroundColor: colors.accent,
-            border: "none",
-            borderRadius: 8,
-            padding: "9px 16px",
-            cursor: "pointer",
-          }}
-        >
-          <Plus size={16} />
-          Add Entry
-        </button>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <button
+            onClick={() => importDeniedMutation.mutate()}
+            disabled={importDeniedMutation.isPending}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 13,
+              color: colors.inkSoft,
+              backgroundColor: "#fff",
+              border: `1px solid ${colors.rule}`,
+              borderRadius: 8,
+              padding: "8px 14px",
+              cursor: importDeniedMutation.isPending ? "not-allowed" : "pointer",
+              opacity: importDeniedMutation.isPending ? 0.7 : 1,
+            }}
+          >
+            <Download size={14} />
+            {importDeniedMutation.isPending ? "Importing…" : "Import Denied"}
+          </button>
+          <button
+            onClick={() => setPanelEntry("new")}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: fonts.dmSans,
+              fontWeight: 600,
+              fontSize: 13,
+              color: "#fff",
+              backgroundColor: colors.accent,
+              border: "none",
+              borderRadius: 8,
+              padding: "9px 16px",
+              cursor: "pointer",
+            }}
+          >
+            <Plus size={16} />
+            Add Entry
+          </button>
+        </div>
       </div>
 
       {/* Search bar */}
@@ -500,11 +549,11 @@ export default function RentalRepairTracker() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ backgroundColor: colors.surface }}>
-                <th style={thStyle}>Truck #</th>
+                <th style={thStyle}>LDAP</th>
                 <th style={thStyle}>Tech Name</th>
-                <th style={thStyle}>Tech Phone</th>
-                <th style={thStyle}>Repair Shop Address</th>
-                <th style={thStyle}>Shop Phone</th>
+                <th style={thStyle}>Truck #</th>
+                <th style={thStyle}>Repair Shop</th>
+                <th style={thStyle}>Denied Date</th>
                 <th style={thStyle}>Status</th>
                 <th style={{ ...thStyle, width: 40 }}></th>
               </tr>
@@ -518,15 +567,23 @@ export default function RentalRepairTracker() {
                   onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
                   onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
                 >
-                  <td style={{ ...tdStyle, fontWeight: 600 }}>{entry.truckNumber}</td>
+                  <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace", fontSize: 12 }}>
+                    {entry.techLdap ?? "—"}
+                  </td>
                   <td style={tdStyle}>{entry.techName}</td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft }}>{entry.techPhone ?? "—"}</td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
+                  <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
+                    {entry.truckNumber ?? "—"}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 180 }}>
                     <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {entry.repairShopAddress ?? "—"}
                     </span>
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft }}>{entry.repairShopPhone ?? "—"}</td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.deniedAt
+                      ? new Date(entry.deniedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                      : "—"}
+                  </td>
                   <td style={tdStyle}>
                     <div>
                       <StatusBadge status={entry.mainStatus} />

@@ -444,7 +444,8 @@ export type InsertVrmNewRentalLog = z.infer<typeof insertVrmNewRentalLogSchema>;
 
 export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  truckNumber: text("truck_number").notNull(),
+  truckNumber: text("truck_number"),
+  techLdap: text("tech_ldap"),
   techName: text("tech_name").notNull(),
   techPhone: text("tech_phone"),
   repairShopAddress: text("repair_shop_address"),
@@ -452,6 +453,9 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   mainStatus: text("main_status").notNull(),
   subStatus: text("sub_status"),
   notes: text("notes"),
+  recommendation: text("recommendation"),
+  deniedAt: timestamp("denied_at"),
+  sourceDecisionId: varchar("source_decision_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
