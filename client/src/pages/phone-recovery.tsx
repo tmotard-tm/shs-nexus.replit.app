@@ -41,7 +41,6 @@ import {
   deriveRecoveryStatus,
   deriveReprovisioningStatus,
   isEscalated,
-  parseContactHistory,
 } from "@/components/phone-recovery";
 import type { ContactHistoryEntry } from "@/components/phone-recovery";
 
@@ -795,7 +794,7 @@ export function PhoneRecoveryDashboard() {
                 <div className="flex-1 overflow-y-auto p-4">
                   {activeTab === "history" && (
                     <ContactHistoryTimeline
-                      contactHistory={parseContactHistory(selectedTask.phoneContactHistory)}
+                      contactHistory={(selectedTask.phoneContactHistory ?? []) as ContactHistoryEntry[]}
                       shippingLabelSent={selectedTask.phoneShippingLabelSent || false}
                       trackingNumber={selectedTask.phoneTrackingNumber || null}
                     />
