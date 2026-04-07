@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, Fragment as ReactFragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -867,9 +867,8 @@ export default function NewRentals() {
                   const be = breakeven(row);
                   const isNoData = row.recommendation === "No Data";
                   return (
-                    <>
+                    <ReactFragment key={row.tech_ldap}>
                       <tr
-                        key={row.tech_ldap}
                         style={{
                           transition: "background 100ms",
                           borderLeft: row.recommendation === "Deny" ? `3px solid ${colors.red}` : "3px solid transparent",
@@ -930,10 +929,10 @@ export default function NewRentals() {
                             ...tdStyle,
                             textAlign: "right",
                             fontWeight: 500,
-                            color: isNoData ? colors.inkMuted : row.daily_ppt_profit < 0 ? colors.red : colors.green,
+                            color: isNoData ? colors.inkMuted : (row.daily_ppt_profit ?? 0) < 0 ? colors.red : colors.green,
                           }}
                         >
-                          {isNoData ? "—" : fmt$(row.daily_ppt_profit)}
+                          {isNoData ? "—" : fmt$(row.daily_ppt_profit ?? 0)}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
@@ -1045,7 +1044,7 @@ export default function NewRentals() {
                           }
                         />
                       )}
-                    </>
+                    </ReactFragment>
                   );
                 })}
               </tbody>

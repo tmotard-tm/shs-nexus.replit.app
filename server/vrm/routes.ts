@@ -520,7 +520,11 @@ export function registerVrmRoutes(): Router {
         console.error("[VRM] failed to save rental checks:", err.message),
       );
 
-      res.json({ rows });
+      const coerced = rows.map((r: any) => ({
+        ...r,
+        daily_ppt_profit: r.daily_ppt_profit != null ? Number(r.daily_ppt_profit) : 0,
+      }));
+      res.json({ rows: coerced });
     } catch (e: any) {
       console.error("[VRM] profitability/check error:", e.message);
       res.status(500).json({ error: e.message });
