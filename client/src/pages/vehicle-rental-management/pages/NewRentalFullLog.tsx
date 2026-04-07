@@ -393,7 +393,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload: Record<string, unknown> = {
+      const payload: Partial<FormData> & { rentalApproved: boolean; declinedRepair: boolean } = {
         dateOfRequest: form.dateOfRequest?.trim() || null,
         vanRentalPo: form.vanRentalPo?.trim() || null,
         trimVanNum: form.trimVanNum?.trim() || null,
