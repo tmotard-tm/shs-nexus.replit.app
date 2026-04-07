@@ -22,7 +22,7 @@ export function deriveRecoveryStatus(task: QueueItem): RecoveryStatus {
     return "Label Sent";
   }
 
-  const history = (task.phoneContactHistory ?? []) as ContactHistoryEntry[];
+  const history = (Array.isArray(task.phoneContactHistory) ? task.phoneContactHistory : []) as ContactHistoryEntry[];
   if (history.length > 0) {
     return "Contact Attempted";
   }
@@ -31,7 +31,7 @@ export function deriveRecoveryStatus(task: QueueItem): RecoveryStatus {
 }
 
 export function isEscalated(task: QueueItem): boolean {
-  const history = (task.phoneContactHistory ?? []) as ContactHistoryEntry[];
+  const history = (Array.isArray(task.phoneContactHistory) ? task.phoneContactHistory : []) as ContactHistoryEntry[];
   const failedCount = history.filter(
     (entry) => entry.outcome === "No Response" || entry.outcome === "Declined"
   ).length;
