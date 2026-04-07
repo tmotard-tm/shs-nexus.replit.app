@@ -37,30 +37,22 @@ interface RentalLogEntry {
   createdAt: string;
 }
 
-type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong">;
+type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong" | "vanAssignedInTpms" | "unitNumber" | "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair">;
 
 const EMPTY_FORM: FormData = {
   dateOfRequest: "",
   vanRentalPo: "",
+  trimVanNum: "",
   name: "",
   enterpriseId: "",
-  trimVanNum: "",
   techPhNum: "",
-  vanAssignedInTpms: "",
   startRentalDate: "",
   repairLocation: "",
   repairPhone: "",
   issue: "",
-  permanentSolution: false,
-  amsUpdated: false,
-  fleetTrackerUpdated: false,
-  rentalApproved: false,
-  approvedInHolman: false,
-  unitNumber: "",
   newRentalOrExtension: "",
   truckBreakdownOrNewHire: "",
   techServiceDate: "",
-  declinedRepair: false,
 };
 
 // ─── CSV header → field map ───────────────────────────────────────────────────
@@ -73,18 +65,17 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "van_rental_po": "vanRentalPo",
   "holman po": "vanRentalPo",
   "van rental po is opened up on in holman": "vanRentalPo",
-  "name": "name",
-  "enterprise id": "enterpriseId",
-  "enterprise_id": "enterpriseId",
+  "van number": "trimVanNum",
+  "van_number": "trimVanNum",
   "trim van num": "trimVanNum",
   "trim_van_num": "trimVanNum",
   "trim": "trimVanNum",
+  "name": "name",
+  "enterprise id": "enterpriseId",
+  "enterprise_id": "enterpriseId",
   "tech ph num": "techPhNum",
   "tech_ph_num": "techPhNum",
   "tech phone": "techPhNum",
-  "van assigned in tpms": "vanAssignedInTpms",
-  "van_assigned_in_tpms": "vanAssignedInTpms",
-  "tpms": "vanAssignedInTpms",
   "start rental date": "startRentalDate",
   "start_rental_date": "startRentalDate",
   "repair location": "repairLocation",
@@ -94,35 +85,14 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "shop phone number": "repairPhone",
   "shop phone": "repairPhone",
   "issue": "issue",
-  "permanent solution": "permanentSolution",
-  "permanent_solution": "permanentSolution",
-  "ams updated": "amsUpdated",
-  "ams_updated": "amsUpdated",
-  "fleet tracker updated": "fleetTrackerUpdated",
-  "fleet_tracker_updated": "fleetTrackerUpdated",
-  "rental approved": "rentalApproved",
-  "rental_approved": "rentalApproved",
-  "approved in holman": "approvedInHolman",
-  "approved_in_holman": "approvedInHolman",
-  "unit number": "unitNumber",
-  "unit_number": "unitNumber",
   "new rental or extension": "newRentalOrExtension",
   "new_rental_or_extension": "newRentalOrExtension",
   "truck breakdown or new hire": "truckBreakdownOrNewHire",
   "truck_breakdown_or_new_hire": "truckBreakdownOrNewHire",
-  "permanent solution in place": "permanentSolution",
   "tech service date": "techServiceDate",
   "tech_service_date": "techServiceDate",
 };
 
-const BOOLEAN_FIELDS: Set<keyof FormData> = new Set([
-  "permanentSolution",
-  "amsUpdated",
-  "fleetTrackerUpdated",
-  "rentalApproved",
-  "approvedInHolman",
-  "declinedRepair",
-]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -168,14 +138,7 @@ function parseCSV(text: string): Record<string, string>[] {
   return rows;
 }
 
-type StringField = Exclude<keyof FormData, "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair">;
-type BooleanField = "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair";
-
 const DATE_FIELDS = new Set<keyof FormData>(["dateOfRequest", "startRentalDate", "techServiceDate"]);
-
-function isBooleanField(field: keyof FormData): field is BooleanField {
-  return BOOLEAN_FIELDS.has(field);
-}
 
 function isDateField(field: keyof FormData): boolean {
   return DATE_FIELDS.has(field);
@@ -205,13 +168,10 @@ function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
   for (const [csvHeader, rawVal] of Object.entries(raw)) {
     const field = CSV_HEADER_MAP[normalizeHeader(csvHeader)];
     if (!field) continue;
-    if (isBooleanField(field)) {
-      const lower = rawVal.toLowerCase().trim();
-      entry[field] = ["yes", "y", "true", "1", "x", "approved"].includes(lower);
-    } else if (isDateField(field)) {
-      entry[field as StringField] = parseDateToISO(rawVal);
+    if (isDateField(field)) {
+      entry[field] = parseDateToISO(rawVal);
     } else {
-      entry[field as StringField] = rawVal || null;
+      entry[field] = rawVal || null;
     }
   }
   return entry;
@@ -385,25 +345,17 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
       ? {
           dateOfRequest: entry.dateOfRequest ?? "",
           vanRentalPo: entry.vanRentalPo ?? "",
+          trimVanNum: entry.trimVanNum ?? "",
           name: entry.name ?? "",
           enterpriseId: entry.enterpriseId ?? "",
-          trimVanNum: entry.trimVanNum ?? "",
           techPhNum: entry.techPhNum ?? "",
-          vanAssignedInTpms: entry.vanAssignedInTpms ?? "",
           startRentalDate: entry.startRentalDate ?? "",
           repairLocation: entry.repairLocation ?? "",
           repairPhone: entry.repairPhone ?? "",
           issue: entry.issue ?? "",
-          permanentSolution: entry.permanentSolution,
-          amsUpdated: entry.amsUpdated,
-          fleetTrackerUpdated: entry.fleetTrackerUpdated,
-          rentalApproved: entry.rentalApproved,
-          approvedInHolman: entry.approvedInHolman,
-          unitNumber: entry.unitNumber ?? "",
           newRentalOrExtension: entry.newRentalOrExtension ?? "",
           truckBreakdownOrNewHire: entry.truckBreakdownOrNewHire ?? "",
           techServiceDate: entry.techServiceDate ?? "",
-          declinedRepair: entry.declinedRepair ?? false,
         }
       : { ...EMPTY_FORM },
   );
@@ -411,27 +363,19 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Partial<FormData> = {
-        permanentSolution: form.permanentSolution,
-        amsUpdated: form.amsUpdated,
-        fleetTrackerUpdated: form.fleetTrackerUpdated,
-        rentalApproved: form.rentalApproved,
-        approvedInHolman: form.approvedInHolman,
         dateOfRequest: form.dateOfRequest?.trim() || null,
         vanRentalPo: form.vanRentalPo?.trim() || null,
+        trimVanNum: form.trimVanNum?.trim() || null,
         name: form.name?.trim() || null,
         enterpriseId: form.enterpriseId?.trim() || null,
-        trimVanNum: form.trimVanNum?.trim() || null,
         techPhNum: form.techPhNum?.trim() || null,
-        vanAssignedInTpms: form.vanAssignedInTpms?.trim() || null,
         startRentalDate: form.startRentalDate?.trim() || null,
         repairLocation: form.repairLocation?.trim() || null,
         repairPhone: form.repairPhone?.trim() || null,
         issue: form.issue?.trim() || null,
-        unitNumber: form.unitNumber?.trim() || null,
         newRentalOrExtension: form.newRentalOrExtension?.trim() || null,
         truckBreakdownOrNewHire: form.truckBreakdownOrNewHire?.trim() || null,
         techServiceDate: form.techServiceDate?.trim() || null,
-        declinedRepair: form.declinedRepair,
       };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, payload);
@@ -526,16 +470,14 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
             set={set}
           />
           <Field label="Van Rental PO (Holman)" field="vanRentalPo" form={form} set={set} />
+          <Field label="Van Number" field="trimVanNum" form={form} set={set} />
           <Field label="Name" field="name" form={form} set={set} />
           <Field label="Enterprise ID" field="enterpriseId" form={form} set={set} />
-          <Field label="Trim / Van Num" field="trimVanNum" form={form} set={set} />
           <Field label="Tech Phone Number" field="techPhNum" form={form} set={set} />
-          <Field label="Van Assigned in TPMS" field="vanAssignedInTpms" form={form} set={set} />
           <Field label="Start Rental Date" field="startRentalDate" type="date" form={form} set={set} />
           <Field label="Repair Location" field="repairLocation" form={form} set={set} />
           <Field label="Repair Phone" field="repairPhone" form={form} set={set} />
           <Field label="Issue" field="issue" type="textarea" form={form} set={set} />
-          <Field label="Unit Number" field="unitNumber" form={form} set={set} />
           <SelectField
             label="Truck Breakdown or New Hire"
             field="truckBreakdownOrNewHire"
@@ -544,94 +486,6 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
             set={set}
           />
           <Field label="Tech Service Date" field="techServiceDate" type="date" form={form} set={set} />
-
-          <div
-            style={{
-              fontFamily: fonts.dmSans,
-              fontWeight: 600,
-              fontSize: 11,
-              color: colors.inkMuted,
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-              marginBottom: 14,
-              marginTop: 8,
-              paddingTop: 14,
-              borderTop: `1px solid ${colors.rule}`,
-            }}
-          >
-            Completion Status
-          </div>
-          <CheckField label="Permanent Solution in Place" field="permanentSolution" form={form} set={set} />
-          <CheckField label="AMS Updated" field="amsUpdated" form={form} set={set} />
-          <CheckField label="Fleet Tracker Updated" field="fleetTrackerUpdated" form={form} set={set} />
-
-          {/* Rental Approved inline Approve / Deny buttons */}
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Rental Approved</span>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => set("rentalApproved", true)}
-                style={{
-                  fontFamily: fonts.dmSans,
-                  fontWeight: 500,
-                  fontSize: 12,
-                  padding: "5px 18px",
-                  borderRadius: 6,
-                  border: `1px solid ${form.rentalApproved ? "#15803d" : colors.rule}`,
-                  backgroundColor: form.rentalApproved ? "#dcfce7" : "#fff",
-                  color: form.rentalApproved ? "#15803d" : colors.inkMuted,
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                }}
-              >
-                Approve
-              </button>
-              <button
-                type="button"
-                onClick={() => set("rentalApproved", false)}
-                style={{
-                  fontFamily: fonts.dmSans,
-                  fontWeight: 500,
-                  fontSize: 12,
-                  padding: "5px 18px",
-                  borderRadius: 6,
-                  border: `1px solid ${!form.rentalApproved ? "#b91c1c" : colors.rule}`,
-                  backgroundColor: !form.rentalApproved ? "#fee2e2" : "#fff",
-                  color: !form.rentalApproved ? "#b91c1c" : colors.inkMuted,
-                  cursor: "pointer",
-                  transition: "all 0.15s",
-                }}
-              >
-                Deny
-              </button>
-            </div>
-          </div>
-
-          {/* Declined Repair toggle */}
-          <div style={{ marginBottom: 12 }}>
-            <span style={{ ...labelStyle, display: "block", marginBottom: 6 }}>Declined Repair</span>
-            <button
-              type="button"
-              onClick={() => set("declinedRepair", !form.declinedRepair)}
-              style={{
-                fontFamily: fonts.dmSans,
-                fontWeight: 500,
-                fontSize: 12,
-                padding: "5px 18px",
-                borderRadius: 6,
-                border: `1px solid ${form.declinedRepair ? "#b91c1c" : colors.rule}`,
-                backgroundColor: form.declinedRepair ? "#fee2e2" : "#fff",
-                color: form.declinedRepair ? "#b91c1c" : colors.inkMuted,
-                cursor: "pointer",
-                transition: "all 0.15s",
-              }}
-            >
-              {form.declinedRepair ? "Declined" : "Not Declined"}
-            </button>
-          </div>
-
-          <CheckField label="Approved in Holman" field="approvedInHolman" form={form} set={set} />
         </div>
 
         {/* Footer */}
