@@ -393,7 +393,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload: Partial<FormData> = {
+      const payload: Record<string, unknown> = {
         dateOfRequest: form.dateOfRequest?.trim() || null,
         vanRentalPo: form.vanRentalPo?.trim() || null,
         trimVanNum: form.trimVanNum?.trim() || null,
@@ -407,6 +407,8 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
         newRentalOrExtension: form.newRentalOrExtension?.trim() || null,
         truckBreakdownOrNewHire: form.truckBreakdownOrNewHire?.trim() || null,
         techServiceDate: form.techServiceDate?.trim() || null,
+        rentalApproved: localApproved ?? false,
+        declinedRepair: localDeclined,
       };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, payload);
@@ -493,8 +495,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
         {/* Form body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
-          {isEdit && (
-            <div style={{ marginBottom: 20 }}>
+          <div style={{ marginBottom: 20 }}>
               <div
                 style={{
                   fontFamily: fonts.dmSans,
@@ -510,10 +511,10 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
-                  disabled={actionPatchMutation.isPending}
+                  disabled={isEdit && actionPatchMutation.isPending}
                   onClick={() => {
                     setLocalApproved(true);
-                    actionPatchMutation.mutate({ rentalApproved: true });
+                    if (isEdit) actionPatchMutation.mutate({ rentalApproved: true });
                   }}
                   style={{
                     fontFamily: fonts.dmSans,
@@ -524,17 +525,17 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
                     border: `1px solid ${localApproved === true ? "#15803d" : colors.rule}`,
                     backgroundColor: localApproved === true ? "#dcfce7" : "#fff",
                     color: localApproved === true ? "#15803d" : colors.inkMuted,
-                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
-                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                    cursor: (isEdit && actionPatchMutation.isPending) ? "not-allowed" : "pointer",
+                    opacity: (isEdit && actionPatchMutation.isPending) ? 0.7 : 1,
                   }}
                 >
                   Approve
                 </button>
                 <button
-                  disabled={actionPatchMutation.isPending}
+                  disabled={isEdit && actionPatchMutation.isPending}
                   onClick={() => {
                     setLocalApproved(false);
-                    actionPatchMutation.mutate({ rentalApproved: false });
+                    if (isEdit) actionPatchMutation.mutate({ rentalApproved: false });
                   }}
                   style={{
                     fontFamily: fonts.dmSans,
@@ -545,18 +546,18 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
                     border: `1px solid ${localApproved === false ? "#b91c1c" : colors.rule}`,
                     backgroundColor: localApproved === false ? "#fee2e2" : "#fff",
                     color: localApproved === false ? "#b91c1c" : colors.inkMuted,
-                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
-                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                    cursor: (isEdit && actionPatchMutation.isPending) ? "not-allowed" : "pointer",
+                    opacity: (isEdit && actionPatchMutation.isPending) ? 0.7 : 1,
                   }}
                 >
                   Deny
                 </button>
                 <button
-                  disabled={actionPatchMutation.isPending}
+                  disabled={isEdit && actionPatchMutation.isPending}
                   onClick={() => {
                     const next = !localDeclined;
                     setLocalDeclined(next);
-                    actionPatchMutation.mutate({ declinedRepair: next });
+                    if (isEdit) actionPatchMutation.mutate({ declinedRepair: next });
                   }}
                   style={{
                     fontFamily: fonts.dmSans,
@@ -567,15 +568,14 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
                     border: `1px solid ${localDeclined ? "#b91c1c" : colors.rule}`,
                     backgroundColor: localDeclined ? "#fee2e2" : "#fff",
                     color: localDeclined ? "#b91c1c" : colors.inkMuted,
-                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
-                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                    cursor: (isEdit && actionPatchMutation.isPending) ? "not-allowed" : "pointer",
+                    opacity: (isEdit && actionPatchMutation.isPending) ? 0.7 : 1,
                   }}
                 >
                   Decline Repair
                 </button>
               </div>
             </div>
-          )}
           <div
             style={{
               fontFamily: fonts.dmSans,
@@ -909,20 +909,35 @@ export default function NewRentalFullLog() {
     },
     {
       label: "Declined Repair",
-      render: (e) => e.declinedRepair ? (
-        <span style={{
-          fontFamily: fonts.dmSans,
-          fontWeight: 500,
-          fontSize: 11,
-          color: "#b91c1c",
-          backgroundColor: "#fee2e2",
-          borderRadius: 6,
-          padding: "2px 8px",
-          display: "inline-block",
-        }}>
-          Declined Repair
-        </span>
-      ) : <span style={{ color: colors.inkMuted }}>—</span>,
+      render: (e) => {
+        const pending = patchingIds.has(e.id);
+        return (
+          <div onClick={(ev) => ev.stopPropagation()}>
+            <button
+              disabled={pending}
+              onClick={(ev) => {
+                ev.stopPropagation();
+                patchEntryMutation.mutate({ id: e.id, patch: { declinedRepair: !e.declinedRepair } });
+              }}
+              style={{
+                fontFamily: fonts.dmSans,
+                fontWeight: 500,
+                fontSize: 11,
+                padding: "2px 9px",
+                borderRadius: 5,
+                border: `1px solid ${e.declinedRepair ? "#b91c1c" : colors.rule}`,
+                backgroundColor: e.declinedRepair ? "#fee2e2" : "#fff",
+                color: e.declinedRepair ? "#b91c1c" : colors.inkMuted,
+                cursor: pending ? "not-allowed" : "pointer",
+                opacity: pending ? 0.6 : 1,
+                transition: "all 0.12s",
+              }}
+            >
+              {e.declinedRepair ? "Declined" : "Decline"}
+            </button>
+          </div>
+        );
+      },
     },
     {
       label: "Name",
