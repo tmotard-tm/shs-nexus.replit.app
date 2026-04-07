@@ -763,7 +763,7 @@ export default function NewRentalFullLog() {
               transition: "all 0.12s",
             }}
           >
-            {e.declinedRepair ? "Declined Repair" : "Not Declined"}
+            Declined Repair
           </button>
         );
       },
