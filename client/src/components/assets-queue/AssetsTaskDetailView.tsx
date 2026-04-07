@@ -26,8 +26,6 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import {
   type DataSource,
   type ContactInfo,
-  SourceDot,
-  SourceLegend,
 } from "@/components/assets-queue/tech-data-utils";
 import {
   ArrowLeft,
@@ -384,7 +382,6 @@ export function AssetsTaskDetailView({
                 </div>
               ) : contactInfo ? (
                 <div className="space-y-2">
-                  <SourceLegend />
                   <div className="flex items-center gap-2 text-sm">
                     <Smartphone className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium">Mobile:</span>
@@ -394,7 +391,6 @@ export function AssetsTaskDetailView({
                     <Phone className="h-4 w-4 text-muted-foreground" />
                     <span className="font-medium flex items-center gap-1">
                       Personal:
-                      <SourceDot source={contactInfo.personalPhone?.source} />
                     </span>
                     {contactInfo.personalPhone?.value ? (
                       <span className="text-green-600 font-medium">{contactInfo.personalPhone.value}</span>
@@ -417,7 +413,6 @@ export function AssetsTaskDetailView({
                       <Mail className="h-4 w-4 text-muted-foreground" />
                       <span className="font-medium flex items-center gap-1">
                         Email:
-                        <SourceDot source={contactInfo.personalEmail.source} />
                       </span>
                       <a href={`mailto:${contactInfo.personalEmail.value}`} className="text-[#1A4B8C] hover:underline">
                         {contactInfo.personalEmail.value}
@@ -428,7 +423,6 @@ export function AssetsTaskDetailView({
                     <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
                     <span className="font-medium flex items-center gap-1">
                       Address:
-                      <SourceDot source={contactInfo.address?.source} />
                     </span>
                     <span>{formatAddress(contactInfo.homeAddress) || 'Not available'}</span>
                   </div>
@@ -437,7 +431,6 @@ export function AssetsTaskDetailView({
                       <MapPin className="h-4 w-4 text-amber-500 mt-0.5" />
                       <span className="font-medium flex items-center gap-1">
                         Fleet Pickup:
-                        <SourceDot source={contactInfo.fleetPickupAddress.source} />
                       </span>
                       <span>{contactInfo.fleetPickupAddress.value}</span>
                     </div>
@@ -446,8 +439,7 @@ export function AssetsTaskDetailView({
                     <div className="flex items-center gap-2 text-sm">
                       <Truck className="h-4 w-4 text-amber-500" />
                       <span className="font-medium flex items-center gap-1">
-                        HR Truck:
-                        <SourceDot source={contactInfo.hrTruckNumber.source} />
+                        Truck Number:
                       </span>
                       <span>{contactInfo.hrTruckNumber.value}</span>
                     </div>

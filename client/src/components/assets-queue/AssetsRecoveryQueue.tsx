@@ -20,8 +20,6 @@ import {
   type DataSource,
   type TechData,
   type AssetsQueueItemEnriched,
-  SourceDot,
-  SourceLegend,
   pickSourced,
   parseTechData,
   enrichItem,
@@ -574,7 +572,6 @@ function ExpandedRowDetails({
                 </div>
               ) : (
                 <>
-                  <SourceLegend />
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500">Mobile Phone:</span>
                     <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
@@ -585,7 +582,6 @@ function ExpandedRowDetails({
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500 flex items-center gap-1">
                       Personal Phone:
-                      <SourceDot source={techData?.sources?.personalPhone || null} />
                     </span>
                     {personalPhone ? (
                       <span className="text-sm font-medium text-[#2db386] bg-[#36D9A3]/10 px-2 py-0.5 rounded flex items-center gap-1">
@@ -599,7 +595,6 @@ function ExpandedRowDetails({
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500 flex items-center gap-1">
                       Email:
-                      <SourceDot source={techData?.sources?.email || null} />
                     </span>
                     {email ? (
                       <a href={`mailto:${email}`} className="text-sm font-medium text-[#1A4B8C] hover:underline flex items-center gap-1">
@@ -613,7 +608,6 @@ function ExpandedRowDetails({
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500 flex items-center gap-1">
                       Address:
-                      <SourceDot source={techData?.sources?.address || null} />
                     </span>
                     <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
                       <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0" />
@@ -624,7 +618,6 @@ function ExpandedRowDetails({
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500 flex items-center gap-1">
                       Fleet Pickup Address:
-                      <SourceDot source={techData?.sources?.fleetPickupAddress || null} />
                     </span>
                     <span className="text-sm font-medium text-slate-900 text-right max-w-[200px] flex items-start justify-end gap-1">
                       <MapPin className="h-3 w-3 mt-0.5 flex-shrink-0 text-amber-500" />
@@ -633,8 +626,7 @@ function ExpandedRowDetails({
                   </div>
                   <div className="flex items-start justify-between">
                     <span className="text-sm text-slate-500 flex items-center gap-1">
-                      HR Truck Number:
-                      <SourceDot source={techData?.sources?.hrTruckNumber || null} />
+                      Truck Number:
                     </span>
                     <span className="text-sm font-medium text-slate-900 flex items-center gap-1">
                       <Truck className="h-3 w-3 text-amber-500" />
