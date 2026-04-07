@@ -297,6 +297,7 @@ export interface ProfitabilityRow {
   daily_costs: number;
   daily_net_before_rental: number;
   daily_net_with_rental: number;
+  daily_ppt_profit: number;
   recommendation: "Approve" | "Deny" | "No Data";
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
@@ -324,7 +325,8 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
         SUM(f.TOTAL_PARTS_COGS_EXPENSE)
           + SUM(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED)            AS parts_cogs,
-        SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                           AS parts_shipping
+        SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                           AS parts_shipping,
+        SUM(f.PPT_PROFIT)                                               AS ppt_profit
       FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
       WHERE f.TECH_LDAP IN (${ldapList})
         AND f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
@@ -390,6 +392,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
         - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78, 2)
                                                                           AS "daily_net_with_rental",
+      ROUND(COALESCE(fin.ppt_profit, 0) / 90.0, 2)                       AS "daily_ppt_profit",
       CASE
         WHEN fin.TECH_LDAP IS NULL AND sc.LDAP_ID IS NULL THEN 'No Data'
         WHEN (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
@@ -421,7 +424,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       END                                                                  AS "scorecard_exempt"
     FROM financials fin
     FULL OUTER JOIN scored sc ON fin.TECH_LDAP = sc.LDAP_ID
-    ORDER BY 17 ASC NULLS LAST
+    ORDER BY "daily_net_with_rental" ASC NULLS LAST
   `) as ProfitabilityRow[];
 
   return rows;

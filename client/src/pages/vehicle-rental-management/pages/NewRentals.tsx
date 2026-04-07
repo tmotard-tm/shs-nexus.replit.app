@@ -24,6 +24,7 @@ interface ProfitRow {
   daily_costs: number;
   daily_net_before_rental: number;
   daily_net_with_rental: number;
+  daily_ppt_profit: number;
   recommendation: "Approve" | "Deny" | "No Data";
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
@@ -124,7 +125,7 @@ function DecisionForm({
   const [notes, setNotes] = useState("");
   return (
     <tr>
-      <td colSpan={11} style={{ padding: "12px 16px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+      <td colSpan={12} style={{ padding: "12px 16px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <span style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 500, color: colors.ink }}>
             {action === "approved" ? "Approve" : "Deny"} rental for <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
@@ -656,9 +657,9 @@ export default function NewRentals() {
 
   const handleExport = () => {
     if (!evaluatedRows.length) return;
-    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", "Daily Net (w/ $78)", "Recommendation"];
+    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", "Daily Net (w/ $78)", "Daily PPT Profit", "Recommendation"];
     const lines = evaluatedRows.map((r) =>
-      [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.recommendation].join(","),
+      [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
     );
     const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
@@ -856,6 +857,7 @@ export default function NewRentals() {
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
+                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ 90 days (avg daily PPT profit, last 90 days)">Daily PPT</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
                 </tr>
@@ -922,6 +924,16 @@ export default function NewRentals() {
                               needs +{be} completes/day
                             </div>
                           )}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: "right",
+                            fontWeight: 500,
+                            color: isNoData ? colors.inkMuted : row.daily_ppt_profit < 0 ? colors.red : colors.green,
+                          }}
+                        >
+                          {isNoData ? "—" : fmt$(row.daily_ppt_profit)}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
