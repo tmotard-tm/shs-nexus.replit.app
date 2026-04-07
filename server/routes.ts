@@ -2205,9 +2205,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
 
           if (tech) {
-            const addressParts = hrRecord?.fleetPickupAddress
-              ? [hrRecord.fleetPickupAddress]
-              : [
+            const addressParts = [
                   tech.homeAddr1,
                   tech.homeAddr2,
                   tech.homeCity,
