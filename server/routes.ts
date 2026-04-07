@@ -14477,6 +14477,75 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/rental-ops/aging-trend", requireAuth, async (_req, res) => {
+    try {
+      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", data: [] });
+      const sf = getSnowflakeService();
+      await sf.connect();
+
+      const sql = `
+        WITH ent AS (
+          SELECT FILE_DATE, VEHICLE_NUMBER,
+            COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE) AS START_DATE
+          FROM ${RENTAL_TICKET_TABLE}
+          WHERE TICKET_STATUS = 'OPEN'
+            AND FILE_DATE >= DATEADD('day', -65, CURRENT_DATE())
+        ),
+        hol AS (
+          SELECT h.FILE_DATE, h.VEHICLE_NUMBER,
+            COALESCE(h.PO_DATE, h.RENTAL_START_DATE) AS START_DATE
+          FROM ${RENTAL_OPEN_TABLE} h
+          WHERE UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%ENTERPRISE%'
+            AND UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%TOLL%'
+            AND h.FILE_DATE >= DATEADD('day', -65, CURRENT_DATE())
+            AND NOT EXISTS (
+              SELECT 1 FROM ${RENTAL_TICKET_TABLE} e
+              WHERE e.VEHICLE_NUMBER = h.VEHICLE_NUMBER
+                AND e.TICKET_STATUS = 'OPEN'
+                AND e.FILE_DATE = h.FILE_DATE
+            )
+        ),
+        combined AS (
+          SELECT FILE_DATE, VEHICLE_NUMBER, START_DATE FROM ent
+          UNION ALL
+          SELECT FILE_DATE, VEHICLE_NUMBER, START_DATE FROM hol
+        )
+        SELECT
+          TO_VARCHAR(FILE_DATE, 'YYYY-MM-DD') AS "file_date",
+          CASE
+            WHEN START_DATE IS NULL OR DATEDIFF('day', START_DATE, FILE_DATE) >= 28 THEN 'd28plus'
+            WHEN DATEDIFF('day', START_DATE, FILE_DATE) >= 21 THEN 'd21plus'
+            WHEN DATEDIFF('day', START_DATE, FILE_DATE) >= 14 THEN 'd14plus'
+            ELSE 'under14'
+          END AS "bucket",
+          COUNT(DISTINCT VEHICLE_NUMBER) AS "cnt"
+        FROM combined
+        GROUP BY FILE_DATE, "bucket"
+        ORDER BY FILE_DATE
+      `;
+
+      const rows = await sf.executeQuery(sql) as any[];
+
+      // Pivot into { fileDate, under14, d14plus, d21plus, d28plus } per date
+      const dateMap = new Map<string, any>();
+      for (const r of rows) {
+        const fd = r.file_date || r.FILE_DATE;
+        if (!fd) continue;
+        const fdStr = fd instanceof Date ? fd.toISOString().slice(0, 10) : String(fd).slice(0, 10);
+        if (!dateMap.has(fdStr)) dateMap.set(fdStr, { fileDate: fdStr, under14: 0, d14plus: 0, d21plus: 0, d28plus: 0 });
+        const bucket = r.bucket || r.BUCKET;
+        const cnt = Number(r.cnt || r.CNT || 0);
+        dateMap.get(fdStr)[bucket] = cnt;
+      }
+
+      const data = Array.from(dateMap.values()).sort((a, b) => a.fileDate.localeCompare(b.fileDate));
+      res.json({ data });
+    } catch (err: any) {
+      return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
+    }
+  });
+
   app.post("/api/rental-ops/qualify", requireAuth, async (req: any, res) => {
     const source = req.body?.source || "all";
     const triggeredBy = req.user?.username || "unknown";

@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { format, parseISO, isValid } from "date-fns";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid,
   ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend
 } from "recharts";
 
@@ -131,6 +131,11 @@ export default function RentalOperations() {
   const { data: availableDates } = useQuery<{ data: Array<{ fileDate: string; sourceFilename: string; loadedTs: string; rowCount: number; ticketRowCount?: number; openRowCount?: number; closedRowCount?: number }>; latestDate: string | null }>({
     queryKey: ["/api/rental-ops/available-dates"],
     staleTime: 10 * 60 * 1000,
+  });
+
+  const { data: agingTrendData, isLoading: loadingAgingTrend } = useQuery<{ data: Array<{ fileDate: string; under14: number; d14plus: number; d21plus: number; d28plus: number }> }>({
+    queryKey: ["/api/rental-ops/aging-trend"],
+    staleTime: 15 * 60 * 1000,
   });
 
   const latestDate = availableDates?.latestDate ?? null;
@@ -363,19 +368,6 @@ export default function RentalOperations() {
       }))
       .sort((a, b) => b.count - a.count);
   }, [analyticsRows, summary]);
-
-  // Analytics: daily trend from availableDates
-  const trendData = useMemo(() => {
-    if (!availableDates?.data) return [];
-    return [...availableDates.data]
-      .sort((a, b) => a.fileDate.localeCompare(b.fileDate))
-      .map(d => ({
-        date: d.fileDate.slice(5), // MM-DD
-        open: d.openRowCount ?? 0,
-        tickets: d.ticketRowCount ?? 0,
-        closed: d.closedRowCount ?? 0,
-      }));
-  }, [availableDates]);
 
   const SummaryCard = ({ label, value, sub, color }: { label: string; value: any; sub?: string; color?: string }) => (
     <Card>
@@ -1033,43 +1025,65 @@ export default function RentalOperations() {
                   </Card>
                 </div>
 
-                {/* Daily trend from file dates */}
-                {trendData.length > 1 && (
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="text-sm">Daily Volume Trend</CardTitle>
-                      <CardDescription className="text-xs">
-                        Open rentals, tickets, and closed per daily Snowflake file load — {trendData.length} data point{trendData.length !== 1 ? "s" : ""} available
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
+                {/* Aging trend stacked bar chart */}
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-sm">Open Rental Aging Trend</CardTitle>
+                    <CardDescription className="text-xs">
+                      Daily snapshot of open rentals by aging bracket — computed from rental start date as of each file load
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    {loadingAgingTrend ? (
+                      <div className="h-[300px] flex items-center justify-center">
+                        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                      </div>
+                    ) : !agingTrendData?.data?.length ? (
+                      <div className="h-[300px] flex items-center justify-center">
+                        <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-sm">
+                          <Clock className="h-4 w-4" />
+                          <span>No aging trend data available yet.</span>
+                        </div>
+                      </div>
+                    ) : (
                       <div className="h-[300px]">
                         <ResponsiveContainer width="100%" height="100%">
-                          <LineChart data={trendData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="date" tick={{ fontSize: 12 }} />
-                            <YAxis tick={{ fontSize: 12 }} />
-                            <Tooltip />
-                            <Legend />
-                            <Line type="monotone" dataKey="open" stroke="#3b82f6" strokeWidth={2} name="Open Rentals" dot />
-                            <Line type="monotone" dataKey="tickets" stroke="#8b5cf6" strokeWidth={2} name="Open Tickets" dot />
-                            <Line type="monotone" dataKey="closed" stroke="#6b7280" strokeWidth={2} name="Closed Rentals" dot />
-                          </LineChart>
+                          <BarChart data={agingTrendData.data.map(d => ({ ...d, date: d.fileDate.slice(5) }))} barSize={14}>
+                            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+                            <XAxis dataKey="date" tick={{ fontSize: 11 }} interval="preserveStartEnd" />
+                            <YAxis tick={{ fontSize: 11 }} />
+                            <Tooltip
+                              formatter={(value: any, name: string) => {
+                                const labels: Record<string, string> = {
+                                  under14: "<14 Days",
+                                  d14plus: "14-20 Days",
+                                  d21plus: "21-27 Days",
+                                  d28plus: "28+ Days",
+                                };
+                                return [value, labels[name] || name];
+                              }}
+                            />
+                            <Legend
+                              formatter={(value: string) => {
+                                const labels: Record<string, string> = {
+                                  under14: "<14 Days",
+                                  d14plus: "14-20 Days",
+                                  d21plus: "21-27 Days",
+                                  d28plus: "28+ Days",
+                                };
+                                return labels[value] || value;
+                              }}
+                            />
+                            <Bar dataKey="under14" stackId="a" fill="#22c55e" name="under14" />
+                            <Bar dataKey="d14plus" stackId="a" fill="#eab308" name="d14plus" />
+                            <Bar dataKey="d21plus" stackId="a" fill="#f97316" name="d21plus" />
+                            <Bar dataKey="d28plus" stackId="a" fill="#ef4444" name="d28plus" radius={[3, 3, 0, 0]} />
+                          </BarChart>
                         </ResponsiveContainer>
                       </div>
-                    </CardContent>
-                  </Card>
-                )}
-                {trendData.length <= 1 && (
-                  <Card className="border-amber-200 bg-amber-50/50 dark:bg-amber-950/20">
-                    <CardContent className="pt-4">
-                      <div className="flex items-center gap-2 text-amber-800 dark:text-amber-300 text-sm">
-                        <Clock className="h-4 w-4" />
-                        <span>Trend chart will appear once 2 or more daily Snowflake file loads are available. New data points are added automatically each time a pipeline file is received.</span>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+                    )}
+                  </CardContent>
+                </Card>
 
                 {/* Vendor / Source breakdown */}
                 {vendorBreakdown.length > 0 && (
