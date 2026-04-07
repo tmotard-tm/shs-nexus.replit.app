@@ -9,6 +9,19 @@ export interface ContactHistoryEntry {
 
 export type RecoveryStatus = "New" | "Contact Attempted" | "Label Sent" | "In Transit" | "Received";
 
+export function parseContactHistory(raw: unknown): ContactHistoryEntry[] {
+  if (Array.isArray(raw)) return raw as ContactHistoryEntry[];
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return Array.isArray(parsed) ? parsed as ContactHistoryEntry[] : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
 export function deriveRecoveryStatus(task: QueueItem): RecoveryStatus {
   if (task.phoneDateReceived) {
     return "Received";
@@ -22,7 +35,7 @@ export function deriveRecoveryStatus(task: QueueItem): RecoveryStatus {
     return "Label Sent";
   }
 
-  const history = (task.phoneContactHistory ?? []) as ContactHistoryEntry[];
+  const history = parseContactHistory(task.phoneContactHistory);
   if (history.length > 0) {
     return "Contact Attempted";
   }
@@ -31,7 +44,7 @@ export function deriveRecoveryStatus(task: QueueItem): RecoveryStatus {
 }
 
 export function isEscalated(task: QueueItem): boolean {
-  const history = (task.phoneContactHistory ?? []) as ContactHistoryEntry[];
+  const history = parseContactHistory(task.phoneContactHistory);
   const failedCount = history.filter(
     (entry) => entry.outcome === "No Response" || entry.outcome === "Declined"
   ).length;
