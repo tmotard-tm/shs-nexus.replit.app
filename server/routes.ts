@@ -12917,6 +12917,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       headerRow.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
       headerRow.height = 20;
 
+      const toDateStr = (val: any): string => {
+        if (!val) return '';
+        if (val instanceof Date) return val.toISOString().split('T')[0];
+        const s = String(val);
+        return s.includes('T') ? s.split('T')[0] : s.split(' ')[0];
+      };
+
       for (const row of rows) {
         const addressParts = [row.SNSTV_HOME_ADDR1, row.SNSTV_HOME_ADDR2, row.SNSTV_HOME_CITY, row.SNSTV_HOME_STATE, row.SNSTV_HOME_POSTAL].filter(Boolean);
         const phoneParts = [formatPhone(row.SNSTV_MAIN_PHONE), formatPhone(row.SNSTV_CELL_PHONE), formatPhone(row.SNSTV_HOME_PHONE)].filter(Boolean);
@@ -12929,8 +12936,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           enterpriseId: (row.ENTERPRISE_ID || '').toUpperCase(),
           emplId: row.EMPLID || '',
           emplStatus: row.EMPL_STATUS || '',
-          effdt: row.EFFDT ? row.EFFDT.split('T')[0] : '',
-          lastDateWorked: row.LAST_DATE_WORKED ? row.LAST_DATE_WORKED.split('T')[0] : '',
+          effdt: toDateStr(row.EFFDT),
+          lastDateWorked: toDateStr(row.LAST_DATE_WORKED),
           planningArea: row.PLANNING_AREA || '',
           owner: getOwner(row.PLANNING_AREA),
           techSpecialty: row.TECH_SPECIALTY || '',
