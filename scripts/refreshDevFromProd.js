@@ -195,8 +195,9 @@ async function copyTable(prod, dev, { schema, name }) {
     const isJson = colType === 'json' || colType === 'jsonb';
     const isArray = colType.startsWith('_') || Array.isArray(val);
     if (isJson) {
-      // Always serialize JSON columns as strings for pg parameterized queries
-      return typeof val === 'string' ? val : JSON.stringify(val);
+      // Always re-serialize: pg returns parsed JS values (string/object/array/number)
+      // but insertion with ::json/::jsonb needs a valid JSON string.
+      return JSON.stringify(val);
     }
     if (isArray && Array.isArray(val)) {
       return val;
