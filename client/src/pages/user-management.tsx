@@ -688,7 +688,7 @@ export default function UserManagement() {
             <p className="text-muted-foreground">Manage system users and their permissions</p>
           </div>
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogChange}>
+        <Dialog open={isCreateOpen} onOpenChange={handleCreateDialogChange} modal={false}>
           <DialogTrigger asChild>
             <Button data-testid="button-create-user">
               <Plus className="mr-2 h-4 w-4" />
