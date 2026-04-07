@@ -560,6 +560,17 @@ export default function NewRentalFullLog() {
     onError: (e: any) => toast({ title: "Clear failed", description: e.message, variant: "destructive" }),
   });
 
+  const [patchingIds, setPatchingIds] = useState<Set<string>>(new Set());
+
+  const patchEntryMutation = useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Record<string, boolean> }) =>
+      apiRequest("PATCH", `/api/vrm/new-rental-log/${id}`, patch),
+    onMutate: ({ id }) => setPatchingIds((s) => new Set(s).add(id)),
+    onSettled: (_d, _e, { id }) => setPatchingIds((s) => { const n = new Set(s); n.delete(id); return n; }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] }),
+    onError: (e: any) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
+  });
+
   const handleSpreadsheetFile = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
@@ -684,44 +695,78 @@ export default function NewRentalFullLog() {
     },
     {
       label: "Rental Approved",
-      render: (e) => (
-        <span
-          style={{
-            fontFamily: fonts.dmSans,
-            fontWeight: 500,
-            fontSize: 11,
-            color: e.rentalApproved ? "#15803d" : "#b91c1c",
-            backgroundColor: e.rentalApproved ? "#dcfce7" : "#fee2e2",
-            borderRadius: 6,
-            padding: "2px 8px",
-            display: "inline-block",
-          }}
-        >
-          {e.rentalApproved ? "Approved" : "Denied"}
-        </span>
-      ),
+      render: (e) => {
+        const pending = patchingIds.has(e.id);
+        return (
+          <div style={{ display: "flex", gap: 4, alignItems: "center" }} onClick={(ev) => ev.stopPropagation()}>
+            <button
+              disabled={pending}
+              onClick={(ev) => { ev.stopPropagation(); patchEntryMutation.mutate({ id: e.id, patch: { rentalApproved: true } }); }}
+              style={{
+                fontFamily: fonts.dmSans,
+                fontWeight: 500,
+                fontSize: 11,
+                padding: "2px 9px",
+                borderRadius: 5,
+                border: `1px solid ${e.rentalApproved ? "#15803d" : colors.rule}`,
+                backgroundColor: e.rentalApproved ? "#dcfce7" : "#fff",
+                color: e.rentalApproved ? "#15803d" : colors.inkMuted,
+                cursor: pending ? "not-allowed" : "pointer",
+                opacity: pending ? 0.6 : 1,
+                transition: "all 0.12s",
+              }}
+            >
+              Approve
+            </button>
+            <button
+              disabled={pending}
+              onClick={(ev) => { ev.stopPropagation(); patchEntryMutation.mutate({ id: e.id, patch: { rentalApproved: false } }); }}
+              style={{
+                fontFamily: fonts.dmSans,
+                fontWeight: 500,
+                fontSize: 11,
+                padding: "2px 9px",
+                borderRadius: 5,
+                border: `1px solid ${!e.rentalApproved ? "#b91c1c" : colors.rule}`,
+                backgroundColor: !e.rentalApproved ? "#fee2e2" : "#fff",
+                color: !e.rentalApproved ? "#b91c1c" : colors.inkMuted,
+                cursor: pending ? "not-allowed" : "pointer",
+                opacity: pending ? 0.6 : 1,
+                transition: "all 0.12s",
+              }}
+            >
+              Deny
+            </button>
+          </div>
+        );
+      },
     },
     {
       label: "Declined Repair",
-      render: (e) =>
-        e.declinedRepair ? (
-          <span
+      render: (e) => {
+        const pending = patchingIds.has(e.id);
+        return (
+          <button
+            disabled={pending}
+            onClick={(ev) => { ev.stopPropagation(); patchEntryMutation.mutate({ id: e.id, patch: { declinedRepair: !e.declinedRepair } }); }}
             style={{
               fontFamily: fonts.dmSans,
               fontWeight: 500,
               fontSize: 11,
-              color: "#b91c1c",
-              backgroundColor: "#fee2e2",
-              borderRadius: 6,
-              padding: "2px 8px",
-              display: "inline-block",
+              padding: "2px 9px",
+              borderRadius: 5,
+              border: `1px solid ${e.declinedRepair ? "#b91c1c" : colors.rule}`,
+              backgroundColor: e.declinedRepair ? "#fee2e2" : "#fff",
+              color: e.declinedRepair ? "#b91c1c" : colors.inkMuted,
+              cursor: pending ? "not-allowed" : "pointer",
+              opacity: pending ? 0.6 : 1,
+              transition: "all 0.12s",
             }}
           >
-            Declined Repair
-          </span>
-        ) : (
-          <span style={{ color: colors.inkMuted, fontSize: 12 }}>—</span>
-        ),
+            {e.declinedRepair ? "Declined Repair" : "Not Declined"}
+          </button>
+        );
+      },
     },
     {
       label: "Name",
@@ -734,7 +779,7 @@ export default function NewRentalFullLog() {
       render: (e) => e.enterpriseId ?? "—",
     },
     {
-      label: "Trim / Van Num",
+      label: "Van Number",
       render: (e) => e.trimVanNum ?? "—",
     },
     {
