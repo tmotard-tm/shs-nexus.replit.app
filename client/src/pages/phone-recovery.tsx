@@ -45,7 +45,7 @@ import {
 import type { ContactHistoryEntry } from "@/components/phone-recovery";
 
 type PipelineCard = "new" | "inContact" | "inTransit" | "reprovisioning" | "ready" | "assigned";
-type SortColumn = "technician" | "separationDate" | "stage" | "status" | "daysOpen" | "assignedTo" | "alert";
+type SortColumn = "technician" | "separationDate" | "stage" | "status" | "daysOpen" | "assignedTo" | "alert" | "phoneRecoveryInitiated";
 type SortDirection = "asc" | "desc";
 
 function getTechName(task: QueueItem): string {
@@ -62,6 +62,14 @@ function getEnterpriseId(task: QueueItem): string | null {
   try {
     const d = JSON.parse(task.data || "{}");
     return d.technician?.enterpriseId || d.technician?.techRacfid || null;
+  } catch {}
+  return null;
+}
+
+function getTruckNumber(task: QueueItem): string | null {
+  try {
+    const d = JSON.parse(task.data || "{}");
+    return d.vehicle?.vehicleNumber || d.vehicle?.truckNumber || d.vehicle?.truck || null;
   } catch {}
   return null;
 }
@@ -188,6 +196,61 @@ export function PhoneRecoveryDashboard() {
     queryKey: ["/api/phone-recovery"],
   });
 
+  const allTruckNumbers = useMemo(() => {
+    const nums = tasks.map(getTruckNumber).filter((n): n is string => !!n);
+    return Array.from(new Set(nums));
+  }, [tasks]);
+
+  const { data: nexusBatchData = [] } = useQuery<{
+    vehicleNumber: string;
+    phoneRecoveryInitiated: string | null;
+  }[]>({
+    queryKey: ["/api/vehicle-nexus-data/batch", allTruckNumbers],
+    queryFn: async () => {
+      if (allTruckNumbers.length === 0) return [];
+      const response = await apiRequest("POST", "/api/vehicle-nexus-data/batch", { vehicleNumbers: allTruckNumbers });
+      return response.json();
+    },
+    enabled: allTruckNumbers.length > 0,
+  });
+
+  const nexusMap = useMemo(() => {
+    return new Map(nexusBatchData.map((item) => [item.vehicleNumber, item.phoneRecoveryInitiated]));
+  }, [nexusBatchData]);
+
+  const updateNexusMutation = useMutation({
+    mutationFn: async ({ vehicleNumber, phoneRecoveryInitiated }: { vehicleNumber: string; phoneRecoveryInitiated: string | null }) => {
+      const response = await apiRequest("PUT", `/api/vehicle-nexus-data/${vehicleNumber}`, { phoneRecoveryInitiated });
+      return response.json();
+    },
+    onMutate: async ({ vehicleNumber, phoneRecoveryInitiated }) => {
+      await queryClient.cancelQueries({ queryKey: ["/api/vehicle-nexus-data/batch"] });
+      const previousData = queryClient.getQueryData<{ vehicleNumber: string; phoneRecoveryInitiated: string | null }[]>([
+        "/api/vehicle-nexus-data/batch",
+        allTruckNumbers,
+      ]);
+      if (previousData) {
+        queryClient.setQueryData(
+          ["/api/vehicle-nexus-data/batch", allTruckNumbers],
+          previousData.map((item) =>
+            item.vehicleNumber === vehicleNumber ? { ...item, phoneRecoveryInitiated } : item
+          )
+        );
+      }
+      return { previousData };
+    },
+    onError: (error: Error, _variables, context: any) => {
+      if (context?.previousData) {
+        queryClient.setQueryData(["/api/vehicle-nexus-data/batch", allTruckNumbers], context.previousData);
+      }
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+    onSettled: (_data, _error, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicle-nexus-data/batch"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vehicle-nexus-data", variables.vehicleNumber] });
+    },
+  });
+
   const seedMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest("POST", "/api/phone-recovery/seed");
@@ -298,12 +361,21 @@ export function PhoneRecoveryDashboard() {
           cmp = aScore - bScore;
           break;
         }
+        case "phoneRecoveryInitiated": {
+          const order: Record<string, number> = { yes: 0, no: 1 };
+          const aVal = getTruckNumber(a) ? (nexusMap.get(getTruckNumber(a)!) ?? null) : null;
+          const bVal = getTruckNumber(b) ? (nexusMap.get(getTruckNumber(b)!) ?? null) : null;
+          const aOrd = aVal ? (order[aVal.toLowerCase()] ?? 2) : 3;
+          const bOrd = bVal ? (order[bVal.toLowerCase()] ?? 2) : 3;
+          cmp = aOrd - bOrd;
+          break;
+        }
       }
       return sortDirection === "desc" ? -cmp : cmp;
     });
 
     return result;
-  }, [tasks, selectedCard, stageFilter, statusFilter, memberFilter, dateFrom, dateTo, sortColumn, sortDirection]);
+  }, [tasks, nexusMap, selectedCard, stageFilter, statusFilter, memberFilter, dateFrom, dateTo, sortColumn, sortDirection]);
 
   const hasActiveFilters = selectedCard || stageFilter !== "all" || statusFilter !== "all" || memberFilter !== "all" || dateFrom || dateTo;
 
@@ -321,7 +393,7 @@ export function PhoneRecoveryDashboard() {
       setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
     } else {
       setSortColumn(col);
-      setSortDirection("desc");
+      setSortDirection(col === "phoneRecoveryInitiated" ? "asc" : "desc");
     }
   }
 
@@ -597,6 +669,7 @@ export function PhoneRecoveryDashboard() {
                     { key: "daysOpen" as SortColumn, label: "Days Open", width: "w-24" },
                     { key: "assignedTo" as SortColumn, label: "Assigned To", width: "w-28" },
                     { key: "alert" as SortColumn, label: "Alert", width: "w-24" },
+                    { key: "phoneRecoveryInitiated" as SortColumn, label: "Phone Recovery Initiated", width: "w-44" },
                   ]).map((col) => (
                     <th
                       key={col.key}
@@ -694,12 +767,38 @@ export function PhoneRecoveryDashboard() {
                           {!escalated && !aging && <span className="text-xs text-slate-400">—</span>}
                         </div>
                       </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        {(() => {
+                          const truckNum = getTruckNumber(task);
+                          if (!truckNum) return <span className="text-xs text-slate-400">—</span>;
+                          const currentVal = nexusMap.get(truckNum) ?? null;
+                          const displayLabel = currentVal === "yes" ? "Yes" : currentVal === "no" ? "No" : "—";
+                          return (
+                            <Select
+                              value={currentVal ?? "__none__"}
+                              onValueChange={(val) => {
+                                const newVal = val === "__none__" ? null : val;
+                                updateNexusMutation.mutate({ vehicleNumber: truckNum, phoneRecoveryInitiated: newVal });
+                              }}
+                            >
+                              <SelectTrigger className="h-7 w-24 text-xs border-slate-200 dark:border-gray-600">
+                                <SelectValue>{displayLabel}</SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__none__">—</SelectItem>
+                                <SelectItem value="yes">Yes</SelectItem>
+                                <SelectItem value="no">No</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          );
+                        })()}
+                      </td>
                     </tr>
                   );
                 })}
                 {filteredTasks.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400 dark:text-gray-500">
+                    <td colSpan={8} className="px-4 py-8 text-center text-sm text-slate-400 dark:text-gray-500">
                       No tasks match the current filters
                     </td>
                   </tr>
