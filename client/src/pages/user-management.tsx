@@ -513,6 +513,11 @@ export default function UserManagement() {
       departments: z.array(z.string()),
       isActive: z.boolean()
     })),
+    defaultValues: {
+      role: "agent",
+      departments: [],
+      isActive: true,
+    },
   });
 
   const onSubmit = (data: CreateUserFormData) => {
@@ -1231,7 +1236,7 @@ export default function UserManagement() {
                     <div>
                       <Label htmlFor="role">User Role</Label>
                       <Select 
-                        value={roleManagementForm.watch("role")} 
+                        value={roleManagementForm.watch("role") || "agent"} 
                         onValueChange={(value) => roleManagementForm.setValue("role", value)}
                       >
                         <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
