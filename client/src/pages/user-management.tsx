@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -285,19 +285,34 @@ export default function UserManagement() {
     queryKey: ["/api/users"],
   });
 
+  // Fallback roles used when /api/role-permissions fails or returns empty
+  const CORE_ROLES = [
+    { value: 'developer', label: 'Developer' },
+    { value: 'admin', label: 'Admin' },
+    { value: 'agent', label: 'Agent' },
+  ];
+
   // Fetch all roles (including custom roles)
-  const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
+  const { data: rolePermissions = [], error: rolePermissionsError } = useQuery<RolePermission[]>({
     queryKey: ["/api/role-permissions"],
   });
 
-  // Build list of available roles for dropdown
-  const availableRoles = rolePermissions.map(rp => ({
-    value: rp.role,
-    label: rp.role === 'developer' ? 'Developer' : 
-           rp.role === 'admin' ? 'Admin' :
-           rp.role === 'agent' ? 'Agent' : 
-           rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
-  }));
+  useEffect(() => {
+    if (rolePermissionsError) {
+      console.warn("[user-management] Failed to load role permissions from API, falling back to core roles:", rolePermissionsError);
+    }
+  }, [rolePermissionsError]);
+
+  // Build list of available roles for dropdown; fall back to core roles if API returned nothing
+  const availableRoles = rolePermissions.length > 0
+    ? rolePermissions.map(rp => ({
+        value: rp.role,
+        label: rp.role === 'developer' ? 'Developer' :
+               rp.role === 'admin' ? 'Admin' :
+               rp.role === 'agent' ? 'Agent' :
+               rp.role.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ')
+      }))
+    : CORE_ROLES;
 
   // Create user mutation
   const createUserMutation = useMutation({
