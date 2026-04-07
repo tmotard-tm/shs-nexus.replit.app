@@ -16,22 +16,41 @@ const EXCLUDED_TABLES = [
 ];
 
 // Dynamically discover all tables from the database
-async function discoverTables(client) {
-  console.log("Discovering tables from database...");
+async function discoverTables(prodClient, devClient) {
+  console.log("Discovering tables from both databases...");
   
-  // Get all tables from public schema and drizzle schema
-  const tablesRes = await client.query(`
-    SELECT table_schema, table_name
-    FROM information_schema.tables
-    WHERE table_type = 'BASE TABLE'
-      AND (table_schema = 'public' OR table_schema = 'drizzle')
-    ORDER BY table_schema, table_name
-  `);
-  
-  const allTables = tablesRes.rows.map(r => ({
-    schema: r.table_schema,
-    name: r.table_name
-  }));
+  const getTableSet = async (client) => {
+    const res = await client.query(`
+      SELECT table_schema, table_name
+      FROM information_schema.tables
+      WHERE table_type = 'BASE TABLE'
+        AND (table_schema = 'public' OR table_schema = 'drizzle')
+      ORDER BY table_schema, table_name
+    `);
+    return new Set(res.rows.map(r => `${r.table_schema}.${r.table_name}`));
+  };
+
+  const prodTables = await getTableSet(prodClient);
+  const devTables = await getTableSet(devClient);
+
+  const onlyInProd = [...prodTables].filter(t => !devTables.has(t));
+  const onlyInDev = [...devTables].filter(t => !prodTables.has(t));
+
+  if (onlyInProd.length > 0) {
+    console.log(`\nTables in prod but NOT in dev (will be skipped):`);
+    onlyInProd.forEach(t => console.log(`  - ${t}`));
+  }
+  if (onlyInDev.length > 0) {
+    console.log(`\nTables in dev but NOT in prod (will be left untouched):`);
+    onlyInDev.forEach(t => console.log(`  - ${t}`));
+  }
+
+  // Only sync tables present in BOTH databases
+  const commonKeys = [...prodTables].filter(t => devTables.has(t));
+  const allTables = commonKeys.map(key => {
+    const [schema, name] = key.split('.');
+    return { schema, name };
+  });
   
   // Filter out excluded tables
   const tables = allTables.filter(t => 
@@ -39,11 +58,11 @@ async function discoverTables(client) {
     !EXCLUDED_TABLES.includes(`${t.schema}.${t.name}`)
   );
   
-  console.log(`Found ${tables.length} tables to sync:`);
+  console.log(`\nFound ${tables.length} tables to sync (present in both databases):`);
   tables.forEach(t => console.log(`  - ${t.schema}.${t.name}`));
   
   // Sort tables by foreign key dependencies (parents first)
-  return await sortTablesByDependencies(client, tables);
+  return await sortTablesByDependencies(prodClient, tables);
 }
 
 // Sort tables so parent tables (referenced by FKs) come before child tables
@@ -114,10 +133,10 @@ async function copyTable(prod, dev, { schema, name }) {
   const fullName = `${escapeIdentifier(schema)}.${escapeIdentifier(name)}`;
   console.log(`\n==> Copying ${fullName}`);
 
-  // Get ordered column list from prod
+  // Get ordered column list with data types from prod
   const colsRes = await prod.query(
     `
-    SELECT column_name
+    SELECT column_name, data_type, udt_name
     FROM information_schema.columns
     WHERE table_schema = $1 AND table_name = $2
     ORDER BY ordinal_position
@@ -125,9 +144,32 @@ async function copyTable(prod, dev, { schema, name }) {
     [schema, name]
   );
 
-  const columns = colsRes.rows.map((r) => r.column_name);
+  // Get column list from dev to handle schema drift
+  const devColsRes = await dev.query(
+    `
+    SELECT column_name
+    FROM information_schema.columns
+    WHERE table_schema = $1 AND table_name = $2
+  `,
+    [schema, name]
+  );
+  const devColSet = new Set(devColsRes.rows.map((r) => r.column_name));
+
+  const allProdColumns = colsRes.rows.map((r) => r.column_name);
+  const colTypes = {};
+  colsRes.rows.forEach((r) => {
+    colTypes[r.column_name] = r.data_type === 'USER-DEFINED' ? r.udt_name : r.data_type;
+  });
+
+  // Only use columns present in BOTH prod and dev
+  const skippedColumns = allProdColumns.filter((c) => !devColSet.has(c));
+  if (skippedColumns.length > 0) {
+    console.log(`  Skipping prod-only columns: ${skippedColumns.join(', ')}`);
+  }
+  const columns = allProdColumns.filter((c) => devColSet.has(c));
+
   if (columns.length === 0) {
-    console.log("  (no columns, skipping)");
+    console.log("  (no common columns, skipping)");
     return;
   }
 
@@ -146,6 +188,22 @@ async function copyTable(prod, dev, { schema, name }) {
     return;
   }
 
+  // Serialize a value for insertion, handling JSON/JSONB and arrays correctly
+  function serializeValue(val, colName) {
+    if (val === null || val === undefined) return null;
+    const colType = colTypes[colName] || '';
+    const isJson = colType === 'json' || colType === 'jsonb';
+    const isArray = colType.startsWith('_') || Array.isArray(val);
+    if (isJson) {
+      // Always serialize JSON columns as strings for pg parameterized queries
+      return typeof val === 'string' ? val : JSON.stringify(val);
+    }
+    if (isArray && Array.isArray(val)) {
+      return val;
+    }
+    return val;
+  }
+
   // Insert data into dev in chunks
   for (let start = 0; start < rows.length; start += CHUNK_SIZE) {
     const chunk = rows.slice(start, start + CHUNK_SIZE);
@@ -154,11 +212,13 @@ async function copyTable(prod, dev, { schema, name }) {
       .map((row, rowIndex) => {
         const placeholders = columns.map((_, colIndex) => {
           const paramIndex = rowIndex * columns.length + colIndex + 1;
-          return `$${paramIndex}`;
+          const colType = colTypes[columns[colIndex]] || '';
+          const isJson = colType === 'json' || colType === 'jsonb';
+          return isJson ? `$${paramIndex}::${colType}` : `$${paramIndex}`;
         });
 
-        // Push values in the same order as columns for this row
-        columns.forEach((col) => values.push(row[col]));
+        // Push serialized values in the same order as columns for this row
+        columns.forEach((col) => values.push(serializeValue(row[col], col)));
 
         return `(${placeholders.join(", ")})`;
       })
@@ -191,8 +251,8 @@ async function main() {
   await dev.connect();
 
   try {
-    // Dynamically discover all tables from prod database
-    const tables = await discoverTables(prod);
+    // Dynamically discover all tables present in both prod and dev
+    const tables = await discoverTables(prod, dev);
     
     if (tables.length === 0) {
       console.log("No tables found to sync.");
