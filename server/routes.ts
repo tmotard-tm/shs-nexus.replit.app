@@ -14494,7 +14494,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ),
         hol AS (
           SELECT h.FILE_DATE, h.VEHICLE_NUMBER,
-            COALESCE(h.PO_DATE, h.RENTAL_START_DATE) AS START_DATE
+            h.PO_DATE AS START_DATE
           FROM ${RENTAL_OPEN_TABLE} h
           WHERE UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%ENTERPRISE%'
             AND UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%TOLL%'
