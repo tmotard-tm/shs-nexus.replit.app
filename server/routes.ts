@@ -8964,6 +8964,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // Filter by LAST_DATE_WORKED >= 2026-01-01
       // Exclude records where the truck is still actively assigned in TPMS_EXTRACT
       const query = `
+        WITH active_trucks AS (
+          SELECT DISTINCT TRUCK_LU
+          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+          WHERE TRUCK_LU IS NOT NULL
+        )
         SELECT 
           t.EMPL_NAME,
           t.ENTERPRISE_ID,
@@ -8987,14 +8992,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ON t.EMPLID = c.EMPLID
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
           ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        LEFT JOIN active_trucks at
+          ON tpms.TRUCK_LU = at.TRUCK_LU
         WHERE t.LAST_DATE_WORKED >= '2026-01-01'
-          AND (
-            tpms.TRUCK_LU IS NULL 
-            OR NOT EXISTS (
-              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
-              WHERE active.TRUCK_LU = tpms.TRUCK_LU
-            )
-          )
+          AND (tpms.TRUCK_LU IS NULL OR at.TRUCK_LU IS NULL)
         ORDER BY t.LAST_DATE_WORKED DESC
       `;
       
@@ -12783,6 +12784,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const snowflakeService = getSnowflakeService();
 
       const query = `
+        WITH active_trucks AS (
+          SELECT DISTINCT TRUCK_LU
+          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+          WHERE TRUCK_LU IS NOT NULL
+        )
         SELECT 
           t.EMPL_NAME,
           t.ENTERPRISE_ID,
@@ -12806,14 +12812,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ON t.EMPLID = c.EMPLID
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
           ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
+        LEFT JOIN active_trucks at
+          ON tpms.TRUCK_LU = at.TRUCK_LU
         WHERE t.LAST_DATE_WORKED >= '2026-01-01'
-          AND (
-            tpms.TRUCK_LU IS NULL 
-            OR NOT EXISTS (
-              SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT active
-              WHERE active.TRUCK_LU = tpms.TRUCK_LU
-            )
-          )
+          AND (tpms.TRUCK_LU IS NULL OR at.TRUCK_LU IS NULL)
         ORDER BY t.LAST_DATE_WORKED DESC
       `;
 

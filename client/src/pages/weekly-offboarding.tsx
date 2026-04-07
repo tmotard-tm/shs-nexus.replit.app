@@ -38,6 +38,7 @@ interface TermRosterEntry {
 
 export default function WeeklyOffboarding() {
   const { toast } = useToast();
+  const [exportLoading, setExportLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -493,17 +494,33 @@ export default function WeeklyOffboarding() {
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => {
-                    const a = document.createElement('a');
-                    a.href = '/api/weekly-offboarding/export.xlsx';
-                    a.download = '';
-                    a.click();
+                  onClick={async () => {
+                    setExportLoading(true);
+                    try {
+                      const res = await fetch('/api/weekly-offboarding/export.xlsx', { credentials: 'include' });
+                      if (!res.ok) {
+                        const err = await res.json().catch(() => ({ message: `Server error ${res.status}` }));
+                        throw new Error(err.message || `Server error ${res.status}`);
+                      }
+                      const blob = await res.blob();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a');
+                      const timestamp = new Date().toISOString().split('T')[0];
+                      a.href = url;
+                      a.download = `weekly_offboarding_${timestamp}.xlsx`;
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err: any) {
+                      toast({ title: 'Export failed', description: err.message || 'Could not generate the XLSX file. Please try again.', variant: 'destructive' });
+                    } finally {
+                      setExportLoading(false);
+                    }
                   }}
-                  disabled={isLoading}
+                  disabled={isLoading || exportLoading}
                   data-testid="button-export-offboarding"
                 >
-                  <Download className="h-3 w-3 mr-1" />
-                  Export XLSX
+                  {exportLoading ? <Loader2 className="h-3 w-3 mr-1 animate-spin" /> : <Download className="h-3 w-3 mr-1" />}
+                  {exportLoading ? 'Exporting...' : 'Export XLSX'}
                 </Button>
                 <Button
                   size="sm"
