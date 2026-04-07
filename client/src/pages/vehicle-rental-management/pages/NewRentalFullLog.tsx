@@ -266,35 +266,6 @@ function Field({
   );
 }
 
-function CheckField({
-  label,
-  field,
-  form,
-  set,
-}: {
-  label: string;
-  field: keyof FormData;
-  form: FormData;
-  set: (field: keyof FormData, val: any) => void;
-}) {
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-      <input
-        type="checkbox"
-        id={`check-${field}`}
-        checked={!!(form[field] as boolean)}
-        onChange={(e) => set(field, e.target.checked)}
-        style={{ width: 16, height: 16, cursor: "pointer", accentColor: colors.accent }}
-      />
-      <label
-        htmlFor={`check-${field}`}
-        style={{ ...labelStyle, marginBottom: 0, cursor: "pointer" }}
-      >
-        {label}
-      </label>
-    </div>
-  );
-}
 
 function SelectField({
   label,
