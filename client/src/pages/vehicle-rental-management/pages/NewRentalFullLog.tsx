@@ -384,6 +384,13 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
       : { ...EMPTY_FORM },
   );
 
+  const [localApproved, setLocalApproved] = useState<boolean | null>(
+    isEdit ? (entry!.rentalApproved ?? null) : null,
+  );
+  const [localDeclined, setLocalDeclined] = useState<boolean>(
+    isEdit ? (entry!.declinedRepair ?? false) : false,
+  );
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Partial<FormData> = {
@@ -413,6 +420,20 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
     },
     onError: (e: any) => {
       toast({ title: "Error", description: e.message, variant: "destructive" });
+    },
+  });
+
+  const actionPatchMutation = useMutation({
+    mutationFn: (patch: Record<string, boolean | null>) =>
+      apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+    },
+    onError: (e: any) => {
+      setLocalApproved(entry!.rentalApproved ?? null);
+      setLocalDeclined(entry!.declinedRepair ?? false);
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
     },
   });
 
@@ -472,6 +493,89 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 
         {/* Form body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
+          {isEdit && (
+            <div style={{ marginBottom: 20 }}>
+              <div
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 600,
+                  fontSize: 11,
+                  color: colors.inkMuted,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.06em",
+                  marginBottom: 10,
+                }}
+              >
+                Actions
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button
+                  disabled={actionPatchMutation.isPending}
+                  onClick={() => {
+                    setLocalApproved(true);
+                    actionPatchMutation.mutate({ rentalApproved: true });
+                  }}
+                  style={{
+                    fontFamily: fonts.dmSans,
+                    fontWeight: 500,
+                    fontSize: 12,
+                    padding: "5px 14px",
+                    borderRadius: 5,
+                    border: `1px solid ${localApproved === true ? "#15803d" : colors.rule}`,
+                    backgroundColor: localApproved === true ? "#dcfce7" : "#fff",
+                    color: localApproved === true ? "#15803d" : colors.inkMuted,
+                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
+                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                  }}
+                >
+                  Approve
+                </button>
+                <button
+                  disabled={actionPatchMutation.isPending}
+                  onClick={() => {
+                    setLocalApproved(false);
+                    actionPatchMutation.mutate({ rentalApproved: false });
+                  }}
+                  style={{
+                    fontFamily: fonts.dmSans,
+                    fontWeight: 500,
+                    fontSize: 12,
+                    padding: "5px 14px",
+                    borderRadius: 5,
+                    border: `1px solid ${localApproved === false ? "#b91c1c" : colors.rule}`,
+                    backgroundColor: localApproved === false ? "#fee2e2" : "#fff",
+                    color: localApproved === false ? "#b91c1c" : colors.inkMuted,
+                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
+                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                  }}
+                >
+                  Deny
+                </button>
+                <button
+                  disabled={actionPatchMutation.isPending}
+                  onClick={() => {
+                    const next = !localDeclined;
+                    setLocalDeclined(next);
+                    actionPatchMutation.mutate({ declinedRepair: next });
+                  }}
+                  style={{
+                    fontFamily: fonts.dmSans,
+                    fontWeight: 500,
+                    fontSize: 12,
+                    padding: "5px 14px",
+                    borderRadius: 5,
+                    border: `1px solid ${localDeclined ? "#b91c1c" : colors.rule}`,
+                    backgroundColor: localDeclined ? "#fee2e2" : "#fff",
+                    color: localDeclined ? "#b91c1c" : colors.inkMuted,
+                    cursor: actionPatchMutation.isPending ? "not-allowed" : "pointer",
+                    opacity: actionPatchMutation.isPending ? 0.7 : 1,
+                  }}
+                >
+                  Decline Repair
+                </button>
+              </div>
+            </div>
+          )}
           <div
             style={{
               fontFamily: fonts.dmSans,
