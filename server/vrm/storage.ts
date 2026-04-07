@@ -538,7 +538,10 @@ export async function listRepairTracker() {
 }
 
 export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
-  const [row] = await db.insert(vrmRepairTracker).values(data).returning();
+  const [row] = await db
+    .insert(vrmRepairTracker)
+    .values({ ...data, mainStatus: data.mainStatus ?? "Decision Pending" })
+    .returning();
   return row;
 }
 

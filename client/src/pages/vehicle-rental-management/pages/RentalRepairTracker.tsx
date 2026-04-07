@@ -44,7 +44,7 @@ const EMPTY_FORM: FormData = {
   techPhone: "",
   repairShopAddress: "",
   repairShopPhone: "",
-  mainStatus: "",
+  mainStatus: "Decision Pending",
   subStatus: "",
   notes: "",
 };
