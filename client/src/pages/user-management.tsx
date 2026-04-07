@@ -727,16 +727,17 @@ export default function UserManagement() {
               </div>
               <div>
                 <Label htmlFor="role">Role</Label>
-                <Select value={form.watch("role") || "agent"} onValueChange={(value) => form.setValue("role", value)}>
-                  <SelectTrigger data-testid="select-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignableRoles.map(role => (
-                      <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select
+                  id="role"
+                  data-testid="select-role"
+                  value={form.watch("role") || "agent"}
+                  onChange={(e) => form.setValue("role", e.target.value, { shouldValidate: true })}
+                  className="w-full h-10 rounded-md border border-blue-300 bg-blue-50 text-blue-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100"
+                >
+                  {assignableRoles.map(role => (
+                    <option key={role.value} value={role.value}>{role.label}</option>
+                  ))}
+                </select>
                 {form.formState.errors.role && (
                   <p className="text-sm text-red-500">{form.formState.errors.role.message}</p>
                 )}
@@ -1234,20 +1235,18 @@ export default function UserManagement() {
                   <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">Access Control</h3>
                   <form onSubmit={roleManagementForm.handleSubmit(onRoleManagementSubmit)} className="space-y-4">
                     <div>
-                      <Label htmlFor="role">User Role</Label>
-                      <Select 
-                        value={roleManagementForm.watch("role") || "agent"} 
-                        onValueChange={(value) => roleManagementForm.setValue("role", value)}
+                      <Label htmlFor="manage-role">User Role</Label>
+                      <select
+                        id="manage-role"
+                        data-testid="select-manage-role"
+                        value={roleManagementForm.watch("role") || "agent"}
+                        onChange={(e) => roleManagementForm.setValue("role", e.target.value, { shouldValidate: true })}
+                        className="w-full h-10 rounded-md border border-blue-300 bg-blue-50 text-blue-900 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100"
                       >
-                        <SelectTrigger data-testid="select-manage-role" className="bg-blue-50 border-blue-300 text-blue-900 dark:bg-blue-900 dark:border-blue-600 dark:text-blue-100">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {assignableRoles.map(role => (
-                            <SelectItem key={role.value} value={role.value}>{role.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                        {assignableRoles.map(role => (
+                          <option key={role.value} value={role.value}>{role.label}</option>
+                        ))}
+                      </select>
                     </div>
                     <div>
                       <Label>Department Access</Label>
