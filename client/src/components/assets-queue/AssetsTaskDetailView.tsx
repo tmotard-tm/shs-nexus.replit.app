@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -293,12 +293,41 @@ export function AssetsTaskDetailView({
     enabled: !!truckNumber && truckNumber !== 'Unknown',
   });
 
-  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null }>({
+  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null; toolsPartsLocation: string | null; partsRecoveryInitiated: string | null }>({
     queryKey: ['/api/vehicle-nexus-data', truckNumber],
     enabled: !!truckNumber && truckNumber !== 'Unknown',
   });
 
   const disposition = vehicleNexusData?.postOffboardedStatus || null;
+
+  const [toolsPartsLocation, setToolsPartsLocation] = useState<string>("");
+  const [partsRecoveryInitiated, setPartsRecoveryInitiated] = useState<string>("");
+
+  useEffect(() => {
+    if (vehicleNexusData) {
+      setToolsPartsLocation(vehicleNexusData.toolsPartsLocation || "");
+      setPartsRecoveryInitiated(vehicleNexusData.partsRecoveryInitiated || "");
+    } else {
+      setToolsPartsLocation("");
+      setPartsRecoveryInitiated("");
+    }
+  }, [vehicleNexusData]);
+
+  const nexusDataMutation = useMutation({
+    mutationFn: (updates: Record<string, string | null>) =>
+      apiRequest("PUT", `/api/vehicle-nexus-data/${truckNumber}`, { vehicleNumber: truckNumber, ...updates }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', truckNumber] });
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) && query.queryKey[0] === '/api/vehicle-nexus-data/batch',
+      });
+      toast({ title: "Saved" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error saving", description: error.message, variant: "destructive" });
+    },
+  });
 
   const handleTaskToggle = (key: TaskKey) => {
     const newValue = !taskState[key];
@@ -485,6 +514,54 @@ export function AssetsTaskDetailView({
                   <span className="text-xs">{vehicleLocation.address}</span>
                 </div>
               )}
+            </div>
+
+            <Separator />
+
+            <div className="space-y-3">
+              <h4 className="font-medium text-sm text-muted-foreground">Tools &amp; Parts</h4>
+              <div>
+                <Label className="text-xs text-muted-foreground">Where are the tools &amp; parts being left?</Label>
+                <Select
+                  value={toolsPartsLocation || "__none__"}
+                  onValueChange={(val) => {
+                    const newVal = val === "__none__" ? "" : val;
+                    setToolsPartsLocation(newVal);
+                    if (truckNumber) nexusDataMutation.mutate({ toolsPartsLocation: newVal || null });
+                  }}
+                  disabled={!truckNumber || truckNumber === 'N/A' || truckNumber === 'Unknown'}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select location..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">-- None --</SelectItem>
+                    <SelectItem value="in_the_truck">In the truck</SelectItem>
+                    <SelectItem value="techs_home">Tech's home</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Parts recovery initiated</Label>
+                <Select
+                  value={partsRecoveryInitiated || "__none__"}
+                  onValueChange={(val) => {
+                    const newVal = val === "__none__" ? "" : val;
+                    setPartsRecoveryInitiated(newVal);
+                    if (truckNumber) nexusDataMutation.mutate({ partsRecoveryInitiated: newVal || null });
+                  }}
+                  disabled={!truckNumber || truckNumber === 'N/A' || truckNumber === 'Unknown'}
+                >
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Select..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">-- None --</SelectItem>
+                    <SelectItem value="yes">Yes</SelectItem>
+                    <SelectItem value="no">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </CardContent>
         </Card>

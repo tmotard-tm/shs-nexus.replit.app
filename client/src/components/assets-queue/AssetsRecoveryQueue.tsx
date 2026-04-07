@@ -525,11 +525,40 @@ function ExpandedRowDetails({
   const [carrier, setCarrier] = useState<string>(item.carrier || "");
 
   const truckNumber = detailData?.hrTruckNumber || techData?.hrTruckNumber || '';
-  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null }>({
+  const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null; toolsPartsLocation: string | null; partsRecoveryInitiated: string | null }>({
     queryKey: ['/api/vehicle-nexus-data', truckNumber],
     enabled: !!truckNumber && truckNumber !== 'N/A',
   });
   const disposition = vehicleNexusData?.postOffboardedStatus || null;
+
+  const [toolsPartsLocation, setToolsPartsLocation] = useState<string>("");
+  const [partsRecoveryInitiated, setPartsRecoveryInitiated] = useState<string>("");
+
+  useEffect(() => {
+    if (vehicleNexusData) {
+      setToolsPartsLocation(vehicleNexusData.toolsPartsLocation || "");
+      setPartsRecoveryInitiated(vehicleNexusData.partsRecoveryInitiated || "");
+    } else {
+      setToolsPartsLocation("");
+      setPartsRecoveryInitiated("");
+    }
+  }, [vehicleNexusData]);
+
+  const nexusDataMutation = useMutation({
+    mutationFn: (updates: Record<string, string | null>) =>
+      apiRequest("PUT", `/api/vehicle-nexus-data/${truckNumber}`, { vehicleNumber: truckNumber, ...updates }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', truckNumber] });
+      queryClient.invalidateQueries({
+        predicate: (query) =>
+          Array.isArray(query.queryKey) && query.queryKey[0] === '/api/vehicle-nexus-data/batch',
+      });
+      toast({ title: "Saved" });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error saving", description: error.message, variant: "destructive" });
+    },
+  });
 
   const { saveStatus, save: debouncedSave } = useDebouncedSave({ itemId: item.id, module: 'assets' });
 
@@ -659,6 +688,57 @@ function ExpandedRowDetails({
               ) : (
                 <span className="text-sm text-slate-400 italic">No disposition set — update on Weekly Offboarding page</span>
               )}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+              <Package className="h-4 w-4 text-slate-500" />
+              Tools &amp; Parts
+            </h4>
+            <div className="bg-white p-4 rounded-md border border-slate-200 shadow-sm space-y-3">
+              <div>
+                <Label className="text-xs text-slate-500 uppercase tracking-wider">Where are the tools &amp; parts being left?</Label>
+                <Select
+                  value={toolsPartsLocation || "__none__"}
+                  onValueChange={(val) => {
+                    const newVal = val === "__none__" ? "" : val;
+                    setToolsPartsLocation(newVal);
+                    if (truckNumber) nexusDataMutation.mutate({ toolsPartsLocation: newVal || null });
+                  }}
+                  disabled={!truckNumber || truckNumber === 'N/A' || truckNumber === 'Unknown'}
+                >
+                  <SelectTrigger className="mt-1 h-8 text-sm">
+                    <SelectValue placeholder="Select location..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">-- None --</SelectItem>
+                    <SelectItem value="in_the_truck">In the truck</SelectItem>
+                    <SelectItem value="techs_home">Tech's home</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-slate-500 uppercase tracking-wider">Parts recovery initiated</Label>
+                <Select
+                  value={partsRecoveryInitiated || "__none__"}
+                  onValueChange={(val) => {
+                    const newVal = val === "__none__" ? "" : val;
+                    setPartsRecoveryInitiated(newVal);
+                    if (truckNumber) nexusDataMutation.mutate({ partsRecoveryInitiated: newVal || null });
+                  }}
+                  disabled={!truckNumber || truckNumber === 'N/A' || truckNumber === 'Unknown'}
+                >
+                  <SelectTrigger className="mt-1 h-8 text-sm">
+                    <SelectValue placeholder="Select..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">-- None --</SelectItem>
+                    <SelectItem value="yes">Yes</SelectItem>
+                    <SelectItem value="no">No</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
           </div>
         </div>
