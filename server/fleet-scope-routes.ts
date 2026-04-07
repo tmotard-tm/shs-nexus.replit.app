@@ -13503,9 +13503,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // POST /vrm-address-sync — fill blank repairAddress/repairPhone for "Confirming Status" trucks
+  // POST /sync-addresses-from-vrm — fill blank repairAddress/repairPhone for "Confirming Status" trucks
   // from the VRM New Rental Full Log, matched by truck number (leading zeros stripped on both sides)
-  app.post("/vrm-address-sync", async (_req, res) => {
+  app.post("/sync-addresses-from-vrm", async (_req, res) => {
     try {
       console.log("[VrmAddressSync] Starting sync...");
       const { db: mainDb } = await import("./db");

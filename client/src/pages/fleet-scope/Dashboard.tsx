@@ -1433,7 +1433,7 @@ export default function Dashboard() {
 
   const vrmAddressSyncMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/fs/vrm-address-sync", {});
+      const response = await apiRequest("POST", "/api/fs/sync-addresses-from-vrm", {});
       return response.json() as Promise<{ updated: number; skipped: number }>;
     },
     onSuccess: (data) => {
