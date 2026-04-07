@@ -1431,6 +1431,23 @@ export default function Dashboard() {
     shopListImportMutation.mutate(shopListFile);
   };
 
+  const vrmAddressSyncMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/fs/sync-addresses-from-vrm", {});
+      return response.json() as Promise<{ updated: number; skipped: number }>;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
+      toast({
+        title: "Sync complete",
+        description: `Synced ${data.updated} truck address${data.updated !== 1 ? "es" : ""} from VRM Full Log`,
+      });
+    },
+    onError: (err: any) => {
+      toast({ title: "Sync failed", description: err.message || "Failed to sync addresses", variant: "destructive" });
+    },
+  });
+
   // Bulk sync mutation
   const bulkSyncMutation = useMutation({
     mutationFn: async (truckNumbers: string[]) => {
@@ -2639,6 +2656,20 @@ export default function Dashboard() {
               )}
             </DialogContent>
           </Dialog>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => vrmAddressSyncMutation.mutate()}
+            disabled={vrmAddressSyncMutation.isPending}
+            data-testid="button-vrm-address-sync"
+          >
+            {vrmAddressSyncMutation.isPending ? (
+              <><Loader2 className="w-3 h-3 mr-1 animate-spin" />Syncing...</>
+            ) : (
+              <><RefreshCw className="w-3 h-3 mr-1" />Sync Addresses</>
+            )}
+          </Button>
 
           <Dialog open={isSyncDialogOpen} onOpenChange={setIsSyncDialogOpen}>
             <DialogTrigger asChild>

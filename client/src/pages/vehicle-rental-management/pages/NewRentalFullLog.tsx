@@ -852,6 +852,10 @@ export default function NewRentalFullLog() {
       render: (e) => e.repairLocation ?? "—",
     },
     {
+      label: "Repair Phone",
+      render: (e) => e.repairPhone ?? "—",
+    },
+    {
       label: "Issue",
       render: (e) =>
         e.issue ? (
