@@ -55,7 +55,19 @@ const EMPTY_FORM: FormData = {
   techServiceDate: "",
 };
 
+// ─── Import row type (extends FormData with rentalApproved for import) ────────
+
+type ImportRow = Partial<FormData> & { rentalApproved?: boolean };
+
 // ─── CSV header → field map ───────────────────────────────────────────────────
+
+const RENTAL_APPROVED_HEADERS = new Set([
+  "rental approved",
+  "rental_approved",
+  "rental approved?",
+  "approved",
+  "rental approval",
+]);
 
 const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "date of request": "dateOfRequest",
@@ -163,10 +175,21 @@ function parseDateToISO(raw: string): string | null {
   return null;
 }
 
-function mapCSVRowToForm(raw: Record<string, string>): Partial<FormData> {
-  const entry: Partial<FormData> = {};
+function parseRentalApproved(raw: string): boolean {
+  const lower = raw.toLowerCase().trim();
+  if (["no", "n", "false", "0", "denied", "deny"].includes(lower)) return false;
+  return true;
+}
+
+function mapCSVRowToForm(raw: Record<string, string>): ImportRow {
+  const entry: ImportRow = { rentalApproved: true };
   for (const [csvHeader, rawVal] of Object.entries(raw)) {
-    const field = CSV_HEADER_MAP[normalizeHeader(csvHeader)];
+    const normalizedH = normalizeHeader(csvHeader);
+    if (RENTAL_APPROVED_HEADERS.has(normalizedH)) {
+      entry.rentalApproved = parseRentalApproved(rawVal);
+      continue;
+    }
+    const field = CSV_HEADER_MAP[normalizedH];
     if (!field) continue;
     if (isDateField(field)) {
       entry[field] = parseDateToISO(rawVal);
@@ -537,7 +560,7 @@ export default function NewRentalFullLog() {
   });
 
   const importMutation = useMutation({
-    mutationFn: async (rows: Partial<FormData>[]) => {
+    mutationFn: async (rows: ImportRow[]) => {
       const res = await apiRequest("POST", "/api/vrm/new-rental-log/import", rows);
       return res.json();
     },
@@ -743,30 +766,20 @@ export default function NewRentalFullLog() {
     },
     {
       label: "Declined Repair",
-      render: (e) => {
-        const pending = patchingIds.has(e.id);
-        return (
-          <button
-            disabled={pending}
-            onClick={(ev) => { ev.stopPropagation(); patchEntryMutation.mutate({ id: e.id, patch: { declinedRepair: !e.declinedRepair } }); }}
-            style={{
-              fontFamily: fonts.dmSans,
-              fontWeight: 500,
-              fontSize: 11,
-              padding: "2px 9px",
-              borderRadius: 5,
-              border: `1px solid ${e.declinedRepair ? "#b91c1c" : colors.rule}`,
-              backgroundColor: e.declinedRepair ? "#fee2e2" : "#fff",
-              color: e.declinedRepair ? "#b91c1c" : colors.inkMuted,
-              cursor: pending ? "not-allowed" : "pointer",
-              opacity: pending ? 0.6 : 1,
-              transition: "all 0.12s",
-            }}
-          >
-            Declined Repair
-          </button>
-        );
-      },
+      render: (e) => e.declinedRepair ? (
+        <span style={{
+          fontFamily: fonts.dmSans,
+          fontWeight: 500,
+          fontSize: 11,
+          color: "#b91c1c",
+          backgroundColor: "#fee2e2",
+          borderRadius: 6,
+          padding: "2px 8px",
+          display: "inline-block",
+        }}>
+          Declined Repair
+        </span>
+      ) : <span style={{ color: colors.inkMuted }}>—</span>,
     },
     {
       label: "Name",
