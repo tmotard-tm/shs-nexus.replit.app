@@ -163,28 +163,24 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       }
       await tpms.updateTechInfo({
         ldapId: tpmsLdap,
-        upserts: {
-          truckNo: "",
-          districtNo: current.districtNo ?? "",
-          updatedBy,
-        },
+        truckNo: "",
+        districtNo: current.districtNo ?? "",
+        updatedBy,
       });
       return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
       await tpms.updateTechInfo({
         ldapId: params.ldapId.trim().toUpperCase(),
-        upserts: {
-          updatedBy,
-          addresses: [{
-            addressType: ADDRESS_TYPE_CODE["PRIMARY"],
-            addrLine1: params.address,
-            addrLine2: params.address2 || "",
-            city: params.city,
-            stateCd: params.state,
-            zipCd: params.zip,
-          }],
-        },
+        updatedBy,
+        addresses: [{
+          addressType: ADDRESS_TYPE_CODE["PRIMARY"],
+          addrLine1: params.address,
+          addrLine2: params.address2 || "",
+          city: params.city,
+          stateCd: params.state,
+          zipCd: params.zip,
+        }],
       });
       return { status: "success", message: "Address updated" };
     }
