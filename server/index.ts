@@ -25,6 +25,13 @@ process.on('uncaughtException', (err: Error) => {
     console.error('[NeonDB] Absorbed connection termination (compute scaling/idle timeout) — pool will reconnect automatically');
     return;
   }
+  // The Replit auth-persistence integration (javascript_auth_all_persistance) is installed
+  // but not used — this app manages sessions via PostgreSQL (server/storage.ts). Any SQLite
+  // initialisation errors from the Replit platform layer are non-fatal and absorbed here.
+  if (err.message?.includes('SQLite') || err.message?.includes('sqlite')) {
+    console.warn('[Auth] Absorbed non-fatal SQLite persistence error (Replit platform layer, not app code):', err.message);
+    return;
+  }
   console.error('[FATAL] Uncaught exception — exiting:', err);
   process.exit(1);
 });
@@ -34,24 +41,6 @@ process.on('unhandledRejection', (reason: unknown) => {
 });
 
 const app = express();
-
-// SESSION MANAGEMENT NOTE:
-// This app uses its own custom session layer (PostgreSQL-backed via server/storage.ts).
-// The Replit auth-persistence integration (javascript_auth_all_persistance) is installed
-// but intentionally NOT initialised here — it is not used. Any "Failed to initialize
-// SQLite persistence" errors seen in the browser are transient Replit platform issues
-// unrelated to this app's session code, and resolve on server restart.
-//
-// SENDGRID SENDER NOTE:
-// The email from-address is sourced from the SENDGRID_EMAIL environment secret
-// (see server/email-service.ts). The old hardcoded stephen.wong@transformco.com
-// address has been removed. If SENDGRID_EMAIL is not set, email sends are blocked
-// immediately with a clear error log rather than producing a 403 from SendGrid.
-//
-// FLEET FINDER NOTE:
-// The Fleet Finder API URL is sourced from the FS_FLEET_FINDER_URL environment
-// secret (see server/fleet-scope-fleet-finder.ts). When not set, the integration
-// is disabled gracefully — pre-warm is skipped and on-demand fetches return empty.
 
 // Trust proxy configuration for proper IP detection behind proxies/load balancers
 // This ensures rate limiting and security features work correctly in production

@@ -10,9 +10,12 @@ if (apiKey) {
   console.warn('SENDGRID_API_KEY not found - email service will log messages instead of sending');
 }
 
-// Default verified sender email — sourced from SENDGRID_EMAIL secret
+// Default verified sender email — sourced from SENDGRID_EMAIL secret.
+// Set this secret to a verified SendGrid Sender Identity to enable outbound mail.
 const DEFAULT_FROM_EMAIL = process.env.SENDGRID_EMAIL || '';
-if (!process.env.SENDGRID_EMAIL) {
+if (DEFAULT_FROM_EMAIL) {
+  console.log(`SendGrid from-address: ${DEFAULT_FROM_EMAIL}`);
+} else {
   console.warn('SENDGRID_EMAIL secret not set — outgoing emails will be blocked until this is configured.');
 }
 
