@@ -95,15 +95,12 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
 
     if (action === "assign") {
       const tpmsTruckNo = toTpmsRef(params.truckNumber);
-      // TPMS PUT /techinfo requires: ldapId (UPPERCASE), truckNo, districtNo flat in body
-      // TPMS PUT /techinfo: ldapId (UPPERCASE) at top level; truck/district/updatedBy inside upserts
+      // TPMS PUT /techinfo expects a flat body — ldapId, truckNo, districtNo at top level.
       await tpms.updateTechInfo({
         ldapId: params.ldapId.trim().toUpperCase(),
-        upserts: {
-          truckNo: tpmsTruckNo,
-          districtNo: params.districtNo ?? "",
-          updatedBy,
-        },
+        truckNo: tpmsTruckNo,
+        districtNo: params.districtNo ?? "",
+        updatedBy,
       });
       return { status: "success", message: "Assigned" };
     }
@@ -147,11 +144,9 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         // Perform unassign directly using the live data we already have.
         await tpms.updateTechInfo({
           ldapId: tpmsLdap,
-          upserts: {
-            truckNo: "",
-            districtNo: liveTech?.districtNo ?? "",
-            updatedBy,
-          },
+          truckNo: "",
+          districtNo: liveTech?.districtNo ?? "",
+          updatedBy,
         });
         return { status: "success", message: "Unassigned (via live TPMS lookup fallback)" };
       }
