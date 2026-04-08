@@ -3829,6 +3829,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return data?.status ? (data.status as string).replace(/_/g, ' ') : null;
       }
 
+      // Variant-tolerant Holman status matchers — the scraper may return
+      // 'Repair Completed', 'Repair Complete', 'repair_completed', etc.
+      function isHolmanRepairComplete(hs: string | null): boolean {
+        if (!hs) return false;
+        const n = hs.toLowerCase().replace(/_/g, ' ').trim();
+        return n === 'repair complete' || n === 'repair completed';
+      }
+      // Handles 'In Authorization', 'Repair Authorization', and underscore variants.
+      function isHolmanInAuthorization(hs: string | null): boolean {
+        if (!hs) return false;
+        const n = hs.toLowerCase().replace(/_/g, ' ').trim();
+        return n === 'in authorization' || n === 'repair authorization';
+      }
+
       type QueueItem = {
         step: number;
         stepTitle: string;
@@ -3894,13 +3908,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const RETURNED_SET = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
       const step3Candidates = [...allTrucks].filter(t => {
         if (assigned.has(t.id)) return false;
+        // Tags and Declined Repair trucks belong in Steps 6 and 7 respectively —
+        // exclude them here so they are not absorbed by Step 3 before reaching their step.
+        if (['Tags', 'Declined Repair'].includes(t.mainStatus ?? '')) return false;
         const hs = getHolmanStatus(t.truckNumber);
         const cl = callLogMap[t.id];
         // Call log authoritative: use cl.callStatus first, then truck denormalized field
         const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
         // Call log authoritative: use cl.estimatedReadyDate first, then truck fields
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
-        const holmanReady = hs === 'Repair Complete';
+        const holmanReady = isHolmanRepairComplete(hs);
         const lucaReady = lucaStatus === 'Ready';
         // Compare against end-of-day so any ERD time today (not just midnight) qualifies
         const dateReady = erd ? (new Date(erd) <= TODAY_END && !RETURNED_SET.has(t.mainStatus ?? '')) : false;
@@ -3919,12 +3936,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       for (const t of step3Candidates) {
         if (assigned.has(t.id)) continue;
         assigned.add(t.id);
-        const isConflict = t.mainStatus === 'Repairing' || t.mainStatus === 'Confirming Status';
+        const isConflict = t.mainStatus === 'Repairing' || t.mainStatus === 'Confirming Status' || t.mainStatus === 'Decision Pending';
         const cl = callLogMap[t.id];
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
         const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
         const lucaReady = lucaStatus === 'Ready';
-        const holmanReady = getHolmanStatus(t.truckNumber) === 'Repair Complete';
+        const holmanReady = isHolmanRepairComplete(getHolmanStatus(t.truckNumber));
         const readyReason: 'luca' | 'holman' | 'date' = lucaReady ? 'luca' : holmanReady ? 'holman' : 'date';
         const actionText = isConflict
           ? 'STATUS CONFLICT — Holman/Luca shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
@@ -3950,7 +3967,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       for (const t of [...allTrucks].filter(t => {
         if (assigned.has(t.id)) return false;
         const hs = getHolmanStatus(t.truckNumber);
-        return t.mainStatus === 'Decision Pending' || hs === 'In Authorization';
+        return t.mainStatus === 'Decision Pending' || isHolmanInAuthorization(hs);
       }).sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
         if (assigned.has(t.id)) continue;
         assigned.add(t.id);
@@ -3974,7 +3991,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const lastDate = lastCallDateFor(t);
         const lucaStatus = lucaStatusFor(t);
         const noRecentCall = !lastDate || (now - lastDate.getTime()) > THREE_DAYS_MS;
-        const badStatus = ['No Answer', 'Call Failed', 'Failed'].includes(lucaStatus ?? '');
+        const badStatus = ['No Answer', 'Call Failed', 'Failed', 'Unknown'].includes(lucaStatus ?? '');
         return noRecentCall || badStatus;
       }).sort((a, b) => {
         const dA = lastCallDateFor(a)?.getTime() ?? 0;
