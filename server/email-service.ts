@@ -10,8 +10,11 @@ if (apiKey) {
   console.warn('SENDGRID_API_KEY not found - email service will log messages instead of sending');
 }
 
-// Default verified sender email
-const DEFAULT_FROM_EMAIL = 'stephen.wong@transformco.com';
+// Default verified sender email — sourced from SENDGRID_EMAIL secret
+const DEFAULT_FROM_EMAIL = process.env.SENDGRID_EMAIL || 'stephen.wong@transformco.com';
+if (!process.env.SENDGRID_EMAIL) {
+  console.warn('SENDGRID_EMAIL secret not set — falling back to hardcoded address. Emails may fail if it is not a verified SendGrid sender.');
+}
 
 interface EmailParams {
   to: string;
