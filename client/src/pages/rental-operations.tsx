@@ -311,6 +311,13 @@ export default function RentalOperations() {
     return all;
   }, [openData]);
 
+  const AGING_COLORS: Record<string, string> = {
+    "28+ Days":   "#ef4444",
+    "21-27 Days": "#f97316",
+    "14-20 Days": "#eab308",
+    "<14 Days":   "#22c55e",
+  };
+
   const agingBuckets = useMemo(() => {
     const counts: Record<string, number> = { "28+ Days": 0, "21-27 Days": 0, "14-20 Days": 0, "<14 Days": 0 };
     for (const r of analyticsRows) {
