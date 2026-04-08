@@ -448,8 +448,11 @@ class TPMSService {
     const url = `${baseUrl}/techinfo`;
     console.log(`[TPMS] Updating tech info for: ${cleanLdapId}`);
 
-    // upserts is a JSON object (not array) containing ldapId plus the fields to change.
-    const requestBody = { upserts: { ldapId: cleanLdapId, ...rest } };
+    // TPMS PUT /techinfo body (per Postman collection):
+    //   { "techLdapId": "KMICKEL", "upserts": { "truckNo": "046863", "updatedBy": "TMOTARD" } }
+    const requestBody = { techLdapId: cleanLdapId, upserts: rest };
+    const bodyStr = JSON.stringify(requestBody);
+    console.log(`[TPMS] PUT ${url} body: ${bodyStr}`);
 
     const response = await fetch(url, {
       method: 'PUT',
@@ -458,15 +461,23 @@ class TPMSService {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify(requestBody),
+      body: bodyStr,
     });
 
+    const rawText = await response.text();
+    console.log(`[TPMS] PUT response: ${response.status} ${rawText}`);
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Tech update request failed: ${response.status} - ${errorText}`);
+      throw new Error(`Tech update request failed: ${response.status} - ${rawText}`);
     }
 
-    const data = await response.json();
+    let data: any;
+    try { data = JSON.parse(rawText); } catch { data = rawText; }
+
+    if (data?.messages && Array.isArray(data.messages) && !data.messages.includes('SUCCESS')) {
+      throw new Error(`TPMS rejected update: ${data.messages.join(', ')}`);
+    }
+
     console.log(`[TPMS] Tech info updated successfully for ${cleanLdapId}`);
     return data;
   }

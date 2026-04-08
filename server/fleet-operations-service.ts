@@ -95,12 +95,22 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
 
     if (action === "assign") {
       const tpmsTruckNo = toTpmsRef(params.truckNumber);
-      // TPMS PUT /techinfo expects a flat body — ldapId, truckNo, districtNo at top level.
+      const cleanLdapId = params.ldapId.trim().toUpperCase();
+      // Fetch the tech's current TPMS profile to get the zero-padded districtNo
+      // (e.g. "0008096") — params.districtNo may be unpadded ("8096") and TPMS rejects that.
+      let districtNo = params.districtNo ?? "";
+      try {
+        const techInfo = await tpms.getTechInfo(cleanLdapId);
+        if (techInfo?.districtNo) districtNo = techInfo.districtNo;
+      } catch {
+        // If lookup fails, fall back to whatever was provided; warn so it's visible in logs.
+        console.warn(`[FleetOps-TPMS] Could not fetch live districtNo for ${cleanLdapId}, using "${districtNo}" from params`);
+      }
       await tpms.updateTechInfo({
-        ldapId: params.ldapId.trim().toUpperCase(),
+        ldapId: cleanLdapId,
         truckNo: tpmsTruckNo,
-        districtNo: params.districtNo ?? "",
-        updatedBy,
+        districtNo,
+        updatedBy: updatedBy.toUpperCase(),
       });
       return { status: "success", message: "Assigned" };
     }
@@ -146,7 +156,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
           ldapId: tpmsLdap,
           truckNo: "",
           districtNo: liveTech?.districtNo ?? "",
-          updatedBy,
+          updatedBy: updatedBy.toUpperCase(),
         });
         return { status: "success", message: "Unassigned (via live TPMS lookup fallback)" };
       }
@@ -165,7 +175,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         ldapId: tpmsLdap,
         truckNo: "",
         districtNo: current.districtNo ?? "",
-        updatedBy,
+        updatedBy: updatedBy.toUpperCase(),
       });
       return { status: "success", message: "Unassigned" };
     }

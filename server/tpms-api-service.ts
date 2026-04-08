@@ -242,7 +242,7 @@ class TpmsApiService {
       return;
     }
     const svc = getTPMSService();
-    await svc.updateTechInfo({ ldapId: enterpriseId, truckNo: "", districtNo: districtNo ?? "" });
+    await svc.updateTechInfo({ ldapId: enterpriseId, truckNo: "", districtNo: districtNo ?? "", updatedBy: "NEXUS" });
   }
 }
 
