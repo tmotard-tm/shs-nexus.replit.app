@@ -436,10 +436,18 @@ class TPMSService {
 
   // Update a tech info record (PUT /techinfo)
   async updateTechInfo(body: Record<string, any>): Promise<any> {
+    // TPMS PUT /techinfo/{ldapId} — ldapId goes in the URL path; all other fields go
+    // inside a top-level "upserts" object in the request body. This mirrors the GET pattern.
+    const { ldapId, ...upsertFields } = body;
+    if (!ldapId) throw new Error('updateTechInfo requires ldapId');
+    const cleanLdapId = String(ldapId).trim().toUpperCase();
+
     const token = await this.getToken();
     const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
-    const url = `${baseUrl}/techinfo`;
-    console.log(`[TPMS] Updating tech info for: ${body.ldapId || 'unknown'}`);
+    const url = `${baseUrl}/techinfo/${encodeURIComponent(cleanLdapId)}`;
+    console.log(`[TPMS] Updating tech info for: ${cleanLdapId}`);
+
+    const requestBody = { upserts: upsertFields };
 
     const response = await fetch(url, {
       method: 'PUT',
@@ -448,7 +456,7 @@ class TPMSService {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
@@ -457,7 +465,7 @@ class TPMSService {
     }
 
     const data = await response.json();
-    console.log(`[TPMS] Tech info updated successfully for ${body.ldapId || 'unknown'}`);
+    console.log(`[TPMS] Tech info updated successfully for ${cleanLdapId}`);
     return data;
   }
 

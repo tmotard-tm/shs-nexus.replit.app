@@ -187,10 +187,10 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
     return { status: "skipped", message: "Unknown TPMS action" };
   } catch (err: any) {
     const msg: string = err.message ?? "";
-    // TPMS ldapId validation errors mean the tech isn't registered in TPMS —
-    // treat as skipped for both assign and unassign rather than a hard failure.
-    if (msg.includes("ldapId is required") || msg.includes("ldapId must be between")) {
-      console.log(`[FleetOps-TPMS] ${action} treated as skipped — tech not registered in TPMS: ${msg}`);
+    // A 404 from TPMS means the tech profile doesn't exist — treat as skipped.
+    // All other errors (including 400 validation failures) should surface as real failures.
+    if (msg.includes("404") || msg.includes("not found") || msg.includes("Tech not found")) {
+      console.log(`[FleetOps-TPMS] ${action} skipped — tech not registered in TPMS: ${msg}`);
       return { status: "skipped", message: "Tech not registered in TPMS" };
     }
     return { status: "failed", message: `TPMS error: ${msg}` };
