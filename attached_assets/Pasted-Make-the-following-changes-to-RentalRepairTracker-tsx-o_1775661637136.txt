@@ -1,0 +1,19 @@
+Make the following changes to RentalRepairTracker.tsx only:
+1. Remove duplicate BYOV toggle:
+In the DenialEntryPanel (the panel that shows when a repair tracker entry has a sourceDecisionId), there are currently two BYOV toggles — one in the Outreach Tracking section (from the decision record) and one in the Tech & Vehicle Info / repair tracker fields section. Remove the BYOV toggle from the repair tracker fields section. The Outreach Tracking BYOV toggle is the single source of truth since it saves to vrm_rental_decisions and is shared across all tabs.
+2. Add "Returned Rental" and "Return Date" columns to the table:
+Add two new columns to the repair tracker table view:
+
+"Returned" — shows "Yes" or "No" based on the linked decision's returnedRental field. For entries without a sourceDecisionId, show "—". To get this data, the GET /api/vrm/repair-tracker endpoint needs to join or include the returnedRental and rentalReturnDate fields from vrm_rental_decisions via the source_decision_id foreign key.
+
+3. Update the backend GET endpoint:
+In server/vrm/routes.ts or server/vrm/storage.ts, update the GET /api/vrm/repair-tracker query to LEFT JOIN vrm_rental_decisions on vrm_repair_tracker.source_decision_id = vrm_rental_decisions.id and include vrm_rental_decisions.returned_rental and vrm_rental_decisions.rental_return_date in the response as returnedRental and rentalReturnDate.
+4. Update the TypeScript interface:
+In RentalRepairTracker.tsx, add returnedRental: boolean | null and rentalReturnDate: string | null to the RepairTrackerEntry interface.
+5. Display in the table:
+
+"Returned" column: show "Yes" (green text) if returnedRental is true, "No" if false, "—" if null
+If "Yes", show the return date underneath in small muted text formatted as "MMM D, YYYY"
+
+6. Also add the BYOV value from the decision to the table:
+Same approach — the LEFT JOIN from step 3 should also include vrm_rental_decisions.byov_enrolled as decisionByovEnrolled. Use this value for the BYOV column display instead of the repair tracker's own byov_enrolled field when a sourceDecisionId exists, so the table always reflects the single source of truth from outreach tracking.
