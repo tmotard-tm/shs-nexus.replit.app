@@ -108,24 +108,62 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       return { status: "success", message: "Assigned" };
     }
     if (action === "unassign") {
-      // Look up by truck number (try both the raw number and the TPMS-padded 6-digit form)
-      // so we use TPMS's own ldapId for the tech, not whatever Holman may have stored.
+      // Step 1: Try to resolve the TPMS ldapId from cache (by truck number, two format variants).
+      // The cache is populated by enterprise ID lookups and fleet syncs, so it may not have every truck.
       const tpmsPaddedTruck = toTpmsRef(params.truckNumber);
       const truckLookup =
         await tpms.lookupByTruckNumber(params.truckNumber).then(r => r.success ? r : tpms.lookupByTruckNumber(tpmsPaddedTruck));
-      if (!truckLookup.success || !truckLookup.data?.ldapId) {
-        return { status: "skipped", message: "Not assigned in TPMS" };
+
+      let tpmsLdap: string;
+
+      if (truckLookup.success && truckLookup.data?.ldapId) {
+        // Cache hit — use the TPMS-sourced ldapId (authoritative).
+        tpmsLdap = truckLookup.data.ldapId.trim().toUpperCase();
+        // Guard: TPMS PUT requires ldapId to be 2–9 chars.
+        if (!tpmsLdap || tpmsLdap.length < 2 || tpmsLdap.length > 9) {
+          console.log(`[FleetOps-TPMS] Skipping unassign — cached ldapId "${tpmsLdap}" is not valid TPMS length`);
+          return { status: "skipped", message: "No valid TPMS tech ID found for this truck" };
+        }
+      } else {
+        // Cache miss for this truck number (cache may not have been populated for this tech yet).
+        // Fall back to params.ldapId and verify via a live TPMS lookup that the tech actually
+        // holds this truck before clearing it.
+        const fallbackLdap = (params.ldapId || "").trim().toUpperCase();
+        if (!fallbackLdap || fallbackLdap.length < 2 || fallbackLdap.length > 9) {
+          console.log(`[FleetOps-TPMS] Skipping unassign — no cache entry for truck "${params.truckNumber}" and provided ldapId "${fallbackLdap}" is not valid`);
+          return { status: "skipped", message: "Not assigned in TPMS (cache miss, no valid fallback ldapId)" };
+        }
+        // Live lookup to confirm this tech owns the truck before we clear it.
+        const liveTech = await tpms.getTechInfo(fallbackLdap).catch(() => null);
+        const liveTruckNo = liveTech?.truckNo?.trim() ?? "";
+        const canonicalLive = toCanonical(liveTruckNo);
+        const canonicalParam = toCanonical(params.truckNumber);
+        if (!liveTruckNo || (canonicalLive !== canonicalParam && liveTruckNo !== tpmsPaddedTruck)) {
+          console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}"; live lookup for "${fallbackLdap}" shows truckNo="${liveTruckNo}" — skipping unassign`);
+          return { status: "skipped", message: "Not assigned in TPMS" };
+        }
+        console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}" resolved via live TPMS lookup for "${fallbackLdap}" (truckNo="${liveTruckNo}")`);
+        tpmsLdap = fallbackLdap;
+        // Perform unassign directly using the live data we already have.
+        await tpms.updateTechInfo({
+          ldapId: tpmsLdap,
+          upserts: {
+            truckNo: "",
+            districtNo: liveTech?.districtNo ?? "",
+            updatedBy,
+          },
+        });
+        return { status: "success", message: "Unassigned (via live TPMS lookup fallback)" };
       }
-      const tpmsLdap = truckLookup.data.ldapId.trim().toUpperCase();
-      // Guard: TPMS PUT requires ldapId to be 2–9 chars; if not, the truck isn't
-      // properly registered and we should skip rather than produce a 400 error.
-      if (!tpmsLdap || tpmsLdap.length < 2 || tpmsLdap.length > 9) {
-        console.log(`[FleetOps-TPMS] Skipping unassign — cached ldapId "${tpmsLdap}" is not valid TPMS length`);
-        return { status: "skipped", message: "No valid TPMS tech ID found for this truck" };
-      }
-      // Verify the tech's truckNo still matches before clearing
+
+      // Step 2 (cache hit path): Verify the tech's truckNo still matches before clearing.
       const current = await tpms.getTechInfo(tpmsLdap).catch(() => null);
-      if (!current?.truckNo || current.truckNo.trim() === "") {
+      if (!current) {
+        // Live TPMS API error — don't silently skip; surface as a failure so ops can retry.
+        console.warn(`[FleetOps-TPMS] Live TPMS lookup for "${tpmsLdap}" failed during unassign verification`);
+        return { status: "failed", message: "TPMS API unreachable during verification — please retry" };
+      }
+      if (!current.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
       await tpms.updateTechInfo({
