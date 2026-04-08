@@ -448,7 +448,8 @@ class TPMSService {
     const url = `${baseUrl}/techinfo`;
     console.log(`[TPMS] Updating tech info for: ${cleanLdapId}`);
 
-    const requestBody = { upserts: [{ ldapId: cleanLdapId, ...rest }] };
+    // upserts is a JSON object (not array) containing ldapId plus the fields to change.
+    const requestBody = { upserts: { ldapId: cleanLdapId, ...rest } };
     console.log(`[TPMS] PUT ${url} body:`, JSON.stringify(requestBody));
 
     const response = await fetch(url, {
