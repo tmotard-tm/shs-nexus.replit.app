@@ -572,6 +572,20 @@ export function registerVrmRoutes(): Router {
   });
 
   /**
+   * GET /api/vrm/profitability/log/:id
+   * Returns a single rental decision row by ID.
+   */
+  router.get("/profitability/log/:id", async (req, res) => {
+    try {
+      const row = await getRentalDecision(req.params.id);
+      if (!row) return res.status(404).json({ error: "Decision not found" });
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
    * GET /api/vrm/profitability/log
    * Returns recent rental approval/denial decisions.
    */

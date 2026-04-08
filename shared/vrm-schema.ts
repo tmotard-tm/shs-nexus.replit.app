@@ -453,6 +453,8 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   repairShopPhone: text("repair_shop_phone"),
   mainStatus: text("main_status"),
   subStatus: text("sub_status"),
+  techStatus: varchar("tech_status", { length: 50 }),
+  byovEnrolled: boolean("byov_enrolled").default(false),
   notes: text("notes"),
   recommendation: text("recommendation"),
   deniedAt: timestamp("denied_at"),

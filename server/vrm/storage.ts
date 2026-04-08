@@ -657,6 +657,8 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     recommendation: d.recommendation,
     deniedAt: d.createdAt,
     sourceDecisionId: d.id,
+    notes: d.notes ?? null,
+    byovEnrolled: d.byovEnrolled ?? false,
   }));
 
   await db.insert(vrmRepairTracker).values(rows);
