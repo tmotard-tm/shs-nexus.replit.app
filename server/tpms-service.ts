@@ -436,18 +436,20 @@ class TPMSService {
 
   // Update a tech info record (PUT /techinfo)
   async updateTechInfo(body: Record<string, any>): Promise<any> {
-    // TPMS PUT /techinfo/{ldapId} — ldapId goes in the URL path; all other fields go
-    // inside a top-level "upserts" object in the request body. This mirrors the GET pattern.
-    const { ldapId, ...upsertFields } = body;
+    // TPMS PUT /techinfo is a batch API.
+    // Body format: { "upserts": [{ "ldapId": "AARNOLD", "truckNo": "", ... }] }
+    // ldapId belongs INSIDE the upserts array entry, not at the top level.
+    const { ldapId, ...rest } = body;
     if (!ldapId) throw new Error('updateTechInfo requires ldapId');
     const cleanLdapId = String(ldapId).trim().toUpperCase();
 
     const token = await this.getToken();
     const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
-    const url = `${baseUrl}/techinfo/${encodeURIComponent(cleanLdapId)}`;
+    const url = `${baseUrl}/techinfo`;
     console.log(`[TPMS] Updating tech info for: ${cleanLdapId}`);
 
-    const requestBody = { upserts: upsertFields };
+    const requestBody = { upserts: [{ ldapId: cleanLdapId, ...rest }] };
+    console.log(`[TPMS] PUT ${url} body:`, JSON.stringify(requestBody));
 
     const response = await fetch(url, {
       method: 'PUT',
