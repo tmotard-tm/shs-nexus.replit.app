@@ -1,0 +1,59 @@
+Make the following changes to the Rental Repair Tracker page. Do NOT change any other pages.
+1. Bug fix in RentalRepairTracker.tsx:
+In the EntryPanel component, the Notes Field is missing the field prop and has an incorrect onChange. Change:
+<Field label="Notes" value={form.notes} onChange={(v) => set("notes", v)} type="textarea" />
+to:
+<Field label="Notes" field="notes" value={form.notes} onChange={set} type="textarea" />
+2. Add LDAP and tech status fields to the database schema:
+In the vrm_repair_tracker table definition (in shared/vrm-schema.ts), add these columns:
+
+tech_status — varchar(50), nullable, default null. Values will be: "On Road", "Off Road", "Route Canceled"
+byov_enrolled — boolean, default false
+
+Also make sure tech_ldap is editable (it already exists in the schema but is not exposed as an editable field in the UI).
+3. Update the import-denied sync to copy more fields:
+In server/vrm/storage.ts, in the importDeniedToRepairTracker() function, when inserting new rows into vrm_repair_tracker from vrm_rental_decisions, also copy these fields:
+
+notes from vrm_rental_decisions.notes → vrm_repair_tracker.notes
+byov_enrolled from vrm_rental_decisions.byov_enrolled → vrm_repair_tracker.byov_enrolled
+
+4. Replace the side panel in RentalRepairTracker.tsx:
+Replace the current EntryPanel component with a new panel that works like this:
+If the entry has a sourceDecisionId (it came from a denial):
+
+Fetch the decision record from GET /api/vrm/profitability/log/:id (you may need to create this endpoint if it doesn't exist — it should return the single vrm_rental_decisions row by ID)
+Fetch the action log from GET /api/vrm/profitability/log/:id/actions
+Display the same DecisionDetailPanel-style layout that exists in NewRentals.tsx: Outreach Tracking section (SMS Sent, Response, Enrolled in BYOV toggle, Returned Rental toggle with return date), Save Changes button, Action Log with Add Action button (using the same action types: text_sent, call_completed, carl_escalated, epv_issued, byov_enrolled, exception_opened), and Decision Summary (Daily Net, Recommendation, Scorecard, Tenure, Decided By)
+Save outreach changes via PATCH /api/vrm/profitability/log/:id (same endpoint New Rentals uses)
+Add actions via POST /api/vrm/profitability/log/:id/actions (same endpoint New Rentals uses)
+This ensures notes and actions entered from either New Rentals or Rental Repair Tracker appear in both places
+
+Additionally, always show these repair-tracker-specific fields in the panel (whether or not there's a sourceDecisionId):
+
+Editable LDAP field
+Truck Number
+Tech Name, Tech Phone
+Repair Shop Address, Repair Shop Phone
+Main Status / Sub-Status dropdowns (keep existing cascading logic)
+Tech Status dropdown with options: "On Road", "Off Road", "Route Canceled"
+BYOV Enrolled toggle
+Notes field (for entries without a sourceDecisionId, this saves to the repair tracker's own notes field)
+Save button that PATCHes /api/vrm/repair-tracker/:id with all repair-tracker-specific fields
+Delete button (keep existing)
+
+If the entry does NOT have a sourceDecisionId (manually added):
+
+Show only the repair-tracker-specific fields listed above (no outreach tracking or decision summary since there's no decision record)
+The notes and actions stay local to the repair tracker entry
+
+5. Add new columns to the table view:
+Add these columns to the repair tracker table:
+
+"Tech Status" — shows "On Road", "Off Road", or "Route Canceled" as a badge
+"BYOV" — shows Yes/No
+"Notes" — truncated preview of notes text
+
+6. Update the PATCH endpoint:
+In the server route for PATCH /api/vrm/repair-tracker/:id, make sure it accepts and saves techLdap, techStatus, and byovEnrolled in addition to the existing fields.
+7. Create a GET endpoint for a single decision (if it doesn't exist):
+Add GET /api/vrm/profitability/log/:id that returns a single vrm_rental_decisions row by ID. The repair tracker panel needs this to load the linked decision data.
