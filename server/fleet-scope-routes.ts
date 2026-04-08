@@ -3883,7 +3883,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
-          actionText: 'Confirm rental has been returned to Enterprise — contact tech or shop to verify',
+          actionText: isHolmanInAuthorization(getHolmanStatus(t.truckNumber))
+            ? '⚠️ Holman shows In Authorization — confirm with Rob before proceeding. Also confirm rental has been returned to Enterprise — contact tech or shop to verify'
+            : 'Confirm rental has been returned to Enterprise — contact tech or shop to verify',
           sortKey: daysInStatus(t),
           repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
@@ -3897,7 +3899,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
           fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
           lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
-          actionText: 'Check with Morgan — confirm shop appointment is booked and get scheduled date',
+          actionText: isHolmanInAuthorization(getHolmanStatus(t.truckNumber))
+            ? '⚠️ Holman shows In Authorization — confirm with Rob before proceeding. Then check with Morgan — confirm shop appointment is booked and get scheduled date'
+            : 'Check with Morgan — confirm shop appointment is booked and get scheduled date',
           sortKey: daysInStatus(t),
           repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
         });
@@ -3912,6 +3916,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // exclude them here so they are not absorbed by Step 3 before reaching their step.
         if (['Tags', 'Declined Repair'].includes(t.mainStatus ?? '')) return false;
         const hs = getHolmanStatus(t.truckNumber);
+        // If Holman shows authorization is still pending, don't pull into Step 3 — let it fall to Step 4
+        if (isHolmanInAuthorization(hs)) return false;
         const cl = callLogMap[t.id];
         // Call log authoritative: use cl.callStatus first, then truck denormalized field
         const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
@@ -3966,6 +3972,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // --- STEP 4: ESCALATE TO ROB FOR AUTHORIZATION ---
       for (const t of [...allTrucks].filter(t => {
         if (assigned.has(t.id)) return false;
+        // Tags and Declined Repair belong to Steps 6 and 7 — their mainStatus overrules any Holman authorization signal
+        if (['Tags', 'Declined Repair'].includes(t.mainStatus ?? '')) return false;
         const hs = getHolmanStatus(t.truckNumber);
         return t.mainStatus === 'Decision Pending' || isHolmanInAuthorization(hs);
       }).sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
