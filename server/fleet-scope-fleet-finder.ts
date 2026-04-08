@@ -1,4 +1,7 @@
-const FLEET_FINDER_API_URL = 'https://9e30626d-ed67-4c4b-b880-4bddd6e67962-00-2uf4pwa9m1r7r.worf.replit.dev/api/all-vehicles';
+const FLEET_FINDER_API_URL = process.env.FS_FLEET_FINDER_URL || '';
+if (!process.env.FS_FLEET_FINDER_URL) {
+  console.warn('[FleetFinder] FS_FLEET_FINDER_URL is not configured — Fleet Finder integration is disabled.');
+}
 
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes cache - longer TTL to reduce API calls
 const RETRY_DELAY_MS = 2 * 60 * 1000; // 2 minute retry delay on failure (exponential backoff applied)
@@ -240,6 +243,10 @@ function selectBestLocation(vehicle: FleetFinderVehicle): FleetFinderLocationDat
 }
 
 export async function fetchFleetFinderData(): Promise<Map<string, FleetFinderLocationData>> {
+  if (!FLEET_FINDER_API_URL) {
+    return new Map();
+  }
+
   // Check cache validity
   if (cachedFleetFinderData && (Date.now() - cachedFleetFinderData.fetchedAt) < CACHE_TTL_MS) {
     console.log('[FleetFinder] Returning cached data');
@@ -325,6 +332,11 @@ let prewarmAttempts = 0;
 const MAX_PREWARM_ATTEMPTS = 2;
 
 export async function prewarmFleetFinderCache(): Promise<void> {
+  if (!FLEET_FINDER_API_URL) {
+    console.log('[FleetFinder] Skipping pre-warm — FS_FLEET_FINDER_URL not configured.');
+    return;
+  }
+
   console.log('[FleetFinder] Pre-warming cache on startup...');
   
   const attemptFetch = async (): Promise<boolean> => {
