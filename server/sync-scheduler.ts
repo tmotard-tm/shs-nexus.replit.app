@@ -426,6 +426,34 @@ async function getLastRentalSyncDateFromDb(): Promise<string | null> {
 }
 
 /**
+ * Run a catch-up offboarding sync if one hasn't happened today (EST).
+ * Mirrors the rental catch-up pattern: checks the DB sync log for
+ * create_offboarding_tasks and skips if it already ran today.
+ * Safe to call on every startup — multiple restarts in one day are safe.
+ */
+async function runCatchUpOffboardingSyncIfNeeded(): Promise<void> {
+  if (!isSnowflakeConfigured()) return;
+  try {
+    const latestLog = await storage.getLatestSyncLog('create_offboarding_tasks');
+    const todayStr = getDateString(getESTDate());
+    if (latestLog?.completedAt) {
+      const logDate = getDateString(new Date(latestLog.completedAt.getTime() - (5 * 60 * 60 * 1000)));
+      if (logDate === todayStr) {
+        console.log(`[Scheduler] Offboarding sync already ran today (${todayStr}), skipping startup catch-up`);
+        return;
+      }
+    }
+    console.log(`[Scheduler] Startup offboarding catch-up: last run was ${latestLog?.completedAt?.toISOString() ?? 'never'}, running now...`);
+    const { getSnowflakeSyncService: getSvc } = await import('./snowflake-sync-service');
+    await getSvc().syncTermedTechs('startup_catchup');
+    const offboardingResult = await createOffboardingQueueTasks('startup_catchup');
+    console.log(`[Scheduler] Startup offboarding catch-up complete — Techs processed: ${offboardingResult.techsProcessed}, Tasks created: ${offboardingResult.tasksCreated}, Skipped: ${offboardingResult.tasksSkipped}`);
+  } catch (err: any) {
+    console.error('[Scheduler] Startup catch-up offboarding sync failed (non-fatal):', err?.message);
+  }
+}
+
+/**
  * Run a catch-up rental sync if one hasn't happened today (EST).
  * Safe to call on every startup — reads the DB so multiple restarts
  * in the same day will only trigger one sync.
@@ -484,13 +512,18 @@ export function startSyncScheduler(): void {
     console.log('[Scheduler] Production mode detected - setInterval scheduler disabled');
     console.log('[Scheduler] Syncs should be triggered via Replit Scheduled Deployments');
     console.log('[Scheduler] Configure a scheduled task with: npx tsx server/run-sync.ts');
-    // On every production startup, run a catch-up rental sync if today's hasn't run yet.
+    // On every production startup, run catch-up syncs if today's haven't run yet.
     // The DB is the source of truth, so multiple restarts in one day are safe.
     setTimeout(() => {
       runCatchUpRentalSyncIfNeeded().catch(err =>
-        console.error('[Scheduler] Production startup catch-up error:', err?.message)
+        console.error('[Scheduler] Production startup rental catch-up error:', err?.message)
       );
     }, 15000); // 15s delay to let DB and Snowflake fully initialise
+    setTimeout(() => {
+      runCatchUpOffboardingSyncIfNeeded().catch(err =>
+        console.error('[Scheduler] Production startup offboarding catch-up error:', err?.message)
+      );
+    }, 25000); // 25s delay — runs after rental catch-up to avoid resource contention
   }
 }
 
