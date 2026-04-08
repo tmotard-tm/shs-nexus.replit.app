@@ -534,7 +534,34 @@ export async function clearAllNewRentalLogEntries() {
 // ─── Repair Tracker ──────────────────────────────────────────────────────────
 
 export async function listRepairTracker() {
-  return db.select().from(vrmRepairTracker).orderBy(desc(vrmRepairTracker.createdAt));
+  const rows = await db.execute(sql`
+    SELECT
+      rt.id,
+      rt.truck_number AS "truckNumber",
+      rt.tech_ldap AS "techLdap",
+      rt.tech_name AS "techName",
+      rt.tech_phone AS "techPhone",
+      rt.repair_shop_address AS "repairShopAddress",
+      rt.repair_shop_phone AS "repairShopPhone",
+      rt.main_status AS "mainStatus",
+      rt.sub_status AS "subStatus",
+      rt.tech_status AS "techStatus",
+      rt.byov_enrolled AS "byovEnrolled",
+      rt.notes,
+      rt.recommendation,
+      rt.denied_at AS "deniedAt",
+      rt.source_decision_id AS "sourceDecisionId",
+      rt.source_check_id AS "sourceCheckId",
+      rt.created_at AS "createdAt",
+      rt.updated_at AS "updatedAt",
+      rd.returned_rental AS "returnedRental",
+      rd.rental_return_date AS "rentalReturnDate",
+      rd.byov_enrolled AS "decisionByovEnrolled"
+    FROM vrm_repair_tracker rt
+    LEFT JOIN vrm_rental_decisions rd ON rt.source_decision_id = rd.id
+    ORDER BY rt.created_at DESC
+  `);
+  return rows.rows;
 }
 
 export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
@@ -604,26 +631,49 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
        )
   `);
 
-  // Step 2: Fetch only truly denied decisions from the Decision Log
+  // Step 2 (new): One-time cleanup — for each tech_ldap with more than one row,
+  // keep only the most recent (by denied_at, falling back to created_at) and delete the rest.
+  await db.execute(sql`
+    DELETE FROM vrm_repair_tracker
+    WHERE id IN (
+      SELECT id FROM (
+        SELECT id,
+               ROW_NUMBER() OVER (
+                 PARTITION BY LOWER(tech_ldap)
+                 ORDER BY
+                   CASE WHEN notes IS NOT NULL AND notes != '' THEN 0 ELSE 1 END,
+                   CASE WHEN repair_shop_address IS NOT NULL AND repair_shop_address != '' THEN 0 ELSE 1 END,
+                   CASE WHEN main_status != 'Decision Pending' THEN 0 ELSE 1 END,
+                   COALESCE(denied_at, created_at) DESC
+               ) AS rn
+        FROM vrm_repair_tracker
+        WHERE tech_ldap IS NOT NULL
+      ) ranked
+      WHERE rn > 1
+    )
+  `);
+
+  // Step 3: Fetch only truly denied decisions from the Decision Log
   const deniedDecisions = await db
     .select()
     .from(vrmRentalDecisions)
     .where(sql`LOWER(${vrmRentalDecisions.decision}) = 'denied'`);
 
-  // Step 3: Fetch existing Repair Tracker rows for dedup by decision ID only
+  // Step 4: Fetch existing Repair Tracker rows for dedup by decision ID and tech_ldap
   const existingRows = await db
-    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId })
+    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap })
     .from(vrmRepairTracker);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
+  const existingTechLdaps = new Set(
+    existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
+  );
 
-  // Step 4: Filter to only genuinely new denied decisions not already tracked.
-  // Dedup by decision ID only — the Full Log guard has been removed because the Full
-  // Log and Repair Tracker serve different purposes and one should not block the other.
-  // A tech present in the Full Log (e.g. from historical XLSX import) can still have a
-  // new denied decision that needs to appear in the Repair Tracker.
+  // Step 5: Filter to only genuinely new denied decisions not already tracked.
+  // Skip if the decision ID already exists OR the tech's LDAP already has any
+  // tracker row — preventing duplicates when a tech is denied more than once.
   const newDecisions = deniedDecisions.filter(
-    (d) => !existingDecisionIds.has(d.id),
+    (d) => !existingDecisionIds.has(d.id) && !existingTechLdaps.has((d.techLdap ?? "").toUpperCase()),
   );
 
   const totalSkipped = deniedDecisions.length - newDecisions.length;

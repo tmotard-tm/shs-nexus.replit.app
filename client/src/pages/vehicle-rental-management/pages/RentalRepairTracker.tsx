@@ -27,6 +27,9 @@ interface RepairTrackerEntry {
   sourceCheckId: string | null;
   createdAt: string;
   updatedAt: string;
+  returnedRental: boolean | null;
+  rentalReturnDate: string | null;
+  decisionByovEnrolled: boolean | null;
 }
 
 interface DecisionRow {
@@ -241,9 +244,10 @@ interface RepairTrackerFieldsProps {
   isEdit: boolean;
   saveMutation: { mutate: () => void; isPending: boolean };
   deleteMutation?: { mutate: () => void; isPending: boolean };
+  sourceDecisionId?: string | null;
 }
 
-function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutation }: RepairTrackerFieldsProps) {
+function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutation, sourceDecisionId }: RepairTrackerFieldsProps) {
   const subOptions: readonly string[] =
     form.mainStatus && MAIN_STATUSES.includes(form.mainStatus as MainStatus)
       ? SUB_STATUSES[form.mainStatus as MainStatus]
@@ -387,21 +391,23 @@ function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutati
         </select>
       </div>
 
-      <div style={{ ...ROW_STYLE, border: "none", marginBottom: 14, padding: 0 }}>
-        <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Enrolled</div>
-        <div style={{ display: "flex", gap: 8 }}>
-          {([true, false] as boolean[]).map((val) => (
-            <button
-              key={String(val)}
-              type="button"
-              onClick={() => set("byovEnrolled", val)}
-              style={toggleBtnStyle(form.byovEnrolled === val)}
-            >
-              {val ? "Yes" : "No"}
-            </button>
-          ))}
+      {!sourceDecisionId && (
+        <div style={{ ...ROW_STYLE, border: "none", marginBottom: 14, padding: 0 }}>
+          <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Enrolled</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {([true, false] as boolean[]).map((val) => (
+              <button
+                key={String(val)}
+                type="button"
+                onClick={() => set("byovEnrolled", val)}
+                style={toggleBtnStyle(form.byovEnrolled === val)}
+              >
+                {val ? "Yes" : "No"}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
       <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
         Notes
@@ -971,6 +977,7 @@ function DenialEntryPanel({
             isEdit={true}
             saveMutation={saveMutation}
             deleteMutation={deleteMutation}
+            sourceDecisionId={entry.sourceDecisionId}
           />
         </div>
       </div>
@@ -1285,6 +1292,7 @@ export default function RentalRepairTracker() {
                 <th style={thStyle}>Status</th>
                 <th style={thStyle}>Tech Status</th>
                 <th style={thStyle}>BYOV</th>
+                <th style={thStyle}>Rental Returned</th>
                 <th style={{ ...thStyle, maxWidth: 160 }}>Notes</th>
                 <th style={{ ...thStyle, width: 40 }}></th>
               </tr>
@@ -1335,7 +1343,25 @@ export default function RentalRepairTracker() {
                     <TechStatusBadge status={entry.techStatus} />
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft }}>
-                    {entry.byovEnrolled ? "Yes" : "No"}
+                    {entry.sourceDecisionId
+                      ? (entry.decisionByovEnrolled ?? entry.byovEnrolled) ? "Yes" : "No"
+                      : entry.byovEnrolled ? "Yes" : "No"}
+                  </td>
+                  <td style={{ ...tdStyle }}>
+                    {entry.sourceDecisionId === null ? (
+                      <span style={{ color: colors.inkMuted }}>—</span>
+                    ) : entry.returnedRental ? (
+                      <div>
+                        <span style={{ color: colors.green, fontWeight: 600, fontFamily: fonts.dmSans, fontSize: 13 }}>Yes</span>
+                        {entry.rentalReturnDate && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>
+                            {new Date(entry.rentalReturnDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: colors.ink, fontFamily: fonts.dmSans, fontSize: 13 }}>No</span>
+                    )}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
                     {entry.notes ? (
