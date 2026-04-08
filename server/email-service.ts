@@ -11,9 +11,9 @@ if (apiKey) {
 }
 
 // Default verified sender email — sourced from SENDGRID_EMAIL secret
-const DEFAULT_FROM_EMAIL = process.env.SENDGRID_EMAIL || 'stephen.wong@transformco.com';
+const DEFAULT_FROM_EMAIL = process.env.SENDGRID_EMAIL || '';
 if (!process.env.SENDGRID_EMAIL) {
-  console.warn('SENDGRID_EMAIL secret not set — falling back to hardcoded address. Emails may fail if it is not a verified SendGrid sender.');
+  console.warn('SENDGRID_EMAIL secret not set — outgoing emails will be blocked until this is configured.');
 }
 
 interface EmailParams {
@@ -30,6 +30,11 @@ export interface EmailResult {
 }
 
 export async function sendEmail(params: EmailParams): Promise<EmailResult> {
+  if (!DEFAULT_FROM_EMAIL) {
+    console.error('EMAIL NOT SENT - SENDGRID_EMAIL secret is not configured');
+    return { success: false, error: 'SENDGRID_EMAIL secret not configured' };
+  }
+
   const fromEmail = params.from || DEFAULT_FROM_EMAIL;
   
   const textContent = params.text || (params.html ? params.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : 'Please view this email in an HTML-capable email client.');
