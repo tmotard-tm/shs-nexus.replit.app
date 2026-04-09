@@ -1041,7 +1041,8 @@ export default function FleetManagement() {
   const { data: vehicleOpLogs, isLoading: logsLoading } = useQuery<any[]>({
     queryKey: ["/api/fleet-ops/logs", selectedVehicle?.vehicleNumber],
     enabled: !!selectedVehicle?.vehicleNumber,
-    staleTime: 2 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
     queryFn: async () => {
       const res = await fetch(`/api/fleet-ops/logs?truckNumber=${encodeURIComponent(selectedVehicle!.vehicleNumber)}`, { credentials: "include" });
       if (!res.ok) return [];
