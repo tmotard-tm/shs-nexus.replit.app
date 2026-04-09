@@ -6,3 +6,15 @@ id = "EjiRdfMjaMBkIoz5B7zTK"
 uri = "file://docs/fleet-truck-database-architecture.md"
 type = "text"
 title = "Fleet Truck Database Architecture"
+
+[[outputs]]
+id = "NVtg7ZS4eAtjFCzI7SJUX"
+uri = "file://external-apis.csv"
+type = "table"
+title = "External System APIs"
+
+[[outputs]]
+id = "xqv5bKaUS6CWHq5M0QtYP"
+uri = "file://spare_trucks_rental_match.csv"
+type = "table"
+title = "Spare Trucks & Closest Rental Match"

@@ -474,7 +474,13 @@ class TPMSService {
     let data: any;
     try { data = JSON.parse(rawText); } catch { data = rawText; }
 
-    if (data?.messages && Array.isArray(data.messages) && !data.messages.includes('SUCCESS')) {
+    // Only throw if messages is non-empty and doesn't contain SUCCESS.
+    // A successful PUT returns messages:[] (empty), updateSuccess:[...], failedUpdates:[].
+    // Also throw if failedUpdates is non-empty regardless of messages.
+    if (data?.failedUpdates && Array.isArray(data.failedUpdates) && data.failedUpdates.length > 0) {
+      throw new Error(`TPMS rejected update: ${data.failedUpdates.join(', ')}`);
+    }
+    if (data?.messages && Array.isArray(data.messages) && data.messages.length > 0 && !data.messages.includes('SUCCESS')) {
       throw new Error(`TPMS rejected update: ${data.messages.join(', ')}`);
     }
 
