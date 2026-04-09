@@ -316,6 +316,26 @@ export default function FleetManagement() {
     refetchOnWindowFocus: false,
   });
 
+  // Full mismatch truck list — used to power the stat card filter accurately
+  const { data: alignmentListData } = useQuery<{ data: { truckNumber: string }[] }>({
+    queryKey: ['/api/fleet-ops/mismatches', 'list'],
+    queryFn: async () => {
+      const res = await fetch('/api/fleet-ops/mismatches', { credentials: 'include' });
+      if (!res.ok) return { data: [] };
+      return res.json();
+    },
+    staleTime: 14 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
+  const mismatchTruckSet = new Set<string>(
+    (alignmentListData?.data ?? []).flatMap(r => {
+      const n = r.truckNumber?.replace(/^0+/, '') || '';
+      return n ? [n, n.padStart(5, '0'), r.truckNumber] : [];
+    })
+  );
+
   // Fetch vehicles from Holman API with TPMS enrichment.
   // refetchInterval aligns with the server's 15-minute in-memory cache so the client
   // automatically picks up background-refreshed data without a manual sync trigger.
@@ -1386,7 +1406,9 @@ export default function FleetManagement() {
       // Stat card quick-filter
       const tpmsId2 = vehicle.tpmsAssignedTechId?.trim() || '';
       const holmanId2 = vehicle.holmanTechAssigned?.trim() || '';
-      const isMismatchSC = (holmanId2 && tpmsId2 && holmanId2.toLowerCase() !== tpmsId2.toLowerCase()) || (holmanId2 && !tpmsId2);
+      const isMismatchSC = mismatchTruckSet.size > 0
+        ? mismatchTruckSet.has(vehicle.vehicleNumber) || mismatchTruckSet.has(toCanonical(vehicle.vehicleNumber))
+        : (holmanId2 && tpmsId2 && holmanId2.toLowerCase() !== tpmsId2.toLowerCase()) || !!(holmanId2 && !tpmsId2);
       const isRentalSC = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
         || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
         || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
