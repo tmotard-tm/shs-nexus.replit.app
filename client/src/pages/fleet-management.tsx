@@ -480,6 +480,7 @@ export default function FleetManagement() {
     repairStatus?: number; repairReason?: number; vendor?: string;
     etaDate?: string; estimateCost?: number;
   }>({});
+  const [returnToAssignAfterRepair, setReturnToAssignAfterRepair] = useState(false);
 
   // Assign form — tech lookup / typeahead
   const [assignLookupStatus, setAssignLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
@@ -3133,9 +3134,25 @@ export default function FleetManagement() {
                     value={assignmentType}
                     onValueChange={(v: 'assigned' | 'temp' | 'dummy' | 'in-repair') => {
                       setAssignmentType(v);
-                      // Reset AMS status to the natural default for this Holman type
                       setAssignAmsStatusId(v === 'in-repair' ? 6 : 1);
                       setAssignRepairData({});
+                      if (v === 'in-repair') {
+                        setAmsRepairInRepair(true);
+                        setAmsRepairDate("");
+                        setAmsRepairReason("");
+                        setAmsRepairVendor("");
+                        setAmsRepairETA("");
+                        setAmsRepairStatus("");
+                        setAmsRepairEstimate("");
+                        setAmsRepairRentalCar("");
+                        setAmsRepairRentalStart("");
+                        setAmsRepairRentalEnd("");
+                        setAmsRepairFinalDisposition("");
+                        setAmsRepairDispositionReason("");
+                        setAmsRepairFinalDate("");
+                        setReturnToAssignAfterRepair(true);
+                        setActiveModal("amsRepair");
+                      }
                     }}
                   >
                     <SelectTrigger className="mt-1">
@@ -3176,48 +3193,34 @@ export default function FleetManagement() {
 
               {/* Repair details — shown when In Repair is selected */}
               {assignmentType === 'in-repair' && (
-                <div className="border rounded-md p-3 space-y-3 bg-amber-50/40 dark:bg-amber-900/10">
-                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">AMS Repair Details</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs">Repair Status</Label>
-                      <Input
-                        type="number"
-                        placeholder="Status code"
-                        className="mt-1"
-                        value={assignRepairData.repairStatus ?? ""}
-                        onChange={e => setAssignRepairData(d => ({ ...d, repairStatus: e.target.value ? parseInt(e.target.value) : undefined }))}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Repair Reason</Label>
-                      <Input
-                        type="number"
-                        placeholder="Reason code"
-                        className="mt-1"
-                        value={assignRepairData.repairReason ?? ""}
-                        onChange={e => setAssignRepairData(d => ({ ...d, repairReason: e.target.value ? parseInt(e.target.value) : undefined }))}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">Vendor</Label>
-                      <Input
-                        placeholder="Vendor name"
-                        className="mt-1"
-                        value={assignRepairData.vendor ?? ""}
-                        onChange={e => setAssignRepairData(d => ({ ...d, vendor: e.target.value || undefined }))}
-                      />
-                    </div>
-                    <div>
-                      <Label className="text-xs">ETA Date</Label>
-                      <Input
-                        type="date"
-                        className="mt-1"
-                        value={assignRepairData.etaDate ?? ""}
-                        onChange={e => setAssignRepairData(d => ({ ...d, etaDate: e.target.value || undefined }))}
-                      />
-                    </div>
+                <div className="border rounded-md p-3 bg-amber-50/40 dark:bg-amber-900/10 flex items-start justify-between gap-3">
+                  <div className="space-y-1 flex-1">
+                    <p className="text-sm font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+                      <Wrench className="h-3.5 w-3.5" /> Repair Details
+                    </p>
+                    {amsRepairVendor || amsRepairETA || amsRepairReason || amsRepairStatus ? (
+                      <div className="text-xs text-muted-foreground space-y-0.5">
+                        {amsRepairVendor && <div>Vendor: <span className="font-medium text-foreground">{amsRepairVendor}</span></div>}
+                        {amsRepairETA && <div>ETA: <span className="font-medium text-foreground">{amsRepairETA}</span></div>}
+                        {amsRepairReason && <div>Reason: <span className="font-medium text-foreground">{amsRepairReason}</span></div>}
+                        {amsRepairStatus && <div>Status: <span className="font-medium text-foreground">{amsRepairStatus}</span></div>}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No repair details entered yet.</p>
+                    )}
                   </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="shrink-0"
+                    onClick={() => {
+                      setReturnToAssignAfterRepair(true);
+                      setActiveModal("amsRepair");
+                    }}
+                  >
+                    <Wrench className="h-3.5 w-3.5 mr-1.5" />
+                    {amsRepairVendor || amsRepairETA || amsRepairReason || amsRepairStatus ? "Edit" : "Enter Details"}
+                  </Button>
                 </div>
               )}
 
@@ -3946,7 +3949,16 @@ export default function FleetManagement() {
       </Dialog>
 
       {/* AMS Repair Updates Modal */}
-      <Dialog open={activeModal === "amsRepair"} onOpenChange={(o) => { if (!o) setActiveModal(null); }}>
+      <Dialog open={activeModal === "amsRepair"} onOpenChange={(o) => {
+        if (!o) {
+          if (returnToAssignAfterRepair) {
+            setReturnToAssignAfterRepair(false);
+            setActiveModal("assign");
+          } else {
+            setActiveModal(null);
+          }
+        }
+      }}>
         <DialogContent className="max-w-lg max-h-[90vh] flex flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2"><Wrench className="h-4 w-4" />Repair Updates — {selectedVehicle?.vehicleNumber}</DialogTitle>
