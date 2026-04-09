@@ -58,6 +58,20 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 
+interface FleetOpsSystemResult {
+  status: "success" | "failed" | "skipped" | "pending";
+  message: string;
+}
+
+interface FleetOpsResult {
+  tpms: FleetOpsSystemResult;
+  holman: FleetOpsSystemResult;
+  ams: FleetOpsSystemResult;
+  overallSuccess: boolean;
+  partialSuccess: boolean;
+  message?: string;
+}
+
 type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
 
 const ownerColors: Record<OwnerName, string> = {
@@ -206,18 +220,32 @@ export default function TruckDetail() {
   });
 
   const assignTechMutation = useMutation({
-    mutationFn: async ({ enterpriseId, districtNo }: { enterpriseId: string; districtNo: string }) => {
-      return apiRequest("POST", `/api/tpms/vehicles/${encodeURIComponent(truckNumberForSpecialty)}/assign`, { enterpriseId, districtNo });
+    mutationFn: async ({ enterpriseId, districtNo, techName }: { enterpriseId: string; districtNo: string; techName: string }): Promise<FleetOpsResult> => {
+      const res = await apiRequest("POST", `/api/fleet-ops/assign`, { truckNumber: truckNumberForSpecialty, ldapId: enterpriseId, districtNo, techName });
+      return res.json() as Promise<FleetOpsResult>;
     },
-    onSuccess: () => {
-      toast({ title: "Technician Assigned", description: "Tech assigned to vehicle in TPMS." });
+    onSuccess: (result: FleetOpsResult) => {
+      if (result.overallSuccess) {
+        toast({ title: "Technician Assigned", description: "Tech assigned to vehicle in all systems." });
+      } else if (result.partialSuccess) {
+        const systemEntries: [string, FleetOpsSystemResult][] = [["TPMS", result.tpms], ["Holman", result.holman], ["AMS", result.ams]];
+        const succeeded = systemEntries.filter(([, s]) => s.status === "success" || s.status === "skipped").map(([name]) => name).join(" and ");
+        const failed = systemEntries.filter(([, s]) => s.status === "failed" || s.status === "pending").map(([name]) => name).join(", ");
+        toast({
+          title: "Partially Assigned",
+          description: `Updated in ${succeeded} — ${failed} update pending`,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Assignment failed", description: result.message || "All systems failed.", variant: "destructive" });
+      }
       setShowAssignTechModal(false);
       setTechSearchInput("");
       setTechSearchQuery("");
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
     },
-    onError: (err: any) => {
+    onError: (err: Error) => {
       toast({ title: "Assignment failed", description: err.message, variant: "destructive" });
     },
   });
@@ -2103,12 +2131,26 @@ export default function TruckDetail() {
                                   onClick={async () => {
                                     if (!confirm(`Unassign technician ${currentEnterprise} from truck ${truckNumberForSpecialty}?`)) return;
                                     try {
-                                      await apiRequest("DELETE", `/api/tpms/vehicles/${encodeURIComponent(truckNumberForSpecialty)}/assign`);
-                                      toast({ title: "Unassigned", description: "Technician unassigned from vehicle in TPMS." });
+                                      const res = await apiRequest("POST", `/api/fleet-ops/unassign`, { truckNumber: truckNumberForSpecialty, ldapId: currentEnterprise });
+                                      const result = await res.json() as FleetOpsResult;
+                                      if (result.overallSuccess) {
+                                        toast({ title: "Unassigned", description: "Technician unassigned from vehicle in all systems." });
+                                      } else if (result.partialSuccess) {
+                                        const systemEntries: [string, FleetOpsSystemResult][] = [["TPMS", result.tpms], ["Holman", result.holman], ["AMS", result.ams]];
+                                        const succeeded = systemEntries.filter(([, s]) => s.status === "success" || s.status === "skipped").map(([name]) => name).join(" and ");
+                                        const failed = systemEntries.filter(([, s]) => s.status === "failed" || s.status === "pending").map(([name]) => name).join(", ");
+                                        toast({
+                                          title: "Partially Unassigned",
+                                          description: `Updated in ${succeeded} — ${failed} update pending`,
+                                          variant: "destructive",
+                                        });
+                                      } else {
+                                        toast({ title: "Unassign failed", description: result.message || "All systems failed.", variant: "destructive" });
+                                      }
                                       queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
                                       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
-                                    } catch (err: any) {
-                                      toast({ title: "Unassign failed", description: err.message, variant: "destructive" });
+                                    } catch (err: unknown) {
+                                      toast({ title: "Unassign failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
                                     }
                                   }}
                                 >
@@ -2339,6 +2381,7 @@ export default function TruckDetail() {
                       assignTechMutation.mutate({
                         enterpriseId: tech.enterpriseId,
                         districtNo: tech.districtNo || "",
+                        techName: `${tech.firstName || ""} ${tech.lastName || ""}`.trim() || tech.enterpriseId,
                       });
                     }}
                   >
