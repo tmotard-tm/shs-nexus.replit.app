@@ -4091,23 +4091,24 @@ export default function FleetManagement() {
               onClick={() => {
                 const updateUser = user?.username || "nexus";
                 const isFinalizing = amsRepairFinalDisposition && amsRepairFinalDisposition !== "__none__";
+                const toAmsDate = (d: string) => { const [y, m, dd] = d.split("-"); return `${m}/${dd}/${y}`; };
                 const payload: Record<string, any> = {
                   inRepair: amsRepairInRepair,
                   updateUser,
                 };
-                if (amsRepairDate) payload.repairDateStart = amsRepairDate;
+                if (amsRepairDate) payload.repairDateStart = toAmsDate(amsRepairDate);
                 if (amsRepairReason && amsRepairReason !== "__none__") payload.repairReason = parseInt(amsRepairReason);
                 if (amsRepairStatus && amsRepairStatus !== "__none__") payload.repairStatus = parseInt(amsRepairStatus);
                 if (amsRepairVendor) payload.vendor = amsRepairVendor;
-                if (amsRepairETA) payload.etaDate = amsRepairETA;
+                if (amsRepairETA) payload.etaDate = toAmsDate(amsRepairETA);
                 if (amsRepairEstimate) payload.estimateCost = parseFloat(amsRepairEstimate);
                 if (amsRepairRentalCar && amsRepairRentalCar !== "__none__") payload.rentalCar = parseInt(amsRepairRentalCar);
-                if (amsRepairRentalStart) payload.rentalStartDate = amsRepairRentalStart;
-                if (amsRepairRentalEnd) payload.rentalEndDate = amsRepairRentalEnd;
+                if (amsRepairRentalStart) payload.rentalStartDate = toAmsDate(amsRepairRentalStart);
+                if (amsRepairRentalEnd) payload.rentalEndDate = toAmsDate(amsRepairRentalEnd);
                 if (isFinalizing) {
                   payload.finalDisposition = parseInt(amsRepairFinalDisposition);
                   if (amsRepairDispositionReason && amsRepairDispositionReason !== "__none__") payload.finalDispositionReason = parseInt(amsRepairDispositionReason);
-                  if (amsRepairFinalDate) payload.finalDispositionDate = amsRepairFinalDate;
+                  if (amsRepairFinalDate) payload.finalDispositionDate = toAmsDate(amsRepairFinalDate);
                 }
                 amsRepairMutation.mutate(payload);
               }}
