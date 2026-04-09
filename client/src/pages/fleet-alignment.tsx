@@ -60,7 +60,7 @@ interface BulkRunItem {
   truckNumber: string;
   action: string;
   ldapId: string | null;
-  status: "pending" | "completed" | "failed" | "skipped" | "cancelled";
+  status: "pending" | "completed" | "failed" | "skipped" | "cancelled" | "conflict";
   outcome: any;
   processedAt: string | null;
 }
@@ -79,6 +79,7 @@ interface BulkRun {
   failedCount: number;
   skippedCount: number;
   cancelledCount: number;
+  conflictCount: number;
 }
 
 const ROOT_CAUSE_META: Record<RootCause, { label: string; color: string; badgeCls: string; icon: any; severity: number }> = {
@@ -127,13 +128,16 @@ function SystemCell({ label, techId, techName, labelColor }: { label: string; te
 function RunProgressDialog({
   runId,
   onClose,
+  onForceConflicts,
 }: {
   runId: string;
   onClose: () => void;
+  onForceConflicts: (conflictTrucks: { truckNumber: string; ldapId: string | null; outcome: any }[]) => void;
 }) {
   const { toast } = useToast();
   const [highFailureWarning, setHighFailureWarning] = useState(false);
   const [dismissedWarning, setDismissedWarning] = useState(false);
+  const [showConflictConfirm, setShowConflictConfirm] = useState(false);
   const prevItems = useRef<BulkRunItem[]>([]);
 
   const { data: run } = useQuery<BulkRun>({
@@ -171,10 +175,11 @@ function RunProgressDialog({
   }, [run, dismissedWarning]);
 
   const totalItems = run ? run.items.length : 0;
-  const doneItems = run ? (run.completedCount + run.failedCount + run.skippedCount) : 0;
+  const doneItems = run ? (run.completedCount + run.failedCount + run.skippedCount + (run.conflictCount ?? 0)) : 0;
   const progress = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
   const isRunning = run?.status === "running";
   const isDone = run && (run.status === "completed" || run.status === "cancelled");
+  const conflictItems = run?.items.filter(i => i.status === "conflict") ?? [];
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !isRunning) onClose(); }}>
@@ -187,7 +192,12 @@ function RunProgressDialog({
           <DialogDescription>
             {isRunning
               ? `Processing vehicles — ${doneItems} of ${totalItems} done`
-              : `${run?.completedCount ?? 0} succeeded · ${run?.failedCount ?? 0} failed · ${run?.skippedCount ?? 0} skipped`}
+              : [
+                  `${run?.completedCount ?? 0} succeeded`,
+                  `${run?.failedCount ?? 0} failed`,
+                  `${run?.skippedCount ?? 0} skipped`,
+                  ...(run?.conflictCount ? [`${run.conflictCount} need confirmation`] : []),
+                ].join(" · ")}
           </DialogDescription>
         </DialogHeader>
 
@@ -212,6 +222,68 @@ function RunProgressDialog({
             </Alert>
           )}
 
+          {/* Conflict confirmation alert — shown after run finishes if any conflicts exist */}
+          {isDone && conflictItems.length > 0 && !showConflictConfirm && (
+            <Alert className="border-amber-300 bg-amber-50 dark:bg-amber-950/20">
+              <AlertTriangle className="h-4 w-4 text-amber-600" />
+              <AlertTitle className="text-amber-800 dark:text-amber-300">
+                {conflictItems.length} truck{conflictItems.length > 1 ? "s" : ""} need confirmation
+              </AlertTitle>
+              <AlertDescription className="flex items-center justify-between gap-4 flex-wrap">
+                <span className="text-amber-700 dark:text-amber-400 text-sm">
+                  TPMS shows a different tech assigned to these trucks. Review and confirm to proceed.
+                </span>
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white shrink-0"
+                  onClick={() => setShowConflictConfirm(true)}
+                >
+                  Review conflicts ({conflictItems.length})
+                </Button>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          {/* Conflict detail + confirm UI */}
+          {showConflictConfirm && conflictItems.length > 0 && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/20 p-3 space-y-3">
+              <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                Confirm forced unassign for {conflictItems.length} truck{conflictItems.length > 1 ? "s" : ""}
+              </p>
+              <div className="space-y-1.5">
+                {conflictItems.map(item => (
+                  <div key={item.id} className="text-xs bg-white dark:bg-amber-900/20 rounded px-2 py-1.5 border border-amber-200">
+                    <span className="font-mono font-semibold">#{item.truckNumber}</span>
+                    {" — "}
+                    <span className="text-muted-foreground">{item.outcome?.message ?? `${item.outcome?.conflictTech ?? item.ldapId} is on truck ${item.outcome?.conflictTruck}`}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Proceeding will unassign each tech from their current truck. This cannot be undone.
+              </p>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="bg-amber-600 hover:bg-amber-700 text-white"
+                  onClick={() => {
+                    onForceConflicts(conflictItems.map(i => ({
+                      truckNumber: i.truckNumber,
+                      ldapId: i.ldapId,
+                      outcome: i.outcome,
+                    })));
+                    setShowConflictConfirm(false);
+                  }}
+                >
+                  Confirm & proceed
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setShowConflictConfirm(false)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+
           {/* Per-vehicle results */}
           <div className="space-y-1">
             {(run?.items ?? []).filter(i => i.status !== "pending").map(item => (
@@ -219,13 +291,24 @@ function RunProgressDialog({
                 {item.status === "completed" && <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />}
                 {item.status === "failed" && <XCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
                 {item.status === "skipped" && <AlertCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                {item.status === "conflict" && <AlertTriangle className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
                 <span className="font-mono text-xs">#{item.truckNumber}</span>
                 <span className="text-xs text-muted-foreground flex-1">{item.action}{item.ldapId ? ` → ${item.ldapId}` : ""}</span>
                 {item.status === "failed" && item.outcome?.error && (
                   <span className="text-xs text-red-600 truncate max-w-[200px]">{item.outcome.error}</span>
                 )}
-                <span className={`text-xs font-medium capitalize ${item.status === "completed" ? "text-green-600" : item.status === "failed" ? "text-red-600" : "text-muted-foreground"}`}>
-                  {item.status}
+                {item.status === "conflict" && (
+                  <span className="text-xs text-amber-600 truncate max-w-[200px]">
+                    {item.outcome?.conflictTech} on truck #{item.outcome?.conflictTruck}
+                  </span>
+                )}
+                <span className={`text-xs font-medium capitalize ${
+                  item.status === "completed" ? "text-green-600"
+                  : item.status === "failed" ? "text-red-600"
+                  : item.status === "conflict" ? "text-amber-600"
+                  : "text-muted-foreground"
+                }`}>
+                  {item.status === "conflict" ? "Needs review" : item.status}
                 </span>
               </div>
             ))}
@@ -928,6 +1011,27 @@ export default function FleetAlignment() {
             setActiveRunId(null);
             queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/bulk-runs"] });
             queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/mismatches"] });
+          }}
+          onForceConflicts={async (conflictTrucks) => {
+            try {
+              const res = await apiRequest("POST", "/api/fleet-ops/bulk-reconcile", {
+                vehicles: conflictTrucks.map(c => ({
+                  truckNumber: c.truckNumber,
+                  action: "unassign",
+                  ldapId: c.ldapId ?? c.outcome?.conflictTech ?? undefined,
+                })),
+                forceConflictTrucks: conflictTrucks.map(c => c.truckNumber),
+              });
+              if (!res.ok) {
+                const body = await res.json().catch(() => ({ message: "Request failed" }));
+                toast({ title: "Force proceed failed", description: body.message, variant: "destructive" });
+                return;
+              }
+              const data = await res.json();
+              setActiveRunId(data.runId);
+            } catch (err: any) {
+              toast({ title: "Force proceed failed", description: err.message, variant: "destructive" });
+            }
           }}
         />
       )}

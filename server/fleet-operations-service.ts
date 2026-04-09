@@ -35,6 +35,7 @@ interface UnassignTechParams {
   ldapId: string;
   requestedBy: string;
   notes?: string;
+  skipConflictCheck?: boolean;
 }
 
 interface UpdateAddressParams {
@@ -189,13 +190,19 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       if (!current.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
-      // Guard: if the cached tech is live-assigned to a DIFFERENT truck, don't clear them —
-      // their assignment on that other truck is valid, and the target truck is already clear.
+      // Guard: if the cached tech is live-assigned to a DIFFERENT truck, surface as a conflict
+      // so the caller can seek confirmation before clearing their valid assignment elsewhere.
+      // If skipConflictCheck is set (user has confirmed), bypass this guard and proceed.
       const canonicalCurrent = toCanonical(current.truckNo.trim());
       const canonicalTarget  = toCanonical(params.truckNumber);
-      if (canonicalCurrent !== canonicalTarget) {
-        console.log(`[FleetOps-TPMS] "${tpmsLdap}" is on truck "${current.truckNo}", not "${params.truckNumber}" — target truck already clear in TPMS`);
-        return { status: "skipped", message: `Already clear in TPMS (${tpmsLdap} is on truck ${current.truckNo}, not ${params.truckNumber})` };
+      if (canonicalCurrent !== canonicalTarget && !params.skipConflictCheck) {
+        console.log(`[FleetOps-TPMS] "${tpmsLdap}" is on truck "${current.truckNo}", not "${params.truckNumber}" — returning conflict for user confirmation`);
+        return {
+          status: "conflict",
+          message: `${tpmsLdap} is currently assigned to truck ${current.truckNo} in TPMS. Confirm to unassign them.`,
+          conflictTech: tpmsLdap,
+          conflictTruck: current.truckNo,
+        } as any;
       }
       try {
         await tpms.updateTechInfo({

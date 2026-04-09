@@ -15560,7 +15560,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const items = dbRows<RunItem>(itemsResult);
 
       const processedItems = items.filter(i => ["completed", "failed"].includes(i.status));
-      const failedItems = items.filter(i => i.status === "failed");
       // High-failure warning: evaluate against the first 10 processed items in true processing order
       // (ORDER BY processed_at ASC, so this is deterministic and stable once set).
       const first10Processed = processedItems.slice(0, 10);
@@ -15584,11 +15583,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           outcome: i.outcome,
           processedAt: i.processed_at,
         })),
-        pendingCount: items.filter(i => i.status === "pending").length,
+        pendingCount:   items.filter(i => i.status === "pending").length,
         completedCount: items.filter(i => i.status === "completed").length,
-        failedCount: items.filter(i => i.status === "failed").length,
-        skippedCount: items.filter(i => i.status === "skipped").length,
+        failedCount:    items.filter(i => i.status === "failed").length,
+        skippedCount:   items.filter(i => i.status === "skipped").length,
         cancelledCount: items.filter(i => i.status === "cancelled").length,
+        conflictCount:  items.filter(i => i.status === "conflict").length,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -15751,15 +15751,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             } else if (item.action === "unassign") {
               // Full cross-system unassign
+              const forceConflictTrucks: string[] = body.forceConflictTrucks ?? [];
+              const skipConflictCheck = forceConflictTrucks.includes(item.truck_number);
               const result = await fleetOpsService.unassignTech({
                 truckNumber: item.truck_number,
                 ldapId: item.ldap_id || "",
                 requestedBy: `${username}:bulk-fix`,
                 notes: `Bulk fix run ${runId}`,
+                skipConflictCheck,
               });
               if ("locked" in result) {
                 outcome = { locked: true, message: result.message };
                 newStatus = "failed";
+              } else if ((result as any).tpms?.status === "conflict" || (result as any).status === "conflict") {
+                // TPMS detected a different tech on a different truck — needs user confirmation
+                const conflictInfo = (result as any).tpms ?? result;
+                outcome = {
+                  conflict: true,
+                  message: conflictInfo.message,
+                  conflictTech: conflictInfo.conflictTech,
+                  conflictTruck: conflictInfo.conflictTruck,
+                  holman: (result as any).holman,
+                  ams: (result as any).ams,
+                };
+                newStatus = "conflict";
               } else {
                 outcome = { overallSuccess: result.overallSuccess, partialSuccess: result.partialSuccess, tpms: result.tpms, holman: result.holman, ams: result.ams };
                 // Partial success means ≥1 system failed — mark as failed for accurate failure metrics and warning logic
@@ -15820,6 +15835,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
           if (newStatus === "completed") completedCount++;
           if (newStatus === "failed") failedCount++;
+          // "conflict" items are not counted as failures — they need user confirmation to proceed
 
           // Wait 2 seconds between operations
           if (idx < pendingItems.length - 1) {
