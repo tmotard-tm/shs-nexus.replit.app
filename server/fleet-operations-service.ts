@@ -107,7 +107,9 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       DROP_RETURN: "D",
       ALTERNATE: "A",
     };
-    const updatedBy = (params.requestedBy as string | undefined)?.trim() || "NEXUS";
+    // TPMS enforces updatedBy must be 6–9 chars. Strip any ":bulk-fix" / colon suffix added by
+    // callers for audit purposes, then cap at 9 characters.
+    const updatedBy = ((params.requestedBy as string | undefined)?.split(":")[0]?.trim() || "NEXUS").substring(0, 9);
 
     if (action === "assign") {
       const tpmsTruckNo = toTpmsRef(params.truckNumber);
