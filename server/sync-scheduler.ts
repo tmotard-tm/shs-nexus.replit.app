@@ -1,9 +1,9 @@
 import { getSnowflakeSyncService } from './snowflake-sync-service';
 import { isSnowflakeConfigured } from './snowflake-service';
 import { db } from './db';
-import { queueItems } from '@shared/schema';
+import { queueItems, amsVehiclesCache, externalWatermarkState, fleetOperationLog, operationEvents, holmanVehiclesCache, tpmsCachedAssignments } from '@shared/schema';
 import { rentalImports } from '@shared/fleet-scope-schema';
-import { eq, and, isNotNull, desc } from 'drizzle-orm';
+import { eq, and, isNotNull, desc, gte } from 'drizzle-orm';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
 import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
@@ -15,6 +15,7 @@ const SEPARATION_POLL_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for separation
 const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for operation events retry
 const OFFBOARDING_TASKS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for offboarding gap-check
+const EXTERNAL_WATERMARK_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for TPMS/AMS external change detection
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
@@ -22,6 +23,8 @@ let lastSeparationPollTime: number | null = null; // Sprint 0: Track separation 
 let lastNotificationBackfillTime: number | null = null;
 let lastOpEventsRetryTime: number | null = null;
 let lastOffboardingTasksTime: number | null = null;
+let lastTpmsPollTime: number | null = null; // External TPMS watermark poll
+let lastAmsPollTime: number | null = null; // External AMS watermark poll
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -94,6 +97,8 @@ async function checkAndRunSync(): Promise<void> {
 
   await checkAndRunOpEventsRetry();
   await checkAndRunOffboardingTasks();
+  await checkAndRunTpmsPoll();
+  await checkAndRunAmsPoll();
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -200,6 +205,387 @@ async function checkAndRunOffboardingTasks(): Promise<void> {
     console.log(`[Scheduler] Offboarding gap-check complete: ${result.techsProcessed} techs, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped`);
   } catch (error: any) {
     console.error('[Scheduler] Error during offboarding gap-check:', error?.message);
+  }
+}
+
+// ─── Watermark helpers ────────────────────────────────────────────────────────
+
+/**
+ * Read the last-poll timestamp for a given system from the DB watermark table.
+ * Returns null if no record exists yet.
+ */
+async function getWatermarkFromDb(systemName: string): Promise<Date | null> {
+  try {
+    const rows = await db.select({ lastPollAt: externalWatermarkState.lastPollAt })
+      .from(externalWatermarkState)
+      .where(eq(externalWatermarkState.systemName, systemName))
+      .limit(1);
+    return rows[0]?.lastPollAt ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist a new watermark timestamp for a given system.
+ */
+async function saveWatermarkToDb(systemName: string, ts: Date, status: string = 'ok', errorMsg: string | null = null): Promise<void> {
+  try {
+    await db.insert(externalWatermarkState).values({
+      systemName,
+      lastPollAt: ts,
+      lastPollStatus: status,
+      lastErrorMessage: errorMsg,
+    }).onConflictDoUpdate({
+      target: externalWatermarkState.systemName,
+      set: { lastPollAt: ts, lastPollStatus: status, lastErrorMessage: errorMsg, updatedAt: new Date() },
+    });
+  } catch (err: any) {
+    console.error(`[Watermark] Failed to save watermark for ${systemName}:`, err?.message);
+  }
+}
+
+/**
+ * Check whether a Nexus operation_events row exists for a given truck within the last 30 minutes.
+ * Used to distinguish external changes from changes Nexus itself orchestrated.
+ */
+async function hasPendingNexusOp(truckNumber: string): Promise<boolean> {
+  try {
+    const cutoff = new Date(Date.now() - 30 * 60 * 1000);
+    const rows = await db.select({ id: operationEvents.id })
+      .from(operationEvents)
+      .where(and(
+        eq(operationEvents.truckNumber, truckNumber),
+        gte(operationEvents.createdAt, cutoff),
+      ))
+      .limit(1);
+    return rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ─── TPMS Watermark Poll ──────────────────────────────────────────────────────
+
+async function checkAndRunTpmsPoll(): Promise<void> {
+  try {
+    const now = Date.now();
+    if (lastTpmsPollTime !== null && (now - lastTpmsPollTime) < EXTERNAL_WATERMARK_POLL_INTERVAL_MS) {
+      return;
+    }
+
+    // Seed from DB if first run in this process
+    let watermarkTs: Date | null = null;
+    if (lastTpmsPollTime === null) {
+      watermarkTs = await getWatermarkFromDb('tpms');
+    } else {
+      watermarkTs = new Date(lastTpmsPollTime);
+    }
+    lastTpmsPollTime = now;
+
+    // Default watermark: 15 minutes ago if no prior run
+    if (!watermarkTs) {
+      watermarkTs = new Date(now - EXTERNAL_WATERMARK_POLL_INTERVAL_MS);
+    }
+
+    const { getTpmsApiService } = await import('./tpms-api-service');
+    const tpmsApi = getTpmsApiService();
+
+    let techs: any[];
+    try {
+      const result = await tpmsApi.getTechsUpdatedAfter(watermarkTs.toISOString());
+      techs = result?.techInfoList ?? (Array.isArray(result) ? result : []);
+    } catch (err: any) {
+      console.error('[Scheduler] TPMS watermark poll failed (non-fatal):', err?.message);
+      await saveWatermarkToDb('tpms', watermarkTs, 'error', err?.message);
+      return;
+    }
+
+    const pollTime = new Date();
+    let upserted = 0;
+    let flagged = 0;
+
+    for (const tech of techs) {
+      try {
+        const enterpriseId: string = (tech.ldapId || tech.enterpriseId || '').trim().toUpperCase();
+        const truckNo: string = (tech.truckNo || '').trim();
+        if (!enterpriseId) continue;
+
+        // Fetch previous cache state so we can detect actual changes
+        const prevCache = await db.select({
+          truckNo: tpmsCachedAssignments.truckNo,
+          enterpriseId: tpmsCachedAssignments.enterpriseId,
+        }).from(tpmsCachedAssignments)
+          .where(eq(tpmsCachedAssignments.lookupKey, enterpriseId))
+          .limit(1);
+        const prevTruckNo = prevCache[0]?.truckNo ?? null;
+
+        // Upsert into tpms_cached_assignments
+        await db.insert(tpmsCachedAssignments).values({
+          lookupKey: enterpriseId,
+          lookupType: 'enterprise_id',
+          truckNo: truckNo || null,
+          enterpriseId,
+          techId: tech.techId || null,
+          firstName: tech.firstName || null,
+          lastName: tech.lastName || null,
+          districtNo: tech.districtNo || null,
+          contactNo: tech.contactNo || null,
+          email: tech.email || null,
+          rawResponse: JSON.stringify(tech),
+          status: 'live',
+          lastSuccessAt: pollTime,
+          lastAttemptAt: pollTime,
+          failureCount: 0,
+        }).onConflictDoUpdate({
+          target: tpmsCachedAssignments.lookupKey,
+          set: {
+            truckNo: truckNo || null,
+            enterpriseId,
+            rawResponse: JSON.stringify(tech),
+            status: 'live',
+            lastSuccessAt: pollTime,
+            lastAttemptAt: pollTime,
+            failureCount: 0,
+            updatedAt: pollTime,
+          },
+        });
+
+        // Also update holman_vehicles_cache.tpmsAssignedTechId for any matching truck
+        if (truckNo) {
+          try {
+            await db.update(holmanVehiclesCache)
+              .set({ tpmsAssignedTechId: enterpriseId, tpmsAssignedTechName: [tech.firstName, tech.lastName].filter(Boolean).join(' ') || null, tpmsLastSyncAt: pollTime, updatedAt: pollTime })
+              .where(eq(holmanVehiclesCache.tpmsVehicleRef, truckNo));
+          } catch { /* non-fatal */ }
+        } else if (prevTruckNo) {
+          // Tech was unassigned — clear the holman cache entry for the old truck
+          try {
+            await db.update(holmanVehiclesCache)
+              .set({ tpmsAssignedTechId: null, tpmsAssignedTechName: null, tpmsLastSyncAt: pollTime, updatedAt: pollTime })
+              .where(eq(holmanVehiclesCache.tpmsVehicleRef, prevTruckNo));
+          } catch { /* non-fatal */ }
+        }
+
+        upserted++;
+
+        // Flag external change if truck assignment changed and no Nexus op explains it
+        const truckChanged = truckNo !== (prevTruckNo ?? '');
+        if (truckChanged && prevCache.length > 0) {
+          const lookupTruck = truckNo || prevTruckNo || '';
+          const hasPending = lookupTruck ? await hasPendingNexusOp(lookupTruck) : false;
+          if (!hasPending) {
+            await db.insert(fleetOperationLog).values({
+              operationType: 'external_change',
+              truckNumber: truckNo || prevTruckNo,
+              fromLdap: null,
+              toLdap: enterpriseId,
+              toTechName: [tech.firstName, tech.lastName].filter(Boolean).join(' ') || null,
+              districtNo: tech.districtNo || null,
+              tpmsStatus: 'skipped',
+              holmanStatus: 'skipped',
+              amsStatus: 'skipped',
+              requestedBy: 'tpms_external',
+              notes: `External TPMS change detected: truck was "${prevTruckNo ?? ''}", now "${truckNo}". No matching Nexus operation found within 30 min.`,
+              tpmsMessage: null,
+              holmanMessage: null,
+              amsMessage: null,
+              completedAt: pollTime,
+            });
+            flagged++;
+          }
+        }
+      } catch (err: any) {
+        console.error('[Scheduler] Error processing TPMS watermark tech:', err?.message);
+      }
+    }
+
+    await saveWatermarkToDb('tpms', pollTime, 'ok', null);
+
+    if (upserted > 0 || flagged > 0) {
+      console.log(`[Scheduler] TPMS watermark poll complete: ${upserted} techs upserted, ${flagged} external changes flagged`);
+    }
+  } catch (err: any) {
+    console.error('[Scheduler] TPMS watermark poll error (non-fatal):', err?.message);
+  }
+}
+
+// ─── AMS Watermark Poll ───────────────────────────────────────────────────────
+
+async function checkAndRunAmsPoll(): Promise<void> {
+  try {
+    const now = Date.now();
+    if (lastAmsPollTime !== null && (now - lastAmsPollTime) < EXTERNAL_WATERMARK_POLL_INTERVAL_MS) {
+      return;
+    }
+
+    let watermarkTs: Date | null = null;
+    if (lastAmsPollTime === null) {
+      watermarkTs = await getWatermarkFromDb('ams');
+    } else {
+      watermarkTs = new Date(lastAmsPollTime);
+    }
+    lastAmsPollTime = now;
+
+    if (!watermarkTs) {
+      watermarkTs = new Date(now - EXTERNAL_WATERMARK_POLL_INTERVAL_MS);
+    }
+
+    const { AmsApiService } = await import('./ams-api-service');
+    const ams = new AmsApiService();
+
+    if (!ams.isConfigured()) {
+      return;
+    }
+
+    let techs: any[];
+    try {
+      const result = await ams.searchTechs({ lastUpdateAfter: watermarkTs.toISOString() });
+      techs = Array.isArray(result) ? result : (result?.data ?? result?.items ?? []);
+    } catch (err: any) {
+      console.error('[Scheduler] AMS watermark poll failed (non-fatal):', err?.message);
+      await saveWatermarkToDb('ams', watermarkTs, 'error', err?.message);
+      return;
+    }
+
+    const pollTime = new Date();
+    let upserted = 0;
+    let flagged = 0;
+
+    for (const tech of techs) {
+      try {
+        const vin: string = (tech.VIN || tech.vin || '').trim();
+        if (!vin) continue;
+
+        // Skip if operation_lock_at is currently held (in-flight manual operation from Task #133)
+        const lockCheck = await db.select({ operationLockAt: amsVehiclesCache.operationLockAt })
+          .from(amsVehiclesCache)
+          .where(eq(amsVehiclesCache.vin, vin))
+          .limit(1);
+        const lockAt = lockCheck[0]?.operationLockAt ?? null;
+        if (lockAt && new Date(lockAt).getTime() > Date.now() - 5 * 60 * 1000) {
+          // Lock held in last 5 minutes — skip this vehicle
+          continue;
+        }
+
+        // Fetch previous cache entry for change detection
+        const prevCache = await db.select({
+          techEnterpriseId: amsVehiclesCache.techEnterpriseId,
+          amsStatus: amsVehiclesCache.amsStatus,
+          vehicleNumber: amsVehiclesCache.vehicleNumber,
+        }).from(amsVehiclesCache)
+          .where(eq(amsVehiclesCache.vin, vin))
+          .limit(1);
+
+        const prevTech = prevCache[0]?.techEnterpriseId ?? null;
+        const prevStatus = prevCache[0]?.amsStatus ?? null;
+        const vehicleNumber = (tech.VehicleNumber || tech.vehicleNumber || prevCache[0]?.vehicleNumber || '').trim();
+
+        const newTech = (tech.Tech || tech.LdapId || '').trim() || null;
+        const rawStatus = tech.Status ?? tech.status ?? null;
+        const amsStatusCode = typeof rawStatus === 'number' ? rawStatus : (rawStatus ? parseInt(rawStatus, 10) : null);
+
+        // AMS Status 4 = "Spare" → default Holman Unassigned ("U")
+        // Do NOT infer Storage or BYOV — requires explicit fleet admin intent
+        let holmanMappedStatus: string | null = null;
+        if (amsStatusCode === 4) {
+          holmanMappedStatus = 'U';
+        }
+
+        // Upsert into ams_vehicles_cache
+        await db.insert(amsVehiclesCache).values({
+          vin,
+          vehicleNumber: vehicleNumber || null,
+          techEnterpriseId: newTech,
+          techName: tech.TechName || null,
+          amsStatus: isNaN(amsStatusCode as number) ? null : amsStatusCode,
+          region: tech.Region || null,
+          district: tech.District || null,
+          address: tech.Address || null,
+          city: tech.City || null,
+          state: tech.State || null,
+          zip: tech.Zip || null,
+          makeName: tech.MakeName || null,
+          modelName: tech.ModelName || null,
+          modelYear: tech.ModelYear || null,
+          licensePlate: tech.LicensePlate || null,
+          licState: tech.LicState || null,
+          color: tech.Color || null,
+          branding: tech.Branding || null,
+          interior: tech.Interior != null ? String(tech.Interior) : null,
+          rawData: tech,
+          lastAmsUpdateDate: tech.LastUpdate || null,
+          status: 'live',
+          lastSuccessAt: pollTime,
+          lastAttemptAt: pollTime,
+          failureCount: 0,
+        }).onConflictDoUpdate({
+          target: amsVehiclesCache.vin,
+          set: {
+            vehicleNumber: vehicleNumber || null,
+            techEnterpriseId: newTech,
+            techName: tech.TechName || null,
+            amsStatus: isNaN(amsStatusCode as number) ? null : amsStatusCode,
+            region: tech.Region || null,
+            district: tech.District || null,
+            rawData: tech,
+            lastAmsUpdateDate: tech.LastUpdate || null,
+            status: 'live',
+            lastSuccessAt: pollTime,
+            lastAttemptAt: pollTime,
+            failureCount: 0,
+            updatedAt: pollTime,
+          },
+        });
+
+        upserted++;
+
+        // Flag external change if tech or status changed and no Nexus op explains it
+        const techChanged = newTech !== prevTech;
+        const statusChanged = amsStatusCode !== prevStatus;
+        if ((techChanged || statusChanged) && prevCache.length > 0) {
+          const lookupTruck = vehicleNumber || '';
+          const hasPending = lookupTruck ? await hasPendingNexusOp(lookupTruck) : false;
+          if (!hasPending) {
+            const changeDesc: string[] = [];
+            if (techChanged) changeDesc.push(`tech changed from "${prevTech ?? 'none'}" to "${newTech ?? 'none'}"`);
+            if (statusChanged) changeDesc.push(`AMS status changed from ${prevStatus ?? 'null'} to ${amsStatusCode ?? 'null'}`);
+            if (amsStatusCode === 4 && holmanMappedStatus) {
+              changeDesc.push(`AMS Status 4 (Spare) → Holman mapped to "${holmanMappedStatus}" (Unassigned). Review if Storage or BYOV was intended.`);
+            }
+
+            await db.insert(fleetOperationLog).values({
+              operationType: 'external_change',
+              truckNumber: vehicleNumber || vin,
+              fromLdap: prevTech,
+              toLdap: newTech,
+              toTechName: tech.TechName || null,
+              districtNo: tech.District || null,
+              tpmsStatus: 'skipped',
+              holmanStatus: 'skipped',
+              amsStatus: 'skipped',
+              requestedBy: 'ams_external',
+              notes: `External AMS change detected: ${changeDesc.join('; ')}. No matching Nexus operation found within 30 min.`,
+              tpmsMessage: null,
+              holmanMessage: null,
+              amsMessage: null,
+              completedAt: pollTime,
+            });
+            flagged++;
+          }
+        }
+      } catch (err: any) {
+        console.error('[Scheduler] Error processing AMS watermark tech:', err?.message);
+      }
+    }
+
+    await saveWatermarkToDb('ams', pollTime, 'ok', null);
+
+    if (upserted > 0 || flagged > 0) {
+      console.log(`[Scheduler] AMS watermark poll complete: ${upserted} vehicles upserted, ${flagged} external changes flagged`);
+    }
+  } catch (err: any) {
+    console.error('[Scheduler] AMS watermark poll error (non-fatal):', err?.message);
   }
 }
 

@@ -273,219 +273,284 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
 }
 
 async function callAms(action: string, params: Record<string, any>): Promise<SystemResult> {
-  try {
-    const { AmsApiService } = await import("./ams-api-service");
-    const ams = new AmsApiService();
-    if (!ams.isConfigured()) {
-      return { status: "skipped", message: "AMS not configured" };
-    }
-    const vin = params.vin || (params.truckNumber ? await lookupVinByTruck(params.truckNumber) : null);
-    if (!vin) {
-      return { status: "skipped", message: "VIN not found for truck" };
-    }
-    if (action === "assign") {
-      // Pre-check: read current AMS state before writing
+  const { AmsApiService } = await import("./ams-api-service");
+  const ams = new AmsApiService();
+  if (!ams.isConfigured()) {
+    return { status: "skipped", message: "AMS not configured" };
+  }
+  const vin = params.vin || (params.truckNumber ? await lookupVinByTruck(params.truckNumber) : null);
+  if (!vin) {
+    return { status: "skipped", message: "VIN not found for truck" };
+  }
+
+  const updateUser = (params.requestedBy || "nexus").slice(0, 8);
+
+  if (action === "assign") {
+    // Pre-check: read current AMS state before writing (also catches BYOV)
+    try {
+      const preCheckResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+      const preVehicle = Array.isArray(preCheckResult) ? preCheckResult[0] : (preCheckResult?.data?.[0] ?? preCheckResult);
+      const preCurrentTech = preVehicle?.Tech ?? null;
+      console.log(`[FleetOps-AMS] Pre-check for assign ${vin}: currentTech=${preCurrentTech}`);
+      // Update cache with pre-operation state
       try {
-        const preCheckResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
-        const preVehicle = Array.isArray(preCheckResult) ? preCheckResult[0] : (preCheckResult?.data?.[0] ?? preCheckResult);
-        const preCurrentTech = preVehicle?.Tech ?? null;
-        console.log(`[FleetOps-AMS] Pre-check for assign ${vin}: currentTech=${preCurrentTech}`);
-        // Update cache with pre-operation state
+        await db.insert(amsVehiclesCache).values({
+          vin,
+          vehicleNumber: preVehicle?.VehicleNumber || null,
+          techEnterpriseId: preCurrentTech,
+          techName: preVehicle?.TechName || null,
+          rawData: preVehicle ?? null,
+          status: 'live',
+          lastSuccessAt: new Date(),
+          lastAttemptAt: new Date(),
+          failureCount: 0,
+        }).onConflictDoUpdate({
+          target: amsVehiclesCache.vin,
+          set: {
+            techEnterpriseId: preCurrentTech,
+            techName: preVehicle?.TechName || null,
+            rawData: preVehicle ?? null,
+            status: 'live',
+            lastSuccessAt: new Date(),
+            lastAttemptAt: new Date(),
+            updatedAt: new Date(),
+          },
+        });
+      } catch {}
+    } catch (preCheckErr: any) {
+      // Check if VIN not found (BYOV case)
+      const msg = (preCheckErr.message || "").toLowerCase();
+      if (msg.includes("404") || msg.includes("not found")) {
+        console.log(`[FleetOps-AMS] VIN ${vin} not found in AMS (possible BYOV) — skipping AMS assign`);
+        // Mark BYOV VIN missing in holman cache
+        try {
+          const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
+          if (cacheRow) {
+            await db.update(holmanVehiclesCache)
+              .set({ byovVinMissing: true })
+              .where(eq(holmanVehiclesCache.holmanVehicleNumber, cacheRow.holmanVehicleNumber));
+          }
+        } catch {}
+        return { status: "skipped", message: "VIN not found in AMS (BYOV vehicle — AMS registration required)" };
+      }
+      console.warn(`[FleetOps-AMS] Pre-check failed for ${vin}: ${preCheckErr.message}`);
+    }
+
+    try {
+      await ams.updateTechAssignment(vin, {
+        techEnterpriseId: params.ldapId,
+        updateUser,
+      });
+      // If repair data is present, post repair update
+      if (params.repairData) {
+        try {
+          await ams.updateRepairStatus(vin, {
+            inRepair: true,
+            repairStatus: params.repairData.repairStatus,
+            repairReason: params.repairData.repairReason,
+            vendor: params.repairData.vendor,
+            etaDate: params.repairData.etaDate,
+            estimateCost: params.repairData.estimateCost,
+            rentalCar: params.repairData.rentalCar,
+            rentalStartDate: params.repairData.rentalStartDate,
+            rentalEndDate: params.repairData.rentalEndDate,
+            updateUser,
+          });
+          console.log(`[FleetOps-AMS] Repair status updated for ${vin}`);
+        } catch (repairErr: any) {
+          console.warn(`[FleetOps-AMS] Repair status update failed for ${vin}: ${repairErr.message}`);
+        }
+      }
+      // Synchronous post-operation verification: read back AMS state
+      try {
+        const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+        const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+        const postTech = (postVehicle?.Tech ?? "").trim().toUpperCase();
+        const expectedTech = params.ldapId.trim().toUpperCase();
+        // Update cache with post-operation state
         try {
           await db.insert(amsVehiclesCache).values({
             vin,
-            amsAssignedLdap: preCurrentTech,
-            amsTruckStatusId: preVehicle?.TruckStatusId ?? null,
-            amsTruckStatusLabel: preVehicle?.TruckStatusDesc ?? null,
-            lastAmsSyncAt: new Date(),
-            rawResponse: preVehicle ?? null,
+            vehicleNumber: postVehicle?.VehicleNumber || null,
+            techEnterpriseId: postVehicle?.Tech ?? null,
+            techName: postVehicle?.TechName || null,
+            rawData: postVehicle ?? null,
+            status: 'live',
+            lastSuccessAt: new Date(),
+            lastAttemptAt: new Date(),
+            failureCount: 0,
           }).onConflictDoUpdate({
             target: amsVehiclesCache.vin,
             set: {
-              amsAssignedLdap: preCurrentTech,
-              amsTruckStatusId: preVehicle?.TruckStatusId ?? null,
-              amsTruckStatusLabel: preVehicle?.TruckStatusDesc ?? null,
-              lastAmsSyncAt: new Date(),
-              rawResponse: preVehicle ?? null,
+              techEnterpriseId: postVehicle?.Tech ?? null,
+              techName: postVehicle?.TechName || null,
+              rawData: postVehicle ?? null,
+              status: 'live',
+              lastSuccessAt: new Date(),
+              lastAttemptAt: new Date(),
+              lastErrorMessage: null,
               updatedAt: new Date(),
             },
           });
         } catch {}
-      } catch (preCheckErr: any) {
-        // Check if VIN not found (BYOV case)
-        const msg = (preCheckErr.message || "").toLowerCase();
-        if (msg.includes("404") || msg.includes("not found")) {
-          console.log(`[FleetOps-AMS] VIN ${vin} not found in AMS (possible BYOV) — skipping AMS assign`);
-          // Mark BYOV VIN missing in holman cache
-          try {
-            const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
-            if (cacheRow) {
-              await db.update(holmanVehiclesCache)
-                .set({ byovVinMissing: true })
-                .where(eq(holmanVehiclesCache.holmanVehicleNumber, cacheRow.holmanVehicleNumber));
-            }
-          } catch {}
-          return { status: "skipped", message: "VIN not found in AMS (BYOV vehicle — AMS registration required)" };
+        if (postTech !== expectedTech) {
+          console.warn(`[FleetOps-AMS] Post-assign verification mismatch for ${vin}: expected ${expectedTech}, got ${postTech}`);
+        } else {
+          console.log(`[FleetOps-AMS] Post-assign verification OK for ${vin}: Tech=${postTech}`);
         }
-        console.warn(`[FleetOps-AMS] Pre-check failed for ${vin}: ${preCheckErr.message}`);
+      } catch (verifyErr: any) {
+        console.warn(`[FleetOps-AMS] Post-assign verification failed for ${vin}: ${verifyErr.message}`);
       }
+      return { status: "success", message: "Assigned" };
+    } catch (assignErr: any) {
+      const msg = (assignErr.message || "").toLowerCase();
+      // Record error in cache (best-effort)
       try {
-        await ams.updateTechAssignment(vin, {
-          techEnterpriseId: params.ldapId,
-          updateUser: (params.requestedBy || "nexus").slice(0, 8),
-        });
-        // If repair data is present, post repair update
-        if (params.repairData) {
-          try {
-            await ams.updateRepairStatus(vin, {
-              inRepair: true,
-              repairStatus: params.repairData.repairStatus,
-              repairReason: params.repairData.repairReason,
-              vendor: params.repairData.vendor,
-              etaDate: params.repairData.etaDate,
-              estimateCost: params.repairData.estimateCost,
-              rentalCar: params.repairData.rentalCar,
-              rentalStartDate: params.repairData.rentalStartDate,
-              rentalEndDate: params.repairData.rentalEndDate,
-              updateUser: (params.requestedBy || "nexus").slice(0, 8),
-            });
-            console.log(`[FleetOps-AMS] Repair status updated for ${vin}`);
-          } catch (repairErr: any) {
-            console.warn(`[FleetOps-AMS] Repair status update failed for ${vin}: ${repairErr.message}`);
-          }
-        }
-        // Synchronous post-operation verification: read back AMS state
-        try {
-          const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
-          const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
-          const postTech = (postVehicle?.Tech ?? "").trim().toUpperCase();
-          const expectedTech = params.ldapId.trim().toUpperCase();
-          // Update cache with post-operation state
-          try {
-            await db.insert(amsVehiclesCache).values({
-              vin,
-              amsAssignedLdap: postVehicle?.Tech ?? null,
-              amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
-              amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
-              lastAmsSyncAt: new Date(),
-              rawResponse: postVehicle ?? null,
-            }).onConflictDoUpdate({
-              target: amsVehiclesCache.vin,
-              set: {
-                amsAssignedLdap: postVehicle?.Tech ?? null,
-                amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
-                amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
-                lastAmsSyncAt: new Date(),
-                rawResponse: postVehicle ?? null,
-                lastAmsError: null,
-                updatedAt: new Date(),
-              },
-            });
-          } catch {}
-          if (postTech !== expectedTech) {
-            console.warn(`[FleetOps-AMS] Post-assign verification mismatch for ${vin}: expected ${expectedTech}, got ${postTech}`);
-          } else {
-            console.log(`[FleetOps-AMS] Post-assign verification OK for ${vin}: Tech=${postTech}`);
-          }
-        } catch (verifyErr: any) {
-          console.warn(`[FleetOps-AMS] Post-assign verification failed for ${vin}: ${verifyErr.message}`);
-        }
-        return { status: "success", message: "Assigned" };
-      } catch (assignErr: any) {
-        const msg = (assignErr.message || "").toLowerCase();
-        // Update cache with error
-        try {
-          await db.insert(amsVehiclesCache).values({
-            vin,
-            lastAmsError: assignErr.message,
-            updatedAt: new Date(),
-          } as any).onConflictDoUpdate({
-            target: amsVehiclesCache.vin,
-            set: { lastAmsError: assignErr.message, updatedAt: new Date() },
-          });
-        } catch {}
-        // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
-        // This is not an error in our system — skip gracefully.
-        if (msg.includes("not found in tech database") || msg.includes("tech") && msg.includes("not found")) {
-          console.log(`[FleetOps-AMS] Assign skipped — tech not in AMS database: ${assignErr.message}`);
-          return { status: "skipped", message: "Tech not registered in AMS" };
-        }
-        throw assignErr;
+        await db.update(amsVehiclesCache)
+          .set({ lastErrorMessage: assignErr.message, lastAttemptAt: new Date(), updatedAt: new Date() })
+          .where(eq(amsVehiclesCache.vin, vin));
+      } catch {}
+      // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
+      // This is not an error in our system — skip gracefully.
+      if (msg.includes("not found in tech database") || msg.includes("tech") && msg.includes("not found")) {
+        console.log(`[FleetOps-AMS] Assign skipped — tech not in AMS database: ${assignErr.message}`);
+        return { status: "skipped", message: "Tech not registered in AMS" };
       }
+      // AMS write failure: queue for retry via operation_events
+      console.warn(`[FleetOps-AMS] Assign failed, queueing for retry: ${assignErr.message}`);
+      return { status: "failed", message: `AMS assign error (queued for retry): ${assignErr.message}` };
     }
-    if (action === "unassign") {
-      let currentTech: string | null = null;
-      try {
-        // Use searchVehicles (list endpoint) — same endpoint the AMS Vehicles page uses, reliable format
+  }
+
+  if (action === "unassign") {
+    let currentTech: string | null = null;
+    try {
+      // Cache-first: try to resolve current tech from ams_vehicles_cache before live call
+      const cacheRow = await db.select({ techEnterpriseId: amsVehiclesCache.techEnterpriseId })
+        .from(amsVehiclesCache)
+        .where(eq(amsVehiclesCache.vin, vin))
+        .limit(1);
+      if (cacheRow[0]?.techEnterpriseId) {
+        currentTech = cacheRow[0].techEnterpriseId;
+        console.log(`[FleetOps-AMS] Cache hit for ${vin}: Tech=${currentTech}`);
+      } else {
+        // Live lookup
         const searchResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
         const vehicle = Array.isArray(searchResult) ? searchResult[0] : (searchResult?.data?.[0] ?? searchResult);
         currentTech = vehicle?.Tech ?? null;
-        console.log(`[FleetOps] AMS pre-check for ${vin}: Tech=${currentTech}, TechName=${vehicle?.TechName}`);
-      } catch (lookupErr: any) {
-        console.warn(`[FleetOps] AMS vehicle lookup failed for ${vin}: ${lookupErr.message}`);
-        return { status: "skipped", message: "Vehicle not found in AMS" };
-      }
-      if (!currentTech) {
-        return { status: "skipped", message: "No tech assigned in AMS" };
-      }
-      try {
-        await ams.updateTechAssignment(vin, {
-          techEnterpriseId: "",
-          updateUser: (params.requestedBy || "nexus").slice(0, 8),
-        });
-        // Synchronous post-operation verification
-        try {
-          const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
-          const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
-          const postTech = (postVehicle?.Tech ?? "").trim();
+        console.log(`[FleetOps] AMS pre-check (live) for ${vin}: Tech=${currentTech}, TechName=${vehicle?.TechName}`);
+        // Update cache with fresh live data
+        if (vehicle) {
           try {
             await db.insert(amsVehiclesCache).values({
               vin,
-              amsAssignedLdap: postVehicle?.Tech ?? null,
-              amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
-              amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
-              lastAmsSyncAt: new Date(),
-              rawResponse: postVehicle ?? null,
+              vehicleNumber: vehicle.VehicleNumber || null,
+              techEnterpriseId: vehicle.Tech || null,
+              techName: vehicle.TechName || null,
+              rawData: vehicle,
+              status: 'live',
+              lastSuccessAt: new Date(),
+              lastAttemptAt: new Date(),
+              failureCount: 0,
             }).onConflictDoUpdate({
               target: amsVehiclesCache.vin,
-              set: {
-                amsAssignedLdap: postVehicle?.Tech ?? null,
-                amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
-                amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
-                lastAmsSyncAt: new Date(),
-                rawResponse: postVehicle ?? null,
-                lastAmsError: null,
-                updatedAt: new Date(),
-              },
+              set: { techEnterpriseId: vehicle.Tech || null, techName: vehicle.TechName || null, rawData: vehicle, status: 'live', lastSuccessAt: new Date(), lastAttemptAt: new Date(), updatedAt: new Date() },
             });
-          } catch {}
-          if (postTech !== "") {
-            console.warn(`[FleetOps-AMS] Post-unassign verification mismatch for ${vin}: expected empty, got ${postTech}`);
-          }
-        } catch (verifyErr: any) {
-          console.warn(`[FleetOps-AMS] Post-unassign verification failed for ${vin}: ${verifyErr.message}`);
+          } catch { /* non-fatal */ }
         }
-        return { status: "success", message: "Unassigned" };
-      } catch (unassignErr: any) {
-        const msg = (unassignErr.message || "").toLowerCase();
-        if (msg.includes("not found") || msg.includes("tech not found") || msg.includes("invalid tech") || msg.includes("cannot clear") || msg.includes("empty tech")) {
-          return { status: "skipped", message: "AMS tech-update does not support clearing — manual clear required in AMS" };
-        }
-        throw unassignErr;
+      }
+    } catch (lookupErr: any) {
+      // Live lookup failed — fall back to cache
+      console.warn(`[FleetOps-AMS] Live vehicle lookup failed for ${vin}, falling back to cache: ${lookupErr.message}`);
+      try {
+        const cacheRow = await db.select({ techEnterpriseId: amsVehiclesCache.techEnterpriseId })
+          .from(amsVehiclesCache)
+          .where(eq(amsVehiclesCache.vin, vin))
+          .limit(1);
+        currentTech = cacheRow[0]?.techEnterpriseId ?? null;
+        // Mark cache as degraded
+        await db.update(amsVehiclesCache)
+          .set({ status: 'cached', lastAttemptAt: new Date(), lastErrorMessage: lookupErr.message, updatedAt: new Date() })
+          .where(eq(amsVehiclesCache.vin, vin));
+      } catch { /* non-fatal */ }
+      if (!currentTech) {
+        return { status: "skipped", message: "Vehicle not found in AMS (live and cache)" };
       }
     }
-    if (action === "update_address") {
+    if (!currentTech) {
+      return { status: "skipped", message: "No tech assigned in AMS" };
+    }
+    try {
+      await ams.updateTechAssignment(vin, {
+        techEnterpriseId: "",
+        updateUser,
+      });
+      // Synchronous post-operation verification: read back AMS state
+      try {
+        const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+        const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+        const postTech = (postVehicle?.Tech ?? "").trim();
+        try {
+          await db.insert(amsVehiclesCache).values({
+            vin,
+            vehicleNumber: postVehicle?.VehicleNumber || null,
+            techEnterpriseId: postVehicle?.Tech ?? null,
+            techName: postVehicle?.TechName || null,
+            rawData: postVehicle ?? null,
+            status: 'live',
+            lastSuccessAt: new Date(),
+            lastAttemptAt: new Date(),
+            failureCount: 0,
+          }).onConflictDoUpdate({
+            target: amsVehiclesCache.vin,
+            set: {
+              techEnterpriseId: postVehicle?.Tech ?? null,
+              techName: postVehicle?.TechName || null,
+              rawData: postVehicle ?? null,
+              status: 'live',
+              lastSuccessAt: new Date(),
+              lastAttemptAt: new Date(),
+              lastErrorMessage: null,
+              updatedAt: new Date(),
+            },
+          });
+        } catch {}
+        if (postTech !== "") {
+          console.warn(`[FleetOps-AMS] Post-unassign verification mismatch for ${vin}: expected empty, got ${postTech}`);
+        } else {
+          console.log(`[FleetOps-AMS] Post-unassign verification OK for ${vin}: Tech cleared`);
+        }
+      } catch (verifyErr: any) {
+        console.warn(`[FleetOps-AMS] Post-unassign verification failed for ${vin}: ${verifyErr.message}`);
+      }
+      return { status: "success", message: "Unassigned" };
+    } catch (unassignErr: any) {
+      const msg = (unassignErr.message || "").toLowerCase();
+      if (msg.includes("not found") || msg.includes("tech not found") || msg.includes("invalid tech") || msg.includes("cannot clear") || msg.includes("empty tech")) {
+        return { status: "skipped", message: "AMS tech-update does not support clearing — manual clear required in AMS" };
+      }
+      // Write failure: queue for retry
+      console.warn(`[FleetOps-AMS] Unassign failed, queueing for retry: ${unassignErr.message}`);
+      return { status: "failed", message: `AMS unassign error (queued for retry): ${unassignErr.message}` };
+    }
+  }
+
+  if (action === "update_address") {
+    try {
       await ams.updateUserFields(vin, {
-        updateUser: (params.requestedBy || "nexus").slice(0, 8),
+        updateUser,
         address: params.address,
         zip: params.zip,
       });
       return { status: "success", message: "Address updated" };
+    } catch (err: any) {
+      // Write failure: queue for retry
+      console.warn(`[FleetOps-AMS] update_address failed, queueing for retry: ${err.message}`);
+      return { status: "failed", message: `AMS address update error (queued for retry): ${err.message}` };
     }
-    return { status: "skipped", message: "Unknown AMS action" };
-  } catch (err: any) {
-    return { status: "failed", message: `AMS error: ${err.message}` };
   }
+
+  return { status: "skipped", message: "Unknown AMS action" };
 }
 
 async function logOperationEvent(

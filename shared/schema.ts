@@ -1518,29 +1518,6 @@ export const insertHolmanVehicleCacheSchema = createInsertSchema(holmanVehiclesC
 export type HolmanVehicleCache = typeof holmanVehiclesCache.$inferSelect;
 export type InsertHolmanVehicleCache = z.infer<typeof insertHolmanVehicleCacheSchema>;
 
-// AMS vehicle cache — keyed by VIN, updated after every successful AMS call
-export const amsVehiclesCache = pgTable("ams_vehicles_cache", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  vin: text("vin").notNull().unique(),
-  amsTruckStatusId: integer("ams_truck_status_id"), // AMS numeric status ID
-  amsTruckStatusLabel: text("ams_truck_status_label"), // Human-readable AMS status label
-  amsAssignedLdap: text("ams_assigned_ldap"), // LDAP/enterprise ID of the currently assigned tech in AMS
-  lastAmsSyncAt: timestamp("last_ams_sync_at"), // When AMS data was last successfully fetched
-  lastAmsError: text("last_ams_error"), // Last error message from an AMS call, if any
-  rawResponse: jsonb("raw_response"), // Raw AMS vehicle response for debugging
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
-
-export const insertAmsVehicleCacheSchema = createInsertSchema(amsVehiclesCache).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
-export type AmsVehicleCache = typeof amsVehiclesCache.$inferSelect;
-export type InsertAmsVehicleCache = z.infer<typeof insertAmsVehicleCacheSchema>;
-
 // Holman Sync State - tracks incremental sync position for efficient change-only fetching
 export const holmanSyncState = pgTable("holman_sync_state", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -2058,6 +2035,79 @@ export const insertTpmsChangeLogSchema = createInsertSchema(tpmsChangeLog).omit(
 });
 export type TpmsChangeLog = typeof tpmsChangeLog.$inferSelect;
 export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;
+
+// ===============================
+// AMS Vehicles Cache - Caches AMS vehicle data for fallback when AMS API is unavailable
+// ===============================
+
+export const amsVehiclesCache = pgTable("ams_vehicles_cache", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vin: text("vin").notNull().unique(),
+  vehicleNumber: text("vehicle_number"),
+  techEnterpriseId: text("tech_enterprise_id"),
+  techName: text("tech_name"),
+  amsStatus: integer("ams_status"),
+  region: text("region"),
+  district: text("district"),
+  address: text("address"),
+  city: text("city"),
+  state: text("state"),
+  zip: text("zip"),
+  makeName: text("make_name"),
+  modelName: text("model_name"),
+  modelYear: text("model_year"),
+  licensePlate: text("license_plate"),
+  licState: text("lic_state"),
+  color: text("color"),
+  branding: text("branding"),
+  interior: text("interior"),
+  rawData: jsonb("raw_data"),
+  lastAmsUpdateDate: text("last_ams_update_date"),
+  operationLockAt: timestamp("operation_lock_at"),
+  operationLockBy: text("operation_lock_by"),
+  status: text("status").notNull().default("live"),
+  lastSuccessAt: timestamp("last_success_at"),
+  lastAttemptAt: timestamp("last_attempt_at"),
+  lastErrorMessage: text("last_error_message"),
+  failureCount: integer("failure_count").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => ({
+  vinIdx: index("ams_cache_vin_idx").on(table.vin),
+  vehicleNumberIdx: index("ams_cache_vehicle_number_idx").on(table.vehicleNumber),
+  techIdx: index("ams_cache_tech_idx").on(table.techEnterpriseId),
+  statusIdx: index("ams_cache_status_idx").on(table.status),
+}));
+
+export const insertAmsvehiclesCacheSchema = createInsertSchema(amsVehiclesCache).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type AmsVehicleCache = typeof amsVehiclesCache.$inferSelect;
+export type InsertAmsVehicleCache = z.infer<typeof insertAmsvehiclesCacheSchema>;
+
+// ===============================
+// External Watermark State - tracks TPMS and AMS poll watermarks for incremental external change detection
+// ===============================
+
+export const externalWatermarkState = pgTable("external_watermark_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  systemName: text("system_name").notNull().unique(),
+  lastPollAt: timestamp("last_poll_at"),
+  lastPollStatus: text("last_poll_status").default("idle"),
+  lastErrorMessage: text("last_error_message"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertExternalWatermarkStateSchema = createInsertSchema(externalWatermarkState).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ExternalWatermarkState = typeof externalWatermarkState.$inferSelect;
+export type InsertExternalWatermarkState = z.infer<typeof insertExternalWatermarkStateSchema>;
 
 // ===============================
 // Operation Events (granular per-system-call log with retry support)
