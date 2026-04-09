@@ -1300,7 +1300,7 @@ export default function PMF() {
                                     <Button
                                         variant="outline"
                                         size="sm"
-                                        onClick={() => window.open(`/pmf/tool-audit/${encodeURIComponent(asset.assetId)}`, '_blank')}
+                                        onClick={() => window.open(`/fleet-scope/pmf/tool-audit/${encodeURIComponent(asset.assetId)}`, '_blank')}
                                         data-testid={`button-tool-audit-${asset.assetId}`}
                                       >
                                         <Wrench className="w-4 h-4 mr-2" />
