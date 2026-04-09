@@ -2378,7 +2378,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   };
 
   // ─── Helper: serialize a full truck record for the public API ───────────────
-  function serializeTruck(truck: any) {
+  function serializeTruck(truck: any, typeData?: AmsVehicleTypeData) {
     return {
       id: truck.id,
       truckNumber: truck.truckNumber,
@@ -2433,6 +2433,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       createdAt: truck.createdAt || null,
       vin: truck.vin || null,
       licensePlate: truck.licensePlate || null,
+      ...(typeData?.techType != null ? { techType: typeData.techType } : {}),
+      ...(typeData?.vehicleType != null ? { vehicleType: typeData.vehicleType } : {}),
     };
   }
 
@@ -2470,15 +2472,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         page,
         pageSize,
         count: paginated.length,
-        data: paginated.map(truck => {
-          const serialized: any = serializeTruck(truck);
-          const amsData = amsTypeMap.get(truck.truckNumber);
-          if (amsData) {
-            if (amsData.techType) serialized.techType = amsData.techType;
-            if (amsData.vehicleType) serialized.vehicleType = amsData.vehicleType;
-          }
-          return serialized;
-        }),
+        data: paginated.map(truck =>
+          serializeTruck(truck, amsTypeMap.get(truck.truckNumber))
+        ),
       });
     } catch (error: any) {
       console.error("Error fetching public rental data:", error);
@@ -2556,23 +2552,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (!truck) {
         return res.status(404).json({ success: false, message: "Truck not found" });
       }
-      const serialized: any = serializeTruck(truck);
+      let typeData: AmsVehicleTypeData | undefined;
       if (truck.inAms) {
         try {
           const amsTypeMap = await batchFetchAmsTypeData(
             [{ truckNumber: truck.truckNumber, vin: truck.vin }],
             _amsApiServiceForEnrichment
           );
-          const amsData = amsTypeMap.get(truck.truckNumber);
-          if (amsData) {
-            if (amsData.techType) serialized.techType = amsData.techType;
-            if (amsData.vehicleType) serialized.vehicleType = amsData.vehicleType;
-          }
+          typeData = amsTypeMap.get(truck.truckNumber);
         } catch {
           // Non-fatal: return record without type enrichment
         }
       }
-      res.json({ success: true, data: serialized });
+      res.json({ success: true, data: serializeTruck(truck, typeData) });
     } catch (error: any) {
       console.error("Error fetching public truck data:", error);
       res.status(500).json({ success: false, message: "Failed to fetch truck data" });
@@ -3089,6 +3081,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const techLat = latStr != null && latStr !== '' ? parseFloat(latStr) : null;
       const techLon = lonStr != null && lonStr !== '' ? parseFloat(lonStr) : null;
       const limit = limitStr ? Math.max(1, Math.min(50, parseInt(limitStr, 10) || 3)) : 3;
+
+      if (techLat !== null && isNaN(techLat)) {
+        return res.status(400).json({ success: false, message: 'lat must be a valid number' });
+      }
+      if (techLon !== null && isNaN(techLon)) {
+        return res.status(400).json({ success: false, message: 'lon must be a valid number' });
+      }
 
       const candidates = await executeQuery<SpareVehicleCandidate>(`
         SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,

@@ -90,22 +90,76 @@ export function mapVehicleType(amsValue: string | null | undefined): string | un
   }
 }
 
-// Module-level cache: truckNumber → { data, cachedAt }
-const AMS_TYPE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
-const amsTypeCache = new Map<string, { data: AmsVehicleTypeData; cachedAt: number }>();
+// ---------------------------------------------------------------------------
+// Full-fleet AMS type cache: fetched once per TTL via paginated API, then
+// looked up in-memory. Eliminates per-vehicle HTTP calls (true batch strategy).
+// ---------------------------------------------------------------------------
+const AMS_FULL_FLEET_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
-function normalizeAmsSearchRows(raw: any): any[] {
-  if (Array.isArray(raw)) return raw;
+interface AmsFullFleetCache {
+  byVin: Map<string, AmsVehicleTypeData>;
+  byVehicleNumber: Map<string, AmsVehicleTypeData>;
+  cachedAt: number;
+}
+
+let _amsFullFleetCache: AmsFullFleetCache | null = null;
+let _amsFullFleetFetchPromise: Promise<AmsFullFleetCache> | null = null;
+
+function extractTypeData(row: AmsVehicle): AmsVehicleTypeData {
+  const rawTechType = row.TechType ?? null;
+  const rawVehicleType = row.VehicleType ?? null;
+  const data: AmsVehicleTypeData = {};
+  const techType = mapTechType(rawTechType);
+  const vehicleType = mapVehicleType(rawVehicleType);
+  if (techType) data.techType = techType;
+  if (vehicleType) data.vehicleType = vehicleType;
+  return data;
+}
+
+function normalizeAmsRows(raw: unknown): AmsVehicle[] {
+  if (Array.isArray(raw)) return raw as AmsVehicle[];
   if (raw && typeof raw === 'object') {
-    return Array.isArray(raw.data) ? raw.data
-      : Array.isArray(raw.vehicles) ? raw.vehicles
-      : Array.isArray(raw.results) ? raw.results
-      : Array.isArray(raw.items) ? raw.items
-      : [];
+    const r = raw as Record<string, unknown>;
+    for (const key of ['data', 'vehicles', 'results', 'items']) {
+      if (Array.isArray(r[key])) return r[key] as AmsVehicle[];
+    }
   }
   return [];
 }
 
+async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFullFleetCache> {
+  const byVin = new Map<string, AmsVehicleTypeData>();
+  const byVehicleNumber = new Map<string, AmsVehicleTypeData>();
+
+  const PAGE_SIZE = 500;
+  let offset = 0;
+  let pagesFetched = 0;
+  const MAX_PAGES = 20; // safety cap: 10 000 vehicles max
+
+  while (pagesFetched < MAX_PAGES) {
+    const raw = await amsService.searchVehicles({ limit: PAGE_SIZE, offset });
+    const rows = normalizeAmsRows(raw);
+    for (const row of rows) {
+      const data = extractTypeData(row);
+      if (row.VIN) byVin.set(row.VIN.toUpperCase(), data);
+      if (row.VehicleNumber) {
+        const vn = String(row.VehicleNumber).replace(/^0+/, '') || String(row.VehicleNumber);
+        byVehicleNumber.set(vn, data);
+      }
+    }
+    pagesFetched++;
+    if (rows.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+
+  return { byVin, byVehicleNumber, cachedAt: Date.now() };
+}
+
+/**
+ * Returns type data for the given vehicles by doing a single in-memory lookup
+ * against the full AMS fleet (fetched once per hour, shared across all callers).
+ * Zero per-vehicle HTTP calls after the cache is warm.
+ */
 export async function batchFetchAmsTypeData(
   vehicles: Array<{ truckNumber: string; vin?: string | null }>,
   amsService: AmsApiService
@@ -113,58 +167,36 @@ export async function batchFetchAmsTypeData(
   const result = new Map<string, AmsVehicleTypeData>();
   if (!amsService.hasCredentials() || vehicles.length === 0) return result;
 
+  // Refresh or reuse the full-fleet cache (coalesce concurrent refreshes)
   const now = Date.now();
-  const toFetch: Array<{ truckNumber: string; vin?: string | null }> = [];
-
-  for (const v of vehicles) {
-    const cached = amsTypeCache.get(v.truckNumber);
-    if (cached && (now - cached.cachedAt) < AMS_TYPE_CACHE_TTL_MS) {
-      result.set(v.truckNumber, cached.data);
-    } else {
-      toFetch.push(v);
+  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= AMS_FULL_FLEET_CACHE_TTL_MS) {
+    if (!_amsFullFleetFetchPromise) {
+      _amsFullFleetFetchPromise = buildAmsFullFleetCache(amsService)
+        .then(cache => {
+          _amsFullFleetCache = cache;
+          _amsFullFleetFetchPromise = null;
+          return cache;
+        })
+        .catch(err => {
+          _amsFullFleetFetchPromise = null;
+          throw err;
+        });
     }
+    await _amsFullFleetFetchPromise;
   }
 
-  if (toFetch.length === 0) return result;
+  if (!_amsFullFleetCache) return result;
+  const { byVin, byVehicleNumber } = _amsFullFleetCache;
 
-  const CONCURRENCY = 20;
-  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
-    const batch = toFetch.slice(i, i + CONCURRENCY);
-    await Promise.all(batch.map(async (v) => {
-      try {
-        let amsVehicle: any = null;
-
-        if (v.vin) {
-          try {
-            amsVehicle = await amsService.getVehicleByVin(v.vin);
-          } catch {
-            // VIN lookup failed, fall through to vehicleId search
-          }
-        }
-
-        if (!amsVehicle) {
-          const searchResult = await amsService.searchVehicles({ vehicleId: v.truckNumber, limit: 1 });
-          const rows = normalizeAmsSearchRows(searchResult);
-          amsVehicle = rows[0] ?? null;
-        }
-
-        if (!amsVehicle) return;
-
-        const rawTechType = amsVehicle.TechType ?? amsVehicle.techType ?? amsVehicle.tech_type ?? null;
-        const rawVehicleType = amsVehicle.VehicleType ?? amsVehicle.vehicleType ?? amsVehicle.vehicle_type ?? null;
-
-        const data: AmsVehicleTypeData = {};
-        const techType = mapTechType(rawTechType);
-        const vehicleType = mapVehicleType(rawVehicleType);
-        if (techType) data.techType = techType;
-        if (vehicleType) data.vehicleType = vehicleType;
-
-        amsTypeCache.set(v.truckNumber, { data, cachedAt: Date.now() });
-        result.set(v.truckNumber, data);
-      } catch {
-        // Non-fatal: skip this vehicle
-      }
-    }));
+  // Pure in-memory join: VIN first, then VehicleNumber
+  for (const v of vehicles) {
+    let data: AmsVehicleTypeData | undefined;
+    if (v.vin) data = byVin.get(v.vin.toUpperCase());
+    if (!data) {
+      const normalized = v.truckNumber.replace(/^0+/, '') || v.truckNumber;
+      data = byVehicleNumber.get(normalized);
+    }
+    if (data) result.set(v.truckNumber, data);
   }
 
   return result;
