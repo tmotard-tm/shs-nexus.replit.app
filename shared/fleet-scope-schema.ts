@@ -989,6 +989,15 @@ export const registrationTracking = pgTable("fs_registration_tracking", {
   alreadySent: boolean("already_sent").default(false),
   comments: text("comments"), // 250 char limit enforced in UI
   updatedAt: timestamp("updated_at").default(sql`now()`),
+  // Holman registration scraper fields
+  lastScraped: timestamp("last_scraped"),
+  scrapeStatus: text("scrape_status"), // "pending" | "scraped" | "error"
+  currentStep: text("current_step"), // "New" | "Prerequisites" | "Sent to State" | "Rejected" | "Complete"
+  lastChangeDate: text("last_change_date"), // Date of last change on the registration event
+  etaDate: text("eta_date"), // ETA date if shown (e.g. "03/17")
+  renewalDate: text("renewal_date"), // Renewal date from Holman (e.g. "03/31/2027")
+  holmanStatus: text("holman_status"), // "No Active Events Found" | "No Tasks Are Available" | ""
+  viewRequestBadge: text("view_request_badge"), // Badge text shown on the Holman view request
 });
 
 export const insertRegistrationTrackingSchema = createInsertSchema(registrationTracking);

@@ -275,6 +275,14 @@ async function buildRegistrationData(): Promise<{
     techLeadName: string;
     techLeadPhone: string;
     inRepairShop: boolean;
+    lastScraped: string | null;
+    scrapeStatus: string | null;
+    currentStep: string | null;
+    lastChangeDate: string | null;
+    etaDate: string | null;
+    renewalDate: string | null;
+    holmanStatus: string | null;
+    viewRequestBadge: string | null;
   }[];
   declinedTrucks: string[];
 }> {
@@ -426,7 +434,15 @@ async function buildRegistrationData(): Promise<{
       comments: tracking?.comments || '',
       techLeadName: tpmsInfo?.techLeadName || '',
       techLeadPhone: tpmsInfo?.techLeadPhone || '',
-      inRepairShop: trucksInRepairShop.has(truckNumber)
+      inRepairShop: trucksInRepairShop.has(truckNumber),
+      lastScraped: tracking?.lastScraped ? tracking.lastScraped.toISOString() : null,
+      scrapeStatus: tracking?.scrapeStatus || null,
+      currentStep: tracking?.currentStep || null,
+      lastChangeDate: tracking?.lastChangeDate || null,
+      etaDate: tracking?.etaDate || null,
+      renewalDate: tracking?.renewalDate || null,
+      holmanStatus: tracking?.holmanStatus || null,
+      viewRequestBadge: tracking?.viewRequestBadge || null,
     });
   }
   trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
@@ -12601,6 +12617,127 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Registration Tracking] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Scrape all trucks from external Holman registration scraper
+  app.post("/registration/scrape", async (_req, res) => {
+    const SCRAPER_BASE = "https://web-scraper-tool-seanchen37.replit.app";
+    try {
+      console.log("[Registration Scrape] Fetching all trucks from scraper...");
+      const response = await fetch(`${SCRAPER_BASE}/api/registration/trucks`);
+      if (!response.ok) {
+        throw new Error(`Scraper returned ${response.status}: ${response.statusText}`);
+      }
+      const scraperTrucks: any[] = await response.json();
+      console.log(`[Registration Scrape] Got ${scraperTrucks.length} trucks from scraper`);
+
+      let updated = 0;
+      for (const truck of scraperTrucks) {
+        const rawNum = truck.truck_number?.toString().trim();
+        if (!rawNum) continue;
+        const truckNumber = rawNum.padStart(6, '0');
+        await getDb()
+          .insert(registrationTracking)
+          .values({
+            truckNumber,
+            lastScraped: new Date(),
+            scrapeStatus: 'scraped',
+            currentStep: truck.current_step || null,
+            lastChangeDate: truck.last_change_date || null,
+            etaDate: truck.eta_date || null,
+            renewalDate: truck.renewal_date || null,
+            holmanStatus: truck.holman_status || null,
+            viewRequestBadge: truck.view_request_badge || null,
+          })
+          .onConflictDoUpdate({
+            target: registrationTracking.truckNumber,
+            set: {
+              lastScraped: new Date(),
+              scrapeStatus: 'scraped',
+              currentStep: truck.current_step || null,
+              lastChangeDate: truck.last_change_date || null,
+              etaDate: truck.eta_date || null,
+              renewalDate: truck.renewal_date || null,
+              holmanStatus: truck.holman_status || null,
+              viewRequestBadge: truck.view_request_badge || null,
+              updatedAt: sql`now()`,
+            },
+          });
+        updated++;
+      }
+
+      console.log(`[Registration Scrape] Updated ${updated} truck records`);
+      res.json({ success: true, updated });
+    } catch (error: any) {
+      console.error("[Registration Scrape] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Scrape a single truck from external Holman registration scraper
+  app.post("/registration/scrape/:truckNumber", async (req, res) => {
+    const SCRAPER_BASE = "https://web-scraper-tool-seanchen37.replit.app";
+    try {
+      const rawNum = req.params.truckNumber?.toString().trim();
+      const truckNumber = rawNum.padStart(6, '0');
+      const scraperTruckNum = rawNum.replace(/^0+/, '') || rawNum;
+      console.log(`[Registration Scrape] Fetching truck ${truckNumber} from scraper...`);
+
+      // Mark as pending first
+      await getDb()
+        .insert(registrationTracking)
+        .values({ truckNumber, scrapeStatus: 'pending', lastScraped: new Date() })
+        .onConflictDoUpdate({
+          target: registrationTracking.truckNumber,
+          set: { scrapeStatus: 'pending', lastScraped: new Date(), updatedAt: sql`now()` },
+        });
+
+      const response = await fetch(`${SCRAPER_BASE}/api/registration/trucks/${scraperTruckNum}`);
+      if (!response.ok) {
+        await getDb()
+          .insert(registrationTracking)
+          .values({ truckNumber, scrapeStatus: 'error', lastScraped: new Date() })
+          .onConflictDoUpdate({
+            target: registrationTracking.truckNumber,
+            set: { scrapeStatus: 'error', lastScraped: new Date(), updatedAt: sql`now()` },
+          });
+        throw new Error(`Scraper returned ${response.status}: ${response.statusText}`);
+      }
+
+      const truck: any = await response.json();
+      await getDb()
+        .insert(registrationTracking)
+        .values({
+          truckNumber,
+          lastScraped: new Date(),
+          scrapeStatus: 'scraped',
+          currentStep: truck.current_step || null,
+          lastChangeDate: truck.last_change_date || null,
+          etaDate: truck.eta_date || null,
+          renewalDate: truck.renewal_date || null,
+          holmanStatus: truck.holman_status || null,
+          viewRequestBadge: truck.view_request_badge || null,
+        })
+        .onConflictDoUpdate({
+          target: registrationTracking.truckNumber,
+          set: {
+            lastScraped: new Date(),
+            scrapeStatus: 'scraped',
+            currentStep: truck.current_step || null,
+            lastChangeDate: truck.last_change_date || null,
+            etaDate: truck.eta_date || null,
+            renewalDate: truck.renewal_date || null,
+            holmanStatus: truck.holman_status || null,
+            viewRequestBadge: truck.view_request_badge || null,
+            updatedAt: sql`now()`,
+          },
+        });
+
+      res.json({ success: true, truck });
+    } catch (error: any) {
+      console.error("[Registration Scrape Single] Error:", error);
       res.status(500).json({ message: error.message });
     }
   });

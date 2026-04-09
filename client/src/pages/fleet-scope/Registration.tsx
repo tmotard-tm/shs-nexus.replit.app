@@ -124,6 +124,14 @@ interface RegistrationTruck {
   techLeadName: string;
   techLeadPhone: string;
   inRepairShop: boolean;
+  lastScraped: string | null;
+  scrapeStatus: string | null;
+  currentStep: string | null;
+  lastChangeDate: string | null;
+  etaDate: string | null;
+  renewalDate: string | null;
+  holmanStatus: string | null;
+  viewRequestBadge: string | null;
 }
 
 interface RegistrationResponse {
@@ -260,6 +268,44 @@ export default function Registration() {
     onError: (error: Error) => {
       toast({
         title: "Import Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const scrapeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/fs/registration/scrape", {});
+      return response.json();
+    },
+    onSuccess: (result) => {
+      toast({
+        title: "Scrape Complete",
+        description: `Updated ${result.updated} trucks from Holman registration portal`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/registration"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Scrape Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const scrapeSingleMutation = useMutation({
+    mutationFn: async (truckNumber: string) => {
+      const response = await apiRequest("POST", `/api/fs/registration/scrape/${truckNumber}`, {});
+      return response.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/registration"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Scrape Failed",
         description: error.message,
         variant: "destructive",
       });
@@ -800,6 +846,16 @@ export default function Registration() {
           >
             <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
             Refresh
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => scrapeMutation.mutate()}
+            disabled={scrapeMutation.isPending}
+            data-testid="button-scrape-holman"
+          >
+            <RefreshCw className={`w-4 h-4 mr-2 ${scrapeMutation.isPending ? 'animate-spin' : ''}`} />
+            {scrapeMutation.isPending ? 'Scraping...' : 'Scrape Holman'}
           </Button>
           <Button
             variant="outline"
@@ -1357,6 +1413,13 @@ export default function Registration() {
                         {daysToExpirySort === "desc" && <ArrowDown className="ml-1 h-3 w-3" />}
                       </Button>
                     </TableHead>
+                    <TableHead className="w-[120px]">Renewal Date</TableHead>
+                    <TableHead className="w-[180px]">Holman Status</TableHead>
+                    <TableHead className="w-[140px]">Badge</TableHead>
+                    <TableHead className="w-[150px]">Current Step</TableHead>
+                    <TableHead className="w-[120px]">Last Change</TableHead>
+                    <TableHead className="w-[90px]">ETA</TableHead>
+                    <TableHead className="w-[100px]">Scrape Status</TableHead>
                     <TableHead className="w-[100px] text-center">Initial Text Sent</TableHead>
                     <TableHead className="w-[180px]">Time Slot</TableHead>
                     <TableHead className="w-[120px] text-center">Submitted to Holman</TableHead>
@@ -1374,7 +1437,7 @@ export default function Registration() {
                 <TableBody>
                   {filteredTrucks.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={18} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={25} className="text-center py-8 text-muted-foreground">
                         No trucks found matching your search
                       </TableCell>
                     </TableRow>
@@ -1437,6 +1500,66 @@ export default function Registration() {
                             ) : (
                               <span className="text-muted-foreground">-</span>
                             )}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.renewalDate || <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.holmanStatus ? (
+                              <span className="text-muted-foreground text-xs">{truck.holmanStatus}</span>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell>
+                            {truck.viewRequestBadge ? (
+                              <Badge variant="outline" className="text-xs">{truck.viewRequestBadge}</Badge>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.currentStep ? (
+                              <Badge
+                                variant="outline"
+                                className={
+                                  truck.currentStep === 'Complete' ? 'border-green-500 text-green-700 dark:text-green-400' :
+                                  truck.currentStep === 'Rejected' ? 'border-red-500 text-red-700 dark:text-red-400' :
+                                  truck.currentStep === 'Sent to State' ? 'border-blue-500 text-blue-700 dark:text-blue-400' :
+                                  truck.currentStep === 'Prerequisites' ? 'border-amber-500 text-amber-700 dark:text-amber-400' :
+                                  ''
+                                }
+                              >
+                                {truck.currentStep}
+                              </Badge>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.lastChangeDate || <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.etaDate || <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              {truck.scrapeStatus ? (
+                                <Badge
+                                  variant="outline"
+                                  className={
+                                    truck.scrapeStatus === 'scraped' ? 'border-green-500 text-green-700 dark:text-green-400' :
+                                    truck.scrapeStatus === 'error' ? 'border-red-500 text-red-700 dark:text-red-400' :
+                                    truck.scrapeStatus === 'pending' ? 'border-amber-500 text-amber-700 dark:text-amber-400' :
+                                    ''
+                                  }
+                                >
+                                  {truck.scrapeStatus}
+                                </Badge>
+                              ) : <span className="text-muted-foreground text-xs">not scraped</span>}
+                              <button
+                                title="Scrape this truck"
+                                onClick={() => scrapeSingleMutation.mutate(truck.truckNumber)}
+                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', flexShrink: 0, borderRadius: '4px', backgroundColor: 'rgb(219 234 254)', color: 'rgb(37 99 235)', cursor: 'pointer', border: 'none', padding: 0 }}
+                                data-testid={`button-scrape-${truck.truckNumber}`}
+                              >
+                                <RefreshCw style={{ width: '11px', height: '11px' }} />
+                              </button>
+                            </div>
                           </TableCell>
                           <TableCell className="text-center">
                             <Checkbox
