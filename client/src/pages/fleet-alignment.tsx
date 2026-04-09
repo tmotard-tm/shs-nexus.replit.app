@@ -359,7 +359,7 @@ export default function FleetAlignment() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [forceRefresh, setForceRefresh] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [patternFilter, setPatternFilter] = useState<"all" | "holman_only" | "tpms_only" | "both_diff">("all");
+  const [patternFilter, setPatternFilter] = useState<"all" | "holman_only" | "tpms_only" | "both_diff" | "ams_blank" | "ams_diff" | "all_three_diff">("all");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [bulkFixOnly, setBulkFixOnly] = useState(false);
   const [confirmUnassign, setConfirmUnassign] = useState(false);
@@ -436,11 +436,15 @@ export default function FleetAlignment() {
       })
       .filter(r => {
         if (patternFilter === "all") return true;
-        const h = (r.holmanTechId ?? "").trim();
-        const t = (r.tpmsTechId ?? "").trim();
-        if (patternFilter === "holman_only") return h !== "" && t === "";
-        if (patternFilter === "tpms_only")  return t !== "" && h === "";
-        if (patternFilter === "both_diff")  return h !== "" && t !== "" && h.toLowerCase() !== t.toLowerCase();
+        const h = (r.holmanTechId ?? "").trim().toLowerCase();
+        const t = (r.tpmsTechId ?? "").trim().toLowerCase();
+        const a = (r.amsTechId ?? "").trim().toLowerCase();
+        if (patternFilter === "holman_only")  return h !== "" && t === "";
+        if (patternFilter === "tpms_only")    return t !== "" && h === "";
+        if (patternFilter === "both_diff")    return h !== "" && t !== "" && h !== t;
+        if (patternFilter === "ams_blank")    return h !== "" && a === "";
+        if (patternFilter === "ams_diff")     return (h !== "" || a !== "") && h !== a;
+        if (patternFilter === "all_three_diff") return h !== "" && t !== "" && a !== "" && h !== t && t !== a && h !== a;
         return true;
       })
       .filter(r => actionFilter === "all" || r.suggestedAction === actionFilter)
@@ -755,6 +759,9 @@ export default function FleetAlignment() {
                       <SelectItem value="holman_only">Holman assigned · TPMS blank</SelectItem>
                       <SelectItem value="tpms_only">TPMS assigned · Holman blank</SelectItem>
                       <SelectItem value="both_diff">Both assigned · different tech</SelectItem>
+                      <SelectItem value="ams_blank">Holman assigned · AMS blank</SelectItem>
+                      <SelectItem value="ams_diff">AMS differs from Holman</SelectItem>
+                      <SelectItem value="all_three_diff">All three systems differ</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
