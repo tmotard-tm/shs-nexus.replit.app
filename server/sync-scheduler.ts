@@ -16,6 +16,7 @@ const NOTIFICATION_BACKFILL_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 hours
 const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for operation events retry
 const OFFBOARDING_TASKS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for offboarding gap-check
 const EXTERNAL_WATERMARK_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for TPMS/AMS external change detection
+const TPMS_STALE_SWEEP_INTERVAL_MS = 4 * 60 * 60 * 1000;   // 4 hours — validates cached assignments against live TPMS
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
@@ -25,6 +26,7 @@ let lastOpEventsRetryTime: number | null = null;
 let lastOffboardingTasksTime: number | null = null;
 let lastTpmsPollTime: number | null = null; // External TPMS watermark poll
 let lastAmsPollTime: number | null = null; // External AMS watermark poll
+let lastTpmsStaleSweepTime: number | null = null; // Stale TPMS cache validation sweep
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 
@@ -99,6 +101,7 @@ async function checkAndRunSync(): Promise<void> {
   await checkAndRunOffboardingTasks();
   await checkAndRunTpmsPoll();
   await checkAndRunAmsPoll();
+  await checkAndRunTpmsStaleSweep();
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -407,6 +410,90 @@ async function checkAndRunTpmsPoll(): Promise<void> {
     }
   } catch (err: any) {
     console.error('[Scheduler] TPMS watermark poll error (non-fatal):', err?.message);
+  }
+}
+
+// ─── TPMS Stale Cache Sweep ──────────────────────────────────────────────────
+// Validates assigned tpms_cached_assignments records older than 4 hours by
+// re-querying TPMS live. Catches anything the watermark poll missed (e.g. due
+// to server restarts resetting the watermark, or pre-Nexus stale imports).
+
+async function checkAndRunTpmsStaleSweep(): Promise<void> {
+  const now = Date.now();
+  if (lastTpmsStaleSweepTime !== null && (now - lastTpmsStaleSweepTime) < TPMS_STALE_SWEEP_INTERVAL_MS) {
+    return;
+  }
+  lastTpmsStaleSweepTime = now;
+
+  try {
+    const { getTPMSService } = await import('./tpms-service');
+    const tpms = getTPMSService();
+    if (!tpms.isConfigured()) return;
+
+    // Find assigned cache records not refreshed in the last 4 hours (batch of 50 per sweep)
+    const { sql: rawSql } = await import('drizzle-orm');
+    const staleRows = await db.execute(rawSql`
+      SELECT enterprise_id, truck_no
+      FROM tpms_cached_assignments
+      WHERE truck_no IS NOT NULL AND truck_no <> ''
+        AND enterprise_id IS NOT NULL AND enterprise_id <> ''
+        AND last_success_at < NOW() - INTERVAL '4 hours'
+      ORDER BY last_success_at ASC
+      LIMIT 50
+    `);
+
+    const rows: Array<{ enterprise_id: string; truck_no: string }> =
+      (staleRows as any).rows ?? (Array.isArray(staleRows) ? staleRows : []);
+
+    if (rows.length === 0) return;
+
+    console.log(`[Scheduler] TPMS stale sweep: validating ${rows.length} cached assignments against live TPMS`);
+    let updated = 0;
+    let evicted = 0;
+
+    for (const row of rows) {
+      try {
+        const live = await tpms.getTechInfo(row.enterprise_id).catch(() => null);
+        const liveTruck = (live?.truckNo ?? '').trim();
+        const cachedTruck = (row.truck_no ?? '').trim();
+
+        if (!liveTruck) {
+          // TPMS confirms unassigned — evict the stale record
+          await db.delete(tpmsCachedAssignments)
+            .where(eq(tpmsCachedAssignments.enterpriseId, row.enterprise_id));
+          evicted++;
+        } else if (liveTruck !== cachedTruck) {
+          // Assignment changed — update the cache with the new truck
+          await db.update(tpmsCachedAssignments)
+            .set({
+              truckNo: liveTruck,
+              lastSuccessAt: new Date(),
+              updatedAt: new Date(),
+              status: 'live',
+            })
+            .where(eq(tpmsCachedAssignments.enterpriseId, row.enterprise_id));
+          updated++;
+        } else {
+          // Still correct — just refresh the timestamp so it won't be swept again for 4h
+          await db.update(tpmsCachedAssignments)
+            .set({ lastSuccessAt: new Date(), updatedAt: new Date() })
+            .where(eq(tpmsCachedAssignments.enterpriseId, row.enterprise_id));
+        }
+
+        // Brief pause to respect TPMS rate limits
+        await new Promise(r => setTimeout(r, 200));
+      } catch (err: any) {
+        console.warn(`[Scheduler] TPMS stale sweep: error validating ${row.enterprise_id}:`, err?.message);
+      }
+    }
+
+    if (updated > 0 || evicted > 0) {
+      console.log(`[Scheduler] TPMS stale sweep complete: ${updated} updated, ${evicted} evicted (phantom mismatches cleared)`);
+    } else {
+      console.log(`[Scheduler] TPMS stale sweep complete: ${rows.length} records confirmed current`);
+    }
+  } catch (err: any) {
+    console.error('[Scheduler] TPMS stale sweep error (non-fatal):', err?.message);
   }
 }
 
