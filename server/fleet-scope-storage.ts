@@ -1742,8 +1742,10 @@ export class DatabaseStorage implements IStorage {
     limit?: number;
     page?: number;
   }): Promise<{ rows: CallLog[]; total: number }> {
-    const pageSize = Math.min(opts.limit ?? 100, 500);
-    const page = Math.max(opts.page ?? 1, 1);
+    const rawLimit = opts.limit ?? 100;
+    const rawPage = opts.page ?? 1;
+    const pageSize = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
+    const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
     const offset = (page - 1) * pageSize;
 
     const conditions = [];

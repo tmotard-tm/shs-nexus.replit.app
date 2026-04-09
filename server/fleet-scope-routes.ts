@@ -2241,8 +2241,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/public/rentals", requirePublicApiKey, async (req, res) => {
     try {
       const { status, owner, limit: limitStr, page: pageStr } = req.query as Record<string, string>;
-      const pageSize = Math.min(limitStr ? Number(limitStr) : 100, 500);
-      const page = Math.max(pageStr ? Number(pageStr) : 1, 1);
+      const rawLimit = limitStr ? parseInt(limitStr, 10) : 100;
+      const rawPage = pageStr ? parseInt(pageStr, 10) : 1;
+      const pageSize = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
+      const page = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
 
       let allTrucks = await fleetScopeStorage.getAllTrucks();
 
@@ -2902,8 +2904,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           description: "Scheduled follow-up calls with nextFollowUpDate due today or earlier",
           auth: true,
         },
-        { method: "GET", path: "/api/public/registrations", description: "Vehicle registration tracking data", auth: true },
-        { method: "GET", path: "/api/public/registrations/:truckNumber", description: "Single truck registration data", auth: true },
+        { method: "GET", path: "/api/public/registrations", description: "Vehicle registration tracking data", auth: false },
+        { method: "GET", path: "/api/public/registrations/:truckNumber", description: "Single truck registration data", auth: false },
         { method: "GET", path: "/api/public/spares", description: "Spare vehicle details with status tracking", auth: true },
         { method: "GET", path: "/api/public/spares/:vehicleNumber", description: "Single spare vehicle data", auth: true },
         { method: "GET", path: "/api/public/all-vehicles", description: "Full fleet vehicle list from Snowflake with location data", auth: true },
@@ -3093,17 +3095,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/public/call-logs", requirePublicApiKey, async (req, res) => {
     try {
       const { truckId, truckNumber, outcome, status: callStatus, limit: limitStr, page: pageStr } = req.query as Record<string, string>;
+      const rawLimit = limitStr ? parseInt(limitStr, 10) : 100;
+      const rawPage = pageStr ? parseInt(pageStr, 10) : 1;
+      const safeLimit = Math.min(Math.max(Number.isFinite(rawLimit) ? rawLimit : 100, 1), 500);
+      const safePage = Math.max(Number.isFinite(rawPage) ? rawPage : 1, 1);
       const { rows, total } = await fleetScopeStorage.getFilteredCallLogs({
         truckId: truckId || undefined,
         truckNumber: truckNumber || undefined,
         outcome: outcome || undefined,
         status: callStatus || undefined,
-        limit: limitStr ? Number(limitStr) : 100,
-        page: pageStr ? Number(pageStr) : 1,
+        limit: safeLimit,
+        page: safePage,
       });
-      const page = Math.max(pageStr ? Number(pageStr) : 1, 1);
-      const pageSize = Math.min(limitStr ? Number(limitStr) : 100, 500);
-      res.json({ success: true, total, page, pageSize, count: rows.length, data: rows });
+      res.json({ success: true, total, page: safePage, pageSize: safeLimit, count: rows.length, data: rows });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
