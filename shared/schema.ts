@@ -2040,46 +2040,23 @@ export type TpmsChangeLog = typeof tpmsChangeLog.$inferSelect;
 export type InsertTpmsChangeLog = z.infer<typeof insertTpmsChangeLogSchema>;
 
 // ===============================
-// AMS Vehicles Cache - Caches AMS vehicle data for fallback when AMS API is unavailable
+// AMS Vehicles Cache - Lean cache tracking AMS tech assignment + status per VIN
 // ===============================
 
 export const amsVehiclesCache = pgTable("ams_vehicles_cache", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   vin: text("vin").notNull().unique(),
-  vehicleNumber: text("vehicle_number"),
-  techEnterpriseId: text("tech_enterprise_id"),
-  techName: text("tech_name"),
-  amsStatus: integer("ams_status"),
-  region: text("region"),
-  district: text("district"),
-  address: text("address"),
-  city: text("city"),
-  state: text("state"),
-  zip: text("zip"),
-  makeName: text("make_name"),
-  modelName: text("model_name"),
-  modelYear: text("model_year"),
-  licensePlate: text("license_plate"),
-  licState: text("lic_state"),
-  color: text("color"),
-  branding: text("branding"),
-  interior: text("interior"),
-  rawData: jsonb("raw_data"),
-  lastAmsUpdateDate: text("last_ams_update_date"),
-  operationLockAt: timestamp("operation_lock_at"),
-  operationLockBy: text("operation_lock_by"),
-  status: text("status").notNull().default("live"),
-  lastSuccessAt: timestamp("last_success_at"),
-  lastAttemptAt: timestamp("last_attempt_at"),
-  lastErrorMessage: text("last_error_message"),
-  failureCount: integer("failure_count").notNull().default(0),
+  amsTruckStatusId: integer("ams_truck_status_id"),
+  amsTruckStatusLabel: text("ams_truck_status_label"),
+  amsAssignedLdap: text("ams_assigned_ldap"),
+  lastAmsSyncAt: timestamp("last_ams_sync_at"),
+  lastAmsError: text("last_ams_error"),
+  rawResponse: jsonb("raw_response"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
   vinIdx: index("ams_cache_vin_idx").on(table.vin),
-  vehicleNumberIdx: index("ams_cache_vehicle_number_idx").on(table.vehicleNumber),
-  techIdx: index("ams_cache_tech_idx").on(table.techEnterpriseId),
-  statusIdx: index("ams_cache_status_idx").on(table.status),
+  ldapIdx: index("ams_cache_ldap_idx").on(table.amsAssignedLdap),
 }));
 
 export const insertAmsvehiclesCacheSchema = createInsertSchema(amsVehiclesCache).omit({

@@ -559,29 +559,17 @@ async function checkAndRunAmsPoll(): Promise<void> {
         const vin: string = (tech.VIN || tech.vin || '').trim();
         if (!vin) continue;
 
-        // Skip if operation_lock_at is currently held (in-flight manual operation from Task #133)
-        const lockCheck = await db.select({ operationLockAt: amsVehiclesCache.operationLockAt })
-          .from(amsVehiclesCache)
-          .where(eq(amsVehiclesCache.vin, vin))
-          .limit(1);
-        const lockAt = lockCheck[0]?.operationLockAt ?? null;
-        if (lockAt && new Date(lockAt).getTime() > Date.now() - 5 * 60 * 1000) {
-          // Lock held in last 5 minutes — skip this vehicle
-          continue;
-        }
-
         // Fetch previous cache entry for change detection
         const prevCache = await db.select({
-          techEnterpriseId: amsVehiclesCache.techEnterpriseId,
-          amsStatus: amsVehiclesCache.amsStatus,
-          vehicleNumber: amsVehiclesCache.vehicleNumber,
+          amsAssignedLdap: amsVehiclesCache.amsAssignedLdap,
+          amsTruckStatusId: amsVehiclesCache.amsTruckStatusId,
         }).from(amsVehiclesCache)
           .where(eq(amsVehiclesCache.vin, vin))
           .limit(1);
 
-        const prevTech = prevCache[0]?.techEnterpriseId ?? null;
-        const prevStatus = prevCache[0]?.amsStatus ?? null;
-        const vehicleNumber = (tech.VehicleNumber || tech.vehicleNumber || prevCache[0]?.vehicleNumber || '').trim();
+        const prevTech = prevCache[0]?.amsAssignedLdap ?? null;
+        const prevStatus = prevCache[0]?.amsTruckStatusId ?? null;
+        const vehicleNumber = (tech.VehicleNumber || tech.vehicleNumber || '').trim();
 
         const newTech = (tech.Tech || tech.LdapId || '').trim() || null;
         const rawStatus = tech.Status ?? tech.status ?? null;
@@ -594,48 +582,22 @@ async function checkAndRunAmsPoll(): Promise<void> {
           holmanMappedStatus = 'U';
         }
 
-        // Upsert into ams_vehicles_cache
+        // Upsert into ams_vehicles_cache (lean schema)
         await db.insert(amsVehiclesCache).values({
           vin,
-          vehicleNumber: vehicleNumber || null,
-          techEnterpriseId: newTech,
-          techName: tech.TechName || null,
-          amsStatus: isNaN(amsStatusCode as number) ? null : amsStatusCode,
-          region: tech.Region || null,
-          district: tech.District || null,
-          address: tech.Address || null,
-          city: tech.City || null,
-          state: tech.State || null,
-          zip: tech.Zip || null,
-          makeName: tech.MakeName || null,
-          modelName: tech.ModelName || null,
-          modelYear: tech.ModelYear || null,
-          licensePlate: tech.LicensePlate || null,
-          licState: tech.LicState || null,
-          color: tech.Color || null,
-          branding: tech.Branding || null,
-          interior: tech.Interior != null ? String(tech.Interior) : null,
-          rawData: tech,
-          lastAmsUpdateDate: tech.LastUpdate || null,
-          status: 'live',
-          lastSuccessAt: pollTime,
-          lastAttemptAt: pollTime,
-          failureCount: 0,
+          amsAssignedLdap: newTech,
+          amsTruckStatusId: isNaN(amsStatusCode as number) ? null : amsStatusCode,
+          amsTruckStatusLabel: tech.StatusLabel || tech.TruckStatusLabel || null,
+          rawResponse: tech,
+          lastAmsSyncAt: pollTime,
         }).onConflictDoUpdate({
           target: amsVehiclesCache.vin,
           set: {
-            vehicleNumber: vehicleNumber || null,
-            techEnterpriseId: newTech,
-            techName: tech.TechName || null,
-            amsStatus: isNaN(amsStatusCode as number) ? null : amsStatusCode,
-            region: tech.Region || null,
-            district: tech.District || null,
-            rawData: tech,
-            lastAmsUpdateDate: tech.LastUpdate || null,
-            status: 'live',
-            lastSuccessAt: pollTime,
-            lastAttemptAt: pollTime,
-            failureCount: 0,
+            amsAssignedLdap: newTech,
+            amsTruckStatusId: isNaN(amsStatusCode as number) ? null : amsStatusCode,
+            amsTruckStatusLabel: tech.StatusLabel || tech.TruckStatusLabel || null,
+            rawResponse: tech,
+            lastAmsSyncAt: pollTime,
             updatedAt: pollTime,
           },
         });

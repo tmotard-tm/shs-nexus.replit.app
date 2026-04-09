@@ -341,23 +341,15 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       try {
         await db.insert(amsVehiclesCache).values({
           vin,
-          vehicleNumber: preVehicle?.VehicleNumber || null,
-          techEnterpriseId: preCurrentTech,
-          techName: preVehicle?.TechName || null,
-          rawData: preVehicle ?? null,
-          status: 'live',
-          lastSuccessAt: new Date(),
-          lastAttemptAt: new Date(),
-          failureCount: 0,
+          amsAssignedLdap: preCurrentTech,
+          rawResponse: preVehicle ?? null,
+          lastAmsSyncAt: new Date(),
         }).onConflictDoUpdate({
           target: amsVehiclesCache.vin,
           set: {
-            techEnterpriseId: preCurrentTech,
-            techName: preVehicle?.TechName || null,
-            rawData: preVehicle ?? null,
-            status: 'live',
-            lastSuccessAt: new Date(),
-            lastAttemptAt: new Date(),
+            amsAssignedLdap: preCurrentTech,
+            rawResponse: preVehicle ?? null,
+            lastAmsSyncAt: new Date(),
             updatedAt: new Date(),
           },
         });
@@ -420,24 +412,17 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
         try {
           await db.insert(amsVehiclesCache).values({
             vin,
-            vehicleNumber: postVehicle?.VehicleNumber || null,
-            techEnterpriseId: postVehicle?.Tech ?? null,
-            techName: postVehicle?.TechName || null,
-            rawData: postVehicle ?? null,
-            status: 'live',
-            lastSuccessAt: new Date(),
-            lastAttemptAt: new Date(),
-            failureCount: 0,
+            amsAssignedLdap: postVehicle?.Tech ?? null,
+            rawResponse: postVehicle ?? null,
+            lastAmsSyncAt: new Date(),
+            lastAmsError: null,
           }).onConflictDoUpdate({
             target: amsVehiclesCache.vin,
             set: {
-              techEnterpriseId: postVehicle?.Tech ?? null,
-              techName: postVehicle?.TechName || null,
-              rawData: postVehicle ?? null,
-              status: 'live',
-              lastSuccessAt: new Date(),
-              lastAttemptAt: new Date(),
-              lastErrorMessage: null,
+              amsAssignedLdap: postVehicle?.Tech ?? null,
+              rawResponse: postVehicle ?? null,
+              lastAmsSyncAt: new Date(),
+              lastAmsError: null,
               updatedAt: new Date(),
             },
           });
@@ -456,7 +441,7 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       // Record error in cache (best-effort)
       try {
         await db.update(amsVehiclesCache)
-          .set({ lastErrorMessage: assignErr.message, lastAttemptAt: new Date(), updatedAt: new Date() })
+          .set({ lastAmsError: assignErr.message, updatedAt: new Date() })
           .where(eq(amsVehiclesCache.vin, vin));
       } catch {}
       // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
@@ -475,35 +460,30 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
     let currentTech: string | null = null;
     try {
       // Cache-first: try to resolve current tech from ams_vehicles_cache before live call
-      const cacheRow = await db.select({ techEnterpriseId: amsVehiclesCache.techEnterpriseId })
+      const cacheRow = await db.select({ amsAssignedLdap: amsVehiclesCache.amsAssignedLdap })
         .from(amsVehiclesCache)
         .where(eq(amsVehiclesCache.vin, vin))
         .limit(1);
-      if (cacheRow[0]?.techEnterpriseId) {
-        currentTech = cacheRow[0].techEnterpriseId;
+      if (cacheRow[0]?.amsAssignedLdap) {
+        currentTech = cacheRow[0].amsAssignedLdap;
         console.log(`[FleetOps-AMS] Cache hit for ${vin}: Tech=${currentTech}`);
       } else {
         // Live lookup
         const searchResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
         const vehicle = Array.isArray(searchResult) ? searchResult[0] : (searchResult?.data?.[0] ?? searchResult);
         currentTech = vehicle?.Tech ?? null;
-        console.log(`[FleetOps] AMS pre-check (live) for ${vin}: Tech=${currentTech}, TechName=${vehicle?.TechName}`);
+        console.log(`[FleetOps] AMS pre-check (live) for ${vin}: Tech=${currentTech}`);
         // Update cache with fresh live data
         if (vehicle) {
           try {
             await db.insert(amsVehiclesCache).values({
               vin,
-              vehicleNumber: vehicle.VehicleNumber || null,
-              techEnterpriseId: vehicle.Tech || null,
-              techName: vehicle.TechName || null,
-              rawData: vehicle,
-              status: 'live',
-              lastSuccessAt: new Date(),
-              lastAttemptAt: new Date(),
-              failureCount: 0,
+              amsAssignedLdap: vehicle.Tech || null,
+              rawResponse: vehicle,
+              lastAmsSyncAt: new Date(),
             }).onConflictDoUpdate({
               target: amsVehiclesCache.vin,
-              set: { techEnterpriseId: vehicle.Tech || null, techName: vehicle.TechName || null, rawData: vehicle, status: 'live', lastSuccessAt: new Date(), lastAttemptAt: new Date(), updatedAt: new Date() },
+              set: { amsAssignedLdap: vehicle.Tech || null, rawResponse: vehicle, lastAmsSyncAt: new Date(), updatedAt: new Date() },
             });
           } catch { /* non-fatal */ }
         }
@@ -512,14 +492,14 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       // Live lookup failed — fall back to cache
       console.warn(`[FleetOps-AMS] Live vehicle lookup failed for ${vin}, falling back to cache: ${lookupErr.message}`);
       try {
-        const cacheRow = await db.select({ techEnterpriseId: amsVehiclesCache.techEnterpriseId })
+        const cacheRow = await db.select({ amsAssignedLdap: amsVehiclesCache.amsAssignedLdap })
           .from(amsVehiclesCache)
           .where(eq(amsVehiclesCache.vin, vin))
           .limit(1);
-        currentTech = cacheRow[0]?.techEnterpriseId ?? null;
-        // Mark cache as degraded
+        currentTech = cacheRow[0]?.amsAssignedLdap ?? null;
+        // Record lookup error in cache
         await db.update(amsVehiclesCache)
-          .set({ status: 'cached', lastAttemptAt: new Date(), lastErrorMessage: lookupErr.message, updatedAt: new Date() })
+          .set({ lastAmsError: lookupErr.message, updatedAt: new Date() })
           .where(eq(amsVehiclesCache.vin, vin));
       } catch { /* non-fatal */ }
       if (!currentTech) {
@@ -542,24 +522,17 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
         try {
           await db.insert(amsVehiclesCache).values({
             vin,
-            vehicleNumber: postVehicle?.VehicleNumber || null,
-            techEnterpriseId: postVehicle?.Tech ?? null,
-            techName: postVehicle?.TechName || null,
-            rawData: postVehicle ?? null,
-            status: 'live',
-            lastSuccessAt: new Date(),
-            lastAttemptAt: new Date(),
-            failureCount: 0,
+            amsAssignedLdap: postVehicle?.Tech ?? null,
+            rawResponse: postVehicle ?? null,
+            lastAmsSyncAt: new Date(),
+            lastAmsError: null,
           }).onConflictDoUpdate({
             target: amsVehiclesCache.vin,
             set: {
-              techEnterpriseId: postVehicle?.Tech ?? null,
-              techName: postVehicle?.TechName || null,
-              rawData: postVehicle ?? null,
-              status: 'live',
-              lastSuccessAt: new Date(),
-              lastAttemptAt: new Date(),
-              lastErrorMessage: null,
+              amsAssignedLdap: postVehicle?.Tech ?? null,
+              rawResponse: postVehicle ?? null,
+              lastAmsSyncAt: new Date(),
+              lastAmsError: null,
               updatedAt: new Date(),
             },
           });
