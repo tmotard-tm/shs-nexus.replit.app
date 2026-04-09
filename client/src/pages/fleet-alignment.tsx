@@ -97,21 +97,21 @@ const ROOT_CAUSE_META: Record<RootCause, { label: string; color: string; badgeCl
 const NON_BULK_FIXABLE: RootCause[] = ["stale_tech_id", "byov_vin_missing", "status_blocked"];
 
 // ---------------------------------------------------------------------------
-// Mismatch pattern taxonomy — all 10 possible three-system disagreement states
-// (when h ≠ t, which is the definition of a mismatch)
+// Mismatch pattern taxonomy — 8 patterns split by TPMS Assigned / Unassigned,
+// then by which pair of systems agree.
 // ---------------------------------------------------------------------------
 type PatternKey =
   | "all"
-  | "tpms_only"         // H empty, T assigned, A empty
-  | "no_holman_match"   // H empty, T & A match
-  | "no_holman_diff"    // H empty, T & A both assigned but different
-  | "holman_only"       // H assigned, T & A empty
-  | "no_tpms_match"     // T empty, H & A match
-  | "no_tpms_diff"      // T empty, H & A both assigned but different
-  | "both_diff_no_ams"  // H & T differ, A empty
-  | "holman_ams_match"  // H & A match, T differs
-  | "tpms_ams_match"    // T & A match, H differs
-  | "all_three_diff";   // H, T, A all different from each other
+  // TPMS Assigned (t ≠ "")
+  | "ta_th_match"   // TPMS & Holman match, AMS differs
+  | "ta_ha_match"   // Holman & AMS match, TPMS differs
+  | "ta_ta_match"   // TPMS & AMS match, Holman differs
+  | "ta_all_diff"   // TPMS assigned — all mismatch
+  // TPMS Unassigned (t = "")
+  | "tu_th_match"   // TPMS & Holman both empty, AMS assigned
+  | "tu_ha_match"   // Holman & AMS match, TPMS empty
+  | "tu_ta_match"   // TPMS & AMS both empty, Holman assigned
+  | "tu_all_diff";  // TPMS unassigned — all mismatch
 
 interface PatternInfo {
   key: Exclude<PatternKey, "all">;
@@ -123,23 +123,20 @@ function getPatternInfo(holman: string | null, tpms: string | null, ams: string 
   const h = (holman ?? "").trim().toLowerCase();
   const t = (tpms ?? "").trim().toLowerCase();
   const a = (ams ?? "").trim().toLowerCase();
-  // Holman empty
-  if (h === "" && t !== "") {
-    if (a === "")  return { key: "tpms_only",        label: "TPMS only · Holman & AMS empty",      short: "T only" };
-    if (a === t)   return { key: "no_holman_match",  label: "Holman empty · TPMS & AMS match",     short: "H empty · T=A" };
-    return           { key: "no_holman_diff",   label: "Holman empty · TPMS & AMS differ",    short: "H empty · T≠A" };
+
+  if (t !== "") {
+    // TPMS Assigned
+    if (h === t)            return { key: "ta_th_match", label: "TPMS Assigned – TPMS & Holman match", short: "T=H · A≠" };
+    if (h !== "" && h === a) return { key: "ta_ha_match", label: "TPMS Assigned – Holman & AMS match",  short: "H=A · T≠" };
+    if (t === a)            return { key: "ta_ta_match", label: "TPMS Assigned – TPMS & AMS match",    short: "T=A · H≠" };
+    return                         { key: "ta_all_diff", label: "TPMS Assigned – All mismatch",         short: "T+ all≠" };
+  } else {
+    // TPMS Unassigned
+    if (h === "")  return { key: "tu_th_match", label: "TPMS Unassigned – TPMS & Holman match", short: "T=H=∅ · A+" };
+    if (a === "")  return { key: "tu_ta_match", label: "TPMS Unassigned – TPMS & AMS match",    short: "T=A=∅ · H+" };
+    if (h === a)   return { key: "tu_ha_match", label: "TPMS Unassigned – Holman & AMS match",  short: "H=A · T∅" };
+    return                { key: "tu_all_diff", label: "TPMS Unassigned – All mismatch",         short: "T∅ · H≠A" };
   }
-  // TPMS empty
-  if (h !== "" && t === "") {
-    if (a === "")  return { key: "holman_only",      label: "Holman only · TPMS & AMS empty",      short: "H only" };
-    if (a === h)   return { key: "no_tpms_match",    label: "TPMS empty · Holman & AMS match",     short: "T empty · H=A" };
-    return           { key: "no_tpms_diff",     label: "TPMS empty · Holman & AMS differ",    short: "T empty · H≠A" };
-  }
-  // Both assigned, different (guaranteed since this is a mismatch row)
-  if (a === "")  return { key: "both_diff_no_ams",   label: "Holman & TPMS differ · AMS empty",   short: "H≠T · A empty" };
-  if (a === h)   return { key: "holman_ams_match",   label: "Holman & AMS match · TPMS differs",  short: "H=A · T differs" };
-  if (a === t)   return { key: "tpms_ams_match",     label: "TPMS & AMS match · Holman differs",  short: "T=A · H differs" };
-  return           { key: "all_three_diff",     label: "All three systems differ",            short: "H≠T≠A" };
 }
 
 function PatternBadge({ holman, tpms, ams }: { holman: string | null; tpms: string | null; ams: string | null }) {
@@ -802,16 +799,14 @@ export default function FleetAlignment() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All patterns</SelectItem>
-                      <SelectItem value="holman_only">H only · TPMS &amp; AMS empty</SelectItem>
-                      <SelectItem value="tpms_only">TPMS only · Holman &amp; AMS empty</SelectItem>
-                      <SelectItem value="no_holman_match">H empty · TPMS &amp; AMS match</SelectItem>
-                      <SelectItem value="no_holman_diff">H empty · TPMS &amp; AMS differ</SelectItem>
-                      <SelectItem value="no_tpms_match">TPMS empty · H &amp; AMS match</SelectItem>
-                      <SelectItem value="no_tpms_diff">TPMS empty · H &amp; AMS differ</SelectItem>
-                      <SelectItem value="both_diff_no_ams">H &amp; TPMS differ · AMS empty</SelectItem>
-                      <SelectItem value="holman_ams_match">H &amp; AMS match · TPMS differs</SelectItem>
-                      <SelectItem value="tpms_ams_match">TPMS &amp; AMS match · H differs</SelectItem>
-                      <SelectItem value="all_three_diff">All three systems differ</SelectItem>
+                      <SelectItem value="ta_th_match">TPMS Assigned – TPMS &amp; Holman match</SelectItem>
+                      <SelectItem value="ta_ha_match">TPMS Assigned – Holman &amp; AMS match</SelectItem>
+                      <SelectItem value="ta_ta_match">TPMS Assigned – TPMS &amp; AMS match</SelectItem>
+                      <SelectItem value="ta_all_diff">TPMS Assigned – All mismatch</SelectItem>
+                      <SelectItem value="tu_th_match">TPMS Unassigned – TPMS &amp; Holman match</SelectItem>
+                      <SelectItem value="tu_ha_match">TPMS Unassigned – Holman &amp; AMS match</SelectItem>
+                      <SelectItem value="tu_ta_match">TPMS Unassigned – TPMS &amp; AMS match</SelectItem>
+                      <SelectItem value="tu_all_diff">TPMS Unassigned – All mismatch</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
