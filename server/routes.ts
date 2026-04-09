@@ -15853,6 +15853,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         // Invalidate mismatch cache so next poll returns fresh data
         mismatchCache = null;
+
+        // Trigger incremental Holman fleet syncs at t+0, t+5min, t+15min so
+        // verifyFromFleetData runs while Holman submissions are still pending.
+        // Without this, Holman processes unassigns asynchronously (5-15 min)
+        // and the verification timer (20 min) expires before the next scheduled
+        // sync runs — causing the bulk-fixed trucks to reappear as mismatches.
+        const triggerVerificationSync = async (delayMs: number) => {
+          if (delayMs > 0) await new Promise(r => setTimeout(r, delayMs));
+          try {
+            const { holmanVehicleSyncService: hvs } = await import('./holman-vehicle-sync-service');
+            const label = delayMs === 0 ? 'immediate' : `${delayMs / 60000}min`;
+            console.log(`[BulkFix] Post-run verification sync (${label}) triggered for run ${runId}`);
+            await hvs.fetchChangedVehicles(false);
+            console.log(`[BulkFix] Post-run verification sync (${label}) complete`);
+          } catch (e: any) {
+            console.warn(`[BulkFix] Post-run verification sync failed (non-fatal):`, e?.message);
+          }
+        };
+        triggerVerificationSync(0);
+        triggerVerificationSync(5 * 60 * 1000);
+        triggerVerificationSync(15 * 60 * 1000);
       })().catch(err => {
         console.error(`[BulkFix] Run ${runId} fatal error:`, err);
       });

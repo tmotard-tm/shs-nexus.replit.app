@@ -294,9 +294,24 @@ async function checkAndRunTpmsPoll(): Promise<void> {
     const { getTpmsApiService } = await import('./tpms-api-service');
     const tpmsApi = getTpmsApiService();
 
+    // TPMS API requires format 'YYYY-MM-DDTHH:mm:ss' in Eastern time (no Z, no ms)
+    const toEasternTimestamp = (d: Date): string => {
+      const estStr = d.toLocaleString('en-US', {
+        timeZone: 'America/New_York',
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false,
+      });
+      // estStr: "04/09/2026, 11:01:13" → "2026-04-09T11:01:13"
+      const [datePart, timePart] = estStr.split(', ');
+      const [month, day, year] = datePart.split('/');
+      const safeTime = timePart.replace(/^24:/, '00:'); // guard midnight edge-case
+      return `${year}-${month}-${day}T${safeTime}`;
+    };
+
     let techs: any[];
     try {
-      const result = await tpmsApi.getTechsUpdatedAfter(watermarkTs.toISOString());
+      const result = await tpmsApi.getTechsUpdatedAfter(toEasternTimestamp(watermarkTs));
       techs = result?.techInfoList ?? (Array.isArray(result) ? result : []);
     } catch (err: any) {
       console.error('[Scheduler] TPMS watermark poll failed (non-fatal):', err?.message);
