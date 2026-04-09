@@ -2167,48 +2167,137 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // PUBLIC API: GET truck numbers and main status for external applications
-  // This endpoint provides a simplified view of rental dashboard data
-  app.get("/public/rentals", async (req, res) => {
+  // ===== PUBLIC API Module — shared auth middleware =====
+  const requirePublicApiKey = (req: any, res: any, next: any) => {
+    const apiKey = req.headers['x-api-key'];
+    const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
+    if (!expectedApiKey) {
+      return res.status(503).json({ success: false, message: "API not configured. Please contact administrator." });
+    }
+    if (!apiKey || apiKey !== expectedApiKey) {
+      return res.status(401).json({ success: false, message: "Unauthorized. Valid X-API-Key header required." });
+    }
+    next();
+  };
+
+  // ─── Helper: serialize a full truck record for the public API ───────────────
+  function serializeTruck(truck: any) {
+    return {
+      id: truck.id,
+      truckNumber: truck.truckNumber,
+      mainStatus: truck.mainStatus || null,
+      subStatus: truck.subStatus || null,
+      status: truck.status || null,
+      owner: truck.shsOwner || null,
+      techName: truck.techName || null,
+      techPhone: truck.techPhone || null,
+      techLeadName: truck.techLeadName || null,
+      techLeadPhone: truck.techLeadPhone || null,
+      techState: truck.techState || null,
+      repairAddress: truck.repairAddress || null,
+      shopPhone: truck.repairPhone || null,
+      contactName: truck.contactName || null,
+      datePutInRepair: truck.datePutInRepair || null,
+      expectedReturnDate: truck.expectedReturnDate || null,
+      expectedCompletion: truck.expectedCompletion || null,
+      estimatedCost: truck.estimatedCost || null,
+      actualCost: truck.actualCost || null,
+      repairCompleted: truck.repairCompleted ?? false,
+      repairPriority: truck.repairPriority || null,
+      rentalStatus: truck.rentalStatus || null,
+      rentalStartDate: truck.rentalStartDate || null,
+      rentalReason: truck.rentalReason || null,
+      rentalNotes: truck.rentalNotes || null,
+      rentalReturned: truck.rentalReturned ?? false,
+      gaveHolman: truck.gaveHolman || null,
+      eta: truck.eta || null,
+      lastCallDate: truck.lastCallDate || null,
+      lastCallStatus: truck.lastCallStatus || null,
+      lastCallSummary: truck.lastCallSummary || null,
+      lastTechCallDate: truck.lastTechCallDate || null,
+      lastTechCallStatus: truck.lastTechCallStatus || null,
+      lastTechCallSummary: truck.lastTechCallSummary || null,
+      registrationStickerValid: truck.registrationStickerValid || null,
+      registrationExpiryDate: truck.registrationExpiryDate || null,
+      holmanRegExpiry: truck.holmanRegExpiry || null,
+      holmanVehicleRef: truck.holmanVehicleRef || null,
+      notes: truck.notes || null,
+      comments: truck.comments || null,
+      pickUpSlotBooked: truck.pickUpSlotBooked ?? false,
+      vanPickedUp: truck.vanPickedUp ?? false,
+      readyForPickup: truck.readyForPickup ?? false,
+      dateReturnedToService: truck.dateReturnedToService || null,
+      enterpriseId: truck.enterpriseId || null,
+      snowflakeAssigned: truck.snowflakeAssigned ?? null,
+      offboardingFlagged: truck.offboardingFlagged ?? false,
+      inAms: truck.inAms ?? false,
+      mainStatusChangedAt: truck.mainStatusChangedAt || null,
+      lastUpdatedAt: truck.lastUpdatedAt || null,
+      createdAt: truck.createdAt || null,
+    };
+  }
+
+  // PUBLIC API: List all trucks (full record) — auth required
+  app.get("/public/rentals", requirePublicApiKey, async (req, res) => {
     try {
-      const trucks = await fleetScopeStorage.getAllTrucks();
-      
-      // Return simplified data with truck number, status, and repair shop phone
-      const rentalData = trucks.map(truck => ({
-        truckNumber: truck.truckNumber,
-        mainStatus: truck.mainStatus || null,
-        subStatus: truck.subStatus || null,
-        shopPhone: truck.repairPhone || null,
-      }));
-      
+      const { status, owner, limit: limitStr, page: pageStr } = req.query as Record<string, string>;
+      const pageSize = Math.min(limitStr ? Number(limitStr) : 100, 500);
+      const page = Math.max(pageStr ? Number(pageStr) : 1, 1);
+
+      let allTrucks = await fleetScopeStorage.getAllTrucks();
+
+      if (status) {
+        const s = status.toLowerCase();
+        allTrucks = allTrucks.filter(t => (t.mainStatus || '').toLowerCase() === s);
+      }
+      if (owner) {
+        const o = owner.toLowerCase();
+        allTrucks = allTrucks.filter(t => (t.shsOwner || '').toLowerCase() === o);
+      }
+
+      const total = allTrucks.length;
+      const paginated = allTrucks.slice((page - 1) * pageSize, page * pageSize);
+
       res.json({
-        count: rentalData.length,
-        data: rentalData,
+        success: true,
+        total,
+        page,
+        pageSize,
+        count: paginated.length,
+        data: paginated.map(serializeTruck),
       });
     } catch (error: any) {
       console.error("Error fetching public rental data:", error);
-      res.status(500).json({ message: "Failed to fetch rental data" });
+      res.status(500).json({ success: false, message: "Failed to fetch rental data" });
     }
   });
 
-  // PUBLIC API: Rental summary (must be before :truckNumber route)
-  app.get("/public/rentals/summary", async (req, res) => {
-    const apiKey = req.headers['x-api-key'];
-    const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
-    if (!expectedApiKey) return res.status(503).json({ success: false, message: "API not configured." });
-    if (!apiKey || apiKey !== expectedApiKey) return res.status(401).json({ success: false, message: "Unauthorized. Valid X-API-Key header required." });
+  // PUBLIC API: Rental summary — auth required (must be before :truckNumber route)
+  app.get("/public/rentals/summary", requirePublicApiKey, async (_req, res) => {
     try {
       const allTrucks = await fleetScopeStorage.getAllTrucks();
-      const rentalTrucks = allTrucks.filter(t => t.mainStatus === "NLWC - Return Rental");
       const now = new Date();
       const oneWeekAgo = new Date();
       oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+      const byMainStatus: Record<string, number> = {};
       let totalDurationDays = 0;
       let durationsCount = 0;
       let overdueCount = 0;
       let returnedThisWeek = 0;
-      const byRegion: Record<string, number> = {};
+      const byOwner: Record<string, number> = {};
+      const byState: Record<string, number> = {};
+
       for (const t of allTrucks) {
+        const main = t.mainStatus || 'Unknown';
+        byMainStatus[main] = (byMainStatus[main] || 0) + 1;
+
+        const owner = t.shsOwner || 'Unassigned';
+        byOwner[owner] = (byOwner[owner] || 0) + 1;
+
+        const state = t.techState || 'Unknown';
+        byState[state] = (byState[state] || 0) + 1;
+
         if (t.datePutInRepair) {
           const start = new Date(t.datePutInRepair);
           if (!isNaN(start.getTime())) {
@@ -2216,27 +2305,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             durationsCount++;
           }
         }
-        const region = t.techState || 'Unknown';
-        byRegion[region] = (byRegion[region] || 0) + 1;
-      }
-      for (const t of rentalTrucks) {
+
         if (t.expectedReturnDate) {
           const expected = new Date(t.expectedReturnDate);
           if (!isNaN(expected.getTime()) && expected < now && t.rentalStatus !== 'Returned') overdueCount++;
         }
-        if (t.rentalStatus === 'Returned' && t.lastUpdatedAt) {
+
+        if (t.rentalReturned && t.lastUpdatedAt) {
           if (new Date(t.lastUpdatedAt) >= oneWeekAgo) returnedThisWeek++;
         }
       }
+
       res.json({
         success: true,
         data: {
-          totalActive: rentalTrucks.filter(t => t.rentalStatus !== 'Returned').length,
-          totalRentals: allTrucks.length,
+          totalTrucks: allTrucks.length,
           averageDurationDays: durationsCount > 0 ? Math.round(totalDurationDays / durationsCount) : 0,
           overdueCount,
           returnedThisWeek,
-          byRegion,
+          byMainStatus,
+          byOwner,
+          byState,
+          generatedAt: now.toISOString(),
         },
       });
     } catch (error: any) {
@@ -2244,26 +2334,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // PUBLIC API: GET single truck status by truck number
-  app.get("/public/rentals/:truckNumber", async (req, res) => {
+  // PUBLIC API: GET single truck full record by truck number — auth required
+  app.get("/public/rentals/:truckNumber", requirePublicApiKey, async (req, res) => {
     try {
       const { truckNumber } = req.params;
-      const trucks = await fleetScopeStorage.getAllTrucks();
-      const truck = trucks.find(t => t.truckNumber === truckNumber);
-      
+      const truck = await fleetScopeStorage.getTruckByNumber(truckNumber);
       if (!truck) {
-        return res.status(404).json({ message: "Truck not found" });
+        return res.status(404).json({ success: false, message: "Truck not found" });
       }
-      
-      res.json({
-        truckNumber: truck.truckNumber,
-        mainStatus: truck.mainStatus || null,
-        subStatus: truck.subStatus || null,
-        shopPhone: truck.repairPhone || null,
-      });
+      res.json({ success: true, data: serializeTruck(truck) });
     } catch (error: any) {
       console.error("Error fetching public truck data:", error);
-      res.status(500).json({ message: "Failed to fetch truck data" });
+      res.status(500).json({ success: false, message: "Failed to fetch truck data" });
     }
   });
 
@@ -2784,29 +2866,44 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   });
 
   // ===== PUBLIC API: Comprehensive Module Endpoints =====
-  // All require X-API-Key header (validated against PUBLIC_SPARES_API_KEY)
-
-  const requirePublicApiKey = (req: any, res: any, next: any) => {
-    const apiKey = req.headers['x-api-key'];
-    const expectedApiKey = process.env.FS_PUBLIC_SPARES_API_KEY;
-    if (!expectedApiKey) {
-      return res.status(503).json({ success: false, message: "API not configured. Please contact administrator." });
-    }
-    if (!apiKey || apiKey !== expectedApiKey) {
-      return res.status(401).json({ success: false, message: "Unauthorized. Valid X-API-Key header required." });
-    }
-    next();
-  };
 
   app.get("/public", (_req, res) => {
     res.json({
       success: true,
+      auth: "All endpoints require X-Api-Key header matching FS_PUBLIC_SPARES_API_KEY",
       endpoints: [
-        { method: "GET", path: "/api/public/rentals", description: "Rental dashboard trucks with status and repair shop info", auth: false },
-        { method: "GET", path: "/api/public/rentals/:truckNumber", description: "Single truck rental status", auth: false },
-        { method: "GET", path: "/api/public/rentals/summary", description: "Rental summary metrics (active, overdue, by region)", auth: true },
-        { method: "GET", path: "/api/public/registrations", description: "Vehicle registration tracking data", auth: false },
-        { method: "GET", path: "/api/public/registrations/:truckNumber", description: "Single truck registration data", auth: false },
+        {
+          method: "GET", path: "/api/public/rentals",
+          description: "Full Fleet Scope repair tracker truck list. Supports ?status=, ?owner=, ?limit= (max 500), ?page=",
+          auth: true,
+        },
+        {
+          method: "GET", path: "/api/public/rentals/summary",
+          description: "Repair tracker metrics: total trucks, by-status breakdown, overdue count, returned this week, by owner, by state",
+          auth: true,
+        },
+        {
+          method: "GET", path: "/api/public/rentals/:truckNumber",
+          description: "Full record for a single truck by truck number",
+          auth: true,
+        },
+        {
+          method: "GET", path: "/api/public/call-logs",
+          description: "LucaAI batch caller call history. Supports ?truckId=, ?truckNumber=, ?outcome=, ?status=, ?limit= (max 500), ?page=",
+          auth: true,
+        },
+        {
+          method: "GET", path: "/api/public/call-logs/:truckId",
+          description: "Full call log history for a specific truck (by internal truck ID)",
+          auth: true,
+        },
+        {
+          method: "GET", path: "/api/public/follow-ups",
+          description: "Scheduled follow-up calls with nextFollowUpDate due today or earlier",
+          auth: true,
+        },
+        { method: "GET", path: "/api/public/registrations", description: "Vehicle registration tracking data", auth: true },
+        { method: "GET", path: "/api/public/registrations/:truckNumber", description: "Single truck registration data", auth: true },
         { method: "GET", path: "/api/public/spares", description: "Spare vehicle details with status tracking", auth: true },
         { method: "GET", path: "/api/public/spares/:vehicleNumber", description: "Single spare vehicle data", auth: true },
         { method: "GET", path: "/api/public/all-vehicles", description: "Full fleet vehicle list from Snowflake with location data", auth: true },
@@ -2816,10 +2913,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         { method: "GET", path: "/api/public/decommissioning", description: "Vehicles in decommissioning workflow", auth: true },
         { method: "GET", path: "/api/public/fleet-cost", description: "Fleet cost analytics (paid POs)", auth: true },
         { method: "GET", path: "/api/public/executive-summary", description: "Executive summary with status counts", auth: true },
-        { method: "GET", path: "/api/public/metrics", description: "Current and historical KPI metrics", auth: true },
+        { method: "GET", path: "/api/public/metrics", description: "Current and historical KPI metrics. Supports ?startDate=, ?endDate=", auth: true },
         { method: "GET", path: "/api/public/action-tracker", description: "Owner-based workload view", auth: true },
-        { method: "GET", path: "/api/public/call-logs", description: "Batch caller call history and outcomes", auth: true },
-        { method: "GET", path: "/api/public/follow-ups", description: "Scheduled follow-up calls", auth: true },
       ],
     });
   });
@@ -2995,9 +3090,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  app.get("/public/call-logs", requirePublicApiKey, async (_req, res) => {
+  app.get("/public/call-logs", requirePublicApiKey, async (req, res) => {
     try {
-      const logs = await fleetScopeStorage.getRecentCallLogs(200);
+      const { truckId, truckNumber, outcome, status: callStatus, limit: limitStr, page: pageStr } = req.query as Record<string, string>;
+      const { rows, total } = await fleetScopeStorage.getFilteredCallLogs({
+        truckId: truckId || undefined,
+        truckNumber: truckNumber || undefined,
+        outcome: outcome || undefined,
+        status: callStatus || undefined,
+        limit: limitStr ? Number(limitStr) : 100,
+        page: pageStr ? Number(pageStr) : 1,
+      });
+      const page = Math.max(pageStr ? Number(pageStr) : 1, 1);
+      const pageSize = Math.min(limitStr ? Number(limitStr) : 100, 500);
+      res.json({ success: true, total, page, pageSize, count: rows.length, data: rows });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get("/public/call-logs/:truckId", requirePublicApiKey, async (req, res) => {
+    try {
+      const { truckId } = req.params;
+      const logs = await fleetScopeStorage.getCallLogsByTruckId(truckId);
       res.json({ success: true, count: logs.length, data: logs });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });

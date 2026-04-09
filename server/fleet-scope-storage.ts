@@ -192,6 +192,16 @@ export interface IStorage {
   clearPmfActivityLogs(vehicleId?: number): Promise<void>;
   getPmfActivitySyncMeta(): Promise<PmfActivitySyncMeta | undefined>;
   updatePmfActivitySyncMeta(vehiclesSynced: number, logsFetched: number, status: string, errorMessage?: string): Promise<PmfActivitySyncMeta>;
+
+  // Call log filtering
+  getFilteredCallLogs(opts: {
+    truckId?: string;
+    truckNumber?: string;
+    outcome?: string;
+    status?: string;
+    limit?: number;
+    page?: number;
+  }): Promise<{ rows: CallLog[]; total: number }>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -1722,6 +1732,43 @@ export class DatabaseStorage implements IStorage {
 
   async getRecentCallLogs(limit: number = 100): Promise<CallLog[]> {
     return await getDb().select().from(callLogs).orderBy(desc(callLogs.callTimestamp)).limit(limit);
+  }
+
+  async getFilteredCallLogs(opts: {
+    truckId?: string;
+    truckNumber?: string;
+    outcome?: string;
+    status?: string;
+    limit?: number;
+    page?: number;
+  }): Promise<{ rows: CallLog[]; total: number }> {
+    const pageSize = Math.min(opts.limit ?? 100, 500);
+    const page = Math.max(opts.page ?? 1, 1);
+    const offset = (page - 1) * pageSize;
+
+    const conditions = [];
+    if (opts.truckId) conditions.push(eq(callLogs.truckId, opts.truckId));
+    if (opts.truckNumber) conditions.push(eq(callLogs.truckNumber, opts.truckNumber));
+    if (opts.outcome) conditions.push(eq(callLogs.outcome, opts.outcome));
+    if (opts.status) conditions.push(eq(callLogs.status, opts.status));
+
+    const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+    const [rows, countResult] = await Promise.all([
+      getDb()
+        .select()
+        .from(callLogs)
+        .where(whereClause)
+        .orderBy(desc(callLogs.callTimestamp))
+        .limit(pageSize)
+        .offset(offset),
+      getDb()
+        .select({ count: sql<number>`count(*)::int` })
+        .from(callLogs)
+        .where(whereClause),
+    ]);
+
+    return { rows, total: countResult[0]?.count ?? 0 };
   }
 }
 
