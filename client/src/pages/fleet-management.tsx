@@ -3459,12 +3459,12 @@ export default function FleetManagement() {
       </Dialog>
 
       {/* Assignment History Dialog */}
-      {selectedVehicle?.tpmsAssignedTechId && (
+      {selectedVehicle?.vehicleNumber && (
         <AssignmentHistoryDialog
           open={showHistoryDialog}
           onOpenChange={setShowHistoryDialog}
-          techRacfid={selectedVehicle.tpmsAssignedTechId}
-          techName={selectedVehicle.tpmsAssignedTechName || selectedVehicle.tpmsAssignedTechId}
+          truckNumber={selectedVehicle.vehicleNumber}
+          mode="vehicle"
         />
       )}
 

@@ -11618,6 +11618,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Get assignment history for a vehicle (by truck number)
+  app.get("/api/vehicle-assignments/by-truck/:truckNumber", requireAuth, async (req: any, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const history = await storage.getTechVehicleAssignmentHistoryByTruck(truckNumber);
+      res.json({ success: true, data: history });
+    } catch (error: any) {
+      console.error("Error fetching vehicle assignment history:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Get service status - check if all data sources are configured
   app.get("/api/vehicle-assignments/status", requireAuth, async (req: any, res) => {
     try {

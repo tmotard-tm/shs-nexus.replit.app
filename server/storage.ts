@@ -3925,6 +3925,20 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(techVehicleAssignmentHistory.createdAt));
   }
 
+  async getTechVehicleAssignmentHistoryByTruck(truckNo: string): Promise<TechVehicleAssignmentHistory[]> {
+    const normalized = truckNo.replace(/^0+/, '').padStart(5, '0');
+    return await db.select().from(techVehicleAssignmentHistory)
+      .where(
+        or(
+          eq(techVehicleAssignmentHistory.truckNo, truckNo),
+          eq(techVehicleAssignmentHistory.truckNo, normalized),
+          eq(techVehicleAssignmentHistory.previousTruckNo, truckNo),
+          eq(techVehicleAssignmentHistory.previousTruckNo, normalized),
+        )!
+      )
+      .orderBy(desc(techVehicleAssignmentHistory.createdAt));
+  }
+
   async createTechVehicleAssignmentHistory(history: InsertTechVehicleAssignmentHistory): Promise<TechVehicleAssignmentHistory> {
     const result = await db.insert(techVehicleAssignmentHistory)
       .values({

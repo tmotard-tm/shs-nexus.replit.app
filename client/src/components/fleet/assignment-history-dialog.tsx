@@ -8,6 +8,7 @@ interface AssignmentHistoryEntry {
   id: number;
   techRacfid: string;
   truckNo: string;
+  previousTruckNo?: string;
   changeType: string;
   action?: string;
   changeSource?: string;
@@ -20,22 +21,35 @@ interface AssignmentHistoryEntry {
 interface AssignmentHistoryDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  techRacfid: string;
-  techName: string;
+  techRacfid?: string;
+  techName?: string;
+  truckNumber?: string;
+  mode?: "tech" | "vehicle";
 }
 
-export function AssignmentHistoryDialog({ 
-  open, 
-  onOpenChange, 
-  techRacfid, 
-  techName 
+export function AssignmentHistoryDialog({
+  open,
+  onOpenChange,
+  techRacfid,
+  techName,
+  truckNumber,
+  mode = "tech",
 }: AssignmentHistoryDialogProps) {
-  const { data: historyResult, isLoading } = useQuery<{ success: boolean; data: AssignmentHistoryEntry[] }>({
+  const isTechMode = mode === "tech" && !!techRacfid;
+  const isVehicleMode = mode === "vehicle" && !!truckNumber;
+
+  const { data: techResult, isLoading: techLoading } = useQuery<{ success: boolean; data: AssignmentHistoryEntry[] }>({
     queryKey: ['/api/vehicle-assignments/history', techRacfid],
-    enabled: open && !!techRacfid,
+    enabled: open && isTechMode,
   });
 
-  const history = historyResult?.data || [];
+  const { data: vehicleResult, isLoading: vehicleLoading } = useQuery<{ success: boolean; data: AssignmentHistoryEntry[] }>({
+    queryKey: ['/api/vehicle-assignments/by-truck', truckNumber],
+    enabled: open && isVehicleMode,
+  });
+
+  const history = isVehicleMode ? (vehicleResult?.data || []) : (techResult?.data || []);
+  const isLoading = isVehicleMode ? vehicleLoading : techLoading;
 
   const getActionBadge = (action: string) => {
     switch (action.toLowerCase()) {
@@ -67,10 +81,12 @@ export function AssignmentHistoryDialog({
             Assignment History
           </DialogTitle>
           <DialogDescription>
-            Vehicle assignment history for {techName} ({techRacfid})
+            {isVehicleMode
+              ? `Tech assignment history for Truck #${truckNumber}`
+              : `Vehicle assignment history for ${techName} (${techRacfid})`}
           </DialogDescription>
         </DialogHeader>
-        
+
         {isLoading ? (
           <div className="flex items-center justify-center p-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
@@ -79,13 +95,13 @@ export function AssignmentHistoryDialog({
         ) : history.length === 0 ? (
           <div className="text-center p-8 text-muted-foreground">
             <History className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>No assignment history found for this technician.</p>
+            <p>No assignment history found for this {isVehicleMode ? "vehicle" : "technician"}.</p>
           </div>
         ) : (
           <div className="space-y-4">
             {history.map((entry) => (
-              <div 
-                key={entry.id} 
+              <div
+                key={entry.id}
                 className="border rounded-lg p-4 space-y-2"
                 data-testid={`history-entry-${entry.id}`}
               >
@@ -96,26 +112,45 @@ export function AssignmentHistoryDialog({
                     {format(new Date(entry.createdAt), 'MMM d, yyyy h:mm a')}
                   </span>
                 </div>
-                
+
                 <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Tech:</span>
-                    <span className="font-mono">{entry.techRacfid}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Truck className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-muted-foreground">Truck:</span>
-                    <span className="font-mono">{entry.truckNo || '-'}</span>
-                  </div>
+                  {isVehicleMode ? (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Tech:</span>
+                        <span className="font-mono">{entry.techRacfid || '—'}</span>
+                      </div>
+                      {entry.previousTruckNo && entry.previousTruckNo !== entry.truckNo && (
+                        <div className="flex items-center gap-2">
+                          <Truck className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-muted-foreground">From:</span>
+                          <span className="font-mono">{entry.previousTruckNo}</span>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2">
+                        <User className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Tech:</span>
+                        <span className="font-mono">{entry.techRacfid}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Truck className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-muted-foreground">Truck:</span>
+                        <span className="font-mono">{entry.truckNo || '—'}</span>
+                      </div>
+                    </>
+                  )}
                 </div>
-                
+
                 {entry.notes && (
                   <div className="text-sm text-muted-foreground bg-muted/50 p-2 rounded">
                     {entry.notes}
                   </div>
                 )}
-                
+
                 {(entry.changedBy || entry.performedBy) && (
                   <div className="text-xs text-muted-foreground">
                     Changed by: {entry.changedBy || entry.performedBy}
