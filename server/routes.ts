@@ -15239,8 +15239,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ('locked' in result && result.locked) {
         return res.status(409).json({ message: result.message });
       }
-      const opResult = result as { overallSuccess: boolean; partialSuccess: boolean };
-      const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
+      if (!('overallSuccess' in result)) return res.status(500).json({ message: "Unexpected result" });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
       res.status(statusCode).json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -15258,8 +15258,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ('locked' in result && result.locked) {
         return res.status(409).json({ message: result.message });
       }
-      const opResult = result as { overallSuccess: boolean; partialSuccess: boolean };
-      const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
+      if (!('overallSuccess' in result)) return res.status(500).json({ message: "Unexpected result" });
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
       res.status(statusCode).json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
@@ -15345,6 +15345,501 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.query.ldap) filters.ldap = req.query.ldap as string;
       const logs = await storage.getFleetOperationLogs(filters);
       res.json(logs);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ─── Cross-System Alignment Endpoints ───────────────────────────────────────
+
+  // Role guard helper for fleet admin operations
+  function requireFleetAdmin(req: any, res: any): boolean {
+    if (!req.user || (req.user.role !== 'developer' && req.user.role !== 'admin')) {
+      res.status(403).json({ message: "Fleet admin or developer role required" });
+      return false;
+    }
+    return true;
+  }
+
+  // In-memory mismatch cache (15 min TTL) — only stores full analysis results
+  let mismatchCache: { data: any[]; count: number; computedAt: number } | null = null;
+  const MISMATCH_CACHE_TTL = 15 * 60 * 1000;
+
+  /** Extract typed rows from a Drizzle db.execute() result (may be { rows: T[] } or T[]). */
+  function dbRows<T = Record<string, unknown>>(result: unknown): T[] {
+    if (result && typeof result === "object" && "rows" in result && Array.isArray((result as { rows: unknown }).rows)) {
+      return (result as { rows: T[] }).rows;
+    }
+    return Array.isArray(result) ? (result as T[]) : [];
+  }
+
+  // Helper that queries and builds the full mismatch record list
+  async function buildMismatchRecords(): Promise<any[]> {
+    const { analyzeAlignment } = await import("./alignment-analysis-service");
+
+    // Query: any two of Holman / TPMS / AMS disagree on assignment
+    const rawResult = await db.execute(sql`
+      WITH tpms_latest AS (
+        SELECT DISTINCT ON (truck_no)
+          LTRIM(truck_no, '0') AS canonical_truck,
+          enterprise_id AS tpms_id,
+          TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS tpms_name,
+          district_no
+        FROM tpms_cached_assignments
+        WHERE truck_no IS NOT NULL AND truck_no != ''
+        ORDER BY truck_no, last_success_at DESC
+      )
+      SELECT
+        h.holman_vehicle_number AS truck_number,
+        h.holman_tech_assigned AS holman_tech_id,
+        h.holman_tech_name AS holman_tech_name,
+        COALESCE(t.tpms_id, '') AS tpms_tech_id,
+        COALESCE(t.tpms_name, '') AS tpms_tech_name,
+        a.ams_assigned_ldap AS ams_tech_id,
+        h.vin,
+        h.holman_assigned_status_cd AS holman_status_cd,
+        h.byov_vin_missing,
+        t.district_no
+      FROM holman_vehicles_cache h
+      LEFT JOIN tpms_latest t ON t.canonical_truck = h.holman_vehicle_number
+      LEFT JOIN ams_vehicles_cache a ON a.vin = h.vin
+      WHERE h.is_active = true
+        AND (h.status_code != 2 OR h.status_code IS NULL)
+        AND h.out_of_service_date IS NULL
+        AND (
+          -- Holman ≠ TPMS
+          (
+            COALESCE(LOWER(TRIM(h.holman_tech_assigned)), '') != ''
+            AND COALESCE(LOWER(TRIM(t.tpms_id)), '') != ''
+            AND LOWER(TRIM(h.holman_tech_assigned)) != LOWER(TRIM(t.tpms_id))
+          )
+          -- Holman assigned, TPMS unassigned
+          OR (
+            COALESCE(TRIM(h.holman_tech_assigned), '') != ''
+            AND COALESCE(TRIM(t.tpms_id), '') = ''
+          )
+          -- TPMS assigned, Holman unassigned
+          OR (
+            COALESCE(TRIM(t.tpms_id), '') != ''
+            AND COALESCE(TRIM(h.holman_tech_assigned), '') = ''
+          )
+          -- AMS ≠ TPMS (both assigned, different values)
+          OR (
+            a.ams_assigned_ldap IS NOT NULL
+            AND TRIM(a.ams_assigned_ldap) != ''
+            AND COALESCE(TRIM(t.tpms_id), '') != ''
+            AND LOWER(TRIM(a.ams_assigned_ldap)) != LOWER(TRIM(t.tpms_id))
+          )
+          -- AMS assigned, TPMS unassigned (AMS disagrees with TPMS's blank)
+          OR (
+            a.ams_assigned_ldap IS NOT NULL
+            AND TRIM(a.ams_assigned_ldap) != ''
+            AND COALESCE(TRIM(t.tpms_id), '') = ''
+          )
+          -- AMS unassigned but TPMS and/or Holman are assigned (AMS is blank, others are not)
+          OR (
+            (a.ams_assigned_ldap IS NULL OR TRIM(a.ams_assigned_ldap) = '')
+            AND (
+              COALESCE(TRIM(t.tpms_id), '') != ''
+              OR COALESCE(TRIM(h.holman_tech_assigned), '') != ''
+            )
+            -- Only flag this if the AMS row exists in the cache (vehicle is tracked in AMS)
+            AND a.vin IS NOT NULL
+          )
+          -- AMS ≠ Holman (both assigned, different values, no TPMS)
+          OR (
+            a.ams_assigned_ldap IS NOT NULL
+            AND TRIM(a.ams_assigned_ldap) != ''
+            AND COALESCE(TRIM(h.holman_tech_assigned), '') != ''
+            AND COALESCE(TRIM(t.tpms_id), '') = ''
+            AND LOWER(TRIM(a.ams_assigned_ldap)) != LOWER(TRIM(h.holman_tech_assigned))
+          )
+        )
+      ORDER BY h.holman_vehicle_number
+    `);
+
+    const rows = dbRows<Record<string, string | null>>(rawResult);
+
+    const records = await Promise.all(
+      rows.map(async (row: any) => {
+        const analysis = await analyzeAlignment(
+          row.truck_number,
+          row.holman_tech_id || null,
+          row.holman_tech_name || null,
+          row.tpms_tech_id || null,
+          row.tpms_tech_name || null,
+          row.ams_tech_id || null,
+          row.vin || null,
+          row.holman_status_cd || null,
+          !!row.byov_vin_missing,
+          row.district_no || null,
+        );
+        return {
+          truckNumber: row.truck_number,
+          holmanTechId: row.holman_tech_id || null,
+          holmanTechName: row.holman_tech_name || null,
+          tpmsTechId: row.tpms_tech_id || null,
+          tpmsTechName: row.tpms_tech_name || null,
+          amsTechId: row.ams_tech_id || null,
+          vin: row.vin || null,
+          holmanStatusCd: row.holman_status_cd || null,
+          byovVinMissing: !!row.byov_vin_missing,
+          districtNo: row.district_no || null,
+          ...analysis,
+        };
+      })
+    );
+
+    return records;
+  }
+
+  app.get("/api/fleet-ops/mismatches", requireAuth, async (req: any, res) => {
+    try {
+      const countOnly = req.query.countOnly === "true";
+      const forceRefresh = req.query.forceRefresh === "true";
+      const rootCauseFilter = req.query.rootCause as string | undefined;
+      const page = Math.max(1, parseInt(req.query.page as string) || 1);
+      const pageSize = Math.min(200, Math.max(10, parseInt(req.query.pageSize as string) || 100));
+
+      // Serve from cache when not forced and still fresh (cache always has full data)
+      if (!forceRefresh && mismatchCache && (Date.now() - mismatchCache.computedAt) < MISMATCH_CACHE_TTL) {
+        if (countOnly) {
+          return res.json({ count: mismatchCache.count });
+        }
+        let data = mismatchCache.data;
+        if (rootCauseFilter) data = data.filter((r: any) => r.rootCause === rootCauseFilter);
+        const total = data.length;
+        const paginated = data.slice((page - 1) * pageSize, page * pageSize);
+        return res.json({ data: paginated, total, page, pageSize });
+      }
+
+      // Build full analysis (always, so countOnly also populates full cache)
+      const records = await buildMismatchRecords();
+      mismatchCache = { data: records, count: records.length, computedAt: Date.now() };
+
+      if (countOnly) {
+        return res.json({ count: records.length });
+      }
+
+      let data = records;
+      if (rootCauseFilter) data = data.filter((r: any) => r.rootCause === rootCauseFilter);
+      const total = data.length;
+      const paginated = data.slice((page - 1) * pageSize, page * pageSize);
+      res.json({ data: paginated, total, page, pageSize });
+    } catch (err: any) {
+      console.error("[Alignment] mismatches error:", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // GET /api/fleet-ops/bulk-runs/:runId — poll run state (owner or admin)
+  app.get("/api/fleet-ops/bulk-runs/:runId", requireAuth, async (req: any, res) => {
+    try {
+      const { runId } = req.params;
+      const runResult = await db.execute(sql`
+        SELECT run_id, status, started_by, started_at, cancelled_at, completed_at
+        FROM bulk_fix_runs WHERE run_id = ${runId}
+      `);
+      const runRows = dbRows<{ run_id: string; status: string; started_by: string; started_at: unknown; cancelled_at: unknown; completed_at: unknown }>(runResult);
+      if (runRows.length === 0) return res.status(404).json({ message: "Run not found" });
+      const run = runRows[0];
+
+      // Ownership check: must be the run owner or an admin/developer
+      const username = req.user?.username || "";
+      const isAdmin = req.user?.role === "admin" || req.user?.role === "developer";
+      if (!isAdmin && run.started_by !== username) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const itemsResult = await db.execute(sql`
+        SELECT id, truck_number, action, ldap_id, status, outcome, processed_at
+        FROM bulk_fix_run_items WHERE run_id = ${runId}
+        ORDER BY processed_at ASC NULLS LAST, id ASC
+      `);
+      type RunItem = { id: string; truck_number: string; action: string; ldap_id: string | null; status: string; outcome: unknown; processed_at: unknown };
+      const items = dbRows<RunItem>(itemsResult);
+
+      const processedItems = items.filter(i => ["completed", "failed"].includes(i.status));
+      const failedItems = items.filter(i => i.status === "failed");
+      // High-failure warning: evaluate against the first 10 processed items in true processing order
+      // (ORDER BY processed_at ASC, so this is deterministic and stable once set).
+      const first10Processed = processedItems.slice(0, 10);
+      const highFailureWarning = first10Processed.length >= 10 &&
+        first10Processed.filter((i: any) => i.status === "failed").length / first10Processed.length > 0.25;
+
+      res.json({
+        runId: run.run_id,
+        status: run.status,
+        startedBy: run.started_by,
+        startedAt: run.started_at,
+        cancelledAt: run.cancelled_at,
+        completedAt: run.completed_at,
+        highFailureWarning,
+        items: items.map(i => ({
+          id: i.id,
+          truckNumber: i.truck_number,
+          action: i.action,
+          ldapId: i.ldap_id,
+          status: i.status,
+          outcome: i.outcome,
+          processedAt: i.processed_at,
+        })),
+        pendingCount: items.filter(i => i.status === "pending").length,
+        completedCount: items.filter(i => i.status === "completed").length,
+        failedCount: items.filter(i => i.status === "failed").length,
+        skippedCount: items.filter(i => i.status === "skipped").length,
+        cancelledCount: items.filter(i => i.status === "cancelled").length,
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // GET /api/fleet-ops/bulk-runs — list recent runs for current user
+  app.get("/api/fleet-ops/bulk-runs", requireAuth, async (req: any, res) => {
+    try {
+      const username = req.user?.username || "";
+      const runsResult = await db.execute(sql`
+        SELECT run_id, status, started_by, started_at, cancelled_at, completed_at
+        FROM bulk_fix_runs
+        WHERE started_by = ${username}
+        ORDER BY started_at DESC
+        LIMIT 5
+      `);
+      type RunRow = { run_id: string; status: string; started_by: string; started_at: unknown; cancelled_at: unknown; completed_at: unknown };
+      const runs = dbRows<RunRow>(runsResult);
+      res.json({
+        runs: runs.map(r => ({
+          runId: r.run_id,
+          status: r.status,
+          startedBy: r.started_by,
+          startedAt: r.started_at,
+          cancelledAt: r.cancelled_at,
+          completedAt: r.completed_at,
+        })),
+      });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // POST /api/fleet-ops/bulk-runs/:runId/cancel — fleet admin only
+  app.post("/api/fleet-ops/bulk-runs/:runId/cancel", requireAuth, async (req: any, res) => {
+    if (!requireFleetAdmin(req, res)) return;
+    try {
+      const { runId } = req.params;
+      await db.execute(sql`
+        UPDATE bulk_fix_runs SET cancelled_at = NOW()
+        WHERE run_id = ${runId} AND cancelled_at IS NULL
+      `);
+      res.json({ success: true });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // POST /api/fleet-ops/bulk-reconcile — fleet admin only
+  // Body: { runId?: string, vehicles?: [...] }
+  // If runId provided → resume run (re-processes pending items from DB; vehicles array ignored)
+  // If no runId → new run (vehicles array required)
+  app.post("/api/fleet-ops/bulk-reconcile", requireAuth, async (req: any, res) => {
+    if (!requireFleetAdmin(req, res)) return;
+    try {
+      const user = req.user;
+      const { runId: existingRunId, vehicles } = req.body as {
+        runId?: string;
+        vehicles?: Array<{
+          truckNumber: string;
+          action: string;
+          ldapId?: string;
+          districtNo?: string;
+        }>;
+      };
+
+      const username = user.username || "unknown";
+      let runId: string;
+
+      if (existingRunId) {
+        // Resume existing run — load pending items from DB; no vehicles payload needed
+        const runResult = await db.execute(sql`
+          SELECT run_id, status, cancelled_at FROM bulk_fix_runs WHERE run_id = ${existingRunId}
+        `);
+        const runRows = dbRows<{ run_id: string; status: string; cancelled_at: unknown }>(runResult);
+        if (runRows.length === 0) return res.status(404).json({ message: "Run not found" });
+        if (runRows[0].status !== "running") return res.status(409).json({ message: "Run is not in running state" });
+        runId = existingRunId;
+      } else {
+        // New run — vehicles array required
+        if (!vehicles || !Array.isArray(vehicles) || vehicles.length === 0) {
+          return res.status(400).json({ message: "vehicles array is required for new runs" });
+        }
+
+        const createResult = await db.execute(sql`
+          INSERT INTO bulk_fix_runs (status, started_by)
+          VALUES ('running', ${username})
+          RETURNING run_id
+        `);
+        const createRows = dbRows<{ run_id: string }>(createResult);
+        runId = createRows[0].run_id;
+
+        for (const v of vehicles) {
+          await db.execute(sql`
+            INSERT INTO bulk_fix_run_items (run_id, truck_number, action, ldap_id, district_no, status)
+            VALUES (${runId}, ${v.truckNumber}, ${v.action}, ${v.ldapId || null}, ${v.districtNo || null}, 'pending')
+          `);
+        }
+      }
+
+      // Return run ID immediately so UI can start polling
+      res.json({ runId, status: "running" });
+
+      // Execute in background (fire and forget)
+      (async () => {
+        const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+        const { fleetOpsService } = await import("./fleet-operations-service");
+
+        let completedCount = 0;
+        let failedCount = 0;
+
+        // Always load from DB — handles both new runs and resumptions
+        const itemsResult = await db.execute(sql`
+          SELECT id, truck_number, action, ldap_id, district_no, status
+          FROM bulk_fix_run_items WHERE run_id = ${runId}
+          ORDER BY id
+        `);
+        type PendingItem = { id: string; truck_number: string; action: string; ldap_id: string | null; district_no: string | null; status: string };
+        const allItems = dbRows<PendingItem>(itemsResult);
+        const pendingItems = allItems.filter(i => i.status === "pending");
+
+        for (let idx = 0; idx < pendingItems.length; idx++) {
+          // Check cancellation flag in DB before each operation
+          const cancelCheck = await db.execute(sql`
+            SELECT cancelled_at FROM bulk_fix_runs WHERE run_id = ${runId}
+          `);
+          const cancelRows = dbRows<{ cancelled_at: unknown }>(cancelCheck);
+          if (cancelRows[0]?.cancelled_at) {
+            // Mark remaining pending as cancelled (not skipped — cancellation is user-initiated)
+            await db.execute(sql`
+              UPDATE bulk_fix_run_items SET status = 'cancelled', processed_at = NOW()
+              WHERE run_id = ${runId} AND status = 'pending'
+            `);
+            break;
+          }
+
+          const item = pendingItems[idx];
+          let outcome: any = {};
+          let newStatus = "completed";
+
+          try {
+            if (item.action === "assign") {
+              // Full cross-system assign
+              const result = await fleetOpsService.assignTech({
+                truckNumber: item.truck_number,
+                ldapId: item.ldap_id || "",
+                districtNo: item.district_no || "0",
+                techName: item.ldap_id || "",
+                requestedBy: `${username}:bulk-fix`,
+                notes: `Bulk fix run ${runId}`,
+              });
+              if ("locked" in result) {
+                outcome = { locked: true, message: result.message };
+                newStatus = "failed";
+              } else {
+                outcome = { overallSuccess: result.overallSuccess, partialSuccess: result.partialSuccess, tpms: result.tpms, holman: result.holman, ams: result.ams };
+                // Partial success means ≥1 system failed — mark as failed for accurate failure metrics and warning logic
+                newStatus = result.overallSuccess ? "completed" : "failed";
+              }
+            } else if (item.action === "unassign") {
+              // Full cross-system unassign
+              const result = await fleetOpsService.unassignTech({
+                truckNumber: item.truck_number,
+                ldapId: item.ldap_id || "",
+                requestedBy: `${username}:bulk-fix`,
+                notes: `Bulk fix run ${runId}`,
+              });
+              if ("locked" in result) {
+                outcome = { locked: true, message: result.message };
+                newStatus = "failed";
+              } else {
+                outcome = { overallSuccess: result.overallSuccess, partialSuccess: result.partialSuccess, tpms: result.tpms, holman: result.holman, ams: result.ams };
+                // Partial success means ≥1 system failed — mark as failed for accurate failure metrics and warning logic
+                newStatus = result.overallSuccess ? "completed" : "failed";
+              }
+            } else if (item.action === "push_holman" || item.action === "push_ams") {
+              // Partial failure recovery: targeted push to only the lagging system
+              const targetSystem = item.action === "push_holman" ? "holman" : "ams";
+              const result = await fleetOpsService.reconcileSystem({
+                truckNumber: item.truck_number,
+                ldapId: item.ldap_id || "",
+                districtNo: item.district_no || "0",
+                targetSystem,
+                requestedBy: `${username}:bulk-fix`,
+                notes: `Partial-failure recovery (${item.action}) — run ${runId}`,
+              });
+              outcome = { action: item.action, targetSystem, ...result.outcome, message: result.message };
+              // Holman accepted-and-queued submissions return status="pending" — treat as completed
+              // (the submission is already tracked in holman_submissions for async verification)
+              newStatus = (result.status === "success" || result.status === "pending") ? "completed"
+                : result.status === "skipped" ? "skipped" : "failed";
+            } else if (item.action === "push_multiple") {
+              // Both Holman and AMS failed — push each in sequence.
+              // The action name itself encodes which systems to target; no need to persist failed_systems.
+              const targets: Array<"holman" | "ams"> = ["holman", "ams"];
+              const results: any[] = [];
+              let anyFailed = false;
+              for (const targetSystem of targets) {
+                const r = await fleetOpsService.reconcileSystem({
+                  truckNumber: item.truck_number,
+                  ldapId: item.ldap_id || "",
+                  districtNo: item.district_no || "0",
+                  targetSystem,
+                  requestedBy: `${username}:bulk-fix`,
+                  notes: `Partial-failure recovery (push_multiple/${targetSystem}) — run ${runId}`,
+                });
+                results.push({ system: targetSystem, status: r.status, message: r.message });
+                // pending = Holman accepted-and-queued, treat as success (not failure)
+                if (r.status !== "success" && r.status !== "pending" && r.status !== "skipped") anyFailed = true;
+              }
+              outcome = { action: "push_multiple", results };
+              newStatus = anyFailed ? "failed" : "completed";
+            } else {
+              // cache_evict, wait, manual_review — non-bulk-fixable; mark skipped with reason
+              newStatus = "skipped";
+              outcome = { reason: `Action '${item.action}' requires manual intervention` };
+            }
+          } catch (err: any) {
+            newStatus = "failed";
+            outcome = { error: err.message };
+          }
+
+          await db.execute(sql`
+            UPDATE bulk_fix_run_items
+            SET status = ${newStatus}, outcome = ${JSON.stringify(outcome)}, processed_at = NOW()
+            WHERE id = ${item.id}
+          `);
+
+          if (newStatus === "completed") completedCount++;
+          if (newStatus === "failed") failedCount++;
+
+          // Wait 2 seconds between operations
+          if (idx < pendingItems.length - 1) {
+            await sleep(2000);
+          }
+        }
+
+        // Finalize run
+        await db.execute(sql`
+          UPDATE bulk_fix_runs
+          SET status = CASE WHEN cancelled_at IS NOT NULL THEN 'cancelled' ELSE 'completed' END,
+              completed_at = NOW()
+          WHERE run_id = ${runId}
+        `);
+
+        // Invalidate mismatch cache so next poll returns fresh data
+        mismatchCache = null;
+      })().catch(err => {
+        console.error(`[BulkFix] Run ${runId} fatal error:`, err);
+      });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

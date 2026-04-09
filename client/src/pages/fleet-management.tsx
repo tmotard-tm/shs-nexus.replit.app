@@ -303,6 +303,19 @@ export default function FleetManagement() {
   const [nexusContact, setNexusContact] = useState("");
   const [nexusComments, setNexusComments] = useState("");
 
+  // Cross-system mismatch count from alignment API (includes AMS disagreements)
+  const { data: alignmentCountData } = useQuery<{ count: number }>({
+    queryKey: ['/api/fleet-ops/mismatches', 'countOnly'],
+    queryFn: async () => {
+      const res = await fetch('/api/fleet-ops/mismatches?countOnly=true', { credentials: 'include' });
+      if (!res.ok) return { count: 0 };
+      return res.json();
+    },
+    staleTime: 14 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+
   // Fetch vehicles from Holman API with TPMS enrichment.
   // refetchInterval aligns with the server's 15-minute in-memory cache so the client
   // automatically picks up background-refreshed data without a manual sync trigger.
@@ -1592,18 +1605,53 @@ export default function FleetManagement() {
                 </CardContent>
               </Card>
 
-              {/* Mismatches */}
-              <Card
-                onClick={() => setStatCardFilter(statCardFilter === "mismatch" ? "all" : "mismatch")}
-                className={`cursor-pointer transition-all hover:shadow-md select-none border-red-200 bg-red-50/50 dark:bg-red-950/10 ${statCardFilter === "mismatch" ? "ring-2 ring-offset-1 ring-red-500" : ""}`}
-              >
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-red-600">Mismatches</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-red-600" data-testid="text-mismatch-count">{mismatchCount}</p>
-                </CardContent>
-              </Card>
+              {/* Mismatches — links to Alignment dashboard; count from cross-system API
+                  Severity: 0=neutral, 1-10=amber, 11+=red */}
+              {(() => {
+                const displayCount = alignmentCountData !== undefined ? alignmentCountData.count : mismatchCount;
+                const severity = displayCount === 0 ? "neutral" : displayCount <= 10 ? "amber" : "red";
+                const cardCls = severity === "neutral"
+                  ? "border-border bg-card"
+                  : severity === "amber"
+                  ? "border-amber-200 bg-amber-50/50 dark:bg-amber-950/10"
+                  : "border-red-200 bg-red-50/50 dark:bg-red-950/10";
+                const textCls = severity === "neutral"
+                  ? "text-muted-foreground"
+                  : severity === "amber"
+                  ? "text-amber-600"
+                  : "text-red-600";
+                const ringCls = severity === "neutral" ? "ring-foreground/30" : severity === "amber" ? "ring-amber-500" : "ring-red-500";
+                const linkCls = severity === "neutral"
+                  ? "text-muted-foreground hover:text-foreground"
+                  : severity === "amber"
+                  ? "text-amber-500 hover:text-amber-700"
+                  : "text-red-500 hover:text-red-700";
+                return (
+                  <Card
+                    onClick={() => setStatCardFilter(statCardFilter === "mismatch" ? "all" : "mismatch")}
+                    className={`cursor-pointer transition-all hover:shadow-md select-none ${cardCls} ${statCardFilter === "mismatch" ? `ring-2 ring-offset-1 ${ringCls}` : ""}`}
+                  >
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className={`text-sm font-medium ${textCls}`}>Mismatches</CardTitle>
+                        <a
+                          href="/fleet-alignment"
+                          onClick={e => e.stopPropagation()}
+                          className={`text-[10px] hover:underline shrink-0 ${linkCls}`}
+                          title="Open Alignment Dashboard"
+                        >
+                          Alignment →
+                        </a>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <p className={`text-2xl font-bold ${textCls}`} data-testid="text-mismatch-count">
+                        {displayCount}
+                      </p>
+                    </CardContent>
+                  </Card>
+                );
+              })()}
 
               {/* Rentals */}
               <Card

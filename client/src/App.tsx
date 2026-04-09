@@ -47,6 +47,7 @@ import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
+import FleetAlignment from "@/pages/fleet-alignment";
 import WeeklyOnboarding from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import RentalOperations from "@/pages/rental-operations";
@@ -360,6 +361,12 @@ function Router() {
       <Route path="/fleet-management">
         <ProtectedRoute>
           <FleetManagement />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-alignment">
+        <ProtectedRoute>
+          <FleetAlignment />
         </ProtectedRoute>
       </Route>
 

@@ -1021,6 +1021,52 @@ export const fleetOpsService = {
 
     return buildResult(log, tpms, holman, ams);
   },
+
+  /**
+   * Targeted partial-failure reconciliation: pushes only the specified lagging
+   * system(s) without touching systems that already succeeded.
+   * targetSystem: "holman" | "ams" | "tpms"
+   */
+  async reconcileSystem(params: {
+    truckNumber: string;
+    ldapId: string;
+    districtNo: string;
+    targetSystem: "holman" | "ams" | "tpms";
+    requestedBy: string;
+    notes?: string;
+  }): Promise<{ status: "success" | "failed" | "skipped" | "pending"; message: string; outcome: SystemResult | Record<string, string> }> {
+    const ldapId = normalizeEnterpriseId(params.ldapId);
+    try {
+      if (params.targetSystem === "tpms") {
+        const result = await callTpms("assign", {
+          truckNumber: params.truckNumber,
+          ldapId,
+          districtNo: params.districtNo,
+          requestedBy: params.requestedBy,
+        });
+        return { status: result.status, message: result.message || "", outcome: result };
+      } else if (params.targetSystem === "holman") {
+        const result = await callHolman("assign", {
+          truckNumber: params.truckNumber,
+          ldapId,
+          districtNo: params.districtNo,
+          requestedBy: params.requestedBy,
+        });
+        return { status: result.status, message: result.message || "", outcome: result };
+      } else if (params.targetSystem === "ams") {
+        const result = await callAms("assign", {
+          truckNumber: params.truckNumber,
+          ldapId,
+          requestedBy: params.requestedBy,
+          notes: params.notes,
+        });
+        return { status: result.status, message: result.message || "", outcome: result };
+      }
+      return { status: "skipped", message: `Unknown target system: ${params.targetSystem}`, outcome: {} };
+    } catch (err: any) {
+      return { status: "failed", message: err.message, outcome: { error: err.message } };
+    }
+  },
 };
 
 export async function retryFailedOperationEvents(): Promise<{ retried: number; succeeded: number; failed: number }> {

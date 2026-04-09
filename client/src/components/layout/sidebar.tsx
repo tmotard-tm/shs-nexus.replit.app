@@ -71,6 +71,22 @@ export function Sidebar() {
   const [isOpen, setIsOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
 
+  // Mismatch count badge — poll every 15 minutes
+  const { data: mismatchCountData } = useQuery<{ count: number }>({
+    queryKey: ["/api/fleet-ops/mismatches", "count"],
+    queryFn: async () => {
+      const res = await fetch("/api/fleet-ops/mismatches?countOnly=true", { credentials: "include" });
+      if (!res.ok) return { count: 0 };
+      return res.json();
+    },
+    staleTime: 14 * 60 * 1000,
+    refetchInterval: 15 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    enabled: !!user,
+    retry: false,
+  });
+  const mismatchCount = mismatchCountData?.count ?? 0;
+
   const { data: rolePermissions = [] } = useQuery<RolePermission[]>({
     queryKey: ['/api/role-permissions'],
     enabled: user?.role === 'developer',
@@ -293,6 +309,14 @@ export function Sidebar() {
                   <DropdownMenuSubContent className="min-w-48">
                     {category.items.map((item) => {
                       const Icon = item.icon;
+                      const isFleetMgmt = item.href === "/fleet-management";
+                      const showBadge = isFleetMgmt && mismatchCountData !== undefined;
+                      const badgeCount = isFleetMgmt ? mismatchCount : 0;
+                      const badgeCls = badgeCount >= 11
+                        ? "bg-red-500 text-white"
+                        : badgeCount >= 1
+                        ? "bg-amber-500 text-white"
+                        : "bg-muted text-muted-foreground border border-border";
                       return (
                         <DropdownMenuItem key={item.href} asChild>
                           <Link
@@ -303,6 +327,11 @@ export function Sidebar() {
                           >
                             <Icon className="h-4 w-4" />
                             {item.name}
+                            {showBadge && (
+                              <span className={`ml-auto text-xs rounded-full px-1.5 py-0.5 leading-none font-semibold ${badgeCls}`}>
+                                {badgeCount}
+                              </span>
+                            )}
                           </Link>
                         </DropdownMenuItem>
                       );

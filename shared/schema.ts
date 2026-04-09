@@ -2157,3 +2157,51 @@ export const insertOperationEventSchema = createInsertSchema(operationEvents).om
 });
 export type OperationEvent = typeof operationEvents.$inferSelect;
 export type InsertOperationEvent = z.infer<typeof insertOperationEventSchema>;
+
+// ===============================
+// Bulk Fix Runs (Alignment Dashboard)
+// ===============================
+
+export const bulkFixRuns = pgTable("bulk_fix_runs", {
+  runId: varchar("run_id").primaryKey().default(sql`gen_random_uuid()`),
+  status: text("status").notNull().default("running"), // "running" | "completed" | "cancelled"
+  startedBy: text("started_by").notNull(),
+  startedAt: timestamp("started_at").defaultNow().notNull(),
+  cancelledAt: timestamp("cancelled_at"),
+  completedAt: timestamp("completed_at"),
+}, (table) => {
+  return {
+    statusIdx: index("bulk_fix_runs_status_idx").on(table.status),
+    startedByIdx: index("bulk_fix_runs_started_by_idx").on(table.startedBy),
+  };
+});
+
+export const insertBulkFixRunSchema = createInsertSchema(bulkFixRuns).omit({
+  runId: true,
+  startedAt: true,
+});
+export type BulkFixRun = typeof bulkFixRuns.$inferSelect;
+export type InsertBulkFixRun = z.infer<typeof insertBulkFixRunSchema>;
+
+export const bulkFixRunItems = pgTable("bulk_fix_run_items", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  runId: varchar("run_id").notNull().references(() => bulkFixRuns.runId),
+  truckNumber: text("truck_number").notNull(),
+  action: text("action").notNull(), // "assign" | "unassign" | "push_holman" | "push_ams" | "cache_evict" | "wait"
+  ldapId: text("ldap_id"),
+  districtNo: text("district_no"),
+  status: text("status").notNull().default("pending"), // "pending" | "completed" | "failed" | "skipped"
+  outcome: jsonb("outcome"),
+  processedAt: timestamp("processed_at"),
+}, (table) => {
+  return {
+    runIdIdx: index("bulk_fix_run_items_run_id_idx").on(table.runId),
+    statusIdx: index("bulk_fix_run_items_status_idx").on(table.status),
+  };
+});
+
+export const insertBulkFixRunItemSchema = createInsertSchema(bulkFixRunItems).omit({
+  id: true,
+});
+export type BulkFixRunItem = typeof bulkFixRunItems.$inferSelect;
+export type InsertBulkFixRunItem = z.infer<typeof insertBulkFixRunItemSchema>;
