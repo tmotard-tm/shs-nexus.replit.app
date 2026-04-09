@@ -2464,7 +2464,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const amsVehicles = paginated
         .filter(t => t.inAms)
         .map(t => ({ truckNumber: t.truckNumber, vin: t.vin }));
-      const amsTypeMap = await batchFetchAmsTypeData(amsVehicles, _amsApiServiceForEnrichment);
+      let amsTypeMap: Map<string, AmsVehicleTypeData>;
+      try {
+        amsTypeMap = await batchFetchAmsTypeData(amsVehicles, _amsApiServiceForEnrichment);
+      } catch {
+        // Non-fatal: return records without AMS type enrichment on AMS outage
+        amsTypeMap = new Map();
+      }
 
       res.json({
         success: true,
