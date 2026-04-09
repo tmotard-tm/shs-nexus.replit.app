@@ -22,6 +22,185 @@ import cron from "node-cron";
 import * as XLSX from "xlsx";
 
 // ---------------------------------------------------------------------------
+// Shared: Spare Vehicle Scoring/Enrichment Helper
+// Used by both /rental/suggested-replacements and /public/spares/search
+// ---------------------------------------------------------------------------
+
+export type SpareVehicleCandidate = {
+  VEHICLE_NUMBER: string;
+  TRUCK_STATUS: string | null;
+  INTERIOR: string | null;
+  AMS_ZIP_LAT: number | null;
+  AMS_ZIP_LON: number | null;
+  AMS_CUR_ADDRESS: string | null;
+  AMS_CUR_CITY: string | null;
+  AMS_CUR_STATE: string | null;
+  AMS_CUR_ZIP: string | null;
+};
+
+export type ScoredSpareVehicle = {
+  vehicleNumber: string;
+  truckStatus: string | null;
+  interior: string | null;
+  distanceMiles: number | null;
+  locationSource: string | null;
+  locationAddress: string | null;
+  hasCheckEngine: boolean;
+  spareLat: number | null;
+  spareLon: number | null;
+};
+
+function haversineDistance(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 3958.8;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
+  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+
+/**
+ * Scores and sorts a pre-filtered list of spare vehicle candidates by proximity.
+ * Enriches with Samsara GPS, confirmed addresses from SPARE_VEHICLE_ASSIGNMENT_STATUS,
+ * ZIP geocoding, and Check Engine DTC flags.
+ *
+ * NOTE: AMS does not expose a bulk-vehicle-type endpoint; enrichment calls are
+ * concurrency-limited (20 parallel) with a 1-hour cache, so this is the best
+ * available strategy absent an AMS batch API.
+ */
+async function scoreSpareVehicleCandidates(
+  candidates: SpareVehicleCandidate[],
+  techLat: number | null,
+  techLon: number | null,
+): Promise<ScoredSpareVehicle[]> {
+  if (candidates.length === 0) return [];
+
+  const paddedList = candidates.map(r => String(r.VEHICLE_NUMBER).padStart(6, '0'));
+
+  // 1. Samsara live locations (module-level cache — effectively free after first call)
+  let samsaraMap: Map<string, { latitude: number; longitude: number; address: string; street: string; city: string; state: string; postal: string }> = new Map();
+  try {
+    const sf = await fetchSamsaraLocations();
+    sf.forEach((data, vNum) => {
+      if (data.latitude && data.longitude) {
+        samsaraMap.set(vNum, {
+          latitude: data.latitude, longitude: data.longitude,
+          address: data.address || '', street: data.street || '',
+          city: data.city || '', state: data.state || '', postal: data.postal || '',
+        });
+      }
+    });
+  } catch { /* Non-fatal */ }
+
+  // 2. Confirmed addresses from SPARE_VEHICLE_ASSIGNMENT_STATUS (single Snowflake query)
+  let confirmedMap: Map<string, { address: string; contact: string | null }> = new Map();
+  let confirmedZipMap: Map<string, string> = new Map();
+  try {
+    const inList = paddedList.map(n => `'${n}'`).join(', ');
+    type ConfirmedRow = { VEHICLE_NUMBER: string; CONFIRMED_ADDRESS: string | null; CONFIRMED_CONTACT: string | null };
+    const rows = await executeQuery<ConfirmedRow>(`
+      SELECT VEHICLE_NUMBER, CONFIRMED_ADDRESS, CONFIRMED_CONTACT
+      FROM PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS
+      WHERE LPAD(TRIM(VEHICLE_NUMBER), 6, '0') IN (${inList})
+        AND CONFIRMED_ADDRESS IS NOT NULL AND TRIM(CONFIRMED_ADDRESS) != ''
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
+        ORDER BY ADDRESS_UPDATED_AT DESC NULLS LAST
+      ) = 1
+    `);
+    for (const row of rows) {
+      const addr = (row.CONFIRMED_ADDRESS || '').trim();
+      if (!addr) continue;
+      const vNum = String(row.VEHICLE_NUMBER).replace(/^0+/, '') || String(row.VEHICLE_NUMBER);
+      confirmedMap.set(vNum, { address: addr, contact: (row.CONFIRMED_CONTACT || '').trim() || null });
+      const zipMatch = addr.match(/\b(\d{5})(?:-\d{4})?\b/g);
+      if (zipMatch) confirmedZipMap.set(vNum, zipMatch[zipMatch.length - 1]);
+    }
+  } catch { /* Non-fatal */ }
+
+  // 3. Geocode confirmed ZIPs (each hit is cached after first call)
+  const confirmedCoordsMap: Map<string, { lat: number; lng: number }> = new Map();
+  if (confirmedZipMap.size > 0) {
+    await Promise.all(Array.from(confirmedZipMap.entries()).map(async ([vNum, zip]) => {
+      try {
+        const coords = await getZipCoordinates(zip);
+        if (coords) confirmedCoordsMap.set(vNum, coords);
+      } catch { /* Non-fatal */ }
+    }));
+  }
+
+  // 4. Check Engine DTC flags (single Snowflake query)
+  const dtcSet = new Set<string>();
+  try {
+    const inList = paddedList.map(n => `'${n}'`).join(', ');
+    type DtcRow = { TRUCK_NUMBER: string };
+    const dtcRows = await executeQuery<DtcRow>(`
+      SELECT TRUCK_NUMBER FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
+      WHERE LPAD(TRIM(TRUCK_NUMBER), 6, '0') IN (${inList})
+    `);
+    for (const row of dtcRows) {
+      dtcSet.add(String(row.TRUCK_NUMBER).replace(/^0+/, '') || String(row.TRUCK_NUMBER));
+    }
+  } catch { /* Non-fatal — deprioritization skipped if this fails */ }
+
+  // 5. Score
+  const scored = candidates.map((r, idx) => {
+    const vNum = String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER);
+    let spareLat: number | null = null;
+    let spareLon: number | null = null;
+    let locationSource: string | null = null;
+    let locationAddress: string | null = null;
+
+    const sam = samsaraMap.get(vNum);
+    if (sam) {
+      spareLat = sam.latitude; spareLon = sam.longitude; locationSource = 'Samsara';
+      let addr = (sam.address || '').trim();
+      if (!addr) {
+        addr = [(sam.street || '').trim(), (sam.city || '').trim(),
+          [(sam.state || '').trim(), (sam.postal || '').trim()].filter(Boolean).join(' ')]
+          .filter(Boolean).join(', ');
+      }
+      locationAddress = addr || null;
+    } else {
+      const cc = confirmedCoordsMap.get(vNum);
+      if (cc) {
+        spareLat = cc.lat; spareLon = cc.lng; locationSource = 'Confirmed';
+        const ce = confirmedMap.get(vNum);
+        if (ce) locationAddress = ce.contact ? `${ce.address} · ${ce.contact}` : ce.address;
+      } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
+        spareLat = Number(r.AMS_ZIP_LAT); spareLon = Number(r.AMS_ZIP_LON); locationSource = 'AMS';
+        const street = (r.AMS_CUR_ADDRESS || '').trim();
+        const cityStateZip = [(r.AMS_CUR_CITY || '').trim(), (r.AMS_CUR_STATE || '').trim(), (r.AMS_CUR_ZIP || '').trim()].filter(Boolean).join(' ');
+        locationAddress = street && cityStateZip ? `${street}, ${cityStateZip}` : street || cityStateZip || null;
+      }
+    }
+
+    const distanceMiles = (techLat !== null && techLon !== null && spareLat !== null && spareLon !== null)
+      ? haversineDistance(techLat, techLon, spareLat, spareLon)
+      : null;
+
+    return { vehicleNumber: r.VEHICLE_NUMBER, truckStatus: r.TRUCK_STATUS || null, interior: r.INTERIOR || null,
+      distanceMiles, locationSource, locationAddress, hasCheckEngine: dtcSet.has(vNum),
+      spareLat, spareLon, _origIdx: idx };
+  });
+
+  // 6. Sort: healthy first, then nearest, then stable order
+  scored.sort((a, b) => {
+    if (a.hasCheckEngine !== b.hasCheckEngine) return a.hasCheckEngine ? 1 : -1;
+    if (a.distanceMiles === null && b.distanceMiles === null) return a._origIdx - b._origIdx;
+    if (a.distanceMiles === null) return 1;
+    if (b.distanceMiles === null) return -1;
+    if (a.distanceMiles !== b.distanceMiles) return a.distanceMiles - b.distanceMiles;
+    return a._origIdx - b._origIdx;
+  });
+
+  return scored.map(({ _origIdx: _i, ...rest }) => rest);
+}
+
+// ---------------------------------------------------------------------------
 // Shop List Auto-Sync State (in-memory)
 // ---------------------------------------------------------------------------
 const SHAREPOINT_SHOP_LIST_URL =
@@ -2862,39 +3041,36 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // PUBLIC API: Search for nearest spare vehicles by techType + optional lat/lon
   // GET /public/spares/search?techType=General+Home+Appliance&lat=34.1&lon=-117.3&limit=3
+  //
+  // Interior filter mapping (mirrors /rental/suggested-replacements job-title logic):
+  //   General Home Appliance       → no-racks only  (UTILITY WITHOUT REF RACKS or NULL)
+  //   Ref + General Home Appliance → ref-rack only   (UTILITY WITH REF RACKS)
+  //   HVAC                         → ref-rack only   (UTILITY WITH REF RACKS)
   app.get("/public/spares/search", requirePublicApiKey, async (req, res) => {
-    const TECH_TYPE_CONFIGS: Record<string, { interiorFilter: string | null; compatibleVehicleTypes: string[] }> = {
+    const TECH_TYPE_CONFIGS: Record<string, {
+      interiorSql: string;
+      compatibleVehicleTypes: string[];
+      interiorToVehicleType: (interior: string | null) => string;
+    }> = {
       'General Home Appliance': {
-        interiorFilter: null,
-        compatibleVehicleTypes: ['No racks', 'Ref (with racks)'],
+        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
+          AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')`,
+        compatibleVehicleTypes: ['No racks'],
+        interiorToVehicleType: (_) => 'No racks',
       },
       'Ref + General Home Appliance': {
-        interiorFilter: null,
-        compatibleVehicleTypes: ['Ref (with racks)', 'No racks'],
+        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
+          AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'`,
+        compatibleVehicleTypes: ['Ref (with racks)'],
+        interiorToVehicleType: (_) => 'Ref (with racks)',
       },
       'HVAC': {
-        interiorFilter: `UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'`,
-        compatibleVehicleTypes: ['HVAC van', 'Ref (with racks)'],
+        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
+          AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'`,
+        compatibleVehicleTypes: ['Ref (with racks)'],
+        interiorToVehicleType: (_) => 'Ref (with racks)',
       },
     };
-
-    function interiorToVehicleType(interior: string | null): string {
-      if (!interior || interior.trim() === '') return 'No racks';
-      if (interior.toUpperCase().trim() === 'UTILITY WITH REF RACKS') return 'Ref (with racks)';
-      return 'No racks';
-    }
-
-    function haversineSearch(lat1: number, lon1: number, lat2: number, lon2: number): number {
-      const R = 3958.8;
-      const dLat = ((lat2 - lat1) * Math.PI) / 180;
-      const dLon = ((lon2 - lon1) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) ** 2 +
-        Math.cos((lat1 * Math.PI) / 180) *
-          Math.cos((lat2 * Math.PI) / 180) *
-          Math.sin(dLon / 2) ** 2;
-      return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-    }
 
     try {
       const { techType, lat: latStr, lon: lonStr, limit: limitStr } = req.query as Record<string, string>;
@@ -2902,229 +3078,39 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (!techType) {
         return res.status(400).json({ success: false, message: 'techType is required' });
       }
-
       const config = TECH_TYPE_CONFIGS[techType];
       if (!config) {
-        return res.status(400).json({ success: false, message: 'Unknown techType' });
+        return res.status(400).json({
+          success: false,
+          message: `Unknown techType. Valid values: ${Object.keys(TECH_TYPE_CONFIGS).join(', ')}`
+        });
       }
 
       const techLat = latStr != null && latStr !== '' ? parseFloat(latStr) : null;
       const techLon = lonStr != null && lonStr !== '' ? parseFloat(lonStr) : null;
       const limit = limitStr ? Math.max(1, Math.min(50, parseInt(limitStr, 10) || 3)) : 3;
 
-      type CandidateRow = {
-        VEHICLE_NUMBER: string;
-        TRUCK_STATUS: string | null;
-        INTERIOR: string | null;
-        AMS_ZIP_LAT: number | null;
-        AMS_ZIP_LON: number | null;
-        AMS_CUR_ADDRESS: string | null;
-        AMS_CUR_CITY: string | null;
-        AMS_CUR_STATE: string | null;
-        AMS_CUR_ZIP: string | null;
-      };
-
-      const interiorClause = config.interiorFilter
-        ? `AND ${config.interiorFilter}`
-        : '';
-
-      const candidateSql = `
+      const candidates = await executeQuery<SpareVehicleCandidate>(`
         SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
                AMS_ZIP_LAT, AMS_ZIP_LON,
                AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
         FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-        WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-        ${interiorClause}
-      `;
+        WHERE ${config.interiorSql}
+      `);
 
-      const candidates = await executeQuery<CandidateRow>(candidateSql);
-
-      // Fetch Samsara locations (cached)
-      let samsaraMap: Map<string, { latitude: number; longitude: number; address: string; street: string; city: string; state: string; postal: string }> = new Map();
-      try {
-        const samsaraFetch = await fetchSamsaraLocations();
-        samsaraFetch.forEach((data, vehicleNum) => {
-          if (data.latitude && data.longitude) {
-            samsaraMap.set(vehicleNum, {
-              latitude: data.latitude,
-              longitude: data.longitude,
-              address: data.address || '',
-              street: data.street || '',
-              city: data.city || '',
-              state: data.state || '',
-              postal: data.postal || '',
-            });
-          }
-        });
-      } catch {
-        // Non-fatal
-      }
-
-      // Batch-fetch confirmed addresses from Snowflake SPARE_VEHICLE_ASSIGNMENT_STATUS
-      const paddedCandidateList = candidates.map(r => String(r.VEHICLE_NUMBER).padStart(6, '0'));
-      type ConfirmedRow = { VEHICLE_NUMBER: string; CONFIRMED_ADDRESS: string | null; CONFIRMED_CONTACT: string | null };
-      let confirmedMap: Map<string, { address: string; contact: string | null }> = new Map();
-      let confirmedZipMap: Map<string, string> = new Map();
-      try {
-        if (paddedCandidateList.length > 0) {
-          const inList = paddedCandidateList.map(n => `'${n}'`).join(', ');
-          const confirmedSql = `
-            SELECT VEHICLE_NUMBER, CONFIRMED_ADDRESS, CONFIRMED_CONTACT
-            FROM PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS
-            WHERE LPAD(TRIM(VEHICLE_NUMBER), 6, '0') IN (${inList})
-              AND CONFIRMED_ADDRESS IS NOT NULL
-              AND TRIM(CONFIRMED_ADDRESS) != ''
-            QUALIFY ROW_NUMBER() OVER (
-              PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
-              ORDER BY ADDRESS_UPDATED_AT DESC NULLS LAST
-            ) = 1
-          `;
-          const confirmedRows = await executeQuery<ConfirmedRow>(confirmedSql);
-          for (const row of confirmedRows) {
-            const addr = (row.CONFIRMED_ADDRESS || '').trim();
-            if (!addr) continue;
-            const vNum = String(row.VEHICLE_NUMBER).replace(/^0+/, '') || String(row.VEHICLE_NUMBER);
-            confirmedMap.set(vNum, { address: addr, contact: (row.CONFIRMED_CONTACT || '').trim() || null });
-            const zipMatch = addr.match(/\b(\d{5})(?:-\d{4})?\b/g);
-            const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
-            if (zip) confirmedZipMap.set(vNum, zip);
-          }
-        }
-      } catch {
-        // Non-fatal
-      }
-
-      // Geocode confirmed ZIPs in parallel
-      const confirmedCoordsMap: Map<string, { lat: number; lng: number }> = new Map();
-      if (confirmedZipMap.size > 0) {
-        await Promise.all(
-          Array.from(confirmedZipMap.entries()).map(async ([vNum, zip]) => {
-            try {
-              const coords = await getZipCoordinates(zip);
-              if (coords) confirmedCoordsMap.set(vNum, coords);
-            } catch {
-              // Non-fatal
-            }
-          })
-        );
-      }
-
-      // Batch-check which candidates have active Check Engine DTCs
-      const dtcVehicleSet = new Set<string>();
-      try {
-        if (paddedCandidateList.length > 0) {
-          const dtcInList = paddedCandidateList.map(n => `'${n}'`).join(', ');
-          const dtcSql = `
-            SELECT TRUCK_NUMBER
-            FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
-            WHERE LPAD(TRIM(TRUCK_NUMBER), 6, '0') IN (${dtcInList})
-          `;
-          type DtcRow = { TRUCK_NUMBER: string };
-          const dtcRows = await executeQuery<DtcRow>(dtcSql);
-          for (const row of dtcRows) {
-            const vNum = String(row.TRUCK_NUMBER).replace(/^0+/, '') || String(row.TRUCK_NUMBER);
-            dtcVehicleSet.add(vNum);
-          }
-        }
-      } catch {
-        // Non-fatal
-      }
-
-      // Score each candidate
-      type ScoredResult = {
-        vehicle_number: string;
-        truck_status: string | null;
-        vehicle_type: string;
-        current_location: string | null;
-        current_lat: number | null;
-        current_lon: number | null;
-        distance_miles: number | null;
-        location_source: string | null;
-        has_check_engine: boolean;
-        _origIdx: number;
-      };
-
-      const scored: ScoredResult[] = candidates.map((r, idx) => {
-        const vNum = String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER);
-
-        let spareLat: number | null = null;
-        let spareLon: number | null = null;
-        let locationSource: string | null = null;
-        let currentLocation: string | null = null;
-
-        const samsaraEntry = samsaraMap.get(vNum);
-        if (samsaraEntry) {
-          spareLat = samsaraEntry.latitude;
-          spareLon = samsaraEntry.longitude;
-          locationSource = 'Samsara';
-          let samAddr = (samsaraEntry.address || '').trim();
-          if (!samAddr) {
-            const samParts = [
-              (samsaraEntry.street || '').trim(),
-              (samsaraEntry.city || '').trim(),
-              [(samsaraEntry.state || '').trim(), (samsaraEntry.postal || '').trim()].filter(Boolean).join(' '),
-            ].filter(Boolean);
-            samAddr = samParts.join(', ');
-          }
-          currentLocation = samAddr || null;
-        } else {
-          const confirmedCoords = confirmedCoordsMap.get(vNum);
-          if (confirmedCoords) {
-            spareLat = confirmedCoords.lat;
-            spareLon = confirmedCoords.lng;
-            locationSource = 'Confirmed';
-            const confirmedEntry = confirmedMap.get(vNum);
-            if (confirmedEntry) {
-              currentLocation = confirmedEntry.contact
-                ? `${confirmedEntry.address} · ${confirmedEntry.contact}`
-                : confirmedEntry.address;
-            }
-          } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
-            spareLat = Number(r.AMS_ZIP_LAT);
-            spareLon = Number(r.AMS_ZIP_LON);
-            locationSource = 'AMS';
-            const amsStreet = (r.AMS_CUR_ADDRESS || '').trim();
-            const amsCityStateZip = [
-              (r.AMS_CUR_CITY || '').trim(),
-              (r.AMS_CUR_STATE || '').trim(),
-              (r.AMS_CUR_ZIP || '').trim(),
-            ].filter(Boolean).join(' ');
-            currentLocation = amsStreet && amsCityStateZip
-              ? `${amsStreet}, ${amsCityStateZip}`
-              : amsStreet || amsCityStateZip || null;
-          }
-        }
-
-        let distanceMiles: number | null = null;
-        if (techLat !== null && techLon !== null && spareLat !== null && spareLon !== null) {
-          distanceMiles = haversineSearch(techLat, techLon, spareLat, spareLon);
-        }
-
-        return {
-          vehicle_number: r.VEHICLE_NUMBER,
-          truck_status: r.TRUCK_STATUS || null,
-          vehicle_type: interiorToVehicleType(r.INTERIOR),
-          current_location: currentLocation,
-          current_lat: spareLat,
-          current_lon: spareLon,
-          distance_miles: distanceMiles,
-          location_source: locationSource,
-          has_check_engine: dtcVehicleSet.has(vNum),
-          _origIdx: idx,
-        };
-      });
-
-      // Sort: healthy first, then nearest, then stable original order
-      scored.sort((a, b) => {
-        if (a.has_check_engine !== b.has_check_engine) return a.has_check_engine ? 1 : -1;
-        if (a.distance_miles === null && b.distance_miles === null) return a._origIdx - b._origIdx;
-        if (a.distance_miles === null) return 1;
-        if (b.distance_miles === null) return -1;
-        if (a.distance_miles !== b.distance_miles) return a.distance_miles - b.distance_miles;
-        return a._origIdx - b._origIdx;
-      });
-
-      const topN = scored.slice(0, limit).map(({ _origIdx: _i, ...rest }) => rest);
+      // Delegate all enrichment/scoring to the shared helper
+      const scored = await scoreSpareVehicleCandidates(candidates, techLat, techLon);
+      const topN = scored.slice(0, limit).map(s => ({
+        vehicle_number: s.vehicleNumber,
+        truck_status: s.truckStatus,
+        vehicle_type: config.interiorToVehicleType(s.interior),
+        current_location: s.locationAddress,
+        current_lat: s.spareLat,
+        current_lon: s.spareLon,
+        distance_miles: s.distanceMiles,
+        location_source: s.locationSource,
+        has_check_engine: s.hasCheckEngine,
+      }));
 
       return res.json({
         success: true,
@@ -3974,32 +3960,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
-      type CandidateRow = {
-        VEHICLE_NUMBER: string;
-        TRUCK_STATUS: string | null;
-        INTERIOR: string | null;
-        AMS_ZIP_LAT: number | null;
-        AMS_ZIP_LON: number | null;
-        AMS_CUR_ADDRESS: string | null;
-        AMS_CUR_CITY: string | null;
-        AMS_CUR_STATE: string | null;
-        AMS_CUR_ZIP: string | null;
-      };
-      const candidates = await executeQuery<CandidateRow>(step3Sql);
-
-      // ---- Distance sorting ----
-      // Haversine formula: returns straight-line miles between two lat/lng points
-      function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
-        const R = 3958.8; // Earth radius in miles
-        const dLat = ((lat2 - lat1) * Math.PI) / 180;
-        const dLon = ((lon2 - lon1) * Math.PI) / 180;
-        const a =
-          Math.sin(dLat / 2) ** 2 +
-          Math.cos((lat1 * Math.PI) / 180) *
-            Math.cos((lat2 * Math.PI) / 180) *
-            Math.sin(dLon / 2) ** 2;
-        return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-      }
+      const candidates = await executeQuery<SpareVehicleCandidate>(step3Sql);
 
       // Resolve tech's ZIP from the truck's repair address in fs_trucks
       let techLat: number | null = null;
@@ -4012,212 +3973,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           const techZip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
           if (techZip) {
             const coords = await getZipCoordinates(techZip);
-            if (coords) {
-              techLat = coords.lat;
-              techLon = coords.lng;
-            }
+            if (coords) { techLat = coords.lat; techLon = coords.lng; }
           }
         }
       } catch {
         // Non-fatal: fall back to unsorted order
       }
 
-      // Fetch Samsara locations (uses cached data — no extra network call)
-      let samsaraMap: Map<string, { latitude: number; longitude: number; address: string; street: string; city: string; state: string; postal: string }> = new Map();
-      try {
-        const samsaraFetch = await fetchSamsaraLocations();
-        samsaraFetch.forEach((data, vehicleNum) => {
-          if (data.latitude && data.longitude) {
-            samsaraMap.set(vehicleNum, {
-              latitude: data.latitude,
-              longitude: data.longitude,
-              address: data.address || '',
-              street: data.street || '',
-              city: data.city || '',
-              state: data.state || '',
-              postal: data.postal || '',
-            });
-          }
-        });
-      } catch {
-        // Non-fatal
-      }
-
-      // Batch-fetch confirmed addresses from Snowflake SPARE_VEHICLE_ASSIGNMENT_STATUS
-      const candidateVehicleNums = candidates.map(r =>
-        String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER)
-      );
-      const paddedCandidateList = candidates.map(r =>
-        String(r.VEHICLE_NUMBER).padStart(6, '0')
-      );
-      type ConfirmedRow = { VEHICLE_NUMBER: string; CONFIRMED_ADDRESS: string | null; CONFIRMED_CONTACT: string | null };
-      let confirmedMap: Map<string, { address: string; contact: string | null }> = new Map();
-      let confirmedZipMap: Map<string, string> = new Map();
-      try {
-        const inList = paddedCandidateList.map(n => `'${n}'`).join(', ');
-        const confirmedSql = `
-          SELECT VEHICLE_NUMBER, CONFIRMED_ADDRESS, CONFIRMED_CONTACT
-          FROM PARTS_SUPPLYCHAIN.FLEET.SPARE_VEHICLE_ASSIGNMENT_STATUS
-          WHERE LPAD(TRIM(VEHICLE_NUMBER), 6, '0') IN (${inList})
-            AND CONFIRMED_ADDRESS IS NOT NULL
-            AND TRIM(CONFIRMED_ADDRESS) != ''
-          QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
-            ORDER BY ADDRESS_UPDATED_AT DESC NULLS LAST
-          ) = 1
-        `;
-        const confirmedRows = await executeQuery<ConfirmedRow>(confirmedSql);
-        for (const row of confirmedRows) {
-          const addr = (row.CONFIRMED_ADDRESS || '').trim();
-          if (!addr) continue;
-          const vNum = String(row.VEHICLE_NUMBER).replace(/^0+/, '') || String(row.VEHICLE_NUMBER);
-          confirmedMap.set(vNum, { address: addr, contact: (row.CONFIRMED_CONTACT || '').trim() || null });
-          const zipMatch = addr.match(/\b(\d{5})(?:-\d{4})?\b/g);
-          const zip = zipMatch ? zipMatch[zipMatch.length - 1] : null;
-          if (zip) confirmedZipMap.set(vNum, zip);
-        }
-      } catch {
-        // Non-fatal
-      }
-
-      // Geocode confirmed ZIPs in parallel (cached — usually instant after first hit)
-      const confirmedCoordsMap: Map<string, { lat: number; lng: number }> = new Map();
-      if (confirmedZipMap.size > 0) {
-        await Promise.all(
-          Array.from(confirmedZipMap.entries()).map(async ([vNum, zip]) => {
-            try {
-              const coords = await getZipCoordinates(zip);
-              if (coords) confirmedCoordsMap.set(vNum, coords);
-            } catch {
-              // Non-fatal
-            }
-          })
-        );
-      }
-
-      // Batch-check which candidates have active Check Engine DTCs in SAMSARA_CRITICALITY_SCORE
-      const dtcVehicleSet = new Set<string>();
-      try {
-        const dtcInList = paddedCandidateList.map(n => `'${n}'`).join(', ');
-        const dtcSql = `
-          SELECT TRUCK_NUMBER
-          FROM PARTS_SUPPLYCHAIN.FLEET.SAMSARA_CRITICALITY_SCORE
-          WHERE LPAD(TRIM(TRUCK_NUMBER), 6, '0') IN (${dtcInList})
-        `;
-        type DtcRow = { TRUCK_NUMBER: string };
-        const dtcRows = await executeQuery<DtcRow>(dtcSql);
-        for (const row of dtcRows) {
-          const vNum = String(row.TRUCK_NUMBER).replace(/^0+/, '') || String(row.TRUCK_NUMBER);
-          dtcVehicleSet.add(vNum);
-        }
-      } catch {
-        // Non-fatal — if this fails, check engine deprioritization is skipped
-      }
-
-      // Score each candidate by distance from the tech.
-      // Resolution priority: Samsara (live GPS) → Confirmed (SPARE_VEHICLE_ASSIGNMENT_STATUS ZIP) → AMS (Snowflake coords)
-      type ScoredCandidate = {
-        vehicleNumber: string;
-        truckStatus: string | null;
-        interior: string | null;
-        distanceMiles: number | null;
-        locationSource: string | null;
-        locationAddress: string | null;
-        hasCheckEngine: boolean;
-        _origIdx: number; // for stable sort
-      };
-
-      const scored: ScoredCandidate[] = candidates.map((r, idx) => {
-        const vNum = String(r.VEHICLE_NUMBER).replace(/^0+/, '') || String(r.VEHICLE_NUMBER);
-
-        let spareLat: number | null = null;
-        let spareLon: number | null = null;
-        let locationSource: string | null = null;
-        let locationAddress: string | null = null;
-
-        const samsaraEntry = samsaraMap.get(vNum);
-        if (samsaraEntry) {
-          spareLat = samsaraEntry.latitude;
-          spareLon = samsaraEntry.longitude;
-          locationSource = 'Samsara';
-          // Prefer full address string; build from components if empty
-          let samAddr = (samsaraEntry.address || '').trim();
-          if (!samAddr) {
-            const samParts = [
-              (samsaraEntry.street || '').trim(),
-              (samsaraEntry.city || '').trim(),
-              [(samsaraEntry.state || '').trim(), (samsaraEntry.postal || '').trim()].filter(Boolean).join(' '),
-            ].filter(Boolean);
-            samAddr = samParts.join(', ');
-          }
-          locationAddress = samAddr || null;
-        } else {
-          const confirmedCoords = confirmedCoordsMap.get(vNum);
-          if (confirmedCoords) {
-            spareLat = confirmedCoords.lat;
-            spareLon = confirmedCoords.lng;
-            locationSource = 'Confirmed';
-            const confirmedEntry = confirmedMap.get(vNum);
-            if (confirmedEntry) {
-              locationAddress = confirmedEntry.contact
-                ? `${confirmedEntry.address} · ${confirmedEntry.contact}`
-                : confirmedEntry.address;
-            }
-          } else if (r.AMS_ZIP_LAT != null && r.AMS_ZIP_LON != null) {
-            spareLat = Number(r.AMS_ZIP_LAT);
-            spareLon = Number(r.AMS_ZIP_LON);
-            locationSource = 'AMS';
-            const amsStreet = (r.AMS_CUR_ADDRESS || '').trim();
-            const amsCityStateZip = [
-              (r.AMS_CUR_CITY || '').trim(),
-              (r.AMS_CUR_STATE || '').trim(),
-              (r.AMS_CUR_ZIP || '').trim(),
-            ].filter(Boolean).join(' ');
-            if (amsStreet && amsCityStateZip) {
-              locationAddress = `${amsStreet}, ${amsCityStateZip}`;
-            } else if (amsStreet || amsCityStateZip) {
-              locationAddress = amsStreet || amsCityStateZip;
-            }
-          }
-        }
-
-        let distanceMiles: number | null = null;
-        if (techLat !== null && techLon !== null && spareLat !== null && spareLon !== null) {
-          distanceMiles = haversine(techLat, techLon, spareLat, spareLon);
-        }
-
-        return {
-          vehicleNumber: r.VEHICLE_NUMBER,
-          truckStatus: r.TRUCK_STATUS || null,
-          interior: r.INTERIOR || null,
-          distanceMiles,
-          locationSource,
-          locationAddress,
-          hasCheckEngine: dtcVehicleSet.has(vNum),
-          _origIdx: idx,
-        };
-      });
-
-      // Sort: healthy trucks first (hasCheckEngine = false before true),
-      // then nearest within each health tier; null-distance vehicles are last within tier.
-      // Tertiary _origIdx ensures deterministic ordering for ties.
-      scored.sort((a, b) => {
-        // Primary: health tier (no DTC before DTC)
-        if (a.hasCheckEngine !== b.hasCheckEngine) return a.hasCheckEngine ? 1 : -1;
-        // Secondary: distance ascending
-        if (a.distanceMiles === null && b.distanceMiles === null) return a._origIdx - b._origIdx;
-        if (a.distanceMiles === null) return 1;
-        if (b.distanceMiles === null) return -1;
-        if (a.distanceMiles !== b.distanceMiles) return a.distanceMiles - b.distanceMiles;
-        // Tertiary: stable original Snowflake order for equal distances
-        return a._origIdx - b._origIdx;
-      });
+      // Delegate enrichment/scoring to the shared helper
+      const scored = await scoreSpareVehicleCandidates(candidates, techLat, techLon);
 
       return res.json({
         matchFound: true,
         techName,
         jobTitle,
-        suggestions: scored.slice(0, 3).map(({ _origIdx: _i, ...rest }) => rest),
+        suggestions: scored.slice(0, 3).map(s => ({
+          vehicleNumber: s.vehicleNumber,
+          truckStatus: s.truckStatus,
+          interior: s.interior,
+          distanceMiles: s.distanceMiles,
+          locationSource: s.locationSource,
+          locationAddress: s.locationAddress,
+          hasCheckEngine: s.hasCheckEngine,
+        })),
       });
     } catch (error: any) {
       console.error("[SuggestedReplacements] Error:", error.message);
