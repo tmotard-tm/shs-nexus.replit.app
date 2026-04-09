@@ -23,7 +23,7 @@ interface AssignTechParams {
   techName: string;
   requestedBy: string;
   notes?: string;
-  assignmentType?: 'assigned' | 'temp';
+  assignmentType?: 'assigned' | 'temp' | 'dummy' | 'in-repair';
   repairData?: RepairData;
 }
 
