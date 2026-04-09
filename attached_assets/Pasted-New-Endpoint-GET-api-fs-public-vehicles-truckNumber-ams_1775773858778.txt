@@ -1,0 +1,41 @@
+New Endpoint: GET /api/fs/public/vehicles/{truckNumber}/ams-comments
+Auth: Same X-Api-Key: PublicSparesAPI header used by all existing endpoints.
+
+Source: AMS — GET /api/v1/vehicles/{vin}/comments (already in Nexus catalog)
+
+What it does: Returns the comment/note history for a vehicle from AMS. These are the freetext notes written by dispatchers, shop coordinators, and managers — things like "waiting on transmission part", "tech requested spare", "flagged for offboarding review". The agent currently has no visibility into this history and it's causing GPT to make decisions without important context that humans can already see.
+
+Lookup: Accept truckNumber (not VIN) as the path param. Internally, resolve to VIN via the existing AMS vehicle lookup, then pull comments.
+
+Expected response shape
+{
+  "data": [
+    {
+      "commentId": "abc123",
+      "commentText": "Shop confirmed waiting on rear axle part, ETA 2 weeks",
+      "commentedBy": "J. Martinez",
+      "commentedAt": "2026-03-28T14:22:00Z",
+      "commentType": "shop_update"
+    },
+    {
+      "commentId": "abc124",
+      "commentText": "Tech called in — says rental is fine for now",
+      "commentedBy": "R. Thompson",
+      "commentedAt": "2026-04-01T09:10:00Z",
+      "commentType": "tech_update"
+    }
+  ],
+  "truckNumber": "45123",
+  "total": 2
+}
+
+Minimum required fields per comment: commentText, commentedAt. Everything else is best-effort.
+
+How the agent uses this
+The agent calls this endpoint once per vehicle evaluation (alongside the existing /rentals/{id} and /call-logs/{truckId} calls) and passes the last 5 comments to GPT as context. This directly improves decision quality for the ~103 "Declined Repair" and ~152 "Confirming Status" vehicles where the repair situation is ambiguous without human notes.
+
+Error handling
+404 if truck not found in AMS — agent skips gracefully, evaluates without notes
+503 if AMS unreachable — agent skips gracefully, logs warning
+No pagination needed — just return all comments sorted by commentedAt descending, capped at 20.
+
