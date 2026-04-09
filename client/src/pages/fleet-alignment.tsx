@@ -96,6 +96,61 @@ const ROOT_CAUSE_META: Record<RootCause, { label: string; color: string; badgeCl
 
 const NON_BULK_FIXABLE: RootCause[] = ["stale_tech_id", "byov_vin_missing", "status_blocked"];
 
+// ---------------------------------------------------------------------------
+// Mismatch pattern taxonomy — all 10 possible three-system disagreement states
+// (when h ≠ t, which is the definition of a mismatch)
+// ---------------------------------------------------------------------------
+type PatternKey =
+  | "all"
+  | "tpms_only"         // H empty, T assigned, A empty
+  | "no_holman_match"   // H empty, T & A match
+  | "no_holman_diff"    // H empty, T & A both assigned but different
+  | "holman_only"       // H assigned, T & A empty
+  | "no_tpms_match"     // T empty, H & A match
+  | "no_tpms_diff"      // T empty, H & A both assigned but different
+  | "both_diff_no_ams"  // H & T differ, A empty
+  | "holman_ams_match"  // H & A match, T differs
+  | "tpms_ams_match"    // T & A match, H differs
+  | "all_three_diff";   // H, T, A all different from each other
+
+interface PatternInfo {
+  key: Exclude<PatternKey, "all">;
+  label: string;
+  short: string;
+}
+
+function getPatternInfo(holman: string | null, tpms: string | null, ams: string | null): PatternInfo {
+  const h = (holman ?? "").trim().toLowerCase();
+  const t = (tpms ?? "").trim().toLowerCase();
+  const a = (ams ?? "").trim().toLowerCase();
+  // Holman empty
+  if (h === "" && t !== "") {
+    if (a === "")  return { key: "tpms_only",        label: "TPMS only · Holman & AMS empty",      short: "T only" };
+    if (a === t)   return { key: "no_holman_match",  label: "Holman empty · TPMS & AMS match",     short: "H empty · T=A" };
+    return           { key: "no_holman_diff",   label: "Holman empty · TPMS & AMS differ",    short: "H empty · T≠A" };
+  }
+  // TPMS empty
+  if (h !== "" && t === "") {
+    if (a === "")  return { key: "holman_only",      label: "Holman only · TPMS & AMS empty",      short: "H only" };
+    if (a === h)   return { key: "no_tpms_match",    label: "TPMS empty · Holman & AMS match",     short: "T empty · H=A" };
+    return           { key: "no_tpms_diff",     label: "TPMS empty · Holman & AMS differ",    short: "T empty · H≠A" };
+  }
+  // Both assigned, different (guaranteed since this is a mismatch row)
+  if (a === "")  return { key: "both_diff_no_ams",   label: "Holman & TPMS differ · AMS empty",   short: "H≠T · A empty" };
+  if (a === h)   return { key: "holman_ams_match",   label: "Holman & AMS match · TPMS differs",  short: "H=A · T differs" };
+  if (a === t)   return { key: "tpms_ams_match",     label: "TPMS & AMS match · Holman differs",  short: "T=A · H differs" };
+  return           { key: "all_three_diff",     label: "All three systems differ",            short: "H≠T≠A" };
+}
+
+function PatternBadge({ holman, tpms, ams }: { holman: string | null; tpms: string | null; ams: string | null }) {
+  const info = getPatternInfo(holman, tpms, ams);
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
+      {info.short}
+    </span>
+  );
+}
+
 function RootCauseBadge({ cause }: { cause: RootCause }) {
   const meta = ROOT_CAUSE_META[cause];
   const Icon = meta.icon;
@@ -359,10 +414,7 @@ export default function FleetAlignment() {
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [forceRefresh, setForceRefresh] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [patternFilter, setPatternFilter] = useState<
-    "all" | "no_holman" | "holman_only" | "no_ams" | "no_tpms" |
-    "tpms_ams_match" | "holman_ams_match" | "all_three_diff"
-  >("all");
+  const [patternFilter, setPatternFilter] = useState<PatternKey>("all");
   const [actionFilter, setActionFilter] = useState<string>("all");
   const [bulkFixOnly, setBulkFixOnly] = useState(false);
   const [confirmUnassign, setConfirmUnassign] = useState(false);
@@ -439,24 +491,7 @@ export default function FleetAlignment() {
       })
       .filter(r => {
         if (patternFilter === "all") return true;
-        const h = (r.holmanTechId ?? "").trim().toLowerCase();
-        const t = (r.tpmsTechId ?? "").trim().toLowerCase();
-        const a = (r.amsTechId ?? "").trim().toLowerCase();
-        // Pattern 1: Empty | Tech A | Tech A  — TPMS & AMS agree, Holman empty
-        if (patternFilter === "no_holman")       return h === "" && t !== "" && a !== "" && t === a;
-        // Pattern 2: Tech A | Empty | Empty  — Holman only
-        if (patternFilter === "holman_only")     return h !== "" && t === "" && a === "";
-        // Pattern 3: Tech A | Tech A | Empty  — Holman & TPMS agree, AMS empty
-        if (patternFilter === "no_ams")          return h !== "" && t !== "" && a === "" && h === t;
-        // Pattern 4: Tech A | Empty | Tech A  — Holman & AMS agree, TPMS empty
-        if (patternFilter === "no_tpms")         return h !== "" && t === "" && a !== "" && h === a;
-        // Pattern 5: Tech A | Tech B | Tech B  — TPMS & AMS agree but differ from Holman
-        if (patternFilter === "tpms_ams_match")  return h !== "" && t !== "" && a !== "" && t === a && h !== t;
-        // Pattern 6: Tech A | Tech B | Tech A  — Holman & AMS agree, TPMS differs
-        if (patternFilter === "holman_ams_match") return h !== "" && t !== "" && a !== "" && h === a && h !== t;
-        // Pattern 7: Tech A | Tech B | Tech C  — all three different
-        if (patternFilter === "all_three_diff")  return h !== "" && t !== "" && a !== "" && h !== t && t !== a && h !== a;
-        return true;
+        return getPatternInfo(r.holmanTechId, r.tpmsTechId, r.amsTechId).key === patternFilter;
       })
       .filter(r => actionFilter === "all" || r.suggestedAction === actionFilter)
       .filter(r => !bulkFixOnly || r.bulkFixEligible)
@@ -767,12 +802,15 @@ export default function FleetAlignment() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All patterns</SelectItem>
-                      <SelectItem value="no_holman">Holman empty · TPMS &amp; AMS match</SelectItem>
-                      <SelectItem value="holman_only">Holman assigned · TPMS &amp; AMS empty</SelectItem>
-                      <SelectItem value="no_ams">Holman &amp; TPMS match · AMS empty</SelectItem>
-                      <SelectItem value="no_tpms">Holman &amp; AMS match · TPMS empty</SelectItem>
-                      <SelectItem value="tpms_ams_match">TPMS &amp; AMS match · differ from Holman</SelectItem>
-                      <SelectItem value="holman_ams_match">Holman &amp; AMS match · TPMS differs</SelectItem>
+                      <SelectItem value="holman_only">H only · TPMS &amp; AMS empty</SelectItem>
+                      <SelectItem value="tpms_only">TPMS only · Holman &amp; AMS empty</SelectItem>
+                      <SelectItem value="no_holman_match">H empty · TPMS &amp; AMS match</SelectItem>
+                      <SelectItem value="no_holman_diff">H empty · TPMS &amp; AMS differ</SelectItem>
+                      <SelectItem value="no_tpms_match">TPMS empty · H &amp; AMS match</SelectItem>
+                      <SelectItem value="no_tpms_diff">TPMS empty · H &amp; AMS differ</SelectItem>
+                      <SelectItem value="both_diff_no_ams">H &amp; TPMS differ · AMS empty</SelectItem>
+                      <SelectItem value="holman_ams_match">H &amp; AMS match · TPMS differs</SelectItem>
+                      <SelectItem value="tpms_ams_match">TPMS &amp; AMS match · H differs</SelectItem>
                       <SelectItem value="all_three_diff">All three systems differ</SelectItem>
                     </SelectContent>
                   </Select>
@@ -917,6 +955,13 @@ export default function FleetAlignment() {
                           {record.districtNo && (
                             <p className="text-[10px] text-muted-foreground">District {record.districtNo}</p>
                           )}
+                          <div className="mt-1.5">
+                            <PatternBadge
+                              holman={record.holmanTechId}
+                              tpms={record.tpmsTechId}
+                              ams={record.amsTechId}
+                            />
+                          </div>
                         </div>
 
                         {/* System states */}
