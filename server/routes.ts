@@ -2649,7 +2649,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         personalEmail: pickWithSource(hrSep?.personalEmail, null),
         address: pickWithSource(null, rosterAddress),
         fleetPickupAddress: pickWithSource(sepAddress, null),
-        hrTruckNumber: pickWithSource(hrSep?.truckNumber, tech.truckLu || null),
+        hrTruckNumber: pickWithSource(hrSep?.truckNumber, tech.lastKnownTruckLu || null),
         homeAddress: {
           line1: tech.homeAddr1 || null,
           line2: tech.homeAddr2 || null,
@@ -8986,7 +8986,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
           c.SNSTV_HOME_PHONE,
-          tpms.TRUCK_LU
+          -- Informational-only: last snapshot truck from TPMS_EXTRACT_LAST_ASSIGNED, not current assignment
+          tpms.TRUCK_LU AS LAST_KNOWN_TRUCK_LU,
+          tpms.FILE_DATE AS LAST_KNOWN_TRUCK_FILE_DATE
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
@@ -9016,7 +9018,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         SNSTV_MAIN_PHONE: string;
         SNSTV_CELL_PHONE: string;
         SNSTV_HOME_PHONE: string;
-        TRUCK_LU: string;
+        LAST_KNOWN_TRUCK_LU: string;
+        LAST_KNOWN_TRUCK_FILE_DATE: string;
       }>;
       
       // Format phone number to (xxx)xxx-xxxx format
@@ -9095,11 +9098,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ].filter(Boolean);
         const contactPhone = phoneParts.join(' / ');
         
+        const emplStatus = row.EMPL_STATUS || '';
         return {
           emplName: row.EMPL_NAME || '',
           enterpriseId: row.ENTERPRISE_ID || '',
           emplId: row.EMPLID || '',
-          emplStatus: row.EMPL_STATUS || '',
+          emplStatus,
           effdt: row.EFFDT || '',
           lastDateWorked: row.LAST_DATE_WORKED || '',
           planningArea: row.PLANNING_AREA || '',
@@ -9107,7 +9111,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           address: address,
           contactPhone: contactPhone,
           owner: getOwner(row.PLANNING_AREA),
-          truck: row.TRUCK_LU || '',
+          lastKnownTruckLu: row.LAST_KNOWN_TRUCK_LU || '',
+          lastKnownTruckFileDate: row.LAST_KNOWN_TRUCK_FILE_DATE || null,
+          // Explicit active-status indicator: 'inactive' for termed/separated employees
+          // lastKnownTruckLu is from TPMS_EXTRACT_LAST_ASSIGNED snapshot and may be stale.
+          techActiveStatus: (emplStatus === 'A' || emplStatus === 'ACTIVE') ? 'active' as const : 'inactive' as const,
           source: 'term_roster' as string,
         };
       });
@@ -9216,7 +9224,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
             address: address,
             contactPhone: contactPhone,
             owner: getOwner(row.PLANNING_AREA),
-            truck: row.TRUCK_NUMBER || '',
+            lastKnownTruckLu: row.TRUCK_NUMBER || '',
+            lastKnownTruckFileDate: null,
+            // Separation records are always inactive — they've already been terminated
+            techActiveStatus: 'inactive' as const,
             source: 'separation' as string,
           });
         }
@@ -9398,8 +9409,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           homeCity: tech.homeCity,
           homeState: tech.homeState,
           homePostal: tech.homePostal,
-          // Fleet info
-          truckLu: tech.truckLu,
+          // Fleet info (informational-only from TPMS_EXTRACT_LAST_ASSIGNED — may be stale)
+          lastKnownTruckLu: tech.lastKnownTruckLu,
+          lastKnownTruckFileDate: tech.lastKnownTruckFileDate,
         });
       } else {
         res.json({ found: false });
@@ -11275,7 +11287,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           });
         }
 
-        // Snowflake drift check: compare allTechs.truckLu vs tpmsTechProfiles.truckNo
+        // Snowflake drift check: compare allTechs.lastKnownTruckLu (snapshot) vs tpmsTechProfiles.truckNo (live)
+        // Note: lastKnownTruckLu is informational-only from TPMS_EXTRACT_LAST_ASSIGNED and may be stale.
+        // This check is logged for awareness but should not be treated as authoritative.
         const profiles = await db.select({
           enterpriseId: tpmsTechProfiles.enterpriseId,
           profileTruckNo: tpmsTechProfiles.truckNo,
@@ -11284,12 +11298,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const driftEntries: Array<{ enterpriseId: string; tpmsNo: string; snowflakeNo: string }> = [];
         for (const profile of profiles) {
           if (!profile.enterpriseId) continue;
-          const [atRow] = await db.select({ truckLu: allTechsTable.truckLu })
+          const [atRow] = await db.select({ lastKnownTruckLu: allTechsTable.lastKnownTruckLu })
             .from(allTechsTable)
             .where(eq(allTechsTable.techRacfid, profile.enterpriseId))
             .limit(1);
-          if (atRow?.truckLu && profile.profileTruckNo && toCanonical(atRow.truckLu) !== toCanonical(profile.profileTruckNo)) {
-            driftEntries.push({ enterpriseId: profile.enterpriseId, tpmsNo: profile.profileTruckNo, snowflakeNo: atRow.truckLu });
+          if (atRow?.lastKnownTruckLu && profile.profileTruckNo && toCanonical(atRow.lastKnownTruckLu) !== toCanonical(profile.profileTruckNo)) {
+            driftEntries.push({ enterpriseId: profile.enterpriseId, tpmsNo: profile.profileTruckNo, snowflakeNo: atRow.lastKnownTruckLu });
           }
         }
 
@@ -12723,7 +12737,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
           c.SNSTV_HOME_PHONE,
-          tpms.TRUCK_LU
+          -- Informational-only: last snapshot truck from TPMS_EXTRACT_LAST_ASSIGNED, not current assignment
+          tpms.TRUCK_LU AS LAST_KNOWN_TRUCK_LU,
+          tpms.FILE_DATE AS LAST_KNOWN_TRUCK_FILE_DATE
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
@@ -12741,7 +12757,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         EFFDT: string; LAST_DATE_WORKED: string; PLANNING_AREA: string; TECH_SPECIALTY: string;
         SNSTV_HOME_ADDR1: string; SNSTV_HOME_ADDR2: string; SNSTV_HOME_CITY: string;
         SNSTV_HOME_STATE: string; SNSTV_HOME_POSTAL: string; SNSTV_MAIN_PHONE: string;
-        SNSTV_CELL_PHONE: string; SNSTV_HOME_PHONE: string; TRUCK_LU: string;
+        SNSTV_CELL_PHONE: string; SNSTV_HOME_PHONE: string; LAST_KNOWN_TRUCK_LU: string;
+        LAST_KNOWN_TRUCK_FILE_DATE: string;
       }>;
 
       const formatPhone = (phone: string | null | undefined): string | null => {
@@ -12776,7 +12793,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const truckNumbers = Array.from(new Set(
         rows.flatMap(r => {
-          const t = r.TRUCK_LU || overrideMap[(r.ENTERPRISE_ID || '').toUpperCase()];
+          const t = r.LAST_KNOWN_TRUCK_LU || overrideMap[(r.ENTERPRISE_ID || '').toUpperCase()];
           return t ? [t] : [];
         })
       ));
@@ -12818,7 +12835,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: 'Planning Area',   key: 'planningArea',   width: 16 },
         { header: 'Owner',           key: 'owner',          width: 26 },
         { header: 'Tech Specialty',  key: 'techSpecialty',  width: 20 },
-        { header: 'Truck #',         key: 'truck',          width: 10 },
+        { header: 'Last Known Truck',           key: 'lastKnownTruckLu',       width: 14 },
+        { header: 'Last Known Truck File Date', key: 'lastKnownTruckFileDate', width: 22 },
         { header: 'Manual Status',   key: 'manualStatus',   width: 36 },
         { header: 'Nexus Location',  key: 'nexusLocation',  width: 24 },
         { header: 'Nexus Comments',  key: 'nexusComments',  width: 40 },
@@ -12844,8 +12862,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       for (const row of rows) {
         const addressParts = [row.SNSTV_HOME_ADDR1, row.SNSTV_HOME_ADDR2, row.SNSTV_HOME_CITY, row.SNSTV_HOME_STATE, row.SNSTV_HOME_POSTAL].filter(Boolean);
         const phoneParts = [formatPhone(row.SNSTV_MAIN_PHONE), formatPhone(row.SNSTV_CELL_PHONE), formatPhone(row.SNSTV_HOME_PHONE)].filter(Boolean);
-        const truck = row.TRUCK_LU || overrideMap[(row.ENTERPRISE_ID || '').toUpperCase()] || '';
-        const nexus = truck ? nexusMap.get(truck) : null;
+        const lastKnownTruckLu = row.LAST_KNOWN_TRUCK_LU || overrideMap[(row.ENTERPRISE_ID || '').toUpperCase()] || '';
+        const nexus = lastKnownTruckLu ? nexusMap.get(lastKnownTruckLu) : null;
         const rawStatus = nexus?.postOffboardedStatus || '';
 
         const dataRow = sheet.addRow({
@@ -12858,7 +12876,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           planningArea: row.PLANNING_AREA || '',
           owner: getOwner(row.PLANNING_AREA),
           techSpecialty: row.TECH_SPECIALTY || '',
-          truck,
+          lastKnownTruckLu,
+          lastKnownTruckFileDate: toDateStr(row.LAST_KNOWN_TRUCK_FILE_DATE),
           manualStatus: rawStatus ? (manualStatusLabels[rawStatus] || rawStatus) : '',
           nexusLocation: nexus?.nexusNewLocation || '',
           nexusComments: nexus?.comments || '',
@@ -12870,7 +12889,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Freeze + auto-filter
-      sheet.autoFilter = { from: 'A1', to: 'P1' };
+      sheet.autoFilter = { from: 'A1', to: 'Q1' };
 
       const timestamp = new Date().toISOString().split('T')[0];
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');

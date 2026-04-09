@@ -471,7 +471,10 @@ export const allTechs = pgTable("all_techs", {
   cellPhone: text("cell_phone"), // SNSTV_CELL_PHONE
   homePhone: text("home_phone"), // SNSTV_HOME_PHONE
   // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED (joined by ENTERPRISE_ID)
-  truckLu: text("truck_lu"), // TRUCK_LU from TPMS last assigned extract
+  // These fields are informational-only: they reflect the last snapshot in which a truck was
+  // associated with this tech. The value may be weeks or months stale. Never treat as current.
+  lastKnownTruckLu: text("last_known_truck_lu"), // TRUCK_LU — last snapshot, not current assignment
+  lastKnownTruckFileDate: date("last_known_truck_file_date"), // FILE_DATE of the snapshot row
   // Offboarding tracking (previously only in termed_techs)
   offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
   offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id

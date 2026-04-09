@@ -160,8 +160,10 @@ export function WorkModuleDialog({
     homeCity: rosterData?.found ? rosterData.homeCity : techData.homeCity,
     homeState: rosterData?.found ? rosterData.homeState : techData.homeState,
     homePostal: rosterData?.found ? rosterData.homePostal : techData.homePostal,
-    // Fleet info from roster
-    truckLu: rosterData?.found ? rosterData.truckLu : techData.truckLu,
+    // Fleet info from roster — lastKnownTruckLu is informational-only (may be stale snapshot)
+    truckLu: rosterData?.found
+      ? (rosterData.lastKnownTruckLu ?? rosterData.truckLu)
+      : (techData.lastKnownTruckLu ?? techData.truckLu),
   };
 
   const truckNumber = enrichedEmployeeData.truckLu || taskData.truckLu || taskData.truckNumber || taskData.vehicleNumber || '';

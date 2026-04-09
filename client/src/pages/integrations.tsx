@@ -844,7 +844,7 @@ export default function Integrations() {
                                   tech.techName?.toLowerCase().includes(searchLower) ||
                                   tech.employeeId?.toLowerCase().includes(searchLower) ||
                                   tech.techRacfid?.toLowerCase().includes(searchLower) ||
-                                  tech.truckLu?.toLowerCase().includes(searchLower) ||
+                                  (tech.lastKnownTruckLu ?? tech.truckLu)?.toLowerCase().includes(searchLower) ||
                                   tech.cellPhone?.toLowerCase().includes(searchLower) ||
                                   tech.mainPhone?.toLowerCase().includes(searchLower) ||
                                   tech.homeCity?.toLowerCase().includes(searchLower);
@@ -867,7 +867,7 @@ export default function Integrations() {
                                       {tech.employmentStatus === 'A' ? 'Active' : tech.employmentStatus || '?'}
                                     </Badge>
                                   </TableCell>
-                                  <TableCell className="font-mono text-xs">{tech.truckLu || '-'}</TableCell>
+                                  <TableCell className="font-mono text-xs">{(tech.lastKnownTruckLu ?? tech.truckLu) || '-'}</TableCell>
                                   <TableCell className="text-xs">{formatPhoneNumber(tech.cellPhone)}</TableCell>
                                   <TableCell className="text-xs">{formatPhoneNumber(tech.mainPhone)}</TableCell>
                                   <TableCell className="text-xs max-w-[200px] truncate" title={tech.homeAddr1 ? `${tech.homeAddr1}${tech.homeAddr2 ? ', ' + tech.homeAddr2 : ''}, ${tech.homeCity || ''}, ${tech.homeState || ''} ${tech.homePostal || ''}` : ''}>
@@ -888,7 +888,7 @@ export default function Integrations() {
                               tech.techName?.toLowerCase().includes(searchLower) ||
                               tech.employeeId?.toLowerCase().includes(searchLower) ||
                               tech.techRacfid?.toLowerCase().includes(searchLower) ||
-                              tech.truckLu?.toLowerCase().includes(searchLower) ||
+                              (tech.lastKnownTruckLu ?? tech.truckLu)?.toLowerCase().includes(searchLower) ||
                               tech.cellPhone?.toLowerCase().includes(searchLower) ||
                               tech.mainPhone?.toLowerCase().includes(searchLower) ||
                               tech.homeCity?.toLowerCase().includes(searchLower);
@@ -900,7 +900,7 @@ export default function Integrations() {
                               tech.techName?.toLowerCase().includes(searchLower) ||
                               tech.employeeId?.toLowerCase().includes(searchLower) ||
                               tech.techRacfid?.toLowerCase().includes(searchLower) ||
-                              tech.truckLu?.toLowerCase().includes(searchLower) ||
+                              (tech.lastKnownTruckLu ?? tech.truckLu)?.toLowerCase().includes(searchLower) ||
                               tech.cellPhone?.toLowerCase().includes(searchLower) ||
                               tech.mainPhone?.toLowerCase().includes(searchLower) ||
                               tech.homeCity?.toLowerCase().includes(searchLower);

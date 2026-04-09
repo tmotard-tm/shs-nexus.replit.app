@@ -101,7 +101,7 @@ export function parseTechData(item: QueueItem): TechData | undefined {
     const rosterMainPhone = roster.mainPhone || null;
     const rosterHomePhone = roster.homePhone || null;
     const rosterAddr = [roster.homeAddr1, roster.homeAddr2, roster.homeCity, roster.homeState, roster.homePostal].filter(Boolean).join(', ') || tech.address || tech.homeAddress;
-    const rosterTruck = roster.truckLu || tech.hrTruckNumber || tech.truckNumber;
+    const rosterTruck = (roster.lastKnownTruckLu ?? roster.truckLu) || tech.hrTruckNumber || tech.truckNumber;
 
     const personalPhoneRoster = rosterCellPhone || tech.personalPhone || tech.homePhone || tech.contactNumber || null;
     const mobilePhoneRoster = rosterMainPhone || tech.mobilePhone || null;

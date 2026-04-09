@@ -3156,176 +3156,424 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // ===== END PUBLIC API Module Endpoints =====
 
-  // GET tech specialty (JOBTITLE) via TPMS_EXTRACT_LAST_ASSIGNED -> ORA_TECH_HIRE_ROSTER_VW
+  // GET tech specialty (JOBTITLE) for the tech currently assigned to a truck.
+  // Lookup order (freshness priority):
+  //   1. Live TPMS API (getTechById keyed by enterprise ID from tpms_cached_assignments by truck)
+  //   2. tpms_cached_assignments by truck number (no live API call)
+  //   3. TPMS_EXTRACT_LAST_ASSIGNED as last resort (snapshot — may be weeks/months stale)
+  // Response includes dataSource: 'live' | 'cache' | 'snapshot' so callers know data freshness.
   app.get("/tech-specialty", async (req, res) => {
     try {
       const truckNumber = req.query.truckNumber as string;
       if (!truckNumber || !truckNumber.trim()) {
-        return res.json({ jobTitle: null });
+        return res.json({ jobTitle: null, dataSource: 'snapshot', techActiveStatus: null });
       }
 
       const rawTruck = truckNumber.trim();
       const paddedTruck = rawTruck.padStart(6, '0');
       const unpadded = rawTruck.replace(/^0+/, '') || rawTruck;
 
-      const step1Sql = `
-        SELECT ENTERPRISE_ID
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
-        WHERE TRUCK_LU IN (?, ?)
-        ORDER BY FILE_DATE DESC
-        LIMIT 1
-      `;
-      const step1 = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(step1Sql, [paddedTruck, unpadded]);
+      // Helper: look up EMPLOYMENT_STATUS for a given enterprise ID from DRIVELINE_ALL_TECHS
+      // Returns 'active' if EMPLOYMENT_STATUS indicates active, 'inactive' otherwise, null if not found
+      const lookupActiveStatus = async (enterpriseId: string): Promise<'active' | 'inactive' | null> => {
+        try {
+          const sql = `
+            SELECT EMPLOYMENT_STATUS
+            FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+            WHERE UPPER(TRIM(ENTERPRISE_ID)) = UPPER(?)
+            LIMIT 1
+          `;
+          const rows = await executeQuery<{ EMPLOYMENT_STATUS: string | null }>(sql, [enterpriseId]);
+          if (rows.length === 0) return null;
+          const status = (rows[0].EMPLOYMENT_STATUS || '').toUpperCase();
+          return status === 'A' || status === 'ACTIVE' ? 'active' : 'inactive';
+        } catch {
+          return null;
+        }
+      };
 
-      if (step1.length === 0 || !step1[0].ENTERPRISE_ID) {
-        return res.json({ jobTitle: null, enterpriseId: null });
-      }
-
-      const enterpriseId = String(step1[0].ENTERPRISE_ID).trim();
-
-      const step2Sql = `
-        SELECT JOBTITLE
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
-        WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
-        ORDER BY LAST_HIRE_DT DESC
-        LIMIT 1
-      `;
-      const step2 = await executeQuery<{ JOBTITLE: string | null }>(step2Sql, [enterpriseId]);
-
-      if (step2.length > 0 && step2[0].JOBTITLE) {
-        res.json({ jobTitle: step2[0].JOBTITLE, enterpriseId });
-      } else {
-        const fallbackSql = `
+      // Helper: look up JOBTITLE for a given enterprise ID from Snowflake roster views
+      const lookupJobTitle = async (enterpriseId: string): Promise<string | null> => {
+        const sql1 = `
+          SELECT JOBTITLE
+          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
+          WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
+          ORDER BY LAST_HIRE_DT DESC
+          LIMIT 1
+        `;
+        const r1 = await executeQuery<{ JOBTITLE: string | null }>(sql1, [enterpriseId]);
+        if (r1.length > 0 && r1[0].JOBTITLE) return r1[0].JOBTITLE;
+        const sql2 = `
           SELECT JOBTITLE
           FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_ACTIVE_ROSTER_FWE_VW_VIEW
           WHERE UPPER(ENTERPRISE_ID) = UPPER(?)
           ORDER BY LAST_HIRE_DT DESC
           LIMIT 1
         `;
-        const fallback = await executeQuery<{ JOBTITLE: string | null }>(fallbackSql, [enterpriseId]);
-        if (fallback.length > 0 && fallback[0].JOBTITLE) {
-          res.json({ jobTitle: fallback[0].JOBTITLE, enterpriseId });
-        } else {
-          res.json({ jobTitle: null, enterpriseId });
+        const r2 = await executeQuery<{ JOBTITLE: string | null }>(sql2, [enterpriseId]);
+        return r2.length > 0 ? (r2[0].JOBTITLE ?? null) : null;
+      };
+
+      // ── Tier 1 (live-first): Resolve enterprise ID from any local cache, then confirm via live TPMS API ──
+      // We query BOTH tpms_tech_profiles (synced from live TPMS watermark) AND tpms_cached_assignments
+      // so that any previously synced assignment can reach the live API, regardless of which cache has a hit.
+      // The TPMS API does not support truck-number based lookup — enterprise ID is required.
+      try {
+        const { db } = await import("./db");
+        const { tpmsCachedAssignments, tpmsTechProfiles } = await import("@shared/schema");
+        const { eq, or, and } = await import("drizzle-orm");
+
+        // Query both cache tables in parallel for enterprise ID by truck number (padded and unpadded variants)
+        const [cachedAssignRows, techProfileRows] = await Promise.all([
+          db.select({ enterpriseId: tpmsCachedAssignments.enterpriseId, truckNo: tpmsCachedAssignments.truckNo })
+            .from(tpmsCachedAssignments)
+            .where(
+              or(
+                eq(tpmsCachedAssignments.truckNo, paddedTruck),
+                eq(tpmsCachedAssignments.truckNo, unpadded),
+                and(eq(tpmsCachedAssignments.lookupKey, paddedTruck), eq(tpmsCachedAssignments.lookupType, 'truck_number')),
+                and(eq(tpmsCachedAssignments.lookupKey, unpadded), eq(tpmsCachedAssignments.lookupType, 'truck_number'))
+              )
+            )
+            .limit(5),
+          db.select({ enterpriseId: tpmsTechProfiles.enterpriseId, truckNo: tpmsTechProfiles.truckNo })
+            .from(tpmsTechProfiles)
+            .where(
+              or(
+                eq(tpmsTechProfiles.truckNo, paddedTruck),
+                eq(tpmsTechProfiles.truckNo, unpadded)
+              )
+            )
+            .limit(5),
+        ]);
+
+        // Prefer tpms_cached_assignments; fall back to tpms_tech_profiles
+        const cacheRow = cachedAssignRows.find(r => r.enterpriseId) ?? techProfileRows.find(r => r.enterpriseId) ?? null;
+
+        if (cacheRow?.enterpriseId) {
+          const cacheEnterpriseId = cacheRow.enterpriseId.trim();
+
+          // Attempt live TPMS API call to confirm current assignment
+          let liveDisproved = false;
+          try {
+            const { getTpmsApiService } = await import("./tpms-api-service");
+            const tpmsApi = getTpmsApiService();
+            const profile = await tpmsApi.getTechById(cacheEnterpriseId);
+            if (profile) {
+              // Verify the live profile is still on this truck
+              const liveTruckNo = (profile.truckNo || '').replace(/^0+/, '') || profile.truckNo;
+              const requestedTruckNo = unpadded;
+              if (liveTruckNo && liveTruckNo === requestedTruckNo) {
+                const jobTitle = profile.jobTitle || profile.JOBTITLE || null;
+                if (jobTitle) {
+                  return res.json({ jobTitle, enterpriseId: cacheEnterpriseId, dataSource: 'live' });
+                }
+                // Job title not in TPMS profile — look up from Snowflake roster with live enterprise ID
+                const rosterTitle = await lookupJobTitle(cacheEnterpriseId);
+                return res.json({ jobTitle: rosterTitle, enterpriseId: cacheEnterpriseId, dataSource: 'live' });
+              }
+              // Live profile exists but truck doesn't match — tech was reassigned; cache is stale
+              liveDisproved = true;
+            }
+          } catch (_liveErr: any) {
+            // Live TPMS call failed — fall through to cache tier
+          }
+
+          if (!liveDisproved) {
+            // Tier 2: Cache hit (live call unavailable or live returned no profile yet; use cached enterprise ID)
+            const [rosterTitle, techActiveStatus] = await Promise.all([
+              lookupJobTitle(cacheEnterpriseId),
+              lookupActiveStatus(cacheEnterpriseId),
+            ]);
+            return res.json({ jobTitle: rosterTitle, enterpriseId: cacheEnterpriseId, dataSource: 'cache', techActiveStatus });
+          }
+          // liveDisproved: cache is stale, fall through to snapshot
         }
+      } catch (_cacheErr: any) {
+        // Cache lookup failed — fall through to snapshot tier
       }
+
+      // ── Tier 3 (last resort): TPMS_EXTRACT_LAST_ASSIGNED snapshot ──
+      // This data may be weeks or months stale. It should NOT be read as the
+      // current truck assignment — it is the last time this truck appeared in any snapshot.
+      const snapshotSql = `
+        SELECT ENTERPRISE_ID
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
+        WHERE TRUCK_LU IN (?, ?)
+        ORDER BY FILE_DATE DESC
+        LIMIT 1
+      `;
+      const snapshotRows = await executeQuery<{ ENTERPRISE_ID: string | number | null }>(snapshotSql, [paddedTruck, unpadded]);
+
+      if (snapshotRows.length === 0 || !snapshotRows[0].ENTERPRISE_ID) {
+        return res.json({ jobTitle: null, enterpriseId: null, dataSource: 'snapshot' });
+      }
+
+      const snapshotEnterpriseId = String(snapshotRows[0].ENTERPRISE_ID).trim();
+      const [jobTitle, techActiveStatus] = await Promise.all([
+        lookupJobTitle(snapshotEnterpriseId),
+        lookupActiveStatus(snapshotEnterpriseId),
+      ]);
+      res.json({ jobTitle, enterpriseId: snapshotEnterpriseId, dataSource: 'snapshot', techActiveStatus });
     } catch (error: any) {
       console.error("Error fetching tech specialty:", error.message);
-      res.json({ jobTitle: null, enterpriseId: null });
+      res.json({ jobTitle: null, enterpriseId: null, dataSource: 'snapshot', techActiveStatus: null });
     }
   });
 
+  // POST /tech-specialty/batch — same 3-tier lookup applied across a batch of truck numbers.
+  // Returns dataSource per truck: 'live' | 'cache' | 'snapshot'
   app.post("/tech-specialty/batch", async (req, res) => {
     try {
       const { truckNumbers } = req.body as { truckNumbers: string[] };
       if (!truckNumbers || !Array.isArray(truckNumbers) || truckNumbers.length === 0) {
-        return res.json({ specialties: {} });
+        return res.json({ specialties: {}, enterpriseIds: {}, dataSources: {} });
       }
 
-      const allLookups: string[] = [];
-      const truckToKeys = new Map<string, string[]>();
+      const truckToKeys = new Map<string, { padded: string; unpadded: string }>();
       for (const tn of truckNumbers) {
         const raw = tn.trim();
-        const padded = raw.padStart(6, '0');
-        const unpadded = raw.replace(/^0+/, '') || raw;
-        const keys = [padded, unpadded];
-        truckToKeys.set(tn, keys);
-        allLookups.push(padded, unpadded);
-      }
-      const uniqueLookups = Array.from(new Set(allLookups));
-      const placeholders = uniqueLookups.map(() => '?').join(',');
-
-      const step1Sql = `
-        SELECT TRUCK_LU, ENTERPRISE_ID, FILE_DATE
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
-        WHERE TRUCK_LU IN (${placeholders})
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY TRUCK_LU ORDER BY FILE_DATE DESC) = 1
-      `;
-      const step1Results = await executeQuery<{ TRUCK_LU: string; ENTERPRISE_ID: string | number | null }>(step1Sql, uniqueLookups);
-
-      const truckLuToEntId = new Map<string, string>();
-      const enterpriseIds = new Set<string>();
-      for (const row of step1Results) {
-        if (row.TRUCK_LU && row.ENTERPRISE_ID) {
-          const entId = String(row.ENTERPRISE_ID).trim();
-          truckLuToEntId.set(row.TRUCK_LU.trim(), entId);
-          enterpriseIds.add(entId);
-        }
+        truckToKeys.set(tn, {
+          padded: raw.padStart(6, '0'),
+          unpadded: raw.replace(/^0+/, '') || raw,
+        });
       }
 
       const specialties: Record<string, string | null> = {};
       const enterpriseIdMap: Record<string, string | null> = {};
+      const dataSources: Record<string, 'live' | 'cache' | 'snapshot'> = {};
+      const activeStatuses: Record<string, 'active' | 'inactive' | null> = {};
       for (const tn of truckNumbers) {
         specialties[tn] = null;
         enterpriseIdMap[tn] = null;
+        dataSources[tn] = 'snapshot';
+        activeStatuses[tn] = null;
       }
 
-      // Map enterprise IDs to truck numbers
-      for (const tn of truckNumbers) {
-        const keys = truckToKeys.get(tn) || [];
-        for (const key of keys) {
-          const entId = truckLuToEntId.get(key);
-          if (entId) {
-            enterpriseIdMap[tn] = entId;
-            break;
+      // Helper: look up EMPLOYMENT_STATUS for a set of enterprise IDs in bulk
+      const bulkLookupActiveStatuses = async (entIds: string[]): Promise<Map<string, 'active' | 'inactive'>> => {
+        const result = new Map<string, 'active' | 'inactive'>();
+        if (entIds.length === 0) return result;
+        try {
+          const sql = `
+            SELECT UPPER(TRIM(ENTERPRISE_ID)) as ENTERPRISE_ID, EMPLOYMENT_STATUS
+            FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS
+            WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${entIds.map(() => 'UPPER(?)').join(',')})
+          `;
+          const rows = await executeQuery<{ ENTERPRISE_ID: string; EMPLOYMENT_STATUS: string | null }>(sql, entIds);
+          for (const row of rows) {
+            if (row.ENTERPRISE_ID) {
+              const status = (row.EMPLOYMENT_STATUS || '').toUpperCase();
+              result.set(row.ENTERPRISE_ID, status === 'A' || status === 'ACTIVE' ? 'active' : 'inactive');
+            }
           }
+        } catch {
+          // Best-effort; if lookup fails, statuses remain null
         }
-      }
+        return result;
+      };
 
-      if (enterpriseIds.size === 0) {
-        return res.json({ specialties, enterpriseIds: enterpriseIdMap });
-      }
-
-      const entIdArr = Array.from(enterpriseIds);
-      const entPlaceholders = entIdArr.map(() => '?').join(',');
-
-      const step2Sql = `
-        SELECT ENTERPRISE_ID, JOBTITLE, LAST_HIRE_DT
-        FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
-        WHERE UPPER(ENTERPRISE_ID) IN (${entIdArr.map(() => 'UPPER(?)').join(',')})
-        QUALIFY ROW_NUMBER() OVER (PARTITION BY ENTERPRISE_ID ORDER BY LAST_HIRE_DT DESC) = 1
-      `;
-      const step2Results = await executeQuery<{ ENTERPRISE_ID: string | number; JOBTITLE: string | null }>(step2Sql, entIdArr);
-
-      const entIdToJob = new Map<string, string>();
-      for (const row of step2Results) {
-        if (row.ENTERPRISE_ID && row.JOBTITLE) {
-          entIdToJob.set(String(row.ENTERPRISE_ID).trim().toUpperCase(), row.JOBTITLE);
-        }
-      }
-
-      // Find enterprise IDs that didn't match in the first roster view
-      const missingEntIds = entIdArr.filter(id => !entIdToJob.has(id.toUpperCase()));
-      if (missingEntIds.length > 0) {
-        const fallbackSql = `
+      // Helper: look up JOBTITLE for a set of enterprise IDs in bulk
+      const bulkLookupJobTitles = async (entIds: string[]): Promise<Map<string, string>> => {
+        const result = new Map<string, string>();
+        if (entIds.length === 0) return result;
+        const sql1 = `
           SELECT ENTERPRISE_ID, JOBTITLE, LAST_HIRE_DT
-          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_ACTIVE_ROSTER_FWE_VW_VIEW
-          WHERE UPPER(ENTERPRISE_ID) IN (${missingEntIds.map(() => 'UPPER(?)').join(',')})
+          FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_HIRE_ROSTER_VW
+          WHERE UPPER(ENTERPRISE_ID) IN (${entIds.map(() => 'UPPER(?)').join(',')})
           QUALIFY ROW_NUMBER() OVER (PARTITION BY ENTERPRISE_ID ORDER BY LAST_HIRE_DT DESC) = 1
         `;
-        const fallbackResults = await executeQuery<{ ENTERPRISE_ID: string | number; JOBTITLE: string | null }>(fallbackSql, missingEntIds);
-        for (const row of fallbackResults) {
+        const r1 = await executeQuery<{ ENTERPRISE_ID: string | number; JOBTITLE: string | null }>(sql1, entIds);
+        for (const row of r1) {
           if (row.ENTERPRISE_ID && row.JOBTITLE) {
-            entIdToJob.set(String(row.ENTERPRISE_ID).trim().toUpperCase(), row.JOBTITLE);
+            result.set(String(row.ENTERPRISE_ID).trim().toUpperCase(), row.JOBTITLE);
+          }
+        }
+        const missing = entIds.filter(id => !result.has(id.toUpperCase()));
+        if (missing.length > 0) {
+          const sql2 = `
+            SELECT ENTERPRISE_ID, JOBTITLE, LAST_HIRE_DT
+            FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_ACTIVE_ROSTER_FWE_VW_VIEW
+            WHERE UPPER(ENTERPRISE_ID) IN (${missing.map(() => 'UPPER(?)').join(',')})
+            QUALIFY ROW_NUMBER() OVER (PARTITION BY ENTERPRISE_ID ORDER BY LAST_HIRE_DT DESC) = 1
+          `;
+          const r2 = await executeQuery<{ ENTERPRISE_ID: string | number; JOBTITLE: string | null }>(sql2, missing);
+          for (const row of r2) {
+            if (row.ENTERPRISE_ID && row.JOBTITLE) {
+              result.set(String(row.ENTERPRISE_ID).trim().toUpperCase(), row.JOBTITLE);
+            }
+          }
+        }
+        return result;
+      };
+
+      // ── Tier 1 & 2: Check tpms_cached_assignments AND tpms_tech_profiles by truck number ──
+      // Both tables contain enterprise IDs that allow us to call the live TPMS API.
+      // tpms_tech_profiles is populated via incremental TPMS sync (watermark-based) and is
+      // an independent path to live data for trucks not in tpms_cached_assignments.
+      const resolvedTrucks = new Set<string>(); // original truck numbers that have been resolved
+      try {
+        const { db } = await import("./db");
+        const { tpmsCachedAssignments, tpmsTechProfiles } = await import("@shared/schema");
+        const { inArray, or } = await import("drizzle-orm");
+
+        const allTruckVariants: string[] = [];
+        for (const { padded, unpadded } of truckToKeys.values()) {
+          allTruckVariants.push(padded, unpadded);
+        }
+        const uniqueVariants = Array.from(new Set(allTruckVariants));
+
+        if (uniqueVariants.length > 0) {
+          // Query both cache tables in parallel
+          const [cacheRows, profileRows] = await Promise.all([
+            db.select({ enterpriseId: tpmsCachedAssignments.enterpriseId, truckNo: tpmsCachedAssignments.truckNo, lookupKey: tpmsCachedAssignments.lookupKey, lookupType: tpmsCachedAssignments.lookupType })
+              .from(tpmsCachedAssignments)
+              .where(
+                or(
+                  inArray(tpmsCachedAssignments.truckNo, uniqueVariants),
+                  inArray(tpmsCachedAssignments.lookupKey, uniqueVariants)
+                )
+              ),
+            db.select({ enterpriseId: tpmsTechProfiles.enterpriseId, truckNo: tpmsTechProfiles.truckNo })
+              .from(tpmsTechProfiles)
+              .where(inArray(tpmsTechProfiles.truckNo, uniqueVariants)),
+          ]);
+
+          // Build truck-variant → enterprise ID map — tpms_cached_assignments takes priority
+          const variantToEntId = new Map<string, string>();
+          // Load profiles first (lower priority)
+          for (const row of profileRows) {
+            if (!row.enterpriseId) continue;
+            const entId = row.enterpriseId.trim();
+            if (row.truckNo) variantToEntId.set(row.truckNo, entId);
+          }
+          // Then overwrite with cached_assignments (higher priority)
+          for (const row of cacheRows) {
+            if (!row.enterpriseId) continue;
+            const entId = row.enterpriseId.trim();
+            if (row.truckNo) variantToEntId.set(row.truckNo, entId);
+            if (row.lookupKey && (row.lookupType === 'truck_number')) variantToEntId.set(row.lookupKey, entId);
+          }
+
+          // Match each requested truck to a cache enterprise ID
+          const cacheEntIds = new Map<string, string>(); // original tn → enterpriseId
+          for (const tn of truckNumbers) {
+            const { padded, unpadded } = truckToKeys.get(tn)!;
+            const entId = variantToEntId.get(padded) ?? variantToEntId.get(unpadded);
+            if (entId) cacheEntIds.set(tn, entId);
+          }
+
+          if (cacheEntIds.size > 0) {
+            // Track which trucks had live TPMS disprove the cache mapping
+            const liveDisprovedTrucks = new Set<string>();
+
+            // Attempt live TPMS API lookup for each enterprise ID
+            try {
+              const { getTpmsApiService } = await import("./tpms-api-service");
+              const tpmsApi = getTpmsApiService();
+
+              for (const [tn, entId] of cacheEntIds.entries()) {
+                try {
+                  const { unpadded } = truckToKeys.get(tn)!;
+                  const profile = await tpmsApi.getTechById(entId);
+                  if (profile) {
+                    const liveTruckNo = (profile.truckNo || '').replace(/^0+/, '') || profile.truckNo;
+                    if (liveTruckNo && liveTruckNo === unpadded) {
+                      enterpriseIdMap[tn] = entId;
+                      dataSources[tn] = 'live';
+                      resolvedTrucks.add(tn);
+                    } else if (liveTruckNo) {
+                      // Live profile exists but is on a different truck — cache is stale/wrong
+                      liveDisprovedTrucks.add(tn);
+                    }
+                  }
+                } catch (_) {
+                  // Individual live lookup failed — will fall back to cache result
+                }
+              }
+            } catch (_) {
+              // Live TPMS service unavailable — fall back to cache for all
+            }
+
+            // Tier 2: cache result for trucks not resolved via live API AND not disproved by live
+            for (const [tn, entId] of cacheEntIds.entries()) {
+              if (!resolvedTrucks.has(tn) && !liveDisprovedTrucks.has(tn)) {
+                enterpriseIdMap[tn] = entId;
+                dataSources[tn] = 'cache';
+                resolvedTrucks.add(tn);
+              }
+              // If liveDisprovedTrucks.has(tn): skip to snapshot tier (leave unresolved)
+            }
+          }
+        }
+      } catch (_cacheErr: any) {
+        // Cache lookup failed — fall through to snapshot for all trucks
+      }
+
+      // ── Tier 3 (last resort): TPMS_EXTRACT_LAST_ASSIGNED for unresolved trucks ──
+      const unresolvedTrucks = truckNumbers.filter(tn => !resolvedTrucks.has(tn));
+      if (unresolvedTrucks.length > 0) {
+        const allSnapshotVariants: string[] = [];
+        for (const tn of unresolvedTrucks) {
+          const { padded, unpadded } = truckToKeys.get(tn)!;
+          allSnapshotVariants.push(padded, unpadded);
+        }
+        const uniqueSnapshotVariants = Array.from(new Set(allSnapshotVariants));
+        const snapshotPlaceholders = uniqueSnapshotVariants.map(() => '?').join(',');
+
+        const snapshotSql = `
+          SELECT TRUCK_LU, ENTERPRISE_ID, FILE_DATE
+          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
+          WHERE TRUCK_LU IN (${snapshotPlaceholders})
+          QUALIFY ROW_NUMBER() OVER (PARTITION BY TRUCK_LU ORDER BY FILE_DATE DESC) = 1
+        `;
+        const snapshotResults = await executeQuery<{ TRUCK_LU: string; ENTERPRISE_ID: string | number | null }>(snapshotSql, uniqueSnapshotVariants);
+
+        const snapshotVariantToEntId = new Map<string, string>();
+        for (const row of snapshotResults) {
+          if (row.TRUCK_LU && row.ENTERPRISE_ID) {
+            snapshotVariantToEntId.set(row.TRUCK_LU.trim(), String(row.ENTERPRISE_ID).trim());
+          }
+        }
+
+        for (const tn of unresolvedTrucks) {
+          const { padded, unpadded } = truckToKeys.get(tn)!;
+          const entId = snapshotVariantToEntId.get(padded) ?? snapshotVariantToEntId.get(unpadded);
+          if (entId) {
+            enterpriseIdMap[tn] = entId;
+            dataSources[tn] = 'snapshot';
+            resolvedTrucks.add(tn);
           }
         }
       }
+
+      // ── Bulk job title + active status lookup for all resolved trucks ──
+      const resolvedEntIds = Array.from(
+        new Set(Object.values(enterpriseIdMap).filter(Boolean) as string[])
+      );
+      // Only look up active status for cache/snapshot-sourced trucks (live TPMS doesn't need it)
+      const nonLiveEntIds = resolvedEntIds.filter(entId => {
+        return truckNumbers.some(tn => enterpriseIdMap[tn] === entId && dataSources[tn] !== 'live');
+      });
+      const [entIdToJob, entIdToStatus] = await Promise.all([
+        bulkLookupJobTitles(resolvedEntIds),
+        bulkLookupActiveStatuses(nonLiveEntIds),
+      ]);
 
       for (const tn of truckNumbers) {
-        const keys = truckToKeys.get(tn) || [];
-        for (const key of keys) {
-          const entId = truckLuToEntId.get(key);
-          if (entId) {
-            specialties[tn] = entIdToJob.get(entId.toUpperCase()) || null;
-            break;
+        const entId = enterpriseIdMap[tn];
+        if (entId) {
+          specialties[tn] = entIdToJob.get(entId.toUpperCase()) ?? null;
+          if (dataSources[tn] !== 'live') {
+            activeStatuses[tn] = entIdToStatus.get(entId.toUpperCase()) ?? null;
           }
         }
       }
 
-      res.json({ specialties, enterpriseIds: enterpriseIdMap });
+      res.json({ specialties, enterpriseIds: enterpriseIdMap, dataSources, techActiveStatuses: activeStatuses });
     } catch (error: any) {
       console.error("Error fetching batch tech specialties:", error.message);
-      res.json({ specialties: {}, enterpriseIds: {} });
+      res.json({ specialties: {}, enterpriseIds: {}, dataSources: {}, techActiveStatuses: {} });
     }
   });
 

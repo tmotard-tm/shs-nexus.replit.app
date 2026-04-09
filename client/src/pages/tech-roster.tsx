@@ -195,7 +195,7 @@ export default function TechRoster() {
       tech.employeeId?.toLowerCase().includes(searchLower) ||
       tech.techRacfid?.toLowerCase().includes(searchLower) ||
       tech.jobTitle?.toLowerCase().includes(searchLower) ||
-      tech.truckLu?.toLowerCase().includes(searchLower) ||
+      (tech.lastKnownTruckLu ?? tech.truckLu)?.toLowerCase().includes(searchLower) ||
       tech.cellPhone?.toLowerCase().includes(searchLower) ||
       tech.mainPhone?.toLowerCase().includes(searchLower) ||
       tech.homeCity?.toLowerCase().includes(searchLower);
@@ -250,7 +250,7 @@ export default function TechRoster() {
       tech.districtNo || '',
       tech.planningAreaName || '',
       tech.employmentStatus || '',
-      tech.truckLu || '',
+      (tech.lastKnownTruckLu ?? tech.truckLu) || '',
       tech.cellPhone || '',
       tech.mainPhone || '',
       tech.homeAddr1 || '',
@@ -492,10 +492,11 @@ export default function TechRoster() {
                                   {tech.employmentStatus === 'A' ? 'A' : tech.employmentStatus || '?'}
                                 </Badge>
                               </td>
-                              <td className="p-2 font-mono text-xs">{tech.truckLu || '-'}</td>
+                              <td className="p-2 font-mono text-xs">{(tech.lastKnownTruckLu ?? tech.truckLu) || '-'}</td>
                               <td className="p-2 text-xs">
-                                {tech.truckLu ? (() => {
-                                  const stripped = tech.truckLu.replace(/^0+/, '');
+                                {(tech.lastKnownTruckLu ?? tech.truckLu) ? (() => {
+                                  const truckVal = (tech.lastKnownTruckLu ?? tech.truckLu)!;
+                                  const stripped = truckVal.replace(/^0+/, '');
                                   const holmanTech = holmanVehicleSet.get(stripped);
                                   const inHolman = holmanVehicleSet.has(stripped);
                                   const techMatch = holmanTech && tech.techRacfid && holmanTech.trim().toUpperCase() === tech.techRacfid.trim().toUpperCase();
@@ -522,10 +523,10 @@ export default function TechRoster() {
                                         <TooltipContent>
                                           {inHolman ? (
                                             techMatch
-                                              ? `Vehicle ${tech.truckLu} found in Holman & tech assignment matches`
-                                              : `Vehicle ${tech.truckLu} found in Holman but assigned to ${holmanTech || 'no one'}`
+                                              ? `Vehicle ${truckVal} found in Holman & tech assignment matches`
+                                              : `Vehicle ${truckVal} found in Holman but assigned to ${holmanTech || 'no one'}`
                                           ) : (
-                                            `Vehicle ${tech.truckLu} not found in Holman fleet`
+                                            `Vehicle ${truckVal} not found in Holman fleet`
                                           )}
                                         </TooltipContent>
                                       </Tooltip>

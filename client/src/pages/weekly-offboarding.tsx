@@ -32,7 +32,10 @@ interface TermRosterEntry {
   address: string;
   contactPhone: string;
   owner: string;
-  truck: string;
+  lastKnownTruckLu: string;
+  lastKnownTruckFileDate?: string | null;
+  techActiveStatus?: 'active' | 'inactive' | null;
+  truck?: string;
   source?: string;
 }
 
@@ -102,7 +105,7 @@ export default function WeeklyOffboarding() {
 
   // Collect all truck numbers from termRoster for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
-    ...termRoster.map(entry => entry.truck).filter((truck): truck is string => !!truck),
+    ...termRoster.map(entry => entry.lastKnownTruckLu ?? entry.truck).filter((truck): truck is string => !!truck),
     ...Object.values(manualTruckOverrides),
   ]));
 
@@ -199,7 +202,7 @@ export default function WeeklyOffboarding() {
   });
 
   // Effective truck: use entry's truck or manually entered one
-  const effectiveTruck = selectedEntry?.truck || (manualTruck.length === 5 ? manualTruck : null);
+  const effectiveTruck = (selectedEntry?.lastKnownTruckLu ?? selectedEntry?.truck) || (manualTruck.length === 5 ? manualTruck : null);
 
   // Fetch nexus data when an entry with a truck is selected
   const { data: nexusData, isLoading: nexusDataLoading } = useQuery({
@@ -242,7 +245,7 @@ export default function WeeklyOffboarding() {
 
   // Reset manual truck when selecting a new entry (pre-fill from overrides)
   useEffect(() => {
-    if (selectedEntry && !selectedEntry.truck && selectedEntry.enterpriseId) {
+    if (selectedEntry && !(selectedEntry.lastKnownTruckLu ?? selectedEntry.truck) && selectedEntry.enterpriseId) {
       setManualTruck(manualTruckOverrides[selectedEntry.enterpriseId] || "");
     } else {
       setManualTruck("");
@@ -270,10 +273,10 @@ export default function WeeklyOffboarding() {
         title: "Saved",
         description: "Nexus tracking data has been saved.",
       });
-      if (!selectedEntry?.truck && manualTruck && selectedEntry?.enterpriseId) {
+      if (!(selectedEntry?.lastKnownTruckLu ?? selectedEntry?.truck) && manualTruck && selectedEntry?.enterpriseId) {
         saveTruckOverrideMutation.mutate({ enterpriseId: selectedEntry.enterpriseId, truckNumber: manualTruck });
       }
-      const truckToInvalidate = selectedEntry?.truck || manualTruck;
+      const truckToInvalidate = (selectedEntry?.lastKnownTruckLu ?? selectedEntry?.truck) || manualTruck;
       if (truckToInvalidate) {
         queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', truckToInvalidate] });
         queryClient.invalidateQueries({ 
@@ -334,7 +337,7 @@ export default function WeeklyOffboarding() {
     const matchesSearch = searchQuery === "" || 
       entry.emplName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.enterpriseId?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entry.truck?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (entry.lastKnownTruckLu ?? entry.truck)?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.planningArea?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.address?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       entry.contactPhone?.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -345,7 +348,7 @@ export default function WeeklyOffboarding() {
     const matchesOwner = ownerFilter === "all" || entry.owner === ownerFilter;
     
     // Manual status filter - check nexus data for the truck (including manual overrides)
-    const filterTruck = entry.truck || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
+    const filterTruck = (entry.lastKnownTruckLu ?? entry.truck) || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
     const nexusInfo = filterTruck ? nexusDataMap.get(filterTruck) : null;
     const matchesManualStatus = manualStatusFilter === "all" || 
       (manualStatusFilter === "__none__" ? !nexusInfo?.postOffboardedStatus : nexusInfo?.postOffboardedStatus === manualStatusFilter);
@@ -365,7 +368,7 @@ export default function WeeklyOffboarding() {
   const postOffboardingCounts = (() => {
     const counts: Record<string, number> = {};
     for (const entry of filteredRoster) {
-      const filterTruck = entry.truck || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
+      const filterTruck = (entry.lastKnownTruckLu ?? entry.truck) || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
       const nexusInfo = filterTruck ? nexusDataMap.get(filterTruck) : null;
       const status = nexusInfo?.postOffboardedStatus || '__none__';
       counts[status] = (counts[status] || 0) + 1;
@@ -713,7 +716,7 @@ export default function WeeklyOffboarding() {
                     </TableHeader>
                     <TableBody>
                       {filteredRoster.map((entry, index) => {
-                        const rowTruck = entry.truck || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
+                        const rowTruck = (entry.lastKnownTruckLu ?? entry.truck) || (entry.enterpriseId ? manualTruckOverrides[entry.enterpriseId] : null);
                         return (
                         <TableRow 
                           key={`${entry.enterpriseId}-${index}`} 
@@ -727,7 +730,7 @@ export default function WeeklyOffboarding() {
                             {rowTruck ? (
                               <span>
                                 {rowTruck}
-                                {!entry.truck && <span className="text-xs text-blue-600 ml-1">(manual)</span>}
+                                {!(entry.lastKnownTruckLu ?? entry.truck) && <span className="text-xs text-blue-600 ml-1">(manual)</span>}
                               </span>
                             ) : '-'}
                           </TableCell>
@@ -1028,7 +1031,7 @@ export default function WeeklyOffboarding() {
                   {selectedEntry.emplName}
                 </SheetTitle>
                 <SheetDescription>
-                  {selectedEntry.enterpriseId?.toUpperCase()} • {selectedEntry.truck || 'No Truck'}
+                  {selectedEntry.enterpriseId?.toUpperCase()} • {(selectedEntry.lastKnownTruckLu ?? selectedEntry.truck) || 'No Truck'}
                 </SheetDescription>
               </SheetHeader>
 
@@ -1067,12 +1070,12 @@ export default function WeeklyOffboarding() {
                 </div>
               </div>
 
-              {(selectedEntry.truck || true) && (
+              {((selectedEntry.lastKnownTruckLu ?? selectedEntry.truck) || true) && (
                 <>
                   <Separator />
 
                   {/* Manual truck entry for null trucks */}
-                  {!selectedEntry.truck && (
+                  {!(selectedEntry.lastKnownTruckLu ?? selectedEntry.truck) && (
                     <div className="space-y-2">
                       <Label className="text-xs text-muted-foreground">Assign Truck Number</Label>
                       <Input
@@ -1097,7 +1100,7 @@ export default function WeeklyOffboarding() {
                   <div className="space-y-4">
                     <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
                       <Truck className="h-4 w-4" />
-                      Nexus Tracking {!selectedEntry.truck && effectiveTruck && <span className="text-xs">— Truck {effectiveTruck}</span>}
+                      Nexus Tracking {!(selectedEntry.lastKnownTruckLu ?? selectedEntry.truck) && effectiveTruck && <span className="text-xs">— Truck {effectiveTruck}</span>}
                     </h4>
                     
                     {nexusDataLoading ? (

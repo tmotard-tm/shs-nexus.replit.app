@@ -3773,8 +3773,9 @@ export class DatabaseStorage implements IStorage {
           mainPhone: sql`excluded.main_phone`,
           cellPhone: sql`excluded.cell_phone`,
           homePhone: sql`excluded.home_phone`,
-          // TPMS truck assignment (join by ENTERPRISE_ID)
-          truckLu: sql`excluded.truck_lu`,
+          // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED — informational-only, may be stale
+          lastKnownTruckLu: sql`excluded.last_known_truck_lu`,
+          lastKnownTruckFileDate: sql`excluded.last_known_truck_file_date`,
           syncedAt: new Date(),
           updatedAt: new Date(),
         },

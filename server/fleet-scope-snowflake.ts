@@ -15,9 +15,9 @@ export async function connectToSnowflake() {
   return service;
 }
 
-export async function executeQuery<T = any>(sql: string, _binds?: any[], _retryCount: number = 0): Promise<T[]> {
+export async function executeQuery<T = any>(sql: string, binds?: any[], _retryCount: number = 0): Promise<T[]> {
   const service = getSnowflakeService();
-  return service.executeQuery(sql) as Promise<T[]>;
+  return service.executeQuery(sql, binds) as Promise<T[]>;
 }
 
 export async function testConnection(): Promise<boolean> {

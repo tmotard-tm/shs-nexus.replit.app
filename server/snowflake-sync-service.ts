@@ -32,7 +32,9 @@ interface SnowflakeAllTechRow {
   SNSTV_CELL_PHONE?: string;
   SNSTV_HOME_PHONE?: string;
   // TPMS assignment from TPMS_EXTRACT_LAST_ASSIGNED (join by ENTERPRISE_ID)
-  TRUCK_LU?: string;
+  // Informational-only: last snapshot in which this tech appeared — may be stale
+  LAST_KNOWN_TRUCK_LU?: string;
+  LAST_KNOWN_TRUCK_FILE_DATE?: string;
 }
 
 interface SkippedEmployee {
@@ -110,7 +112,9 @@ interface SnowflakeTermRosterRow {
   SNSTV_MAIN_PHONE?: string;
   SNSTV_CELL_PHONE?: string;
   SNSTV_HOME_PHONE?: string;
+  // Informational-only from TPMS_EXTRACT_LAST_ASSIGNED — last snapshot, not current assignment
   TRUCK_LU?: string;
+  TRUCK_FILE_DATE?: string;
 }
 
 interface SnowflakeSeparationRow {
@@ -144,7 +148,9 @@ interface UnifiedTermEmployee {
   planningAreaName: string | null;
   jobTitle: string | null;
   districtNo: string | null;
-  truckLu: string | null;
+  // Informational-only from TPMS_EXTRACT_LAST_ASSIGNED — may be stale
+  lastKnownTruckLu: string | null;
+  lastKnownTruckFileDate: string | null;
   cellPhone: string | null;
   mainPhone: string | null;
   homePhone: string | null;
@@ -230,7 +236,9 @@ export class SnowflakeSyncService {
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
           c.SNSTV_HOME_PHONE,
-          tpms.TRUCK_LU
+          -- Informational-only: last snapshot truck, not current assignment
+          tpms.TRUCK_LU,
+          tpms.FILE_DATE AS TRUCK_FILE_DATE
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
@@ -275,7 +283,11 @@ export class SnowflakeSyncService {
           planningAreaName: row.PLANNING_AREA || null,
           jobTitle: row.TECH_SPECIALTY || null,
           districtNo: null,
-          truckLu: row.TRUCK_LU || null,
+          // Informational-only: last snapshot truck from TPMS_EXTRACT_LAST_ASSIGNED, not current assignment
+          lastKnownTruckLu: row.TRUCK_LU || null,
+          lastKnownTruckFileDate: row.TRUCK_FILE_DATE
+            ? new Date(row.TRUCK_FILE_DATE).toISOString().slice(0, 10)
+            : null,
           cellPhone: row.SNSTV_CELL_PHONE || null,
           mainPhone: row.SNSTV_MAIN_PHONE || null,
           homePhone: row.SNSTV_HOME_PHONE || null,
@@ -334,7 +346,10 @@ export class SnowflakeSyncService {
           planningAreaName: row.PLANNING_AREA || null,
           jobTitle: null,
           districtNo: null,
-          truckLu: row.TRUCK_NUMBER || null,
+          // For separation rows, TRUCK_NUMBER comes from SEPARATION_FLEET_DETAILS (not TPMS_EXTRACT_LAST_ASSIGNED)
+          // Still treat as informational-only; no FILE_DATE available from this source
+          lastKnownTruckLu: row.TRUCK_NUMBER || null,
+          lastKnownTruckFileDate: null,
           cellPhone: row.SNSTV_CELL_PHONE || row.CONTACT_NUMBER || null,
           mainPhone: row.SNSTV_MAIN_PHONE || null,
           homePhone: row.SNSTV_HOME_PHONE || null,
@@ -737,8 +752,9 @@ export class SnowflakeSyncService {
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
           c.SNSTV_HOME_PHONE,
-          -- TPMS truck assignment (join by ENTERPRISE_ID)
-          tpms.TRUCK_LU
+          -- TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED — informational-only, may be stale
+          tpms.TRUCK_LU AS LAST_KNOWN_TRUCK_LU,
+          tpms.FILE_DATE AS LAST_KNOWN_TRUCK_FILE_DATE
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPL_ID = c.EMPLID
@@ -788,8 +804,11 @@ export class SnowflakeSyncService {
             mainPhone: row.SNSTV_MAIN_PHONE || null,
             cellPhone: row.SNSTV_CELL_PHONE || null,
             homePhone: row.SNSTV_HOME_PHONE || null,
-            // TPMS truck assignment (join by ENTERPRISE_ID)
-            truckLu: row.TRUCK_LU || null,
+            // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED — informational-only, may be stale
+            lastKnownTruckLu: row.LAST_KNOWN_TRUCK_LU || null,
+            lastKnownTruckFileDate: row.LAST_KNOWN_TRUCK_FILE_DATE
+              ? new Date(row.LAST_KNOWN_TRUCK_FILE_DATE).toISOString().slice(0, 10)
+              : null,
           }));
 
           const upsertedCount = await storage.bulkUpsertAllTechs(techDataBatch);
@@ -2579,7 +2598,8 @@ export class SnowflakeSyncService {
               homeCity: rosterTech.homeCity || null,
               homeState: rosterTech.homeState || null,
               homePostal: rosterTech.homePostal || null,
-              truckLu: rosterTech.truckLu || null,
+              lastKnownTruckLu: rosterTech.lastKnownTruckLu || null,
+              lastKnownTruckFileDate: rosterTech.lastKnownTruckFileDate || null,
               enrichedAt: new Date().toISOString(),
             };
 
