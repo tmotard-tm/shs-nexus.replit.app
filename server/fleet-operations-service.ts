@@ -1,7 +1,7 @@
 import { storage } from "./storage";
 import { db } from "./db";
 import { eq, and, lte, or, sql } from "drizzle-orm";
-import { holmanVehiclesCache, amsVehiclesCache, operationEvents } from "@shared/schema";
+import { holmanVehiclesCache, amsVehiclesCache, operationEvents, tpmsCachedAssignments } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 
@@ -188,6 +188,10 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         return { status: "failed", message: "TPMS API unreachable during verification — please retry" };
       }
       if (!current.truckNo || current.truckNo.trim() === "") {
+        // Evict the stale cache record so this phantom mismatch doesn't reappear
+        await db.delete(tpmsCachedAssignments)
+          .where(eq(tpmsCachedAssignments.enterpriseId, tpmsLdap))
+          .catch((e: unknown) => console.warn(`[FleetOps-TPMS] Cache evict failed for ${tpmsLdap}:`, e));
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
       // Guard: if the cached tech is live-assigned to a DIFFERENT truck, surface as a conflict
@@ -217,6 +221,10 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         const msg: string = err?.message ?? "";
         if (msg.includes("TPMS rejected update") && msg.replace("TPMS rejected update:", "").trim() === "") {
           console.log(`[FleetOps-TPMS] TPMS rejected unassign with empty message for "${tpmsLdap}" on truck "${params.truckNumber}" — treating as already clear`);
+          // Evict the stale cache record so this phantom mismatch doesn't reappear
+          await db.delete(tpmsCachedAssignments)
+            .where(eq(tpmsCachedAssignments.enterpriseId, tpmsLdap))
+            .catch((e: unknown) => console.warn(`[FleetOps-TPMS] Cache evict failed for ${tpmsLdap}:`, e));
           return { status: "skipped", message: "Already unassigned in TPMS (confirmed via rejection)" };
         }
         throw err;
