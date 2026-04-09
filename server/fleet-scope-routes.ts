@@ -2602,7 +2602,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(503).json({ success: false, message: "AMS service unavailable — try again later" });
       }
 
-      const rawArray: unknown[] = Array.isArray(rawComments) ? rawComments : [];
+      // AMS may return a plain array OR an object { vin, comments: [...] }
+      let rawArray: unknown[];
+      if (Array.isArray(rawComments)) {
+        rawArray = rawComments;
+      } else if (rawComments && typeof rawComments === 'object' && Array.isArray((rawComments as any).comments)) {
+        rawArray = (rawComments as any).comments;
+      } else {
+        rawArray = [];
+      }
 
       const comments = rawArray
         .map((c: any) => ({
