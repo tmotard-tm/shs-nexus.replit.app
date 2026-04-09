@@ -126,10 +126,10 @@ function getPatternInfo(holman: string | null, tpms: string | null, ams: string 
 
   if (t !== "") {
     // TPMS Assigned
-    if (h === t)            return { key: "ta_th_match", label: "TPMS Assigned – TPMS & Holman match", short: "T=H · A≠" };
-    if (h !== "" && h === a) return { key: "ta_ha_match", label: "TPMS Assigned – Holman & AMS match",  short: "H=A · T≠" };
-    if (t === a)            return { key: "ta_ta_match", label: "TPMS Assigned – TPMS & AMS match",    short: "T=A · H≠" };
-    return                         { key: "ta_all_diff", label: "TPMS Assigned – All mismatch",         short: "T+ all≠" };
+    if (h === t)   return { key: "ta_th_match", label: "TPMS Assigned – TPMS & Holman match", short: "T=H · A≠" };
+    if (t === a)   return { key: "ta_ta_match", label: "TPMS Assigned – TPMS & AMS match",    short: "T=A · H≠" };
+    if (h === a)   return { key: "ta_ha_match", label: "TPMS Assigned – Holman & AMS match",  short: "H=A · T≠" };
+    return                { key: "ta_all_diff", label: "TPMS Assigned – All mismatch",         short: "T+ all≠" };
   } else {
     // TPMS Unassigned
     if (h === "")  return { key: "tu_th_match", label: "TPMS Unassigned – TPMS & Holman match", short: "T=H=∅ · A+" };
