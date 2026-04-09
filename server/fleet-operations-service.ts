@@ -23,7 +23,10 @@ interface AssignTechParams {
   techName: string;
   requestedBy: string;
   notes?: string;
+  /** Holman status code to write: A=Assigned, D=Dummy, I=In Repair, F=Temp */
   assignmentType?: 'assigned' | 'temp' | 'dummy' | 'in-repair';
+  /** Explicit AMS truck status ID override (1=Assigned, 6=In Repair, 10=Unknown) */
+  amsStatusId?: number;
   repairData?: RepairData;
 }
 
@@ -231,10 +234,16 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
     const holmanVehicleNum = cacheRow?.holmanVehicleNumber || toHolmanRef(params.truckNumber) || params.truckNumber;
 
     if (action === "assign") {
+      // Map assignmentType to Holman status code: A=Assigned, D=Dummy, I=In Repair, F=Temp
+      const holmanStatusCode: string =
+        params.assignmentType === 'temp'     ? 'F' :
+        params.assignmentType === 'dummy'    ? 'D' :
+        params.assignmentType === 'in-repair'? 'I' :
+        'A';
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
         holmanVehicleNum,
         normalizeEnterpriseId(params.ldapId),
-        params.assignmentType === 'temp' ? 'F' : undefined
+        holmanStatusCode === 'A' ? undefined : holmanStatusCode
       );
       if (result.success) {
         try {
@@ -243,7 +252,7 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
               holmanTechAssigned: params.ldapId,
               holmanTechName: params.techName || params.ldapId,
               lastLocalUpdateAt: new Date(),
-              holmanAssignedStatusCd: params.assignmentType === 'temp' ? 'F' : 'A',
+              holmanAssignedStatusCd: holmanStatusCode,
             })
             .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
         } catch {}
@@ -337,23 +346,27 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
     }
 
     try {
+      // AMS status 10 = Unknown (Dummy Holman status) — skip tech assignment
+      if (params.amsStatusId === 10) {
+        return { status: "skipped", message: "AMS status set to Unknown (10) — tech assignment not written to AMS" };
+      }
       await ams.updateTechAssignment(vin, {
         techEnterpriseId: params.ldapId,
         updateUser,
       });
-      // If repair data is present, post repair update
-      if (params.repairData) {
+      // If repair data is present OR assignmentType is 'in-repair', post repair update (AMS Status 6)
+      if (params.repairData || params.assignmentType === 'in-repair') {
         try {
           await ams.updateRepairStatus(vin, {
             inRepair: true,
-            repairStatus: params.repairData.repairStatus,
-            repairReason: params.repairData.repairReason,
-            vendor: params.repairData.vendor,
-            etaDate: params.repairData.etaDate,
-            estimateCost: params.repairData.estimateCost,
-            rentalCar: params.repairData.rentalCar,
-            rentalStartDate: params.repairData.rentalStartDate,
-            rentalEndDate: params.repairData.rentalEndDate,
+            repairStatus: params.repairData?.repairStatus,
+            repairReason: params.repairData?.repairReason,
+            vendor: params.repairData?.vendor,
+            etaDate: params.repairData?.etaDate,
+            estimateCost: params.repairData?.estimateCost,
+            rentalCar: params.repairData?.rentalCar,
+            rentalStartDate: params.repairData?.rentalStartDate,
+            rentalEndDate: params.repairData?.rentalEndDate,
             updateUser,
           });
           console.log(`[FleetOps-AMS] Repair status updated for ${vin}`);

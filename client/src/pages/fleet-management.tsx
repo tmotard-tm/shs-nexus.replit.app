@@ -474,7 +474,12 @@ export default function FleetManagement() {
   const [assignTechName, setAssignTechName] = useState("");
   const [assignDistrict, setAssignDistrict] = useState("");
   const [assignNotes, setAssignNotes] = useState("");
-  const [assignmentType, setAssignmentType] = useState<'assigned' | 'temp'>('assigned');
+  const [assignmentType, setAssignmentType] = useState<'assigned' | 'temp' | 'dummy' | 'in-repair'>('assigned');
+  const [assignAmsStatusId, setAssignAmsStatusId] = useState<number>(1);
+  const [assignRepairData, setAssignRepairData] = useState<{
+    repairStatus?: number; repairReason?: number; vendor?: string;
+    etaDate?: string; estimateCost?: number;
+  }>({});
 
   // Assign form — tech lookup / typeahead
   const [assignLookupStatus, setAssignLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
@@ -491,6 +496,8 @@ export default function FleetManagement() {
       setAssignDistrict("");
       setAssignNotes("");
       setAssignmentType('assigned');
+      setAssignAmsStatusId(1);
+      setAssignRepairData({});
       setAssignLookupStatus("idle");
       setTechNameSuggestions([]);
       setShowNameDropdown(false);
@@ -3118,36 +3125,120 @@ export default function FleetManagement() {
                 );
               })()}
 
-              {/* Assignment type */}
-              <div>
-                <Label className="text-xs mb-1 block">Assignment Type</Label>
-                <div className="flex gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={assignmentType === 'assigned' ? 'default' : 'outline'}
-                    onClick={() => setAssignmentType('assigned')}
+              {/* Holman Status Dropdown */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs mb-1 block">Holman Assigned Status</Label>
+                  <Select
+                    value={assignmentType}
+                    onValueChange={(v: 'assigned' | 'temp' | 'dummy' | 'in-repair') => {
+                      setAssignmentType(v);
+                      // Reset AMS status to the natural default for this Holman type
+                      setAssignAmsStatusId(v === 'in-repair' ? 6 : 1);
+                      setAssignRepairData({});
+                    }}
                   >
-                    Permanent (A)
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={assignmentType === 'temp' ? 'default' : 'outline'}
-                    onClick={() => setAssignmentType('temp')}
-                  >
-                    Temp Assignment (F)
-                  </Button>
+                    <SelectTrigger className="mt-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="assigned">Assigned — A</SelectItem>
+                      <SelectItem value="dummy">Dummy — D</SelectItem>
+                      <SelectItem value="in-repair">In Repair — I</SelectItem>
+                      <SelectItem value="temp">Temp Assignment — F</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* AMS Status — fixed for most types, selectable for Dummy */}
+                <div>
+                  <Label className="text-xs mb-1 block">AMS Truck Status</Label>
+                  {assignmentType === 'dummy' ? (
+                    <Select
+                      value={String(assignAmsStatusId)}
+                      onValueChange={v => setAssignAmsStatusId(Number(v))}
+                    >
+                      <SelectTrigger className="mt-1">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="1">1 — Assigned to Tech</SelectItem>
+                        <SelectItem value="10">10 — Unknown</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <div className="mt-1 flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground">
+                      {assignmentType === 'in-repair'
+                        ? '6 — In Repair'
+                        : '1 — Assigned to Tech'}
+                    </div>
+                  )}
                 </div>
               </div>
+
+              {/* Repair details — shown when In Repair is selected */}
+              {assignmentType === 'in-repair' && (
+                <div className="border rounded-md p-3 space-y-3 bg-amber-50/40 dark:bg-amber-900/10">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">AMS Repair Details</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <Label className="text-xs">Repair Status ID</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 6"
+                        className="mt-1"
+                        value={assignRepairData.repairStatus ?? ""}
+                        onChange={e => setAssignRepairData(d => ({ ...d, repairStatus: e.target.value ? parseInt(e.target.value) : undefined }))}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Repair Reason ID</Label>
+                      <Input
+                        type="number"
+                        placeholder="e.g. 1"
+                        className="mt-1"
+                        value={assignRepairData.repairReason ?? ""}
+                        onChange={e => setAssignRepairData(d => ({ ...d, repairReason: e.target.value ? parseInt(e.target.value) : undefined }))}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Vendor</Label>
+                      <Input
+                        placeholder="Vendor name"
+                        className="mt-1"
+                        value={assignRepairData.vendor ?? ""}
+                        onChange={e => setAssignRepairData(d => ({ ...d, vendor: e.target.value || undefined }))}
+                      />
+                    </div>
+                    <div>
+                      <Label className="text-xs">ETA Date</Label>
+                      <Input
+                        type="date"
+                        className="mt-1"
+                        value={assignRepairData.etaDate ?? ""}
+                        onChange={e => setAssignRepairData(d => ({ ...d, etaDate: e.target.value || undefined }))}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
 
               {/* After-assignment preview */}
               <div className="rounded-md border px-3 py-2 space-y-1">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">After assignment</p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
-                  <span>Holman → <strong>{assignmentType === 'temp' ? 'F (Temp)' : 'A (Assigned)'}</strong></span>
+                  <span>Holman → <strong>
+                    {assignmentType === 'temp'      ? 'F — Temp Assignment' :
+                     assignmentType === 'dummy'     ? 'D — Dummy' :
+                     assignmentType === 'in-repair' ? 'I — In Repair' :
+                                                      'A — Assigned'}
+                  </strong></span>
                   <span>TPMS → <strong>Assigned</strong></span>
-                  <span>AMS → <strong>Assigned to Tech (Status 1)</strong></span>
+                  <span>AMS → <strong>
+                    {assignmentType === 'in-repair'             ? 'Status 6 — In Repair' :
+                     assignmentType === 'dummy' && assignAmsStatusId === 10 ? 'Status 10 — Unknown (skipped)' :
+                                                                  'Status 1 — Assigned to Tech'}
+                  </strong></span>
                 </div>
               </div>
 
@@ -3210,7 +3301,16 @@ export default function FleetManagement() {
                   })()) || assignVehicleStatus?.isLocked}
                   onClick={() => fleetOpMutation.mutate({
                     endpoint: "/api/fleet-ops/assign",
-                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: assignLdap, districtNo: assignDistrict, techName: assignTechName, notes: assignNotes, assignmentType },
+                    body: {
+                      truckNumber: selectedVehicle?.vehicleNumber,
+                      ldapId: assignLdap,
+                      districtNo: assignDistrict,
+                      techName: assignTechName,
+                      notes: assignNotes,
+                      assignmentType,
+                      amsStatusId: assignAmsStatusId,
+                      repairData: assignmentType === 'in-repair' ? assignRepairData : undefined,
+                    },
                   })}
                 >
                   {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}

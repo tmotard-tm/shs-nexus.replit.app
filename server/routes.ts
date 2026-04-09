@@ -15230,12 +15230,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/fleet-ops/assign", requireAuth, async (req: any, res) => {
     try {
-      const { truckNumber, ldapId, districtNo, techName, notes, assignmentType, repairData } = req.body;
+      const { truckNumber, ldapId, districtNo, techName, notes, assignmentType, amsStatusId, repairData } = req.body;
       if (!truckNumber || !ldapId) {
         return res.status(400).json({ message: "truckNumber and ldapId are required" });
       }
       const requestedBy = req.user?.username || "unknown";
-      const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes, assignmentType, repairData });
+      const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes, assignmentType, amsStatusId: amsStatusId ? Number(amsStatusId) : undefined, repairData });
       if ('locked' in result && result.locked) {
         return res.status(409).json({ message: result.message });
       }
