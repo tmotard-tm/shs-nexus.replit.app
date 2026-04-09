@@ -3142,10 +3142,10 @@ export default function FleetManagement() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="assigned">Assigned — A</SelectItem>
-                      <SelectItem value="dummy">Dummy — D</SelectItem>
-                      <SelectItem value="in-repair">In Repair — I</SelectItem>
-                      <SelectItem value="temp">Temp Assignment — F</SelectItem>
+                      <SelectItem value="assigned">Assigned</SelectItem>
+                      <SelectItem value="dummy">Dummy</SelectItem>
+                      <SelectItem value="in-repair">In Repair</SelectItem>
+                      <SelectItem value="temp">Temp Assignment</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -3162,15 +3162,13 @@ export default function FleetManagement() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="1">1 — Assigned to Tech</SelectItem>
-                        <SelectItem value="10">10 — Unknown</SelectItem>
+                        <SelectItem value="1">Assigned to Tech</SelectItem>
+                        <SelectItem value="10">Unknown</SelectItem>
                       </SelectContent>
                     </Select>
                   ) : (
                     <div className="mt-1 flex h-9 items-center rounded-md border bg-muted/40 px-3 text-sm text-muted-foreground">
-                      {assignmentType === 'in-repair'
-                        ? '6 — In Repair'
-                        : '1 — Assigned to Tech'}
+                      {assignmentType === 'in-repair' ? 'In Repair' : 'Assigned to Tech'}
                     </div>
                   )}
                 </div>
@@ -3228,16 +3226,16 @@ export default function FleetManagement() {
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">After assignment</p>
                 <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
                   <span>Holman → <strong>
-                    {assignmentType === 'temp'      ? 'F — Temp Assignment' :
-                     assignmentType === 'dummy'     ? 'D — Dummy' :
-                     assignmentType === 'in-repair' ? 'I — In Repair' :
-                                                      'A — Assigned'}
+                    {assignmentType === 'temp'      ? 'Temp Assignment' :
+                     assignmentType === 'dummy'     ? 'Dummy' :
+                     assignmentType === 'in-repair' ? 'In Repair' :
+                                                      'Assigned'}
                   </strong></span>
                   <span>TPMS → <strong>Assigned</strong></span>
                   <span>AMS → <strong>
-                    {assignmentType === 'in-repair'             ? 'Status 6 — In Repair' :
-                     assignmentType === 'dummy' && assignAmsStatusId === 10 ? 'Status 10 — Unknown (skipped)' :
-                                                                  'Status 1 — Assigned to Tech'}
+                    {assignmentType === 'in-repair'                          ? 'In Repair' :
+                     assignmentType === 'dummy' && assignAmsStatusId === 10  ? 'Unknown (skipped)' :
+                                                                               'Assigned to Tech'}
                   </strong></span>
                 </div>
               </div>
