@@ -474,6 +474,7 @@ export default function FleetManagement() {
   const [assignTechName, setAssignTechName] = useState("");
   const [assignDistrict, setAssignDistrict] = useState("");
   const [assignNotes, setAssignNotes] = useState("");
+  const [assignmentType, setAssignmentType] = useState<'assigned' | 'temp'>('assigned');
 
   // Assign form — tech lookup / typeahead
   const [assignLookupStatus, setAssignLookupStatus] = useState<"idle" | "loading" | "found" | "notfound">("idle");
@@ -489,6 +490,7 @@ export default function FleetManagement() {
       setAssignTechName("");
       setAssignDistrict("");
       setAssignNotes("");
+      setAssignmentType('assigned');
       setAssignLookupStatus("idle");
       setTechNameSuggestions([]);
       setShowNameDropdown(false);
@@ -1038,6 +1040,24 @@ export default function FleetManagement() {
       const json = await res.json();
       return json.data || json || [];
     },
+  });
+
+  // Vehicle status pre-check for the assign modal
+  const assignTruckNumber = activeModal === "assign" ? selectedVehicle?.vehicleNumber : null;
+  const { data: assignVehicleStatus, isLoading: isLoadingAssignVehicleStatus } = useQuery<{
+    holmanAssignedStatusCd: string | null;
+    holmanTechAssigned: string | null;
+    holmanTechName: string | null;
+    isLocked: boolean;
+  }>({
+    queryKey: ["/api/fleet-ops/vehicle-status", assignTruckNumber],
+    enabled: !!assignTruckNumber,
+    queryFn: async () => {
+      const res = await fetch(`/api/fleet-ops/vehicle-status/${encodeURIComponent(assignTruckNumber!)}`);
+      if (!res.ok) return { holmanAssignedStatusCd: null, holmanTechAssigned: null, holmanTechName: null, isLocked: false };
+      return res.json();
+    },
+    staleTime: 30_000,
   });
 
   const fleetOpMutation = useMutation({
@@ -3054,6 +3074,83 @@ export default function FleetManagement() {
             </div>
           ) : (
             <div className="space-y-3">
+              {/* Vehicle status pre-check */}
+              {isLoadingAssignVehicleStatus && <Skeleton className="h-10 w-full" />}
+              {assignVehicleStatus && (() => {
+                const sc = assignVehicleStatus.holmanAssignedStatusCd;
+                const BLOCKED: Record<string, string> = { L: 'For Sale', B: 'At Auction', W: 'Wrecked/Stolen', T: 'Terminated' };
+                const BORDERLINE: Record<string, string> = { H: 'At Upfitter', I: 'In Repair', O: 'Storage', Q: 'Order Pending' };
+                const isBlocked = sc ? !!BLOCKED[sc] : false;
+                const isBorderline = sc ? !!BORDERLINE[sc] : false;
+                return (
+                  <>
+                    {sc && (
+                      <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm border ${
+                        isBlocked ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300' :
+                        isBorderline ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300' :
+                        'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-700 dark:text-green-300'
+                      }`}>
+                        <span className="font-medium">
+                          Holman Status: {sc}
+                          {BLOCKED[sc] && ` — ${BLOCKED[sc]}`}
+                          {BORDERLINE[sc] && ` — ${BORDERLINE[sc]}`}
+                        </span>
+                        {isBlocked && <span className="ml-auto text-xs font-semibold">BLOCKED</span>}
+                        {isBorderline && <span className="ml-auto text-xs font-semibold">WARNING</span>}
+                      </div>
+                    )}
+                    {isBlocked && (
+                      <div className="rounded-md bg-red-50 border border-red-200 px-3 py-2 text-sm text-red-800 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300">
+                        This vehicle cannot be assigned — Holman status is <strong>{BLOCKED[sc!]}</strong>. Resolve the vehicle status in fleet operations first.
+                      </div>
+                    )}
+                    {assignVehicleStatus.isLocked && (
+                      <div className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-300">
+                        ⚠ This vehicle is currently being updated by another operation. Please wait a moment and try again.
+                      </div>
+                    )}
+                    {assignVehicleStatus.holmanTechAssigned && (
+                      <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-300">
+                        Currently assigned: <strong>{assignVehicleStatus.holmanTechName || assignVehicleStatus.holmanTechAssigned}</strong> ({assignVehicleStatus.holmanTechAssigned}). Assigning a new tech will displace this one.
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Assignment type */}
+              <div>
+                <Label className="text-xs mb-1 block">Assignment Type</Label>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={assignmentType === 'assigned' ? 'default' : 'outline'}
+                    onClick={() => setAssignmentType('assigned')}
+                  >
+                    Permanent (A)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={assignmentType === 'temp' ? 'default' : 'outline'}
+                    onClick={() => setAssignmentType('temp')}
+                  >
+                    Temp Assignment (F)
+                  </Button>
+                </div>
+              </div>
+
+              {/* After-assignment preview */}
+              <div className="rounded-md border px-3 py-2 space-y-1">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">After assignment</p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                  <span>Holman → <strong>{assignmentType === 'temp' ? 'F (Temp)' : 'A (Assigned)'}</strong></span>
+                  <span>TPMS → <strong>Assigned</strong></span>
+                  <span>AMS → <strong>Assigned to Tech (Status 1)</strong></span>
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Enterprise / LDAP ID *</Label>
@@ -3107,10 +3204,13 @@ export default function FleetManagement() {
               <DialogFooter>
                 <Button variant="outline" onClick={() => setActiveModal(null)}>Cancel</Button>
                 <Button
-                  disabled={!assignLdap.trim() || fleetOpMutation.isPending}
+                  disabled={!assignLdap.trim() || fleetOpMutation.isPending || !!(assignVehicleStatus && (() => {
+                    const sc = assignVehicleStatus.holmanAssignedStatusCd;
+                    return sc && ['L','B','W','T'].includes(sc);
+                  })()) || assignVehicleStatus?.isLocked}
                   onClick={() => fleetOpMutation.mutate({
                     endpoint: "/api/fleet-ops/assign",
-                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: assignLdap, districtNo: assignDistrict, techName: assignTechName, notes: assignNotes },
+                    body: { truckNumber: selectedVehicle?.vehicleNumber, ldapId: assignLdap, districtNo: assignDistrict, techName: assignTechName, notes: assignNotes, assignmentType },
                   })}
                 >
                   {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
