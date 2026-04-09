@@ -52,7 +52,122 @@ export interface AmsVehicle {
   LastUpdate: string | null;
   LastUpdateUser: string | null;
   DetailID: number | null;
+  TechType?: string | null;
+  VehicleType?: string | null;
   [key: string]: any;
+}
+
+export interface AmsVehicleTypeData {
+  techType?: string;
+  vehicleType?: string;
+}
+
+// AMS → Agent taxonomy: techType mapping
+export function mapTechType(amsValue: string | null | undefined): string | undefined {
+  if (!amsValue) return undefined;
+  const v = amsValue.trim();
+  switch (v) {
+    case 'General': return 'General Home Appliance';
+    case 'General Home Appliance': return 'General Home Appliance';
+    case 'Ref+General': return 'Ref + General Home Appliance';
+    case 'Ref + General': return 'Ref + General Home Appliance';
+    case 'HVAC': return 'HVAC';
+    default: return undefined;
+  }
+}
+
+// AMS → Agent taxonomy: vehicleType mapping
+export function mapVehicleType(amsValue: string | null | undefined): string | undefined {
+  if (!amsValue) return undefined;
+  const v = amsValue.trim();
+  switch (v) {
+    case 'No racks': return 'No racks';
+    case 'Ref with racks': return 'Ref (with racks)';
+    case 'Ref (with racks)': return 'Ref (with racks)';
+    case 'HVAC van': return 'HVAC van';
+    case 'HVAC Van': return 'HVAC van';
+    default: return undefined;
+  }
+}
+
+// Module-level cache: truckNumber → { data, cachedAt }
+const AMS_TYPE_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+const amsTypeCache = new Map<string, { data: AmsVehicleTypeData; cachedAt: number }>();
+
+function normalizeAmsSearchRows(raw: any): any[] {
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object') {
+    return Array.isArray(raw.data) ? raw.data
+      : Array.isArray(raw.vehicles) ? raw.vehicles
+      : Array.isArray(raw.results) ? raw.results
+      : Array.isArray(raw.items) ? raw.items
+      : [];
+  }
+  return [];
+}
+
+export async function batchFetchAmsTypeData(
+  vehicles: Array<{ truckNumber: string; vin?: string | null }>,
+  amsService: AmsApiService
+): Promise<Map<string, AmsVehicleTypeData>> {
+  const result = new Map<string, AmsVehicleTypeData>();
+  if (!amsService.hasCredentials() || vehicles.length === 0) return result;
+
+  const now = Date.now();
+  const toFetch: Array<{ truckNumber: string; vin?: string | null }> = [];
+
+  for (const v of vehicles) {
+    const cached = amsTypeCache.get(v.truckNumber);
+    if (cached && (now - cached.cachedAt) < AMS_TYPE_CACHE_TTL_MS) {
+      result.set(v.truckNumber, cached.data);
+    } else {
+      toFetch.push(v);
+    }
+  }
+
+  if (toFetch.length === 0) return result;
+
+  const CONCURRENCY = 20;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    const batch = toFetch.slice(i, i + CONCURRENCY);
+    await Promise.all(batch.map(async (v) => {
+      try {
+        let amsVehicle: any = null;
+
+        if (v.vin) {
+          try {
+            amsVehicle = await amsService.getVehicleByVin(v.vin);
+          } catch {
+            // VIN lookup failed, fall through to vehicleId search
+          }
+        }
+
+        if (!amsVehicle) {
+          const searchResult = await amsService.searchVehicles({ vehicleId: v.truckNumber, limit: 1 });
+          const rows = normalizeAmsSearchRows(searchResult);
+          amsVehicle = rows[0] ?? null;
+        }
+
+        if (!amsVehicle) return;
+
+        const rawTechType = amsVehicle.TechType ?? amsVehicle.techType ?? amsVehicle.tech_type ?? null;
+        const rawVehicleType = amsVehicle.VehicleType ?? amsVehicle.vehicleType ?? amsVehicle.vehicle_type ?? null;
+
+        const data: AmsVehicleTypeData = {};
+        const techType = mapTechType(rawTechType);
+        const vehicleType = mapVehicleType(rawVehicleType);
+        if (techType) data.techType = techType;
+        if (vehicleType) data.vehicleType = vehicleType;
+
+        amsTypeCache.set(v.truckNumber, { data, cachedAt: Date.now() });
+        result.set(v.truckNumber, data);
+      } catch {
+        // Non-fatal: skip this vehicle
+      }
+    }));
+  }
+
+  return result;
 }
 
 export interface AmsTech {
