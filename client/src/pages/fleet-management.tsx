@@ -1660,23 +1660,23 @@ export default function FleetManagement() {
                     className={`cursor-pointer transition-all hover:shadow-md select-none ${cardCls} ${statCardFilter === "mismatch" ? `ring-2 ring-offset-1 ${ringCls}` : ""}`}
                   >
                     <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className={`text-sm font-medium ${textCls}`}>Mismatches</CardTitle>
-                        <a
-                          href="/fleet-alignment"
-                          onClick={e => e.stopPropagation()}
-                          className={`text-[10px] hover:underline shrink-0 ${linkCls}`}
-                          title="Open Alignment Dashboard"
-                        >
-                          Alignment →
-                        </a>
-                      </div>
+                      <CardTitle className={`text-sm font-medium ${textCls}`}>Mismatches</CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    <CardContent className="pb-2">
                       <p className={`text-2xl font-bold ${textCls}`} data-testid="text-mismatch-count">
                         {displayCount}
                       </p>
                     </CardContent>
+                    <div className="px-6 pb-4">
+                      <a
+                        href="/fleet-alignment"
+                        onClick={e => e.stopPropagation()}
+                        className={`text-[10px] hover:underline ${linkCls}`}
+                        title="Open Alignment Dashboard"
+                      >
+                        Alignment →
+                      </a>
+                    </div>
                   </Card>
                 );
               })()}
