@@ -1497,6 +1497,10 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   tpmsVehicleRef: varchar("tpms_vehicle_ref", { length: 10 }),
   snowflakeVehicleRef: varchar("snowflake_vehicle_ref", { length: 20 }),
   vehicleNumberDisplay: varchar("vehicle_number_display", { length: 10 }),
+  holmanAssignedStatusCd: text("holman_assigned_status_cd"), // A, U, H, B, D, L, I, M, Q, V, T, O, F, W
+  byovVinMissing: boolean("byov_vin_missing").default(false),
+  operationLockAt: timestamp("operation_lock_at"), // nullable — set when a fleet operation is in progress
+  operationLockedBy: text("operation_locked_by"), // nullable — identifier of the lock holder
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
@@ -1513,6 +1517,29 @@ export const insertHolmanVehicleCacheSchema = createInsertSchema(holmanVehiclesC
 
 export type HolmanVehicleCache = typeof holmanVehiclesCache.$inferSelect;
 export type InsertHolmanVehicleCache = z.infer<typeof insertHolmanVehicleCacheSchema>;
+
+// AMS vehicle cache — keyed by VIN, updated after every successful AMS call
+export const amsVehiclesCache = pgTable("ams_vehicles_cache", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  vin: text("vin").notNull().unique(),
+  amsTruckStatusId: integer("ams_truck_status_id"), // AMS numeric status ID
+  amsTruckStatusLabel: text("ams_truck_status_label"), // Human-readable AMS status label
+  amsAssignedLdap: text("ams_assigned_ldap"), // LDAP/enterprise ID of the currently assigned tech in AMS
+  lastAmsSyncAt: timestamp("last_ams_sync_at"), // When AMS data was last successfully fetched
+  lastAmsError: text("last_ams_error"), // Last error message from an AMS call, if any
+  rawResponse: jsonb("raw_response"), // Raw AMS vehicle response for debugging
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertAmsVehicleCacheSchema = createInsertSchema(amsVehiclesCache).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type AmsVehicleCache = typeof amsVehiclesCache.$inferSelect;
+export type InsertAmsVehicleCache = z.infer<typeof insertAmsVehicleCacheSchema>;
 
 // Holman Sync State - tracks incremental sync position for efficient change-only fetching
 export const holmanSyncState = pgTable("holman_sync_state", {

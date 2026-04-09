@@ -112,8 +112,8 @@ class HolmanAssignmentUpdateService {
     return normalized.startsWith('88');
   }
 
-  private buildPayload(vehicleNumber: string, techData: TPMSTechData): HolmanAssignmentPayload {
-    const assignedStatusCode = this.isBYOV(vehicleNumber) ? 'D' : 'A';
+  private buildPayload(vehicleNumber: string, techData: TPMSTechData, overrideStatusCode?: string): HolmanAssignmentPayload {
+    const assignedStatusCode = this.isBYOV(vehicleNumber) ? 'D' : (overrideStatusCode || 'A');
     const districtPrefix = techData.districtNo ? techData.districtNo.slice(-4) : null;
     const NULL_VAL = '^null^';
     const cityValue = this.normalizeString(techData.primaryAddress?.city)?.toUpperCase() || null;
@@ -213,7 +213,8 @@ class HolmanAssignmentUpdateService {
 
   async updateVehicleAssignment(
     vehicleNumber: string,
-    enterpriseId?: string | null
+    enterpriseId?: string | null,
+    assignedStatusCode?: string
   ): Promise<UpdateResult> {
     console.log(`[HolmanAssignmentUpdate] Starting update for vehicle ${vehicleNumber} with tech ${enterpriseId || 'UNASSIGN'}`);
 
@@ -266,7 +267,7 @@ class HolmanAssignmentUpdateService {
           mobilePhone: techInfo.contactNo,
         };
 
-        payload = this.buildPayload(vehicleNumber, techData);
+        payload = this.buildPayload(vehicleNumber, techData, assignedStatusCode);
       }
       
       console.log(`[HolmanAssignmentUpdate] Built payload:`, JSON.stringify(payload, null, 2));

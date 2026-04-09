@@ -289,6 +289,7 @@ class HolmanVehicleSyncService {
         tpmsVehicleRef: toTpmsRef(vehicleNumber),
         snowflakeVehicleRef: vehicleNumber,
         vehicleNumberDisplay: toDisplayNumber(vehicleNumber),
+        holmanAssignedStatusCd: v.assignedStatus || v.assignedStatusCode || null,
       };
       
       await db
@@ -595,6 +596,7 @@ class HolmanVehicleSyncService {
         tpmsVehicleRef: toTpmsRef(vehicleNumber),
         snowflakeVehicleRef: vehicleNumber,
         vehicleNumberDisplay: toDisplayNumber(vehicleNumber),
+        holmanAssignedStatusCd: v.assignedStatus || v.assignedStatusCode || null,
       };
 
       await db

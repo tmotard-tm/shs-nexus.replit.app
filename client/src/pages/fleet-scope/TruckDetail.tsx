@@ -207,6 +207,41 @@ export default function TruckDetail() {
   const [showAssignTechModal, setShowAssignTechModal] = useState(false);
   const [techSearchInput, setTechSearchInput] = useState("");
   const [techSearchQuery, setTechSearchQuery] = useState("");
+  const [assignmentType, setAssignmentType] = useState<'assigned' | 'temp'>('assigned');
+  const [tempEndDate, setTempEndDate] = useState("");
+  const [showRepairSection, setShowRepairSection] = useState(false);
+  const [repairData, setRepairData] = useState<{
+    repairStatus?: number;
+    repairReason?: number;
+    vendor?: string;
+    etaDate?: string;
+    estimateCost?: number;
+    rentalCar?: number;
+    rentalStartDate?: string;
+    rentalEndDate?: string;
+  }>({});
+
+  // Vehicle status from cache (for eligibility check)
+  const { data: vehicleStatus, isLoading: isLoadingVehicleStatus } = useQuery<{
+    holmanVehicleNumber: string;
+    holmanAssignedStatusCd: string | null;
+    holmanTechAssigned: string | null;
+    holmanTechName: string | null;
+    isLocked: boolean;
+    lockedBy: string | null;
+    byovVinMissing: boolean;
+    vin: string | null;
+  } | null>({
+    queryKey: ["/api/fleet-ops/vehicle-status", truckNumberForSpecialty],
+    queryFn: async () => {
+      if (!truckNumberForSpecialty) return null;
+      const res = await fetch(`/api/fleet-ops/vehicle-status/${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!truckNumberForSpecialty && showAssignTechModal,
+    staleTime: 30000,
+  });
 
   const { data: techSearchResults, isFetching: isSearchingTechs } = useQuery<any[]>({
     queryKey: ["/api/tpms/techs", { search: techSearchQuery }],
@@ -220,8 +255,17 @@ export default function TruckDetail() {
   });
 
   const assignTechMutation = useMutation({
-    mutationFn: async ({ enterpriseId, districtNo, techName }: { enterpriseId: string; districtNo: string; techName: string }): Promise<FleetOpsResult> => {
-      const res = await apiRequest("POST", `/api/fleet-ops/assign`, { truckNumber: truckNumberForSpecialty, ldapId: enterpriseId, districtNo, techName });
+    mutationFn: async ({ enterpriseId, districtNo, techName: tName }: { enterpriseId: string; districtNo: string; techName?: string }): Promise<FleetOpsResult> => {
+      const statusCd = vehicleStatus?.holmanAssignedStatusCd;
+      const isInRepair = statusCd === 'I';
+      const res = await apiRequest("POST", "/api/fleet-ops/assign", {
+        truckNumber: truckNumberForSpecialty,
+        ldapId: enterpriseId,
+        districtNo,
+        techName: tName || enterpriseId,
+        assignmentType,
+        repairData: isInRepair && showRepairSection ? repairData : undefined,
+      });
       return res.json() as Promise<FleetOpsResult>;
     },
     onSuccess: (result: FleetOpsResult) => {
@@ -242,11 +286,20 @@ export default function TruckDetail() {
       setShowAssignTechModal(false);
       setTechSearchInput("");
       setTechSearchQuery("");
+      setAssignmentType('assigned');
+      setTempEndDate("");
+      setShowRepairSection(false);
+      setRepairData({});
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/vehicle-status", truckNumberForSpecialty] });
     },
-    onError: (err: Error) => {
-      toast({ title: "Assignment failed", description: err.message, variant: "destructive" });
+    onError: (err: any) => {
+      if (err.status === 409 || (typeof err.message === 'string' && err.message.includes('being updated'))) {
+        toast({ title: "Vehicle Locked", description: err.message || "This vehicle is being updated — please try again in a moment.", variant: "destructive" });
+      } else {
+        toast({ title: "Assignment failed", description: err.message, variant: "destructive" });
+      }
     },
   });
 
@@ -2336,69 +2389,333 @@ export default function TruckDetail() {
       </Dialog>
 
       {/* Assign Tech Modal */}
-      <Dialog open={showAssignTechModal} onOpenChange={setShowAssignTechModal}>
-        <DialogContent className="max-w-md">
+      <Dialog open={showAssignTechModal} onOpenChange={(open) => {
+        setShowAssignTechModal(open);
+        if (!open) {
+          setTechSearchInput("");
+          setTechSearchQuery("");
+          setAssignmentType('assigned');
+          setTempEndDate("");
+          setShowRepairSection(false);
+          setRepairData({});
+        }
+      }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Assign Technician to Truck {truckNumberForSpecialty}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                placeholder="Search by enterprise ID or name…"
-                value={techSearchInput}
-                onChange={(e) => setTechSearchInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") setTechSearchQuery(techSearchInput);
-                }}
-                data-testid="input-tpms-tech-search"
-              />
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setTechSearchQuery(techSearchInput)}
-                disabled={isSearchingTechs}
-              >
-                <Search className="h-4 w-4" />
-              </Button>
-            </div>
-            {isSearchingTechs && (
-              <div className="space-y-2">
-                <Skeleton className="h-10 w-full" />
-                <Skeleton className="h-10 w-full" />
-              </div>
-            )}
-            {!isSearchingTechs && techSearchResults && techSearchResults.length === 0 && techSearchQuery && (
-              <p className="text-sm text-muted-foreground text-center py-4">No technicians found.</p>
-            )}
-            {!isSearchingTechs && techSearchResults && techSearchResults.length > 0 && (
-              <div className="border rounded-md divide-y max-h-64 overflow-y-auto">
-                {techSearchResults.map((tech: any) => (
-                  <div
-                    key={tech.enterpriseId || tech.techId}
-                    className="flex items-center justify-between px-3 py-2 hover:bg-muted/50 cursor-pointer"
-                    onClick={() => {
-                      if (assignTechMutation.isPending) return;
-                      assignTechMutation.mutate({
-                        enterpriseId: tech.enterpriseId,
-                        districtNo: tech.districtNo || "",
-                        techName: `${tech.firstName || ""} ${tech.lastName || ""}`.trim() || tech.enterpriseId,
-                      });
-                    }}
-                  >
-                    <div>
-                      <p className="text-sm font-medium">
-                        {tech.firstName} {tech.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        {tech.enterpriseId} · District {tech.districtNo || "—"}
-                      </p>
+            {/* Vehicle status and eligibility */}
+            {isLoadingVehicleStatus && <Skeleton className="h-12 w-full" />}
+            {vehicleStatus && (() => {
+              const statusCd = vehicleStatus.holmanAssignedStatusCd;
+              const BLOCKED_STATUSES: Record<string, string> = { L: 'For Sale', B: 'At Auction', W: 'Wrecked/Stolen', T: 'Terminated' };
+              const BORDERLINE_STATUSES: Record<string, string> = { H: 'At Upfitter', I: 'In Repair', O: 'Storage', Q: 'Order Pending' };
+              const isBlocked = statusCd ? !!BLOCKED_STATUSES[statusCd] : false;
+              const isBorderline = statusCd ? !!BORDERLINE_STATUSES[statusCd] : false;
+              const isInRepair = statusCd === 'I';
+              return (
+                <>
+                  {/* Status badge */}
+                  {statusCd && (
+                    <div className={`flex items-center gap-2 rounded-md px-3 py-2 text-sm border ${
+                      isBlocked ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300' :
+                      isBorderline ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300' :
+                      'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-700 dark:text-green-300'
+                    }`}>
+                      <span className="font-medium">
+                        Holman Status: {statusCd}
+                        {BLOCKED_STATUSES[statusCd] && ` — ${BLOCKED_STATUSES[statusCd]}`}
+                        {BORDERLINE_STATUSES[statusCd] && ` — ${BORDERLINE_STATUSES[statusCd]}`}
+                      </span>
+                      {isBlocked && <span className="ml-auto text-xs font-semibold">BLOCKED</span>}
+                      {isBorderline && <span className="ml-auto text-xs font-semibold">WARNING</span>}
                     </div>
-                    <Button type="button" size="sm" variant="outline" disabled={assignTechMutation.isPending}>
-                      Assign
-                    </Button>
+                  )}
+                  {/* Blocked message */}
+                  {isBlocked && (
+                    <div className="rounded-md bg-red-50 border border-red-200 px-3 py-3 text-sm text-red-800 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300">
+                      This vehicle cannot be assigned because its Holman status is <strong>{BLOCKED_STATUSES[statusCd!]}</strong>. Contact fleet operations to resolve the vehicle status before assigning.
+                    </div>
+                  )}
+                  {/* Locked message */}
+                  {vehicleStatus.isLocked && (
+                    <div className="rounded-md bg-yellow-50 border border-yellow-200 px-3 py-2 text-sm text-yellow-800 dark:bg-yellow-900/20 dark:border-yellow-700 dark:text-yellow-300">
+                      ⚠ This vehicle is currently being updated by another operation. Please wait and try again in a moment.
+                    </div>
+                  )}
+                  {/* Current occupant warning */}
+                  {vehicleStatus.holmanTechAssigned && (
+                    <div className="rounded-md bg-blue-50 border border-blue-200 px-3 py-2 text-sm text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-300">
+                      Currently assigned: <strong>{vehicleStatus.holmanTechName || vehicleStatus.holmanTechAssigned}</strong> ({vehicleStatus.holmanTechAssigned}). Assigning a new tech will displace this tech.
+                    </div>
+                  )}
+                  {/* In Repair expand prompt */}
+                  {isInRepair && !showRepairSection && (
+                    <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300">
+                      This vehicle is In Repair (I). You must provide repair details before assigning.{' '}
+                      <button type="button" className="underline font-medium" onClick={() => setShowRepairSection(true)}>
+                        Add repair info
+                      </button>
+                    </div>
+                  )}
+                  {/* Repair section */}
+                  {isInRepair && showRepairSection && (
+                    <div className="border rounded-md p-3 space-y-3 bg-amber-50/40 dark:bg-amber-900/10">
+                      <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">AMS Repair Details (Required)</p>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Repair Status ID</label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 6"
+                            value={repairData.repairStatus ?? ""}
+                            onChange={e => setRepairData(d => ({ ...d, repairStatus: e.target.value ? parseInt(e.target.value) : undefined }))}
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Repair Reason ID</label>
+                          <Input
+                            type="number"
+                            placeholder="e.g. 1"
+                            value={repairData.repairReason ?? ""}
+                            onChange={e => setRepairData(d => ({ ...d, repairReason: e.target.value ? parseInt(e.target.value) : undefined }))}
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Vendor</label>
+                          <Input
+                            placeholder="Vendor name"
+                            value={repairData.vendor ?? ""}
+                            onChange={e => setRepairData(d => ({ ...d, vendor: e.target.value || undefined }))}
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">ETA Date</label>
+                          <Input
+                            type="date"
+                            value={repairData.etaDate ?? ""}
+                            onChange={e => setRepairData(d => ({ ...d, etaDate: e.target.value || undefined }))}
+                            className="mt-1"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">Est. Cost (optional)</label>
+                          <Input
+                            type="number"
+                            placeholder="0.00"
+                            value={repairData.estimateCost ?? ""}
+                            onChange={e => setRepairData(d => ({ ...d, estimateCost: e.target.value ? parseFloat(e.target.value) : undefined }))}
+                            className="mt-1"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {/* Status preview */}
+                  <div className="rounded-md border px-3 py-2 space-y-1">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">After assignment</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                      <span>Holman → <strong>{assignmentType === 'temp' ? 'F (Temp)' : (statusCd === 'D' ? 'D (BYOV)' : 'A (Assigned)')}</strong></span>
+                      <span>TPMS → <strong>Assigned</strong></span>
+                      <span>AMS → <strong>{isInRepair && showRepairSection ? 'In Repair (Status 6)' : 'Assigned to Tech (Status 1)'}</strong></span>
+                    </div>
                   </div>
-                ))}
-              </div>
+                  {/* Only show rest of form if not blocked or locked */}
+                  {!isBlocked && !vehicleStatus.isLocked && (
+                    <>
+                      {/* Assignment type */}
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={assignmentType === 'assigned' ? 'default' : 'outline'}
+                          onClick={() => setAssignmentType('assigned')}
+                        >
+                          Assigned (Permanent)
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={assignmentType === 'temp' ? 'default' : 'outline'}
+                          onClick={() => setAssignmentType('temp')}
+                        >
+                          Temp Assignment
+                        </Button>
+                      </div>
+                      {assignmentType === 'temp' && (
+                        <div>
+                          <label className="text-xs font-medium text-muted-foreground">End Date (optional)</label>
+                          <Input
+                            type="date"
+                            value={tempEndDate}
+                            onChange={e => setTempEndDate(e.target.value)}
+                            className="mt-1"
+                          />
+                        </div>
+                      )}
+                      {/* Tech search */}
+                      <div className="flex gap-2">
+                        <Input
+                          placeholder="Search by enterprise ID or name…"
+                          value={techSearchInput}
+                          onChange={(e) => setTechSearchInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") setTechSearchQuery(techSearchInput);
+                          }}
+                          data-testid="input-tpms-tech-search"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setTechSearchQuery(techSearchInput)}
+                          disabled={isSearchingTechs}
+                        >
+                          <Search className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      {isSearchingTechs && (
+                        <div className="space-y-2">
+                          <Skeleton className="h-10 w-full" />
+                          <Skeleton className="h-10 w-full" />
+                        </div>
+                      )}
+                      {!isSearchingTechs && techSearchResults && techSearchResults.length === 0 && techSearchQuery && (
+                        <p className="text-sm text-muted-foreground text-center py-4">No technicians found.</p>
+                      )}
+                      {!isSearchingTechs && techSearchResults && techSearchResults.length > 0 && (
+                        <div className="border rounded-md divide-y max-h-48 overflow-y-auto">
+                          {techSearchResults.map((tech: any) => (
+                            <div
+                              key={tech.enterpriseId || tech.techId}
+                              className="flex items-center justify-between px-3 py-2 hover:bg-muted/50 cursor-pointer"
+                              onClick={() => {
+                                if (assignTechMutation.isPending) return;
+                                if (isInRepair && showRepairSection && (!repairData.repairStatus || !repairData.repairReason || !repairData.vendor || !repairData.etaDate)) {
+                                  toast({ title: "Repair details required", description: "Please fill in all required repair fields before assigning.", variant: "destructive" });
+                                  return;
+                                }
+                                assignTechMutation.mutate({
+                                  enterpriseId: tech.enterpriseId,
+                                  districtNo: tech.districtNo || "",
+                                  techName: `${tech.firstName || ''} ${tech.lastName || ''}`.trim() || tech.enterpriseId,
+                                });
+                              }}
+                            >
+                              <div>
+                                <p className="text-sm font-medium">
+                                  {tech.firstName} {tech.lastName}
+                                </p>
+                                <p className="text-xs text-muted-foreground">
+                                  {tech.enterpriseId} · District {tech.districtNo || "—"}
+                                </p>
+                              </div>
+                              <Button type="button" size="sm" variant="outline" disabled={assignTechMutation.isPending}>
+                                Assign
+                              </Button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </>
+                  )}
+                </>
+              );
+            })()}
+            {/* Fallback: no vehicleStatus yet but not loading */}
+            {!isLoadingVehicleStatus && !vehicleStatus && (
+              <>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={assignmentType === 'assigned' ? 'default' : 'outline'}
+                    onClick={() => setAssignmentType('assigned')}
+                  >
+                    Assigned (Permanent)
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={assignmentType === 'temp' ? 'default' : 'outline'}
+                    onClick={() => setAssignmentType('temp')}
+                  >
+                    Temp Assignment
+                  </Button>
+                </div>
+                {assignmentType === 'temp' && (
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground">End Date (optional)</label>
+                    <Input
+                      type="date"
+                      value={tempEndDate}
+                      onChange={e => setTempEndDate(e.target.value)}
+                      className="mt-1"
+                    />
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Search by enterprise ID or name…"
+                    value={techSearchInput}
+                    onChange={(e) => setTechSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") setTechSearchQuery(techSearchInput);
+                    }}
+                    data-testid="input-tpms-tech-search"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setTechSearchQuery(techSearchInput)}
+                    disabled={isSearchingTechs}
+                  >
+                    <Search className="h-4 w-4" />
+                  </Button>
+                </div>
+                {isSearchingTechs && (
+                  <div className="space-y-2">
+                    <Skeleton className="h-10 w-full" />
+                    <Skeleton className="h-10 w-full" />
+                  </div>
+                )}
+                {!isSearchingTechs && techSearchResults && techSearchResults.length === 0 && techSearchQuery && (
+                  <p className="text-sm text-muted-foreground text-center py-4">No technicians found.</p>
+                )}
+                {!isSearchingTechs && techSearchResults && techSearchResults.length > 0 && (
+                  <div className="border rounded-md divide-y max-h-64 overflow-y-auto">
+                    {techSearchResults.map((tech: any) => (
+                      <div
+                        key={tech.enterpriseId || tech.techId}
+                        className="flex items-center justify-between px-3 py-2 hover:bg-muted/50 cursor-pointer"
+                        onClick={() => {
+                          if (assignTechMutation.isPending) return;
+                          assignTechMutation.mutate({
+                            enterpriseId: tech.enterpriseId,
+                            districtNo: tech.districtNo || "",
+                            techName: `${tech.firstName || ''} ${tech.lastName || ''}`.trim() || tech.enterpriseId,
+                          });
+                        }}
+                      >
+                        <div>
+                          <p className="text-sm font-medium">
+                            {tech.firstName} {tech.lastName}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {tech.enterpriseId} · District {tech.districtNo || "—"}
+                          </p>
+                        </div>
+                        <Button type="button" size="sm" variant="outline" disabled={assignTechMutation.isPending}>
+                          Assign
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
           </div>
           <DialogFooter>

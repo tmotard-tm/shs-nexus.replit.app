@@ -15211,14 +15211,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/fleet-ops/assign", requireAuth, async (req: any, res) => {
     try {
-      const { truckNumber, ldapId, districtNo, techName, notes } = req.body;
+      const { truckNumber, ldapId, districtNo, techName, notes, assignmentType, repairData } = req.body;
       if (!truckNumber || !ldapId) {
         return res.status(400).json({ message: "truckNumber and ldapId are required" });
       }
       const requestedBy = req.user?.username || "unknown";
-      const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes });
-      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
-      res.status(statusCode).json(result);
+      const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes, assignmentType, repairData });
+      if ('locked' in result && result.locked) {
+        return res.status(409).json({ message: result.message });
+      }
+      const opResult = result as any;
+      const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(opResult);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -15232,8 +15236,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const requestedBy = req.user?.username || "unknown";
       const result = await fleetOpsService.unassignTech({ truckNumber, ldapId, requestedBy, notes });
-      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
-      res.status(statusCode).json(result);
+      if ('locked' in result && result.locked) {
+        return res.status(409).json({ message: result.message });
+      }
+      const opResult = result as any;
+      const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
+      res.status(statusCode).json(opResult);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -15249,6 +15257,62 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const result = await fleetOpsService.updateAddress({ truckNumber, ldapId, address, city, state, zip, requestedBy });
       const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
       res.status(statusCode).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // Return vehicle status info from cache for eligibility checking
+  app.get("/api/fleet-ops/vehicle-status/:truckNumber", requireAuth, async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const { db: dbConn } = await import("./db");
+      const { holmanVehiclesCache } = await import("@shared/schema");
+      const { toHolmanRef, toDisplayNumber, toCanonical } = await import("./vehicle-number-utils");
+      const { eq, or } = await import("drizzle-orm");
+
+      const candidates = Array.from(new Set([
+        toHolmanRef(truckNumber),
+        toDisplayNumber(truckNumber),
+        truckNumber.trim(),
+        toCanonical(truckNumber),
+      ])).filter(Boolean);
+
+      let row: any = null;
+      for (const candidate of candidates) {
+        const rows = await dbConn.select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          holmanAssignedStatusCd: holmanVehiclesCache.holmanAssignedStatusCd,
+          holmanTechAssigned: holmanVehiclesCache.holmanTechAssigned,
+          holmanTechName: holmanVehiclesCache.holmanTechName,
+          operationLockAt: holmanVehiclesCache.operationLockAt,
+          operationLockedBy: holmanVehiclesCache.operationLockedBy,
+          byovVinMissing: holmanVehiclesCache.byovVinMissing,
+          vin: holmanVehiclesCache.vin,
+        }).from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, candidate))
+          .limit(1);
+        if (rows[0]) { row = rows[0]; break; }
+      }
+
+      if (!row) {
+        return res.status(404).json({ message: "Vehicle not found in cache" });
+      }
+
+      // Check if lock is active (not expired)
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+      const isLocked = row.operationLockAt && new Date(row.operationLockAt) > twoMinutesAgo;
+
+      res.json({
+        holmanVehicleNumber: row.holmanVehicleNumber,
+        holmanAssignedStatusCd: row.holmanAssignedStatusCd,
+        holmanTechAssigned: row.holmanTechAssigned,
+        holmanTechName: row.holmanTechName,
+        isLocked,
+        lockedBy: isLocked ? row.operationLockedBy : null,
+        byovVinMissing: row.byovVinMissing,
+        vin: row.vin,
+      });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

@@ -1,9 +1,20 @@
 import { storage } from "./storage";
 import { db } from "./db";
-import { eq, and, lte, or } from "drizzle-orm";
-import { holmanVehiclesCache, operationEvents } from "@shared/schema";
+import { eq, and, lte, or, sql } from "drizzle-orm";
+import { holmanVehiclesCache, amsVehiclesCache, operationEvents } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
+
+interface RepairData {
+  repairStatus?: number;
+  repairReason?: number;
+  vendor?: string;
+  etaDate?: string;
+  estimateCost?: number;
+  rentalCar?: number;
+  rentalStartDate?: string;
+  rentalEndDate?: string;
+}
 
 interface AssignTechParams {
   truckNumber: string;
@@ -12,6 +23,8 @@ interface AssignTechParams {
   techName: string;
   requestedBy: string;
   notes?: string;
+  assignmentType?: 'assigned' | 'temp';
+  repairData?: RepairData;
 }
 
 interface UnassignTechParams {
@@ -220,12 +233,18 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
     if (action === "assign") {
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
         holmanVehicleNum,
-        normalizeEnterpriseId(params.ldapId)
+        normalizeEnterpriseId(params.ldapId),
+        params.assignmentType === 'temp' ? 'F' : undefined
       );
       if (result.success) {
         try {
           await db.update(holmanVehiclesCache)
-            .set({ holmanTechAssigned: params.ldapId, holmanTechName: params.techName || params.ldapId, lastLocalUpdateAt: new Date() })
+            .set({
+              holmanTechAssigned: params.ldapId,
+              holmanTechName: params.techName || params.ldapId,
+              lastLocalUpdateAt: new Date(),
+              holmanAssignedStatusCd: params.assignmentType === 'temp' ? 'F' : 'A',
+            })
             .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
         } catch {}
         return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
@@ -265,14 +284,126 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       return { status: "skipped", message: "VIN not found for truck" };
     }
     if (action === "assign") {
+      // Pre-check: read current AMS state before writing
+      try {
+        const preCheckResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+        const preVehicle = Array.isArray(preCheckResult) ? preCheckResult[0] : (preCheckResult?.data?.[0] ?? preCheckResult);
+        const preCurrentTech = preVehicle?.Tech ?? null;
+        console.log(`[FleetOps-AMS] Pre-check for assign ${vin}: currentTech=${preCurrentTech}`);
+        // Update cache with pre-operation state
+        try {
+          await db.insert(amsVehiclesCache).values({
+            vin,
+            amsAssignedLdap: preCurrentTech,
+            amsTruckStatusId: preVehicle?.TruckStatusId ?? null,
+            amsTruckStatusLabel: preVehicle?.TruckStatusDesc ?? null,
+            lastAmsSyncAt: new Date(),
+            rawResponse: preVehicle ?? null,
+          }).onConflictDoUpdate({
+            target: amsVehiclesCache.vin,
+            set: {
+              amsAssignedLdap: preCurrentTech,
+              amsTruckStatusId: preVehicle?.TruckStatusId ?? null,
+              amsTruckStatusLabel: preVehicle?.TruckStatusDesc ?? null,
+              lastAmsSyncAt: new Date(),
+              rawResponse: preVehicle ?? null,
+              updatedAt: new Date(),
+            },
+          });
+        } catch {}
+      } catch (preCheckErr: any) {
+        // Check if VIN not found (BYOV case)
+        const msg = (preCheckErr.message || "").toLowerCase();
+        if (msg.includes("404") || msg.includes("not found")) {
+          console.log(`[FleetOps-AMS] VIN ${vin} not found in AMS (possible BYOV) — skipping AMS assign`);
+          // Mark BYOV VIN missing in holman cache
+          try {
+            const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
+            if (cacheRow) {
+              await db.update(holmanVehiclesCache)
+                .set({ byovVinMissing: true })
+                .where(eq(holmanVehiclesCache.holmanVehicleNumber, cacheRow.holmanVehicleNumber));
+            }
+          } catch {}
+          return { status: "skipped", message: "VIN not found in AMS (BYOV vehicle — AMS registration required)" };
+        }
+        console.warn(`[FleetOps-AMS] Pre-check failed for ${vin}: ${preCheckErr.message}`);
+      }
       try {
         await ams.updateTechAssignment(vin, {
           techEnterpriseId: params.ldapId,
           updateUser: (params.requestedBy || "nexus").slice(0, 8),
         });
+        // If repair data is present, post repair update
+        if (params.repairData) {
+          try {
+            await ams.updateRepairStatus(vin, {
+              inRepair: true,
+              repairStatus: params.repairData.repairStatus,
+              repairReason: params.repairData.repairReason,
+              vendor: params.repairData.vendor,
+              etaDate: params.repairData.etaDate,
+              estimateCost: params.repairData.estimateCost,
+              rentalCar: params.repairData.rentalCar,
+              rentalStartDate: params.repairData.rentalStartDate,
+              rentalEndDate: params.repairData.rentalEndDate,
+              updateUser: (params.requestedBy || "nexus").slice(0, 8),
+            });
+            console.log(`[FleetOps-AMS] Repair status updated for ${vin}`);
+          } catch (repairErr: any) {
+            console.warn(`[FleetOps-AMS] Repair status update failed for ${vin}: ${repairErr.message}`);
+          }
+        }
+        // Synchronous post-operation verification: read back AMS state
+        try {
+          const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+          const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+          const postTech = (postVehicle?.Tech ?? "").trim().toUpperCase();
+          const expectedTech = params.ldapId.trim().toUpperCase();
+          // Update cache with post-operation state
+          try {
+            await db.insert(amsVehiclesCache).values({
+              vin,
+              amsAssignedLdap: postVehicle?.Tech ?? null,
+              amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
+              amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
+              lastAmsSyncAt: new Date(),
+              rawResponse: postVehicle ?? null,
+            }).onConflictDoUpdate({
+              target: amsVehiclesCache.vin,
+              set: {
+                amsAssignedLdap: postVehicle?.Tech ?? null,
+                amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
+                amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
+                lastAmsSyncAt: new Date(),
+                rawResponse: postVehicle ?? null,
+                lastAmsError: null,
+                updatedAt: new Date(),
+              },
+            });
+          } catch {}
+          if (postTech !== expectedTech) {
+            console.warn(`[FleetOps-AMS] Post-assign verification mismatch for ${vin}: expected ${expectedTech}, got ${postTech}`);
+          } else {
+            console.log(`[FleetOps-AMS] Post-assign verification OK for ${vin}: Tech=${postTech}`);
+          }
+        } catch (verifyErr: any) {
+          console.warn(`[FleetOps-AMS] Post-assign verification failed for ${vin}: ${verifyErr.message}`);
+        }
         return { status: "success", message: "Assigned" };
       } catch (assignErr: any) {
         const msg = (assignErr.message || "").toLowerCase();
+        // Update cache with error
+        try {
+          await db.insert(amsVehiclesCache).values({
+            vin,
+            lastAmsError: assignErr.message,
+            updatedAt: new Date(),
+          } as any).onConflictDoUpdate({
+            target: amsVehiclesCache.vin,
+            set: { lastAmsError: assignErr.message, updatedAt: new Date() },
+          });
+        } catch {}
         // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
         // This is not an error in our system — skip gracefully.
         if (msg.includes("not found in tech database") || msg.includes("tech") && msg.includes("not found")) {
@@ -302,6 +433,38 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
           techEnterpriseId: "",
           updateUser: (params.requestedBy || "nexus").slice(0, 8),
         });
+        // Synchronous post-operation verification
+        try {
+          const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
+          const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+          const postTech = (postVehicle?.Tech ?? "").trim();
+          try {
+            await db.insert(amsVehiclesCache).values({
+              vin,
+              amsAssignedLdap: postVehicle?.Tech ?? null,
+              amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
+              amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
+              lastAmsSyncAt: new Date(),
+              rawResponse: postVehicle ?? null,
+            }).onConflictDoUpdate({
+              target: amsVehiclesCache.vin,
+              set: {
+                amsAssignedLdap: postVehicle?.Tech ?? null,
+                amsTruckStatusId: postVehicle?.TruckStatusId ?? null,
+                amsTruckStatusLabel: postVehicle?.TruckStatusDesc ?? null,
+                lastAmsSyncAt: new Date(),
+                rawResponse: postVehicle ?? null,
+                lastAmsError: null,
+                updatedAt: new Date(),
+              },
+            });
+          } catch {}
+          if (postTech !== "") {
+            console.warn(`[FleetOps-AMS] Post-unassign verification mismatch for ${vin}: expected empty, got ${postTech}`);
+          }
+        } catch (verifyErr: any) {
+          console.warn(`[FleetOps-AMS] Post-unassign verification failed for ${vin}: ${verifyErr.message}`);
+        }
         return { status: "success", message: "Unassigned" };
       } catch (unassignErr: any) {
         const msg = (unassignErr.message || "").toLowerCase();
@@ -426,21 +589,294 @@ async function resolveCurrentTechTruck(ldapId: string): Promise<string | null> {
   return null;
 }
 
+// Acquire an operation lock on a vehicle row atomically.
+// Returns true if the lock was acquired, false if already held by another operation.
+async function acquireVehicleLock(holmanVehicleNumber: string, lockedBy: string): Promise<boolean> {
+  const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+  const result = await db
+    .update(holmanVehiclesCache)
+    .set({ operationLockAt: new Date(), operationLockedBy: lockedBy })
+    .where(
+      and(
+        eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNumber),
+        or(
+          sql`${holmanVehiclesCache.operationLockAt} IS NULL`,
+          sql`${holmanVehiclesCache.operationLockAt} < ${twoMinutesAgo}`
+        )
+      )
+    )
+    .returning({ id: holmanVehiclesCache.id });
+  return result.length > 0;
+}
+
+async function releaseVehicleLock(holmanVehicleNumber: string): Promise<void> {
+  try {
+    await db
+      .update(holmanVehiclesCache)
+      .set({ operationLockAt: null, operationLockedBy: null })
+      .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNumber));
+  } catch {}
+}
+
+// Resolve the current occupant of the target truck (cache-first, then live TPMS).
+async function resolveTargetTruckOccupant(truckNumber: string): Promise<string | null> {
+  // 1. Check holman cache first (fast)
+  try {
+    const cacheRow = await lookupHolmanVehicleRef(truckNumber);
+    if (cacheRow) {
+      const rows = await db.select({ holmanTechAssigned: holmanVehiclesCache.holmanTechAssigned })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, cacheRow.holmanVehicleNumber))
+        .limit(1);
+      const cached = rows[0]?.holmanTechAssigned?.trim() || null;
+      if (cached) {
+        // Confirm with live TPMS lookup
+        try {
+          const { getTPMSService } = await import("./tpms-service");
+          const tpms = getTPMSService();
+          if (tpms.isConfigured()) {
+            const truckLookup = await tpms.lookupByTruckNumber(truckNumber).catch(() => ({ success: false }));
+            if ((truckLookup as any).success && (truckLookup as any).data?.ldapId) {
+              const liveLdap = ((truckLookup as any).data.ldapId as string).trim().toUpperCase();
+              if (liveLdap) {
+                console.log(`[FleetOps] Target truck ${truckNumber} occupant confirmed via TPMS: ${liveLdap}`);
+                return liveLdap;
+              }
+            }
+          }
+        } catch {}
+        console.log(`[FleetOps] Target truck ${truckNumber} occupant from cache: ${cached}`);
+        return cached;
+      }
+    }
+  } catch {}
+
+  // 2. Live TPMS lookup
+  try {
+    const { getTPMSService } = await import("./tpms-service");
+    const tpms = getTPMSService();
+    if (tpms.isConfigured()) {
+      const truckLookup = await tpms.lookupByTruckNumber(truckNumber).catch(() => ({ success: false }));
+      if ((truckLookup as any).success && (truckLookup as any).data?.ldapId) {
+        const liveLdap = ((truckLookup as any).data.ldapId as string).trim().toUpperCase();
+        if (liveLdap) return liveLdap;
+      }
+    }
+  } catch {}
+
+  return null;
+}
+
 export const fleetOpsService = {
-  async assignTech(params: AssignTechParams): Promise<OperationResult> {
+  async assignTech(params: AssignTechParams): Promise<OperationResult | { locked: true; message: string }> {
     params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
 
-    // ── Pre-assignment check: auto-unassign from any existing truck ──────────
-    const targetTruck = toCanonical(params.truckNumber);
-    const currentTruck = await resolveCurrentTechTruck(params.ldapId);
-    const currentTruckCanonical = currentTruck ? toCanonical(currentTruck) : null;
+    // ── Acquire operation lock on the target vehicle ──────────────────────────
+    const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
+    const holmanVehicleNum = cacheRow?.holmanVehicleNumber || toHolmanRef(params.truckNumber) || params.truckNumber;
 
-    if (currentTruckCanonical && currentTruckCanonical !== targetTruck) {
-      console.log(`[FleetOps] Tech ${params.ldapId} is already on truck ${currentTruck} — auto-unassigning before new assignment to ${params.truckNumber}`);
-      const preUnassignParams = { truckNumber: currentTruck!, ldapId: params.ldapId, requestedBy: params.requestedBy, notes: `Auto-unassign: reassigned to ${params.truckNumber}` };
-      const preLogData: InsertFleetOperationLog = {
+    if (cacheRow) {
+      const lockAcquired = await acquireVehicleLock(holmanVehicleNum, `assignTech:${params.requestedBy}`);
+      if (!lockAcquired) {
+        console.log(`[FleetOps] Vehicle ${holmanVehicleNum} is locked by another operation — returning 409`);
+        return { locked: true, message: "This vehicle is being updated — please try again in a moment." };
+      }
+    }
+
+    try {
+      // ── Pre-assignment check: auto-unassign from any existing truck ──────────
+      const targetTruck = toCanonical(params.truckNumber);
+      const currentTruck = await resolveCurrentTechTruck(params.ldapId);
+      const currentTruckCanonical = currentTruck ? toCanonical(currentTruck) : null;
+
+      if (currentTruckCanonical && currentTruckCanonical !== targetTruck) {
+        console.log(`[FleetOps] Tech ${params.ldapId} is already on truck ${currentTruck} — auto-unassigning before new assignment to ${params.truckNumber}`);
+        const preUnassignParams = { truckNumber: currentTruck!, ldapId: params.ldapId, requestedBy: params.requestedBy, notes: `Auto-unassign: reassigned to ${params.truckNumber}` };
+        const preLogData: InsertFleetOperationLog = {
+          operationType: "unassign",
+          truckNumber: currentTruck!,
+          fromLdap: params.ldapId,
+          toLdap: null,
+          toTechName: null,
+          districtNo: null,
+          tpmsStatus: "pending",
+          holmanStatus: "pending",
+          amsStatus: "pending",
+          requestedBy: params.requestedBy,
+          notes: `Auto-unassign (reassignment to ${params.truckNumber})`,
+          tpmsMessage: null,
+          holmanMessage: null,
+          amsMessage: null,
+          completedAt: null,
+        };
+        const preLog = await storage.createFleetOperationLog(preLogData);
+        const [preTpms, preHolman, preAms] = await Promise.all([
+          callTpms("unassign", preUnassignParams),
+          callHolman("unassign", preUnassignParams),
+          callAms("unassign", preUnassignParams),
+        ]);
+        await storage.updateFleetOperationLog(preLog.id, {
+          tpmsStatus: preTpms.status,
+          tpmsMessage: preTpms.message,
+          holmanStatus: preHolman.status,
+          holmanMessage: preHolman.message,
+          amsStatus: preAms.status,
+          amsMessage: preAms.message,
+        });
+        await logAllEvents(preLog.id, "unassign", preUnassignParams, preTpms, preHolman, preAms);
+        console.log(`[FleetOps] Auto-unassign from ${currentTruck}: TPMS=${preTpms.status}, Holman=${preHolman.status}, AMS=${preAms.status}`);
+      }
+
+      // ── Target truck occupant pre-check and displacement ──────────────────
+      const targetOccupant = await resolveTargetTruckOccupant(params.truckNumber);
+      const normalizedTargetOccupant = targetOccupant ? normalizeEnterpriseId(targetOccupant) : null;
+      const normalizedIncoming = normalizeEnterpriseId(params.ldapId);
+
+      if (normalizedTargetOccupant && normalizedTargetOccupant !== normalizedIncoming) {
+        console.log(`[FleetOps] Target truck ${params.truckNumber} is occupied by ${normalizedTargetOccupant} — auto-unassigning displaced tech`);
+        const dispUnassignParams = {
+          truckNumber: params.truckNumber,
+          ldapId: normalizedTargetOccupant,
+          requestedBy: params.requestedBy,
+          notes: `Displaced by assignment of ${params.ldapId}`,
+        };
+        const dispLogData: InsertFleetOperationLog = {
+          operationType: "unassign",
+          truckNumber: params.truckNumber,
+          fromLdap: normalizedTargetOccupant,
+          toLdap: null,
+          toTechName: null,
+          districtNo: null,
+          tpmsStatus: "pending",
+          holmanStatus: "pending",
+          amsStatus: "pending",
+          requestedBy: params.requestedBy,
+          notes: `Displacement unassign (${params.ldapId} taking truck ${params.truckNumber})`,
+          tpmsMessage: null,
+          holmanMessage: null,
+          amsMessage: null,
+          completedAt: null,
+        };
+        const dispLog = await storage.createFleetOperationLog(dispLogData);
+        // For TPMS displaced tech: explicitly clear truckNo to ""
+        const [dispTpms, dispHolman, dispAms] = await Promise.all([
+          callTpms("unassign", dispUnassignParams),
+          callHolman("unassign", dispUnassignParams),
+          callAms("unassign", dispUnassignParams),
+        ]);
+        await storage.updateFleetOperationLog(dispLog.id, {
+          tpmsStatus: dispTpms.status,
+          tpmsMessage: dispTpms.message,
+          holmanStatus: dispHolman.status,
+          holmanMessage: dispHolman.message,
+          amsStatus: dispAms.status,
+          amsMessage: dispAms.message,
+        });
+        await logAllEvents(dispLog.id, "unassign", dispUnassignParams, dispTpms, dispHolman, dispAms);
+        // Update tpms_cached_assignments for the displaced tech (best-effort)
+        try {
+          const dispAssignment = await storage.getTechVehicleAssignmentByTechRacfid(normalizedTargetOccupant);
+          if (dispAssignment) {
+            await storage.updateTechVehicleAssignment(dispAssignment.id, { truckNo: "" });
+          }
+        } catch {}
+        // Update ams_vehicles_cache for the displaced tech's VIN
+        console.log(`[FleetOps] Displacement unassign for ${normalizedTargetOccupant}: TPMS=${dispTpms.status}, Holman=${dispHolman.status}, AMS=${dispAms.status}`);
+      } else if (normalizedTargetOccupant === normalizedIncoming) {
+        console.log(`[FleetOps] Tech ${normalizedIncoming} is already on target truck ${params.truckNumber} — treating as no-op for TPMS`);
+      }
+      // ─────────────────────────────────────────────────────────────────────────
+
+      const logData: InsertFleetOperationLog = {
+        operationType: "assign",
+        truckNumber: params.truckNumber,
+        toLdap: params.ldapId,
+        toTechName: params.techName,
+        districtNo: params.districtNo,
+        tpmsStatus: "pending",
+        holmanStatus: "pending",
+        amsStatus: "pending",
+        requestedBy: params.requestedBy,
+        notes: currentTruckCanonical && currentTruckCanonical !== targetTruck
+          ? `${params.notes ? params.notes + '; ' : ''}Reassigned from truck ${currentTruck}`
+          : (params.notes || null),
+        fromLdap: null,
+        tpmsMessage: null,
+        holmanMessage: null,
+        amsMessage: null,
+        completedAt: null,
+      };
+      let log = await storage.createFleetOperationLog(logData);
+
+      // If the same tech is already on target truck, skip TPMS assign (avoid 400).
+      const tpmsAlreadyCurrent = normalizedTargetOccupant === normalizedIncoming;
+
+      const [tpms, holman, ams] = await Promise.all([
+        tpmsAlreadyCurrent
+          ? Promise.resolve<SystemResult>({ status: "skipped", message: "Already assigned in TPMS" })
+          : callTpms("assign", params),
+        callHolman("assign", params),
+        callAms("assign", params),
+      ]);
+
+      // Synchronous TPMS post-assignment verification
+      if (!tpmsAlreadyCurrent && tpms.status === "success") {
+        try {
+          const { getTPMSService } = await import("./tpms-service");
+          const tpmsService = getTPMSService();
+          if (tpmsService.isConfigured()) {
+            const postTechInfo = await tpmsService.getTechInfo(normalizeEnterpriseId(params.ldapId)).catch(() => null);
+            const postTruckNo = postTechInfo?.truckNo?.trim() ?? "";
+            const canonicalPost = toCanonical(postTruckNo);
+            if (canonicalPost !== targetTruck) {
+              console.warn(`[FleetOps-TPMS] Post-assign verification mismatch for ${params.ldapId}: expected truck ${targetTruck}, TPMS shows ${postTruckNo}`);
+            } else {
+              console.log(`[FleetOps-TPMS] Post-assign verification OK for ${params.ldapId}: truck=${postTruckNo}`);
+            }
+          }
+        } catch (verifyErr: any) {
+          console.warn(`[FleetOps-TPMS] Post-assign verification failed: ${verifyErr.message}`);
+        }
+      }
+
+      log = await storage.updateFleetOperationLog(log.id, {
+        tpmsStatus: tpms.status,
+        tpmsMessage: tpms.message,
+        holmanStatus: holman.status,
+        holmanMessage: holman.message,
+        amsStatus: ams.status,
+        amsMessage: ams.message,
+      }) ?? log;
+
+      await logAllEvents(log.id, "assign", params, tpms, holman, ams);
+
+      return buildResult(log, tpms, holman, ams);
+    } finally {
+      if (cacheRow) {
+        await releaseVehicleLock(holmanVehicleNum);
+      }
+    }
+  },
+
+  async unassignTech(params: UnassignTechParams): Promise<OperationResult | { locked: true; message: string }> {
+    params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
+
+    // Acquire operation lock
+    const cacheRow = await lookupHolmanVehicleRef(params.truckNumber);
+    const holmanVehicleNum = cacheRow?.holmanVehicleNumber || toHolmanRef(params.truckNumber) || params.truckNumber;
+
+    if (cacheRow) {
+      const lockAcquired = await acquireVehicleLock(holmanVehicleNum, `unassignTech:${params.requestedBy}`);
+      if (!lockAcquired) {
+        console.log(`[FleetOps] Vehicle ${holmanVehicleNum} is locked — returning 409`);
+        return { locked: true, message: "This vehicle is being updated — please try again in a moment." };
+      }
+    }
+
+    try {
+      const logData: InsertFleetOperationLog = {
         operationType: "unassign",
-        truckNumber: currentTruck!,
+        truckNumber: params.truckNumber,
         fromLdap: params.ldapId,
         toLdap: null,
         toTechName: null,
@@ -449,117 +885,37 @@ export const fleetOpsService = {
         holmanStatus: "pending",
         amsStatus: "pending",
         requestedBy: params.requestedBy,
-        notes: `Auto-unassign (reassignment to ${params.truckNumber})`,
+        notes: params.notes || null,
         tpmsMessage: null,
         holmanMessage: null,
         amsMessage: null,
         completedAt: null,
       };
-      const preLog = await storage.createFleetOperationLog(preLogData);
-      const [preTpms, preHolman, preAms] = await Promise.all([
-        callTpms("unassign", preUnassignParams),
-        callHolman("unassign", preUnassignParams),
-        callAms("unassign", preUnassignParams),
+      let log = await storage.createFleetOperationLog(logData);
+
+      const [tpms, holman, ams] = await Promise.all([
+        callTpms("unassign", { ...params }),
+        callHolman("unassign", { ...params }),
+        callAms("unassign", { ...params }),
       ]);
-      await storage.updateFleetOperationLog(preLog.id, {
-        tpmsStatus: preTpms.status,
-        tpmsMessage: preTpms.message,
-        holmanStatus: preHolman.status,
-        holmanMessage: preHolman.message,
-        amsStatus: preAms.status,
-        amsMessage: preAms.message,
-      });
-      await logAllEvents(preLog.id, "unassign", preUnassignParams, preTpms, preHolman, preAms);
-      console.log(`[FleetOps] Auto-unassign from ${currentTruck}: TPMS=${preTpms.status}, Holman=${preHolman.status}, AMS=${preAms.status}`);
+
+      log = await storage.updateFleetOperationLog(log.id, {
+        tpmsStatus: tpms.status,
+        tpmsMessage: tpms.message,
+        holmanStatus: holman.status,
+        holmanMessage: holman.message,
+        amsStatus: ams.status,
+        amsMessage: ams.message,
+      }) ?? log;
+
+      await logAllEvents(log.id, "unassign", params, tpms, holman, ams);
+
+      return buildResult(log, tpms, holman, ams);
+    } finally {
+      if (cacheRow) {
+        await releaseVehicleLock(holmanVehicleNum);
+      }
     }
-    // ─────────────────────────────────────────────────────────────────────────
-
-    const logData: InsertFleetOperationLog = {
-      operationType: "assign",
-      truckNumber: params.truckNumber,
-      toLdap: params.ldapId,
-      toTechName: params.techName,
-      districtNo: params.districtNo,
-      tpmsStatus: "pending",
-      holmanStatus: "pending",
-      amsStatus: "pending",
-      requestedBy: params.requestedBy,
-      notes: currentTruckCanonical && currentTruckCanonical !== targetTruck
-        ? `${params.notes ? params.notes + '; ' : ''}Reassigned from truck ${currentTruck}`
-        : (params.notes || null),
-      fromLdap: null,
-      tpmsMessage: null,
-      holmanMessage: null,
-      amsMessage: null,
-      completedAt: null,
-    };
-    let log = await storage.createFleetOperationLog(logData);
-
-    // If TPMS already shows this tech on this truck, skip the TPMS assign call.
-    // Calling it anyway causes a TPMS 400 validation error.
-    const tpmsAlreadyCurrent = currentTruckCanonical !== null && currentTruckCanonical === targetTruck;
-
-    const [tpms, holman, ams] = await Promise.all([
-      tpmsAlreadyCurrent
-        ? Promise.resolve<SystemResult>({ status: "skipped", message: "Already assigned in TPMS" })
-        : callTpms("assign", params),
-      callHolman("assign", params),
-      callAms("assign", params),
-    ]);
-
-    log = await storage.updateFleetOperationLog(log.id, {
-      tpmsStatus: tpms.status,
-      tpmsMessage: tpms.message,
-      holmanStatus: holman.status,
-      holmanMessage: holman.message,
-      amsStatus: ams.status,
-      amsMessage: ams.message,
-    }) ?? log;
-
-    await logAllEvents(log.id, "assign", params, tpms, holman, ams);
-
-    return buildResult(log, tpms, holman, ams);
-  },
-
-  async unassignTech(params: UnassignTechParams): Promise<OperationResult> {
-    params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
-    const logData: InsertFleetOperationLog = {
-      operationType: "unassign",
-      truckNumber: params.truckNumber,
-      fromLdap: params.ldapId,
-      toLdap: null,
-      toTechName: null,
-      districtNo: null,
-      tpmsStatus: "pending",
-      holmanStatus: "pending",
-      amsStatus: "pending",
-      requestedBy: params.requestedBy,
-      notes: params.notes || null,
-      tpmsMessage: null,
-      holmanMessage: null,
-      amsMessage: null,
-      completedAt: null,
-    };
-    let log = await storage.createFleetOperationLog(logData);
-
-    const [tpms, holman, ams] = await Promise.all([
-      callTpms("unassign", { ...params }),
-      callHolman("unassign", { ...params }),
-      callAms("unassign", { ...params }),
-    ]);
-
-    log = await storage.updateFleetOperationLog(log.id, {
-      tpmsStatus: tpms.status,
-      tpmsMessage: tpms.message,
-      holmanStatus: holman.status,
-      holmanMessage: holman.message,
-      amsStatus: ams.status,
-      amsMessage: ams.message,
-    }) ?? log;
-
-    await logAllEvents(log.id, "unassign", params, tpms, holman, ams);
-
-    return buildResult(log, tpms, holman, ams);
   },
 
   async updateAddress(params: UpdateAddressParams): Promise<OperationResult> {
