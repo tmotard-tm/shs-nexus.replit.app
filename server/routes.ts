@@ -15239,9 +15239,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ('locked' in result && result.locked) {
         return res.status(409).json({ message: result.message });
       }
-      const opResult = result as any;
+      const opResult = result as { overallSuccess: boolean; partialSuccess: boolean };
       const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
-      res.status(statusCode).json(opResult);
+      res.status(statusCode).json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
@@ -15258,9 +15258,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if ('locked' in result && result.locked) {
         return res.status(409).json({ message: result.message });
       }
-      const opResult = result as any;
+      const opResult = result as { overallSuccess: boolean; partialSuccess: boolean };
       const statusCode = opResult.overallSuccess ? 200 : opResult.partialSuccess ? 207 : 500;
-      res.status(statusCode).json(opResult);
+      res.status(statusCode).json(result);
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
