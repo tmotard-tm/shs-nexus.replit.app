@@ -15,9 +15,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Progress } from "@/components/ui/progress";
+import { Label } from "@/components/ui/label";
 import {
   AlertTriangle, RefreshCw, Loader2, CheckCircle, XCircle, Clock, ExternalLink,
   AlertCircle, Zap, Shield, Layers, GitBranch, UserX, HelpCircle, Info, X, Play,
+  Search, Filter,
 } from "lucide-react";
 import { Link } from "wouter";
 
@@ -273,6 +275,10 @@ export default function FleetAlignment() {
   const [sortField, setSortField] = useState<SortField>("truckNumber");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [patternFilter, setPatternFilter] = useState<"all" | "holman_only" | "tpms_only" | "both_diff">("all");
+  const [actionFilter, setActionFilter] = useState<string>("all");
+  const [bulkFixOnly, setBulkFixOnly] = useState(false);
   const [confirmUnassign, setConfirmUnassign] = useState(false);
   const [confirmText, setConfirmText] = useState("");
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
@@ -331,16 +337,45 @@ export default function FleetAlignment() {
   };
 
   const filtered = (() => {
-    const base = rootCauseFilter === "all"
-      ? allRecords
-      : allRecords.filter(r => r.rootCause === rootCauseFilter);
-    return [...base].sort((a, b) => {
-      const av = (a[sortField as keyof AlignmentRecord] as string) ?? "";
-      const bv = (b[sortField as keyof AlignmentRecord] as string) ?? "";
-      const cmp = av.localeCompare(bv);
-      return sortDir === "asc" ? cmp : -cmp;
-    });
+    const q = searchQuery.trim().toLowerCase();
+    return [...allRecords]
+      .filter(r => rootCauseFilter === "all" || r.rootCause === rootCauseFilter)
+      .filter(r => {
+        if (q === "") return true;
+        return (
+          r.truckNumber.toLowerCase().includes(q) ||
+          (r.holmanTechId ?? "").toLowerCase().includes(q) ||
+          (r.tpmsTechId ?? "").toLowerCase().includes(q) ||
+          (r.amsTechId ?? "").toLowerCase().includes(q) ||
+          (r.holmanTechName ?? "").toLowerCase().includes(q) ||
+          (r.tpmsTechName ?? "").toLowerCase().includes(q)
+        );
+      })
+      .filter(r => {
+        if (patternFilter === "all") return true;
+        const h = (r.holmanTechId ?? "").trim();
+        const t = (r.tpmsTechId ?? "").trim();
+        if (patternFilter === "holman_only") return h !== "" && t === "";
+        if (patternFilter === "tpms_only")  return t !== "" && h === "";
+        if (patternFilter === "both_diff")  return h !== "" && t !== "" && h.toLowerCase() !== t.toLowerCase();
+        return true;
+      })
+      .filter(r => actionFilter === "all" || r.suggestedAction === actionFilter)
+      .filter(r => !bulkFixOnly || r.bulkFixEligible)
+      .sort((a, b) => {
+        const av = (a[sortField as keyof AlignmentRecord] as string) ?? "";
+        const bv = (b[sortField as keyof AlignmentRecord] as string) ?? "";
+        const cmp = av.localeCompare(bv);
+        return sortDir === "asc" ? cmp : -cmp;
+      });
   })();
+
+  const activeFilterCount = [
+    searchQuery.trim() !== "",
+    patternFilter !== "all",
+    actionFilter !== "all",
+    bulkFixOnly,
+  ].filter(Boolean).length;
 
   // Resume run data for pending count
   const { data: resumableRunData } = useQuery<BulkRun>({
@@ -586,6 +621,103 @@ export default function FleetAlignment() {
                   </button>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* Compact filters */}
+          {!isLoading && allRecords.length > 0 && (
+            <div className="rounded-md border bg-card px-4 py-3 space-y-3">
+              <div className="flex items-center gap-2">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Filters</span>
+                {activeFilterCount > 0 && (
+                  <button
+                    onClick={() => {
+                      setSearchQuery("");
+                      setPatternFilter("all");
+                      setActionFilter("all");
+                      setBulkFixOnly(false);
+                    }}
+                    className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <X className="h-3 w-3" />
+                    Clear {activeFilterCount} filter{activeFilterCount > 1 ? "s" : ""}
+                  </button>
+                )}
+              </div>
+              <div className="flex flex-wrap gap-3 items-end">
+                {/* Search */}
+                <div className="flex flex-col gap-1 min-w-[180px] flex-1">
+                  <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Search</Label>
+                  <div className="relative">
+                    <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                    <Input
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Truck # or tech LDAP…"
+                      className="h-8 pl-7 text-sm"
+                    />
+                  </div>
+                </div>
+
+                {/* Mismatch pattern */}
+                <div className="flex flex-col gap-1 min-w-[180px]">
+                  <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Mismatch Pattern</Label>
+                  <Select value={patternFilter} onValueChange={v => setPatternFilter(v as any)}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All patterns</SelectItem>
+                      <SelectItem value="holman_only">Holman assigned · TPMS blank</SelectItem>
+                      <SelectItem value="tpms_only">TPMS assigned · Holman blank</SelectItem>
+                      <SelectItem value="both_diff">Both assigned · different tech</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Suggested action */}
+                <div className="flex flex-col gap-1 min-w-[160px]">
+                  <Label className="text-[10px] uppercase tracking-wide text-muted-foreground font-semibold">Suggested Action</Label>
+                  <Select value={actionFilter} onValueChange={setActionFilter}>
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All actions</SelectItem>
+                      {[...new Set(allRecords.map(r => r.suggestedAction))].sort().map(action => (
+                        <SelectItem key={action} value={action}>
+                          {action === "assign" ? "Assign"
+                            : action === "unassign" ? "Unassign"
+                            : action === "push_holman" ? "Push to Holman"
+                            : action === "push_ams" ? "Push to AMS"
+                            : action === "push_multiple" ? "Push to multiple"
+                            : action === "cache_evict" ? "Cache evict"
+                            : action === "manual_review" ? "Manual review"
+                            : action === "wait" ? "Wait"
+                            : action}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Bulk fix eligible toggle */}
+                <div className="flex items-center gap-2 pb-1">
+                  <Checkbox
+                    id="bulk-fix-only"
+                    checked={bulkFixOnly}
+                    onCheckedChange={v => setBulkFixOnly(!!v)}
+                  />
+                  <Label htmlFor="bulk-fix-only" className="text-sm cursor-pointer">Bulk-fix eligible only</Label>
+                </div>
+              </div>
+
+              {/* Result count */}
+              <p className="text-xs text-muted-foreground">
+                Showing <span className="font-semibold text-foreground">{filtered.length}</span> of{" "}
+                <span className="font-semibold text-foreground">{allRecords.length}</span> mismatches
+              </p>
             </div>
           )}
 
