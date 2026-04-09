@@ -3180,20 +3180,20 @@ export default function FleetManagement() {
                   <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">AMS Repair Details</p>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <Label className="text-xs">Repair Status ID</Label>
+                      <Label className="text-xs">Repair Status</Label>
                       <Input
                         type="number"
-                        placeholder="e.g. 6"
+                        placeholder="Status code"
                         className="mt-1"
                         value={assignRepairData.repairStatus ?? ""}
                         onChange={e => setAssignRepairData(d => ({ ...d, repairStatus: e.target.value ? parseInt(e.target.value) : undefined }))}
                       />
                     </div>
                     <div>
-                      <Label className="text-xs">Repair Reason ID</Label>
+                      <Label className="text-xs">Repair Reason</Label>
                       <Input
                         type="number"
-                        placeholder="e.g. 1"
+                        placeholder="Reason code"
                         className="mt-1"
                         value={assignRepairData.repairReason ?? ""}
                         onChange={e => setAssignRepairData(d => ({ ...d, repairReason: e.target.value ? parseInt(e.target.value) : undefined }))}
