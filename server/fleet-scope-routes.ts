@@ -13,7 +13,7 @@ import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-u
 import { parqApi } from "./fleet-scope-pmf-api";
 import { fetchFleetFinderData, fetchFleetFinderVehicleInfo, prewarmFleetFinderCache, type FleetFinderLocationData, type FleetFinderVehicleInfo } from "./fleet-scope-fleet-finder";
 import { fetchSamsaraLocations, testSamsaraConnection, type SamsaraLocationData } from "./fleet-scope-samsara";
-import { AmsApiService, batchFetchAmsTypeData } from "./ams-api-service";
+import { AmsApiService, batchFetchAmsTypeData, type AmsVehicleTypeData } from "./ams-api-service";
 const _amsApiServiceForEnrichment = new AmsApiService();
 import { reverseGeocode, batchReverseGeocode, getGeocodeStats } from "./fleet-scope-reverse-geocode";
 import sgMail from "@sendgrid/mail";
