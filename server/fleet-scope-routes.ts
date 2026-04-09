@@ -2577,6 +2577,56 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // PUBLIC API: AMS comment history for a truck — auth required
+  app.get("/public/vehicles/:truckNumber/ams-comments", requirePublicApiKey, async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const truck = await fleetScopeStorage.getTruckByNumber(truckNumber);
+      if (!truck) {
+        return res.status(404).json({ success: false, message: "Truck not found" });
+      }
+      const vin = truck.vin;
+      if (!vin) {
+        return res.status(400).json({ success: false, message: "Truck has no resolvable VIN — cannot query AMS comments" });
+      }
+
+      let rawComments: unknown;
+      try {
+        rawComments = await _amsApiServiceForEnrichment.getComments(vin);
+      } catch (amsError: any) {
+        const status = amsError?.statusCode ?? amsError?.status ?? 0;
+        if (status === 404) {
+          return res.status(404).json({ success: false, message: "Vehicle not found in AMS" });
+        }
+        console.error(`[AMS-Comments] Error fetching comments for VIN=${vin} truck=${truckNumber}:`, amsError);
+        return res.status(503).json({ success: false, message: "AMS service unavailable — try again later" });
+      }
+
+      const rawArray: unknown[] = Array.isArray(rawComments) ? rawComments : [];
+
+      const comments = rawArray
+        .map((c: any) => ({
+          commentId: c?.id ?? c?.commentId ?? c?.comment_id ?? null,
+          commentText: c?.comment ?? c?.commentText ?? c?.text ?? c?.body ?? '',
+          commentedBy: c?.user ?? c?.commentedBy ?? c?.createdBy ?? c?.author ?? null,
+          commentedAt: c?.createdAt ?? c?.commentedAt ?? c?.created_at ?? c?.date ?? null,
+          commentType: c?.commentType ?? c?.type ?? c?.category ?? null,
+        }))
+        .filter(c => c.commentText)
+        .sort((a, b) => {
+          const ta = a.commentedAt ? new Date(a.commentedAt).getTime() : 0;
+          const tb = b.commentedAt ? new Date(b.commentedAt).getTime() : 0;
+          return tb - ta;
+        })
+        .slice(0, 20);
+
+      res.json({ success: true, truckNumber, total: comments.length, data: comments });
+    } catch (error: any) {
+      console.error("Error fetching public AMS comments:", error);
+      res.status(500).json({ success: false, message: "Failed to fetch AMS comments" });
+    }
+  });
+
   app.get("/public/registrations", async (_req, res) => {
     try {
       const { trucks } = await buildRegistrationData();
@@ -3227,6 +3277,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         { method: "GET", path: "/api/public/registrations/:truckNumber", description: "Single truck registration data", auth: false },
         { method: "GET", path: "/api/public/spares", description: "Spare vehicle details with status tracking", auth: true },
         { method: "GET", path: "/api/public/spares/search", description: "Find nearest compatible spare vehicles. Required: ?techType= (General Home Appliance | Ref + General Home Appliance | HVAC). Optional: ?lat=, ?lon=, ?limit= (default 3)", auth: true },
+        { method: "GET", path: "/api/public/vehicles/:truckNumber/ams-comments", description: "AMS comment/note history for a truck (newest-first, capped at 20). 404 if not found, 503 if AMS unavailable", auth: true },
         { method: "GET", path: "/api/public/spares/:vehicleNumber", description: "Single spare vehicle data", auth: true },
         { method: "GET", path: "/api/public/all-vehicles", description: "Full fleet vehicle list from Snowflake with location data", auth: true },
         { method: "GET", path: "/api/public/pmf", description: "Park My Fleet vehicles and statuses", auth: true },
