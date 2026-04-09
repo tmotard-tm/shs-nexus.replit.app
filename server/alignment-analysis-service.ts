@@ -107,12 +107,13 @@ export async function analyzeAlignment(
     };
   }
 
-  // 3. Pending Holman submission
+  // 3. Pending Holman submission (only block if < 30 min old — older ones are considered stale)
   try {
     const pendingResult = await db.execute(sql`
       SELECT id FROM holman_submissions
       WHERE holman_vehicle_number = ${truckNumber}
         AND status IN ('pending', 'processing')
+        AND created_at > NOW() - INTERVAL '30 minutes'
       LIMIT 1
     `);
     const pendingRows = extractRows(pendingResult);

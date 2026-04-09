@@ -15646,7 +15646,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!requireFleetAdmin(req, res)) return;
     try {
       const user = req.user;
-      const { runId: existingRunId, vehicles } = req.body as {
+      const { runId: existingRunId, vehicles, forceConflictTrucks } = req.body as {
         runId?: string;
         vehicles?: Array<{
           truckNumber: string;
@@ -15654,6 +15654,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           ldapId?: string;
           districtNo?: string;
         }>;
+        forceConflictTrucks?: string[];
       };
 
       const username = user.username || "unknown";
@@ -15751,8 +15752,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               }
             } else if (item.action === "unassign") {
               // Full cross-system unassign
-              const forceConflictTrucks: string[] = body.forceConflictTrucks ?? [];
-              const skipConflictCheck = forceConflictTrucks.includes(item.truck_number);
+              const skipConflictCheck = (forceConflictTrucks ?? []).includes(item.truck_number);
               const result = await fleetOpsService.unassignTech({
                 truckNumber: item.truck_number,
                 ldapId: item.ldap_id || "",
