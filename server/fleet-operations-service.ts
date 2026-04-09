@@ -189,12 +189,31 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       if (!current.truckNo || current.truckNo.trim() === "") {
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
-      await tpms.updateTechInfo({
-        ldapId: tpmsLdap,
-        truckNo: "",
-        districtNo: current.districtNo ?? "",
-        updatedBy: updatedBy.toUpperCase(),
-      });
+      // Guard: if the cached tech is live-assigned to a DIFFERENT truck, don't clear them —
+      // their assignment on that other truck is valid, and the target truck is already clear.
+      const canonicalCurrent = toCanonical(current.truckNo.trim());
+      const canonicalTarget  = toCanonical(params.truckNumber);
+      if (canonicalCurrent !== canonicalTarget) {
+        console.log(`[FleetOps-TPMS] "${tpmsLdap}" is on truck "${current.truckNo}", not "${params.truckNumber}" — target truck already clear in TPMS`);
+        return { status: "skipped", message: `Already clear in TPMS (${tpmsLdap} is on truck ${current.truckNo}, not ${params.truckNumber})` };
+      }
+      try {
+        await tpms.updateTechInfo({
+          ldapId: tpmsLdap,
+          truckNo: "",
+          districtNo: current.districtNo ?? "",
+          updatedBy: updatedBy.toUpperCase(),
+        });
+      } catch (err: any) {
+        // TPMS sometimes rejects with an empty message when the truck is already clear on their
+        // end (cache stale). Treat as a successful no-op for unassign.
+        const msg: string = err?.message ?? "";
+        if (msg.includes("TPMS rejected update") && msg.replace("TPMS rejected update:", "").trim() === "") {
+          console.log(`[FleetOps-TPMS] TPMS rejected unassign with empty message for "${tpmsLdap}" on truck "${params.truckNumber}" — treating as already clear`);
+          return { status: "skipped", message: "Already unassigned in TPMS (confirmed via rejection)" };
+        }
+        throw err;
+      }
       return { status: "success", message: "Unassigned" };
     }
     if (action === "update_address") {
