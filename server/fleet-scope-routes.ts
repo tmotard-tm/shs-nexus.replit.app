@@ -2234,6 +2234,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       mainStatusChangedAt: truck.mainStatusChangedAt || null,
       lastUpdatedAt: truck.lastUpdatedAt || null,
       createdAt: truck.createdAt || null,
+      vin: truck.vin || null,
+      licensePlate: truck.licensePlate || null,
     };
   }
 
@@ -3092,6 +3094,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  function serializeCallLog(log: any) {
+    return {
+      id: log.id,
+      truckId: log.truckId,
+      truckNumber: log.truckNumber,
+      callType: log.callType,
+      callTimestamp: log.callTimestamp,
+      phoneNumber: log.phoneNumber,
+      elevenLabsConversationId: log.elevenLabsConversationId,
+      status: log.status,
+      outcome: log.outcome,
+      aiSummary: log.shopNotes || null,
+      estimatedReadyDate: log.estimatedReadyDate || null,
+      blockers: log.blockers || null,
+      attemptNumber: log.attemptNumber,
+      nextFollowUpDate: log.nextFollowUpDate || null,
+      createdAt: log.createdAt,
+    };
+  }
+
   app.get("/public/call-logs", requirePublicApiKey, async (req, res) => {
     try {
       const { truckId, truckNumber, outcome, status: callStatus, limit: limitStr, page: pageStr } = req.query as Record<string, string>;
@@ -3107,7 +3129,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         limit: safeLimit,
         page: safePage,
       });
-      res.json({ success: true, total, page: safePage, pageSize: safeLimit, count: rows.length, data: rows });
+      res.json({ success: true, total, page: safePage, pageSize: safeLimit, count: rows.length, data: rows.map(serializeCallLog) });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -3117,7 +3139,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     try {
       const { truckId } = req.params;
       const logs = await fleetScopeStorage.getCallLogsByTruckId(truckId);
-      res.json({ success: true, count: logs.length, data: logs });
+      res.json({ success: true, count: logs.length, data: logs.map(serializeCallLog) });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -4389,6 +4411,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
 
+      // Persist VIN and license plate back to truck record for public API
+      try {
+        const vinPlateUpdate: Record<string, any> = {};
+        if (vin && !truck.vin) vinPlateUpdate.vin = vin;
+        if (licensePlate && !truck.licensePlate) vinPlateUpdate.licensePlate = licensePlate;
+        if (Object.keys(vinPlateUpdate).length > 0) await fleetScopeStorage.updateTruck(truck.id, vinPlateUpdate);
+      } catch (err: any) {
+        console.warn("[CallRepairShop] Could not persist VIN/plate to truck record:", err.message);
+      }
+
       const last8Vin = vin.length >= 8 ? vin.slice(-8) : vin;
       const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
@@ -4755,6 +4787,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                     if (holmanData.length > 0) licensePlate = holmanData[0].LICENSE_PLATE?.toString().trim() || "";
                   } catch (e) {}
                 }
+
+                // Persist VIN and license plate back to truck record for public API
+                try {
+                  const vinPlateUpdate: Record<string, any> = {};
+                  if (vin && !truck.vin) vinPlateUpdate.vin = vin;
+                  if (licensePlate && !truck.licensePlate) vinPlateUpdate.licensePlate = licensePlate;
+                  if (Object.keys(vinPlateUpdate).length > 0) await fleetScopeStorage.updateTruck(truck.id, vinPlateUpdate);
+                } catch (e) {}
 
                 const last8Vin = vin.length >= 8 ? vin.slice(-8) : vin;
                 const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });

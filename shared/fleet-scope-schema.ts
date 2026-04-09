@@ -556,6 +556,10 @@ export const trucks = pgTable("fs_trucks", {
   // Status change tracking — set whenever mainStatus is updated
   mainStatusChangedAt: timestamp("main_status_changed_at"),
 
+  // Vehicle identity (populated from Holman/Snowflake at call time)
+  vin: varchar("vin", { length: 20 }), // Vehicle VIN
+  licensePlate: varchar("license_plate", { length: 30 }), // License plate from Holman
+
   // Timestamps
   lastUpdatedAt: timestamp("last_updated_at").default(sql`now()`),
   lastUpdatedBy: text("last_updated_by").default("System"),
