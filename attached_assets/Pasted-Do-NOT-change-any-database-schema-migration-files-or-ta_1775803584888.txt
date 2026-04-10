@@ -1,0 +1,44 @@
+Do NOT change any database schema, migration files, or table definitions. Only modify server/routes.ts. Do not change any other files.
+Fix two bugs in the TPMS sync code that prevent tech_manager_name and tech_manager_ldap_id from being populated on tpms_tech_profiles.
+Bug A: techManagerName is never mapped from any sync path.
+Three upsert paths in server/routes.ts write to tpms_tech_profiles. None of them include techManagerName in the data object. Add it to all three:
+
+Path A — TPMS Watermark Sync (~line 11128): This path uses live TPMS API responses where the field is on the tech object directly. Add:
+typescripttechManagerName: tech.techManagerName?.trim() || tech.managerName?.trim() || null,
+Try tech.techManagerName first, fall back to tech.managerName since the API may use either key name.
+Path B — Full-Sync Bootstrap (~line 11079): This path reads from a raw JSON object where the key is managerName. Add:
+typescripttechManagerName: raw.managerName || null,
+
+Path C — Backfill Phase 1 (~line 11369): Same as Path B. Add:
+typescripttechManagerName: raw.managerName || null,
+
+
+Bug B: techManagerLdapId uses the wrong JSON key in Paths B and C.
+Both bootstrap and backfill paths read raw.techManagerLdapId but the raw JSON key is actually managerEntId. Fix both:
+
+Path B (~line 11079): Change:
+typescripttechManagerLdapId: raw.techManagerLdapId || null,
+to:
+typescripttechManagerLdapId: raw.managerEntId?.trim() || null,
+
+Path C (~line 11369): Same fix:
+typescripttechManagerLdapId: raw.managerEntId?.trim() || null,
+
+
+One-time backfill of existing rows:
+After applying the code fixes, run a one-time UPDATE that extracts the manager fields from the existing raw_response JSON for all 1,730 rows:
+sqlUPDATE tpms_tech_profiles
+SET 
+  tech_manager_name = (raw_response::jsonb->>'managerName'),
+  tech_manager_ldap_id = COALESCE(tech_manager_ldap_id, (raw_response::jsonb->>'managerEntId'))
+WHERE raw_response IS NOT NULL
+  AND raw_response::jsonb->>'managerName' IS NOT NULL;
+Note the COALESCE on tech_manager_ldap_id — this preserves the 73 rows that already have correct values.
+After running, verify by executing:
+sqlSELECT 
+  COUNT(*) AS total_rows,
+  COUNT(tech_manager_name) AS rows_with_manager_name,
+  COUNT(tech_manager_ldap_id) AS rows_with_manager_ldap
+FROM tpms_tech_profiles;
+Show me the before and after counts.
+Do NOT change the data type or behavior of any other field. Do NOT touch the TPMS frontend pages. Do NOT modify any schema files.
