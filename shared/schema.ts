@@ -1053,6 +1053,7 @@ export interface AutomationDetail {
   automatedTasks?: Record<string, AutomationTaskEntry>;
   outreach?: unknown[];
   manualFlags?: unknown[];
+  page_visited_at?: string;
 }
 
 export type StorageSpot = typeof storageSpots.$inferSelect;
@@ -2196,3 +2197,28 @@ export const insertBulkFixRunItemSchema = createInsertSchema(bulkFixRunItems).om
 });
 export type BulkFixRunItem = typeof bulkFixRunItems.$inferSelect;
 export type InsertBulkFixRunItem = z.infer<typeof insertBulkFixRunItemSchema>;
+
+// ===============================
+// Offboarding Return Tokens (Sprint B1)
+// ===============================
+
+export const offboardingReturnTokens = pgTable("offboarding_return_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  token: varchar("token", { length: 128 }).notNull().unique(),
+  queueItemId: varchar("queue_item_id").notNull().references(() => queueItems.id),
+  expiresAt: timestamp("expires_at").notNull(),
+  consumedAt: timestamp("consumed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    tokenIdx: index("offboarding_return_tokens_token_idx").on(table.token),
+    queueItemIdIdx: index("offboarding_return_tokens_queue_item_id_idx").on(table.queueItemId),
+  };
+});
+
+export const insertOffboardingReturnTokenSchema = createInsertSchema(offboardingReturnTokens).omit({
+  id: true,
+  createdAt: true,
+});
+export type OffboardingReturnToken = typeof offboardingReturnTokens.$inferSelect;
+export type InsertOffboardingReturnToken = z.infer<typeof insertOffboardingReturnTokenSchema>;

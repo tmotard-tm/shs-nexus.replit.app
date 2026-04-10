@@ -117,6 +117,8 @@ function getAgingBadge(separationDate: string | null): { label: string; classNam
   return { label: "Overdue", className: "bg-red-100 text-red-700 border-red-200" };
 }
 
+// SYNC NOTE: This lane logic is duplicated in server/return-token-service.ts getDetectionLane().
+// If lane boundaries change (e.g., WARM extends to 10 days), both copies must be updated.
 function getDetectionLane(item: AssetsQueueItemEnriched): { label: string; className: string } {
   const lastDayWorked = item.techData?.lastDayWorked;
   // When lastDayWorked is null, fallback to createdAt. Note: freshly created records

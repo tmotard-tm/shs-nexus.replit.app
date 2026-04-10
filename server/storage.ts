@@ -70,6 +70,8 @@ import {
   type FleetOperationLog,
   type InsertFleetOperationLog,
   type AutomationDetail,
+  type OffboardingReturnToken,
+  offboardingReturnTokens,
   users,
   requests,
   apiConfigurations,
@@ -106,7 +108,7 @@ import {
 } from "@shared/schema";
 import { db } from "./db";
 import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
-import { randomUUID } from "crypto";
+import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
 
@@ -462,6 +464,12 @@ export interface IStorage {
 
   // Vehicle Odometer Bulk Update
   bulkUpdateVehicleOdometers(updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }>): Promise<number>;
+
+  // Offboarding Return Tokens (Sprint B1)
+  createReturnToken(queueItemId: string, expiresAt: Date): Promise<{ record: OffboardingReturnToken; rawToken: string }>;
+  validateReturnToken(token: string): Promise<{ queueItem: QueueItem; tokenRecord: OffboardingReturnToken; status: 'valid' } | { status: 'invalid' } | { status: 'expired' }>;
+  logReturnPageVisit(queueItemId: string): Promise<void>;
+  markReturnTokenConsumed(tokenId: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -3538,6 +3546,14 @@ export class MemStorage implements IStorage {
   async bulkUpdateVehicleOdometers(_updates: Array<{ vehicleNumber: string; odometer: number; odometerDate: string; odometerSource: string }>): Promise<number> {
     return 0;
   }
+  async createReturnToken(_queueItemId: string, _expiresAt: Date): Promise<{ record: OffboardingReturnToken; rawToken: string }> {
+    throw new Error("Not implemented in MemStorage");
+  }
+  async validateReturnToken(_token: string): Promise<{ queueItem: QueueItem; tokenRecord: OffboardingReturnToken; status: 'valid' } | { status: 'invalid' } | { status: 'expired' }> {
+    return { status: 'invalid' };
+  }
+  async logReturnPageVisit(_queueItemId: string): Promise<void> {}
+  async markReturnTokenConsumed(_tokenId: string): Promise<void> {}
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6422,6 +6438,54 @@ export class DatabaseStorage implements IStorage {
       count++;
     }
     return count;
+  }
+
+  async createReturnToken(queueItemId: string, expiresAt: Date): Promise<{ record: OffboardingReturnToken; rawToken: string }> {
+    const rawToken = randomBytes(32).toString('hex');
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+    const [record] = await db.insert(offboardingReturnTokens).values({
+      token: tokenHash,
+      queueItemId,
+      expiresAt,
+    }).returning();
+    return { record, rawToken };
+  }
+
+  async validateReturnToken(token: string): Promise<{ queueItem: QueueItem; tokenRecord: OffboardingReturnToken; status: 'valid' } | { status: 'invalid' } | { status: 'expired' }> {
+    const tokenHash = createHash('sha256').update(token).digest('hex');
+    const [tokenRecord] = await db.select()
+      .from(offboardingReturnTokens)
+      .where(eq(offboardingReturnTokens.token, tokenHash))
+      .limit(1);
+    if (!tokenRecord) return { status: 'invalid' };
+    if (tokenRecord.expiresAt < new Date()) return { status: 'expired' };
+    const [queueItem] = await db.select()
+      .from(queueItems)
+      .where(eq(queueItems.id, tokenRecord.queueItemId))
+      .limit(1);
+    if (!queueItem) return { status: 'invalid' };
+    return { queueItem, tokenRecord, status: 'valid' };
+  }
+
+  async logReturnPageVisit(queueItemId: string): Promise<void> {
+    const [item] = await db.select({ automationDetail: queueItems.automationDetail })
+      .from(queueItems)
+      .where(eq(queueItems.id, queueItemId))
+      .limit(1);
+    const existing = (item?.automationDetail ?? {}) as Record<string, unknown>;
+    const merged = {
+      ...existing,
+      page_visited_at: new Date().toISOString(),
+    };
+    await db.update(queueItems)
+      .set({ automationDetail: merged })
+      .where(eq(queueItems.id, queueItemId));
+  }
+
+  async markReturnTokenConsumed(tokenId: string): Promise<void> {
+    await db.update(offboardingReturnTokens)
+      .set({ consumedAt: new Date() })
+      .where(eq(offboardingReturnTokens.id, tokenId));
   }
 
   async backfillVehicleReferenceColumns(): Promise<void> {

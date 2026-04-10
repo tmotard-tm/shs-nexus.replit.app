@@ -28,6 +28,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
+import { getDetectionLane, parseTechDataFromQueueItem } from "./return-token-service";
 import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { registerWmsRoutes } from "./wms-engine-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
@@ -937,6 +938,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ verified: true, originalUrl: verification.originalUrl });
     } catch (error) {
       res.status(500).json({ message: "Failed to check verification status" });
+    }
+  });
+
+  // ===== Public Offboarding Return Token Routes (Sprint B1) =====
+  // These routes are PUBLIC — no requireAuth. Token-based access control.
+  app.get("/api/offboarding/return/validate", checkAnonymousRateLimit, async (req, res) => {
+    try {
+      const token = req.query.token as string;
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ message: "Token is required" });
+      }
+
+      const result = await storage.validateReturnToken(token);
+      if (result.status === 'invalid') {
+        return res.status(401).json({ message: "Invalid token. Please contact your supervisor for assistance." });
+      }
+      if (result.status === 'expired') {
+        return res.status(410).json({ message: "This link has expired. Please contact your supervisor for a new link." });
+      }
+
+      const { queueItem, tokenRecord } = result;
+      const techData = parseTechDataFromQueueItem(queueItem.data);
+      const lane = getDetectionLane(techData.lastDayWorked, queueItem.createdAt ? queueItem.createdAt.toISOString() : null);
+
+      const returnSteps = [
+        {
+          step: 1,
+          title: "Audit Your Tools",
+          description: "Complete a tool audit to confirm which company tools and equipment you currently have in your possession.",
+          instruction: "Your supervisor will provide you with a link to the tool audit form. If you haven't received one, please reach out to your supervisor.",
+        },
+        {
+          step: 2,
+          title: "Return Your Tools",
+          description: "Ship your tools back using the prepaid UPS shipping label. Package all tools securely and drop off at any UPS location.",
+          instruction: "A QR code or prepaid UPS shipping label will be provided via email. Check your inbox (and spam folder) for the shipping details.",
+        },
+        {
+          step: 3,
+          title: "Return Your iPhone",
+          description: "Your company iPhone must be returned separately. Please factory reset the device before shipping.",
+          instruction: "A separate return label for your iPhone will be included in the shipping materials. If not received, contact your supervisor.",
+        },
+        {
+          step: 4,
+          title: "Return Other Items",
+          description: "Any additional company property (uniforms, badges, keys, documentation) should be included in your tool return shipment.",
+          instruction: "Use the same QR code / UPS return process from Step 2 to ship any remaining company items.",
+        },
+      ];
+
+      res.json({
+        techName: techData.techName,
+        separationDate: techData.separationDate,
+        lane,
+        tokenId: tokenRecord.id,
+        firstVisit: !tokenRecord.consumedAt,
+        returnSteps,
+      });
+    } catch (error) {
+      console.error('Return token validation error:', error);
+      res.status(500).json({ message: "Validation failed" });
+    }
+  });
+
+  app.post("/api/offboarding/return/log-visit", checkAnonymousRateLimit, async (req, res) => {
+    try {
+      const { token } = req.body;
+      if (!token || typeof token !== 'string') {
+        return res.status(400).json({ message: "Token is required" });
+      }
+
+      const result = await storage.validateReturnToken(token);
+      if (result.status !== 'valid') {
+        return res.status(401).json({ message: "Invalid or expired token" });
+      }
+
+      const { queueItem, tokenRecord } = result;
+      await storage.logReturnPageVisit(queueItem.id);
+
+      if (!tokenRecord.consumedAt) {
+        await storage.markReturnTokenConsumed(tokenRecord.id);
+      }
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Log visit error:', error);
+      res.status(500).json({ message: "Failed to log visit" });
     }
   });
 

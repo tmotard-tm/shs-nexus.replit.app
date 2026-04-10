@@ -44,6 +44,7 @@ import AnalyticsBoard from "@/pages/analytics-board";
 import OperationsDashboard from "@/pages/operations-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
+import OffboardingReturn from "@/pages/offboarding-return";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
@@ -195,6 +196,10 @@ function Router() {
             <SearsDriveEnrollment />
           </MainContent>
         </PublicFormRoute>
+      </Route>
+
+      <Route path="/offboarding/return">
+        <OffboardingReturn />
       </Route>
       
       {/* Task work routes - deep linking for specific task IDs */}
