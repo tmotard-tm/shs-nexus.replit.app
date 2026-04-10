@@ -13039,14 +13039,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       console.log(`[Registration Import Renewals] Headers found at row ${headerRowIdx}: vehicleCol=${vehicleColIdx}, caseStatusCol=${caseStatusColIdx}, taskDescCol=${taskDescColIdx}`);
 
-      const results = { updated: 0, skipped: 0, errors: [] as string[] };
+      const results = { matched: 0, created: 0, errors: [] as string[] };
       const vehicleUpdates = new Map<string, { caseStatus: string; tasks: string[] }>();
 
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i];
         if (!row || !row[vehicleColIdx]) continue;
 
-        const rawVehicle = String(row[vehicleColIdx]).trim();
+        const rawVehicle = String(row[vehicleColIdx]).trim().replace(/\D/g, "");
         if (!rawVehicle || rawVehicle === "0") continue;
 
         const vehicleNumber = rawVehicle.padStart(6, "0");
@@ -13093,27 +13093,27 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 holmanPendingTasks: pendingTasks || null,
               })
               .where(eq(registrationTracking.truckNumber, vehicleNumber));
-            results.updated++;
+            results.matched++;
           } else {
             await getDb().insert(registrationTracking).values({
               truckNumber: vehicleNumber,
               holmanCaseStatus: data.caseStatus || null,
               holmanPendingTasks: pendingTasks || null,
             });
-            results.updated++;
+            results.created++;
           }
         } catch (err: any) {
           results.errors.push(`${vehicleNumber}: ${err.message}`);
         }
       }
 
-      console.log(`[Registration Import Renewals] Complete: ${results.updated} updated, ${results.skipped} skipped, ${results.errors.length} errors`);
+      console.log(`[Registration Import Renewals] Complete: ${results.matched} matched, ${results.created} new, ${results.errors.length} errors`);
 
       res.json({
         success: true,
         totalVehicles: vehicleUpdates.size,
-        updated: results.updated,
-        skipped: results.skipped,
+        matched: results.matched,
+        created: results.created,
         errors: results.errors.slice(0, 10),
       });
     } catch (error: any) {

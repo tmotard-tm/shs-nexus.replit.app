@@ -294,9 +294,13 @@ export default function Registration() {
       return response.json();
     },
     onSuccess: (result) => {
+      const parts = [];
+      if (result.matched > 0) parts.push(`${result.matched} matched`);
+      if (result.created > 0) parts.push(`${result.created} new`);
+      parts.push(`${result.totalVehicles} vehicles in file`);
       toast({
         title: "Renewals Import Complete",
-        description: `${result.updated} vehicles updated from ${result.totalVehicles} found in file${result.errors.length ? `. ${result.errors.length} errors.` : "."}`,
+        description: parts.join(", ") + (result.errors.length ? `. ${result.errors.length} errors.` : "."),
       });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/registration"] });
     },
