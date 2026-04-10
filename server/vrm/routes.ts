@@ -41,9 +41,11 @@ import {
   listRepairTracker,
   createRepairTrackerEntry,
   updateRepairTrackerEntry,
-  deleteRepairTrackerEntry,
+  softDeleteRepairTrackerEntry,
   importDeniedToRepairTracker,
   backfillRepairTrackerTruckNumbers,
+  listRepairTrackerActions,
+  addRepairTrackerAction,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
@@ -858,8 +860,35 @@ export function registerVrmRoutes(): Router {
 
   router.delete("/repair-tracker/:id", async (req, res) => {
     try {
-      await deleteRepairTrackerEntry(req.params.id);
+      await softDeleteRepairTrackerEntry(req.params.id);
       res.json({ ok: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.get("/repair-tracker/:id/actions", async (req, res) => {
+    try {
+      const actions = await listRepairTrackerActions(req.params.id);
+      res.json(actions);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker/:id/actions", async (req, res) => {
+    try {
+      const { actionType, notes, performedByName } = req.body;
+      if (!actionType || !performedByName) {
+        return res.status(400).json({ error: "actionType and performedByName are required" });
+      }
+      const action = await addRepairTrackerAction({
+        repairTrackerId: req.params.id,
+        actionType,
+        notes: notes || null,
+        performedByName,
+      });
+      res.status(201).json(action);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

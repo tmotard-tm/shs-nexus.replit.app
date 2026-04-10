@@ -15,6 +15,7 @@ import {
   vrmRentalChecks,
   vrmNewRentalLog,
   vrmRepairTracker,
+  vrmRepairTrackerActions,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
@@ -22,6 +23,7 @@ import {
   type InsertVrmRentalCheck,
   type InsertVrmNewRentalLog,
   type InsertVrmRepairTracker,
+  type InsertVrmRepairTrackerAction,
 } from "../../shared/vrm-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
@@ -552,13 +554,31 @@ export async function listRepairTracker() {
       rt.denied_at AS "deniedAt",
       rt.source_decision_id AS "sourceDecisionId",
       rt.source_check_id AS "sourceCheckId",
+      rt.supervisor_name AS "supervisorName",
+      rt.supervisor_phone AS "supervisorPhone",
+      rt.tech_contacted AS "techContacted",
+      rt.rental_returned AS "rentalReturned",
+      rt.rental_return_date AS "rentalReturnDate",
+      rt.route_cleared AS "routeCleared",
       rt.created_at AS "createdAt",
       rt.updated_at AS "updatedAt",
-      rd.returned_rental AS "returnedRental",
-      rd.rental_return_date AS "rentalReturnDate",
-      rd.byov_enrolled AS "decisionByovEnrolled"
+      rd.byov_enrolled AS "decisionByovEnrolled",
+      la.notes AS "lastActionNotes",
+      la.created_at AS "lastActionAt",
+      tp.tech_manager_name AS "tpmsManagerName",
+      mgr.mobile_phone AS "tpmsManagerPhone"
     FROM vrm_repair_tracker rt
     LEFT JOIN vrm_rental_decisions rd ON rt.source_decision_id = rd.id
+    LEFT JOIN LATERAL (
+      SELECT a.notes, a.created_at
+      FROM vrm_repair_tracker_actions a
+      WHERE a.repair_tracker_id = rt.id
+      ORDER BY a.created_at DESC
+      LIMIT 1
+    ) la ON TRUE
+    LEFT JOIN tpms_tech_profiles tp ON UPPER(rt.tech_ldap) = UPPER(tp.enterprise_id)
+    LEFT JOIN tpms_tech_profiles mgr ON UPPER(mgr.enterprise_id) = UPPER(tp.tech_manager_ldap_id)
+    WHERE rt.dismissed IS NOT TRUE
     ORDER BY rt.created_at DESC
   `);
   return rows.rows;
@@ -619,38 +639,60 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   //     final decision field so they should never drive Repair Tracker entries
   //   - Rows sourced from Decision Log where the actual decision was NOT 'denied' (e.g.
   //     recommendation=Deny but manager overrode to Approved)
+  //   Only hard-delete non-dismissed rows for these cases.
   await db.execute(sql`
     DELETE FROM vrm_repair_tracker
-    WHERE source_check_id IS NOT NULL
-       OR (
-         source_decision_id IS NOT NULL
-         AND source_decision_id IN (
-           SELECT id FROM vrm_rental_decisions
-           WHERE decision IS NULL OR LOWER(decision) <> 'denied'
-         )
-       )
+    WHERE dismissed IS NOT TRUE
+      AND (
+        source_check_id IS NOT NULL
+        OR (
+          source_decision_id IS NOT NULL
+          AND source_decision_id IN (
+            SELECT id FROM vrm_rental_decisions
+            WHERE decision IS NULL OR LOWER(decision) <> 'denied'
+          )
+        )
+      )
   `);
 
-  // Step 2 (new): One-time cleanup — for each tech_ldap with more than one row,
+  // Step 2: One-time cleanup — for each tech_ldap with more than one non-dismissed row,
   // keep only the most recent (by denied_at, falling back to created_at) and delete the rest.
   await db.execute(sql`
     DELETE FROM vrm_repair_tracker
-    WHERE id IN (
-      SELECT id FROM (
-        SELECT id,
-               ROW_NUMBER() OVER (
-                 PARTITION BY LOWER(tech_ldap)
-                 ORDER BY
-                   CASE WHEN notes IS NOT NULL AND notes != '' THEN 0 ELSE 1 END,
-                   CASE WHEN repair_shop_address IS NOT NULL AND repair_shop_address != '' THEN 0 ELSE 1 END,
-                   CASE WHEN main_status != 'Decision Pending' THEN 0 ELSE 1 END,
-                   COALESCE(denied_at, created_at) DESC
-               ) AS rn
-        FROM vrm_repair_tracker
-        WHERE tech_ldap IS NOT NULL
-      ) ranked
-      WHERE rn > 1
-    )
+    WHERE dismissed IS NOT TRUE
+      AND id IN (
+        SELECT id FROM (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY LOWER(tech_ldap)
+                   ORDER BY
+                     CASE WHEN notes IS NOT NULL AND notes != '' THEN 0 ELSE 1 END,
+                     CASE WHEN repair_shop_address IS NOT NULL AND repair_shop_address != '' THEN 0 ELSE 1 END,
+                     CASE WHEN main_status != 'Decision Pending' THEN 0 ELSE 1 END,
+                     COALESCE(denied_at, created_at) DESC
+                 ) AS rn
+          FROM vrm_repair_tracker
+          WHERE tech_ldap IS NOT NULL
+            AND dismissed IS NOT TRUE
+        ) ranked
+        WHERE rn > 1
+      )
+  `);
+
+  // Step 2b: Overridden-approval cleanup — for each non-dismissed tech_ldap in the tracker,
+  // if the most recent decision for that tech is NOT 'denied', soft-delete the tracker row.
+  await db.execute(sql`
+    UPDATE vrm_repair_tracker rt
+    SET dismissed = TRUE
+    FROM (
+      SELECT DISTINCT ON (LOWER(tech_ldap)) LOWER(tech_ldap) AS ldap_lower, decision
+      FROM vrm_rental_decisions
+      ORDER BY LOWER(tech_ldap), created_at DESC
+    ) latest_decision
+    WHERE rt.dismissed IS NOT TRUE
+      AND rt.tech_ldap IS NOT NULL
+      AND LOWER(rt.tech_ldap) = latest_decision.ldap_lower
+      AND (latest_decision.decision IS NULL OR LOWER(latest_decision.decision) <> 'denied')
   `);
 
   // Step 3: Fetch only truly denied decisions from the Decision Log
@@ -659,7 +701,8 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     .from(vrmRentalDecisions)
     .where(sql`LOWER(${vrmRentalDecisions.decision}) = 'denied'`);
 
-  // Step 4: Fetch existing Repair Tracker rows for dedup by decision ID and tech_ldap
+  // Step 4: Fetch ALL existing Repair Tracker rows (including dismissed) for dedup
+  // by decision ID and tech_ldap — dismissed rows still block re-import.
   const existingRows = await db
     .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap })
     .from(vrmRepairTracker);
@@ -685,9 +728,16 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   const tpmsRows = allNewLdaps.length
     ? await db.execute(sql`
-        SELECT UPPER(enterprise_id) AS ldap, truck_no, mobile_phone
-        FROM tpms_tech_profiles
-        WHERE UPPER(enterprise_id) IN (${sql.join(allNewLdaps.map((l) => sql`${l}`), sql`, `)})
+        SELECT
+          UPPER(t.enterprise_id) AS ldap,
+          t.truck_no,
+          t.mobile_phone,
+          t.tech_manager_name,
+          t.tech_manager_ldap_id,
+          mgr.mobile_phone AS manager_phone
+        FROM tpms_tech_profiles t
+        LEFT JOIN tpms_tech_profiles mgr ON UPPER(mgr.enterprise_id) = UPPER(t.tech_manager_ldap_id)
+        WHERE UPPER(t.enterprise_id) IN (${sql.join(allNewLdaps.map((l) => sql`${l}`), sql`, `)})
       `)
     : { rows: [] };
 
@@ -696,6 +746,12 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   );
   const phoneByLdap = new Map<string, string>(
     ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.mobile_phone as string]),
+  );
+  const mgrNameByLdap = new Map<string, string>(
+    ((tpmsRows as any).rows ?? []).filter((r: any) => r.tech_manager_name).map((r: any) => [r.ldap as string, r.tech_manager_name as string]),
+  );
+  const mgrPhoneByLdap = new Map<string, string>(
+    ((tpmsRows as any).rows ?? []).filter((r: any) => r.manager_phone).map((r: any) => [r.ldap as string, r.manager_phone as string]),
   );
 
   const rows: InsertVrmRepairTracker[] = newDecisions.map((d) => ({
@@ -709,6 +765,9 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     sourceDecisionId: d.id,
     notes: d.notes ?? null,
     byovEnrolled: d.byovEnrolled ?? false,
+    rentalReturned: "No",
+    supervisorName: mgrNameByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
+    supervisorPhone: mgrPhoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
   }));
 
   await db.insert(vrmRepairTracker).values(rows);
@@ -728,6 +787,22 @@ export async function updateRepairTrackerEntry(id: string, data: Partial<InsertV
   return row ?? null;
 }
 
-export async function deleteRepairTrackerEntry(id: string) {
-  await db.delete(vrmRepairTracker).where(eq(vrmRepairTracker.id, id));
+export async function softDeleteRepairTrackerEntry(id: string) {
+  await db
+    .update(vrmRepairTracker)
+    .set({ dismissed: true, updatedAt: new Date() })
+    .where(eq(vrmRepairTracker.id, id));
+}
+
+export async function listRepairTrackerActions(repairTrackerId: string) {
+  return db
+    .select()
+    .from(vrmRepairTrackerActions)
+    .where(eq(vrmRepairTrackerActions.repairTrackerId, repairTrackerId))
+    .orderBy(desc(vrmRepairTrackerActions.createdAt));
+}
+
+export async function addRepairTrackerAction(data: InsertVrmRepairTrackerAction) {
+  const [row] = await db.insert(vrmRepairTrackerActions).values(data).returning();
+  return row;
 }

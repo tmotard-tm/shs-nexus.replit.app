@@ -460,8 +460,24 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   deniedAt: timestamp("denied_at"),
   sourceDecisionId: varchar("source_decision_id"),
   sourceCheckId: varchar("source_check_id"),
+  dismissed: boolean("dismissed").default(false),
+  supervisorName: varchar("supervisor_name", { length: 255 }),
+  supervisorPhone: varchar("supervisor_phone", { length: 50 }),
+  techContacted: boolean("tech_contacted").default(false),
+  rentalReturned: varchar("rental_returned", { length: 10 }),
+  rentalReturnDate: date("rental_return_date"),
+  routeCleared: boolean("route_cleared").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const vrmRepairTrackerActions = pgTable("vrm_repair_tracker_actions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  repairTrackerId: text("repair_tracker_id").notNull(),
+  actionType: varchar("action_type", { length: 50 }).notNull(),
+  notes: text("notes"),
+  performedByName: varchar("performed_by_name", { length: 255 }).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const insertVrmRepairTrackerSchema = createInsertSchema(vrmRepairTracker).omit({
@@ -471,3 +487,10 @@ export const insertVrmRepairTrackerSchema = createInsertSchema(vrmRepairTracker)
 });
 export type VrmRepairTracker = typeof vrmRepairTracker.$inferSelect;
 export type InsertVrmRepairTracker = z.infer<typeof insertVrmRepairTrackerSchema>;
+
+export const insertVrmRepairTrackerActionSchema = createInsertSchema(vrmRepairTrackerActions).omit({
+  id: true,
+  createdAt: true,
+});
+export type VrmRepairTrackerAction = typeof vrmRepairTrackerActions.$inferSelect;
+export type InsertVrmRepairTrackerAction = z.infer<typeof insertVrmRepairTrackerActionSchema>;

@@ -1,0 +1,117 @@
+This is a significant change to the Rental Repair Tracker. Only these files should be modified: RentalRepairTracker.tsx, server/vrm/storage.ts, server/vrm/routes.ts, server/vrm/init-schema.ts, shared/vrm-schema.ts. Do NOT change shared/fleet-scope-schema.ts. Do NOT change any Fleet Scope pages. Do NOT drop or recreate any existing tables.
+Part 2: Repair Tracker — Self-Contained Action Log, New Fields, Panel Redesign
+1. New database table: vrm_repair_tracker_actions
+Create a new table vrm_repair_tracker_actions in shared/vrm-schema.ts and server/vrm/init-schema.ts (use CREATE TABLE IF NOT EXISTS):
+
+id — UUID primary key, default gen_random_uuid()
+repair_tracker_id — text, NOT NULL, foreign key references vrm_repair_tracker.id
+action_type — varchar(50), NOT NULL
+notes — text, nullable
+performed_by_name — varchar(255), NOT NULL
+created_at — timestamp, default now()
+
+2. New columns on vrm_repair_tracker
+Add these columns via ALTER TABLE ADD COLUMN IF NOT EXISTS in server/vrm/init-schema.ts and in the schema definition in shared/vrm-schema.ts:
+
+supervisor_name — varchar(255), nullable
+supervisor_phone — varchar(50), nullable
+tech_contacted — boolean, default false
+rental_returned — varchar(10), nullable (values: "Yes", "No", "N/A")
+rental_return_date — date, nullable
+route_cleared — boolean, default false
+
+3. New API endpoints
+Add to server/vrm/routes.ts:
+
+GET /api/vrm/repair-tracker/:id/actions — returns all actions for a repair tracker entry, ordered by created_at descending
+POST /api/vrm/repair-tracker/:id/actions — creates a new action. Body: { actionType, notes, performedByName }. Returns the created action.
+
+Add corresponding storage functions in server/vrm/storage.ts.
+4. Update the PATCH and POST endpoints
+Make sure PATCH /api/vrm/repair-tracker/:id and POST /api/vrm/repair-tracker accept the new fields: supervisorName, supervisorPhone, techContacted, rentalReturned, rentalReturnDate, routeCleared. These should flow through automatically if the insert schema picks them up from the table definition.
+5. Redesign the side panel in RentalRepairTracker.tsx
+Replace the current split between DenialEntryPanel and ManualEntryPanel with a single unified panel for all entries. The panel layout from top to bottom:
+Header: Tech name + LDAP + denial badge (if applicable)
+Section: Tech & Vehicle Info
+
+LDAP (editable text)
+Truck Number (editable text)
+Tech Name (editable text)
+Tech Phone (editable text)
+
+Section: Supervisor
+
+Supervisor Name (editable text)
+Supervisor Phone (editable text)
+
+Section: Repair Shop
+
+Repair Shop Address (editable text)
+Repair Shop Phone (editable text)
+
+Section: Status
+
+Shop Status dropdown (MAIN_STATUSES — unchanged)
+Sub-Status dropdown (cascading — unchanged)
+Van Status dropdown (On Road / Off Road — unchanged)
+
+Section: Tracking
+
+Tech Contacted — Yes / No toggle
+Rental Returned — three-option selector: Yes / No / N/A
+If "Yes" is selected, show a Return Date date input below it
+Route Cleared — Yes / No toggle
+BYOV Enrolled — Yes / No toggle (saves to vrm_repair_tracker.byov_enrolled directly, NOT to vrm_rental_decisions)
+
+Section: Action Log
+
+Fetches from GET /api/vrm/repair-tracker/:id/actions
+List of existing actions: each shows action type badge, notes, performed by, timestamp
+"+ Add Action" button that expands an inline form:
+
+Action Type dropdown with options: "Called Tech", "Tech Called In", "Called Shop", "Shop Called In", "Sent Text", "Updated Status", "Escalated", "Other"
+Notes textarea
+Performed By text input
+"Log Action" and "Cancel" buttons
+
+
+Posts to POST /api/vrm/repair-tracker/:id/actions
+
+Section: Decision Summary (only if sourceDecisionId exists)
+
+Read-only section at the bottom showing: Daily Net, Recommendation, Scorecard, Tenure, Decided By
+Fetched from GET /api/vrm/profitability/log/:id
+If no sourceDecisionId, this section is not shown at all
+
+Footer: Save Changes button + Delete button
+
+Save Changes calls PATCH /api/vrm/repair-tracker/:id with ALL fields from the panel (tech info, supervisor, shop, statuses, tracking toggles)
+Delete calls the existing soft-delete endpoint
+
+Remove the freeform Notes textarea from the panel. Notes are now entered through the Action Log only.
+Remove the Outreach Tracking section entirely (SMS Sent, Response fields). The "Tech Contacted" toggle replaces the need for SMS tracking.
+6. Update the table columns in RentalRepairTracker.tsx
+The table columns should be (in order):
+
+LDAP
+Tech Name
+Tech Phone
+Truck #
+Repair Shop
+Repair Phone
+Denied Date
+Shop Status (with sub-status below)
+Van Status
+Tech Contacted (Yes/No)
+BYOV
+Rental Returned (Yes/No/N/A, with return date below if Yes)
+Route Cleared (Yes/No)
+Supervisor
+Sup. Phone
+Last Action (shows the most recent action log entry's notes, truncated — replaces the old "Notes" column)
+
+7. Update the import-denied sync
+In importDeniedToRepairTracker() in server/vrm/storage.ts, when creating new repair tracker entries from denied decisions, set rental_returned to "No" by default (since they were denied, they had a rental that needs to be returned). For manually added entries, the default should be "N/A".
+8. Query update for last action
+Update listRepairTracker() in server/vrm/storage.ts to include a subquery or LEFT JOIN that fetches the most recent action's notes from vrm_repair_tracker_actions for each entry. Return it as lastActionNotes and lastActionAt in the response.
+Show me exactly what you changed for each numbered item.

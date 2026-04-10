@@ -376,6 +376,25 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS source_check_id VARCHAR;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_status VARCHAR(50);`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS byov_enrolled BOOLEAN NOT NULL DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS dismissed BOOLEAN DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS supervisor_name VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS supervisor_phone VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_contacted BOOLEAN DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS rental_returned VARCHAR(10);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS rental_return_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS route_cleared BOOLEAN DEFAULT FALSE;`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_repair_tracker_actions (
+      id                  VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      repair_tracker_id   TEXT NOT NULL REFERENCES vrm_repair_tracker(id),
+      action_type         VARCHAR(50) NOT NULL,
+      notes               TEXT,
+      performed_by_name   VARCHAR(255) NOT NULL,
+      created_at          TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_actions_tracker_idx ON vrm_repair_tracker_actions(repair_tracker_id);`);
 
   console.log("[VRM] Schema initialised");
 }

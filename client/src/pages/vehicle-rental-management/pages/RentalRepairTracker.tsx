@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock, Download } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -25,11 +25,18 @@ interface RepairTrackerEntry {
   deniedAt: string | null;
   sourceDecisionId: string | null;
   sourceCheckId: string | null;
+  supervisorName: string | null;
+  supervisorPhone: string | null;
+  techContacted: boolean;
+  rentalReturned: string | null;
+  rentalReturnDate: string | null;
+  routeCleared: boolean;
   createdAt: string;
   updatedAt: string;
-  returnedRental: boolean | null;
-  rentalReturnDate: string | null;
-  decisionByovEnrolled: boolean | null;
+  lastActionNotes: string | null;
+  lastActionAt: string | null;
+  tpmsManagerName: string | null;
+  tpmsManagerPhone: string | null;
 }
 
 interface DecisionRow {
@@ -43,34 +50,31 @@ interface DecisionRow {
   notes: string | null;
   scorecardScore: string | null;
   tenureMonths: number | null;
-  smsSentAt: string | null;
-  smsResponseStatus: string | null;
-  byovEnrolled: boolean;
-  returnedRental: boolean;
-  rentalReturnDate: string | null;
   createdAt: string;
 }
 
-interface DecisionAction {
+interface TrackerAction {
   id: string;
-  decisionId: string;
+  repairTrackerId: string;
   actionType: string;
   notes: string | null;
-  performedByName: string | null;
+  performedByName: string;
   createdAt: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TECH_STATUSES = ["On Road", "Off Road", "Route Canceled"] as const;
+const TECH_STATUSES = ["On Road", "Off Road"] as const;
 
-const ACTION_TYPE_LABELS: Record<string, string> = {
-  text_sent: "Text Sent",
-  call_completed: "Call Completed",
-  carl_escalated: "Escalated to Carl",
-  epv_issued: "EPV Issued",
-  byov_enrolled: "BYOV Enrolled",
-  exception_opened: "Exception Opened",
+const RT_ACTION_TYPE_LABELS: Record<string, string> = {
+  called_tech: "Called Tech",
+  tech_called_in: "Tech Called In",
+  called_shop: "Called Shop",
+  shop_called_in: "Shop Called In",
+  sent_text: "Sent Text",
+  updated_status: "Updated Status",
+  escalated: "Escalated",
+  other: "Other",
 };
 
 // ─── Status badge colour map ──────────────────────────────────────────────────
@@ -236,22 +240,82 @@ function SectionHeading({ children, style }: { children: React.ReactNode; style?
   );
 }
 
-// ─── RepairTrackerFields — shared repair-tracker-specific form section ─────────
+// ─── RepairForm type ──────────────────────────────────────────────────────────
 
-interface RepairTrackerFieldsProps {
-  form: RepairForm;
-  setForm: React.Dispatch<React.SetStateAction<RepairForm>>;
-  isEdit: boolean;
-  saveMutation: { mutate: () => void; isPending: boolean };
-  deleteMutation?: { mutate: () => void; isPending: boolean };
-  sourceDecisionId?: string | null;
+interface RepairForm {
+  techLdap: string;
+  truckNumber: string;
+  techName: string;
+  techPhone: string;
+  supervisorName: string;
+  supervisorPhone: string;
+  repairShopAddress: string;
+  repairShopPhone: string;
+  mainStatus: string;
+  subStatus: string;
+  techStatus: string;
+  techContacted: boolean;
+  rentalReturned: string;
+  rentalReturnDate: string;
+  routeCleared: boolean;
+  byovEnrolled: boolean;
 }
 
-function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutation, sourceDecisionId }: RepairTrackerFieldsProps) {
-  const subOptions: readonly string[] =
-    form.mainStatus && MAIN_STATUSES.includes(form.mainStatus as MainStatus)
-      ? SUB_STATUSES[form.mainStatus as MainStatus]
-      : [];
+function entryToForm(entry: RepairTrackerEntry): RepairForm {
+  return {
+    techLdap: entry.techLdap ?? "",
+    truckNumber: entry.truckNumber ?? "",
+    techName: entry.techName ?? "",
+    techPhone: entry.techPhone ?? "",
+    supervisorName: entry.supervisorName ?? "",
+    supervisorPhone: entry.supervisorPhone ?? "",
+    repairShopAddress: entry.repairShopAddress ?? "",
+    repairShopPhone: entry.repairShopPhone ?? "",
+    mainStatus: entry.mainStatus ?? "",
+    subStatus: entry.subStatus ?? "",
+    techStatus: entry.techStatus ?? "",
+    techContacted: entry.techContacted ?? false,
+    rentalReturned: entry.rentalReturned ?? "N/A",
+    rentalReturnDate: entry.rentalReturnDate ?? "",
+    routeCleared: entry.routeCleared ?? false,
+    byovEnrolled: entry.byovEnrolled ?? false,
+  };
+}
+
+const EMPTY_FORM: RepairForm = {
+  techLdap: "",
+  truckNumber: "",
+  techName: "",
+  techPhone: "",
+  supervisorName: "",
+  supervisorPhone: "",
+  repairShopAddress: "",
+  repairShopPhone: "",
+  mainStatus: "Decision Pending",
+  subStatus: "",
+  techStatus: "",
+  techContacted: false,
+  rentalReturned: "N/A",
+  rentalReturnDate: "",
+  routeCleared: false,
+  byovEnrolled: false,
+};
+
+// ─── Unified Side Panel ───────────────────────────────────────────────────────
+
+function UnifiedPanel({
+  entry,
+  onClose,
+  onSaved,
+}: {
+  entry: RepairTrackerEntry | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const isEdit = !!entry;
+  const [form, setForm] = useState<RepairForm>(entry ? entryToForm(entry) : { ...EMPTY_FORM });
 
   const set = useCallback((field: keyof RepairForm, val: string | boolean) => {
     if (field === "mainStatus") {
@@ -259,7 +323,12 @@ function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutati
     } else {
       setForm((f) => ({ ...f, [field]: val }));
     }
-  }, [setForm]);
+  }, []);
+
+  const subOptions: readonly string[] =
+    form.mainStatus && MAIN_STATUSES.includes(form.mainStatus as MainStatus)
+      ? SUB_STATUSES[form.mainStatus as MainStatus]
+      : [];
 
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
     fontFamily: fonts.dmSans,
@@ -274,370 +343,95 @@ function RepairTrackerFields({ form, setForm, isEdit, saveMutation, deleteMutati
     transition: "all 120ms",
   });
 
-  return (
-    <>
-      <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-        Tech &amp; Vehicle Info
-      </SectionHeading>
+  const threeOptionStyle = (active: boolean): React.CSSProperties => ({
+    fontFamily: fonts.dmSans,
+    fontWeight: 500,
+    fontSize: 12,
+    padding: "4px 14px",
+    borderRadius: 6,
+    cursor: "pointer",
+    border: `1px solid ${active ? colors.accent : colors.rule}`,
+    backgroundColor: active ? colors.accent : "transparent",
+    color: active ? "#FFFFFF" : colors.inkSoft,
+    transition: "all 120ms",
+  });
 
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>LDAP</label>
-        <input
-          type="text"
-          value={form.techLdap}
-          onChange={(e) => set("techLdap", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
+  const hasDecision = isEdit && entry?.sourceDecisionId;
+  const decisionId = entry?.sourceDecisionId;
 
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Truck Number</label>
-        <input
-          type="text"
-          value={form.truckNumber}
-          onChange={(e) => set("truckNumber", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Tech Name</label>
-        <input
-          type="text"
-          value={form.techName}
-          onChange={(e) => set("techName", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Tech Phone</label>
-        <input
-          type="text"
-          value={form.techPhone}
-          onChange={(e) => set("techPhone", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
-
-      <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-        Repair Shop
-      </SectionHeading>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Repair Shop Address</label>
-        <input
-          type="text"
-          value={form.repairShopAddress}
-          onChange={(e) => set("repairShopAddress", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Repair Shop Phone</label>
-        <input
-          type="text"
-          value={form.repairShopPhone}
-          onChange={(e) => set("repairShopPhone", e.target.value)}
-          style={INPUT_STYLE}
-        />
-      </div>
-
-      <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-        Status
-      </SectionHeading>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Main Status</label>
-        <select
-          value={form.mainStatus}
-          onChange={(e) => set("mainStatus", e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: "pointer" }}
-        >
-          <option value="">— select —</option>
-          {MAIN_STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Sub-Status</label>
-        <select
-          value={form.subStatus}
-          onChange={(e) => set("subStatus", e.target.value)}
-          disabled={!form.mainStatus || subOptions.length === 0}
-          style={{ ...INPUT_STYLE, cursor: form.mainStatus ? "pointer" : "default", opacity: form.mainStatus ? 1 : 0.5 }}
-        >
-          <option value="">— select —</option>
-          {subOptions.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-
-      <div style={{ marginBottom: 14 }}>
-        <label style={LABEL_STYLE}>Tech Status</label>
-        <select
-          value={form.techStatus}
-          onChange={(e) => set("techStatus", e.target.value)}
-          style={{ ...INPUT_STYLE, cursor: "pointer" }}
-        >
-          <option value="">— select —</option>
-          {TECH_STATUSES.map((s) => (
-            <option key={s} value={s}>{s}</option>
-          ))}
-        </select>
-      </div>
-
-      {!sourceDecisionId && (
-        <div style={{ ...ROW_STYLE, border: "none", marginBottom: 14, padding: 0 }}>
-          <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Enrolled</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            {([true, false] as boolean[]).map((val) => (
-              <button
-                key={String(val)}
-                type="button"
-                onClick={() => set("byovEnrolled", val)}
-                style={toggleBtnStyle(form.byovEnrolled === val)}
-              >
-                {val ? "Yes" : "No"}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-        Notes
-      </SectionHeading>
-      <div style={{ marginBottom: 14 }}>
-        <textarea
-          rows={3}
-          value={form.notes}
-          onChange={(e) => set("notes", e.target.value)}
-          style={{ ...INPUT_STYLE, resize: "vertical" }}
-        />
-      </div>
-
-      {/* Footer buttons */}
-      <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
-        <button
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-          style={{
-            flex: 1,
-            fontFamily: fonts.dmSans,
-            fontWeight: 600,
-            fontSize: 13,
-            color: "#fff",
-            backgroundColor: colors.accent,
-            border: "none",
-            borderRadius: 8,
-            padding: "10px 0",
-            cursor: "pointer",
-            opacity: saveMutation.isPending ? 0.7 : 1,
-          }}
-        >
-          {saveMutation.isPending ? "Saving…" : isEdit ? "Save Changes" : "Add Entry"}
-        </button>
-        {isEdit && deleteMutation && (
-          <button
-            onClick={() => {
-              if (window.confirm("Delete this entry?")) deleteMutation.mutate();
-            }}
-            disabled={deleteMutation.isPending}
-            style={{
-              fontFamily: fonts.dmSans,
-              fontWeight: 600,
-              fontSize: 13,
-              color: colors.red,
-              backgroundColor: "#FEF2F2",
-              border: "none",
-              borderRadius: 8,
-              padding: "10px 14px",
-              cursor: "pointer",
-            }}
-          >
-            <Trash2 size={15} />
-          </button>
-        )}
-      </div>
-    </>
-  );
-}
-
-// ─── RepairForm type ──────────────────────────────────────────────────────────
-
-interface RepairForm {
-  techLdap: string;
-  truckNumber: string;
-  techName: string;
-  techPhone: string;
-  repairShopAddress: string;
-  repairShopPhone: string;
-  mainStatus: string;
-  subStatus: string;
-  techStatus: string;
-  byovEnrolled: boolean;
-  notes: string;
-}
-
-function entryToForm(entry: RepairTrackerEntry): RepairForm {
-  return {
-    techLdap: entry.techLdap ?? "",
-    truckNumber: entry.truckNumber ?? "",
-    techName: entry.techName ?? "",
-    techPhone: entry.techPhone ?? "",
-    repairShopAddress: entry.repairShopAddress ?? "",
-    repairShopPhone: entry.repairShopPhone ?? "",
-    mainStatus: entry.mainStatus ?? "",
-    subStatus: entry.subStatus ?? "",
-    techStatus: entry.techStatus ?? "",
-    byovEnrolled: entry.byovEnrolled ?? false,
-    notes: entry.notes ?? "",
-  };
-}
-
-const EMPTY_FORM: RepairForm = {
-  techLdap: "",
-  truckNumber: "",
-  techName: "",
-  techPhone: "",
-  repairShopAddress: "",
-  repairShopPhone: "",
-  mainStatus: "Decision Pending",
-  subStatus: "",
-  techStatus: "",
-  byovEnrolled: false,
-  notes: "",
-};
-
-// ─── Side Panel for denial-sourced rows (full detail) ─────────────────────────
-
-function DenialEntryPanel({
-  entry,
-  onClose,
-  onSaved,
-}: {
-  entry: RepairTrackerEntry;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const [form, setForm] = useState<RepairForm>(entryToForm(entry));
-
-  const decisionId = entry.sourceDecisionId!;
-
-  const { data: decision, isLoading: decisionLoading } = useQuery<DecisionRow>({
+  const { data: decision } = useQuery<DecisionRow>({
     queryKey: ["/api/vrm/profitability/log", decisionId],
     queryFn: async () => {
       const r = await fetch(`/api/vrm/profitability/log/${decisionId}`);
       if (!r.ok) throw new Error("Failed to load decision");
       return r.json();
     },
+    enabled: !!hasDecision,
   });
 
-  const { data: actionsData } = useQuery<{ rows: DecisionAction[] }>({
-    queryKey: ["/api/vrm/profitability/log", decisionId, "actions"],
+  const { data: actionsData, isLoading: actionsLoading } = useQuery<TrackerAction[]>({
+    queryKey: ["/api/vrm/repair-tracker", entry?.id, "actions"],
     queryFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decisionId}/actions`);
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/actions`);
       if (!r.ok) throw new Error("Failed to load actions");
       return r.json();
     },
-    enabled: !!decision,
+    enabled: isEdit,
   });
-  const actionLog = actionsData?.rows ?? [];
+  const actionLog = actionsData ?? [];
 
-  // Outreach tracking state — synced from decision once loaded
-  const [smsSentAt, setSmsSentAt] = useState<string>("");
-  const [smsResponseStatus, setSmsResponseStatus] = useState<string>("");
-  const [byovEnrolledDecision, setByovEnrolledDecision] = useState<boolean>(false);
-  const [returnedRental, setReturnedRental] = useState<boolean>(false);
-  const [rentalReturnDate, setRentalReturnDate] = useState<string>("");
-  const [outreachSaved, setOutreachSaved] = useState(false);
-  const [outreachInit, setOutreachInit] = useState(false);
-
-  // Once decision loads, initialise outreach state (use effect to avoid setState during render)
-  useEffect(() => {
-    if (decision && !outreachInit) {
-      setSmsSentAt(decision.smsSentAt ? decision.smsSentAt.split("T")[0] : "");
-      setSmsResponseStatus(decision.smsResponseStatus ?? "");
-      setByovEnrolledDecision(decision.byovEnrolled);
-      setReturnedRental(decision.returnedRental);
-      setRentalReturnDate(decision.rentalReturnDate ?? "");
-      setOutreachInit(true);
-    }
-  }, [decision, outreachInit]);
-
-  // Action log form state
   const [showAddAction, setShowAddAction] = useState(false);
-  const [actionType, setActionType] = useState("text_sent");
+  const [actionType, setActionType] = useState("called_tech");
   const [actionNotes, setActionNotes] = useState("");
   const [actionPerformer, setActionPerformer] = useState("");
 
-  const trackingMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decisionId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smsSentAt: smsSentAt || null,
-          smsResponseStatus: smsResponseStatus || null,
-          byovEnrolled: byovEnrolledDecision,
-          returnedRental,
-          rentalReturnDate: rentalReturnDate || null,
-        }),
-      });
-      if (!r.ok) throw new Error("Failed to save outreach");
-      return r.json();
-    },
-    onSuccess: () => {
-      setOutreachSaved(true);
-      setTimeout(() => setOutreachSaved(false), 2000);
-      qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
-    },
-  });
-
   const addActionMutation = useMutation({
     mutationFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decisionId}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actionType, notes: actionNotes || null, performedByName: actionPerformer }),
+      const r = await apiRequest("POST", `/api/vrm/repair-tracker/${entry!.id}/actions`, {
+        actionType,
+        notes: actionNotes || null,
+        performedByName: actionPerformer,
       });
-      if (!r.ok) throw new Error("Failed to add action");
       return r.json();
     },
     onSuccess: () => {
       setShowAddAction(false);
-      setActionType("text_sent");
+      setActionType("called_tech");
       setActionNotes("");
       setActionPerformer("");
-      qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log", decisionId, "actions"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "actions"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
     },
   });
 
   const saveMutation = useMutation({
-    mutationFn: async () =>
-      apiRequest("PATCH", `/api/vrm/repair-tracker/${entry.id}`, {
+    mutationFn: async () => {
+      const payload = {
         techLdap: form.techLdap.trim() || null,
         truckNumber: form.truckNumber.trim() || null,
         techName: form.techName.trim() || null,
         techPhone: form.techPhone.trim() || null,
+        supervisorName: form.supervisorName.trim() || null,
+        supervisorPhone: form.supervisorPhone.trim() || null,
         repairShopAddress: form.repairShopAddress.trim() || null,
         repairShopPhone: form.repairShopPhone.trim() || null,
         mainStatus: form.mainStatus || null,
         subStatus: form.subStatus || null,
         techStatus: form.techStatus || null,
+        techContacted: form.techContacted,
+        rentalReturned: form.rentalReturned || null,
+        rentalReturnDate: form.rentalReturned === "Yes" ? (form.rentalReturnDate || null) : null,
+        routeCleared: form.routeCleared,
         byovEnrolled: form.byovEnrolled,
-        notes: form.notes.trim() || null,
-      }),
+      };
+      if (isEdit) {
+        return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
+      }
+      return apiRequest("POST", "/api/vrm/repair-tracker", payload);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
-      toast({ title: "Entry updated" });
+      toast({ title: isEdit ? "Entry updated" : "Entry created" });
       onSaved();
     },
     onError: (e: any) => {
@@ -646,7 +440,7 @@ function DenialEntryPanel({
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async () => apiRequest("DELETE", `/api/vrm/repair-tracker/${entry.id}`),
+    mutationFn: async () => apiRequest("DELETE", `/api/vrm/repair-tracker/${entry!.id}`),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
       toast({ title: "Entry deleted" });
@@ -656,31 +450,6 @@ function DenialEntryPanel({
       toast({ title: "Error", description: e.message, variant: "destructive" });
     },
   });
-
-  const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
-    fontFamily: fonts.dmSans,
-    fontWeight: 500,
-    fontSize: 13,
-    padding: "5px 16px",
-    borderRadius: 6,
-    cursor: "pointer",
-    border: `1px solid ${active ? colors.accent : colors.rule}`,
-    backgroundColor: active ? colors.accent : "transparent",
-    color: active ? "#FFFFFF" : colors.inkSoft,
-    transition: "all 120ms",
-  });
-
-  const inputStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans,
-    fontSize: 13,
-    color: colors.ink,
-    backgroundColor: colors.surface,
-    border: `1px solid ${colors.rule}`,
-    borderRadius: 8,
-    padding: "6px 10px",
-    width: "100%",
-    outline: "none",
-  };
 
   const labelStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
@@ -720,10 +489,15 @@ function DenialEntryPanel({
         >
           <div>
             <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-              {entry.techName ?? entry.techLdap ?? "Repair Entry"}
+              {isEdit ? (entry.techName ?? entry.techLdap ?? "Repair Entry") : "Add Entry"}
             </h2>
-            {entry.techLdap && (
+            {isEdit && entry.techLdap && (
               <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{entry.techLdap}</span>
+            )}
+            {isEdit && entry.sourceDecisionId && (
+              <span style={{ display: "inline-block", marginLeft: 8, fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: colors.red, backgroundColor: colors.redLight, padding: "2px 8px", borderRadius: 5 }}>
+                Denied
+              </span>
             )}
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
@@ -733,214 +507,275 @@ function DenialEntryPanel({
 
         {/* Body */}
         <div style={{ flex: 1, padding: "0 24px 40px", overflowY: "auto" }}>
-          {decisionLoading ? (
-            <div style={{ padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
-              Loading decision data…
+          {/* ── Tech & Vehicle Info ── */}
+          <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Tech &amp; Vehicle Info
+          </SectionHeading>
+
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>LDAP</label>
+            <input type="text" value={form.techLdap} onChange={(e) => set("techLdap", e.target.value)} style={INPUT_STYLE} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Truck Number</label>
+            <input type="text" value={form.truckNumber} onChange={(e) => set("truckNumber", e.target.value)} style={INPUT_STYLE} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Tech Name</label>
+            <input type="text" value={form.techName} onChange={(e) => set("techName", e.target.value)} style={INPUT_STYLE} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Tech Phone</label>
+            <input type="text" value={form.techPhone} onChange={(e) => set("techPhone", e.target.value)} style={INPUT_STYLE} />
+          </div>
+
+          {/* ── Supervisor ── */}
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Supervisor
+          </SectionHeading>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Supervisor Name</label>
+            <input type="text" value={form.supervisorName} onChange={(e) => set("supervisorName", e.target.value)} placeholder={entry?.tpmsManagerName ?? ""} style={INPUT_STYLE} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Supervisor Phone</label>
+            <input type="text" value={form.supervisorPhone} onChange={(e) => set("supervisorPhone", e.target.value)} placeholder={entry?.tpmsManagerPhone ?? ""} style={INPUT_STYLE} />
+          </div>
+
+          {/* ── Repair Shop ── */}
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Repair Shop
+          </SectionHeading>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Repair Shop Address</label>
+            <input type="text" value={form.repairShopAddress} onChange={(e) => set("repairShopAddress", e.target.value)} style={INPUT_STYLE} />
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Repair Shop Phone</label>
+            <input type="text" value={form.repairShopPhone} onChange={(e) => set("repairShopPhone", e.target.value)} style={INPUT_STYLE} />
+          </div>
+
+          {/* ── Status ── */}
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Status
+          </SectionHeading>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Shop Status</label>
+            <select value={form.mainStatus} onChange={(e) => set("mainStatus", e.target.value)} style={{ ...INPUT_STYLE, cursor: "pointer" }}>
+              <option value="">— select —</option>
+              {MAIN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Sub-Status</label>
+            <select
+              value={form.subStatus}
+              onChange={(e) => set("subStatus", e.target.value)}
+              disabled={!form.mainStatus || subOptions.length === 0}
+              style={{ ...INPUT_STYLE, cursor: form.mainStatus ? "pointer" : "default", opacity: form.mainStatus ? 1 : 0.5 }}
+            >
+              <option value="">— select —</option>
+              {subOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+          <div style={{ marginBottom: 14 }}>
+            <label style={LABEL_STYLE}>Van Status</label>
+            <select value={form.techStatus} onChange={(e) => set("techStatus", e.target.value)} style={{ ...INPUT_STYLE, cursor: "pointer" }}>
+              <option value="">— select —</option>
+              {TECH_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+          </div>
+
+          {/* ── Tracking ── */}
+          <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Tracking
+          </SectionHeading>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>Tech Contacted</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {([true, false] as boolean[]).map((val) => (
+                <button key={String(val)} type="button" onClick={() => set("techContacted", val)} style={toggleBtnStyle(form.techContacted === val)}>
+                  {val ? "Yes" : "No"}
+                </button>
+              ))}
             </div>
-          ) : decision ? (
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>Rental Returned</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["Yes", "No", "N/A"].map((val) => (
+                <button key={val} type="button" onClick={() => set("rentalReturned", val)} style={threeOptionStyle(form.rentalReturned === val)}>
+                  {val}
+                </button>
+              ))}
+            </div>
+            {form.rentalReturned === "Yes" && (
+              <div style={{ marginTop: 8 }}>
+                <label style={{ ...LABEL_STYLE, marginBottom: 4 }}>Return Date</label>
+                <input type="date" value={form.rentalReturnDate} onChange={(e) => set("rentalReturnDate", e.target.value)} style={INPUT_STYLE} />
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>Route Cleared</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {([true, false] as boolean[]).map((val) => (
+                <button key={String(val)} type="button" onClick={() => set("routeCleared", val)} style={toggleBtnStyle(form.routeCleared === val)}>
+                  {val ? "Yes" : "No"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Enrolled</div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {([true, false] as boolean[]).map((val) => (
+                <button key={String(val)} type="button" onClick={() => set("byovEnrolled", val)} style={toggleBtnStyle(form.byovEnrolled === val)}>
+                  {val ? "Yes" : "No"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* ── Action Log (edit mode only) ── */}
+          {isEdit && (
             <>
-              {/* ── Outreach Tracking ─────────────────────────── */}
-              <div style={{ marginTop: 20, marginBottom: 4 }}>
-                <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-                  Outreach Tracking
-                </h3>
-              </div>
+              <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+                Action Log
+              </SectionHeading>
 
-              <div style={ROW_STYLE}>
-                <div style={labelStyle}>SMS Sent</div>
-                <input type="date" value={smsSentAt} onChange={(e) => setSmsSentAt(e.target.value)} style={inputStyle} />
-              </div>
-
-              <div style={ROW_STYLE}>
-                <div style={labelStyle}>Response</div>
-                <input
-                  type="text"
-                  value={smsResponseStatus}
-                  onChange={(e) => setSmsResponseStatus(e.target.value)}
-                  placeholder="Enter response…"
-                  style={inputStyle}
-                />
-              </div>
-
-              <div style={ROW_STYLE}>
-                <div style={labelStyle}>Enrolled in BYOV</div>
-                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                  {([true, false] as boolean[]).map((val) => (
-                    <button key={String(val)} type="button" onClick={() => setByovEnrolledDecision(val)} style={toggleBtnStyle(byovEnrolledDecision === val)}>
-                      {val ? "Yes" : "No"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={ROW_STYLE}>
-                <div style={labelStyle}>Returned Rental</div>
-                <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-                  {([true, false] as boolean[]).map((val) => (
-                    <button key={String(val)} type="button" onClick={() => setReturnedRental(val)} style={toggleBtnStyle(returnedRental === val)}>
-                      {val ? "Yes" : "No"}
-                    </button>
-                  ))}
-                </div>
-                {returnedRental && (
-                  <div style={{ marginTop: 8 }}>
-                    <div style={{ ...labelStyle, marginBottom: 4 }}>Return Date</div>
-                    <input type="date" value={rentalReturnDate} onChange={(e) => setRentalReturnDate(e.target.value)} style={inputStyle} />
-                  </div>
-                )}
-              </div>
-
-              <div style={{ marginTop: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                  {actionsLoading ? "Loading…" : `${actionLog.length} action${actionLog.length !== 1 ? "s" : ""}`}
+                </span>
                 <button
-                  onClick={() => trackingMutation.mutate()}
-                  disabled={trackingMutation.isPending}
+                  onClick={() => setShowAddAction((v) => !v)}
                   style={{
                     fontFamily: fonts.dmSans,
                     fontWeight: 500,
-                    fontSize: 13,
-                    color: "#FFFFFF",
-                    backgroundColor: outreachSaved ? colors.green : colors.accent,
-                    border: "none",
-                    borderRadius: 8,
-                    padding: "8px 20px",
-                    cursor: trackingMutation.isPending ? "not-allowed" : "pointer",
-                    opacity: trackingMutation.isPending ? 0.7 : 1,
-                    transition: "background-color 200ms",
+                    fontSize: 12,
+                    color: colors.accent,
+                    backgroundColor: "#EFF4FF",
+                    border: "1px solid #C7D7F9",
+                    borderRadius: 6,
+                    padding: "4px 10px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 4,
                   }}
                 >
-                  {outreachSaved ? "Saved ✓" : trackingMutation.isPending ? "Saving…" : "Save Changes"}
+                  <Plus size={12} /> Add Action
                 </button>
               </div>
 
-              {/* ── Action Log ────────────────────────────────── */}
-              <div style={{ marginTop: 32 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-                    Action Log
-                  </h3>
-                  <button
-                    onClick={() => setShowAddAction((v) => !v)}
-                    style={{
-                      fontFamily: fonts.dmSans,
-                      fontWeight: 500,
-                      fontSize: 12,
-                      color: colors.accent,
-                      backgroundColor: "#EFF4FF",
-                      border: "1px solid #C7D7F9",
-                      borderRadius: 6,
-                      padding: "4px 10px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: 4,
-                    }}
-                  >
-                    <Plus size={12} /> Add Action
-                  </button>
-                </div>
-
-                {showAddAction && (
-                  <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                      <div>
-                        <div style={labelStyle}>Action Type</div>
-                        <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={NR_SELECT_STYLE}>
-                          {Object.entries(ACTION_TYPE_LABELS).map(([v, l]) => (
-                            <option key={v} value={v}>{l}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <div style={labelStyle}>Notes</div>
-                        <textarea
-                          value={actionNotes}
-                          onChange={(e) => setActionNotes(e.target.value)}
-                          placeholder="Optional notes…"
-                          rows={2}
-                          style={{ ...inputStyle, resize: "vertical" as any }}
-                        />
-                      </div>
-                      <div>
-                        <div style={labelStyle}>Performed By</div>
-                        <input
-                          type="text"
-                          value={actionPerformer}
-                          onChange={(e) => setActionPerformer(e.target.value)}
-                          placeholder="Your name"
-                          style={inputStyle}
-                        />
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button
-                          onClick={() => addActionMutation.mutate()}
-                          disabled={!actionPerformer.trim() || addActionMutation.isPending}
-                          style={{
-                            fontFamily: fonts.dmSans,
-                            fontWeight: 500,
-                            fontSize: 12,
-                            color: "#fff",
-                            backgroundColor: colors.accent,
-                            border: "none",
-                            borderRadius: 6,
-                            padding: "6px 14px",
-                            cursor: !actionPerformer.trim() || addActionMutation.isPending ? "not-allowed" : "pointer",
-                            opacity: !actionPerformer.trim() || addActionMutation.isPending ? 0.55 : 1,
-                          }}
-                        >
-                          {addActionMutation.isPending ? "Saving…" : "Log Action"}
-                        </button>
-                        <button
-                          onClick={() => setShowAddAction(false)}
-                          style={{
-                            fontFamily: fonts.dmSans,
-                            fontWeight: 500,
-                            fontSize: 12,
-                            color: colors.inkSoft,
-                            backgroundColor: "transparent",
-                            border: `1px solid ${colors.rule}`,
-                            borderRadius: 6,
-                            padding: "6px 12px",
-                            cursor: "pointer",
-                          }}
-                        >
-                          Cancel
-                        </button>
-                      </div>
+              {showAddAction && (
+                <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div>
+                      <div style={labelStyle}>Action Type</div>
+                      <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={NR_SELECT_STYLE}>
+                        {Object.entries(RT_ACTION_TYPE_LABELS).map(([v, l]) => (
+                          <option key={v} value={v}>{l}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Notes</div>
+                      <textarea
+                        value={actionNotes}
+                        onChange={(e) => setActionNotes(e.target.value)}
+                        placeholder="Optional notes…"
+                        rows={2}
+                        style={{ ...INPUT_STYLE, resize: "vertical" as any }}
+                      />
+                    </div>
+                    <div>
+                      <div style={labelStyle}>Performed By</div>
+                      <input
+                        type="text"
+                        value={actionPerformer}
+                        onChange={(e) => setActionPerformer(e.target.value)}
+                        placeholder="Your name"
+                        style={INPUT_STYLE}
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => addActionMutation.mutate()}
+                        disabled={!actionPerformer.trim() || addActionMutation.isPending}
+                        style={{
+                          fontFamily: fonts.dmSans,
+                          fontWeight: 500,
+                          fontSize: 12,
+                          color: "#fff",
+                          backgroundColor: colors.accent,
+                          border: "none",
+                          borderRadius: 6,
+                          padding: "6px 14px",
+                          cursor: !actionPerformer.trim() || addActionMutation.isPending ? "not-allowed" : "pointer",
+                          opacity: !actionPerformer.trim() || addActionMutation.isPending ? 0.55 : 1,
+                        }}
+                      >
+                        {addActionMutation.isPending ? "Saving…" : "Log Action"}
+                      </button>
+                      <button
+                        onClick={() => setShowAddAction(false)}
+                        style={{
+                          fontFamily: fonts.dmSans,
+                          fontWeight: 500,
+                          fontSize: 12,
+                          color: colors.inkSoft,
+                          backgroundColor: "transparent",
+                          border: `1px solid ${colors.rule}`,
+                          borderRadius: 6,
+                          padding: "6px 12px",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Cancel
+                      </button>
                     </div>
                   </div>
-                )}
+                </div>
+              )}
 
-                {actionLog.length === 0 ? (
-                  <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No actions logged yet.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {actionLog.map((a) => (
-                      <div key={a.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface }}>
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: a.notes ? 6 : 0 }}>
-                          <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.accent, backgroundColor: "#EFF4FF", padding: "2px 8px", borderRadius: 5 }}>
-                            {ACTION_TYPE_LABELS[a.actionType] ?? a.actionType}
+              {actionLog.length === 0 && !actionsLoading ? (
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No actions logged yet.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {actionLog.map((a) => (
+                    <div key={a.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: a.notes ? 6 : 0 }}>
+                        <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.accent, backgroundColor: "#EFF4FF", padding: "2px 8px", borderRadius: 5 }}>
+                          {RT_ACTION_TYPE_LABELS[a.actionType] ?? a.actionType}
+                        </span>
+                        <div style={{ display: "flex", alignItems: "center", gap: 4, color: colors.inkMuted }}>
+                          <Clock size={12} />
+                          <span style={{ fontFamily: fonts.dmSans, fontSize: 11 }}>
+                            {new Date(a.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
                           </span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4, color: colors.inkMuted }}>
-                            <Clock size={12} />
-                            <span style={{ fontFamily: fonts.dmSans, fontSize: 11 }}>
-                              {new Date(a.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                            </span>
-                          </div>
                         </div>
-                        {a.notes && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0" }}>{a.notes}</p>}
-                        {a.performedByName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {a.performedByName}</p>}
                       </div>
-                    ))}
-                  </div>
-                )}
-              </div>
+                      {a.notes && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0" }}>{a.notes}</p>}
+                      {a.performedByName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {a.performedByName}</p>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
 
-              {/* ── Decision Summary ──────────────────────────── */}
-              <div style={{ marginTop: 32, marginBottom: 4 }}>
-                <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-                  Decision Summary
-                </h3>
-              </div>
+          {/* ── Decision Summary (only if sourceDecisionId exists) ── */}
+          {hasDecision && decision && (
+            <>
+              <SectionHeading style={{ marginTop: 24, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+                Decision Summary
+              </SectionHeading>
               <div style={ROW_STYLE}>
                 <div style={labelStyle}>Daily Net (w/ $78)</div>
                 <span style={{ fontFamily: fonts.jetbrains, fontWeight: 600, fontSize: 14, color: decision.dailyNetWithRental != null ? (Number(decision.dailyNetWithRental) < 0 ? colors.red : colors.green) : colors.inkMuted }}>
@@ -968,155 +803,73 @@ function DenialEntryPanel({
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 14, color: colors.ink }}>{decision.decidedByName}</span>
               </div>
             </>
-          ) : null}
+          )}
 
-          {/* ── Repair Tracker Fields ─────────────────────── */}
-          <RepairTrackerFields
-            form={form}
-            setForm={setForm}
-            isEdit={true}
-            saveMutation={saveMutation}
-            deleteMutation={deleteMutation}
-            sourceDecisionId={entry.sourceDecisionId}
-          />
+          {/* ── Footer buttons ── */}
+          <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
+            <button
+              onClick={() => saveMutation.mutate()}
+              disabled={saveMutation.isPending}
+              style={{
+                flex: 1,
+                fontFamily: fonts.dmSans,
+                fontWeight: 600,
+                fontSize: 13,
+                color: "#fff",
+                backgroundColor: colors.accent,
+                border: "none",
+                borderRadius: 8,
+                padding: "10px 0",
+                cursor: "pointer",
+                opacity: saveMutation.isPending ? 0.7 : 1,
+              }}
+            >
+              {saveMutation.isPending ? "Saving…" : isEdit ? "Save Changes" : "Add Entry"}
+            </button>
+            {isEdit && (
+              <button
+                onClick={() => {
+                  if (window.confirm("Delete this entry?")) deleteMutation.mutate();
+                }}
+                disabled={deleteMutation.isPending}
+                style={{
+                  fontFamily: fonts.dmSans,
+                  fontWeight: 600,
+                  fontSize: 13,
+                  color: colors.red,
+                  backgroundColor: "#FEF2F2",
+                  border: "none",
+                  borderRadius: 8,
+                  padding: "10px 14px",
+                  cursor: "pointer",
+                }}
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
-}
-
-// ─── Side Panel for manually-added rows (repair fields only) ──────────────────
-
-function ManualEntryPanel({
-  entry,
-  onClose,
-  onSaved,
-}: {
-  entry: RepairTrackerEntry | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const { toast } = useToast();
-  const qc = useQueryClient();
-  const isEdit = !!entry;
-
-  const [form, setForm] = useState<RepairForm>(entry ? entryToForm(entry) : { ...EMPTY_FORM });
-
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      const payload = {
-        techLdap: form.techLdap.trim() || null,
-        truckNumber: form.truckNumber.trim() || null,
-        techName: form.techName.trim() || null,
-        techPhone: form.techPhone.trim() || null,
-        repairShopAddress: form.repairShopAddress.trim() || null,
-        repairShopPhone: form.repairShopPhone.trim() || null,
-        mainStatus: form.mainStatus || null,
-        subStatus: form.subStatus || null,
-        techStatus: form.techStatus || null,
-        byovEnrolled: form.byovEnrolled,
-        notes: form.notes.trim() || null,
-      };
-      if (isEdit) {
-        return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
-      }
-      return apiRequest("POST", "/api/vrm/repair-tracker", payload);
-    },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
-      toast({ title: isEdit ? "Entry updated" : "Entry created" });
-      onSaved();
-    },
-    onError: (e: any) => {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: async () => apiRequest("DELETE", `/api/vrm/repair-tracker/${entry!.id}`),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
-      toast({ title: "Entry deleted" });
-      onSaved();
-    },
-    onError: (e: any) => {
-      toast({ title: "Error", description: e.message, variant: "destructive" });
-    },
-  });
-
-  return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
-      <div style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.18)" }} onClick={onClose} />
-      <div
-        style={{
-          width: 480,
-          height: "100%",
-          backgroundColor: "#fff",
-          overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          boxShadow: "-4px 0 24px rgba(0,0,0,0.12)",
-          borderLeft: `1px solid ${colors.rule}`,
-        }}
-      >
-        {/* Header */}
-        <div
-          style={{
-            padding: "20px 24px 16px",
-            borderBottom: `1px solid ${colors.rule}`,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 15, color: colors.ink }}>
-            {isEdit ? "Edit Entry" : "Add Entry"}
-          </span>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
-            <X size={18} color={colors.inkMuted} />
-          </button>
-        </div>
-
-        {/* Body */}
-        <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
-          <RepairTrackerFields
-            form={form}
-            setForm={setForm}
-            isEdit={isEdit}
-            saveMutation={saveMutation}
-            deleteMutation={isEdit ? deleteMutation : undefined}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── EntryPanel dispatcher ────────────────────────────────────────────────────
-
-function EntryPanel({
-  entry,
-  onClose,
-  onSaved,
-}: {
-  entry: RepairTrackerEntry | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  if (entry && entry.sourceDecisionId) {
-    return <DenialEntryPanel entry={entry} onClose={onClose} onSaved={onSaved} />;
-  }
-  return <ManualEntryPanel entry={entry} onClose={onClose} onSaved={onSaved} />;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
+
+type SortColumn =
+  | "techLdap" | "techName" | "techPhone" | "truckNumber"
+  | "repairShopAddress" | "repairShopPhone" | "deniedAt"
+  | "mainStatus" | "techStatus" | "techContacted" | "byovEnrolled"
+  | "rentalReturned" | "routeCleared" | "supervisorName" | "supervisorPhone"
+  | "lastActionNotes";
 
 export default function RentalRepairTracker() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
+  const [sortColumn, setSortColumn] = useState<SortColumn>("deniedAt");
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
 
   const { data: entries = [], isLoading } = useQuery<RepairTrackerEntry[]>({
     queryKey: ["/api/vrm/repair-tracker"],
@@ -1141,6 +894,20 @@ export default function RentalRepairTracker() {
       toast({ title: "Sync failed", description: e.message, variant: "destructive" }),
   });
 
+  const handleSort = (col: SortColumn) => {
+    if (sortColumn === col) {
+      setSortDirection((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortColumn(col);
+      setSortDirection("asc");
+    }
+  };
+
+  const sortIndicator = (col: SortColumn) => {
+    if (sortColumn !== col) return null;
+    return <span style={{ marginLeft: 4 }}>{sortDirection === "asc" ? "▲" : "▼"}</span>;
+  };
+
   const filtered = entries.filter((e) => {
     if (!search.trim()) return true;
     const q = search.toLowerCase();
@@ -1149,6 +916,30 @@ export default function RentalRepairTracker() {
       (e.techName ?? "").toLowerCase().includes(q) ||
       (e.techLdap ?? "").toLowerCase().includes(q)
     );
+  });
+
+  const sorted = [...filtered].sort((a, b) => {
+    const dir = sortDirection === "asc" ? 1 : -1;
+    const col = sortColumn;
+
+    const valA = (a as any)[col];
+    const valB = (b as any)[col];
+
+    if (valA == null && valB == null) return 0;
+    if (valA == null) return 1;
+    if (valB == null) return -1;
+
+    if (typeof valA === "boolean" && typeof valB === "boolean") {
+      return valA === valB ? 0 : valA ? -dir : dir;
+    }
+
+    if (col === "deniedAt") {
+      const da = new Date(valA as string).getTime();
+      const db2 = new Date(valB as string).getTime();
+      return (da - db2) * dir;
+    }
+
+    return String(valA).localeCompare(String(valB)) * dir;
   });
 
   const thStyle: React.CSSProperties = {
@@ -1162,6 +953,8 @@ export default function RentalRepairTracker() {
     textAlign: "left",
     borderBottom: `1px solid ${colors.rule}`,
     whiteSpace: "nowrap",
+    cursor: "pointer",
+    userSelect: "none",
   };
 
   const tdStyle: React.CSSProperties = {
@@ -1171,6 +964,45 @@ export default function RentalRepairTracker() {
     padding: "11px 14px",
     borderBottom: `1px solid ${colors.rule}`,
     verticalAlign: "middle",
+  };
+
+  const boolBadge = (val: boolean | null | undefined) => {
+    const yes = !!val;
+    return (
+      <span style={{
+        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
+        color: yes ? "#FFFFFF" : "#FFFFFF",
+        backgroundColor: yes ? "#22C55E" : "#EF4444",
+        borderRadius: 6, padding: "3px 8px",
+        display: "inline-block", whiteSpace: "nowrap",
+      }}>
+        {yes ? "Yes" : "No"}
+      </span>
+    );
+  };
+
+  const rentalReturnedBadge = (val: string | null) => {
+    if (!val || val === "N/A") {
+      return (
+        <span style={{
+          fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
+          color: "#000000", backgroundColor: "#F5A623",
+          borderRadius: 6, padding: "3px 8px",
+          display: "inline-block", whiteSpace: "nowrap",
+        }}>N/A</span>
+      );
+    }
+    const yes = val === "Yes";
+    return (
+      <span style={{
+        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
+        color: "#FFFFFF", backgroundColor: yes ? "#22C55E" : "#EF4444",
+        borderRadius: 6, padding: "3px 8px",
+        display: "inline-block", whiteSpace: "nowrap",
+      }}>
+        {val}
+      </span>
+    );
   };
 
   return (
@@ -1211,6 +1043,57 @@ export default function RentalRepairTracker() {
               className={syncMutation.isPending ? "animate-spin" : ""}
             />
             {syncMutation.isPending ? "Syncing…" : "Sync Now"}
+          </button>
+          <button
+            onClick={() => {
+              const fmtDate = (v: string | null) => {
+                if (!v) return "";
+                const d = new Date(v);
+                if (isNaN(d.getTime())) return "";
+                return `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+              };
+              const boolStr = (v: boolean | null | undefined) => v ? "Yes" : "No";
+              const esc = (v: string) => {
+                if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
+                return v;
+              };
+              const headers = ["LDAP","Tech Name","Tech Phone","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
+              const rows = sorted.map((e) => [
+                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.truckNumber ?? "",
+                e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.deniedAt),
+                e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "",
+                boolStr(e.techContacted), boolStr(e.byovEnrolled),
+                e.rentalReturned ?? "N/A", fmtDate(e.rentalReturnDate),
+                boolStr(e.routeCleared), e.supervisorName ?? e.tpmsManagerName ?? "", e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
+                e.lastActionNotes ?? "", fmtDate(e.lastActionAt),
+              ].map(esc));
+              const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              const today = new Date();
+              a.href = url;
+              a.download = `rental_repair_tracker_${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}.csv`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 13,
+              color: colors.inkSoft,
+              backgroundColor: "#fff",
+              border: `1px solid ${colors.rule}`,
+              borderRadius: 8,
+              padding: "8px 14px",
+              cursor: "pointer",
+            }}
+          >
+            <Download size={14} />
+            Export CSV
           </button>
           <button
             onClick={() => setPanelEntry("new")}
@@ -1267,7 +1150,7 @@ export default function RentalRepairTracker() {
           backgroundColor: "#fff",
           border: `1px solid ${colors.rule}`,
           borderRadius: 10,
-          overflow: "hidden",
+          overflow: "auto",
         }}
       >
         {isLoading ? (
@@ -1282,23 +1165,27 @@ export default function RentalRepairTracker() {
           <table style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr style={{ backgroundColor: colors.surface }}>
-                <th style={thStyle}>LDAP</th>
-                <th style={thStyle}>Tech Name</th>
-                <th style={thStyle}>Tech Phone</th>
-                <th style={thStyle}>Truck #</th>
-                <th style={thStyle}>Repair Shop</th>
-                <th style={thStyle}>Repair Phone</th>
-                <th style={thStyle}>Denied Date</th>
-                <th style={thStyle}>Status</th>
-                <th style={thStyle}>Tech Status</th>
-                <th style={thStyle}>BYOV</th>
-                <th style={thStyle}>Rental Returned</th>
-                <th style={{ ...thStyle, maxWidth: 160 }}>Notes</th>
-                <th style={{ ...thStyle, width: 40 }}></th>
+                <th style={thStyle} onClick={() => handleSort("techLdap")}>LDAP{sortIndicator("techLdap")}</th>
+                <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
+                <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
+                <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
+                <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
+                <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
+                <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied Date{sortIndicator("deniedAt")}</th>
+                <th style={thStyle} onClick={() => handleSort("mainStatus")}>Shop Status{sortIndicator("mainStatus")}</th>
+                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techStatus")}>Van Status{sortIndicator("techStatus")}</th>
+                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techContacted")}>Tech Contacted{sortIndicator("techContacted")}</th>
+                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
+                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("rentalReturned")}>Rental Returned{sortIndicator("rentalReturned")}</th>
+                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("routeCleared")}>Route Cleared{sortIndicator("routeCleared")}</th>
+                <th style={thStyle} onClick={() => handleSort("supervisorName")}>Supervisor{sortIndicator("supervisorName")}</th>
+                <th style={thStyle} onClick={() => handleSort("supervisorPhone")}>Sup. Phone{sortIndicator("supervisorPhone")}</th>
+                <th style={{ ...thStyle, maxWidth: 180 }} onClick={() => handleSort("lastActionNotes")}>Last Action{sortIndicator("lastActionNotes")}</th>
+                <th style={{ ...thStyle, width: 40, cursor: "default" }}></th>
               </tr>
             </thead>
             <tbody>
-              {filtered.map((entry) => (
+              {sorted.map((entry) => (
                 <tr
                   key={entry.id}
                   onClick={() => setPanelEntry(entry)}
@@ -1339,34 +1226,36 @@ export default function RentalRepairTracker() {
                       )}
                     </div>
                   </td>
-                  <td style={tdStyle}>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
                     <TechStatusBadge status={entry.techStatus} />
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft }}>
-                    {entry.sourceDecisionId
-                      ? (entry.decisionByovEnrolled ?? entry.byovEnrolled) ? "Yes" : "No"
-                      : entry.byovEnrolled ? "Yes" : "No"}
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    {boolBadge(entry.techContacted)}
                   </td>
-                  <td style={{ ...tdStyle }}>
-                    {entry.sourceDecisionId === null ? (
-                      <span style={{ color: colors.inkMuted }}>—</span>
-                    ) : entry.returnedRental ? (
-                      <div>
-                        <span style={{ color: colors.green, fontWeight: 600, fontFamily: fonts.dmSans, fontSize: 13 }}>Yes</span>
-                        {entry.rentalReturnDate && (
-                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>
-                            {new Date(entry.rentalReturnDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                          </div>
-                        )}
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    {boolBadge(entry.byovEnrolled)}
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    {rentalReturnedBadge(entry.rentalReturned)}
+                    {entry.rentalReturned === "Yes" && entry.rentalReturnDate && (
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>
+                        {new Date(entry.rentalReturnDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
                       </div>
-                    ) : (
-                      <span style={{ color: colors.ink, fontFamily: fonts.dmSans, fontSize: 13 }}>No</span>
                     )}
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
-                    {entry.notes ? (
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    {boolBadge(entry.routeCleared)}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.supervisorName ?? entry.tpmsManagerName ?? "—"}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.supervisorPhone ?? entry.tpmsManagerPhone ?? "—"}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 180 }}>
+                    {entry.lastActionNotes ? (
                       <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {entry.notes}
+                        {entry.lastActionNotes}
                       </span>
                     ) : "—"}
                   </td>
@@ -1381,16 +1270,16 @@ export default function RentalRepairTracker() {
       </div>
 
       {/* Count */}
-      {!isLoading && filtered.length > 0 && (
+      {!isLoading && sorted.length > 0 && (
         <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, marginTop: 12 }}>
-          {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
+          {sorted.length} {sorted.length === 1 ? "entry" : "entries"}
           {search && ` matching "${search}"`}
         </div>
       )}
 
       {/* Slide-over panel */}
       {panelEntry !== null && (
-        <EntryPanel
+        <UnifiedPanel
           entry={panelEntry === "new" ? null : panelEntry}
           onClose={() => setPanelEntry(null)}
           onSaved={() => setPanelEntry(null)}
