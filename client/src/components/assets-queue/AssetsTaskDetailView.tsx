@@ -47,6 +47,10 @@ import {
   Save,
   Edit3,
   Send,
+  Bot,
+  Clock,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 
 
@@ -148,6 +152,60 @@ const TASK_LIST: TaskItem[] = [
   { key: 'taskCloseSegnoOrders', label: 'Close Segno Orders', description: 'Ensure no open work orders remain', icon: FileText },
   { key: 'taskCreateShippingLabel', label: 'Create UPS Shipping Label', description: 'Generate QR code for tech', icon: Package },
 ];
+
+type AutomationStatus = 'completed' | 'processing' | 'actionRequired';
+
+const AUTOMATED_TASK_KEYS: TaskKey[] = [
+  'taskToolsReturn',
+  'taskIphoneReturn',
+  'taskCreateShippingLabel',
+  'taskCloseSegnoOrders',
+];
+
+const HUMAN_TASK_KEYS: TaskKey[] = [
+  'taskDisconnectedLine',
+  'taskDisconnectedMPayment',
+];
+
+const VENDOR_CHECK_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
+
+// DEV FIXTURE: hardcode overrides to test non-default badge states (yellow/red).
+// Remove entries from this map to restore default green/processing behaviour.
+const DEV_AUTOMATION_STATUS_OVERRIDES: Partial<Record<TaskKey, AutomationStatus>> = {
+  // 'taskCreateShippingLabel': 'actionRequired',
+};
+
+function getAutomationStatus(key: TaskKey, isComplete: boolean): AutomationStatus {
+  if (isComplete) return 'completed';
+  if (DEV_AUTOMATION_STATUS_OVERRIDES[key]) return DEV_AUTOMATION_STATUS_OVERRIDES[key]!;
+  return 'processing';
+}
+
+function AutomationBadge({ status }: { status: AutomationStatus }) {
+  switch (status) {
+    case 'completed':
+      return (
+        <Badge className="text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800 hover:bg-green-100">
+          <CheckCircle className="h-3 w-3 mr-1" />
+          System Completed
+        </Badge>
+      );
+    case 'processing':
+      return (
+        <Badge className="text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100">
+          <Clock className="h-3 w-3 mr-1" />
+          System Processing
+        </Badge>
+      );
+    case 'actionRequired':
+      return (
+        <Badge className="text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-100">
+          <AlertTriangle className="h-3 w-3 mr-1" />
+          Action Required
+        </Badge>
+      );
+  }
+}
 
 function InlineNotesCard({ item }: { item: any }) {
   const [notes, setNotes] = useState(item.notes || "");
@@ -572,8 +630,54 @@ export function AssetsTaskDetailView({
             <CardTitle className="text-lg" style={{ color: '#1A4B8C' }}>Task Checklist</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="space-y-3">
-              {TASK_LIST.map((task) => {
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 mb-2">
+                <Bot className="h-4 w-4 text-blue-600" />
+                <span className="text-xs font-semibold uppercase tracking-wide text-blue-600">Automated Tasks</span>
+              </div>
+              {TASK_LIST.filter(t => AUTOMATED_TASK_KEYS.includes(t.key)).map((task) => {
+                const Icon = task.icon;
+                const isChecked = taskState[task.key];
+                const status = getAutomationStatus(task.key, isChecked);
+                return (
+                  <div key={task.key} className="space-y-1">
+                    <div
+                      className={`flex items-center gap-3 p-2 rounded ${
+                        status === 'completed' ? 'bg-green-50 dark:bg-green-900/20' :
+                        status === 'actionRequired' ? 'bg-red-50 dark:bg-red-900/10' :
+                        'bg-yellow-50 dark:bg-yellow-900/10'
+                      }`}
+                    >
+                      <Icon className={`h-4 w-4 ${
+                        status === 'completed' ? 'text-green-600' :
+                        status === 'actionRequired' ? 'text-red-600' :
+                        'text-yellow-600'
+                      }`} />
+                      <div className="flex-1">
+                        <span className="text-sm font-medium">{task.label}</span>
+                        <p className="text-xs text-muted-foreground">{task.description}</p>
+                      </div>
+                      <AutomationBadge status={status} />
+                    </div>
+                    {task.key === 'taskCloseSegnoOrders' && (
+                      <div className="ml-6 flex items-start gap-2 p-2 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+                        <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-800 dark:text-amber-400">{VENDOR_CHECK_ADVISORY}</p>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            <Separator />
+
+            <div className="space-y-1">
+              <div className="flex items-center gap-2 mb-2">
+                <AlertCircle className="h-4 w-4 text-orange-600" />
+                <span className="text-xs font-semibold uppercase tracking-wide text-orange-600">Manual Tasks</span>
+              </div>
+              {TASK_LIST.filter(t => HUMAN_TASK_KEYS.includes(t.key)).map((task) => {
                 const Icon = task.icon;
                 const isChecked = taskState[task.key];
                 return (
@@ -588,6 +692,7 @@ export function AssetsTaskDetailView({
                         id={task.key}
                         checked={isChecked}
                         onCheckedChange={() => handleTaskToggle(task.key)}
+                        onClick={(e) => e.stopPropagation()}
                         className="mt-0.5"
                       />
                       <div className="flex-1">
@@ -602,7 +707,14 @@ export function AssetsTaskDetailView({
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
                       </div>
-                      {isChecked && <CheckCircle className="h-4 w-4 text-green-600" />}
+                      {isChecked ? (
+                        <CheckCircle className="h-4 w-4 text-green-600" />
+                      ) : (
+                        <Badge className="text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400 border-orange-200 dark:border-orange-800 hover:bg-orange-100">
+                          <Clock className="h-3 w-3 mr-1" />
+                          Awaiting Operator
+                        </Badge>
+                      )}
                     </div>
 
                     {task.hasCarrier && (
@@ -627,18 +739,6 @@ export function AssetsTaskDetailView({
                 );
               })}
             </div>
-
-            <Separator />
-
-            <div className="flex items-center justify-between p-2 bg-muted rounded">
-              <span className="text-sm font-medium">Progress</span>
-              <Badge
-                variant={completedCount === totalTasks ? "default" : "secondary"}
-                style={completedCount === totalTasks ? { backgroundColor: '#36D9A3' } : {}}
-              >
-                {completedCount}/{totalTasks} Complete
-              </Badge>
-            </div>
           </CardContent>
         </Card>
 
@@ -648,16 +748,6 @@ export function AssetsTaskDetailView({
             <CardTitle className="text-lg" style={{ color: '#1A4B8C' }}>Actions</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <Button
-              variant="outline"
-              className="w-full justify-start"
-              disabled
-            >
-              <FileText className="h-4 w-4 mr-2" />
-              View in Segno
-              <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
-            </Button>
-
             <Button
               variant="outline"
               className="w-full justify-start"

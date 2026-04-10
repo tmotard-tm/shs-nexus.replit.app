@@ -62,6 +62,9 @@ import {
   Loader2,
   Save,
   Edit3,
+  Bot,
+  Info,
+  AlertCircle,
 } from "lucide-react";
 
 type VehicleType = "company" | "byov" | "rental";
@@ -72,6 +75,15 @@ type TaskKey = 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' |
 function getVehicleType(item: AssetsQueueItemEnriched): VehicleType {
   if ((item as any).vehicleType === "byov" || (item as any).isByov) return "byov";
   if ((item as any).vehicleType === "rental") return "rental";
+  // Check tech data signals before trusting the stored "company" default —
+  // vehicleType defaults to "company" in the DB and may not reflect the real type.
+  const truck = item.techData?.hrTruckNumber;
+  const pickup = item.techData?.fleetPickupAddress;
+  if (
+    truck === "BYOV" || pickup === "BYOV" ||
+    (truck && truck.startsWith("88")) ||
+    (item as any).fleetRoutingDecision === "BYOV"
+  ) return "byov";
   if ((item as any).vehicleType) return (item as any).vehicleType as VehicleType;
   return "company";
 }
@@ -114,16 +126,14 @@ function getUrgencyLevel(vehicleType: VehicleType, daysUntilSep: number | null):
 }
 
 function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; total: number; percentage: number } {
-  const tasks = [
-    item.taskToolsReturn,
-    item.taskIphoneReturn,
+  // Only the 2 manual tasks count toward operator progress — the other 4 are automated.
+  const manualTasks = [
     item.taskDisconnectedLine,
     item.taskDisconnectedMPayment,
-    item.taskCloseSegnoOrders,
-    item.taskCreateShippingLabel,
   ];
-  const completed = tasks.filter(Boolean).length;
-  return { completed, total: 6, percentage: (completed / 6) * 100 };
+  const completed = manualTasks.filter(Boolean).length;
+  const total = manualTasks.length;
+  return { completed, total, percentage: (completed / total) * 100 };
 }
 
 type SourceLabel = "fleet_separation" | "terminated_tech" | "both" | "manual";
@@ -573,8 +583,6 @@ function ExpandedRowDetails({
     debouncedSave({ carrier: value });
   };
 
-  const completedTasksCount = Object.values(taskState).filter(Boolean).length;
-
   const taskItems = [
     { key: "taskToolsReturn" as TaskKey, label: "Tools Return Asset", desc: "Verify all assigned tools returned", icon: Briefcase },
     { key: "taskIphoneReturn" as TaskKey, label: "iPhone Return Asset", desc: "Check condition and unlock status", icon: Smartphone },
@@ -583,6 +591,15 @@ function ExpandedRowDetails({
     { key: "taskCloseSegnoOrders" as TaskKey, label: "Close Segno Orders", desc: "Ensure no open work orders remain", icon: FileText },
     { key: "taskCreateShippingLabel" as TaskKey, label: "Create UPS Shipping Label", desc: "Generate QR code for tech", icon: Package },
   ];
+
+  const AUTOMATED_KEYS: TaskKey[] = ["taskToolsReturn", "taskIphoneReturn", "taskCreateShippingLabel", "taskCloseSegnoOrders"];
+  const HUMAN_KEYS: TaskKey[] = ["taskDisconnectedLine", "taskDisconnectedMPayment"];
+  const VENDOR_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
+
+  function getAutoStatus(key: TaskKey, done: boolean): "completed" | "processing" | "actionRequired" {
+    if (done) return "completed";
+    return "processing";
+  }
 
   return (
     <div className="p-6 bg-slate-50 border-t border-b border-slate-200 shadow-inner">
@@ -744,47 +761,109 @@ function ExpandedRowDetails({
         </div>
 
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-slate-500" />
-              Recovery Tasks
-            </h4>
-            <span className="text-xs font-medium bg-slate-100 text-slate-600 px-2 py-1 rounded-full">
-              {completedTasksCount}/6 Complete
-            </span>
-          </div>
+          <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
+            <CheckCircle className="h-4 w-4 text-slate-500" />
+            Recovery Tasks
+          </h4>
 
-          <div className="bg-white rounded-md border border-slate-200 shadow-sm divide-y divide-slate-100">
-            {taskItems.map((task) => {
-              const Icon = task.icon;
-              const isChecked = taskState[task.key];
-              return (
-                <label
-                  key={task.key}
-                  className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 transition-colors ${isChecked ? "bg-slate-50/50" : ""}`}
-                >
-                  <Checkbox
-                    checked={isChecked}
-                    onCheckedChange={(checked) => handleTaskChange(task.key, !!checked)}
-                    className="mt-1"
-                  />
-                  <div className="flex-1">
-                    <div className={`text-sm font-medium ${isChecked ? "text-slate-500 line-through" : "text-slate-900"}`}>
-                      {task.label}
-                    </div>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      {task.showCarrier && carrier && (
-                        <Badge variant="outline" className="text-[10px] h-4 px-1.5">
-                          {carrier}
+          {/* Automated tasks */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Bot className="h-3.5 w-3.5 text-blue-600" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-blue-600">Automated</span>
+            </div>
+            <div className="bg-white rounded-md border border-slate-200 shadow-sm divide-y divide-slate-100">
+              {taskItems.filter(t => AUTOMATED_KEYS.includes(t.key)).map((task) => {
+                const Icon = task.icon;
+                const status = getAutoStatus(task.key, taskState[task.key]);
+                return (
+                  <div key={task.key} className="space-y-0">
+                    <div className={`flex items-center gap-3 p-3 ${
+                      status === "completed" ? "bg-green-50/60" :
+                      status === "actionRequired" ? "bg-red-50/60" :
+                      "bg-yellow-50/60"
+                    }`}>
+                      <Icon className={`h-4 w-4 shrink-0 ${
+                        status === "completed" ? "text-green-600" :
+                        status === "actionRequired" ? "text-red-500" :
+                        "text-yellow-600"
+                      }`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-800">{task.label}</div>
+                        <div className="text-xs text-slate-500">{task.desc}</div>
+                      </div>
+                      {status === "completed" && (
+                        <Badge className="text-[10px] shrink-0 bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+                          <CheckCircle className="h-3 w-3 mr-1" />System Completed
                         </Badge>
                       )}
-                      <span className="text-xs text-slate-500">{task.desc}</span>
+                      {status === "processing" && (
+                        <Badge className="text-[10px] shrink-0 bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100">
+                          <Clock className="h-3 w-3 mr-1" />System Processing
+                        </Badge>
+                      )}
+                      {status === "actionRequired" && (
+                        <Badge className="text-[10px] shrink-0 bg-red-100 text-red-800 border-red-200 hover:bg-red-100">
+                          <AlertTriangle className="h-3 w-3 mr-1" />Action Required
+                        </Badge>
+                      )}
                     </div>
+                    {task.key === "taskCloseSegnoOrders" && (
+                      <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border-t border-amber-100">
+                        <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-800">{VENDOR_ADVISORY}</p>
+                      </div>
+                    )}
                   </div>
-                  <Icon className={`h-4 w-4 ${isChecked ? "text-slate-300" : "text-slate-400"}`} />
-                </label>
-              );
-            })}
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Manual tasks */}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 mb-1">
+              <AlertCircle className="h-3.5 w-3.5 text-orange-600" />
+              <span className="text-xs font-semibold uppercase tracking-wide text-orange-600">Manual</span>
+            </div>
+            <div className="bg-white rounded-md border border-slate-200 shadow-sm divide-y divide-slate-100">
+              {taskItems.filter(t => HUMAN_KEYS.includes(t.key)).map((task) => {
+                const Icon = task.icon;
+                const isChecked = taskState[task.key];
+                return (
+                  <label
+                    key={task.key}
+                    className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 transition-colors ${isChecked ? "bg-slate-50/50" : ""}`}
+                  >
+                    <Checkbox
+                      checked={isChecked}
+                      onCheckedChange={(checked) => handleTaskChange(task.key, !!checked)}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className={`text-sm font-medium ${isChecked ? "text-slate-500 line-through" : "text-slate-900"}`}>
+                        {task.label}
+                      </div>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {task.showCarrier && carrier && (
+                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                            {carrier}
+                          </Badge>
+                        )}
+                        <span className="text-xs text-slate-500">{task.desc}</span>
+                      </div>
+                    </div>
+                    {isChecked ? (
+                      <Icon className="h-4 w-4 text-slate-300 shrink-0" />
+                    ) : (
+                      <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100">
+                        <Clock className="h-3 w-3 mr-1" />Awaiting Operator
+                      </Badge>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
           </div>
 
           {taskItems.some(t => t.showCarrier) && (
@@ -901,11 +980,6 @@ function ExpandedRowDetails({
                 </a>
               </Button>
               <SendToolAuditInlineButton itemId={item.id} techData={techData} />
-              <Button variant="outline" className="justify-start" disabled>
-                <FileText className="h-4 w-4 mr-2 text-slate-500" />
-                View in Segno
-                <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
-              </Button>
               <Button variant="outline" className="justify-start" disabled>
                 <Package className="h-4 w-4 mr-2 text-slate-500" />
                 Generate Return Label
