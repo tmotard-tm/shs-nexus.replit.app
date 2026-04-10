@@ -850,7 +850,8 @@ export function registerVrmRoutes(): Router {
     try {
       const parsed = insertVrmRepairTrackerSchema.partial().safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-      const row = await updateRepairTrackerEntry(req.params.id, parsed.data);
+      const { dismissed, ...rest } = parsed.data;
+      const row = await updateRepairTrackerEntry(req.params.id, rest);
       if (!row) return res.status(404).json({ error: "Not found" });
       res.json(row);
     } catch (e: any) {

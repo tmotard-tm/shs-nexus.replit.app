@@ -634,6 +634,21 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
 }
 
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
+  const dismissedBlockers = await db
+    .select({
+      sourceDecisionId: vrmRepairTracker.sourceDecisionId,
+      techLdap: vrmRepairTracker.techLdap,
+    })
+    .from(vrmRepairTracker)
+    .where(eq(vrmRepairTracker.dismissed, true));
+
+  const dismissedDecisionIds = new Set(
+    dismissedBlockers.map((r) => r.sourceDecisionId).filter(Boolean) as string[],
+  );
+  const dismissedTechLdaps = new Set(
+    dismissedBlockers.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
+  );
+
   // Step 1: Clean up any rows that were incorrectly imported in the past:
   //   - Rows sourced from Check History (source_check_id IS NOT NULL) — checks have no
   //     final decision field so they should never drive Repair Tracker entries
@@ -711,6 +726,9 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   const existingTechLdaps = new Set(
     existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
+
+  dismissedDecisionIds.forEach((id) => existingDecisionIds.add(id));
+  dismissedTechLdaps.forEach((ldap) => existingTechLdaps.add(ldap));
 
   // Step 5: Filter to only genuinely new denied decisions not already tracked.
   // Skip if the decision ID already exists OR the tech's LDAP already has any
