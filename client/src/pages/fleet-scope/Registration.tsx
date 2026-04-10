@@ -1494,9 +1494,6 @@ export default function Registration() {
                         {daysToExpirySort === "desc" && <ArrowDown className="ml-1 h-3 w-3" />}
                       </Button>
                     </TableHead>
-                    <TableHead className="w-[120px]">Renewal Date</TableHead>
-                    <TableHead className="w-[180px]">Holman Status</TableHead>
-                    <TableHead className="w-[140px]">Badge</TableHead>
                     <TableHead className="w-[140px]">
                       <Select
                         value={caseStatusFilter}
@@ -1545,8 +1542,6 @@ export default function Registration() {
                         </SelectContent>
                       </Select>
                     </TableHead>
-                    <TableHead className="w-[150px]">Current Step</TableHead>
-                    <TableHead className="w-[120px]">Last Change</TableHead>
                     <TableHead className="w-[90px]">ETA</TableHead>
                     <TableHead className="w-[100px]">Scrape Status</TableHead>
                     <TableHead className="w-[100px] text-center">Initial Text Sent</TableHead>
@@ -1631,19 +1626,6 @@ export default function Registration() {
                             )}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {truck.renewalDate || <span className="text-muted-foreground">-</span>}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {truck.holmanStatus ? (
-                              <span className="text-muted-foreground text-xs">{truck.holmanStatus}</span>
-                            ) : <span className="text-muted-foreground">-</span>}
-                          </TableCell>
-                          <TableCell>
-                            {truck.viewRequestBadge ? (
-                              <Badge variant="outline" className="text-xs">{truck.viewRequestBadge}</Badge>
-                            ) : <span className="text-muted-foreground">-</span>}
-                          </TableCell>
-                          <TableCell className="text-sm">
                             {truck.holmanCaseStatus ? (
                               <span className="text-xs">{truck.holmanCaseStatus}</span>
                             ) : <span className="text-muted-foreground">-</span>}
@@ -1652,25 +1634,6 @@ export default function Registration() {
                             {truck.holmanPendingTasks ? (
                               <span className="text-xs">{truck.holmanPendingTasks}</span>
                             ) : <span className="text-muted-foreground">-</span>}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {truck.currentStep ? (
-                              <Badge
-                                variant="outline"
-                                className={
-                                  truck.currentStep === 'Complete' ? 'border-green-500 text-green-700 dark:text-green-400' :
-                                  truck.currentStep === 'Rejected' ? 'border-red-500 text-red-700 dark:text-red-400' :
-                                  truck.currentStep === 'Sent to State' ? 'border-blue-500 text-blue-700 dark:text-blue-400' :
-                                  truck.currentStep === 'Prerequisites' ? 'border-amber-500 text-amber-700 dark:text-amber-400' :
-                                  ''
-                                }
-                              >
-                                {truck.currentStep}
-                              </Badge>
-                            ) : <span className="text-muted-foreground">-</span>}
-                          </TableCell>
-                          <TableCell className="text-sm">
-                            {truck.lastChangeDate || <span className="text-muted-foreground">-</span>}
                           </TableCell>
                           <TableCell className="text-sm">
                             {truck.etaDate || <span className="text-muted-foreground">-</span>}
