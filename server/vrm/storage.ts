@@ -566,7 +566,8 @@ export async function listRepairTracker() {
       la.notes AS "lastActionNotes",
       la.created_at AS "lastActionAt",
       tp.tech_manager_name AS "tpmsManagerName",
-      mgr.mobile_phone AS "tpmsManagerPhone"
+      mgr.mobile_phone AS "tpmsManagerPhone",
+      tp.district_no AS "district"
     FROM vrm_repair_tracker rt
     LEFT JOIN vrm_rental_decisions rd ON rt.source_decision_id = rd.id
     LEFT JOIN LATERAL (

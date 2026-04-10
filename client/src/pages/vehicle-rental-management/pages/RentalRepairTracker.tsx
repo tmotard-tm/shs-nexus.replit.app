@@ -37,6 +37,7 @@ interface RepairTrackerEntry {
   lastActionAt: string | null;
   tpmsManagerName: string | null;
   tpmsManagerPhone: string | null;
+  district: string | null;
 }
 
 interface DecisionRow {
@@ -857,7 +858,7 @@ function UnifiedPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type SortColumn =
-  | "techLdap" | "techName" | "techPhone" | "truckNumber"
+  | "techLdap" | "techName" | "techPhone" | "district" | "truckNumber"
   | "repairShopAddress" | "repairShopPhone" | "deniedAt"
   | "mainStatus" | "techStatus" | "techContacted" | "byovEnrolled"
   | "rentalReturned" | "routeCleared" | "supervisorName" | "supervisorPhone"
@@ -1057,9 +1058,9 @@ export default function RentalRepairTracker() {
                 if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
                 return v;
               };
-              const headers = ["LDAP","Tech Name","Tech Phone","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
+              const headers = ["LDAP","Tech Name","Tech Phone","District","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
               const rows = sorted.map((e) => [
-                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.truckNumber ?? "",
+                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ?? "", e.truckNumber ?? "",
                 e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.deniedAt),
                 e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "",
                 boolStr(e.techContacted), boolStr(e.byovEnrolled),
@@ -1168,6 +1169,7 @@ export default function RentalRepairTracker() {
                 <th style={thStyle} onClick={() => handleSort("techLdap")}>LDAP{sortIndicator("techLdap")}</th>
                 <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
                 <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
+                <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
                 <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
                 <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
                 <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
@@ -1199,6 +1201,9 @@ export default function RentalRepairTracker() {
                   <td style={tdStyle}>{entry.techName ?? "—"}</td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.techPhone ?? "—"}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+                    {entry.district ?? "—"}
                   </td>
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
                     {entry.truckNumber ?? "—"}
