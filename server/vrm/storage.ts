@@ -638,16 +638,12 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   const dismissedBlockers = await db
     .select({
       sourceDecisionId: vrmRepairTracker.sourceDecisionId,
-      techLdap: vrmRepairTracker.techLdap,
     })
     .from(vrmRepairTracker)
     .where(eq(vrmRepairTracker.dismissed, true));
 
   const dismissedDecisionIds = new Set(
     dismissedBlockers.map((r) => r.sourceDecisionId).filter(Boolean) as string[],
-  );
-  const dismissedTechLdaps = new Set(
-    dismissedBlockers.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
 
   // Step 1: Clean up any rows that were incorrectly imported in the past:
@@ -717,19 +713,20 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     .from(vrmRentalDecisions)
     .where(sql`LOWER(${vrmRentalDecisions.decision}) = 'denied'`);
 
-  // Step 4: Fetch ALL existing Repair Tracker rows (including dismissed) for dedup
-  // by decision ID and tech_ldap — dismissed rows still block re-import.
+  // Step 4: Fetch existing Repair Tracker rows for dedup.
+  // Decision ID dedup uses ALL rows (dismissed included — merged from dismissedDecisionIds).
+  // Tech LDAP dedup uses only ACTIVE (non-dismissed) rows — dismissed techs CAN be
+  // re-imported when they receive a brand new denial.
   const existingRows = await db
-    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap })
+    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap, dismissed: vrmRepairTracker.dismissed })
     .from(vrmRepairTracker);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
   const existingTechLdaps = new Set(
-    existingRows.map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
+    existingRows.filter((r) => !r.dismissed).map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
 
   dismissedDecisionIds.forEach((id) => existingDecisionIds.add(id));
-  dismissedTechLdaps.forEach((ldap) => existingTechLdaps.add(ldap));
 
   // Step 5: Filter to only genuinely new denied decisions not already tracked.
   // Skip if the decision ID already exists OR the tech's LDAP already has any
