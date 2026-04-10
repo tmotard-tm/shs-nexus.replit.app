@@ -177,6 +177,7 @@ export default function Registration() {
   const [tagStateFilters, setTagStateFilters] = useState<Set<string> | null>(null);
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<string | null>(null);
   const [daysToExpirySort, setDaysToExpirySort] = useState<"none" | "asc" | "desc">("none");
+  const [caseStatusFilter, setCaseStatusFilter] = useState<string>("all");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pasteData, setPasteData] = useState("");
   const [overwriteDates, setOverwriteDates] = useState(false);
@@ -483,6 +484,15 @@ export default function Registration() {
     return Array.from(states).sort();
   }, [data?.trucks]);
 
+  const uniqueCaseStatuses = useMemo(() => {
+    if (!data?.trucks) return [];
+    const statuses = new Set<string>();
+    data.trucks.forEach(truck => {
+      if (truck.holmanCaseStatus) statuses.add(truck.holmanCaseStatus);
+    });
+    return Array.from(statuses).sort();
+  }, [data?.trucks]);
+
   const filteredTrucks = useMemo(() => {
     if (!data?.trucks) return [];
     
@@ -527,7 +537,10 @@ export default function Registration() {
         matchesExpiryMonth = false;
       }
       
-      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesTagState && matchesExpiryMonth;
+      const matchesCaseStatus = caseStatusFilter === "all" ||
+        (caseStatusFilter === "none" ? !truck.holmanCaseStatus : truck.holmanCaseStatus === caseStatusFilter);
+
+      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesTagState && matchesExpiryMonth && matchesCaseStatus;
     });
     
     // Apply Days to Expiry sort
@@ -546,7 +559,7 @@ export default function Registration() {
     }
     
     return result;
-  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort]);
+  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort, caseStatusFilter]);
 
   const toggleStateFilter = (state: string, allStates: string[]) => {
     setStateFilters(prev => {
@@ -1475,7 +1488,31 @@ export default function Registration() {
                     <TableHead className="w-[120px]">Renewal Date</TableHead>
                     <TableHead className="w-[180px]">Holman Status</TableHead>
                     <TableHead className="w-[140px]">Badge</TableHead>
-                    <TableHead className="w-[140px]">Case Status</TableHead>
+                    <TableHead className="w-[140px]">
+                      <Select
+                        value={caseStatusFilter}
+                        onValueChange={setCaseStatusFilter}
+                      >
+                        <SelectTrigger className="h-8 border-0 bg-transparent p-0 font-medium hover:bg-muted/50">
+                          <div className="flex items-center gap-1">
+                            <Filter className="h-3 w-3" />
+                            <span>Case Status</span>
+                            {caseStatusFilter !== "all" && (
+                              <Badge variant="secondary" className="ml-1 text-xs">
+                                {caseStatusFilter === "none" ? "None" : caseStatusFilter}
+                              </Badge>
+                            )}
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="none">No Status</SelectItem>
+                          {uniqueCaseStatuses.map(status => (
+                            <SelectItem key={status} value={status}>{status}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableHead>
                     <TableHead className="w-[200px]">Pending Tasks</TableHead>
                     <TableHead className="w-[150px]">Current Step</TableHead>
                     <TableHead className="w-[120px]">Last Change</TableHead>

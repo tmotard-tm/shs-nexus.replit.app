@@ -13008,8 +13008,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.log(`[Registration Import Renewals] Processing file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)} KB)`);
 
       const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
-      const sheetName = workbook.SheetNames[0];
-      const sheet = workbook.Sheets[sheetName];
+      const detailsSheet = workbook.Sheets["Details"] || workbook.Sheets["details"];
+      if (!detailsSheet && workbook.SheetNames.length > 1) {
+        return res.status(400).json({ message: `Could not find 'Details' sheet. Available sheets: ${workbook.SheetNames.join(", ")}` });
+      }
+      const sheet = detailsSheet || workbook.Sheets[workbook.SheetNames[0]];
       const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
       let headerRowIdx = -1;
@@ -13067,6 +13070,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       console.log(`[Registration Import Renewals] ${vehicleUpdates.size} unique vehicles found in XLSX`);
+
+      await getDb().update(registrationTracking).set({
+        holmanCaseStatus: null,
+        holmanPendingTasks: null,
+      });
+      console.log(`[Registration Import Renewals] Cleared existing renewal data (full refresh)`);
 
       for (const [vehicleNumber, data] of vehicleUpdates) {
         try {
