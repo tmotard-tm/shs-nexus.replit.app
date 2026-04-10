@@ -466,6 +466,8 @@ async function buildRegistrationData(): Promise<{
     viewRequestBadge: string | null;
     holmanCaseStatus: string | null;
     holmanPendingTasks: string | null;
+    holmanEta: string | null;
+    holmanReceivedTags: boolean;
   }[];
   declinedTrucks: string[];
 }> {
@@ -628,6 +630,8 @@ async function buildRegistrationData(): Promise<{
       viewRequestBadge: tracking?.viewRequestBadge || null,
       holmanCaseStatus: tracking?.holmanCaseStatus || null,
       holmanPendingTasks: tracking?.holmanPendingTasks || null,
+      holmanEta: tracking?.holmanEta || null,
+      holmanReceivedTags: tracking?.holmanReceivedTags || false,
     });
   }
   trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
@@ -13032,15 +13036,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const vehicleColIdx = headers.findIndex((h: string) => h.includes("vehicle"));
       const caseStatusColIdx = headers.findIndex((h: string) => h.includes("case status"));
       const taskDescColIdx = headers.findIndex((h: string) => h.includes("task description") || h.includes("pending task"));
+      const etaColIdx = headers.findIndex((h: string) => h === "eta" || h.includes("eta"));
+      const receivedTagsColIdx = etaColIdx >= 0 ? etaColIdx + 1 : -1;
 
       if (vehicleColIdx === -1) {
         return res.status(400).json({ message: "Could not find Vehicle column in headers" });
       }
 
-      console.log(`[Registration Import Renewals] Headers found at row ${headerRowIdx}: vehicleCol=${vehicleColIdx}, caseStatusCol=${caseStatusColIdx}, taskDescCol=${taskDescColIdx}`);
+      console.log(`[Registration Import Renewals] Headers found at row ${headerRowIdx}: vehicleCol=${vehicleColIdx}, caseStatusCol=${caseStatusColIdx}, taskDescCol=${taskDescColIdx}, etaCol=${etaColIdx}, receivedTagsCol=${receivedTagsColIdx}`);
 
       const results = { matched: 0, created: 0, errors: [] as string[] };
-      const vehicleUpdates = new Map<string, { caseStatus: string; tasks: string[] }>();
+      const vehicleUpdates = new Map<string, { caseStatus: string; tasks: string[]; eta: string; receivedTags: boolean }>();
 
       for (let i = headerRowIdx + 1; i < rows.length; i++) {
         const row = rows[i];
@@ -13052,6 +13058,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const vehicleNumber = rawVehicle.padStart(6, "0");
         const caseStatus = caseStatusColIdx >= 0 ? String(row[caseStatusColIdx] || "").trim() : "";
         const taskDesc = taskDescColIdx >= 0 ? String(row[taskDescColIdx] || "").trim() : "";
+        const eta = etaColIdx >= 0 ? String(row[etaColIdx] || "").trim() : "";
+        const receivedTagsRaw = receivedTagsColIdx >= 0 ? String(row[receivedTagsColIdx] || "").trim().toUpperCase() : "";
+        const receivedTags = receivedTagsRaw === "X" || receivedTagsRaw === "YES" || receivedTagsRaw === "TRUE";
 
         const existing = vehicleUpdates.get(vehicleNumber);
         if (existing) {
@@ -13061,10 +13070,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           if (caseStatus && !existing.caseStatus) {
             existing.caseStatus = caseStatus;
           }
+          if (eta && !existing.eta) {
+            existing.eta = eta;
+          }
+          if (receivedTags) {
+            existing.receivedTags = true;
+          }
         } else {
           vehicleUpdates.set(vehicleNumber, {
             caseStatus,
             tasks: taskDesc ? [taskDesc] : [],
+            eta,
+            receivedTags,
           });
         }
       }
@@ -13074,6 +13091,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       await getDb().update(registrationTracking).set({
         holmanCaseStatus: null,
         holmanPendingTasks: null,
+        holmanEta: null,
+        holmanReceivedTags: null,
       });
       console.log(`[Registration Import Renewals] Cleared existing renewal data (full refresh)`);
 
@@ -13091,6 +13110,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               .set({
                 holmanCaseStatus: data.caseStatus || null,
                 holmanPendingTasks: pendingTasks || null,
+                holmanEta: data.eta || null,
+                holmanReceivedTags: data.receivedTags || null,
               })
               .where(eq(registrationTracking.truckNumber, vehicleNumber));
             results.matched++;
@@ -13099,6 +13120,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               truckNumber: vehicleNumber,
               holmanCaseStatus: data.caseStatus || null,
               holmanPendingTasks: pendingTasks || null,
+              holmanEta: data.eta || null,
+              holmanReceivedTags: data.receivedTags || null,
             });
             results.created++;
           }

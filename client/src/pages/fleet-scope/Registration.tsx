@@ -135,6 +135,8 @@ interface RegistrationTruck {
   viewRequestBadge: string | null;
   holmanCaseStatus: string | null;
   holmanPendingTasks: string | null;
+  holmanEta: string | null;
+  holmanReceivedTags: boolean;
 }
 
 interface RegistrationResponse {
@@ -778,6 +780,8 @@ export default function Registration() {
         'Tech Address': truck.techAddress,
         'Case Status': truck.holmanCaseStatus || '',
         'Pending Tasks': truck.holmanPendingTasks || '',
+        'ETA': truck.holmanEta || '',
+        'Holman Received Tags': truck.holmanReceivedTags ? 'Yes' : '',
       };
     });
 
@@ -1543,7 +1547,7 @@ export default function Registration() {
                       </Select>
                     </TableHead>
                     <TableHead className="w-[90px]">ETA</TableHead>
-                    <TableHead className="w-[100px]">Scrape Status</TableHead>
+                    <TableHead className="w-[120px] text-center">Holman Received Tags</TableHead>
                     <TableHead className="w-[100px] text-center">Initial Text Sent</TableHead>
                     <TableHead className="w-[180px]">Time Slot</TableHead>
                     <TableHead className="w-[120px] text-center">Submitted to Holman</TableHead>
@@ -1636,32 +1640,12 @@ export default function Registration() {
                             ) : <span className="text-muted-foreground">-</span>}
                           </TableCell>
                           <TableCell className="text-sm">
-                            {truck.etaDate || <span className="text-muted-foreground">-</span>}
+                            {truck.holmanEta || <span className="text-muted-foreground">-</span>}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-1">
-                              {truck.scrapeStatus ? (
-                                <Badge
-                                  variant="outline"
-                                  className={
-                                    truck.scrapeStatus === 'scraped' ? 'border-green-500 text-green-700 dark:text-green-400' :
-                                    truck.scrapeStatus === 'error' ? 'border-red-500 text-red-700 dark:text-red-400' :
-                                    truck.scrapeStatus === 'pending' ? 'border-amber-500 text-amber-700 dark:text-amber-400' :
-                                    ''
-                                  }
-                                >
-                                  {truck.scrapeStatus}
-                                </Badge>
-                              ) : <span className="text-muted-foreground text-xs">not scraped</span>}
-                              <button
-                                title="Scrape this truck"
-                                onClick={() => scrapeSingleMutation.mutate(truck.truckNumber)}
-                                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: '20px', height: '20px', flexShrink: 0, borderRadius: '4px', backgroundColor: 'rgb(219 234 254)', color: 'rgb(37 99 235)', cursor: 'pointer', border: 'none', padding: 0 }}
-                                data-testid={`button-scrape-${truck.truckNumber}`}
-                              >
-                                <RefreshCw style={{ width: '11px', height: '11px' }} />
-                              </button>
-                            </div>
+                          <TableCell className="text-center">
+                            {truck.holmanReceivedTags ? (
+                              <Badge variant="default" className="bg-green-600 text-white">Yes</Badge>
+                            ) : <span className="text-muted-foreground">-</span>}
                           </TableCell>
                           <TableCell className="text-center">
                             <Checkbox

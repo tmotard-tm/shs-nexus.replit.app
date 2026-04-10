@@ -1000,6 +1000,8 @@ export const registrationTracking = pgTable("fs_registration_tracking", {
   viewRequestBadge: text("view_request_badge"), // Badge text shown on the Holman view request
   holmanCaseStatus: text("holman_case_status"),
   holmanPendingTasks: text("holman_pending_tasks"),
+  holmanEta: text("holman_eta"),
+  holmanReceivedTags: boolean("holman_received_tags"),
 });
 
 export const insertRegistrationTrackingSchema = createInsertSchema(registrationTracking);
