@@ -833,7 +833,7 @@ export default function NewRentals() {
       )}
 
       {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
-      {checkHistory.length > 0 && (() => {
+      {decisionLog.length > 0 && (() => {
         const now = new Date();
         const dayOfWeek = now.getDay();
         const daysSinceSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
@@ -846,11 +846,11 @@ export default function NewRentals() {
           end.setDate(end.getDate() + 6);
           end.setHours(23, 59, 59, 999);
           let approved = 0, denied = 0;
-          for (const c of checkHistory) {
-            const d = new Date(c.checkedAt);
-            if (d >= start && d <= end) {
-              if (c.recommendation === "Approve") approved++;
-              else if (c.recommendation === "Deny") denied++;
+          for (const d of decisionLog) {
+            const dt = new Date(d.createdAt);
+            if (dt >= start && dt <= end) {
+              if (d.recommendation === "Approve") approved++;
+              else if (d.recommendation === "Deny") denied++;
             }
           }
           const fmtD = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
