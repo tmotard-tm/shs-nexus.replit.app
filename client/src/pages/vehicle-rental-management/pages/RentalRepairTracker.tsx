@@ -1060,7 +1060,7 @@ export default function RentalRepairTracker() {
               };
               const headers = ["LDAP","Tech Name","Tech Phone","District","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
               const rows = sorted.map((e) => [
-                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ?? "", e.truckNumber ?? "",
+                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ? e.district.replace(/^0+/, "") || "0" : "", e.truckNumber ?? "",
                 e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.deniedAt),
                 e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "",
                 boolStr(e.techContacted), boolStr(e.byovEnrolled),
@@ -1203,7 +1203,7 @@ export default function RentalRepairTracker() {
                     {entry.techPhone ?? "—"}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.district ?? "—"}
+                    {entry.district ? entry.district.replace(/^0+/, "") || "0" : "—"}
                   </td>
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
                     {entry.truckNumber ?? "—"}
