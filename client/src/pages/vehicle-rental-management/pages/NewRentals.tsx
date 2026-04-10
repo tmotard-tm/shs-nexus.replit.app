@@ -832,6 +832,76 @@ export default function NewRentals() {
         </div>
       )}
 
+      {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
+      {checkHistory.length > 0 && (() => {
+        const now = new Date();
+        const dayOfWeek = now.getDay(); // 0=Sun..6=Sat
+        const daysSinceSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
+        const currentWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceSat);
+        const currentWeekEnd = new Date(currentWeekStart);
+        currentWeekEnd.setDate(currentWeekEnd.getDate() + 6);
+        currentWeekEnd.setHours(23, 59, 59, 999);
+        const prevWeekStart = new Date(currentWeekStart);
+        prevWeekStart.setDate(prevWeekStart.getDate() - 7);
+        const prevWeekEnd = new Date(currentWeekStart);
+        prevWeekEnd.setTime(prevWeekEnd.getTime() - 1);
+
+        const computeWeek = (start: Date, end: Date) => {
+          let approved = 0, denied = 0;
+          for (const c of checkHistory) {
+            const d = new Date(c.checkedAt);
+            if (d >= start && d <= end) {
+              if (c.recommendation === "Approve") approved++;
+              else if (c.recommendation === "Deny") denied++;
+            }
+          }
+          return { approved, denied, total: approved + denied };
+        };
+
+        const current = computeWeek(currentWeekStart, currentWeekEnd);
+        const prev = computeWeek(prevWeekStart, prevWeekEnd);
+
+        const fmtRange = (s: Date, e: Date) => {
+          const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+          return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", { ...opts, year: "numeric" })}`;
+        };
+
+        const cardStyle: React.CSSProperties = {
+          flex: 1,
+          minWidth: 180,
+          padding: "16px 20px",
+          borderRadius: 8,
+          border: `1px solid ${colors.rule}`,
+          backgroundColor: colors.surface,
+        };
+
+        const statRow = (label: string, value: number, color: string) => (
+          <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>{label}</span>
+            <span style={{ fontFamily: fonts.jetbrains, fontSize: 18, fontWeight: 700, color }}>{value}</span>
+          </div>
+        );
+
+        return (
+          <div style={{ display: "flex", gap: 16, marginBottom: 28, flexWrap: "wrap" }}>
+            <div style={cardStyle}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>
+                Current Week · {fmtRange(currentWeekStart, currentWeekEnd)}
+              </div>
+              {statRow("Approved", current.approved, colors.accent)}
+              {statRow("Requested", current.total, colors.ink)}
+            </div>
+            <div style={cardStyle}>
+              <div style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 12 }}>
+                Prior Week · {fmtRange(prevWeekStart, prevWeekEnd)}
+              </div>
+              {statRow("Approved", prev.approved, colors.accent)}
+              {statRow("Requested", prev.total, colors.ink)}
+            </div>
+          </div>
+        );
+      })()}
+
       {/* ── Results table ─────────────────────────────────────────────────────── */}
       {evaluatedRows.length > 0 && (
         <div style={{ marginBottom: 40 }}>
