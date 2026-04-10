@@ -16841,49 +16841,93 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const enrollments: any[] = rows.rows as any[];
 
       // Enrich with TPMS_EXTRACT contact + address data from Snowflake
+      // Two-tier matching: 1) truck_number → TRUCK_LU, 2) fallback enterprise_id → ENTERPRISE_ID
       if (enrollments.length > 0) {
         try {
           const { executeQuery: sfQuery } = await import("./fleet-scope-snowflake");
-          const ids = enrollments
+
+          const normalizeTruck = (val: string | null | undefined): string => {
+            if (!val) return '';
+            return val.toString().trim().replace(/\D/g, '').replace(/^0+/, '');
+          };
+
+          const truckNums = enrollments
+            .map((e: any) => normalizeTruck(e.truck_number))
+            .filter(Boolean);
+          const entIds = enrollments
             .map((e: any) => e.enterprise_id?.toString().trim())
             .filter(Boolean);
-          console.log(`[BYOV] Enriching ${enrollments.length} enrollments, IDs: ${ids.slice(0,5).join(', ')}`);
-          if (ids.length > 0) {
-            const upperIds = ids.map((id: string) => id.toUpperCase());
-            const safeIds = upperIds.map((id: string) => `'${id.replace(/'/g, "''")}'`).join(',');
-            const tpmsRows = await sfQuery<{
-              TECH_NO: string;
-              MOBILEPHONENUMBER: string | null;
-              PRIMARYADDR1: string | null;
-              PRIMARYADDR2: string | null;
-              PRIMARYCITY: string | null;
-              PRIMARYSTATE: string | null;
-              PRIMARYZIP: string | null;
-            }>(`
-              SELECT UPPER(TECH_NO) AS TECH_NO, MOBILEPHONENUMBER,
+
+          console.log(`[BYOV] Enriching ${enrollments.length} enrollments, trucks: ${truckNums.slice(0,5).join(', ')}, IDs: ${entIds.slice(0,5).join(', ')}`);
+
+          type TpmsRow = {
+            NORM_TRUCK: string | null;
+            ENTERPRISE_ID: string | null;
+            MOBILEPHONENUMBER: string | null;
+            PRIMARYADDR1: string | null;
+            PRIMARYADDR2: string | null;
+            PRIMARYCITY: string | null;
+            PRIMARYSTATE: string | null;
+            PRIMARYZIP: string | null;
+          };
+
+          const whereClauses: string[] = [];
+          if (truckNums.length > 0) {
+            const safeTrucks = truckNums.map((t: string) => `'${t.replace(/'/g, "''")}'`).join(',');
+            whereClauses.push(`LTRIM(REGEXP_REPLACE(TRUCK_LU, '[^0-9]', ''), '0') IN (${safeTrucks})`);
+          }
+          if (entIds.length > 0) {
+            const safeIds = entIds.map((id: string) => `'${id.replace(/'/g, "''").toUpperCase()}'`).join(',');
+            whereClauses.push(`UPPER(ENTERPRISE_ID) IN (${safeIds})`);
+          }
+
+          if (whereClauses.length > 0) {
+            const tpmsRows = await sfQuery<TpmsRow>(`
+              SELECT LTRIM(REGEXP_REPLACE(TRUCK_LU, '[^0-9]', ''), '0') AS NORM_TRUCK,
+                     UPPER(ENTERPRISE_ID) AS ENTERPRISE_ID, MOBILEPHONENUMBER,
                      PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
               FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-              WHERE UPPER(TECH_NO) IN (${safeIds})
+              WHERE ${whereClauses.join(' OR ')}
             `);
-            console.log(`[BYOV] TPMS_EXTRACT returned ${tpmsRows.length} rows for ${upperIds.length} IDs`);
-            const tpmsMap = new Map<string, typeof tpmsRows[0]>();
+            console.log(`[BYOV] TPMS_EXTRACT returned ${tpmsRows.length} rows`);
+
+            const truckMap = new Map<string, TpmsRow>();
+            const entIdMap = new Map<string, TpmsRow>();
             for (const row of tpmsRows) {
-              if (row.TECH_NO) {
-                tpmsMap.set(row.TECH_NO.toString().trim().toUpperCase(), row);
+              if (row.NORM_TRUCK && !truckMap.has(row.NORM_TRUCK)) {
+                truckMap.set(row.NORM_TRUCK, row);
+              }
+              if (row.ENTERPRISE_ID) {
+                const key = row.ENTERPRISE_ID.toString().trim().toUpperCase();
+                if (!entIdMap.has(key)) {
+                  entIdMap.set(key, row);
+                }
               }
             }
+
+            const applyTpms = (enrollment: any, tpms: TpmsRow) => {
+              enrollment.mobile_phone = tpms.MOBILEPHONENUMBER?.toString().trim() || null;
+              const addrParts = [
+                tpms.PRIMARYADDR1?.trim(),
+                tpms.PRIMARYADDR2?.trim(),
+                tpms.PRIMARYCITY?.trim(),
+                tpms.PRIMARYSTATE?.trim(),
+                tpms.PRIMARYZIP?.trim(),
+              ].filter(Boolean);
+              enrollment.home_address = addrParts.length > 0 ? addrParts.join(', ') : null;
+            };
+
             for (const enrollment of enrollments) {
-              const tpms = tpmsMap.get(enrollment.enterprise_id?.toString().trim().toUpperCase());
-              if (tpms) {
-                enrollment.mobile_phone = tpms.MOBILEPHONENUMBER?.toString().trim() || null;
-                const addrParts = [
-                  tpms.PRIMARYADDR1?.trim(),
-                  tpms.PRIMARYADDR2?.trim(),
-                  tpms.PRIMARYCITY?.trim(),
-                  tpms.PRIMARYSTATE?.trim(),
-                  tpms.PRIMARYZIP?.trim(),
-                ].filter(Boolean);
-                enrollment.home_address = addrParts.length > 0 ? addrParts.join(', ') : null;
+              const normTruck = normalizeTruck(enrollment.truck_number);
+              const truckMatch = normTruck ? truckMap.get(normTruck) : undefined;
+              if (truckMatch) {
+                applyTpms(enrollment, truckMatch);
+                continue;
+              }
+              const entKey = enrollment.enterprise_id?.toString().trim().toUpperCase() || '';
+              const entMatch = entKey ? entIdMap.get(entKey) : undefined;
+              if (entMatch) {
+                applyTpms(enrollment, entMatch);
               } else {
                 enrollment.mobile_phone = null;
                 enrollment.home_address = null;
