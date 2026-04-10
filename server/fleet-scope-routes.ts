@@ -13058,7 +13058,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const vehicleNumber = rawVehicle.padStart(6, "0");
         const caseStatus = caseStatusColIdx >= 0 ? String(row[caseStatusColIdx] || "").trim() : "";
         const taskDesc = taskDescColIdx >= 0 ? String(row[taskDescColIdx] || "").trim() : "";
-        const eta = etaColIdx >= 0 ? String(row[etaColIdx] || "").trim() : "";
+        let eta = "";
+        if (etaColIdx >= 0 && row[etaColIdx] != null && row[etaColIdx] !== "") {
+          const rawEta = row[etaColIdx];
+          if (typeof rawEta === "number") {
+            const excelEpoch = new Date(1899, 11, 30);
+            const d = new Date(excelEpoch.getTime() + rawEta * 86400000);
+            eta = `${String(d.getMonth() + 1).padStart(2, "0")}/${String(d.getDate()).padStart(2, "0")}/${d.getFullYear()}`;
+          } else {
+            eta = String(rawEta).trim();
+          }
+        }
         const receivedTagsRaw = receivedTagsColIdx >= 0 ? String(row[receivedTagsColIdx] || "").trim().toUpperCase() : "";
         const receivedTags = receivedTagsRaw === "X" || receivedTagsRaw === "YES" || receivedTagsRaw === "TRUE";
 
