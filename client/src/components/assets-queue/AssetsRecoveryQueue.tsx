@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import type { QueueItem, User } from "@shared/schema";
+import type { QueueItem, User, AutomationDetail } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
@@ -115,6 +115,23 @@ function getAgingBadge(separationDate: string | null): { label: string; classNam
   if (daysSince <= 7) return { label: "New", className: "bg-green-100 text-green-700 border-green-200" };
   if (daysSince <= 30) return { label: "Active", className: "bg-amber-100 text-amber-700 border-amber-200" };
   return { label: "Overdue", className: "bg-red-100 text-red-700 border-red-200" };
+}
+
+function getDetectionLane(item: AssetsQueueItemEnriched): { label: string; className: string } {
+  const lastDayWorked = item.techData?.lastDayWorked;
+  // When lastDayWorked is null, fallback to createdAt. Note: freshly created records
+  // will always show WARM because createdAt is recent — this is expected for test data.
+  const referenceDate = lastDayWorked || (item.createdAt ? new Date(item.createdAt).toISOString() : null);
+  if (!referenceDate) return { label: "WARM", className: "bg-orange-100 text-orange-700 border-orange-200" };
+  const ref = new Date(referenceDate);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  ref.setHours(0, 0, 0, 0);
+  const daysSince = Math.floor((today.getTime() - ref.getTime()) / (1000 * 60 * 60 * 24));
+  if (daysSince < 0) return { label: "PRE", className: "bg-blue-100 text-blue-700 border-blue-200" };
+  if (daysSince <= 7) return { label: "WARM", className: "bg-orange-100 text-orange-700 border-orange-200" };
+  if (daysSince <= 30) return { label: "LATE", className: "bg-amber-100 text-amber-700 border-amber-200" };
+  return { label: "COLD", className: "bg-slate-200 text-slate-700 border-slate-300" };
 }
 
 function getUrgencyLevel(vehicleType: VehicleType, daysUntilSep: number | null): UrgencyLevel {
@@ -576,6 +593,15 @@ function ExpandedRowDetails({
     const newState = { ...taskState, [key]: checked };
     setTaskState(newState);
     debouncedSave({ [key]: checked });
+    apiRequest("PATCH", `/api/assets-queue/${item.id}/automation-detail`, {
+      automatedTasks: {
+        [key]: {
+          status: checked ? 'completed' : 'processing',
+          source: 'manual',
+          updatedAt: new Date().toISOString(),
+        }
+      }
+    }).catch((err) => console.warn('automation-detail PATCH failed (non-blocking):', err));
   };
 
   const handleCarrierChange = (value: string) => {
@@ -597,6 +623,10 @@ function ExpandedRowDetails({
   const VENDOR_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
 
   function getAutoStatus(key: TaskKey, done: boolean): "completed" | "processing" | "actionRequired" {
+    const ad = item.automationDetail as AutomationDetail | null;
+    if (ad?.automatedTasks?.[key]?.status) {
+      return ad.automatedTasks[key].status;
+    }
     if (done) return "completed";
     return "processing";
   }
@@ -1440,14 +1470,24 @@ export function AssetsRecoveryQueue() {
                               ? new Date(sepDate).toLocaleDateString("en-US", { month: "short", day: "numeric" })
                               : "N/A"}
                           </span>
-                          {(() => {
-                            const aging = getAgingBadge(sepDate);
-                            return aging ? (
-                              <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${aging.className}`}>
-                                {aging.label}
-                              </Badge>
-                            ) : null;
-                          })()}
+                          <div className="flex items-center gap-1">
+                            {(() => {
+                              const aging = getAgingBadge(sepDate);
+                              return aging ? (
+                                <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${aging.className}`}>
+                                  {aging.label}
+                                </Badge>
+                              ) : null;
+                            })()}
+                            {(() => {
+                              const lane = getDetectionLane(row);
+                              return (
+                                <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${lane.className}`}>
+                                  {lane.label}
+                                </Badge>
+                              );
+                            })()}
+                          </div>
                         </div>
                       </td>
                       <td className="px-4 py-3">

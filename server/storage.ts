@@ -69,6 +69,7 @@ import {
   type InsertHolmanPoCache,
   type FleetOperationLog,
   type InsertFleetOperationLog,
+  type AutomationDetail,
   users,
   requests,
   apiConfigurations,
@@ -108,6 +109,29 @@ import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
+
+function deepMergeAutomationDetail(existing: AutomationDetail, patch: Partial<AutomationDetail>): AutomationDetail {
+  const result: AutomationDetail = { ...existing };
+  if (patch.lane !== undefined) {
+    result.lane = patch.lane;
+  }
+  if (patch.automatedTasks) {
+    result.automatedTasks = { ...(existing.automatedTasks || {}) };
+    for (const taskKey of Object.keys(patch.automatedTasks)) {
+      result.automatedTasks[taskKey] = {
+        ...(result.automatedTasks[taskKey] || { status: 'processing' }),
+        ...patch.automatedTasks[taskKey],
+      };
+    }
+  }
+  if (patch.outreach !== undefined) {
+    result.outreach = patch.outreach;
+  }
+  if (patch.manualFlags !== undefined) {
+    result.manualFlags = patch.manualFlags;
+  }
+  return result;
+}
 
 export interface IStorage {
   // Users
@@ -184,6 +208,9 @@ export interface IStorage {
   completeFleetQueueItem(id: string, completedBy: string): Promise<QueueItem | undefined>;
 
   updateAssetsQueueProgress(id: string, updates: Partial<Pick<QueueItem, 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel' | 'carrier' | 'fleetRoutingDecision'>>): Promise<QueueItem | undefined>;
+
+  getAutomationDetail(id: string): Promise<AutomationDetail | null>;
+  updateAutomationDetail(id: string, detail: Partial<AutomationDetail>): Promise<AutomationDetail | null>;
   
   // BYOV Blocking Logic (Sprint 2)
   getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined>;
@@ -2073,6 +2100,23 @@ export class MemStorage implements IStorage {
     };
     this.assetsQueueItems.set(id, updatedItem);
     return updatedItem;
+  }
+
+  async getAutomationDetail(id: string): Promise<AutomationDetail | null> {
+    const item = this.assetsQueueItems.get(id);
+    if (!item) return null;
+    return (item.automationDetail as AutomationDetail) || null;
+  }
+
+  async updateAutomationDetail(id: string, detail: Partial<AutomationDetail>): Promise<AutomationDetail | null> {
+    const item = this.assetsQueueItems.get(id);
+    if (!item) return null;
+    const existing = (item.automationDetail as AutomationDetail) || {};
+    const merged = deepMergeAutomationDetail(existing, detail);
+    item.automationDetail = merged;
+    item.updatedAt = new Date();
+    this.assetsQueueItems.set(id, item);
+    return merged;
   }
 
   async getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined> {
@@ -4627,6 +4671,26 @@ export class DatabaseStorage implements IStorage {
       .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
       .returning();
     return result[0];
+  }
+
+  async getAutomationDetail(id: string): Promise<AutomationDetail | null> {
+    const result = await db.select({ automationDetail: queueItems.automationDetail })
+      .from(queueItems)
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+      .limit(1);
+    if (!result[0]) return null;
+    return (result[0].automationDetail as AutomationDetail) || null;
+  }
+
+  async updateAutomationDetail(id: string, detail: Partial<AutomationDetail>): Promise<AutomationDetail | null> {
+    const existing = await this.getAutomationDetail(id);
+    const merged = deepMergeAutomationDetail(existing || {}, detail);
+    const result = await db.update(queueItems)
+      .set({ automationDetail: merged, updatedAt: new Date() })
+      .where(and(eq(queueItems.id, id), eq(queueItems.department, 'Assets Management')))
+      .returning();
+    if (!result[0]) return null;
+    return (result[0].automationDetail as AutomationDetail) || null;
   }
 
   async getFleetTaskByWorkflowId(workflowId: string): Promise<QueueItem | undefined> {

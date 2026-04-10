@@ -285,6 +285,7 @@ export const queueItems = pgTable("queue_items", {
   phoneRecoveryStage: text("phone_recovery_stage").default("initiation"),
   phoneWrittenOff: boolean("phone_written_off").default(false),
   isTlt: boolean("is_tlt").default(false),
+  automationDetail: jsonb("automation_detail"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
@@ -1040,6 +1041,19 @@ export type Vehicle = typeof vehicles.$inferSelect;
 export type InsertVehicle = z.infer<typeof insertVehicleSchema>;
 export type QueueItem = typeof queueItems.$inferSelect;
 export type InsertQueueItem = z.infer<typeof insertQueueItemSchema>;
+
+export interface AutomationTaskEntry {
+  status: 'completed' | 'processing' | 'actionRequired';
+  source?: string;
+  updatedAt?: string;
+}
+
+export interface AutomationDetail {
+  lane?: string;
+  automatedTasks?: Record<string, AutomationTaskEntry>;
+  outreach?: unknown[];
+  manualFlags?: unknown[];
+}
 
 export type StorageSpot = typeof storageSpots.$inferSelect;
 export type InsertStorageSpot = z.infer<typeof insertStorageSpotSchema>;

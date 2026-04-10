@@ -19,7 +19,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import type { QueueItem, User } from "@shared/schema";
+import type { QueueItem, User, AutomationDetail } from "@shared/schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -169,15 +169,11 @@ const HUMAN_TASK_KEYS: TaskKey[] = [
 
 const VENDOR_CHECK_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
 
-// DEV FIXTURE: hardcode overrides to test non-default badge states (yellow/red).
-// Remove entries from this map to restore default green/processing behaviour.
-const DEV_AUTOMATION_STATUS_OVERRIDES: Partial<Record<TaskKey, AutomationStatus>> = {
-  // 'taskCreateShippingLabel': 'actionRequired',
-};
-
-function getAutomationStatus(key: TaskKey, isComplete: boolean): AutomationStatus {
+function getAutomationStatus(key: TaskKey, isComplete: boolean, automationDetail?: AutomationDetail | null): AutomationStatus {
+  if (automationDetail?.automatedTasks?.[key]?.status) {
+    return automationDetail.automatedTasks[key].status;
+  }
   if (isComplete) return 'completed';
-  if (DEV_AUTOMATION_STATUS_OVERRIDES[key]) return DEV_AUTOMATION_STATUS_OVERRIDES[key]!;
   return 'processing';
 }
 
@@ -391,6 +387,15 @@ export function AssetsTaskDetailView({
     const newValue = !taskState[key];
     setTaskState(prev => ({ ...prev, [key]: newValue }));
     save({ [key]: newValue });
+    apiRequest("PATCH", `/api/assets-queue/${item.id}/automation-detail`, {
+      automatedTasks: {
+        [key]: {
+          status: newValue ? 'completed' : 'processing',
+          source: 'manual',
+          updatedAt: new Date().toISOString(),
+        }
+      }
+    }).catch((err) => console.warn('automation-detail PATCH failed (non-blocking):', err));
   };
 
   const handleCarrierChange = (value: string) => {
@@ -638,7 +643,7 @@ export function AssetsTaskDetailView({
               {TASK_LIST.filter(t => AUTOMATED_TASK_KEYS.includes(t.key)).map((task) => {
                 const Icon = task.icon;
                 const isChecked = taskState[task.key];
-                const status = getAutomationStatus(task.key, isChecked);
+                const status = getAutomationStatus(task.key, isChecked, item.automationDetail as AutomationDetail | null);
                 return (
                   <div key={task.key} className="space-y-1">
                     <div

@@ -2426,6 +2426,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/assets-queue/:id/automation-detail", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+      const detail = req.body;
+      if (!detail || typeof detail !== 'object') {
+        return res.status(400).json({ message: "Invalid automation detail payload" });
+      }
+      const result = await storage.updateAutomationDetail(req.params.id, detail);
+      if (result === null) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+      res.json(result);
+    } catch (error) {
+      console.error('Error updating automation detail:', error);
+      res.status(500).json({ message: "Failed to update automation detail" });
+    }
+  });
+
   app.patch("/api/assets-queue/:id/notes", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
