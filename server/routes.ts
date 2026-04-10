@@ -12634,7 +12634,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             fleetTeamComments: postOffboardedStatus ? statusMap[postOffboardedStatus] || postOffboardedStatus : null,
           };
 
-          const fleetScopeUrl = `https://fleet-scope.replit.app/api/public/spares/${cleanVehicleNumber}`;
+          const fleetScopeUrl = `https://SHS-Nexus.replit.app/api/fs/public/spares/${cleanVehicleNumber}`;
           
           console.log('=== FLEET SCOPE API REQUEST ===');
           console.log('URL:', fleetScopeUrl);
@@ -12652,13 +12652,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             body: JSON.stringify(fleetScopePayload),
           });
 
+          const contentType = fleetScopeResponse.headers.get('content-type') || '';
           const responseText = await fleetScopeResponse.text();
           console.log('=== FLEET SCOPE API RESPONSE ===');
           console.log('Status:', fleetScopeResponse.status);
-          console.log('Response Body:', responseText);
+          console.log('Content-Type:', contentType);
+          console.log('Response Body:', responseText.substring(0, 500));
           console.log('================================');
 
-          if (!fleetScopeResponse.ok) {
+          if (contentType.includes('text/html')) {
+            console.warn(`Fleet Scope API returned HTML instead of JSON for vehicle ${vehicleNumber} — route may not exist on Fleet Scope`);
+          } else if (!fleetScopeResponse.ok) {
             console.warn(`Fleet Scope API returned status ${fleetScopeResponse.status} for vehicle ${vehicleNumber}`);
           } else {
             console.log(`Successfully synced vehicle ${vehicleNumber} to Fleet Scope`);
