@@ -59,6 +59,7 @@ import {
   CalendarCheck,
   Building2,
   PackageCheck,
+  Upload,
 } from "lucide-react";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet } from '@/lib/xlsx-utils';
@@ -132,6 +133,8 @@ interface RegistrationTruck {
   renewalDate: string | null;
   holmanStatus: string | null;
   viewRequestBadge: string | null;
+  holmanCaseStatus: string | null;
+  holmanPendingTasks: string | null;
 }
 
 interface RegistrationResponse {
@@ -268,6 +271,37 @@ export default function Registration() {
     onError: (error: Error) => {
       toast({
         title: "Import Failed",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const renewalsFileRef = useRef<HTMLInputElement>(null);
+  const importRenewalsMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/fs/registration/import-renewals", {
+        method: "POST",
+        body: formData,
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({ message: "Upload failed" }));
+        throw new Error(err.message || "Upload failed");
+      }
+      return response.json();
+    },
+    onSuccess: (result) => {
+      toast({
+        title: "Renewals Import Complete",
+        description: `${result.updated} vehicles updated from ${result.totalVehicles} found in file${result.errors.length ? `. ${result.errors.length} errors.` : "."}`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/registration"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Renewals Import Failed",
         description: error.message,
         variant: "destructive",
       });
@@ -719,7 +753,9 @@ export default function Registration() {
         'Days to Expiry': daysToExpiry !== null ? daysToExpiry : '',
         'Tech Name': truck.techName,
         'Tech Phone': truck.techPhone,
-        'Tech Address': truck.techAddress
+        'Tech Address': truck.techAddress,
+        'Case Status': truck.holmanCaseStatus || '',
+        'Pending Tasks': truck.holmanPendingTasks || '',
       };
     });
 
@@ -837,6 +873,29 @@ export default function Registration() {
               </DialogFooter>
             </DialogContent>
           </Dialog>
+          <input
+            type="file"
+            ref={renewalsFileRef}
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file) {
+                importRenewalsMutation.mutate(file);
+                e.target.value = "";
+              }
+            }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => renewalsFileRef.current?.click()}
+            disabled={importRenewalsMutation.isPending}
+            data-testid="button-import-renewals"
+          >
+            <Upload className="w-4 h-4 mr-2" />
+            {importRenewalsMutation.isPending ? "Importing..." : "Import Renewals"}
+          </Button>
           <Button
             variant="outline"
             size="sm"
@@ -1416,6 +1475,8 @@ export default function Registration() {
                     <TableHead className="w-[120px]">Renewal Date</TableHead>
                     <TableHead className="w-[180px]">Holman Status</TableHead>
                     <TableHead className="w-[140px]">Badge</TableHead>
+                    <TableHead className="w-[140px]">Case Status</TableHead>
+                    <TableHead className="w-[200px]">Pending Tasks</TableHead>
                     <TableHead className="w-[150px]">Current Step</TableHead>
                     <TableHead className="w-[120px]">Last Change</TableHead>
                     <TableHead className="w-[90px]">ETA</TableHead>
@@ -1512,6 +1573,16 @@ export default function Registration() {
                           <TableCell>
                             {truck.viewRequestBadge ? (
                               <Badge variant="outline" className="text-xs">{truck.viewRequestBadge}</Badge>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.holmanCaseStatus ? (
+                              <span className="text-xs">{truck.holmanCaseStatus}</span>
+                            ) : <span className="text-muted-foreground">-</span>}
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {truck.holmanPendingTasks ? (
+                              <span className="text-xs">{truck.holmanPendingTasks}</span>
                             ) : <span className="text-muted-foreground">-</span>}
                           </TableCell>
                           <TableCell className="text-sm">

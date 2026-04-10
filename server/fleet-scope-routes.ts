@@ -464,6 +464,8 @@ async function buildRegistrationData(): Promise<{
     renewalDate: string | null;
     holmanStatus: string | null;
     viewRequestBadge: string | null;
+    holmanCaseStatus: string | null;
+    holmanPendingTasks: string | null;
   }[];
   declinedTrucks: string[];
 }> {
@@ -624,6 +626,8 @@ async function buildRegistrationData(): Promise<{
       renewalDate: tracking?.renewalDate || null,
       holmanStatus: tracking?.holmanStatus || null,
       viewRequestBadge: tracking?.viewRequestBadge || null,
+      holmanCaseStatus: tracking?.holmanCaseStatus || null,
+      holmanPendingTasks: tracking?.holmanPendingTasks || null,
     });
   }
   trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
@@ -12991,6 +12995,120 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       
     } catch (error: any) {
       console.error("[Registration Import] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/registration/import-renewals", upload.single('file'), async (req: any, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No file uploaded" });
+      }
+
+      console.log(`[Registration Import Renewals] Processing file: ${req.file.originalname} (${(req.file.size / 1024).toFixed(1)} KB)`);
+
+      const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      const rows: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      let headerRowIdx = -1;
+      for (let i = 0; i < Math.min(rows.length, 5); i++) {
+        const row = rows[i];
+        if (row && row.some((c: any) => String(c).toLowerCase().includes("vehicle"))) {
+          headerRowIdx = i;
+          break;
+        }
+      }
+
+      if (headerRowIdx === -1) {
+        return res.status(400).json({ message: "Could not find header row with 'Vehicle' column" });
+      }
+
+      const headers = rows[headerRowIdx].map((h: any) => String(h || "").trim().toLowerCase());
+      const vehicleColIdx = headers.findIndex((h: string) => h.includes("vehicle"));
+      const caseStatusColIdx = headers.findIndex((h: string) => h.includes("case status"));
+      const taskDescColIdx = headers.findIndex((h: string) => h.includes("task description") || h.includes("pending task"));
+
+      if (vehicleColIdx === -1) {
+        return res.status(400).json({ message: "Could not find Vehicle column in headers" });
+      }
+
+      console.log(`[Registration Import Renewals] Headers found at row ${headerRowIdx}: vehicleCol=${vehicleColIdx}, caseStatusCol=${caseStatusColIdx}, taskDescCol=${taskDescColIdx}`);
+
+      const results = { updated: 0, skipped: 0, errors: [] as string[] };
+      const vehicleUpdates = new Map<string, { caseStatus: string; tasks: string[] }>();
+
+      for (let i = headerRowIdx + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (!row || !row[vehicleColIdx]) continue;
+
+        const rawVehicle = String(row[vehicleColIdx]).trim();
+        if (!rawVehicle || rawVehicle === "0") continue;
+
+        const vehicleNumber = rawVehicle.padStart(6, "0");
+        const caseStatus = caseStatusColIdx >= 0 ? String(row[caseStatusColIdx] || "").trim() : "";
+        const taskDesc = taskDescColIdx >= 0 ? String(row[taskDescColIdx] || "").trim() : "";
+
+        const existing = vehicleUpdates.get(vehicleNumber);
+        if (existing) {
+          if (taskDesc && !existing.tasks.includes(taskDesc)) {
+            existing.tasks.push(taskDesc);
+          }
+          if (caseStatus && !existing.caseStatus) {
+            existing.caseStatus = caseStatus;
+          }
+        } else {
+          vehicleUpdates.set(vehicleNumber, {
+            caseStatus,
+            tasks: taskDesc ? [taskDesc] : [],
+          });
+        }
+      }
+
+      console.log(`[Registration Import Renewals] ${vehicleUpdates.size} unique vehicles found in XLSX`);
+
+      for (const [vehicleNumber, data] of vehicleUpdates) {
+        try {
+          const existing = await getDb().select()
+            .from(registrationTracking)
+            .where(eq(registrationTracking.truckNumber, vehicleNumber))
+            .limit(1);
+
+          const pendingTasks = data.tasks.join("; ");
+
+          if (existing.length > 0) {
+            await getDb().update(registrationTracking)
+              .set({
+                holmanCaseStatus: data.caseStatus || null,
+                holmanPendingTasks: pendingTasks || null,
+              })
+              .where(eq(registrationTracking.truckNumber, vehicleNumber));
+            results.updated++;
+          } else {
+            await getDb().insert(registrationTracking).values({
+              truckNumber: vehicleNumber,
+              holmanCaseStatus: data.caseStatus || null,
+              holmanPendingTasks: pendingTasks || null,
+            });
+            results.updated++;
+          }
+        } catch (err: any) {
+          results.errors.push(`${vehicleNumber}: ${err.message}`);
+        }
+      }
+
+      console.log(`[Registration Import Renewals] Complete: ${results.updated} updated, ${results.skipped} skipped, ${results.errors.length} errors`);
+
+      res.json({
+        success: true,
+        totalVehicles: vehicleUpdates.size,
+        updated: results.updated,
+        skipped: results.skipped,
+        errors: results.errors.slice(0, 10),
+      });
+    } catch (error: any) {
+      console.error("[Registration Import Renewals] Error:", error);
       res.status(500).json({ message: error.message });
     }
   });

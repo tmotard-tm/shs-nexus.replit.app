@@ -998,6 +998,8 @@ export const registrationTracking = pgTable("fs_registration_tracking", {
   renewalDate: text("renewal_date"), // Renewal date from Holman (e.g. "03/31/2027")
   holmanStatus: text("holman_status"), // "No Active Events Found" | "No Tasks Are Available" | ""
   viewRequestBadge: text("view_request_badge"), // Badge text shown on the Holman view request
+  holmanCaseStatus: text("holman_case_status"),
+  holmanPendingTasks: text("holman_pending_tasks"),
 });
 
 export const insertRegistrationTrackingSchema = createInsertSchema(registrationTracking);
