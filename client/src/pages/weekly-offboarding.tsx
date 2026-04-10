@@ -39,6 +39,21 @@ interface TermRosterEntry {
   source?: string;
 }
 
+interface ByovEnrollment {
+  enterprise_id: string;
+  full_name: string | null;
+  truck_number: string | null;
+  enrollment_type: string | null;
+  in_rental: boolean;
+  district: string | null;
+  status: string;
+  approved_date: string | null;
+  created_at: string;
+  updated_at: string;
+  mobile_phone: string | null;
+  home_address: string | null;
+}
+
 export default function WeeklyOffboarding() {
   const { toast } = useToast();
   const [exportLoading, setExportLoading] = useState(false);
@@ -48,6 +63,7 @@ export default function WeeklyOffboarding() {
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
   const [manualStatusFilter, setManualStatusFilter] = useState<string>("all");
   const [selectedEntry, setSelectedEntry] = useState<TermRosterEntry | null>(null);
+  const [selectedByovEntry, setSelectedByovEntry] = useState<ByovEnrollment | null>(null);
   
   // Nexus tracking fields
   const [nexusStatus, setNexusStatus] = useState("");
@@ -59,6 +75,14 @@ export default function WeeklyOffboarding() {
   const [nexusPhoneRecovery, setNexusPhoneRecovery] = useState("");
   const [nexusToolsLocation, setNexusToolsLocation] = useState("");
   const [nexusPartsRecovery, setNexusPartsRecovery] = useState("");
+
+  // BYOV nexus tracking fields
+  const [byovNexusStatus, setByovNexusStatus] = useState("");
+  const [byovNexusLocation, setByovNexusLocation] = useState("");
+  const [byovNexusContact, setByovNexusContact] = useState("");
+  const [byovNexusKeys, setByovNexusKeys] = useState("");
+  const [byovNexusRepaired, setByovNexusRepaired] = useState("");
+  const [byovNexusComments, setByovNexusComments] = useState("");
   const [manualTruck, setManualTruck] = useState("");
 
   const { data: manualTruckOverrides = {} } = useQuery<Record<string, string>>({
@@ -402,21 +426,6 @@ export default function WeeklyOffboarding() {
   // ===== BYOV Tab state & data fetching =====
   const [byovSearch, setByovSearch] = useState("");
 
-  interface ByovEnrollment {
-    enterprise_id: string;
-    full_name: string | null;
-    truck_number: string | null;
-    enrollment_type: string | null;
-    in_rental: boolean;
-    district: string | null;
-    status: string;
-    approved_date: string | null;
-    created_at: string;
-    updated_at: string;
-    mobile_phone: string | null;
-    home_address: string | null;
-  }
-
   const { data: byovEnrollments = [], isLoading: byovLoading, refetch: refetchByov } = useQuery<ByovEnrollment[]>({
     queryKey: ['/api/byov-enrollments'],
   });
@@ -452,6 +461,74 @@ export default function WeeklyOffboarding() {
       (e.mobile_phone || '').toLowerCase().includes(q) ||
       (e.home_address || '').toLowerCase().includes(q)
     );
+  });
+
+  const effectiveByovTruck = selectedByovEntry?.truck_number?.toString().trim() || null;
+
+  const { data: byovNexusData, isLoading: byovNexusLoading } = useQuery({
+    queryKey: ['/api/vehicle-nexus-data', effectiveByovTruck],
+    queryFn: async () => {
+      if (!effectiveByovTruck) return null;
+      const response = await fetch(`/api/vehicle-nexus-data/${effectiveByovTruck}`, {
+        credentials: 'include',
+      });
+      if (!response.ok) return null;
+      return response.json();
+    },
+    enabled: !!effectiveByovTruck,
+  });
+
+  useEffect(() => {
+    if (byovNexusData) {
+      setByovNexusStatus(byovNexusData.postOffboardedStatus || "");
+      setByovNexusLocation(byovNexusData.nexusNewLocation || "");
+      setByovNexusContact(byovNexusData.nexusNewLocationContact || "");
+      setByovNexusKeys(byovNexusData.keys || "");
+      setByovNexusRepaired(byovNexusData.repaired || "");
+      setByovNexusComments(byovNexusData.comments || "");
+    } else {
+      setByovNexusStatus("");
+      setByovNexusLocation("");
+      setByovNexusContact("");
+      setByovNexusKeys("");
+      setByovNexusRepaired("");
+      setByovNexusComments("");
+    }
+  }, [byovNexusData, selectedByovEntry]);
+
+  const saveByovNexusMutation = useMutation({
+    mutationFn: async (data: {
+      vehicleNumber: string;
+      postOffboardedStatus: string | null;
+      nexusNewLocation: string | null;
+      nexusNewLocationContact: string | null;
+      keys: string | null;
+      repaired: string | null;
+      comments: string | null;
+    }) => {
+      return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Saved",
+        description: "Nexus tracking data has been saved and synced to Fleet Scope Spares.",
+      });
+      if (effectiveByovTruck) {
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', effectiveByovTruck] });
+        queryClient.invalidateQueries({
+          predicate: (query) =>
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === '/api/vehicle-nexus-data/batch'
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Save Failed",
+        description: error.message || "Failed to save nexus tracking data",
+        variant: "destructive",
+      });
+    },
   });
 
   return (
@@ -983,7 +1060,7 @@ export default function WeeklyOffboarding() {
                       </TableHeader>
                       <TableBody>
                         {filteredByov.map((e) => (
-                          <TableRow key={e.enterprise_id}>
+                          <TableRow key={e.enterprise_id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedByovEntry(e)}>
                             <TableCell className="font-mono text-sm">{e.enterprise_id.toUpperCase()}</TableCell>
                             <TableCell>{e.full_name || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{e.truck_number || '-'}</TableCell>
@@ -1273,6 +1350,195 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                   )}
+                </>
+              )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* BYOV Detail Drawer */}
+      <Sheet open={!!selectedByovEntry} onOpenChange={(open) => !open && setSelectedByovEntry(null)}>
+        <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto" data-testid="sheet-byov-detail">
+          {selectedByovEntry && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  <CarFront className="h-5 w-5 text-blue-600" />
+                  {selectedByovEntry.full_name || 'Unknown'}
+                </SheetTitle>
+                <SheetDescription>
+                  {selectedByovEntry.enterprise_id?.toUpperCase()} • Truck {selectedByovEntry.truck_number || 'N/A'}
+                </SheetDescription>
+              </SheetHeader>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-muted-foreground">BYOV Details</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>
+                    <Badge variant={selectedByovEntry.status === 'approved' ? 'default' : 'secondary'} className="ml-2 capitalize">
+                      {selectedByovEntry.status}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Type:</span>
+                    <span className="ml-2 capitalize">{selectedByovEntry.enrollment_type?.replace(/_/g, ' ') || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">District:</span>
+                    <span className="ml-2">{selectedByovEntry.district || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Phone:</span>
+                    <span className="ml-2 font-mono">{selectedByovEntry.mobile_phone || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Home Address:</span>
+                    <span className="ml-2">{selectedByovEntry.home_address || '-'}</span>
+                  </div>
+                </div>
+              </div>
+
+              {effectiveByovTruck ? (
+                <>
+                  <Separator />
+                  <div className="space-y-4">
+                    <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
+                      <Truck className="h-4 w-4" />
+                      Nexus Tracking
+                    </h4>
+
+                    {byovNexusLoading ? (
+                      <div className="space-y-3">
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-9 w-full" />
+                        <Skeleton className="h-20 w-full" />
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
+                          <Select value={byovNexusStatus} onValueChange={setByovNexusStatus}>
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
+                              <SelectItem value="in_repair">In repair</SelectItem>
+                              <SelectItem value="declined_repair">Declined repair</SelectItem>
+                              <SelectItem value="available_for_rental_pmf">Available to assign or send to PMF</SelectItem>
+                              <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
+                              <SelectItem value="assigned_to_tech_in_rental">Assigned to rental</SelectItem>
+                              <SelectItem value="assigned_to_tech">Assigned to tech</SelectItem>
+                              <SelectItem value="not_found">Not found</SelectItem>
+                              <SelectItem value="sent_to_auction">Sent to auction</SelectItem>
+                              <SelectItem value="already_picked_up">Already picked up</SelectItem>
+                              <SelectItem value="unable_to_reach">Unable to reach</SelectItem>
+                              <SelectItem value="byov">BYOV</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">New Location</Label>
+                          <Input
+                            value={byovNexusLocation}
+                            onChange={(e) => setByovNexusLocation(e.target.value)}
+                            placeholder="Address or location description..."
+                            className="mt-1"
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">New Location Contact</Label>
+                          <Input
+                            value={byovNexusContact}
+                            onChange={(e) => setByovNexusContact(e.target.value)}
+                            placeholder="Phone number or contact info..."
+                            className="mt-1"
+                          />
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Keys</Label>
+                          <Select value={byovNexusKeys} onValueChange={setByovNexusKeys}>
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select keys status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="present">Present</SelectItem>
+                              <SelectItem value="not_present">Not Present</SelectItem>
+                              <SelectItem value="unknown">Unknown/Would not Check</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Repaired</Label>
+                          <Select value={byovNexusRepaired} onValueChange={setByovNexusRepaired}>
+                            <SelectTrigger className="mt-1">
+                              <SelectValue placeholder="Select repair status..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">-- None --</SelectItem>
+                              <SelectItem value="complete">Complete</SelectItem>
+                              <SelectItem value="in_process">In Process</SelectItem>
+                              <SelectItem value="unknown_if_needed">Unknown if needed</SelectItem>
+                              <SelectItem value="declined">Declined</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div>
+                          <Label className="text-xs text-muted-foreground">Comments</Label>
+                          <Textarea
+                            value={byovNexusComments}
+                            onChange={(e) => setByovNexusComments(e.target.value.slice(0, 400))}
+                            placeholder="Additional notes (max 400 characters)..."
+                            className="mt-1 resize-none"
+                            rows={3}
+                            maxLength={400}
+                          />
+                          <p className="text-xs text-muted-foreground text-right mt-1">{byovNexusComments.length}/400</p>
+                        </div>
+
+                        <Button
+                          onClick={() => saveByovNexusMutation.mutate({
+                            vehicleNumber: effectiveByovTruck!,
+                            postOffboardedStatus: byovNexusStatus === '__none__' ? null : (byovNexusStatus || null),
+                            nexusNewLocation: byovNexusLocation || null,
+                            nexusNewLocationContact: byovNexusContact || null,
+                            keys: byovNexusKeys === '__none__' ? null : (byovNexusKeys || null),
+                            repaired: byovNexusRepaired === '__none__' ? null : (byovNexusRepaired || null),
+                            comments: byovNexusComments || null,
+                          })}
+                          disabled={saveByovNexusMutation.isPending}
+                          className="w-full"
+                        >
+                          {saveByovNexusMutation.isPending ? (
+                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          ) : (
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                          )}
+                          Save Tracking Data
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Separator />
+                  <div className="text-sm text-muted-foreground text-center py-4">
+                    <AlertCircle className="h-5 w-5 mx-auto mb-2" />
+                    No truck number available for this enrollment. Nexus tracking requires a truck number.
+                  </div>
                 </>
               )}
             </div>
