@@ -178,6 +178,7 @@ export default function Registration() {
   const [expiryMonthFilter, setExpiryMonthFilter] = useState<string | null>(null);
   const [daysToExpirySort, setDaysToExpirySort] = useState<"none" | "asc" | "desc">("none");
   const [caseStatusFilter, setCaseStatusFilter] = useState<string>("all");
+  const [pendingTasksFilter, setPendingTasksFilter] = useState<string>("all");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pasteData, setPasteData] = useState("");
   const [overwriteDates, setOverwriteDates] = useState(false);
@@ -544,7 +545,11 @@ export default function Registration() {
       const matchesCaseStatus = caseStatusFilter === "all" ||
         (caseStatusFilter === "none" ? !truck.holmanCaseStatus : truck.holmanCaseStatus === caseStatusFilter);
 
-      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesTagState && matchesExpiryMonth && matchesCaseStatus;
+      const matchesPendingTasks = pendingTasksFilter === "all" ||
+        (pendingTasksFilter === "none" ? !truck.holmanPendingTasks :
+          pendingTasksFilter === "has" ? !!truck.holmanPendingTasks : false);
+
+      return matchesSearch && matchesTruckNumber && matchesStatus && matchesOwner && matchesState && matchesTagState && matchesExpiryMonth && matchesCaseStatus && matchesPendingTasks;
     });
     
     // Apply Days to Expiry sort
@@ -563,7 +568,7 @@ export default function Registration() {
     }
     
     return result;
-  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort, caseStatusFilter]);
+  }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort, caseStatusFilter, pendingTasksFilter]);
 
   const toggleStateFilter = (state: string, allStates: string[]) => {
     setStateFilters(prev => {
@@ -1517,7 +1522,29 @@ export default function Registration() {
                         </SelectContent>
                       </Select>
                     </TableHead>
-                    <TableHead className="w-[200px]">Pending Tasks</TableHead>
+                    <TableHead className="w-[200px]">
+                      <Select
+                        value={pendingTasksFilter}
+                        onValueChange={setPendingTasksFilter}
+                      >
+                        <SelectTrigger className="h-8 border-0 bg-transparent p-0 font-medium hover:bg-muted/50">
+                          <div className="flex items-center gap-1">
+                            <Filter className="h-3 w-3" />
+                            <span>Pending Tasks</span>
+                            {pendingTasksFilter !== "all" && (
+                              <Badge variant="secondary" className="ml-1 text-xs">
+                                {pendingTasksFilter === "none" ? "None" : "Has Tasks"}
+                              </Badge>
+                            )}
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="has">Has Tasks</SelectItem>
+                          <SelectItem value="none">No Tasks</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </TableHead>
                     <TableHead className="w-[150px]">Current Step</TableHead>
                     <TableHead className="w-[120px]">Last Change</TableHead>
                     <TableHead className="w-[90px]">ETA</TableHead>
