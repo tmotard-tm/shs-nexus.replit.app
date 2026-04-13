@@ -9547,6 +9547,110 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/loa-trucks-to-recover", requireAuth, async (req: any, res) => {
+    try {
+      const snowflakeService = getSnowflakeService();
+
+      const query = `
+        SELECT
+          t.FULL_NAME,
+          t.ENTERPRISE_ID,
+          t.EMPLOYMENT_STATUS,
+          t.JOB_TITLE,
+          t.DISTRICT_NO,
+          t.PLANNING_AREA_NM,
+          t.EFFDT,
+          t.DATE_LAST_WORKED,
+          tpms.MOBILEPHONENUMBER,
+          tpms.PRIMARYADDR1,
+          tpms.PRIMARYADDR2,
+          tpms.PRIMARYCITY,
+          tpms.PRIMARYSTATE,
+          tpms.PRIMARYZIP,
+          tpms.TRUCK_LU
+        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT tpms
+          ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms.ENTERPRISE_ID))
+        WHERE t.EMPLOYMENT_STATUS IN ('L', 'P', 'S')
+        ORDER BY t.EMPLOYMENT_STATUS, t.FULL_NAME
+      `;
+
+      const rows = await snowflakeService.executeQuery(query) as Array<{
+        FULL_NAME: string | null;
+        ENTERPRISE_ID: string | null;
+        EMPLOYMENT_STATUS: string | null;
+        JOB_TITLE: string | null;
+        DISTRICT_NO: string | null;
+        PLANNING_AREA_NM: string | null;
+        EFFDT: string | null;
+        DATE_LAST_WORKED: string | null;
+        MOBILEPHONENUMBER: string | number | null;
+        PRIMARYADDR1: string | null;
+        PRIMARYADDR2: string | null;
+        PRIMARYCITY: string | null;
+        PRIMARYSTATE: string | null;
+        PRIMARYZIP: string | null;
+        TRUCK_LU: string | null;
+      }>;
+
+      const statusLabels: Record<string, string> = {
+        'L': 'Leave of Absence',
+        'P': 'Paid Leave',
+        'S': 'Suspended',
+      };
+
+      const formatPhone = (phone: string | number | null | undefined): string | null => {
+        if (!phone) return null;
+        const digits = String(phone).replace(/\D/g, '');
+        if (digits.length === 10) {
+          return `(${digits.slice(0, 3)})${digits.slice(3, 6)}-${digits.slice(6)}`;
+        }
+        if (digits.length === 11 && digits[0] === '1') {
+          return `(${digits.slice(1, 4)})${digits.slice(4, 7)}-${digits.slice(7)}`;
+        }
+        return String(phone);
+      };
+
+      const deduped = new Map<string, (typeof rows)[0]>();
+      for (const row of rows) {
+        const key = (row.ENTERPRISE_ID || '').trim().toUpperCase();
+        if (key && !deduped.has(key)) {
+          deduped.set(key, row);
+        }
+      }
+
+      const formatted = Array.from(deduped.values()).map(row => {
+        const addressParts = [
+          row.PRIMARYADDR1?.trim(),
+          row.PRIMARYADDR2?.trim(),
+          row.PRIMARYCITY?.trim(),
+          row.PRIMARYSTATE?.trim(),
+          row.PRIMARYZIP?.trim(),
+        ].filter(Boolean);
+
+        return {
+          fullName: row.FULL_NAME?.trim() || '',
+          enterpriseId: (row.ENTERPRISE_ID || '').trim().toUpperCase(),
+          employmentStatus: row.EMPLOYMENT_STATUS?.trim() || '',
+          employmentStatusLabel: statusLabels[row.EMPLOYMENT_STATUS?.trim() || ''] || row.EMPLOYMENT_STATUS?.trim() || '',
+          jobTitle: row.JOB_TITLE?.trim() || '',
+          district: row.DISTRICT_NO?.trim()?.replace(/^0+/, '') || '',
+          planningArea: row.PLANNING_AREA_NM?.trim() || '',
+          effectiveDate: row.EFFDT || '',
+          lastDateWorked: row.DATE_LAST_WORKED || '',
+          tpmsPhone: formatPhone(row.MOBILEPHONENUMBER),
+          tpmsAddress: addressParts.join(', '),
+          lastKnownTruck: row.TRUCK_LU?.trim() || '',
+        };
+      });
+
+      res.json(formatted);
+    } catch (error: any) {
+      console.error('[LOA Trucks] Error fetching LOA/Paid Leave/Suspended techs:', error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Weekly Offboarding - Sync/Refresh (same as GET but for POST compatibility)
   app.post("/api/snowflake/sync/weekly-offboarding", requireAuth, async (req: any, res) => {
     try {

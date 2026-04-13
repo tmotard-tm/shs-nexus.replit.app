@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -52,6 +52,21 @@ interface ByovEnrollment {
   updated_at: string;
   mobile_phone: string | null;
   home_address: string | null;
+}
+
+interface LoaTechEntry {
+  fullName: string;
+  enterpriseId: string;
+  employmentStatus: string;
+  employmentStatusLabel: string;
+  jobTitle: string;
+  district: string;
+  planningArea: string;
+  effectiveDate: string;
+  lastDateWorked: string;
+  tpmsPhone: string | null;
+  tpmsAddress: string;
+  lastKnownTruck: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -450,6 +465,27 @@ export default function WeeklyOffboarding() {
       }, byovEnrollments[0].created_at)
     : null;
 
+  // ===== LOA / Paid Leave / Suspended Tab state & data fetching =====
+  const [loaSearch, setLoaSearch] = useState("");
+  const [loaStatusFilter, setLoaStatusFilter] = useState<string>("all");
+
+  const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
+    queryKey: ['/api/loa-trucks-to-recover'],
+  });
+
+  const filteredLoa = loaTechs.filter(e => {
+    if (loaStatusFilter !== "all" && e.employmentStatus !== loaStatusFilter) return false;
+    if (!loaSearch.trim()) return true;
+    const q = loaSearch.toLowerCase();
+    return (
+      (e.fullName || '').toLowerCase().includes(q) ||
+      (e.enterpriseId || '').toLowerCase().includes(q) ||
+      (e.lastKnownTruck || '').toLowerCase().includes(q) ||
+      (e.tpmsAddress || '').toLowerCase().includes(q) ||
+      (e.district || '').toLowerCase().includes(q)
+    );
+  });
+
   const filteredByov = byovEnrollments.filter(e => {
     if (!byovSearch.trim()) return true;
     const q = byovSearch.toLowerCase();
@@ -554,6 +590,10 @@ export default function WeeklyOffboarding() {
             <TabsTrigger value="byov" className="flex items-center gap-1">
               <CarFront className="h-4 w-4" />
               BYOV Offboarding
+            </TabsTrigger>
+            <TabsTrigger value="loa" className="flex items-center gap-1">
+              <PauseCircle className="h-4 w-4" />
+              LOA, Paid Leave & Suspended
             </TabsTrigger>
           </TabsList>
 
@@ -1084,6 +1124,119 @@ export default function WeeklyOffboarding() {
                             </TableCell>
                             <TableCell className="text-sm max-w-[220px]">
                               {e.home_address || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="loa">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <PauseCircle className="h-5 w-5 text-amber-600" />
+                      LOA, Paid Leave & Suspended trucks to recover
+                    </CardTitle>
+                    <CardDescription>
+                      Technicians on Leave, Paid Leave, or Suspended status with trucks that may need recovery
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refetchLoa()}
+                    disabled={loaLoading}
+                  >
+                    <RefreshCw className={`h-4 w-4 mr-1 ${loaLoading ? 'animate-spin' : ''}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4 mb-4">
+                  <div className="relative flex-1 max-w-sm">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      placeholder="Search by name, enterprise ID, truck, or address..."
+                      value={loaSearch}
+                      onChange={(e) => setLoaSearch(e.target.value)}
+                      className="pl-9"
+                    />
+                  </div>
+                  <Select value={loaStatusFilter} onValueChange={setLoaStatusFilter}>
+                    <SelectTrigger className="w-[200px]">
+                      <SelectValue placeholder="All Statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Statuses</SelectItem>
+                      <SelectItem value="L">Leave of Absence</SelectItem>
+                      <SelectItem value="P">Paid Leave</SelectItem>
+                      <SelectItem value="S">Suspended</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <span className="text-sm text-muted-foreground whitespace-nowrap">
+                    {filteredLoa.length} of {loaTechs.length} record{loaTechs.length !== 1 ? 's' : ''}
+                  </span>
+                </div>
+
+                {loaLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-6 w-6 animate-spin text-muted-foreground mr-2" />
+                    <span className="text-muted-foreground">Loading LOA / Paid Leave / Suspended techs...</span>
+                  </div>
+                ) : filteredLoa.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    {loaTechs.length === 0 ? (
+                      <p>No technicians found with LOA, Paid Leave, or Suspended status.</p>
+                    ) : (
+                      <p>No results match your search.</p>
+                    )}
+                  </div>
+                ) : (
+                  <div className="rounded-md border overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Employment Status</TableHead>
+                          <TableHead>Name</TableHead>
+                          <TableHead>Enterprise ID</TableHead>
+                          <TableHead>Truck</TableHead>
+                          <TableHead>District</TableHead>
+                          <TableHead>Phone (TPMS)</TableHead>
+                          <TableHead>Address (TPMS)</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {filteredLoa.map((e) => (
+                          <TableRow key={e.enterpriseId}>
+                            <TableCell>
+                              <Badge
+                                variant="outline"
+                                className={`text-xs whitespace-nowrap ${
+                                  e.employmentStatus === 'L' ? 'bg-yellow-50 text-yellow-800 border-yellow-300 dark:bg-yellow-950 dark:text-yellow-200 dark:border-yellow-700' :
+                                  e.employmentStatus === 'P' ? 'bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-700' :
+                                  'bg-red-50 text-red-800 border-red-300 dark:bg-red-950 dark:text-red-200 dark:border-red-700'
+                                }`}
+                              >
+                                {e.employmentStatusLabel}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="font-medium">{e.fullName || '-'}</TableCell>
+                            <TableCell className="font-mono text-sm">{e.enterpriseId}</TableCell>
+                            <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
+                            <TableCell className="text-sm">{e.district || '-'}</TableCell>
+                            <TableCell className="text-sm whitespace-nowrap font-mono">
+                              {e.tpmsPhone || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                            <TableCell className="text-sm max-w-[280px]">
+                              {e.tpmsAddress || <span className="text-muted-foreground">-</span>}
                             </TableCell>
                           </TableRow>
                         ))}
