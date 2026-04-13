@@ -635,6 +635,14 @@ function ExpandedRowDetails({
 
   return (
     <div className="p-6 bg-slate-50 border-t border-b border-slate-200 shadow-inner">
+      {(item.automationDetail as AutomationDetail | null)?.page_visited_at && (
+        <div className="mb-4">
+          <Badge className="text-xs bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Engaged
+          </Badge>
+        </div>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <div className="space-y-6">
           <div className="space-y-3">
@@ -1075,6 +1083,7 @@ export function AssetsRecoveryQueue() {
   const [workModuleItem, setWorkModuleItem] = useState<AssetsQueueItemEnriched | null>(null);
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
   const [detailViewItem, setDetailViewItem] = useState<AssetsQueueItemEnriched | null>(null);
+
   const [showIncompleteWarning, setShowIncompleteWarning] = useState(false);
   const [pendingCompleteId, setPendingCompleteId] = useState<string | null>(null);
 
@@ -1085,6 +1094,15 @@ export function AssetsRecoveryQueue() {
   });
 
   const queueItems = useMemo(() => rawQueueItems.map(enrichItem), [rawQueueItems]);
+
+  useEffect(() => {
+    if (detailViewItem) {
+      const updated = queueItems.find(i => i.id === detailViewItem.id);
+      if (updated) {
+        setDetailViewItem(updated);
+      }
+    }
+  }, [queueItems]);
 
   const { data: users = [] } = useQuery<User[]>({
     queryKey: ["/api/users"],
@@ -1489,6 +1507,11 @@ export function AssetsRecoveryQueue() {
                                 </Badge>
                               );
                             })()}
+                            {(row.automationDetail as AutomationDetail | null)?.page_visited_at && (
+                              <Badge className="text-[10px] px-1.5 py-0 h-4 w-fit font-medium border bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+                                Engaged
+                              </Badge>
+                            )}
                           </div>
                         </div>
                       </td>

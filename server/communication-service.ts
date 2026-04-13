@@ -386,6 +386,168 @@ This is an automated message from the Nexus Portal.`,
       isActive: true,
     },
     {
+      name: 'tool-recovery-outreach-pre',
+      description: 'Outreach email for PRE lane — proactive/friendly tone, before last day worked',
+      type: 'email',
+      mode: 'simulated',
+      subject: 'Upcoming Offboarding: Equipment Return Reminder for {{technicianName}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">Equipment Return Reminder</h1>
+    <p style="color: #dbeafe; margin: 8px 0 0 0; font-size: 14px;">Let's get ahead of your offboarding</p>
+  </div>
+  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>Hi {{firstName}},</p>
+    <p>We wanted to reach out early regarding your upcoming separation date of <strong>{{lastDay}}</strong>. To make the transition as smooth as possible, we'd like to coordinate the return of any company-provided equipment and tools assigned to you.</p>
+    <p>Please use the link below to review your equipment and begin the return process:</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{returnLink}}" style="background: #2563eb; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Start Equipment Return</a>
+    </div>
+    <p>Getting started early helps avoid any delays or complications. If you have questions, please reach out to your supervisor.</p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Hi {{firstName}},
+
+We wanted to reach out early regarding your upcoming separation date of {{lastDay}}. To make the transition as smooth as possible, we'd like to coordinate the return of any company-provided equipment and tools assigned to you.
+
+Please use the link below to review your equipment and begin the return process:
+{{returnLink}}
+
+Getting started early helps avoid any delays or complications. If you have questions, please reach out to your supervisor.
+
+This is an automated message from the Nexus Offboarding System.`,
+      variables: ['firstName', 'technicianName', 'lastDay', 'returnLink'],
+      isActive: true,
+    },
+    {
+      name: 'tool-recovery-outreach-warm',
+      description: 'Outreach email for WARM lane — prompt/helpful tone, within 7 days of last day',
+      type: 'email',
+      mode: 'simulated',
+      subject: 'Action Needed: Return Your Company Equipment — {{technicianName}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">Equipment Return Needed</h1>
+    <p style="color: #fed7aa; margin: 8px 0 0 0; font-size: 14px;">Please complete your return promptly</p>
+  </div>
+  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>Hi {{firstName}},</p>
+    <p>Your last day of <strong>{{lastDay}}</strong> has recently passed, and we need to arrange the return of your company-provided equipment. Returning items promptly helps us close out your offboarding without issue.</p>
+    <p>Please click below to begin the return process:</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{returnLink}}" style="background: #ea580c; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Return Equipment Now</a>
+    </div>
+    <p>If you've already shipped your items, no further action is needed. For questions, contact your supervisor.</p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Hi {{firstName}},
+
+Your last day of {{lastDay}} has recently passed, and we need to arrange the return of your company-provided equipment. Returning items promptly helps us close out your offboarding without issue.
+
+Please click below to begin the return process:
+{{returnLink}}
+
+If you've already shipped your items, no further action is needed. For questions, contact your supervisor.
+
+This is an automated message from the Nexus Offboarding System.`,
+      variables: ['firstName', 'technicianName', 'lastDay', 'returnLink'],
+      isActive: true,
+    },
+    {
+      name: 'tool-recovery-outreach-late',
+      description: 'Outreach email for LATE lane — urgent tone, 8-30 days past last day',
+      type: 'email',
+      mode: 'simulated',
+      subject: 'Urgent: Company Equipment Still Outstanding — {{technicianName}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #dc2626 0%, #f87171 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">Urgent: Equipment Return Overdue</h1>
+    <p style="color: #fecaca; margin: 8px 0 0 0; font-size: 14px;">Immediate action required</p>
+  </div>
+  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>Hi {{firstName}},</p>
+    <p>Our records indicate that company-provided equipment assigned to you has not yet been returned. Your last day was <strong>{{lastDay}}</strong>, and this return is now overdue.</p>
+    <p>Under company policy, technicians are responsible for returning all company-provided tools upon separation. Failure to return equipment may result in further action.</p>
+    <p>Please use the link below to initiate your return immediately:</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{returnLink}}" style="background: #dc2626; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Return Equipment Immediately</a>
+    </div>
+    <p>If you believe this message was sent in error, please contact your supervisor right away.</p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Hi {{firstName}},
+
+Our records indicate that company-provided equipment assigned to you has not yet been returned. Your last day was {{lastDay}}, and this return is now overdue.
+
+Under company policy, technicians are responsible for returning all company-provided tools upon separation. Failure to return equipment may result in further action.
+
+Please use the link below to initiate your return immediately:
+{{returnLink}}
+
+If you believe this message was sent in error, please contact your supervisor right away.
+
+This is an automated message from the Nexus Offboarding System.`,
+      variables: ['firstName', 'technicianName', 'lastDay', 'returnLink'],
+      isActive: true,
+    },
+    {
+      name: 'tool-recovery-outreach-cold',
+      description: 'Outreach email for COLD lane — final notice tone, 30+ days past last day',
+      type: 'email',
+      mode: 'simulated',
+      subject: 'Final Notice: Unreturned Company Equipment — {{technicianName}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #1e293b 0%, #475569 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 24px;">Final Notice: Equipment Return</h1>
+    <p style="color: #cbd5e1; margin: 8px 0 0 0; font-size: 14px;">This is your final notification</p>
+  </div>
+  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>Dear {{firstName}},</p>
+    <p>This is a final notice regarding company-provided equipment that remains unreturned. Your last day was <strong>{{lastDay}}</strong>, and multiple prior attempts to arrange a return have been made.</p>
+    <p>Per the Company Policy and Acknowledgment for Company-Provided Technician Tools, you are responsible for reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.</p>
+    <p>To avoid further escalation, please return your equipment using the link below:</p>
+    <div style="text-align: center; margin: 30px 0;">
+      <a href="{{returnLink}}" style="background: #1e293b; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Return Equipment Now</a>
+    </div>
+    <p>If you have already returned your equipment or have questions, please contact your supervisor immediately.</p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Dear {{firstName}},
+
+This is a final notice regarding company-provided equipment that remains unreturned. Your last day was {{lastDay}}, and multiple prior attempts to arrange a return have been made.
+
+Per the Company Policy and Acknowledgment for Company-Provided Technician Tools, you are responsible for reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.
+
+To avoid further escalation, please return your equipment using the link below:
+{{returnLink}}
+
+If you have already returned your equipment or have questions, please contact your supervisor immediately.
+
+This is an automated message from the Nexus Offboarding System.`,
+      variables: ['firstName', 'technicianName', 'lastDay', 'returnLink'],
+      isActive: true,
+    },
+    {
       name: 'phase2-tasks-created',
       description: 'Notifies Fleet team when all Day 0 offboarding tasks are completed and Phase 2 tasks have been auto-generated',
       type: 'email',

@@ -28,7 +28,7 @@ import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
 import { getSamsaraService } from "./samsara-service";
 import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils";
-import { getDetectionLane, parseTechDataFromQueueItem } from "./return-token-service";
+import { getDetectionLane, parseTechDataFromQueueItem, generateReturnToken } from "./return-token-service";
 import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { registerWmsRoutes } from "./wms-engine-routes";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
@@ -2641,6 +2641,126 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error sending tool audit notification:', error);
       res.status(500).json({ message: "Failed to send tool audit notification" });
+    }
+  });
+
+  app.post("/api/assets-queue/:id/send-outreach", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || !hasQueueAccess(currentUser, 'assets')) {
+        return res.status(403).json({ message: "Access denied to Assets queue" });
+      }
+
+      const queueItem = await storage.getAssetsQueueItem(req.params.id);
+      if (!queueItem) {
+        return res.status(404).json({ message: "Assets queue item not found" });
+      }
+
+      const parsedData = typeof queueItem.data === 'string'
+        ? JSON.parse(queueItem.data)
+        : queueItem.data || {};
+
+      const tech = parsedData.technician || parsedData.employee || {};
+      const hr = parsedData.hrSeparation || {};
+      const roster = parsedData.rosterContact || {};
+
+      const techName = tech.techName || tech.name || tech.technicianName || hr.technicianName || queueItem.title || "Team Member";
+      const ldapId = tech.enterpriseId || tech.ldapId || hr.ldapId || tech.techRacfid || "";
+      let personalEmail = tech.personalEmail || hr.personalEmail || roster.personalEmail || tech.email || "";
+      const lastDay = hr.lastDay || tech.lastDayWorked || tech.separationDate || "your scheduled last day";
+
+      if (!personalEmail && ldapId) {
+        try {
+          const allTechRecord = await storage.getAllTechByTechRacfid(ldapId);
+          if (allTechRecord) {
+            personalEmail = (allTechRecord as any).personalEmail || (allTechRecord as any).email || "";
+          }
+        } catch (e) {
+          console.warn('[Outreach] Could not look up enriched tech data:', e);
+        }
+      }
+
+      let firstName = 'Team Member';
+      if (techName.includes(',')) {
+        const afterComma = techName.split(',')[1]?.trim().split(/\s+/)[0];
+        if (afterComma) firstName = afterComma;
+      } else {
+        const firstToken = techName.trim().split(/\s+/)[0];
+        if (firstToken) firstName = firstToken;
+      }
+      firstName = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+
+      const techData = parseTechDataFromQueueItem(typeof queueItem.data === 'string' ? queueItem.data : JSON.stringify(queueItem.data));
+      const lane = getDetectionLane(techData.lastDayWorked, queueItem.createdAt ? queueItem.createdAt.toISOString() : null);
+
+      const laneTemplateMap: Record<string, string> = {
+        'PRE': 'tool-recovery-outreach-pre',
+        'WARM': 'tool-recovery-outreach-warm',
+        'LATE': 'tool-recovery-outreach-late',
+        'COLD': 'tool-recovery-outreach-cold',
+      };
+      const templateName = laneTemplateMap[lane] || 'tool-recovery-outreach-warm';
+
+      if (!personalEmail) {
+        const commTemplate = await storage.getCommunicationTemplateByName(templateName);
+        const templateMode = commTemplate?.mode || 'simulated';
+        if (templateMode === 'live') {
+          return res.status(400).json({ message: "No personal email found for this technician. A personal email is required to send outreach in Live mode." });
+        }
+        personalEmail = `no-email-on-file@technician.placeholder`;
+        console.log(`[Outreach] No personal email for ${techName} (${ldapId}). Mode is '${templateMode}' — using placeholder.`);
+      }
+
+      const returnLink = await generateReturnToken(req.params.id);
+      const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
+      const fullReturnLink = `${baseUrl}${returnLink}`;
+
+      const { sendCommunication } = await import("./communication-service");
+      const result = await sendCommunication({
+        templateName,
+        recipient: personalEmail,
+        variables: {
+          firstName,
+          technicianName: techName,
+          lastDay,
+          returnLink: fullReturnLink,
+        },
+        metadata: {
+          source: 'tool-recovery-outreach',
+          queueItemId: req.params.id,
+          lane,
+        },
+        sentBy: currentUser.id,
+      });
+
+      const outreachEvent = {
+        channel: 'email' as const,
+        templateName,
+        lane,
+        status: result.status,
+        communicationLogId: result.logId,
+        sentAt: new Date().toISOString(),
+        sentBy: currentUser.username,
+        error: result.error,
+      };
+
+      await storage.updateAutomationDetail(req.params.id, {
+        outreach: [outreachEvent],
+      });
+
+      res.json({
+        success: result.success,
+        status: result.status,
+        lane,
+        templateName,
+        intendedRecipient: result.intendedRecipient,
+        actualRecipient: result.actualRecipient,
+        techName,
+        error: result.error,
+      });
+    } catch (error) {
+      console.error('Error sending outreach:', error);
+      res.status(500).json({ message: "Failed to send outreach email" });
     }
   });
 

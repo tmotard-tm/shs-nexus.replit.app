@@ -115,6 +115,119 @@ function SendToolAuditButton({ itemId, techData }: { itemId: string; techData?: 
   );
 }
 
+function SendOutreachButton({ itemId }: { itemId: string }) {
+  const { toast } = useToast();
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/assets-queue/${itemId}/send-outreach`);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data.success) {
+        const statusLabel = data.status === 'simulated' ? 'simulated' : data.status === 'sent' ? 'sent' : data.status;
+        toast({
+          title: "Outreach Email Sent",
+          description: `${statusLabel} to ${data.actualRecipient || data.intendedRecipient} (${data.lane} lane)`,
+        });
+        queryClient.invalidateQueries({
+          predicate: (query) => {
+            const key = query.queryKey[0];
+            return typeof key === "string" && key.startsWith("/api/assets-queue");
+          },
+        });
+      } else {
+        toast({
+          title: "Outreach Failed",
+          description: data.error || "Unknown error",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: any) => {
+      let message = "Failed to send outreach email";
+      if (error?.message) {
+        const match = error.message.match(/^\d+:\s*(.+)/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[1]);
+            message = parsed.message || message;
+          } catch {
+            message = match[1];
+          }
+        } else {
+          message = error.message;
+        }
+      }
+      toast({ title: "Error", description: message, variant: "destructive" });
+    },
+  });
+
+  return (
+    <Button
+      variant="outline"
+      className="w-full justify-start border-orange-200 text-orange-700 hover:bg-orange-50"
+      onClick={() => mutation.mutate()}
+      disabled={mutation.isPending}
+    >
+      {mutation.isPending ? (
+        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+      ) : (
+        <Mail className="h-4 w-4 mr-2" />
+      )}
+      {mutation.isPending ? "Sending Outreach..." : "Send Outreach Email"}
+    </Button>
+  );
+}
+
+function OutreachTimeline({ outreach }: { outreach?: Array<{ channel: string; templateName: string; lane: string; status: string; sentAt: string; sentBy?: string; error?: string }> }) {
+  const laneLabels: Record<string, string> = {
+    'tool-recovery-outreach-pre': 'PRE — Proactive',
+    'tool-recovery-outreach-warm': 'WARM — Prompt',
+    'tool-recovery-outreach-late': 'LATE — Urgent',
+    'tool-recovery-outreach-cold': 'COLD — Final Notice',
+  };
+
+  const statusStyles: Record<string, string> = {
+    sent: 'bg-green-100 text-green-800 border-green-200',
+    simulated: 'bg-blue-100 text-blue-800 border-blue-200',
+    blocked: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    failed: 'bg-red-100 text-red-800 border-red-200',
+  };
+
+  if (!outreach || outreach.length === 0) {
+    return (
+      <div className="p-3 bg-muted rounded-md">
+        <p className="text-sm text-muted-foreground italic">No outreach sent yet.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      {outreach.map((entry, idx) => (
+        <div key={idx} className="flex items-start gap-3 p-3 bg-white dark:bg-slate-900 rounded-md border border-slate-200 dark:border-slate-700">
+          <Mail className="h-4 w-4 text-slate-500 mt-0.5 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-sm font-medium">{laneLabels[entry.templateName] || entry.templateName}</span>
+              <Badge className={`text-[10px] px-1.5 py-0 h-4 border ${statusStyles[entry.status] || 'bg-slate-100 text-slate-700'}`}>
+                {entry.status}
+              </Badge>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              {new Date(entry.sentAt).toLocaleString()}
+              {entry.sentBy && ` • by ${entry.sentBy}`}
+            </div>
+            {entry.error && (
+              <p className="text-xs text-red-600 mt-1">{entry.error}</p>
+            )}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 interface VehicleLocation {
   lat?: number;
   lng?: number;
@@ -421,9 +534,17 @@ export function AssetsTaskDetailView({
             <h1 className="text-xl font-semibold" style={{ color: '#1A4B8C' }}>
               Day 0: Recover Equipment & Tools - {techName}
             </h1>
-            <p className="text-sm text-muted-foreground">
-              Assets Queue Task • {item.status}
-            </p>
+            <div className="flex items-center gap-2">
+              <p className="text-sm text-muted-foreground">
+                Assets Queue Task • {item.status}
+              </p>
+              {(item.automationDetail as AutomationDetail)?.page_visited_at && (
+                <Badge className="text-xs bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
+                  <CheckCircle className="h-3 w-3 mr-1" />
+                  Engaged
+                </Badge>
+              )}
+            </div>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -771,6 +892,8 @@ export function AssetsTaskDetailView({
 
             <SendToolAuditButton itemId={item.id} techData={item.techData} />
 
+            <SendOutreachButton itemId={item.id} />
+
             <Button
               variant="outline"
               className="w-full justify-start"
@@ -830,6 +953,19 @@ export function AssetsTaskDetailView({
           </CardContent>
         </Card>
       </div>
+
+      {/* Outreach History */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-lg flex items-center gap-2" style={{ color: '#1A4B8C' }}>
+            <Mail className="h-5 w-5" />
+            Outreach History
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <OutreachTimeline outreach={(item.automationDetail as AutomationDetail)?.outreach} />
+        </CardContent>
+      </Card>
 
       {/* Notes Section */}
       <InlineNotesCard item={item} />

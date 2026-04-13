@@ -127,7 +127,7 @@ function deepMergeAutomationDetail(existing: AutomationDetail, patch: Partial<Au
     }
   }
   if (patch.outreach !== undefined) {
-    result.outreach = patch.outreach;
+    result.outreach = [...(existing.outreach || []), ...(patch.outreach || [])];
   }
   if (patch.manualFlags !== undefined) {
     result.manualFlags = patch.manualFlags;

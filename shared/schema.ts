@@ -1048,10 +1048,21 @@ export interface AutomationTaskEntry {
   updatedAt?: string;
 }
 
+export interface OutreachEvent {
+  channel: 'email' | 'sms';
+  templateName: string;
+  lane: string;
+  status: 'sent' | 'simulated' | 'blocked' | 'failed';
+  communicationLogId?: string;
+  sentAt: string;
+  sentBy?: string;
+  error?: string;
+}
+
 export interface AutomationDetail {
   lane?: string;
   automatedTasks?: Record<string, AutomationTaskEntry>;
-  outreach?: unknown[];
+  outreach?: OutreachEvent[];
   manualFlags?: unknown[];
   page_visited_at?: string;
 }
