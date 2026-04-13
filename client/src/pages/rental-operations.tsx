@@ -366,14 +366,13 @@ export default function RentalOperations() {
 
   const trendData = useMemo(() => {
     if (!availableDates?.data) return [];
-    return [...availableDates.data]
-      .sort((a, b) => a.fileDate.localeCompare(b.fileDate))
-      .map(d => ({
-        date: d.fileDate.slice(5), // MM-DD
-        open: d.openRowCount ?? 0,
-        tickets: d.ticketRowCount ?? 0,
-        closed: d.closedRowCount ?? 0,
-      }));
+    const sorted = [...availableDates.data].sort((a, b) => a.fileDate.localeCompare(b.fileDate));
+    return sorted.map((d, i) => ({
+      date: d.fileDate.slice(5), // MM-DD
+      open: d.openRowCount ?? 0,
+      tickets: d.ticketRowCount ?? 0,
+      closed: i === 0 ? 0 : Math.max(0, (d.closedRowCount ?? 0) - (sorted[i - 1].closedRowCount ?? 0)),
+    }));
   }, [availableDates]);
 
   const SummaryCard = ({ label, value, sub, color }: { label: string; value: any; sub?: string; color?: string }) => (
@@ -1038,7 +1037,7 @@ export default function RentalOperations() {
                     <CardHeader>
                       <CardTitle className="text-sm">Daily Volume Trend</CardTitle>
                       <CardDescription className="text-xs">
-                        Open rentals, tickets, and closed per daily Snowflake file load — {trendData.length} data point{trendData.length !== 1 ? "s" : ""} available
+                        Open rentals, tickets, and new daily closures per Snowflake file load — {trendData.length} data point{trendData.length !== 1 ? "s" : ""} available
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1052,7 +1051,7 @@ export default function RentalOperations() {
                             <Legend />
                             <Line type="monotone" dataKey="open" stroke="#3b82f6" strokeWidth={2} name="Open Rentals" dot />
                             <Line type="monotone" dataKey="tickets" stroke="#8b5cf6" strokeWidth={2} name="Open Tickets" dot />
-                            <Line type="monotone" dataKey="closed" stroke="#6b7280" strokeWidth={2} name="Closed Rentals" dot />
+                            <Line type="monotone" dataKey="closed" stroke="#6b7280" strokeWidth={2} name="New Closures" dot />
                           </LineChart>
                         </ResponsiveContainer>
                       </div>
