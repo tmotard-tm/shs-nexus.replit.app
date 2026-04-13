@@ -9595,12 +9595,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
             WHEN tpms.ENTERPRISE_ID IS NOT NULL THEN 'TPMS_EXTRACT'
             WHEN tpms_last.ENTERPRISE_ID IS NOT NULL THEN 'TPMS_EXTRACT_LAST_ASSIGNED'
             ELSE NULL
-          END AS TPMS_SOURCE
+          END AS TPMS_SOURCE,
+          c.SNSTV_MAIN_PHONE,
+          c.SNSTV_HOME_PHONE,
+          c.SNSTV_CELL_PHONE
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT tpms
           ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms.ENTERPRISE_ID))
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms_last
           ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms_last.ENTERPRISE_ID))
+        LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
+          ON t.EMPL_ID = c.EMPLID
         WHERE t.EMPLOYMENT_STATUS IN ('L', 'P', 'S')
         ORDER BY t.EMPLOYMENT_STATUS, t.FULL_NAME
       `;
@@ -9622,6 +9627,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         PRIMARYZIP: string | null;
         TRUCK_LU: string | null;
         TPMS_SOURCE: string | null;
+        SNSTV_MAIN_PHONE: string | number | null;
+        SNSTV_HOME_PHONE: string | number | null;
+        SNSTV_CELL_PHONE: string | number | null;
       }>;
 
       console.log(`[LOA Trucks] Query returned ${rows.length} rows, sample:`, rows.length > 0 ? JSON.stringify({
@@ -9632,6 +9640,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         addr1: rows[0].PRIMARYADDR1,
         truck: rows[0].TRUCK_LU,
         source: rows[0].TPMS_SOURCE,
+        mainPhone: rows[0].SNSTV_MAIN_PHONE,
+        homePhone: rows[0].SNSTV_HOME_PHONE,
+        cellPhone: rows[0].SNSTV_CELL_PHONE,
       }) : 'no rows');
 
       const statusLabels: Record<string, string> = {
@@ -9669,6 +9680,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           row.PRIMARYZIP?.trim(),
         ].filter(Boolean);
 
+        const personalPhones = [
+          formatPhone(row.SNSTV_MAIN_PHONE),
+          formatPhone(row.SNSTV_CELL_PHONE),
+          formatPhone(row.SNSTV_HOME_PHONE),
+        ].filter(Boolean);
+        const uniquePersonalPhones = [...new Set(personalPhones)];
+
         return {
           fullName: row.FULL_NAME?.trim() || '',
           enterpriseId: (row.ENTERPRISE_ID || '').trim().toUpperCase(),
@@ -9683,6 +9701,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tpmsAddress: addressParts.join(', '),
           lastKnownTruck: row.TRUCK_LU?.trim() || '',
           tpmsSource: row.TPMS_SOURCE || '',
+          personalNumber: uniquePersonalPhones.join(' / ') || null,
         };
       });
 

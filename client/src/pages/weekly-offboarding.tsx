@@ -68,6 +68,7 @@ interface LoaTechEntry {
   tpmsAddress: string;
   lastKnownTruck: string;
   tpmsSource: string;
+  personalNumber: string | null;
 }
 
 export default function WeeklyOffboarding() {
@@ -483,7 +484,8 @@ export default function WeeklyOffboarding() {
       (e.enterpriseId || '').toLowerCase().includes(q) ||
       (e.lastKnownTruck || '').toLowerCase().includes(q) ||
       (e.tpmsAddress || '').toLowerCase().includes(q) ||
-      (e.district || '').toLowerCase().includes(q)
+      (e.district || '').toLowerCase().includes(q) ||
+      (e.personalNumber || '').toLowerCase().includes(q)
     );
   });
 
@@ -1211,6 +1213,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>Truck</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
+                          <TableHead>Personal Number</TableHead>
                           <TableHead>Address (TPMS)</TableHead>
                           <TableHead>TPMS Source</TableHead>
                         </TableRow>
@@ -1236,6 +1239,9 @@ export default function WeeklyOffboarding() {
                             <TableCell className="text-sm">{e.district || '-'}</TableCell>
                             <TableCell className="text-sm whitespace-nowrap font-mono">
                               {e.tpmsPhone || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap font-mono">
+                              {e.personalNumber || <span className="text-muted-foreground">-</span>}
                             </TableCell>
                             <TableCell className="text-sm max-w-[280px]">
                               {e.tpmsAddress || <span className="text-muted-foreground">-</span>}
