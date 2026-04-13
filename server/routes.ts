@@ -13068,7 +13068,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } catch (fleetScopeError: any) {
         console.error('Fleet Scope API sync failed:', fleetScopeError.message);
       }
-      
+
       res.json(data);
     } catch (error: any) {
       console.error("Error updating vehicle nexus data:", error);

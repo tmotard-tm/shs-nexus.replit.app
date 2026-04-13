@@ -1,0 +1,68 @@
+ In `server/routes.ts`, fix the `/api/fleet-overview/statistics` route handler (~line 11978) which is causing all three Fleet Overview Statistics widgets (Technician Summary, Assignment Status, Holman Vehicles) to show overstated
+ numbers.
+
+ ---
+
+ ### Fix 1 — Add FILE_DATE filter to the TPMS query (PRIMARY FIX)
+
+ The TPMS Snowflake query (~lines 12016–12029) has no WHERE clause, so it returns ALL rows across every daily file load ever written to the table — not just the latest. This inflates every count by a factor equal to the number of days
+ of history.
+
+ Replace the existing `tpmsQuery` string with:
+
+ ```typescript
+ const tpmsQuery = `
+   SELECT
+     TRUCK_NUMBER_NORM,
+     FULL_NAME,
+     ENTERPRISE_ID,
+     DISTRICT,
+     TECH_NO,
+     TRUCK_NO,
+     LAST_NAME,
+     FIRST_NAME,
+     STATUS,
+     FILE_DATE
+   FROM PARTS_SUPPLYCHAIN.FLEET.VW_TPMS_TRUCK_ASSIGNMENT
+   WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM PARTS_SUPPLYCHAIN.FLEET.VW_TPMS_TRUCK_ASSIGNMENT)
+ `;
+
+ ---
+ Fix 2 — Deduplicate by technician before counting
+
+ After fetching tpmsRows, deduplicate so each technician is counted once (a tech may have multiple rows even within one file date). Insert this immediately after line 12031 (const tpmsRows = await snowflake.executeQuery(tpmsQuery);):
+
+ // Deduplicate: one row per technician (by ENTERPRISE_ID, fallback to TECH_NO)
+ const techMap = new Map<string, any>();
+ for (const r of tpmsRows as any[]) {
+   const key = (r.ENTERPRISE_ID || r.TECH_NO || '').toString().trim();
+   if (key && !techMap.has(key)) techMap.set(key, r);
+ }
+ const dedupedRows = Array.from(techMap.values());
+
+ Then replace every reference to tpmsRows in the stat calculations below with dedupedRows:
+ - Line ~12038: const totalActiveTechs = dedupedRows.length;
+ - Line ~12041: tpmsRows.filter(...) → dedupedRows.filter(...)  (apply this replacement to all .filter() calls on tpmsRows in this route handler)
+
+ ---
+ No other changes needed
+
+ - Do not modify the Holman vehicles section (lines ~12089–12112)
+ - Do not modify the frontend (rental-operations.tsx)
+ - Do not modify the generateSampleFleetStats fallback function
+
+ ---
+
+ ## Critical File
+
+ - `server/routes.ts`
+   - Line ~12016: TPMS `tpmsQuery` — add `WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM ...)`
+   - Line ~12031: After `executeQuery` — insert dedup block
+   - Lines ~12038–12087: Replace all `tpmsRows` references with `dedupedRows`
+
+ ## Verification
+
+ After the fix:
+ - `totalActiveTechs` should drop from an inflated multiple to the actual technician headcount matching a recent TPMS report
+ - Assignment counts should be proportionally lower
+ - Total Holman vehicles count is unchanged (comes from Postgres cache, not TPMS query)
