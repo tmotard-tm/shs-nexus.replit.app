@@ -478,10 +478,10 @@ class TPMSService {
     // A successful PUT returns messages:[] (empty), updateSuccess:[...], failedUpdates:[].
     // Also throw if failedUpdates is non-empty regardless of messages.
     if (data?.failedUpdates && Array.isArray(data.failedUpdates) && data.failedUpdates.length > 0) {
-      throw new Error(`TPMS rejected update: ${data.failedUpdates.join(', ')}`);
+      throw new Error(`TPMS rejected update: ${data.failedUpdates.map((f: any) => typeof f === 'string' ? f : JSON.stringify(f)).join(', ')}`);
     }
     if (data?.messages && Array.isArray(data.messages) && data.messages.length > 0 && !data.messages.includes('SUCCESS')) {
-      throw new Error(`TPMS rejected update: ${data.messages.join(', ')}`);
+      throw new Error(`TPMS rejected update: ${data.messages.map((m: any) => typeof m === 'string' ? m : JSON.stringify(m)).join(', ')}`);
     }
 
     console.log(`[TPMS] Tech info updated successfully for ${cleanLdapId}`);

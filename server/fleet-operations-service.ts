@@ -1166,3 +1166,73 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
 
   return { retried, succeeded, failed };
 }
+
+export async function resolveStaleOperationEvents(): Promise<{ resolved: number }> {
+  const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const now = new Date();
+
+  const staleEvents = await db.select({ id: operationEvents.id })
+    .from(operationEvents)
+    .where(
+      and(
+        or(
+          eq(operationEvents.outcome, "pending"),
+          eq(operationEvents.outcome, "failed"),
+        ),
+        lte(operationEvents.createdAt, cutoff),
+      )
+    )
+    .limit(200);
+
+  if (staleEvents.length === 0) return { resolved: 0 };
+
+  const staleIds = staleEvents.map(e => e.id);
+
+  for (const id of staleIds) {
+    await db.update(operationEvents)
+      .set({
+        outcome: "exhausted",
+        errorMessage: "Auto-resolved: stale event pending > 24 hours",
+        nextRetryAt: null,
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(operationEvents.id, id));
+  }
+
+  console.log(`[FleetOps] Resolved ${staleIds.length} stale operation_events (pending > 24h)`);
+  return { resolved: staleIds.length };
+}
+
+export async function autoResolveTerminalOpEvents(): Promise<{ resolved: number }> {
+  const terminalOps = await db.execute(sql`
+    SELECT oe.id
+    FROM operation_events oe
+    JOIN fleet_operation_log fol ON oe.fleet_op_log_id = fol.id
+    WHERE oe.outcome IN ('pending', 'failed')
+      AND fol.tpms_status IN ('success', 'skipped', 'failed')
+      AND fol.holman_status IN ('success', 'skipped', 'failed')
+      AND fol.ams_status IN ('success', 'skipped', 'failed')
+      AND fol.completed_at IS NOT NULL
+    LIMIT 200
+  `);
+
+  const rows = (terminalOps as any).rows || terminalOps || [];
+  if (rows.length === 0) return { resolved: 0 };
+
+  const now = new Date();
+  for (const row of rows) {
+    await db.update(operationEvents)
+      .set({
+        outcome: "exhausted",
+        errorMessage: "Auto-resolved: parent fleet operation reached terminal state",
+        nextRetryAt: null,
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(operationEvents.id, row.id));
+  }
+
+  console.log(`[FleetOps] Auto-resolved ${rows.length} operation_events with terminal parent ops`);
+  return { resolved: rows.length };
+}

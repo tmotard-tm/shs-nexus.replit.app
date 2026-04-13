@@ -1944,6 +1944,7 @@ export const fleetOperationLog = pgTable("fleet_operation_log", {
   amsMessage: text("ams_message"),
   requestedBy: text("requested_by"),
   notes: text("notes"),
+  source: text("source"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   completedAt: timestamp("completed_at"),
 }, (table) => {

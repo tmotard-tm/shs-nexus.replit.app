@@ -402,6 +402,7 @@ async function checkAndRunTpmsPoll(): Promise<void> {
               holmanStatus: 'skipped',
               amsStatus: 'skipped',
               requestedBy: 'tpms_external',
+              source: 'tpms_external',
               notes: `External TPMS change detected: truck was "${prevTruckNo ?? ''}", now "${truckNo}". No matching Nexus operation found within 30 min.`,
               tpmsMessage: null,
               holmanMessage: null,
@@ -627,6 +628,7 @@ async function checkAndRunAmsPoll(): Promise<void> {
               holmanStatus: 'skipped',
               amsStatus: 'skipped',
               requestedBy: 'ams_external',
+              source: 'ams_external',
               notes: `External AMS change detected: ${changeDesc.join('; ')}. No matching Nexus operation found within 30 min.`,
               tpmsMessage: null,
               holmanMessage: null,
@@ -990,6 +992,19 @@ export function startSyncScheduler(): void {
       console.error('[Scheduler] Notification backfill error:', err)
     );
   }, NOTIFICATION_BACKFILL_INTERVAL_MS);
+
+  setTimeout(async () => {
+    try {
+      const { resolveStaleOperationEvents, autoResolveTerminalOpEvents } = await import("./fleet-operations-service");
+      const stale = await resolveStaleOperationEvents();
+      const terminal = await autoResolveTerminalOpEvents();
+      if (stale.resolved > 0 || terminal.resolved > 0) {
+        console.log(`[Scheduler] Startup op_events cleanup: ${stale.resolved} stale + ${terminal.resolved} terminal resolved`);
+      }
+    } catch (err: any) {
+      console.error('[Scheduler] Startup op_events cleanup error:', err?.message);
+    }
+  }, 30000);
 }
 
 export function stopSyncScheduler(): void {

@@ -219,7 +219,7 @@ export async function analyzeAlignment(
       const staleResult = await db.execute(sql`
         SELECT dat.employment_status
         FROM tpms_cached_assignments tca
-        JOIN DRIVELINE_ALL_TECHS dat ON UPPER(dat.tech_racfid) = UPPER(tca.enterprise_id)
+        JOIN all_techs dat ON UPPER(dat.tech_racfid) = UPPER(tca.enterprise_id)
         WHERE tca.truck_no = ${truckNumber}
           AND dat.employment_status != 'A'
         LIMIT 1
@@ -305,7 +305,13 @@ export async function analyzeAlignment(
   let actionLabel = "Manual review required";
   let ldapId: string | null = null;
 
-  if (t && !h) {
+  const a = (amsTechId || "").trim().toLowerCase();
+
+  if (h && t && h === t && a !== t) {
+    action = "push_ams";
+    actionLabel = `Push ${t} to AMS`;
+    ldapId = t;
+  } else if (t && !h) {
     action = "assign";
     actionLabel = `Assign ${t} to Holman`;
     ldapId = t;

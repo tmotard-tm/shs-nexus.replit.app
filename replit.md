@@ -47,7 +47,8 @@ Preferred communication style: Simple, everyday language.
 -   **Snowflake Sync System**: Automated daily synchronization for technician rosters, offboarding data, and TPMS data. Offboarding workflows generate tasks across multiple departments.
 -   **TPMS Integration**: Syncs technician-vehicle assignments and retrieves mobile phone numbers from Snowflake daily snapshots.
 -   **Vehicle Number Utility**: Centralized formatting and normalization for vehicle numbers across various external systems.
--   **Operation Events**: Tracks per-system outcomes for fleet operations with automatic retry functionality.
+-   **Operation Events**: Tracks per-system outcomes for fleet operations with automatic retry functionality. Includes lifecycle management: auto-resolve when parent op reaches terminal state, and startup sweep for events pending > 24 hours.
+-   **Fleet Alignment Verification Pipeline**: Analyzes mismatches across TPMS, Holman, and AMS systems per vehicle. Detects stale tech IDs, external TPMS/AMS changes (via `source` column on `fleet_operation_log`), and drift scenarios. Supports `push_ams` action when TPMS & Holman agree but AMS differs. Holman verification actively checks `holman_vehicles_cache`.
 -   **Cross-System Vehicle Match**: Displays Holman vehicle match status for technicians.
 -   **AMS Vehicle Panel**: Reusable component for displaying AMS vehicle details in task dialogs.
 -   **Samsara Telematics**: Integration for GPS location, address, speed, and last-updated vehicle data.

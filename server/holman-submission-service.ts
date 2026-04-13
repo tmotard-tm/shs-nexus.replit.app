@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { holmanSubmissions, fleetOperationLog, type HolmanSubmission, type InsertHolmanSubmission } from "@shared/schema";
+import { holmanSubmissions, fleetOperationLog, holmanVehiclesCache, type HolmanSubmission, type InsertHolmanSubmission } from "@shared/schema";
 import { eq, and, inArray, desc, gte, lte, like, sql } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
 
@@ -113,15 +113,57 @@ export class HolmanSubmissionService {
     message: string;
     rawVehicle?: any;
   }> {
-    // Nothing to check here — real verification happens in verifyFromFleetData.
-    // Just leave pending so the next fleet sync can resolve it.
     const vehicleNumber = submission.holmanVehicleNumber;
-    console.log(`[HolmanVerify] Submission ${submission.id} for vehicle ${vehicleNumber} (${submission.action}) — awaiting next fleet sync for verification`);
-    return {
-      verified: false,
-      newStatus: 'pending',
-      message: 'Awaiting next fleet sync for verification',
-    };
+    try {
+      const [cached] = await db.select()
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber))
+        .limit(1);
+
+      if (!cached || !cached.lastHolmanSyncAt) {
+        console.log(`[HolmanVerify] Submission ${submission.id} for vehicle ${vehicleNumber} (${submission.action}) — no cached data, awaiting next fleet sync`);
+        return { verified: false, newStatus: 'pending', message: 'No cached vehicle data — awaiting fleet sync' };
+      }
+
+      const submittedAt = submission.createdAt ? new Date(submission.createdAt).getTime() : 0;
+      const syncedAt = new Date(cached.lastHolmanSyncAt).getTime();
+      if (syncedAt < submittedAt) {
+        console.log(`[HolmanVerify] Submission ${submission.id} for vehicle ${vehicleNumber} — cache is stale (synced ${new Date(syncedAt).toISOString()} < submitted ${new Date(submittedAt).toISOString()}), awaiting next sync`);
+        return { verified: false, newStatus: 'pending', message: 'Cache predates submission — awaiting fresh fleet sync' };
+      }
+
+      const techInCache = (cached.holmanTechAssigned || '').trim();
+      const expectedTech = (submission.enterpriseId || '').trim();
+      const assignedStatusCd = (cached.holmanAssignedStatusCd || '').trim().toUpperCase();
+
+      if (submission.action === 'unassign') {
+        const success = assignedStatusCd === 'U' || techInCache === '';
+        if (success) {
+          console.log(`[HolmanVerify] Submission ${submission.id} — confirmed unassigned from cache (status=${assignedStatusCd}, tech="${techInCache}")`);
+          return { verified: true, newStatus: 'completed', message: `Confirmed unassigned via cache (status=${assignedStatusCd})`, rawVehicle: cached };
+        }
+        console.log(`[HolmanVerify] Submission ${submission.id} — cache still shows assigned (status=${assignedStatusCd}, tech="${techInCache}"), pending`);
+        return { verified: false, newStatus: 'pending', message: `Cache shows status=${assignedStatusCd}, tech="${techInCache}" — not yet unassigned` };
+      }
+
+      if (submission.action === 'assign') {
+        const techMatch = !!(expectedTech && techInCache.toLowerCase().includes(expectedTech.toLowerCase()));
+        if (techMatch) {
+          console.log(`[HolmanVerify] Submission ${submission.id} — confirmed assigned from cache (tech="${techInCache}" matches "${expectedTech}")`);
+          return { verified: true, newStatus: 'completed', message: `Confirmed assigned via cache (tech="${techInCache}")`, rawVehicle: cached };
+        }
+        if (techInCache && expectedTech) {
+          await this.updateSubmissionStatus(submission.id, 'pending', undefined, techInCache);
+        }
+        console.log(`[HolmanVerify] Submission ${submission.id} — cache tech="${techInCache}" doesn't match expected="${expectedTech}", pending`);
+        return { verified: false, newStatus: 'pending', message: `Cache tech="${techInCache}", expected="${expectedTech}" — not yet matched` };
+      }
+
+      return { verified: false, newStatus: 'pending', message: 'Awaiting fleet sync for verification' };
+    } catch (err: any) {
+      console.warn(`[HolmanVerify] Cache lookup failed for ${vehicleNumber}:`, err.message);
+      return { verified: false, newStatus: 'pending', message: `Cache lookup error: ${err.message}` };
+    }
   }
 
   // ─── Passive verification from fleet sync data ────────────────────────────
