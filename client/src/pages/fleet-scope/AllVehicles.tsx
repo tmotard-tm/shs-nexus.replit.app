@@ -930,9 +930,6 @@ export default function AllVehicles() {
                       <div className="text-2xl font-bold text-rose-700 dark:text-rose-400" data-testid="text-rental-count-card">
                         {data.rentalCount.toLocaleString()}
                       </div>
-                      <p className="text-xs text-rose-600 dark:text-rose-500">
-                        {rentalCountInFleet.toLocaleString()} in active fleet
-                      </p>
                     </CardContent>
                   </Card>
                 )}
