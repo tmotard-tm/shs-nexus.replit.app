@@ -308,7 +308,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
   const [zoom, setZoom] = useState(DEFAULT_ZOOM);
   const [center, setCenter] = useState<[number, number]>(DEFAULT_CENTER);
   const [spareExpanded, setSpareExpanded] = useState<{ confirmed: boolean; needs: boolean }>({ confirmed: false, needs: false });
-  const [amsViewMode, setAmsViewMode] = useState(false);
+  const [amsViewMode, setAmsViewMode] = useState(true);
   const [savedFleetState, setSavedFleetState] = useState<{
     selections: MapSelection[];
     visibleCategories: Set<CategoryKey>;
@@ -696,7 +696,7 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
                 }}
                 data-testid="toggle-fleet-view"
               >
-                Fleet View
+                Other View
               </button>
               <button
                 className={`px-3 py-1.5 transition-colors ${amsViewMode ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
