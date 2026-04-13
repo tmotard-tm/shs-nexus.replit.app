@@ -81,6 +81,7 @@ export default function WeeklyOffboarding() {
   const [manualStatusFilter, setManualStatusFilter] = useState<string>("all");
   const [selectedEntry, setSelectedEntry] = useState<TermRosterEntry | null>(null);
   const [selectedByovEntry, setSelectedByovEntry] = useState<ByovEnrollment | null>(null);
+  const [selectedLoaEntry, setSelectedLoaEntry] = useState<LoaTechEntry | null>(null);
   
   // Nexus tracking fields
   const [nexusStatus, setNexusStatus] = useState("");
@@ -101,6 +102,14 @@ export default function WeeklyOffboarding() {
   const [byovNexusRepaired, setByovNexusRepaired] = useState("");
   const [byovNexusComments, setByovNexusComments] = useState("");
   const [manualTruck, setManualTruck] = useState("");
+
+  const [loaNexusStatus, setLoaNexusStatus] = useState("");
+  const [loaNexusLocation, setLoaNexusLocation] = useState("");
+  const [loaNexusContact, setLoaNexusContact] = useState("");
+  const [loaNexusKeys, setLoaNexusKeys] = useState("");
+  const [loaNexusRepaired, setLoaNexusRepaired] = useState("");
+  const [loaNexusComments, setLoaNexusComments] = useState("");
+  const [loaManualTruck, setLoaManualTruck] = useState("");
 
   const { data: manualTruckOverrides = {} } = useQuery<Record<string, string>>({
     queryKey: ['/api/offboarding-truck-overrides'],
@@ -554,6 +563,83 @@ export default function WeeklyOffboarding() {
       });
       if (effectiveByovTruck) {
         queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', effectiveByovTruck] });
+        queryClient.invalidateQueries({
+          predicate: (query) =>
+            Array.isArray(query.queryKey) &&
+            query.queryKey[0] === '/api/vehicle-nexus-data/batch'
+        });
+      }
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Save Failed",
+        description: error.message || "Failed to save nexus tracking data",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const effectiveLoaTruck = selectedLoaEntry?.lastKnownTruck?.trim() || (loaManualTruck.length === 5 ? loaManualTruck : null) || (manualTruckOverrides[selectedLoaEntry?.enterpriseId || ''] && manualTruckOverrides[selectedLoaEntry?.enterpriseId || ''].length === 5 ? manualTruckOverrides[selectedLoaEntry?.enterpriseId || ''] : null);
+
+  const { data: loaNexusData, isLoading: loaNexusLoading } = useQuery({
+    queryKey: ['/api/vehicle-nexus-data', effectiveLoaTruck],
+    queryFn: async () => {
+      if (!effectiveLoaTruck) return null;
+      const response = await fetch(`/api/vehicle-nexus-data/${effectiveLoaTruck}`, { credentials: 'include' });
+      if (!response.ok) return null;
+      return response.json();
+    },
+    enabled: !!effectiveLoaTruck,
+  });
+
+  useEffect(() => {
+    if (loaNexusData) {
+      setLoaNexusStatus(loaNexusData.postOffboardedStatus || "");
+      setLoaNexusLocation(loaNexusData.nexusNewLocation || "");
+      setLoaNexusContact(loaNexusData.nexusNewLocationContact || "");
+      setLoaNexusKeys(loaNexusData.keys || "");
+      setLoaNexusRepaired(loaNexusData.repaired || "");
+      setLoaNexusComments(loaNexusData.comments || "");
+    } else {
+      setLoaNexusStatus("");
+      setLoaNexusLocation("");
+      setLoaNexusContact("");
+      setLoaNexusKeys("");
+      setLoaNexusRepaired("");
+      setLoaNexusComments("");
+    }
+  }, [loaNexusData, selectedLoaEntry]);
+
+  useEffect(() => {
+    if (selectedLoaEntry && !selectedLoaEntry.lastKnownTruck && selectedLoaEntry.enterpriseId) {
+      setLoaManualTruck(manualTruckOverrides[selectedLoaEntry.enterpriseId] || "");
+    } else {
+      setLoaManualTruck("");
+    }
+  }, [selectedLoaEntry]);
+
+  const saveLoaNexusMutation = useMutation({
+    mutationFn: async (data: {
+      vehicleNumber: string;
+      postOffboardedStatus: string | null;
+      nexusNewLocation: string | null;
+      nexusNewLocationContact: string | null;
+      keys: string | null;
+      repaired: string | null;
+      comments: string | null;
+    }) => {
+      return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Saved",
+        description: "Nexus tracking data has been saved.",
+      });
+      if (!selectedLoaEntry?.lastKnownTruck && loaManualTruck && selectedLoaEntry?.enterpriseId) {
+        saveTruckOverrideMutation.mutate({ enterpriseId: selectedLoaEntry.enterpriseId, truckNumber: loaManualTruck });
+      }
+      if (effectiveLoaTruck) {
+        queryClient.invalidateQueries({ queryKey: ['/api/vehicle-nexus-data', effectiveLoaTruck] });
         queryClient.invalidateQueries({
           predicate: (query) =>
             Array.isArray(query.queryKey) &&
@@ -1220,7 +1306,7 @@ export default function WeeklyOffboarding() {
                       </TableHeader>
                       <TableBody>
                         {filteredLoa.map((e) => (
-                          <TableRow key={e.enterpriseId}>
+                          <TableRow key={e.enterpriseId} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLoaEntry(e)}>
                             <TableCell>
                               <Badge
                                 variant="outline"
@@ -1711,6 +1797,227 @@ export default function WeeklyOffboarding() {
                   </div>
                 </>
               )}
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
+      <Sheet open={!!selectedLoaEntry} onOpenChange={(open) => !open && setSelectedLoaEntry(null)}>
+        <SheetContent className="w-[450px] sm:max-w-[450px] overflow-y-auto" data-testid="sheet-loa-detail">
+          {selectedLoaEntry && (
+            <div className="space-y-6">
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-orange-600" />
+                  {selectedLoaEntry.fullName || 'Unknown'}
+                </SheetTitle>
+                <SheetDescription>
+                  {selectedLoaEntry.enterpriseId} • Truck {selectedLoaEntry.lastKnownTruck || (loaManualTruck.length === 5 ? loaManualTruck : 'N/A')}
+                </SheetDescription>
+              </SheetHeader>
+
+              <Separator />
+
+              <div className="space-y-3">
+                <h4 className="font-medium text-sm text-muted-foreground">Employee Details</h4>
+                <div className="grid grid-cols-2 gap-3 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Status:</span>
+                    <Badge
+                      variant="outline"
+                      className={`ml-2 text-xs ${
+                        selectedLoaEntry.employmentStatus === 'L' ? 'bg-yellow-50 text-yellow-800 border-yellow-300' :
+                        selectedLoaEntry.employmentStatus === 'P' ? 'bg-blue-50 text-blue-800 border-blue-300' :
+                        'bg-red-50 text-red-800 border-red-300'
+                      }`}
+                    >
+                      {selectedLoaEntry.employmentStatusLabel}
+                    </Badge>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">District:</span>
+                    <span className="ml-2">{selectedLoaEntry.district || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Job Title:</span>
+                    <span className="ml-2">{selectedLoaEntry.jobTitle || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Planning Area:</span>
+                    <span className="ml-2">{selectedLoaEntry.planningArea || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Phone (TPMS):</span>
+                    <span className="ml-2 font-mono">{selectedLoaEntry.tpmsPhone || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Personal Number:</span>
+                    <span className="ml-2 font-mono">{selectedLoaEntry.personalNumber || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">Address (TPMS):</span>
+                    <span className="ml-2">{selectedLoaEntry.tpmsAddress || '-'}</span>
+                  </div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground">TPMS Source:</span>
+                    <span className="ml-2">{selectedLoaEntry.tpmsSource === 'TPMS_EXTRACT' ? 'Active' : selectedLoaEntry.tpmsSource === 'TPMS_EXTRACT_LAST_ASSIGNED' ? 'Last Assigned' : '-'}</span>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              {!selectedLoaEntry.lastKnownTruck && (
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">Assign Truck Number</Label>
+                  <Input
+                    value={loaManualTruck}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/\D/g, '').slice(0, 5);
+                      setLoaManualTruck(val);
+                    }}
+                    placeholder="Enter 5-digit truck #"
+                    className="font-mono"
+                    maxLength={5}
+                  />
+                  {loaManualTruck.length > 0 && loaManualTruck.length < 5 && (
+                    <p className="text-xs text-amber-600">Enter all 5 digits to enable tracking fields</p>
+                  )}
+                </div>
+              )}
+
+              {effectiveLoaTruck ? (
+                <div className="space-y-4">
+                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-2">
+                    <Truck className="h-4 w-4" />
+                    Nexus Tracking {!selectedLoaEntry.lastKnownTruck && effectiveLoaTruck && <span className="text-xs">— Truck {effectiveLoaTruck}</span>}
+                  </h4>
+
+                  {loaNexusLoading ? (
+                    <div className="space-y-3">
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-9 w-full" />
+                      <Skeleton className="h-20 w-full" />
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
+                        <Select value={loaNexusStatus} onValueChange={setLoaNexusStatus}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select status..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">-- None --</SelectItem>
+                            <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
+                            <SelectItem value="in_repair">In repair</SelectItem>
+                            <SelectItem value="declined_repair">Declined repair</SelectItem>
+                            <SelectItem value="available_for_rental_pmf">Available to assign or send to PMF</SelectItem>
+                            <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
+                            <SelectItem value="assigned_to_tech_in_rental">Assigned to rental</SelectItem>
+                            <SelectItem value="assigned_to_tech">Assigned to tech</SelectItem>
+                            <SelectItem value="not_found">Not found</SelectItem>
+                            <SelectItem value="sent_to_auction">Sent to auction</SelectItem>
+                            <SelectItem value="already_picked_up">Already picked up</SelectItem>
+                            <SelectItem value="unable_to_reach">Unable to reach</SelectItem>
+                            <SelectItem value="loa_hold">LOA / Leave Hold</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">New Location</Label>
+                        <Input
+                          value={loaNexusLocation}
+                          onChange={(e) => setLoaNexusLocation(e.target.value)}
+                          placeholder="Address or location description..."
+                          className="mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">New Location Contact</Label>
+                        <Input
+                          value={loaNexusContact}
+                          onChange={(e) => setLoaNexusContact(e.target.value)}
+                          placeholder="Phone number or contact info..."
+                          className="mt-1"
+                        />
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Keys</Label>
+                        <Select value={loaNexusKeys} onValueChange={setLoaNexusKeys}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select keys status..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">-- None --</SelectItem>
+                            <SelectItem value="present">Present</SelectItem>
+                            <SelectItem value="not_present">Not Present</SelectItem>
+                            <SelectItem value="unknown">Unknown/Would not Check</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Repaired</Label>
+                        <Select value={loaNexusRepaired} onValueChange={setLoaNexusRepaired}>
+                          <SelectTrigger className="mt-1">
+                            <SelectValue placeholder="Select repair status..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">-- None --</SelectItem>
+                            <SelectItem value="complete">Complete</SelectItem>
+                            <SelectItem value="in_process">In Process</SelectItem>
+                            <SelectItem value="unknown_if_needed">Unknown if needed</SelectItem>
+                            <SelectItem value="declined">Declined</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
+                        <Label className="text-xs text-muted-foreground">Comments</Label>
+                        <Textarea
+                          value={loaNexusComments}
+                          onChange={(e) => setLoaNexusComments(e.target.value.slice(0, 400))}
+                          placeholder="Additional notes (max 400 characters)..."
+                          className="mt-1 resize-none"
+                          rows={3}
+                          maxLength={400}
+                        />
+                        <p className="text-xs text-muted-foreground text-right mt-1">{loaNexusComments.length}/400</p>
+                      </div>
+
+                      <Button
+                        onClick={() => saveLoaNexusMutation.mutate({
+                          vehicleNumber: effectiveLoaTruck!,
+                          postOffboardedStatus: loaNexusStatus === '__none__' ? null : (loaNexusStatus || null),
+                          nexusNewLocation: loaNexusLocation || null,
+                          nexusNewLocationContact: loaNexusContact || null,
+                          keys: loaNexusKeys === '__none__' ? null : (loaNexusKeys || null),
+                          repaired: loaNexusRepaired === '__none__' ? null : (loaNexusRepaired || null),
+                          comments: loaNexusComments || null,
+                        })}
+                        disabled={saveLoaNexusMutation.isPending}
+                        className="w-full"
+                      >
+                        {saveLoaNexusMutation.isPending ? (
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-4 w-4 mr-2" />
+                        )}
+                        Save Tracking Data
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              ) : !selectedLoaEntry.lastKnownTruck ? (
+                <div className="text-sm text-muted-foreground text-center py-4">
+                  <AlertCircle className="h-5 w-5 mx-auto mb-2" />
+                  Enter a truck number above to enable Nexus tracking.
+                </div>
+              ) : null}
             </div>
           )}
         </SheetContent>
