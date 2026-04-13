@@ -67,6 +67,7 @@ interface LoaTechEntry {
   tpmsPhone: string | null;
   tpmsAddress: string;
   lastKnownTruck: string;
+  tpmsSource: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -1211,6 +1212,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
                           <TableHead>Address (TPMS)</TableHead>
+                          <TableHead>TPMS Source</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1237,6 +1239,15 @@ export default function WeeklyOffboarding() {
                             </TableCell>
                             <TableCell className="text-sm max-w-[280px]">
                               {e.tpmsAddress || <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                            <TableCell className="text-xs whitespace-nowrap">
+                              {e.tpmsSource === 'TPMS_EXTRACT' ? (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-300 dark:bg-green-950 dark:text-green-300 dark:border-green-700">Active</Badge>
+                              ) : e.tpmsSource === 'TPMS_EXTRACT_LAST_ASSIGNED' ? (
+                                <Badge variant="outline" className="bg-orange-50 text-orange-700 border-orange-300 dark:bg-orange-950 dark:text-orange-300 dark:border-orange-700">Last Assigned</Badge>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}

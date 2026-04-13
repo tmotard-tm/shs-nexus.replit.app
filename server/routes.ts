@@ -9561,13 +9561,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
           t.PLANNING_AREA_NM,
           t.EFFDT,
           t.DATE_LAST_WORKED,
-          tpms.MOBILEPHONENUMBER,
-          tpms.PRIMARYADDR1,
-          tpms.PRIMARYADDR2,
-          tpms.PRIMARYCITY,
-          tpms.PRIMARYSTATE,
-          tpms.PRIMARYZIP,
-          COALESCE(tpms.TRUCK_LU, tpms_last.TRUCK_LU) AS TRUCK_LU
+          COALESCE(tpms.MOBILEPHONENUMBER, tpms_last.MOBILEPHONENUMBER) AS MOBILEPHONENUMBER,
+          COALESCE(tpms.PRIMARYADDR1, tpms_last.PRIMARYADDR1) AS PRIMARYADDR1,
+          COALESCE(tpms.PRIMARYADDR2, tpms_last.PRIMARYADDR2) AS PRIMARYADDR2,
+          COALESCE(tpms.PRIMARYCITY, tpms_last.PRIMARYCITY) AS PRIMARYCITY,
+          COALESCE(tpms.PRIMARYSTATE, tpms_last.PRIMARYSTATE) AS PRIMARYSTATE,
+          COALESCE(tpms.PRIMARYZIP, tpms_last.PRIMARYZIP) AS PRIMARYZIP,
+          COALESCE(tpms.TRUCK_LU, tpms_last.TRUCK_LU) AS TRUCK_LU,
+          CASE
+            WHEN tpms.ENTERPRISE_ID IS NOT NULL THEN 'TPMS_EXTRACT'
+            WHEN tpms_last.ENTERPRISE_ID IS NOT NULL THEN 'TPMS_EXTRACT_LAST_ASSIGNED'
+            ELSE NULL
+          END AS TPMS_SOURCE
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT tpms
           ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms.ENTERPRISE_ID))
@@ -9593,6 +9598,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         PRIMARYSTATE: string | null;
         PRIMARYZIP: string | null;
         TRUCK_LU: string | null;
+        TPMS_SOURCE: string | null;
       }>;
 
       console.log(`[LOA Trucks] Query returned ${rows.length} rows, sample:`, rows.length > 0 ? JSON.stringify({
@@ -9602,6 +9608,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         phone: rows[0].MOBILEPHONENUMBER,
         addr1: rows[0].PRIMARYADDR1,
         truck: rows[0].TRUCK_LU,
+        source: rows[0].TPMS_SOURCE,
       }) : 'no rows');
 
       const statusLabels: Record<string, string> = {
@@ -9652,6 +9659,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tpmsPhone: formatPhone(row.MOBILEPHONENUMBER),
           tpmsAddress: addressParts.join(', '),
           lastKnownTruck: row.TRUCK_LU?.trim() || '',
+          tpmsSource: row.TPMS_SOURCE || '',
         };
       });
 
