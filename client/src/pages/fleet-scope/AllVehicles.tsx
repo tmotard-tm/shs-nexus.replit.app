@@ -741,7 +741,22 @@ export default function AllVehicles() {
               </div>
 
               {scorecardViewMode === 'ams' ? (
-                <div className="grid gap-3 grid-cols-2 lg:grid-cols-5" data-testid="ams-scorecards">
+                <div className="flex gap-3 overflow-x-auto" data-testid="ams-scorecards">
+                  <Card
+                    className="cursor-pointer hover-elevate border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800 flex-shrink-0 min-w-[120px]"
+                    onClick={() => setCategoryFilter(null)}
+                    data-testid="card-ams-total-fleet"
+                  >
+                    <CardContent className="p-4">
+                      <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Fleet</p>
+                      <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                        {(data.vehicles?.length || 0).toLocaleString()}
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        100%
+                      </p>
+                    </CardContent>
+                  </Card>
                   {amsStatusCounts.map(({ status, count }, idx) => {
                     const colors = AMS_CARD_COLORS[idx % AMS_CARD_COLORS.length];
                     const total = data.vehicles?.length || 1;
@@ -750,7 +765,7 @@ export default function AllVehicles() {
                     return (
                       <Card
                         key={status}
-                        className={`cursor-pointer hover-elevate ${colors.border} ${colors.bg} ${isActive ? 'ring-2 ring-primary' : ''}`}
+                        className={`cursor-pointer hover-elevate ${colors.border} ${colors.bg} ${isActive ? 'ring-2 ring-primary' : ''} flex-shrink-0 min-w-[120px]`}
                         onClick={() => setCategoryFilter(isActive ? null : { truckStatus: status, label: `AMS: ${status}` })}
                         data-testid={`card-ams-${status.replace(/\s+/g, '-').toLowerCase()}`}
                       >
