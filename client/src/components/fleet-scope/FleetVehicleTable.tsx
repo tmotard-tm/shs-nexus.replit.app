@@ -50,6 +50,7 @@ interface CategoryFilter {
   subStatus?: string;
   excludePmf?: boolean;
   isRental?: boolean;
+  truckStatus?: string;
   label: string;
 }
 
@@ -424,6 +425,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     if (categoryFilter) {
       result = result.filter(v => {
         if (categoryFilter.isRental) return rentalTruckNumbers.has(v.vehicleNumber?.toString().padStart(6, '0'));
+        if (categoryFilter.truckStatus) return (v.truckStatus?.trim() || 'Unknown') === categoryFilter.truckStatus;
         if (categoryFilter.generalStatus) {
           // 'Spare-Location confirmed' and 'Spare-Needs confirming' are sub-classifications of
           // the 'Vehicles in storage' bucket, so include them when filtering by 'Vehicles in storage'.

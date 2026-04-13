@@ -254,7 +254,8 @@ export default function AllVehicles() {
   const { currentUser } = useUser();
   const { toast } = useToast();
   const [weeklyTrendsOpen, setWeeklyTrendsOpen] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; isRental?: boolean; label: string} | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState<{generalStatus?: string; subStatus?: string; excludePmf?: boolean; isRental?: boolean; truckStatus?: string; label: string} | null>(null);
+  const [scorecardViewMode, setScorecardViewMode] = useState<'ams' | 'other'>('ams');
   const [mapSelections, setMapSelections] = useState<MapSelection[]>([]);
   const [visibleMapCategories, setVisibleMapCategories] = useState<Set<CategoryKey>>(
     new Set(['onRoad', 'repairShop', 'pmf', 'byov', 'confirmedSpare', 'needsReconfirmation'] as CategoryKey[])
@@ -443,6 +444,31 @@ export default function AllVehicles() {
     
     return { onRoad, repairShop, pmfTotal, otherParking, spareConfirmed, spareNeedsConfirming, byovTotal, repairStatuses, total: vehicles.length };
   }, [data?.vehicles, data?.byov?.technicians]);
+
+  const amsStatusCounts = useMemo(() => {
+    if (!data?.vehicles) return [];
+    const counts: Record<string, number> = {};
+    for (const v of data.vehicles) {
+      const status = v.truckStatus?.trim() || 'Unknown';
+      counts[status] = (counts[status] || 0) + 1;
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([status, count]) => ({ status, count }));
+  }, [data?.vehicles]);
+
+  const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
+    { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
+    { border: 'border-amber-200 dark:border-amber-800', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-700 dark:text-amber-400', subtext: 'text-amber-600 dark:text-amber-500' },
+    { border: 'border-blue-200 dark:border-blue-800', bg: 'bg-blue-50 dark:bg-blue-900/20', text: 'text-blue-700 dark:text-blue-400', subtext: 'text-blue-600 dark:text-blue-500' },
+    { border: 'border-purple-200 dark:border-purple-800', bg: 'bg-purple-50 dark:bg-purple-900/20', text: 'text-purple-700 dark:text-purple-400', subtext: 'text-purple-600 dark:text-purple-500' },
+    { border: 'border-rose-200 dark:border-rose-800', bg: 'bg-rose-50 dark:bg-rose-900/20', text: 'text-rose-700 dark:text-rose-400', subtext: 'text-rose-600 dark:text-rose-500' },
+    { border: 'border-cyan-200 dark:border-cyan-800', bg: 'bg-cyan-50 dark:bg-cyan-900/20', text: 'text-cyan-700 dark:text-cyan-400', subtext: 'text-cyan-600 dark:text-cyan-500' },
+    { border: 'border-orange-200 dark:border-orange-800', bg: 'bg-orange-50 dark:bg-orange-900/20', text: 'text-orange-700 dark:text-orange-400', subtext: 'text-orange-600 dark:text-orange-500' },
+    { border: 'border-teal-200 dark:border-teal-800', bg: 'bg-teal-50 dark:bg-teal-900/20', text: 'text-teal-700 dark:text-teal-400', subtext: 'text-teal-600 dark:text-teal-500' },
+    { border: 'border-indigo-200 dark:border-indigo-800', bg: 'bg-indigo-50 dark:bg-indigo-900/20', text: 'text-indigo-700 dark:text-indigo-400', subtext: 'text-indigo-600 dark:text-indigo-500' },
+    { border: 'border-pink-200 dark:border-pink-800', bg: 'bg-pink-50 dark:bg-pink-900/20', text: 'text-pink-700 dark:text-pink-400', subtext: 'text-pink-600 dark:text-pink-500' },
+  ];
 
   const rentalTruckSet = useMemo(() => {
     if (!data?.rentalTruckNumbers) return new Set<string>();
@@ -691,7 +717,57 @@ export default function AllVehicles() {
                 </div>
               )}
 
-              {/* Row 1: Total Fleet + 4 Location Cards */}
+              {/* Scorecard View Toggle */}
+              <div className="flex items-center gap-2">
+                <div
+                  className="flex rounded-lg border overflow-hidden text-xs font-semibold"
+                  data-testid="toggle-scorecard-view-mode"
+                >
+                  <button
+                    className={`px-3 py-1.5 transition-colors ${scorecardViewMode === 'ams' ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
+                    onClick={() => setScorecardViewMode('ams')}
+                    data-testid="toggle-scorecard-ams-view"
+                  >
+                    AMS View
+                  </button>
+                  <button
+                    className={`px-3 py-1.5 transition-colors ${scorecardViewMode === 'other' ? 'bg-primary text-primary-foreground' : 'bg-muted/40 text-muted-foreground hover:bg-muted/60'}`}
+                    onClick={() => setScorecardViewMode('other')}
+                    data-testid="toggle-scorecard-other-view"
+                  >
+                    Other View
+                  </button>
+                </div>
+              </div>
+
+              {scorecardViewMode === 'ams' ? (
+                <div className="grid gap-3 grid-cols-2 lg:grid-cols-5" data-testid="ams-scorecards">
+                  {amsStatusCounts.map(({ status, count }, idx) => {
+                    const colors = AMS_CARD_COLORS[idx % AMS_CARD_COLORS.length];
+                    const total = data.vehicles?.length || 1;
+                    const pct = ((count / total) * 100).toFixed(1);
+                    const isActive = categoryFilter?.truckStatus === status;
+                    return (
+                      <Card
+                        key={status}
+                        className={`cursor-pointer hover-elevate ${colors.border} ${colors.bg} ${isActive ? 'ring-2 ring-primary' : ''}`}
+                        onClick={() => setCategoryFilter(isActive ? null : { truckStatus: status, label: `AMS: ${status}` })}
+                        data-testid={`card-ams-${status.replace(/\s+/g, '-').toLowerCase()}`}
+                      >
+                        <CardContent className="p-4">
+                          <p className={`text-xs font-medium ${colors.text}`}>{status}</p>
+                          <div className={`text-2xl font-bold ${colors.text}`}>
+                            {count.toLocaleString()}
+                          </div>
+                          <p className={`text-xs ${colors.subtext}`}>
+                            {pct}% of total
+                          </p>
+                        </CardContent>
+                      </Card>
+                    );
+                  })}
+                </div>
+              ) : (
               <div className="grid gap-3 grid-cols-2 lg:grid-cols-6">
                 {/* Card A - Total Fleet */}
                 <Card data-testid="card-total-fleet">
@@ -872,6 +948,7 @@ export default function AllVehicles() {
                   </Card>
                 )}
               </div>
+              )}
 
               {/* Row 2: Rental Trend Chart + BYOV */}
               <div className="grid gap-4 lg:grid-cols-2">
