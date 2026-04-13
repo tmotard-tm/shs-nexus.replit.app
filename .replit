@@ -63,4 +63,4 @@ WMS_ENGINE_BASE_URL = "https://hspsc-api-gateway-dev.stage.nextgen.shs.com/v1/ap
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 20000
+timeoutMs = 60000
