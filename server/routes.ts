@@ -2715,6 +2715,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
       const fullReturnLink = `${baseUrl}${returnLink}`;
 
+      const separationDate = techData.separationDate || lastDay;
+      const enterpriseId = techData.enterpriseId || ldapId || 'N/A';
+
+      const toolAuditLink = `${baseUrl}/tool-audit/${req.params.id}`;
+      const qrShippingLink = `${baseUrl}/qr-shipping/${req.params.id}`;
+
+      let detectionGap = '0';
+      if (separationDate && separationDate !== 'your scheduled last day') {
+        const sepDate = new Date(separationDate);
+        if (!isNaN(sepDate.getTime())) {
+          const today = new Date();
+          sepDate.setHours(0, 0, 0, 0);
+          today.setHours(0, 0, 0, 0);
+          const daysDiff = Math.floor((today.getTime() - sepDate.getTime()) / (1000 * 60 * 60 * 24));
+          detectionGap = String(Math.max(0, daysDiff));
+        }
+      }
+
       const { sendCommunication } = await import("./communication-service");
       const result = await sendCommunication({
         templateName,
@@ -2723,6 +2741,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
           firstName,
           technicianName: techName,
           lastDay,
+          separationDate,
+          enterpriseId,
+          toolAuditLink,
+          qrShippingLink,
+          detectionGap,
           returnLink: fullReturnLink,
         },
         metadata: {
