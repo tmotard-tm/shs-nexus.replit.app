@@ -457,6 +457,10 @@ export default function AllVehicles() {
       .map(([status, count]) => ({ status, count }));
   }, [data?.vehicles]);
 
+  const declineRepairCount = useMemo(() => {
+    return amsStatusCounts.find(s => s.status.toLowerCase().includes('decline'))?.count || 0;
+  }, [amsStatusCounts]);
+
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
     { border: 'border-amber-200 dark:border-amber-800', bg: 'bg-amber-50 dark:bg-amber-900/20', text: 'text-amber-700 dark:text-amber-400', subtext: 'text-amber-600 dark:text-amber-500' },
@@ -741,9 +745,9 @@ export default function AllVehicles() {
               </div>
 
               {scorecardViewMode === 'ams' ? (
-                <div className="flex gap-3 overflow-x-auto" data-testid="ams-scorecards">
+                <div className="flex gap-3" data-testid="ams-scorecards">
                   <Card
-                    className="cursor-pointer hover-elevate border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800 flex-shrink-0 min-w-[120px]"
+                    className="cursor-pointer hover-elevate border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800 flex-1 min-w-0"
                     onClick={() => setCategoryFilter(null)}
                     data-testid="card-ams-total-fleet"
                   >
@@ -752,9 +756,11 @@ export default function AllVehicles() {
                       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
                         {(data.vehicles?.length || 0).toLocaleString()}
                       </div>
-                      <p className="text-xs text-slate-500 dark:text-slate-400">
-                        100%
-                      </p>
+                      {declineRepairCount > 0 && (
+                        <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-1">
+                          {declineRepairCount} Decline Repair
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                   {amsStatusCounts.map(({ status, count }, idx) => {
@@ -765,7 +771,7 @@ export default function AllVehicles() {
                     return (
                       <Card
                         key={status}
-                        className={`cursor-pointer hover-elevate ${colors.border} ${colors.bg} ${isActive ? 'ring-2 ring-primary' : ''} flex-shrink-0 min-w-[120px]`}
+                        className={`cursor-pointer hover-elevate ${colors.border} ${colors.bg} ${isActive ? 'ring-2 ring-primary' : ''} flex-1 min-w-0`}
                         onClick={() => setCategoryFilter(isActive ? null : { truckStatus: status, label: `AMS: ${status}` })}
                         data-testid={`card-ams-${status.replace(/\s+/g, '-').toLowerCase()}`}
                       >
