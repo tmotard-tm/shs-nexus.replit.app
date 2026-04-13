@@ -1,0 +1,64 @@
+ In `client/src/pages/rental-operations.tsx`, fix the "Closed Rentals" line in the Daily Volume Trend chart.
+
+ **Problem:** The `HOLMAN_CLOSED_RENTAL_REPORT` Snowflake table is loaded daily as a full historical snapshot (each file contains ALL closed rentals to date, not just new ones). So `closedRowCount` per date is a cumulative running
+ total, which makes the chart line look like it only goes up. We need to show the day-over-day delta (new closures per day) instead.
+
+ **Fix — update the `trendData` useMemo (currently lines ~347–357):**
+
+ Replace this:
+ ```tsx
+ const trendData = useMemo(() => {
+   if (!availableDates?.data) return [];
+   return [...availableDates.data]
+     .sort((a, b) => a.fileDate.localeCompare(b.fileDate))
+     .map(d => ({
+       date: d.fileDate.slice(5), // MM-DD
+       open: d.openRowCount ?? 0,
+       tickets: d.ticketRowCount ?? 0,
+       closed: d.closedRowCount ?? 0,
+     }));
+ }, [availableDates]);
+
+ With this:
+ const trendData = useMemo(() => {
+   if (!availableDates?.data) return [];
+   const sorted = [...availableDates.data]
+     .sort((a, b) => a.fileDate.localeCompare(b.fileDate));
+   return sorted.map((d, i) => ({
+     date: d.fileDate.slice(5), // MM-DD
+     open: d.openRowCount ?? 0,
+     tickets: d.ticketRowCount ?? 0,
+     closed: i === 0
+       ? 0
+       : Math.max(0, (d.closedRowCount ?? 0) - (sorted[i - 1].closedRowCount ?? 0)),
+   }));
+ }, [availableDates]);
+
+ Also update these two strings in the same file (within the chart card, ~lines 965–981):
+
+ 1. The CardDescription text — change:
+ "Open rentals, tickets, and closed per daily Snowflake file load"
+ to:
+ "Open rentals, tickets, and new daily closures per Snowflake file load"
+ 2. The Line component for closed — change the name prop:
+ name="Closed Rentals"
+ to:
+ name="New Closures"
+
+ No other files need to change. Do not modify the server route or Snowflake queries.
+
+ ---
+
+ ## Critical Files
+
+ - `client/src/pages/rental-operations.tsx`
+   - Lines 347–357: `trendData` useMemo — core fix
+   - Lines ~965–967: `CardDescription` — label update
+   - Line ~981: `<Line name="Closed Rentals">` — legend label update
+
+ ## Verification
+
+ After the fix, the "New Closures" line on the Daily Volume Trend chart should:
+ - Show near-zero or small positive values each day (new closures only)
+ - No longer trend monotonically upward
+ - Match the logical expectation: how many rentals were closed on that specific day
