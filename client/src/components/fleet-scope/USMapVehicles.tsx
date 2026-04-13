@@ -983,9 +983,6 @@ export function USMapVehicles({ vehicles, byovTechnicians = [], onMapFiltersChan
               {Math.round(zoom * 100)}%
             </div>
           )}
-          {rentalsByState && Object.keys(rentalsByState).length > 0 && (
-            <RentalsByStatePanel rentalsByState={rentalsByState} />
-          )}
           <ComposableMap
             projection="geoAlbersUsa"
             projectionConfig={{ scale: 1300 }}
