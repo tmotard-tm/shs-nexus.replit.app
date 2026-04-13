@@ -1,6 +1,6 @@
 #!/bin/bash
 set -e
-npm install
+npm install --no-fund --no-audit 2>&1 | tail -1
 
 for f in migrations/*.sql; do
   if [ -f "$f" ]; then
@@ -21,4 +21,4 @@ for f in migrations/*.sql; do
   fi
 done
 
-yes "" | timeout 50 npx drizzle-kit push --force 2>&1 || echo "[post-merge] drizzle-kit push completed or skipped"
+yes "" | timeout 55 npx drizzle-kit push --force 2>&1 || echo "[post-merge] drizzle-kit push completed or skipped"
