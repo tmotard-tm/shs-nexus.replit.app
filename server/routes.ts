@@ -9567,10 +9567,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
           tpms.PRIMARYCITY,
           tpms.PRIMARYSTATE,
           tpms.PRIMARYZIP,
-          tpms.TRUCK_LU
+          COALESCE(tpms.TRUCK_LU, tpms_last.TRUCK_LU) AS TRUCK_LU
         FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT tpms
           ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms.ENTERPRISE_ID))
+        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms_last
+          ON UPPER(TRIM(t.ENTERPRISE_ID)) = UPPER(TRIM(tpms_last.ENTERPRISE_ID))
         WHERE t.EMPLOYMENT_STATUS IN ('L', 'P', 'S')
         ORDER BY t.EMPLOYMENT_STATUS, t.FULL_NAME
       `;
@@ -9592,6 +9594,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         PRIMARYZIP: string | null;
         TRUCK_LU: string | null;
       }>;
+
+      console.log(`[LOA Trucks] Query returned ${rows.length} rows, sample:`, rows.length > 0 ? JSON.stringify({
+        name: rows[0].FULL_NAME,
+        eid: rows[0].ENTERPRISE_ID,
+        status: rows[0].EMPLOYMENT_STATUS,
+        phone: rows[0].MOBILEPHONENUMBER,
+        addr1: rows[0].PRIMARYADDR1,
+        truck: rows[0].TRUCK_LU,
+      }) : 'no rows');
 
       const statusLabels: Record<string, string> = {
         'L': 'Leave of Absence',
