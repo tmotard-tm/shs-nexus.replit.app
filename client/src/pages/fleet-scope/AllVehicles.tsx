@@ -928,16 +928,11 @@ export default function AllVehicles() {
                     <CardContent className="p-4">
                       <p className="text-xs font-medium text-rose-700 dark:text-rose-400">Rentals</p>
                       <div className="text-2xl font-bold text-rose-700 dark:text-rose-400" data-testid="text-rental-count-card">
-                        {rentalCountInFleet.toLocaleString()}
+                        {data.rentalCount.toLocaleString()}
                       </div>
                       <p className="text-xs text-rose-600 dark:text-rose-500">
-                        {locationCounts ? ((rentalCountInFleet / locationCounts.total) * 100).toFixed(1) : '0.0'}% of total
+                        {rentalCountInFleet.toLocaleString()} in active fleet
                       </p>
-                      {data.rentalCount > rentalCountInFleet && (
-                        <p className="text-[10px] text-rose-500 dark:text-rose-600 mt-1">
-                          {data.rentalCount} total ({data.rentalCount - rentalCountInFleet} declined and not in active total fleet)
-                        </p>
-                      )}
                     </CardContent>
                   </Card>
                 )}
