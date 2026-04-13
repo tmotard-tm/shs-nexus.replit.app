@@ -1429,6 +1429,9 @@ async function sendPendingApprovalsEmail(pendingCount: number): Promise<void> {
     to: recipients,
     from: "notifications@shs.com",
     subject: "PLEASE REVIEW POs = REDUCE RENTALS",
+    trackingSettings: {
+      clickTracking: { enable: false, enableText: false },
+    },
     text: `A new PO import has been completed.\n\nYou have ${pendingCount} purchase order(s) pending Final Approval.\n\nPlease review and approve them at your earliest convenience.\n\nHow to Access:\n1. Go to ${appUrl}\n2. Select your name from the profile dropdown\n3. Click the "POs" button in the dashboard header\n4. Find records with blank Final Approval (highlighted in yellow)\n5. Click on any Final Approval cell to select a value from the dropdown`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1492,6 +1495,9 @@ async function sendTruckSwapEmail(truck: any): Promise<void> {
     to: recipients,
     from: "notifications@shs.com",
     subject: `Declined Repair Truck Swap: Parts Swap and Decommissioning – Truck #${truckNumber}`,
+    trackingSettings: {
+      clickTracking: { enable: false, enableText: false },
+    },
     text: `Declined Repair Truck Swap: Parts Swap and Decommissioning\n\nThe following trucks, From Truck - To Truck, need to have the parts swapped (Tim Motard) and Jennifer can you help the technician decommission the truck including tools, Ref Tanks and Samsara Gateway and Camera.\n\nDetails:\n- Truck Number: ${truckNumber}\n- Repair Shop Location: ${truck.repairAddress || 'N/A'}\n- Tech Name: ${truck.techName || 'N/A'}\n- Tech Phone: ${truck.techPhone || 'N/A'}\n- Tech Lead Name: ${truck.techLeadName || 'N/A'}\n- Tech Lead Phone: ${truck.techLeadPhone || 'N/A'}\n- Pick Up Slot Booked: ${truck.pickUpSlotBooked ? 'Yes' : 'No'}\n- Scheduled Pick Up Time: ${truck.timeBlockedToPickUpVan || 'N/A'}\n\nView details: ${truckDetailUrl}`,
     html: `
       <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -13284,6 +13290,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         to: "pranab.dutta@transformco.com",
         from: "notifications@shs.com",
         subject: `Vehicle Termination Request [${truckNum}]`,
+        trackingSettings: {
+          clickTracking: { enable: false, enableText: false },
+        },
         text: `Attached term request for a vehicle not economical to repair or keep road worthy. Please approve and process for termination. Please note that approvals should be routed to Rob Gerlach.\n\nThanks!`,
         html: `
           <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
