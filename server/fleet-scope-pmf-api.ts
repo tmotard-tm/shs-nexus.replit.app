@@ -251,6 +251,27 @@ class ParqApiService {
     return this.makeRequest<ParqCheckinResponse>(`/api/public/v1/vehicle/${vehicleId}/conditionreport`);
   }
 
+  async findVehicleByAssetId(assetId: string): Promise<ParqVehicle | null> {
+    try {
+      const normalizedAssetId = assetId.replace(/^0+/, '') || assetId;
+      console.log(`[PARQ API] Searching for vehicle with asset ID: ${assetId} (normalized: ${normalizedAssetId})`);
+      const vehicles = await this.getVehicles();
+      const match = vehicles.find(v => {
+        const normalizedVehicleAssetId = v.assetId?.replace(/^0+/, '') || v.assetId;
+        return normalizedVehicleAssetId === normalizedAssetId || v.assetId === assetId;
+      });
+      if (match) {
+        console.log(`[PARQ API] Found vehicle: internal ID ${match.id} for asset ID ${assetId}`);
+      } else {
+        console.log(`[PARQ API] No vehicle found for asset ID ${assetId}`);
+      }
+      return match || null;
+    } catch (err) {
+      console.error(`[PARQ API] Error searching for vehicle by asset ID ${assetId}:`, err);
+      return null;
+    }
+  }
+
   /**
    * Fetch activity logs for multiple vehicles using Asset IDs
    */

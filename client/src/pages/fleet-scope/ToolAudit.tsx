@@ -115,6 +115,25 @@ export default function ToolAudit() {
       setError(null);
       
       const response = await fetch(`/api/fs/pmf/conditionreport/${id}`);
+      
+      if (!response.ok) {
+        let errorMessage = 'Failed to fetch condition report';
+        try {
+          const errorData = await response.json();
+          if (response.status === 404 || errorData.error?.includes('404') || errorData.error?.includes('No condition report')) {
+            errorMessage = 'No condition report available for this vehicle';
+          } else {
+            errorMessage = errorData.error || errorMessage;
+          }
+        } catch {
+          errorMessage = response.status === 404 
+            ? 'No condition report available for this vehicle' 
+            : `Server error: ${response.status} ${response.statusText}`;
+        }
+        setError(errorMessage);
+        return;
+      }
+      
       const data = await response.json();
       
       if (data.success && data.conditionreport) {

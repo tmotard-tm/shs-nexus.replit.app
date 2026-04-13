@@ -9986,16 +9986,30 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       
       if (matchingRow && matchingRow.rawRow) {
         try {
-          // rawRow is stored as JSON string in database, need to parse it
           const rawRow = typeof matchingRow.rawRow === 'string' 
             ? JSON.parse(matchingRow.rawRow) 
             : matchingRow.rawRow;
           if (rawRow.id && typeof rawRow.id === 'number') {
             parqId = String(rawRow.id);
-            console.log(`[PMF ConditionReport] Resolved asset ${vehicleId} to PARQ ID ${parqId}`);
+            console.log(`[PMF ConditionReport] Resolved asset ${vehicleId} to PARQ ID ${parqId} via PMF dataset`);
+          } else {
+            console.warn(`[PMF ConditionReport] PMF dataset row found but rawRow.id is missing or not a number for asset ${vehicleId}`);
           }
         } catch (e) {
-          console.warn(`[PMF ConditionReport] Failed to parse rawRow for asset ${vehicleId}, using original ID`);
+          console.warn(`[PMF ConditionReport] Failed to parse rawRow for asset ${vehicleId}:`, e);
+        }
+      } else {
+        console.log(`[PMF ConditionReport] No matching row found in PMF dataset for asset ${vehicleId}`);
+      }
+      
+      if (parqId === vehicleId) {
+        console.log(`[PMF ConditionReport] PMF dataset lookup did not resolve PARQ ID, trying PARQ vehicles API fallback...`);
+        const vehicle = await parqApi.findVehicleByAssetId(vehicleId);
+        if (vehicle) {
+          parqId = String(vehicle.id);
+          console.log(`[PMF ConditionReport] Resolved asset ${vehicleId} to PARQ ID ${parqId} via PARQ vehicles API fallback`);
+        } else {
+          console.warn(`[PMF ConditionReport] Could not resolve PARQ internal ID for asset ${vehicleId} via any method, proceeding with original ID`);
         }
       }
       
@@ -10003,7 +10017,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json({ success: true, conditionreport: reportData });
     } catch (error: any) {
       console.error("Error fetching condition report:", error);
-      res.status(500).json({ success: false, error: error.message });
+      const is404 = error.message?.includes('404');
+      const statusCode = is404 ? 404 : 500;
+      const message = is404 
+        ? 'No condition report available for this vehicle' 
+        : error.message;
+      res.status(statusCode).json({ success: false, error: message });
     }
   });
 
