@@ -29,6 +29,8 @@ let lastAmsPollTime: number | null = null; // External AMS watermark poll
 let lastTpmsStaleSweepTime: number | null = null; // Stale TPMS cache validation sweep
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
+let separationPollIntervalId: NodeJS.Timeout | null = null;
+let notificationBackfillIntervalId: NodeJS.Timeout | null = null;
 
 const isDevelopment = process.env.NODE_ENV !== 'production';
 
@@ -90,8 +92,6 @@ async function checkAndRunSync(): Promise<void> {
       }
 
       await checkAndRunEnrichment();
-      await checkAndRunSeparationPoll();
-      await checkAndRunNotificationBackfill();
     } catch (error) {
       console.error('[Scheduler] Error during scheduled sync:', error);
     }
@@ -131,7 +131,6 @@ async function checkAndRunEnrichment(): Promise<void> {
   }
 }
 
-// Sprint 0: Poll for new separation records every 5 minutes
 async function checkAndRunSeparationPoll(): Promise<void> {
   try {
     if (!isSnowflakeConfigured()) {
@@ -140,9 +139,8 @@ async function checkAndRunSeparationPoll(): Promise<void> {
 
     const now = Date.now();
 
-    // Run separation poll if we haven't run it yet or if 5 minutes have passed
     if (lastSeparationPollTime === null || (now - lastSeparationPollTime) >= SEPARATION_POLL_INTERVAL_MS) {
-      console.log('[Scheduler] Polling for new separation records (every 5 minutes)');
+      console.log('[Scheduler] Polling for new separation records (every 30 minutes)');
       
       const syncService = getSnowflakeSyncService();
       const result = await syncService.syncNewSeparations('scheduler');
@@ -934,22 +932,15 @@ export function startSyncScheduler(): void {
 
   schedulerRunning = true;
   
-  // In production, we use Replit Scheduled Deployments instead of setInterval
-  // The setInterval approach only works when the server is continuously running,
-  // which is true in development but NOT in production where the app sleeps.
   if (isDevelopment) {
     console.log('[Scheduler] Starting Snowflake sync scheduler (development mode - uses setInterval)');
-    console.log('[Scheduler] Note: In production, use Replit Scheduled Deployments with: npx tsx server/run-sync.ts');
     
-    // Run check every minute (development only)
     intervalId = setInterval(checkAndRunSync, CHECK_INTERVAL_MS);
     
     backfillAllDepartments().catch(err => 
       console.error('[Backfill] Startup backfill failed:', err)
     );
     
-    // Seed lastSyncDate from the DB so restarts don't re-fire the 5am sync
-    // on the same day. Then run the normal check 5s later.
     getLastRentalSyncDateFromDb().then(dbDate => {
       if (dbDate) {
         lastSyncDate = dbDate;
@@ -959,28 +950,60 @@ export function startSyncScheduler(): void {
       setTimeout(() => { checkAndRunSync(); }, 5000);
     });
   } else {
-    console.log('[Scheduler] Production mode detected - setInterval scheduler disabled');
-    console.log('[Scheduler] Syncs should be triggered via Replit Scheduled Deployments');
-    console.log('[Scheduler] Configure a scheduled task with: npx tsx server/run-sync.ts');
-    // On every production startup, run catch-up syncs if today's haven't run yet.
-    // The DB is the source of truth, so multiple restarts in one day are safe.
+    console.log('[Scheduler] Production mode detected - daily sync setInterval disabled');
     setTimeout(() => {
       runCatchUpRentalSyncIfNeeded().catch(err =>
         console.error('[Scheduler] Production startup rental catch-up error:', err?.message)
       );
-    }, 15000); // 15s delay to let DB and Snowflake fully initialise
+    }, 15000);
     setTimeout(() => {
       runCatchUpOffboardingSyncIfNeeded().catch(err =>
         console.error('[Scheduler] Production startup offboarding catch-up error:', err?.message)
       );
-    }, 25000); // 25s delay — runs after rental catch-up to avoid resource contention
+    }, 25000);
   }
+
+  // Separation poll and notification backfill run independently on every boot
+  // (both dev and production), following the same pattern as VRM/UPS/etc.
+  console.log('[Scheduler] Starting separation poll (every 30 min) and notification backfill (every 6 hr) — all environments');
+
+  setTimeout(() => {
+    checkAndRunSeparationPoll().catch(err =>
+      console.error('[Scheduler] Startup separation poll error:', err)
+    );
+  }, 10000);
+
+  separationPollIntervalId = setInterval(() => {
+    checkAndRunSeparationPoll().catch(err =>
+      console.error('[Scheduler] Separation poll error:', err)
+    );
+  }, SEPARATION_POLL_INTERVAL_MS);
+
+  setTimeout(() => {
+    checkAndRunNotificationBackfill().catch(err =>
+      console.error('[Scheduler] Startup notification backfill error:', err)
+    );
+  }, 20000);
+
+  notificationBackfillIntervalId = setInterval(() => {
+    checkAndRunNotificationBackfill().catch(err =>
+      console.error('[Scheduler] Notification backfill error:', err)
+    );
+  }, NOTIFICATION_BACKFILL_INTERVAL_MS);
 }
 
 export function stopSyncScheduler(): void {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
+  }
+  if (separationPollIntervalId) {
+    clearInterval(separationPollIntervalId);
+    separationPollIntervalId = null;
+  }
+  if (notificationBackfillIntervalId) {
+    clearInterval(notificationBackfillIntervalId);
+    notificationBackfillIntervalId = null;
   }
   schedulerRunning = false;
   console.log('[Scheduler] Sync scheduler stopped');
