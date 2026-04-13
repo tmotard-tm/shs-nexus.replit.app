@@ -1010,7 +1010,7 @@ function ExpandedRowDetails({
 
               <Button variant="outline" className="justify-start" asChild>
                 <a
-                  href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/?ldap=${techData?.enterpriseId || ''}`}
+                  href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/admin?enterpriseId=${techData?.enterpriseId || ''}&type=offboarding`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -1020,11 +1020,6 @@ function ExpandedRowDetails({
                 </a>
               </Button>
               <SendToolAuditInlineButton itemId={item.id} techData={techData} />
-              <Button variant="outline" className="justify-start" disabled>
-                <Package className="h-4 w-4 mr-2 text-slate-500" />
-                Generate Return Label
-                <Badge variant="secondary" className="ml-auto text-xs">Coming Soon</Badge>
-              </Button>
 
               <Separator className="my-2" />
 

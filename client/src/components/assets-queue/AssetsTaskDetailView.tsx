@@ -880,7 +880,7 @@ export function AssetsTaskDetailView({
               asChild
             >
               <a
-                href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/?ldap=${item.techData?.enterpriseId || ''}`}
+                href={`https://tech-tool-audit-checklist-lucabuccilli1.replit.app/admin?enterpriseId=${item.techData?.enterpriseId || ''}&type=offboarding`}
                 target="_blank"
                 rel="noopener noreferrer"
               >
