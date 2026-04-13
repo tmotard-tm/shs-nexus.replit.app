@@ -155,9 +155,7 @@ function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; to
   return { completed, total, percentage: (completed / total) * 100 };
 }
 
-type SourceLabel = "fleet_separation" | "terminated_tech" | "both" | "manual";
-
-function getItemSourceFromData(item: QueueItem): boolean {
+function isItemFromSync(item: QueueItem): boolean {
   try {
     const parsed = item.data ? JSON.parse(item.data) : {};
     const source = parsed.source || "";
@@ -177,36 +175,6 @@ function getItemSourceFromData(item: QueueItem): boolean {
     }
   } catch {}
   return false;
-}
-
-function getItemSource(item: QueueItem, separationIds: Set<string>): SourceLabel {
-  const fromSync = getItemSourceFromData(item);
-  if (!fromSync) return "manual";
-
-  const techData = parseTechData(item);
-  const eid = (techData?.enterpriseId || "").toUpperCase();
-
-  if (eid && separationIds.has(eid)) return "both";
-
-  return "terminated_tech";
-}
-
-function renderSourceLabels(source: SourceLabel) {
-  switch (source) {
-    case "both":
-      return (
-        <>
-          <span className="text-[10px] text-slate-400 italic">Fleet Separation</span>
-          <span className="text-[10px] text-slate-400 italic"> · Terminated Tech</span>
-        </>
-      );
-    case "fleet_separation":
-      return <span className="text-[10px] text-slate-400 italic">Fleet Separation</span>;
-    case "terminated_tech":
-      return <span className="text-[10px] text-slate-400 italic">Terminated Tech</span>;
-    case "manual":
-      return <span className="text-[10px] text-slate-400 italic">Manual</span>;
-  }
 }
 
 function getStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -612,8 +580,8 @@ function ExpandedRowDetails({
   };
 
   const taskItems = [
-    { key: "taskToolsReturn" as TaskKey, label: "Tools Return Asset", desc: "Verify all assigned tools returned", icon: Briefcase },
-    { key: "taskIphoneReturn" as TaskKey, label: "iPhone Return Asset", desc: "Check condition and unlock status", icon: Smartphone },
+    { key: "taskToolsReturn" as TaskKey, label: "Tools Return", desc: "", icon: Briefcase },
+    { key: "taskIphoneReturn" as TaskKey, label: "iPhone Return", desc: "", icon: Smartphone },
     { key: "taskDisconnectedLine" as TaskKey, label: "Disconnect Phone Line", desc: "Suspend service", icon: Wifi, showCarrier: true },
     { key: "taskDisconnectedMPayment" as TaskKey, label: "Deactivate mPayment", desc: "Remove access in Temples system", icon: CreditCard },
     { key: "taskCloseSegnoOrders" as TaskKey, label: "Close Segno Orders", desc: "Ensure no open work orders remain", icon: FileText },
@@ -830,7 +798,7 @@ function ExpandedRowDetails({
                       }`} />
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-slate-800">{task.label}</div>
-                        <div className="text-xs text-slate-500">{task.desc}</div>
+                        {task.desc && <div className="text-xs text-slate-500">{task.desc}</div>}
                       </div>
                       {status === "completed" && (
                         <Badge className="text-[10px] shrink-0 bg-green-100 text-green-800 border-green-200 hover:bg-green-100">
@@ -839,7 +807,7 @@ function ExpandedRowDetails({
                       )}
                       {status === "processing" && (
                         <Badge className="text-[10px] shrink-0 bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100">
-                          <Clock className="h-3 w-3 mr-1" />System Processing
+                          <Clock className="h-3 w-3 mr-1" />{task.key === "taskCloseSegnoOrders" ? "System Processing" : "Tool recovery email sent"}
                         </Badge>
                       )}
                       {status === "actionRequired" && (
@@ -1103,10 +1071,6 @@ export function AssetsRecoveryQueue() {
     queryKey: ["/api/users"],
   });
 
-  const { data: separationIdsRaw = [] } = useQuery<string[]>({
-    queryKey: ["/api/snowflake/separation-ids"],
-    staleTime: 10 * 60 * 1000,
-  });
 
   const vehicleNumbers = useMemo(() => {
     return [...new Set(queueItems.map(item => item.techData?.hrTruckNumber).filter(Boolean) as string[])];
@@ -1128,9 +1092,6 @@ export function AssetsRecoveryQueue() {
     staleTime: 5 * 60 * 1000,
   });
 
-  const separationIds = useMemo(() => {
-    return new Set(separationIdsRaw.map(id => id.toUpperCase()));
-  }, [separationIdsRaw]);
 
   const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
 
@@ -1225,15 +1186,15 @@ export function AssetsRecoveryQueue() {
       const taskProgress = getTaskProgress(item);
       const matchesIncomplete = !filters.incompleteOnly || taskProgress.completed < taskProgress.total;
 
-      const itemSource = getItemSource(item, separationIds);
-      const matchesSource = filters.includeManual || itemSource !== "manual";
+      const fromSync = isItemFromSync(item);
+      const matchesSource = filters.includeManual || fromSync;
 
       const isOrphan = techData?.techName === "Unknown" && !techData?.enterpriseId;
       const matchesNotOrphan = !isOrphan;
 
       return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource && matchesNotOrphan;
     });
-  }, [queueItems, searchQuery, filters, separationIds]);
+  }, [queueItems, searchQuery, filters]);
 
   const sortedData = useMemo(() => {
     if (!sortConfig) return filteredData;
@@ -1473,9 +1434,6 @@ export function AssetsRecoveryQueue() {
                             </span>
                           )}
                         </div>
-                        <span>
-                          {renderSourceLabels(getItemSource(row, separationIds))}
-                        </span>
                       </td>
                       <td className="px-4 py-3 text-slate-600">{row.techData?.district || "N/A"}</td>
                       <td className="px-4 py-3 text-slate-600">

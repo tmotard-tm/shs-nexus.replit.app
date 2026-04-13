@@ -104,6 +104,7 @@ interface SnowflakeTermRosterRow {
   LAST_DATE_WORKED: string;
   PLANNING_AREA: string;
   TECH_SPECIALTY?: string;
+  DISTRICT_NO?: string;
   SNSTV_HOME_ADDR1?: string;
   SNSTV_HOME_ADDR2?: string;
   SNSTV_HOME_CITY?: string;
@@ -112,7 +113,6 @@ interface SnowflakeTermRosterRow {
   SNSTV_MAIN_PHONE?: string;
   SNSTV_CELL_PHONE?: string;
   SNSTV_HOME_PHONE?: string;
-  // Informational-only from TPMS_EXTRACT_LAST_ASSIGNED — last snapshot, not current assignment
   TRUCK_LU?: string;
   TRUCK_FILE_DATE?: string;
 }
@@ -228,6 +228,7 @@ export class SnowflakeSyncService {
           t.LAST_DATE_WORKED,
           t.PLANNING_AREA,
           t.TECH_SPECIALTY,
+          t.DISTRICT_NO,
           c.SNSTV_HOME_ADDR1,
           c.SNSTV_HOME_ADDR2,
           c.SNSTV_HOME_CITY,
@@ -282,8 +283,7 @@ export class SnowflakeSyncService {
           lastDayWorked: row.LAST_DATE_WORKED || null,
           planningAreaName: row.PLANNING_AREA || null,
           jobTitle: row.TECH_SPECIALTY || null,
-          districtNo: null,
-          // Informational-only: last snapshot truck from TPMS_EXTRACT_LAST_ASSIGNED, not current assignment
+          districtNo: row.DISTRICT_NO || null,
           lastKnownTruckLu: row.TRUCK_LU || null,
           lastKnownTruckFileDate: row.TRUCK_FILE_DATE
             ? new Date(row.TRUCK_FILE_DATE).toISOString().slice(0, 10)

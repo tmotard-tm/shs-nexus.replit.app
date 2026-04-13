@@ -258,8 +258,8 @@ interface TaskItem {
 }
 
 const TASK_LIST: TaskItem[] = [
-  { key: 'taskToolsReturn', label: 'Tools Return Asset', description: 'Verify all assigned tools returned', icon: Briefcase },
-  { key: 'taskIphoneReturn', label: 'iPhone Return Asset', description: 'Check condition and unlock status', icon: Smartphone },
+  { key: 'taskToolsReturn', label: 'Tools Return', description: '', icon: Briefcase },
+  { key: 'taskIphoneReturn', label: 'iPhone Return', description: '', icon: Smartphone },
   { key: 'taskDisconnectedLine', label: 'Disconnect Phone Line', description: 'Suspend service', icon: Wifi, hasCarrier: true },
   { key: 'taskDisconnectedMPayment', label: 'Deactivate mPayment', description: 'Remove access in Temples system', icon: CreditCard },
   { key: 'taskCloseSegnoOrders', label: 'Close Segno Orders', description: 'Ensure no open work orders remain', icon: FileText },
@@ -290,7 +290,7 @@ function getAutomationStatus(key: TaskKey, isComplete: boolean, automationDetail
   return 'processing';
 }
 
-function AutomationBadge({ status }: { status: AutomationStatus }) {
+function AutomationBadge({ status, taskKey }: { status: AutomationStatus; taskKey?: TaskKey }) {
   switch (status) {
     case 'completed':
       return (
@@ -303,7 +303,7 @@ function AutomationBadge({ status }: { status: AutomationStatus }) {
       return (
         <Badge className="text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100">
           <Clock className="h-3 w-3 mr-1" />
-          System Processing
+          {taskKey === 'taskCloseSegnoOrders' ? 'System Processing' : 'Tool recovery email sent'}
         </Badge>
       );
     case 'actionRequired':
@@ -781,9 +781,9 @@ export function AssetsTaskDetailView({
                       }`} />
                       <div className="flex-1">
                         <span className="text-sm font-medium">{task.label}</span>
-                        <p className="text-xs text-muted-foreground">{task.description}</p>
+                        {task.description && <p className="text-xs text-muted-foreground">{task.description}</p>}
                       </div>
-                      <AutomationBadge status={status} />
+                      <AutomationBadge status={status} taskKey={task.key} />
                     </div>
                     {task.key === 'taskCloseSegnoOrders' && (
                       <div className="ml-6 flex items-start gap-2 p-2 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
@@ -831,7 +831,7 @@ export function AssetsTaskDetailView({
                             {task.label}
                           </Label>
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>
+                        {task.description && <p className="text-xs text-muted-foreground mt-0.5">{task.description}</p>}
                       </div>
                       {isChecked ? (
                         <CheckCircle className="h-4 w-4 text-green-600" />

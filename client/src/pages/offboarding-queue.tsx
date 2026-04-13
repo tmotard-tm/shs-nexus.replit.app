@@ -583,8 +583,8 @@ function AssetsPanel({ task, techDetail, updateTaskMutation }: { task: any; tech
   const [showCarrierDropdown, setShowCarrierDropdown] = useState(!!task?.taskDisconnectedLine);
 
   const checklist = [
-    { key: "taskToolsReturn", label: "Tools Return Asset", desc: "Verify all assigned tools returned" },
-    { key: "taskIphoneReturn", label: "iPhone Return Asset", desc: "Check condition and unlock status" },
+    { key: "taskToolsReturn", label: "Tools Return", desc: "" },
+    { key: "taskIphoneReturn", label: "iPhone Return", desc: "" },
     { key: "taskDisconnectedLine", label: "Disconnect Phone Line", desc: "Suspend service" },
     { key: "taskDisconnectedMPayment", label: "Deactivate mPayment", desc: "Remove access in Temples system" },
     { key: "taskCloseSegnoOrders", label: "Close Segno Orders", desc: "Ensure no open work orders remain" },
@@ -633,7 +633,7 @@ function AssetsPanel({ task, techDetail, updateTaskMutation }: { task: any; tech
                 />
                 <div>
                   <div className="text-sm font-medium">{item.label}</div>
-                  <div className="text-xs text-muted-foreground">{item.desc}</div>
+                  {item.desc && <div className="text-xs text-muted-foreground">{item.desc}</div>}
                   {item.key === "taskDisconnectedLine" && showCarrierDropdown && (
                     <Select
                       value={task?.carrier || ""}

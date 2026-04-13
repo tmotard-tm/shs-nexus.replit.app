@@ -255,8 +255,8 @@ export function WorkModuleDialog({
   const assetsCompletedCount = Object.values(assetsTaskState).filter(Boolean).length;
 
   const assetsTaskItems: { key: TaskKey; label: string; desc: string; icon: any; showCarrier?: boolean }[] = [
-    { key: "taskToolsReturn", label: "Tools Return Asset", desc: "Verify all assigned tools returned", icon: Briefcase },
-    { key: "taskIphoneReturn", label: "iPhone Return Asset", desc: "Check condition and unlock status", icon: Smartphone },
+    { key: "taskToolsReturn", label: "Tools Return", desc: "", icon: Briefcase },
+    { key: "taskIphoneReturn", label: "iPhone Return", desc: "", icon: Smartphone },
     { key: "taskDisconnectedLine", label: "Disconnect Phone Line", desc: "Suspend service", icon: Wifi, showCarrier: true },
     { key: "taskDisconnectedMPayment", label: "Deactivate mPayment", desc: "Remove access in Temples system", icon: CreditCard },
     { key: "taskCloseSegnoOrders", label: "Close Segno Orders", desc: "Ensure no open work orders remain", icon: FileText },
@@ -827,7 +827,7 @@ export function WorkModuleDialog({
                                         </SelectContent>
                                       </Select>
                                     )}
-                                    <span className="text-xs text-muted-foreground">{task.desc}</span>
+                                    {task.desc && <span className="text-xs text-muted-foreground">{task.desc}</span>}
                                   </div>
                                 </div>
                                 <Icon className={`h-4 w-4 mt-1 ${isChecked ? "text-muted-foreground/50" : "text-muted-foreground"}`} />
