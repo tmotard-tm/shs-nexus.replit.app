@@ -13156,6 +13156,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/ams/declined-repair-count", requireAuth, async (_req, res) => {
+    try {
+      const now = Date.now();
+      if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+        amsTruckStatusCache = { data: await buildAmsTruckStatusMap(), builtAt: now };
+      }
+      let count = 0;
+      for (const status of Object.values(amsTruckStatusCache.data)) {
+        if (status && status.toLowerCase().includes('declined repair')) {
+          count++;
+        }
+      }
+      res.json({ count });
+    } catch (error: any) {
+      console.error('[AMS DeclinedRepairCount] Error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Warm the AMS truck-status cache in the background at startup so the
   // first real request is served instantly from cache.
   setImmediate(() => {

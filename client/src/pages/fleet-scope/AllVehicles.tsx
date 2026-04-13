@@ -457,9 +457,11 @@ export default function AllVehicles() {
       .map(([status, count]) => ({ status, count }));
   }, [data?.vehicles]);
 
-  const declineRepairCount = useMemo(() => {
-    return amsStatusCounts.find(s => s.status.toLowerCase().includes('decline'))?.count || 0;
-  }, [amsStatusCounts]);
+  const { data: amsDeclinedData } = useQuery<{ count: number }>({
+    queryKey: ['/api/ams/declined-repair-count'],
+    enabled: scorecardViewMode === 'ams',
+  });
+  const declineRepairCount = amsDeclinedData?.count || 0;
 
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
