@@ -131,6 +131,21 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
         if (!ldapId) {
           result.skippedNoLdap++;
           result.details.push({ ldapId: '', techName, action: 'skipped_no_ldap' });
+          await storage.createCommunicationLog({
+            templateId: commTemplate.id,
+            templateName: 'tool-audit-notification',
+            type: commTemplate.type,
+            mode: commTemplate.mode,
+            status: 'blocked',
+            intendedRecipient: techName || 'Unknown Technician',
+            actualRecipient: null,
+            subject: null,
+            contentPreview: null,
+            variables: null,
+            errorMessage: 'No LDAP ID on file',
+            metadata: { queueItemId: item.id, techName } as any,
+            sentBy: null,
+          });
           continue;
         }
 
@@ -168,6 +183,21 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
           if (templateMode === 'live') {
             result.skippedNoEmail++;
             result.details.push({ ldapId, techName, action: 'skipped_no_email', error: 'No personal email (live mode)' });
+            await storage.createCommunicationLog({
+              templateId: commTemplate.id,
+              templateName: 'tool-audit-notification',
+              type: commTemplate.type,
+              mode: commTemplate.mode,
+              status: 'blocked',
+              intendedRecipient: techName ? `${techName} (${ldapId})` : ldapId,
+              actualRecipient: null,
+              subject: null,
+              contentPreview: null,
+              variables: { technicianName: techName, ldapId } as any,
+              errorMessage: 'No personal email on file',
+              metadata: { queueItemId: item.id, ldapId, techName } as any,
+              sentBy: null,
+            });
             continue;
           }
           emailToUse = `no-email-on-file@technician.placeholder`;
