@@ -263,7 +263,7 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                 <TableHead className="w-[80px]">District</TableHead>
                 <TableHead className="w-[100px]">Reg Exp</TableHead>
                 <TableHead className="w-[130px]">Case Status</TableHead>
-                <TableHead className="w-[200px]">Pending Tasks</TableHead>
+                <TableHead className="w-[350px]">Pending Tasks</TableHead>
                 <TableHead className="w-[250px]">Address</TableHead>
                 <TableHead className="w-[140px]">Contact No</TableHead>
                 <TableHead className="w-[120px]">Keys</TableHead>
@@ -291,7 +291,7 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                   <TableCell className="text-sm">{truck.district || '-'}</TableCell>
                   <TableCell className="text-sm">{truck.regExpDate || '-'}</TableCell>
                   <TableCell className="text-sm">{truck.holmanCaseStatus || '-'}</TableCell>
-                  <TableCell className="text-sm max-w-[200px] truncate" title={truck.holmanPendingTasks || ''}>{truck.holmanPendingTasks || '-'}</TableCell>
+                  <TableCell className="text-sm whitespace-normal">{truck.holmanPendingTasks || '-'}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
                       <textarea
