@@ -1,0 +1,22 @@
+Truck #	Address	Contact No	Keys	Comments 	Available to Pick up Yes/No
+47131	Pep Boys Auto Service & Tires - 2769 Zelda Rd, Montgomery, AL 36106	(334)-230-7764	No	Called Pep boys on 3342307764, agent Confirmed the do not have this truck	No
+37110	7625 N Academy Blvd, Colorado Springs, CO 80920	  719-900-3706	Yes	Called Pep boys on 7199003706, agent answering the call confirmed they have the truck and keys  ready for Pick up 	Yes
+46441	PEP BOYS, 5895 47TH AVE, SACRAMENTO CA 95823	 916-245-3496	No	Called Pep Boys on 9162453496, agent answering the call confirmed they do not have this truck however, he gave me another truck # 46063 and said it is ready for pick up	No
+37344			No	Tahseen said this truck is from offboarding file.	No
+46063	PEP BOYS, 5895 47TH AVE, SACRAMENTO CA 95824	 916-245-3496	No	"This truck is assigned to Mr RYAN BRISTOW, Called him on 
+(916) 878-9374,(916) 559-0520, No answer. Message Tech lead to check on mentioned truck"	No
+61601	900 EAST COOLEY AVENUE, 92408	(833) 801-5101	No	Called on (833) 801-5101, Agent said Truck is not ready for pickup,She will confirm if the keys are available or not	No
+21943	ONT-2 PMF - 900 East Cooley Avenue, San Bernardino, CA - 92408	(833) 801-5101	Yes	Called on (833) 801-5101, Agent said Truck is not ready for pickup, She will confirm if the keys are available or not	No
+61866	Pep Boys 4987 West Lane, Stockton, CA - 95210	209-227-3394	Yes	Called Pep boys on 209-227-3394, Agent (Chai) confirmed the truck is ready for pick up and they have the keys.	Yes
+24042	Pep Boys Auto Service & Tires - 774 N Nellis Blvd, Las Vegas, NV 89110	(702) 838-4335	Yes	Called Pep Boys on (702) 838-4335, Agent (Crossway) confirmed the truck is ready for pick up and they have the keys.	Yes
+89868	900 East Cooley Avenue, San Bernardino, CA - 92408	909-733-6882	Yes	Called Pep Boys on (909) 733-6882, Agent (Steven) confirmed the truck is ready for pick up and they have the keys.	Yes
+22316	Pep Boys Auto Service & Tires - 2411 F St, Bakersfield, CA 93301	661-246-3875	No	Called on 661-246-3875, Agent (Ben) confirmed they do not have the Truck or key.	No
+21144	Pep Boys 4490 West Shaw Ave, Fresno, CA 93722	(559) 276-7501	Yes	Called Pep Boys on (559) 276-7501, Agent (Andrew) confirmed the truck is ready for pick up and they have the keys.	Yes
+36780	3J’s Auto Body & RLSH - 1855 E 29th St, Suite A, Signal Hill, CA 90755,	(562) 424-6744	No	Called (562) 424-6744, they confirmed they do not have this trucl. Lookg at the notes on AMS, I called Aamco 832-856-8093, agent (David) confirmed they do not have this truck.	No
+24010	3J’s Auto Body & RLSH - 1855 E 29th St, Suite A, Signal Hill, CA 90755,	(562) 424-6744	Yes	Called Pep Boys on (562) 424-6744, Agent (James) confirmed the truck is ready for pick up and they have the keys.	Yes
+6609	ONT-2 PMF - 900 East Cooley Avenue, San Bernardino, CA - 92408	909-733-6882	Yes	Called Pep Boys on (909) 733-6882, Agent (Steven) confirmed the truck is ready for pick up and they have the keys.	Yes
+21118	Pep Boys Auto Service & Tires - 11937 E Valley Blvd, El Monte, CA 91732	626-213-2968	Yes	Called Pep Boys on 626-213-2968, Agent (Rich), confirmed the truck and keys are with them however, Truck is under repair, Check engine light is on.	No
+21016	PEP BOYS (916-297-6535) 2500 ARDEN WY UNIT 100, SA, SACRAMENTO, CA, 95825	916-297-6535	Yes	Called Pep Boys on 916-297-6535, Agent (Chris) confirmed the truck is ready for pick up and they have the keys.	Yes
+46331	7432 Farm to Market 1960 Rd E, Humble, TX 77346	281-784-0605	Yes	Called Pep Boys 281-784-0605, Agent (Gerard) Confirmed the truck and keys are with them. Truck does not have gas.	Yes
+21119	ONT-2 PMF - 900 East Cooley Avenue, San Bernardino, CA - 92408	909-733-6882	Yes	Called Pep Boys on (909) 733-6882, Agent (Steven) confirmed the truck is ready for pick up and they have the keys.	Yes
+37402	PEP BOYS, 2050 W FLORIDA AVE, HEMET, CA, 92545	951-305-0207	Yes	Called Pep Boys on 951-305-0207, Agent (Brian) confirmed the truck is ready for pick up and they have the keys	Yes
