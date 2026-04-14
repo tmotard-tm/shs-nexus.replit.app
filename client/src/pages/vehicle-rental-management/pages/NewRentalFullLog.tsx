@@ -1021,7 +1021,7 @@ export default function NewRentalFullLog() {
   ];
 
   return (
-    <div style={{ maxWidth: 1400 }}>
+    <div style={{ width: "100%" }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
