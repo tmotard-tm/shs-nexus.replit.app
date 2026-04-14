@@ -567,6 +567,42 @@ CREATE TABLE IF NOT EXISTS "fs_truck_status_events" (
 CREATE INDEX IF NOT EXISTS "fs_truck_status_events_truck_id_idx" ON "fs_truck_status_events"("truck_id");
 CREATE INDEX IF NOT EXISTS "fs_truck_status_events_effective_at_idx" ON "fs_truck_status_events"("effective_at");
 
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='unassigned_address') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "unassigned_address" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='unassigned_contact_no') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "unassigned_contact_no" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='unassigned_keys') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "unassigned_keys" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='unassigned_comments') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "unassigned_comments" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='unassigned_available_pickup') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "unassigned_available_pickup" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_ldap') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_ldap" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_name') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_name" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_phone') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_phone" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_address') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_address" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_lead') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_lead" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_lead_phone') THEN
+    ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_lead_phone" text;
+  END IF;
+END $$;
+
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.
 -- This ensures daysInStatus is accurate for trucks added before this feature shipped,
 -- using their best available status timestamp: COALESCE(mainStatusChangedAt, lastUpdatedAt, NOW()).

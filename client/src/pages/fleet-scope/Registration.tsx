@@ -137,6 +137,17 @@ interface RegistrationTruck {
   holmanPendingTasks: string | null;
   holmanEta: string | null;
   holmanReceivedTags: boolean;
+  unassignedAddress: string;
+  unassignedContactNo: string;
+  unassignedKeys: string;
+  unassignedComments: string;
+  unassignedAvailablePickup: string;
+  nearestLdap: string;
+  nearestTechName: string;
+  nearestTechPhone: string;
+  nearestTechAddress: string;
+  nearestTechLead: string;
+  nearestTechLeadPhone: string;
 }
 
 interface RegistrationResponse {
@@ -167,8 +178,201 @@ const DECLINED_TRUCKS = new Set([
   '036096', '036024', '023302'
 ]);
 
+function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruck[]; trackingMutation: any }) {
+  const [search, setSearch] = useState("");
+  const [lookupLoading, setLookupLoading] = useState<string | null>(null);
+  const { toast } = useToast();
+
+  const unassigned = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return trucks
+      .filter(t => t.assignmentStatus === 'Unassigned')
+      .filter(t => {
+        if (!q) return true;
+        return (
+          t.truckNumber.toLowerCase().includes(q) ||
+          (t.tagState || '').toLowerCase().includes(q) ||
+          (t.district || '').toLowerCase().includes(q) ||
+          (t.unassignedAddress || '').toLowerCase().includes(q) ||
+          (t.nearestTechName || '').toLowerCase().includes(q) ||
+          (t.nearestLdap || '').toLowerCase().includes(q)
+        );
+      });
+  }, [trucks, search]);
+
+  const handleAddressBlur = async (truck: RegistrationTruck, newAddress: string) => {
+    if (newAddress === (truck.unassignedAddress || '')) return;
+    trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedAddress: newAddress });
+
+    if (!newAddress.trim()) return;
+
+    const zipMatch = newAddress.match(/(\d{5})(?:\s*-?\s*\d{4})?(?:\s*$)/);
+    if (!zipMatch) return;
+
+    setLookupLoading(truck.truckNumber);
+    try {
+      const response = await apiRequest("POST", "/api/fs/registration/nearest-tech", { address: newAddress });
+      const result = await response.json();
+      trackingMutation.mutate({
+        truckNumber: truck.truckNumber,
+        nearestLdap: result.ldap || '',
+        nearestTechName: result.techName || '',
+        nearestTechPhone: result.techPhone || '',
+        nearestTechAddress: result.techAddress || '',
+        nearestTechLead: result.techLead || '',
+        nearestTechLeadPhone: result.techLeadPhone || '',
+      });
+      toast({
+        title: "Nearest tech found",
+        description: `${result.techName} — ${result.distanceMiles} mi away`,
+      });
+    } catch (err: any) {
+      console.error("Nearest tech lookup failed:", err);
+    } finally {
+      setLookupLoading(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <CardTitle className="flex items-center gap-2">
+            <PackageCheck className="w-5 h-5" />
+            Unassigned Vehicles
+            <Badge variant="secondary" className="ml-2">{unassigned.length} vehicles</Badge>
+          </CardTitle>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search truck #, address, tech..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9 w-full sm:w-[300px]"
+            />
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent>
+        <div className="rounded-md border overflow-x-auto max-h-[700px]">
+          <Table>
+            <TableHeader className="sticky top-0 bg-background z-10">
+              <TableRow>
+                <TableHead className="w-[100px]">Truck #</TableHead>
+                <TableHead className="w-[80px]">Tag State</TableHead>
+                <TableHead className="w-[80px]">District</TableHead>
+                <TableHead className="w-[100px]">Reg Exp</TableHead>
+                <TableHead className="w-[250px]">Address</TableHead>
+                <TableHead className="w-[140px]">Contact No</TableHead>
+                <TableHead className="w-[120px]">Keys</TableHead>
+                <TableHead className="w-[200px]">Comments</TableHead>
+                <TableHead className="w-[140px]">Available to Pick Up</TableHead>
+                <TableHead className="w-[100px]">LDAP</TableHead>
+                <TableHead className="w-[180px]">Tech Name</TableHead>
+                <TableHead className="w-[130px]">Tech Phone</TableHead>
+                <TableHead className="w-[250px]">Tech Address</TableHead>
+                <TableHead className="w-[150px]">Tech Lead</TableHead>
+                <TableHead className="w-[130px]">Tech Lead Phone</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {unassigned.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={15} className="text-center py-8 text-muted-foreground">
+                    No unassigned trucks found
+                  </TableCell>
+                </TableRow>
+              ) : unassigned.map((truck) => (
+                <TableRow key={truck.truckNumber}>
+                  <TableCell className="font-mono font-medium">{truck.truckNumber}</TableCell>
+                  <TableCell className="text-sm">{truck.tagState || '-'}</TableCell>
+                  <TableCell className="text-sm">{truck.district || '-'}</TableCell>
+                  <TableCell className="text-sm">{truck.regExpDate || '-'}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <Input
+                        defaultValue={truck.unassignedAddress || ''}
+                        placeholder="Enter address with ZIP..."
+                        className="h-7 text-xs w-[230px]"
+                        onBlur={(e) => handleAddressBlur(truck, e.target.value.trim())}
+                      />
+                      {lookupLoading === truck.truckNumber && (
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground flex-shrink-0" />
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      defaultValue={truck.unassignedContactNo || ''}
+                      placeholder="Phone..."
+                      className="h-7 text-xs w-[120px]"
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (val !== (truck.unassignedContactNo || '')) {
+                          trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedContactNo: val });
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      defaultValue={truck.unassignedKeys || ''}
+                      placeholder="Keys info..."
+                      className="h-7 text-xs w-[100px]"
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (val !== (truck.unassignedKeys || '')) {
+                          trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedKeys: val });
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      defaultValue={truck.unassignedComments || ''}
+                      placeholder="Comments..."
+                      className="h-7 text-xs w-[180px]"
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (val !== (truck.unassignedComments || '')) {
+                          trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedComments: val });
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <Input
+                      defaultValue={truck.unassignedAvailablePickup || ''}
+                      placeholder="Pickup info..."
+                      className="h-7 text-xs w-[120px]"
+                      onBlur={(e) => {
+                        const val = e.target.value.trim();
+                        if (val !== (truck.unassignedAvailablePickup || '')) {
+                          trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedAvailablePickup: val });
+                        }
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell className="font-mono text-sm">{truck.nearestLdap || '-'}</TableCell>
+                  <TableCell className="text-sm">{truck.nearestTechName || '-'}</TableCell>
+                  <TableCell className="text-sm">{truck.nearestTechPhone || '-'}</TableCell>
+                  <TableCell className="text-sm max-w-[250px] truncate" title={truck.nearestTechAddress}>
+                    {truck.nearestTechAddress || '-'}
+                  </TableCell>
+                  <TableCell className="text-sm">{truck.nearestTechLead || '-'}</TableCell>
+                  <TableCell className="text-sm">{truck.nearestTechLeadPhone || '-'}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function Registration() {
-  const [activeView, setActiveView] = useState<"table" | "conversations">("table");
+  const [activeView, setActiveView] = useState<"table" | "conversations" | "unassigned">("table");
   const [convTruck, setConvTruck] = useState<string | null>(null);
   const [processFlowCollapsed, setProcessFlowCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -355,7 +559,7 @@ export default function Registration() {
   });
 
   const trackingMutation = useMutation({
-    mutationFn: async ({ truckNumber, ...data }: { truckNumber: string; initialTextSent?: boolean; timeSlotConfirmed?: boolean; timeSlotValue?: string; submittedToHolman?: boolean; alreadySent?: boolean; comments?: string }) => {
+    mutationFn: async ({ truckNumber, ...data }: { truckNumber: string; initialTextSent?: boolean; timeSlotConfirmed?: boolean; timeSlotValue?: string; submittedToHolman?: boolean; alreadySent?: boolean; comments?: string; unassignedAddress?: string; unassignedContactNo?: string; unassignedKeys?: string; unassignedComments?: string; unassignedAvailablePickup?: string; nearestLdap?: string; nearestTechName?: string; nearestTechPhone?: string; nearestTechAddress?: string; nearestTechLead?: string; nearestTechLeadPhone?: string }) => {
       const response = await apiRequest("PATCH", `/api/fs/registration/tracking/${truckNumber}`, data);
       return response.json();
     },
@@ -373,6 +577,17 @@ export default function Registration() {
             if (variables.submittedToHolman !== undefined) updated.submittedToHolman = variables.submittedToHolman;
             if (variables.alreadySent !== undefined) updated.alreadySent = variables.alreadySent;
             if (variables.comments !== undefined) updated.comments = variables.comments;
+            if (variables.unassignedAddress !== undefined) updated.unassignedAddress = variables.unassignedAddress;
+            if (variables.unassignedContactNo !== undefined) updated.unassignedContactNo = variables.unassignedContactNo;
+            if (variables.unassignedKeys !== undefined) updated.unassignedKeys = variables.unassignedKeys;
+            if (variables.unassignedComments !== undefined) updated.unassignedComments = variables.unassignedComments;
+            if (variables.unassignedAvailablePickup !== undefined) updated.unassignedAvailablePickup = variables.unassignedAvailablePickup;
+            if (variables.nearestLdap !== undefined) updated.nearestLdap = variables.nearestLdap;
+            if (variables.nearestTechName !== undefined) updated.nearestTechName = variables.nearestTechName;
+            if (variables.nearestTechPhone !== undefined) updated.nearestTechPhone = variables.nearestTechPhone;
+            if (variables.nearestTechAddress !== undefined) updated.nearestTechAddress = variables.nearestTechAddress;
+            if (variables.nearestTechLead !== undefined) updated.nearestTechLead = variables.nearestTechLead;
+            if (variables.nearestTechLeadPhone !== undefined) updated.nearestTechLeadPhone = variables.nearestTechLeadPhone;
             return updated;
           }
           return truck;
@@ -823,6 +1038,19 @@ export default function Registration() {
               Vehicles Table
             </Button>
             <Button
+              variant={activeView === "unassigned" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => { setActiveView("unassigned"); setConvTruck(null); }}
+              className="rounded-none border-0 border-l"
+              data-testid="button-view-unassigned"
+            >
+              <PackageCheck className="w-3.5 h-3.5 mr-1.5" />
+              Unassigned
+              {data?.summary?.unassigned ? (
+                <Badge variant="secondary" className="ml-1.5 text-xs">{data.summary.unassigned}</Badge>
+              ) : null}
+            </Button>
+            <Button
               variant={activeView === "conversations" ? "default" : "ghost"}
               size="sm"
               onClick={() => setActiveView("conversations")}
@@ -1216,6 +1444,8 @@ export default function Registration() {
           )}
         </Card>
       )}
+
+      {activeView === "unassigned" && <UnassignedView trucks={data?.trucks || []} trackingMutation={trackingMutation} />}
 
       {activeView === "table" && <Card>
         <CardHeader>

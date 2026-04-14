@@ -632,6 +632,17 @@ async function buildRegistrationData(): Promise<{
       holmanPendingTasks: tracking?.holmanPendingTasks || null,
       holmanEta: tracking?.holmanEta || null,
       holmanReceivedTags: tracking?.holmanReceivedTags || false,
+      unassignedAddress: tracking?.unassignedAddress || '',
+      unassignedContactNo: tracking?.unassignedContactNo || '',
+      unassignedKeys: tracking?.unassignedKeys || '',
+      unassignedComments: tracking?.unassignedComments || '',
+      unassignedAvailablePickup: tracking?.unassignedAvailablePickup || '',
+      nearestLdap: tracking?.nearestLdap || '',
+      nearestTechName: tracking?.nearestTechName || '',
+      nearestTechPhone: tracking?.nearestTechPhone || '',
+      nearestTechAddress: tracking?.nearestTechAddress || '',
+      nearestTechLead: tracking?.nearestTechLead || '',
+      nearestTechLeadPhone: tracking?.nearestTechLeadPhone || '',
     });
   }
   trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
@@ -12752,9 +12763,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.patch("/registration/tracking/:truckNumber", async (req, res) => {
     try {
       const { truckNumber } = req.params;
-      const { initialTextSent, timeSlotConfirmed, timeSlotValue, submittedToHolman, alreadySent, comments } = req.body;
+      const {
+        initialTextSent, timeSlotConfirmed, timeSlotValue, submittedToHolman, alreadySent, comments,
+        unassignedAddress, unassignedContactNo, unassignedKeys, unassignedComments, unassignedAvailablePickup,
+        nearestLdap, nearestTechName, nearestTechPhone, nearestTechAddress, nearestTechLead, nearestTechLeadPhone,
+      } = req.body;
       
-      console.log(`[Registration Tracking] Updating ${truckNumber}:`, { initialTextSent, timeSlotConfirmed, timeSlotValue, submittedToHolman, alreadySent, comments });
+      console.log(`[Registration Tracking] Updating ${truckNumber}`);
       
       // Get existing record
       const existing = await getDb().select().from(registrationTracking).where(eq(registrationTracking.truckNumber, truckNumber)).limit(1);
@@ -12773,6 +12788,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Set timestamp only when checkbox is newly checked
       const submittedToHolmanAt = (!wasSubmitted && resolvedSubmittedToHolman) ? new Date() : (existingRecord?.submittedToHolmanAt || null);
       
+      const resolvedUnassignedAddress = unassignedAddress !== undefined ? (unassignedAddress || null) : (existingRecord?.unassignedAddress || null);
+      const resolvedUnassignedContactNo = unassignedContactNo !== undefined ? (unassignedContactNo || null) : (existingRecord?.unassignedContactNo || null);
+      const resolvedUnassignedKeys = unassignedKeys !== undefined ? (unassignedKeys || null) : (existingRecord?.unassignedKeys || null);
+      const resolvedUnassignedComments = unassignedComments !== undefined ? (unassignedComments || null) : (existingRecord?.unassignedComments || null);
+      const resolvedUnassignedAvailablePickup = unassignedAvailablePickup !== undefined ? (unassignedAvailablePickup || null) : (existingRecord?.unassignedAvailablePickup || null);
+      const resolvedNearestLdap = nearestLdap !== undefined ? (nearestLdap || null) : (existingRecord?.nearestLdap || null);
+      const resolvedNearestTechName = nearestTechName !== undefined ? (nearestTechName || null) : (existingRecord?.nearestTechName || null);
+      const resolvedNearestTechPhone = nearestTechPhone !== undefined ? (nearestTechPhone || null) : (existingRecord?.nearestTechPhone || null);
+      const resolvedNearestTechAddress = nearestTechAddress !== undefined ? (nearestTechAddress || null) : (existingRecord?.nearestTechAddress || null);
+      const resolvedNearestTechLead = nearestTechLead !== undefined ? (nearestTechLead || null) : (existingRecord?.nearestTechLead || null);
+      const resolvedNearestTechLeadPhone = nearestTechLeadPhone !== undefined ? (nearestTechLeadPhone || null) : (existingRecord?.nearestTechLeadPhone || null);
+
       // Upsert the tracking record
       await getDb()
         .insert(registrationTracking)
@@ -12785,6 +12812,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           submittedToHolmanAt: resolvedSubmittedToHolman ? (submittedToHolmanAt || new Date()) : null,
           alreadySent: resolvedAlreadySent,
           comments: resolvedComments,
+          unassignedAddress: resolvedUnassignedAddress,
+          unassignedContactNo: resolvedUnassignedContactNo,
+          unassignedKeys: resolvedUnassignedKeys,
+          unassignedComments: resolvedUnassignedComments,
+          unassignedAvailablePickup: resolvedUnassignedAvailablePickup,
+          nearestLdap: resolvedNearestLdap,
+          nearestTechName: resolvedNearestTechName,
+          nearestTechPhone: resolvedNearestTechPhone,
+          nearestTechAddress: resolvedNearestTechAddress,
+          nearestTechLead: resolvedNearestTechLead,
+          nearestTechLeadPhone: resolvedNearestTechLeadPhone,
         })
         .onConflictDoUpdate({
           target: registrationTracking.truckNumber,
@@ -12796,6 +12834,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             submittedToHolmanAt: resolvedSubmittedToHolman ? (submittedToHolmanAt || sql`now()`) : null,
             alreadySent: resolvedAlreadySent,
             comments: resolvedComments,
+            unassignedAddress: resolvedUnassignedAddress,
+            unassignedContactNo: resolvedUnassignedContactNo,
+            unassignedKeys: resolvedUnassignedKeys,
+            unassignedComments: resolvedUnassignedComments,
+            unassignedAvailablePickup: resolvedUnassignedAvailablePickup,
+            nearestLdap: resolvedNearestLdap,
+            nearestTechName: resolvedNearestTechName,
+            nearestTechPhone: resolvedNearestTechPhone,
+            nearestTechAddress: resolvedNearestTechAddress,
+            nearestTechLead: resolvedNearestTechLead,
+            nearestTechLeadPhone: resolvedNearestTechLeadPhone,
             updatedAt: sql`now()`,
           },
         });
@@ -12803,6 +12852,113 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json({ success: true });
     } catch (error: any) {
       console.error("[Registration Tracking] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/registration/nearest-tech", async (req, res) => {
+    try {
+      const { address } = req.body;
+      if (!address || typeof address !== 'string') {
+        return res.status(400).json({ message: "Address is required" });
+      }
+
+      const zipMatch = address.match(/(\d{5})(?:\s*-?\s*\d{4})?(?:\s*$)/);
+      if (!zipMatch) {
+        return res.status(400).json({ message: "Could not extract a 5-digit ZIP code from the address" });
+      }
+      const vehicleZip = zipMatch[1];
+      console.log(`[Registration NearestTech] Extracted ZIP ${vehicleZip} from address`);
+
+      const vehicleCoords = await getZipCoordinates(vehicleZip);
+      if (!vehicleCoords) {
+        return res.status(404).json({ message: `Could not geocode ZIP ${vehicleZip}` });
+      }
+
+      const tpmsQuery = `
+        SELECT
+          ENTERPRISE_ID,
+          FULL_NAME,
+          MOBILEPHONENUMBER,
+          PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP,
+          MANAGER_NAME, MANAGER_ENT_ID
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
+      `;
+      const tpmsData = await executeQuery<{
+        ENTERPRISE_ID: string | null;
+        FULL_NAME: string | null;
+        MOBILEPHONENUMBER: string | null;
+        PRIMARYADDR1: string | null;
+        PRIMARYADDR2: string | null;
+        PRIMARYCITY: string | null;
+        PRIMARYSTATE: string | null;
+        PRIMARYZIP: string | null;
+        MANAGER_NAME: string | null;
+        MANAGER_ENT_ID: string | null;
+      }>(tpmsQuery);
+
+      const entIdToPhone = new Map<string, string>();
+      for (const row of tpmsData) {
+        const eid = row.ENTERPRISE_ID?.toString().trim();
+        const ph = row.MOBILEPHONENUMBER?.toString().trim();
+        if (eid && ph) entIdToPhone.set(eid, ph);
+      }
+
+      function haversine(lat1: number, lon1: number, lat2: number, lon2: number): number {
+        const R = 3959;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      }
+
+      let closest: { distance: number; row: typeof tpmsData[0]; coords: { lat: number; lng: number } } | null = null;
+
+      const uniqueZips = new Set(tpmsData.map(r => r.PRIMARYZIP?.toString().trim().padStart(5, '0')).filter(Boolean));
+      const zipCoordsMap = new Map<string, { lat: number; lng: number }>();
+      const batchSize = 20;
+      const zipArr = Array.from(uniqueZips) as string[];
+      for (let i = 0; i < zipArr.length; i += batchSize) {
+        const batch = zipArr.slice(i, i + batchSize);
+        const results = await Promise.all(batch.map(z => getZipCoordinates(z)));
+        for (let j = 0; j < batch.length; j++) {
+          if (results[j]) zipCoordsMap.set(batch[j], results[j]!);
+        }
+      }
+
+      for (const row of tpmsData) {
+        const techZip = row.PRIMARYZIP?.toString().trim().padStart(5, '0');
+        if (!techZip) continue;
+        const techCoords = zipCoordsMap.get(techZip);
+        if (!techCoords) continue;
+        const dist = haversine(vehicleCoords.lat, vehicleCoords.lng, techCoords.lat, techCoords.lng);
+        if (!closest || dist < closest.distance) {
+          closest = { distance: dist, row, coords: techCoords };
+        }
+      }
+
+      if (!closest) {
+        return res.status(404).json({ message: "No technicians found in TPMS_EXTRACT with valid ZIP codes" });
+      }
+
+      const r = closest.row;
+      const addrParts = [r.PRIMARYADDR1?.trim(), r.PRIMARYADDR2?.trim(), r.PRIMARYCITY?.trim(), r.PRIMARYSTATE?.trim(), r.PRIMARYZIP?.trim()].filter(Boolean);
+      const mgrEntId = r.MANAGER_ENT_ID?.toString().trim();
+      const mgrPhone = mgrEntId ? (entIdToPhone.get(mgrEntId) || '') : '';
+
+      res.json({
+        ldap: r.ENTERPRISE_ID?.toString().trim() || '',
+        techName: r.FULL_NAME?.toString().trim() || '',
+        techPhone: r.MOBILEPHONENUMBER?.toString().trim() || '',
+        techAddress: addrParts.join(', '),
+        techLead: r.MANAGER_NAME?.toString().trim() || '',
+        techLeadPhone: mgrPhone,
+        distanceMiles: Math.round(closest.distance * 10) / 10,
+        vehicleZip,
+      });
+    } catch (error: any) {
+      console.error("[Registration NearestTech] Error:", error);
       res.status(500).json({ message: error.message });
     }
   });

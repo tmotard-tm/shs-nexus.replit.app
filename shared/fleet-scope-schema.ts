@@ -1002,6 +1002,17 @@ export const registrationTracking = pgTable("fs_registration_tracking", {
   holmanPendingTasks: text("holman_pending_tasks"),
   holmanEta: text("holman_eta"),
   holmanReceivedTags: boolean("holman_received_tags"),
+  unassignedAddress: text("unassigned_address"),
+  unassignedContactNo: text("unassigned_contact_no"),
+  unassignedKeys: text("unassigned_keys"),
+  unassignedComments: text("unassigned_comments"),
+  unassignedAvailablePickup: text("unassigned_available_pickup"),
+  nearestLdap: text("nearest_ldap"),
+  nearestTechName: text("nearest_tech_name"),
+  nearestTechPhone: text("nearest_tech_phone"),
+  nearestTechAddress: text("nearest_tech_address"),
+  nearestTechLead: text("nearest_tech_lead"),
+  nearestTechLeadPhone: text("nearest_tech_lead_phone"),
 });
 
 export const insertRegistrationTrackingSchema = createInsertSchema(registrationTracking);
