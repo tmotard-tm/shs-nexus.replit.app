@@ -328,14 +328,24 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
+                    <textarea
                       defaultValue={truck.unassignedComments || ''}
                       placeholder="Comments..."
-                      className="h-7 text-xs w-[180px]"
+                      rows={1}
+                      className="flex rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 w-[280px] resize-none transition-all duration-150 overflow-hidden focus:h-[80px] focus:overflow-y-auto h-7"
+                      onFocus={(e) => { e.target.style.height = '80px'; e.target.style.overflowY = 'auto'; }}
                       onBlur={(e) => {
+                        e.target.style.height = '28px';
+                        e.target.style.overflowY = 'hidden';
                         const val = e.target.value.trim();
                         if (val !== (truck.unassignedComments || '')) {
                           trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedComments: val });
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                          e.preventDefault();
+                          e.currentTarget.blur();
                         }
                       }}
                     />
