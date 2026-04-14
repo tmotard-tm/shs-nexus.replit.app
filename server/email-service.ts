@@ -21,6 +21,7 @@ if (DEFAULT_FROM_EMAIL) {
 
 interface EmailParams {
   to: string;
+  cc?: string | string[];
   from: string;
   subject: string;
   text?: string;
@@ -30,6 +31,16 @@ interface EmailParams {
 export interface EmailResult {
   success: boolean;
   error?: string;
+}
+
+interface MailPayload {
+  to: string;
+  from: string;
+  replyTo?: string;
+  subject: string;
+  text: string;
+  html: string;
+  cc?: string | string[];
 }
 
 export async function sendEmail(params: EmailParams): Promise<EmailResult> {
@@ -43,13 +54,14 @@ export async function sendEmail(params: EmailParams): Promise<EmailResult> {
   const textContent = params.text || (params.html ? params.html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim() : 'Please view this email in an HTML-capable email client.');
   const htmlContent = params.html || params.text || textContent;
   
-  const msg = {
+  const msg: MailPayload = {
     to: params.to,
     from: DEFAULT_FROM_EMAIL,
-    replyTo: fromEmail !== DEFAULT_FROM_EMAIL ? fromEmail : undefined,
+    ...(fromEmail !== DEFAULT_FROM_EMAIL ? { replyTo: fromEmail } : {}),
     subject: params.subject,
     text: textContent,
     html: htmlContent,
+    ...(params.cc ? { cc: params.cc } : {}),
   };
 
   if (!apiKey) {
@@ -57,6 +69,7 @@ export async function sendEmail(params: EmailParams): Promise<EmailResult> {
     console.warn('EMAIL NOT SENT - SENDGRID_API_KEY not configured');
     console.warn('========================================');
     console.warn(`To: ${msg.to}`);
+    if (msg.cc) console.warn(`CC: ${Array.isArray(msg.cc) ? msg.cc.join(', ') : msg.cc}`);
     console.warn(`From: ${msg.from}`);
     console.warn(`Subject: ${msg.subject}`);
     console.warn('');

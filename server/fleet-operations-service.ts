@@ -1,9 +1,10 @@
 import { storage } from "./storage";
 import { db } from "./db";
 import { eq, and, lte, or, sql } from "drizzle-orm";
-import { holmanVehiclesCache, amsVehiclesCache, operationEvents, tpmsCachedAssignments } from "@shared/schema";
+import { holmanVehiclesCache, amsVehiclesCache, operationEvents, tpmsCachedAssignments, allTechs } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
+import { sendEmail } from "./email-service";
 
 interface RepairData {
   repairStatus?: number;
@@ -936,6 +937,51 @@ export const fleetOpsService = {
       }) ?? log;
 
       await logAllEvents(log.id, "assign", params, tpms, holman, ams);
+
+      if (ams.status === "skipped" && ams.message?.includes("Tech not registered in AMS")) {
+        (async () => {
+          try {
+            const vehicleVin = cacheRow?.vin ?? "N/A";
+            let firstName = "N/A";
+            let lastName = "N/A";
+            try {
+              const techRows = await db.select({
+                firstName: allTechs.firstName,
+                lastName: allTechs.lastName,
+              })
+                .from(allTechs)
+                .where(eq(allTechs.techRacfid, params.ldapId))
+                .limit(1);
+              if (techRows[0]) {
+                firstName = techRows[0].firstName || "N/A";
+                lastName = techRows[0].lastName || "N/A";
+              }
+            } catch (lookupErr: any) {
+              console.warn(`[FleetOps-AMS] Tech roster lookup failed for ${params.ldapId}: ${lookupErr.message}`);
+            }
+            const emailBody = [
+              "The Nexus assignment failed because the tech is missing from the AMS Tech database.",
+              "",
+              `Vehicle #: ${params.truckNumber}`,
+              `VIN: ${vehicleVin}`,
+              `Enterprise ID: ${params.ldapId}`,
+              `Tech First Name: ${firstName}`,
+              `Tech Last Name: ${lastName}`,
+              "",
+              "Please register this tech in AMS so future assignments can complete successfully.",
+            ].join("\n");
+            await sendEmail({
+              to: "nfdt@transformco.com",
+              cc: ["tmotard@transformco.com", "Swong@transformco.com"],
+              from: "",
+              subject: "Action Required: Nexus assignment failed - Tech missing from AMS database",
+              text: emailBody,
+            });
+          } catch (err: any) {
+            console.error(`[FleetOps-AMS] Failed to send AMS skip notification email: ${err?.message ?? err}`);
+          }
+        })();
+      }
 
       return buildResult(log, tpms, holman, ams);
     } finally {
