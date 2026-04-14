@@ -290,11 +290,23 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                   <TableCell className="text-sm">{truck.regExpDate || '-'}</TableCell>
                   <TableCell>
                     <div className="flex items-center gap-1">
-                      <Input
+                      <textarea
                         defaultValue={truck.unassignedAddress || ''}
                         placeholder="Enter address with ZIP..."
-                        className="h-7 text-xs w-[230px]"
-                        onBlur={(e) => handleAddressBlur(truck, e.target.value.trim())}
+                        rows={1}
+                        className="flex rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 w-[250px] resize-none transition-all duration-150 overflow-hidden h-7"
+                        onFocus={(e) => { e.target.style.height = '60px'; e.target.style.overflowY = 'auto'; }}
+                        onBlur={(e) => {
+                          e.target.style.height = '28px';
+                          e.target.style.overflowY = 'hidden';
+                          handleAddressBlur(truck, e.target.value.trim());
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            e.currentTarget.blur();
+                          }
+                        }}
                       />
                       {lookupLoading === truck.truckNumber && (
                         <RefreshCw className="w-3.5 h-3.5 animate-spin text-muted-foreground flex-shrink-0" />
@@ -315,17 +327,20 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
+                    <select
                       defaultValue={truck.unassignedKeys || ''}
-                      placeholder="Keys info..."
-                      className="h-7 text-xs w-[100px]"
-                      onBlur={(e) => {
-                        const val = e.target.value.trim();
+                      className="flex h-7 rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 w-[70px] cursor-pointer"
+                      onChange={(e) => {
+                        const val = e.target.value;
                         if (val !== (truck.unassignedKeys || '')) {
                           trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedKeys: val });
                         }
                       }}
-                    />
+                    >
+                      <option value="">--</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
                   </TableCell>
                   <TableCell>
                     <textarea
@@ -351,17 +366,20 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                     />
                   </TableCell>
                   <TableCell>
-                    <Input
+                    <select
                       defaultValue={truck.unassignedAvailablePickup || ''}
-                      placeholder="Pickup info..."
-                      className="h-7 text-xs w-[120px]"
-                      onBlur={(e) => {
-                        const val = e.target.value.trim();
+                      className="flex h-7 rounded-md border border-input bg-background px-2 py-1 text-xs ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 w-[70px] cursor-pointer"
+                      onChange={(e) => {
+                        const val = e.target.value;
                         if (val !== (truck.unassignedAvailablePickup || '')) {
                           trackingMutation.mutate({ truckNumber: truck.truckNumber, unassignedAvailablePickup: val });
                         }
                       }}
-                    />
+                    >
+                      <option value="">--</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
                   </TableCell>
                   <TableCell className="font-mono text-sm">{truck.nearestLdap || '-'}</TableCell>
                   <TableCell className="text-sm">{truck.nearestTechName || '-'}</TableCell>
