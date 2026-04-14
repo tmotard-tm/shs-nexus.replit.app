@@ -553,6 +553,12 @@ DO $$ BEGIN
   ) THEN
     ALTER TABLE "fs_trucks" ADD COLUMN "main_status_changed_at" timestamp;
   END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'vin'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "vin" varchar(20);
+  END IF;
 END $$;
 
 CREATE TABLE IF NOT EXISTS "fs_truck_status_events" (
