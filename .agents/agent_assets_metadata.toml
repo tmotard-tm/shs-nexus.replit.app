@@ -30,3 +30,9 @@ id = "TXrIWfMCjsUZduWB6nKZm"
 uri = "file://.local/tasks/nexus-data-sources.md"
 type = "text"
 title = "Nexus — Complete Data Source & Field Inventory"
+
+[[outputs]]
+id = "yf1qiYzvmDQvP_BQtCatk"
+uri = "file://.local/tasks/nexus-architecture-qa.md"
+type = "text"
+title = "Nexus Architecture — Technical Q&A (Q16–Q42)"
