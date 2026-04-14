@@ -21,4 +21,4 @@ for f in migrations/*.sql; do
   fi
 done
 
-yes "" | timeout 55 npx drizzle-kit push --force 2>&1 || echo "[post-merge] drizzle-kit push completed or skipped"
+yes "No" | timeout 55 npx drizzle-kit push --force 2>&1 || echo "[post-merge] drizzle-kit push completed or skipped"
