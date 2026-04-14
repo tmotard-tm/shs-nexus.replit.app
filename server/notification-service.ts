@@ -9,6 +9,7 @@ interface ToolAuditNotificationParams {
   technicianName: string;
   lastDay: string;
   ldapId: string;
+  emailSource?: 'personal' | 'tpms_fallback';
 }
 
 export async function sendToolAuditNotification(params: ToolAuditNotificationParams): Promise<{
@@ -32,6 +33,7 @@ export async function sendToolAuditNotification(params: ToolAuditNotificationPar
     metadata: {
       source: 'tool-audit-notification',
       ldapId: params.ldapId,
+      ...(params.emailSource ? { emailSource: params.emailSource } : {}),
     },
     sentBy: undefined,
   });

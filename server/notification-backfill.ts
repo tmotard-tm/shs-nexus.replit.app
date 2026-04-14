@@ -169,6 +169,8 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
         }
 
         let emailToUse = personalEmail;
+        let emailSource: 'personal' | 'tpms_fallback' = 'personal';
+
         if (!emailToUse && ldapId) {
           try {
             const allTechRecord = await storage.getAllTechByTechRacfid(ldapId);
@@ -176,6 +178,19 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
               emailToUse = (allTechRecord as any).personalEmail || (allTechRecord as any).email || "";
             }
           } catch {
+          }
+        }
+
+        if (!emailToUse && ldapId) {
+          try {
+            const tpmsRecord = await storage.getTpmsCachedAssignmentByEnterpriseId(ldapId);
+            if (tpmsRecord?.email) {
+              emailToUse = tpmsRecord.email;
+              emailSource = 'tpms_fallback';
+              console.log(`[NotificationBackfill] Using TPMS fallback email for ${techName} (${ldapId})`);
+            }
+          } catch (tpmsErr: any) {
+            console.warn(`[NotificationBackfill] TPMS fallback lookup failed for ${ldapId}:`, tpmsErr?.message);
           }
         }
 
@@ -194,8 +209,8 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
               subject: null,
               contentPreview: null,
               variables: { technicianName: techName, ldapId } as any,
-              errorMessage: 'No personal email on file',
-              metadata: { queueItemId: item.id, ldapId, techName } as any,
+              errorMessage: 'No personal or TPMS email on file',
+              metadata: { queueItemId: item.id, ldapId, techName, emailSource: 'none' } as any,
               sentBy: null,
             });
             continue;
@@ -217,6 +232,7 @@ export async function runToolAuditBackfill(): Promise<BackfillResult> {
           technicianName: techName,
           lastDay,
           ldapId,
+          emailSource,
         });
 
         if (sendResult.success) {

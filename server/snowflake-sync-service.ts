@@ -1606,7 +1606,23 @@ export class SnowflakeSyncService {
             result.tasksCreated++;
             console.log(`[Separation Sync] Created Tools Queue task for ${techName} (${separation.ldapId}), vehicleType=${sepByovStatus.vehicleType}, isByov=${sepByovStatus.isByov}, truckNo=${vehicleNumber}`);
 
-            if (separation.personalEmail) {
+            let notifEmail = separation.personalEmail || '';
+            let notifEmailSource: 'personal' | 'tpms_fallback' = 'personal';
+
+            if (!notifEmail && separation.ldapId) {
+              try {
+                const tpmsRecord = await storage.getTpmsCachedAssignmentByEnterpriseId(separation.ldapId);
+                if (tpmsRecord?.email) {
+                  notifEmail = tpmsRecord.email;
+                  notifEmailSource = 'tpms_fallback';
+                  console.log(`[Separation Sync] Using TPMS fallback email for ${techName} (${separation.ldapId})`);
+                }
+              } catch (tpmsErr: any) {
+                console.warn(`[Separation Sync] TPMS fallback lookup failed for ${separation.ldapId}:`, tpmsErr?.message);
+              }
+            }
+
+            if (notifEmail) {
               try {
                 const nameParts = (separation.technicianName || '').split(/[,\s]+/);
                 const firstName = nameParts.length > 1 
@@ -1614,17 +1630,18 @@ export class SnowflakeSyncService {
                   : nameParts[0] || 'Team Member';
                 
                 const emailResult = await sendToolAuditNotification({
-                  email: separation.personalEmail,
+                  email: notifEmail,
                   firstName: firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase(),
                   technicianName: separation.technicianName || separation.ldapId,
                   lastDay: separation.lastDay || 'your scheduled last day',
                   ldapId: separation.ldapId,
+                  emailSource: notifEmailSource,
                 });
                 
                 if (emailResult.success && toolsCreatedItem?.id) {
                   await storage.updateAssetsQueueItem(toolsCreatedItem.id, { notificationSent: true });
                   result.emailsSent++;
-                  console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode})`);
+                  console.log(`[Separation Sync] Tool Audit email sent for ${techName} (test mode: ${emailResult.testMode}, source: ${notifEmailSource})`);
                 } else if (!emailResult.success) {
                   console.log(`[Separation Sync] Tool Audit email failed for ${techName}: ${emailResult.error || 'unknown'}`);
                   result.emailsSkipped++;
@@ -1634,7 +1651,7 @@ export class SnowflakeSyncService {
                 result.emailsSkipped++;
               }
             } else {
-              console.log(`[Separation Sync] No personal email for ${techName}, skipping Tool Audit notification`);
+              console.log(`[Separation Sync] No personal or TPMS email for ${techName}, skipping Tool Audit notification`);
               result.emailsSkipped++;
             }
           } catch (toolsError: any) {
