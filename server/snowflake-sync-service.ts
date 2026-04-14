@@ -6,7 +6,7 @@ import { queueItems } from '@shared/schema';
 import { eq, and } from 'drizzle-orm';
 import { randomUUID } from 'crypto';
 import type { InsertAllTech, InsertQueueItem, InsertTruckInventory, InsertTpmsCachedAssignment } from '@shared/schema';
-import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
+import { getInitialToolsTaskStatusAsync, TOOLS_OWNER } from './byov-utils';
 import { sendToolAuditNotification } from './notification-service';
 import { toDisplayNumber, toCanonical, toSnowflakeRef } from './vehicle-number-utils';
 
@@ -441,11 +441,15 @@ export class SnowflakeSyncService {
           // Generate unique workflow ID for this offboarding sequence
           const workflowId = `offboard_sync_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
           const vehicleNumber = truckInfo.truckNo || '';
-          
+
+          // Detect vehicle type: BYOV (prefix "88") takes priority, then rental lookup, then company default
+          const detectedByovStatus = await getInitialToolsTaskStatusAsync(vehicleNumber);
+          const detectedVehicleType = detectedByovStatus.vehicleType;
+
           // Shared data for all Day 0 tasks - use 'technician' to match display expectations
           const sharedTriggerData = {
             workflowId,
-            vehicleType: 'cargo_van',
+            vehicleType: detectedVehicleType,
             technician: {
               techName: tech.techName,
               techRacfid: tech.techRacfid,
@@ -465,7 +469,7 @@ export class SnowflakeSyncService {
               truckNo: vehicleNumber,
               location: '',
               condition: 'unknown',
-              type: 'cargo_van',
+              type: detectedVehicleType,
             },
             submitter: {
               name: 'Snowflake Sync',
@@ -615,18 +619,18 @@ export class SnowflakeSyncService {
             } else if (deptUpper === 'ASSETS MANAGEMENT' || deptUpper === 'ASSETS' || deptUpper === 'TOOLS') {
               const isToolsRecoveryTask = task.step === 'tools_recover_equipment_day0' || deptUpper === 'TOOLS';
               if (isToolsRecoveryTask) {
-                const byovStatus = getInitialToolsTaskStatus(vehicleNumber);
                 const assetsQueueItem = {
                   ...queueItem,
                   department: 'Assets Management',
-                  isByov: byovStatus.isByov,
-                  blockedActions: byovStatus.blockedActions,
-                  fleetRoutingDecision: byovStatus.routingPath,
-                  routingReceivedAt: byovStatus.isByov ? new Date() : null,
+                  isByov: detectedByovStatus.isByov,
+                  vehicleType: detectedByovStatus.vehicleType,
+                  blockedActions: detectedByovStatus.blockedActions,
+                  fleetRoutingDecision: detectedByovStatus.routingPath,
+                  routingReceivedAt: detectedByovStatus.isByov ? new Date() : null,
                   assignedTo: TOOLS_OWNER.id,
                 };
                 createdItem = await storage.createAssetsQueueItem(assetsQueueItem);
-                console.log(`[Sync] Assets task BYOV status: isByov=${byovStatus.isByov}, truckNo=${vehicleNumber}, blockedActions=${byovStatus.blockedActions.join(',') || 'none'}`);
+                console.log(`[Sync] Assets task vehicle status: isByov=${detectedByovStatus.isByov}, vehicleType=${detectedByovStatus.vehicleType}, truckNo=${vehicleNumber}, blockedActions=${detectedByovStatus.blockedActions.join(',') || 'none'}`);
               } else {
                 createdItem = await storage.createAssetsQueueItem(queueItem);
               }
@@ -1563,6 +1567,9 @@ export class SnowflakeSyncService {
           const vehicleNumber = truckInfo.truckNo || separation.truckNumber || '';
           const techName = separation.technicianName || separation.ldapId;
 
+          // Detect vehicle type: BYOV (prefix "88") takes priority, then rental lookup, then company default
+          const sepByovStatus = await getInitialToolsTaskStatusAsync(vehicleNumber);
+
           // Create offboarding tasks for Fleet, Tools, and Inventory
           // Tools task uses "Tools Queue -" format with rich HR data for better enrichment
           const toolsQueueItem: InsertQueueItem = {
@@ -1575,6 +1582,8 @@ export class SnowflakeSyncService {
             department: 'Assets Management',
             workflowId: workflowId,
             workflowStep: 1,
+            isByov: sepByovStatus.isByov,
+            vehicleType: sepByovStatus.vehicleType,
             data: JSON.stringify({
               source: 'hr_separation',
               employee: {
@@ -1595,7 +1604,7 @@ export class SnowflakeSyncService {
           try {
             toolsCreatedItem = await storage.createAssetsQueueItem(toolsQueueItem);
             result.tasksCreated++;
-            console.log(`[Separation Sync] Created Tools Queue task for ${techName} (${separation.ldapId})`);
+            console.log(`[Separation Sync] Created Tools Queue task for ${techName} (${separation.ldapId}), vehicleType=${sepByovStatus.vehicleType}, isByov=${sepByovStatus.isByov}, truckNo=${vehicleNumber}`);
 
             if (separation.personalEmail) {
               try {
