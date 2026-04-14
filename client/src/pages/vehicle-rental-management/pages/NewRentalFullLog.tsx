@@ -795,6 +795,7 @@ export default function NewRentalFullLog() {
       (e.enterpriseId ?? "").toLowerCase().includes(q) ||
       (e.vanRentalPo ?? "").toLowerCase().includes(q) ||
       (e.repairLocation ?? "").toLowerCase().includes(q) ||
+      (e.repairPhone ?? "").toLowerCase().includes(q) ||
       (e.issue ?? "").toLowerCase().includes(q)
     );
   });
@@ -969,6 +970,10 @@ export default function NewRentalFullLog() {
     {
       label: "Repair Location",
       render: (e) => e.repairLocation ?? "—",
+    },
+    {
+      label: "Repair Phone",
+      render: (e) => e.repairPhone ?? "—",
     },
     {
       label: "Issue",

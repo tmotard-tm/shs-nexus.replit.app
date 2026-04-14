@@ -24,3 +24,9 @@ id = "Xv7sBWU1fzyoavZVOS4rq"
 uri = "file://spare-trucks-with-rentals.csv"
 type = "table"
 title = "Spare Trucks with Closest Rental Techs"
+
+[[outputs]]
+id = "TXrIWfMCjsUZduWB6nKZm"
+uri = "file://.local/tasks/nexus-data-sources.md"
+type = "text"
+title = "Nexus — Complete Data Source & Field Inventory"
