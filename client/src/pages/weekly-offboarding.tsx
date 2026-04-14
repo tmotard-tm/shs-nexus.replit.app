@@ -1185,10 +1185,14 @@ export default function WeeklyOffboarding() {
                           <TableHead>Approved Date</TableHead>
                           <TableHead>Phone</TableHead>
                           <TableHead>Home Address</TableHead>
+                          <TableHead>Manual Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredByov.map((e) => (
+                        {filteredByov.map((e) => {
+                          const byovTruck = e.truck_number?.toString().trim() || null;
+                          const byovNexus = byovTruck ? nexusDataMap.get(byovTruck) : null;
+                          return (
                           <TableRow key={e.enterprise_id} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedByovEntry(e)}>
                             <TableCell className="font-mono text-sm">{e.enterprise_id.toUpperCase()}</TableCell>
                             <TableCell>{e.full_name || '-'}</TableCell>
@@ -1214,8 +1218,21 @@ export default function WeeklyOffboarding() {
                             <TableCell className="text-sm max-w-[220px]">
                               {e.home_address || <span className="text-muted-foreground">-</span>}
                             </TableCell>
+                            <TableCell className="text-sm">
+                              {byovNexus?.postOffboardedStatus ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <Badge variant="outline" className="text-xs whitespace-nowrap w-fit">
+                                    {manualStatusLabels[byovNexus.postOffboardedStatus] || byovNexus.postOffboardedStatus}
+                                  </Badge>
+                                  {byovNexus.updatedBy && (
+                                    <span className="text-xs text-muted-foreground">by {byovNexus.updatedBy}</span>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
@@ -1302,10 +1319,14 @@ export default function WeeklyOffboarding() {
                           <TableHead>Personal Number</TableHead>
                           <TableHead>Address (TPMS)</TableHead>
                           <TableHead>TPMS Source</TableHead>
+                          <TableHead>Manual Status</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {filteredLoa.map((e) => (
+                        {filteredLoa.map((e) => {
+                          const loaTruck = e.lastKnownTruck?.trim() || null;
+                          const loaNexus = loaTruck ? nexusDataMap.get(loaTruck) : null;
+                          return (
                           <TableRow key={e.enterpriseId} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLoaEntry(e)}>
                             <TableCell>
                               <Badge
@@ -1341,8 +1362,21 @@ export default function WeeklyOffboarding() {
                                 <span className="text-muted-foreground">-</span>
                               )}
                             </TableCell>
+                            <TableCell className="text-sm">
+                              {loaNexus?.postOffboardedStatus ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <Badge variant="outline" className="text-xs whitespace-nowrap w-fit">
+                                    {manualStatusLabels[loaNexus.postOffboardedStatus] || loaNexus.postOffboardedStatus}
+                                  </Badge>
+                                  {loaNexus.updatedBy && (
+                                    <span className="text-xs text-muted-foreground">by {loaNexus.updatedBy}</span>
+                                  )}
+                                </div>
+                              ) : '-'}
+                            </TableCell>
                           </TableRow>
-                        ))}
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>
