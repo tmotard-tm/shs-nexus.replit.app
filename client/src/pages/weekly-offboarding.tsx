@@ -496,6 +496,10 @@ export default function WeeklyOffboarding() {
       (e.district || '').toLowerCase().includes(q) ||
       (e.personalNumber || '').toLowerCase().includes(q)
     );
+  }).sort((a, b) => {
+    const dateA = a.lastDateWorked ? new Date(a.lastDateWorked).getTime() : 0;
+    const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
+    return dateA - dateB;
   });
 
   const filteredByov = byovEnrollments.filter(e => {
@@ -1313,6 +1317,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>Employment Status</TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Enterprise ID</TableHead>
+                          <TableHead>Date Last Worked</TableHead>
                           <TableHead>Truck</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
@@ -1326,8 +1331,11 @@ export default function WeeklyOffboarding() {
                         {filteredLoa.map((e) => {
                           const loaTruck = e.lastKnownTruck?.trim() || null;
                           const loaNexus = loaTruck ? nexusDataMap.get(loaTruck) : null;
+                          const lastWorkedDate = e.lastDateWorked ? new Date(e.lastDateWorked) : null;
+                          const daysSinceLastWorked = lastWorkedDate ? differenceInDays(new Date(), lastWorkedDate) : null;
+                          const isOver30Days = daysSinceLastWorked !== null && daysSinceLastWorked >= 30;
                           return (
-                          <TableRow key={e.enterpriseId} className="cursor-pointer hover:bg-muted/50" onClick={() => setSelectedLoaEntry(e)}>
+                          <TableRow key={e.enterpriseId} className={`cursor-pointer hover:bg-muted/50 ${isOver30Days ? 'bg-red-50 dark:bg-red-950/30' : ''}`} onClick={() => setSelectedLoaEntry(e)}>
                             <TableCell>
                               <Badge
                                 variant="outline"
@@ -1342,6 +1350,14 @@ export default function WeeklyOffboarding() {
                             </TableCell>
                             <TableCell className="font-medium">{e.fullName || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{e.enterpriseId}</TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">
+                              {lastWorkedDate ? (
+                                <div className="flex flex-col">
+                                  <span className={isOver30Days ? 'font-semibold text-red-700 dark:text-red-400' : ''}>{format(lastWorkedDate, 'MM/dd/yyyy')}</span>
+                                  <span className={`text-xs ${isOver30Days ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>{daysSinceLastWorked}d ago</span>
+                                </div>
+                              ) : <span className="text-muted-foreground">-</span>}
+                            </TableCell>
                             <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
                             <TableCell className="text-sm">{e.district || '-'}</TableCell>
                             <TableCell className="text-sm whitespace-nowrap font-mono">
