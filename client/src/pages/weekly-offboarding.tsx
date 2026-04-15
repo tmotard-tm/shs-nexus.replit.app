@@ -1258,6 +1258,10 @@ export default function WeeklyOffboarding() {
                       Technicians on Leave, Paid Leave, or Suspended status with trucks that may need recovery
                     </CardDescription>
                   </div>
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-md bg-red-100 border border-red-300 text-red-800 dark:bg-red-950/50 dark:border-red-700 dark:text-red-300">
+                    <AlertCircle className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-sm font-medium">Call and Recover all trucks for LOA Techs over 30 days</span>
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
