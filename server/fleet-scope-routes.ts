@@ -14132,12 +14132,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     const { calculateDistancesForDecommissioningVehicles, calculateZipToZipDistance } = await import("./fleet-scope-distance-calculator");
     
     const vehicles = await fleetScopeStorage.getDecommissioningVehiclesNeedingDistanceCalc();
-    console.log(`[Decommissioning Distance] ${vehicles.length} vehicles need distance calculation`);
+    console.log(`[Decommissioning Distance] ${vehicles.length} vehicles need manager/tech distance calculation`);
     
-    if (vehicles.length === 0) {
-      return { managerCalculated: 0, techCalculated: 0 };
-    }
+    let managerSuccess = 0;
+    let techSuccess = 0;
     
+    if (vehicles.length > 0) {
     const results = await calculateDistancesForDecommissioningVehicles(
       vehicles.map(v => ({
         id: v.id,
@@ -14152,9 +14152,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     );
     
     // Save distances to database (including failures to prevent retry loops)
-    let managerSuccess = 0;
-    let techSuccess = 0;
-    
     for (const result of results) {
       const vehicle = vehicles.find(v => v.id === result.id);
       if (!vehicle) continue;
@@ -14174,6 +14171,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (result.managerDistance !== null) managerSuccess++;
       if (result.techDistance !== null) techSuccess++;
     }
+    } // end if vehicles.length > 0
 
     // Calculate nearest tech distances for vehicles that have nearestTechZip but no nearestTechDistance
     const allVehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
