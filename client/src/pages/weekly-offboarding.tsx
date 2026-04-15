@@ -1330,8 +1330,8 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-auto max-h-[calc(100vh-300px)]">
-                    <Table className="min-w-[1400px]">
+                  <div className="rounded-md border overflow-x-scroll overflow-y-auto max-h-[calc(100vh-300px)]" style={{ WebkitOverflowScrolling: 'touch' }}>
+                    <Table style={{ minWidth: '1600px' }}>
                       <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
                           <TableHead>Employment Status</TableHead>
