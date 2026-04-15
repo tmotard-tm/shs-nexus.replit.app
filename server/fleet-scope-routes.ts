@@ -13352,11 +13352,71 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           rentalTruckNumbers.add(truck.truckNumber.toString().replace(/^0+/, '') || '0');
         }
       }
+
+      let repairTrackerMap = new Map<string, { repairShopAddress: string | null; repairShopPhone: string | null }>();
+      try {
+        const { db } = await import("./db");
+        const { vrmRepairTracker } = await import("@shared/vrm-schema");
+        const { eq, desc: descOrder } = await import("drizzle-orm");
+        const trackerRows = await db
+          .select({
+            truckNumber: vrmRepairTracker.truckNumber,
+            repairShopAddress: vrmRepairTracker.repairShopAddress,
+            repairShopPhone: vrmRepairTracker.repairShopPhone,
+            dismissed: vrmRepairTracker.dismissed,
+            updatedAt: vrmRepairTracker.updatedAt,
+          })
+          .from(vrmRepairTracker)
+          .where(eq(vrmRepairTracker.dismissed, false))
+          .orderBy(descOrder(vrmRepairTracker.updatedAt));
+        for (const row of trackerRows) {
+          if (row.truckNumber) {
+            const normalized = row.truckNumber.replace(/^0+/, '') || '0';
+            if (!repairTrackerMap.has(normalized)) {
+              repairTrackerMap.set(normalized, {
+                repairShopAddress: row.repairShopAddress,
+                repairShopPhone: row.repairShopPhone,
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("[Decommissioning] Repair tracker enrichment failed (non-fatal):", err);
+      }
       
-      const vehiclesWithRental = vehicles.map(v => ({
-        ...v,
-        withRental: rentalTruckNumbers.has((v.truckNumber || '').replace(/^0+/, '') || '0'),
-      }));
+      const vehiclesWithRental = vehicles.map(v => {
+        const normalizedTruck = (v.truckNumber || '').replace(/^0+/, '') || '0';
+        const repairData = repairTrackerMap.get(normalizedTruck);
+        let address = v.address;
+        let zipCode = v.zipCode;
+        let phone = v.phone;
+        let repairTrackerSource = false;
+
+        if (repairData) {
+          if (repairData.repairShopAddress) {
+            address = repairData.repairShopAddress;
+            const zipMatch = repairData.repairShopAddress.match(/\b(\d{5})(?:-\d{4})?\s*$/);
+            if (zipMatch) {
+              zipCode = zipMatch[1];
+            }
+          }
+          if (repairData.repairShopPhone) {
+            phone = repairData.repairShopPhone;
+          }
+          if (repairData.repairShopAddress || repairData.repairShopPhone) {
+            repairTrackerSource = true;
+          }
+        }
+
+        return {
+          ...v,
+          address,
+          zipCode,
+          phone,
+          repairTrackerSource,
+          withRental: rentalTruckNumbers.has(normalizedTruck),
+        };
+      });
       
       res.json(vehiclesWithRental);
     } catch (error: any) {

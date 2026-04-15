@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench } from "lucide-react";
 import { useLocation } from "wouter";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
@@ -62,6 +62,7 @@ interface DecommissioningVehicle {
   techMatchSource: string | null; // 'truck' for direct match, 'manager_zip_fallback' for nearest manager ZIP match
   isAssigned: boolean; // Whether truck # is currently found in TPMS_EXTRACT
   withRental: boolean; // Whether truck # exists in Rentals Dashboard
+  repairTrackerSource: boolean; // Whether address/phone came from Repair Tracker
   partsCount: number | null; // Sum of ON_HAND from NTAO_FIELD_VIEW_ASSORTMENT
   partsSpace: number | null; // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT
   partsCountSyncedAt: string | null;
@@ -507,6 +508,14 @@ export default function Decommissioning() {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            className="bg-indigo-600 hover:bg-indigo-700 text-white"
+            onClick={() => navigate("/fleet-scope/decommissioning/procurement-history")}
+          >
+            <Package className="h-4 w-4 mr-2" />
+            Decommissioned History
+          </Button>
+
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
@@ -558,14 +567,6 @@ export default function Decommissioning() {
               <RefreshCw className="h-4 w-4 mr-2" />
             )}
             Sync from POs
-          </Button>
-
-          <Button
-            variant="outline"
-            onClick={() => navigate("/fleet-scope/decommissioning/procurement-history")}
-          >
-            <Package className="h-4 w-4 mr-2" />
-            Procurement History
           </Button>
 
           <Button
@@ -793,7 +794,12 @@ export default function Decommissioning() {
                             className="w-full"
                           />
                         ) : (
-                          <span className="text-sm">{vehicle.address || "-"}</span>
+                          <span className="text-sm flex items-center gap-1">
+                            {vehicle.address || "-"}
+                            {vehicle.repairTrackerSource && vehicle.address && (
+                              <Wrench className="h-3 w-3 text-blue-500 shrink-0" title="From Repair Tracker" />
+                            )}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell
@@ -811,7 +817,12 @@ export default function Decommissioning() {
                             className="w-24"
                           />
                         ) : (
-                          <span className="text-sm font-mono">{vehicle.zipCode || "-"}</span>
+                          <span className="text-sm font-mono flex items-center gap-1">
+                            {vehicle.zipCode || "-"}
+                            {vehicle.repairTrackerSource && vehicle.zipCode && (
+                              <Wrench className="h-3 w-3 text-blue-500 shrink-0" title="From Repair Tracker" />
+                            )}
+                          </span>
                         )}
                       </TableCell>
                       <TableCell
@@ -829,7 +840,12 @@ export default function Decommissioning() {
                             className="w-32"
                           />
                         ) : (
-                          <span className="text-sm">{vehicle.phone || "-"}</span>
+                          <span className="text-sm flex items-center gap-1">
+                            {vehicle.phone || "-"}
+                            {vehicle.repairTrackerSource && vehicle.phone && (
+                              <Wrench className="h-3 w-3 text-blue-500 shrink-0" title="From Repair Tracker" />
+                            )}
+                          </span>
                         )}
                       </TableCell>
                       {/* Persisted Snowflake TPMS_EXTRACT columns - orange text for manager ZIP fallback matches */}
