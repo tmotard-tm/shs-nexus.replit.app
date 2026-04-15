@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package } from "lucide-react";
+import { useLocation } from "wouter";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
 
@@ -73,6 +74,7 @@ interface DecommissioningVehicle {
 
 export default function Decommissioning() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [pasteData, setPasteData] = useState("");
@@ -92,11 +94,6 @@ export default function Decommissioning() {
 
   const { data: vehicles = [], isLoading } = useQuery<DecommissioningVehicle[]>({
     queryKey: ["/api/fs/decommissioning"],
-  });
-
-  interface WeeklyCount { weekStart: string; weekEnd: string; count: number }
-  const { data: weeklyCounts = [] } = useQuery<WeeklyCount[]>({
-    queryKey: ["/api/fs/decommissioning/procurement-weekly-counts"],
   });
 
   // Sync tech data from Snowflake
@@ -168,7 +165,6 @@ export default function Decommissioning() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning/procurement-weekly-counts"] });
     },
     onError: (error: any) => {
       toast({
@@ -566,6 +562,14 @@ export default function Decommissioning() {
 
           <Button
             variant="outline"
+            onClick={() => navigate("/fleet-scope/decommissioning/procurement-history")}
+          >
+            <Package className="h-4 w-4 mr-2" />
+            Procurement History
+          </Button>
+
+          <Button
+            variant="outline"
             onClick={handleExport}
             disabled={filteredVehicles.length === 0}
             data-testid="button-export"
@@ -671,32 +675,6 @@ export default function Decommissioning() {
               {searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
             </div>
           ) : (
-            <>
-            {weeklyCounts.length > 0 && (
-              <div className="mb-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Package className="h-4 w-4 text-emerald-600" />
-                  <span className="text-sm font-semibold">Sent to Procurement — Weekly Count</span>
-                </div>
-                <div className="grid grid-cols-5 lg:grid-cols-10 gap-2">
-                  {weeklyCounts.map((w, i) => {
-                    const startParts = w.weekStart.split("-");
-                    const endParts = w.weekEnd.split("-");
-                    const label = `${startParts[1]}/${startParts[2]} – ${endParts[1]}/${endParts[2]}`;
-                    return (
-                      <Card key={w.weekStart} className={`${i === 0 ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/30' : ''}`}>
-                        <CardContent className="p-2 text-center">
-                          <p className="text-lg font-bold">{w.count}</p>
-                          <p className="text-[10px] text-muted-foreground leading-tight">{label}</p>
-                          {i === 0 && <p className="text-[9px] text-emerald-600 font-medium mt-0.5">This Week</p>}
-                        </CardContent>
-                      </Card>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
               <Table>
                 <TableHeader className="sticky top-0 bg-background z-10">
@@ -953,7 +931,6 @@ export default function Decommissioning() {
                 </TableBody>
               </Table>
             </div>
-            </>
           )}
         </CardContent>
       </Card>

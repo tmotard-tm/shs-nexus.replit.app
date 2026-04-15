@@ -18,6 +18,7 @@ import Spares from "./Spares";
 import FleetCost from "./FleetCost";
 import Registration from "./Registration";
 import Decommissioning from "./Decommissioning";
+import ProcurementHistory from "./ProcurementHistory";
 import ToolAudit from "./ToolAudit";
 import BatchCaller from "./BatchCaller";
 import TechProfitability from "./TechProfitability";
@@ -64,6 +65,7 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/spares" component={Spares} />
                 <Route path="/fleet-scope/fleet-cost" component={FleetCost} />
                 <Route path="/fleet-scope/registration" component={Registration} />
+                <Route path="/fleet-scope/decommissioning/procurement-history" component={ProcurementHistory} />
                 <Route path="/fleet-scope/decommissioning" component={Decommissioning} />
                 <Route path="/fleet-scope/batch-caller" component={BatchCaller} />
                 <Route path="/fleet-scope/rental-profitability" component={TechProfitability} />
