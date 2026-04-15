@@ -1330,15 +1330,14 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto">
+                  <div className="rounded-md border overflow-x-auto max-h-[calc(100vh-300px)]">
                     <Table>
-                      <TableHeader>
+                      <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
                           <TableHead>Employment Status</TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Enterprise ID</TableHead>
                           <TableHead>Date Last Worked</TableHead>
-                          <TableHead>Daily Profit</TableHead>
                           <TableHead>Truck</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
@@ -1346,6 +1345,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>Address (TPMS)</TableHead>
                           <TableHead>TPMS Source</TableHead>
                           <TableHead>Manual Status</TableHead>
+                          <TableHead>Daily Profit</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -1380,13 +1380,6 @@ export default function WeeklyOffboarding() {
                                 </div>
                               ) : <span className="text-muted-foreground">-</span>}
                             </TableCell>
-                            <TableCell className="text-sm whitespace-nowrap">
-                              {e.dailyProfit !== null ? (
-                                <span className={`font-mono font-medium ${e.dailyProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
-                                  {e.dailyProfit >= 0 ? '+' : ''}${e.dailyProfit.toFixed(2)}/day
-                                </span>
-                              ) : <span className="text-muted-foreground text-xs">No data</span>}
-                            </TableCell>
                             <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
                             <TableCell className="text-sm">{e.district || '-'}</TableCell>
                             <TableCell className="text-sm whitespace-nowrap font-mono">
@@ -1418,6 +1411,13 @@ export default function WeeklyOffboarding() {
                                   )}
                                 </div>
                               ) : '-'}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">
+                              {e.dailyProfit !== null ? (
+                                <span className={`font-mono font-medium ${e.dailyProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                                  {e.dailyProfit >= 0 ? '+' : ''}${e.dailyProfit.toFixed(2)}/day
+                                </span>
+                              ) : <span className="text-muted-foreground text-xs">No data</span>}
                             </TableCell>
                           </TableRow>
                           );
