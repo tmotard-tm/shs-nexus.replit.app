@@ -13365,11 +13365,54 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  app.get("/decommissioning/procurement-weekly-counts", async (_req, res) => {
+    try {
+      const vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const mondayOffset = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+      const currentMonday = new Date(now);
+      currentMonday.setHours(0, 0, 0, 0);
+      currentMonday.setDate(currentMonday.getDate() - mondayOffset);
+
+      const weeks: { weekStart: string; weekEnd: string; count: number }[] = [];
+      for (let i = 0; i < 10; i++) {
+        const weekStart = new Date(currentMonday);
+        weekStart.setDate(weekStart.getDate() - i * 7);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        weekEnd.setHours(23, 59, 59, 999);
+
+        const count = vehicles.filter(v => {
+          if (!v.sentToProcurement || !v.sentToProcurementAt) return false;
+          const ts = new Date(v.sentToProcurementAt);
+          return ts >= weekStart && ts <= weekEnd;
+        }).length;
+
+        weeks.push({
+          weekStart: weekStart.toISOString().split("T")[0],
+          weekEnd: weekEnd.toISOString().split("T")[0],
+          count,
+        });
+      }
+      res.json(weeks);
+    } catch (error: any) {
+      console.error("[Decommissioning] Error fetching procurement weekly counts:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Update a decommissioning vehicle field
   app.patch("/decommissioning/:id", async (req, res) => {
     try {
       const { id } = req.params;
       const updates = req.body;
+      
+      if (updates.sentToProcurement === true) {
+        updates.sentToProcurementAt = new Date();
+      } else if (updates.sentToProcurement === false) {
+        updates.sentToProcurementAt = null;
+      }
       
       const vehicle = await fleetScopeStorage.updateDecommissioningVehicle(parseInt(id), updates);
       if (!vehicle) {

@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS "fs_decommissioning_vehicles" (
   "last_tech_zip_for_distance" varchar(20),
   "decom_done" boolean DEFAULT false,
   "sent_to_procurement" boolean DEFAULT false,
+  "sent_to_procurement_at" timestamp,
   "tech_match_source" varchar(20),
   "is_assigned" boolean DEFAULT false,
   "parts_count" integer,
@@ -606,6 +607,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_registration_tracking' AND column_name='nearest_tech_lead_phone') THEN
     ALTER TABLE "fs_registration_tracking" ADD COLUMN "nearest_tech_lead_phone" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='sent_to_procurement_at') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "sent_to_procurement_at" timestamp;
   END IF;
 END $$;
 
