@@ -588,7 +588,7 @@ export async function listRepairTracker() {
 export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
   const [row] = await db
     .insert(vrmRepairTracker)
-    .values({ ...data, mainStatus: data.mainStatus ?? "Decision Pending" })
+    .values({ ...data, mainStatus: data.mainStatus ?? "Confirming Status" })
     .returning();
   return row;
 }
@@ -784,7 +784,7 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
     techName: d.techName ?? d.techLdap ?? "Unknown",
     truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
     techPhone: phoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-    mainStatus: "Decision Pending",
+    mainStatus: "Confirming Status",
     recommendation: d.recommendation,
     deniedAt: d.createdAt,
     sourceDecisionId: d.id,

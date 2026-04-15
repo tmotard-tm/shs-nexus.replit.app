@@ -368,7 +368,7 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN truck_number DROP NOT NULL;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN tech_name DROP NOT NULL;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN main_status DROP NOT NULL;`);
-  await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN main_status SET DEFAULT 'Decision Pending';`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ALTER COLUMN main_status SET DEFAULT 'Confirming Status';`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_ldap TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS recommendation TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS denied_at TIMESTAMPTZ;`);

@@ -1141,84 +1141,8 @@ export default function NewRentals() {
         </div>
       )}
 
-      {/* ── Check history ─────────────────────────────────────────────────────── */}
-      <div style={{ marginBottom: 40 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
-            Check History
-          </h2>
-          {checkHistory.length > 0 && (
-            <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-              {checkHistory.length} evaluation{checkHistory.length !== 1 ? "s" : ""} recorded
-            </span>
-          )}
-        </div>
-        {checkHistory.length === 0 ? (
-          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
-            No evaluations recorded yet. Each lookup is automatically saved here.
-          </p>
-        ) : (
-          <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={thStyle}>LDAP</th>
-                  <th style={thStyle}>Name</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
-                  <th style={thStyle}>Checked</th>
-                </tr>
-              </thead>
-              <tbody>
-                {checkHistory.map((c) => (
-                  <tr
-                    key={c.id}
-                    style={{ transition: "background 100ms" }}
-                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
-                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
-                  >
-                    <td style={tdStyle}>
-                      <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{c.techLdap}</span>
-                    </td>
-                    <td style={tdStyle}>{c.techName ?? "—"}</td>
-                    <td style={{ ...tdStyle, textAlign: "center" }}>
-                      {c.tenureMonths != null ? `${Math.round(c.tenureMonths)} mo` : "—"}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "center" }}>
-                      {c.scorecardScore != null ? Number(c.scorecardScore).toFixed(2) : "—"}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "center" }}>
-                      {c.completes ?? "—"}
-                    </td>
-                    <td style={{
-                      ...tdStyle,
-                      textAlign: "right",
-                      fontWeight: 500,
-                      color: c.dailyNetWithRental != null
-                        ? Number(c.dailyNetWithRental) < 0 ? colors.red : colors.green
-                        : colors.inkMuted,
-                    }}>
-                      {c.dailyNetWithRental != null ? fmt$(Number(c.dailyNetWithRental)) : "—"}
-                    </td>
-                    <td style={{ ...tdStyle, textAlign: "center" }}>
-                      <RecPill rec={c.recommendation} />
-                    </td>
-                    <td style={{ ...tdStyle, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-                      {new Date(c.checkedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
       {/* ── Decision log ──────────────────────────────────────────────────────── */}
-      <div>
+      <div style={{ marginBottom: 40 }}>
         <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 12px" }}>
           Decision Log
         </h2>
@@ -1308,6 +1232,82 @@ export default function NewRentals() {
                     </tr>
                   );
                 })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ── Check history ─────────────────────────────────────────────────────── */}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
+            Check History
+          </h2>
+          {checkHistory.length > 0 && (
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+              {checkHistory.length} evaluation{checkHistory.length !== 1 ? "s" : ""} recorded
+            </span>
+          )}
+        </div>
+        {checkHistory.length === 0 ? (
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            No evaluations recorded yet. Each lookup is automatically saved here.
+          </p>
+        ) : (
+          <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={thStyle}>LDAP</th>
+                  <th style={thStyle}>Name</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
+                  <th style={thStyle}>Checked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {checkHistory.map((c) => (
+                  <tr
+                    key={c.id}
+                    style={{ transition: "background 100ms" }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
+                  >
+                    <td style={tdStyle}>
+                      <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{c.techLdap}</span>
+                    </td>
+                    <td style={tdStyle}>{c.techName ?? "—"}</td>
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
+                      {c.tenureMonths != null ? `${Math.round(c.tenureMonths)} mo` : "—"}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
+                      {c.scorecardScore != null ? Number(c.scorecardScore).toFixed(2) : "—"}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
+                      {c.completes ?? "—"}
+                    </td>
+                    <td style={{
+                      ...tdStyle,
+                      textAlign: "right",
+                      fontWeight: 500,
+                      color: c.dailyNetWithRental != null
+                        ? Number(c.dailyNetWithRental) < 0 ? colors.red : colors.green
+                        : colors.inkMuted,
+                    }}>
+                      {c.dailyNetWithRental != null ? fmt$(Number(c.dailyNetWithRental)) : "—"}
+                    </td>
+                    <td style={{ ...tdStyle, textAlign: "center" }}>
+                      <RecPill rec={c.recommendation} />
+                    </td>
+                    <td style={{ ...tdStyle, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                      {new Date(c.checkedAt).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
