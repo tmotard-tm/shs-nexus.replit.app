@@ -13902,7 +13902,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return Math.abs(num1 - num2);
       };
 
-      // Step 3: Get all techs with ZIP codes for nearest-tech lookup
+      // Build a set of manager enterprise IDs to exclude from nearest-tech pool
+      const managerEntIdSet = new Set<string>();
+      for (const mgr of allManagers) {
+        if (mgr.MANAGER_ENT_ID) {
+          managerEntIdSet.add(mgr.MANAGER_ENT_ID.toString().trim());
+        }
+      }
+
+      // Step 3: Get all techs with ZIP codes for nearest-tech lookup (excluding managers)
       interface TechInfo {
         enterpriseId: string;
         fullName: string;
@@ -13933,14 +13941,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[Decommissioning Tech Sync] Found ${techZipData.length} techs with ZIP codes for nearest-tech matching`);
         for (const row of techZipData) {
           if (row.ENTERPRISE_ID && row.PRIMARYZIP) {
+            const entId = row.ENTERPRISE_ID.toString().trim();
+            if (managerEntIdSet.has(entId)) continue;
             techsWithZip.push({
-              enterpriseId: row.ENTERPRISE_ID.toString().trim(),
+              enterpriseId: entId,
               fullName: row.FULL_NAME?.toString().trim() || '',
               mobilePhone: row.MOBILEPHONENUMBER?.toString().trim() || '',
               primaryZip: row.PRIMARYZIP.toString().trim(),
             });
           }
         }
+        console.log(`[Decommissioning Tech Sync] After excluding ${managerEntIdSet.size} managers: ${techsWithZip.length} field techs available for nearest-tech matching`);
       } catch (techErr) {
         console.error("[Decommissioning Tech Sync] Nearest tech lookup failed (non-fatal):", techErr);
       }
