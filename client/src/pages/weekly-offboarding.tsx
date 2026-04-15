@@ -132,11 +132,6 @@ export default function WeeklyOffboarding() {
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [tableWidth, setTableWidth] = useState(0);
 
-  // Refs for synchronized scrollbars (LOA table)
-  const loaTopScrollRef = useRef<HTMLDivElement>(null);
-  const loaTableScrollRef = useRef<HTMLDivElement>(null);
-  const [loaTableWidth, setLoaTableWidth] = useState(0);
-
   // Sync scroll positions between top scrollbar and table (Term Roster)
   const handleTopScroll = useCallback(() => {
     if (topScrollRef.current && tableScrollRef.current) {
@@ -147,19 +142,6 @@ export default function WeeklyOffboarding() {
   const handleTableScroll = useCallback(() => {
     if (topScrollRef.current && tableScrollRef.current) {
       topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
-    }
-  }, []);
-
-  // Sync scroll positions between top scrollbar and table (LOA)
-  const handleLoaTopScroll = useCallback(() => {
-    if (loaTopScrollRef.current && loaTableScrollRef.current) {
-      loaTableScrollRef.current.scrollLeft = loaTopScrollRef.current.scrollLeft;
-    }
-  }, []);
-
-  const handleLoaTableScroll = useCallback(() => {
-    if (loaTopScrollRef.current && loaTableScrollRef.current) {
-      loaTopScrollRef.current.scrollLeft = loaTableScrollRef.current.scrollLeft;
     }
   }, []);
 
@@ -534,21 +516,6 @@ export default function WeeklyOffboarding() {
     const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
     return dateA - dateB;
   });
-
-  // Update table width for top scrollbar (LOA)
-  useEffect(() => {
-    const updateWidth = () => {
-      if (loaTableScrollRef.current) {
-        setLoaTableWidth(loaTableScrollRef.current.scrollWidth);
-      }
-    };
-    const timer = setTimeout(updateWidth, 100);
-    window.addEventListener('resize', updateWidth);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', updateWidth);
-    };
-  }, [filteredLoa]);
 
   const filteredByov = byovEnrollments.filter(e => {
     if (!byovSearch.trim()) return true;
@@ -1362,21 +1329,7 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border">
-                    {/* Top scrollbar */}
-                    <div 
-                      ref={loaTopScrollRef}
-                      onScroll={handleLoaTopScroll}
-                      className="overflow-x-auto overflow-y-hidden"
-                      style={{ height: '12px' }}
-                    >
-                      <div style={{ width: loaTableWidth, height: '1px' }} />
-                    </div>
-                    <div 
-                      ref={loaTableScrollRef}
-                      onScroll={handleLoaTableScroll}
-                      className="overflow-x-auto overflow-y-auto max-h-[600px]"
-                    >
+                  <div className="rounded-md border overflow-x-auto overflow-y-auto max-h-[600px]">
                     <Table style={{ minWidth: '1600px' }}>
                       <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
@@ -1470,7 +1423,6 @@ export default function WeeklyOffboarding() {
                         })}
                       </TableBody>
                     </Table>
-                    </div>
                   </div>
                 )}
               </CardContent>
