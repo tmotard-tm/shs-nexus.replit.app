@@ -1335,7 +1335,7 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto overflow-y-auto max-h-[600px]">
+                  <div className="rounded-md border overflow-x-auto overflow-y-auto" style={{ maxHeight: 'calc(100vh - 320px)' }}>
                     <Table style={{ minWidth: '1600px' }}>
                       <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
