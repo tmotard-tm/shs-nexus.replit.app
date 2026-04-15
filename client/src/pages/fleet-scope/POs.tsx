@@ -1551,7 +1551,7 @@ export default function POs() {
             </Collapsible>
           )}
 
-          <Card className="flex flex-col min-h-0" style={{ maxHeight: 'calc(100vh - 300px)', minHeight: '400px' }}>
+          <Card className="flex flex-col min-h-0" style={{ maxHeight: 'calc(100vh - 200px)', minHeight: '600px' }}>
             <CardHeader className="flex-shrink-0 border-b bg-card">
               <CardTitle className="flex items-center gap-2">
                 <FileSpreadsheet className="h-5 w-5" />
@@ -1580,7 +1580,7 @@ export default function POs() {
                   </Button>
                 </div>
               ) : (
-                <div className="overflow-auto" style={{ scrollbarWidth: 'thin', maxHeight: 'calc(100vh - 420px)' }}>
+                <div className="overflow-auto" style={{ scrollbarWidth: 'thin', maxHeight: 'calc(100vh - 320px)', minHeight: '500px' }}>
                   <table className="text-sm min-w-max border-collapse">
                     <thead>
                       <tr>
