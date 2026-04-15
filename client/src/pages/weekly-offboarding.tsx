@@ -251,21 +251,6 @@ export default function WeeklyOffboarding() {
     };
   }, [termRoster]);
 
-  // Update table width for top scrollbar (LOA)
-  useEffect(() => {
-    const updateWidth = () => {
-      if (loaTableScrollRef.current) {
-        setLoaTableWidth(loaTableScrollRef.current.scrollWidth);
-      }
-    };
-    const timer = setTimeout(updateWidth, 100);
-    window.addEventListener('resize', updateWidth);
-    return () => {
-      clearTimeout(timer);
-      window.removeEventListener('resize', updateWidth);
-    };
-  }, [filteredLoa]);
-
   const syncMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/sync/weekly-offboarding');
@@ -549,6 +534,21 @@ export default function WeeklyOffboarding() {
     const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
     return dateA - dateB;
   });
+
+  // Update table width for top scrollbar (LOA)
+  useEffect(() => {
+    const updateWidth = () => {
+      if (loaTableScrollRef.current) {
+        setLoaTableWidth(loaTableScrollRef.current.scrollWidth);
+      }
+    };
+    const timer = setTimeout(updateWidth, 100);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [filteredLoa]);
 
   const filteredByov = byovEnrollments.filter(e => {
     if (!byovSearch.trim()) return true;
