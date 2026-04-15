@@ -1330,8 +1330,8 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-x-auto max-h-[calc(100vh-300px)]">
-                    <Table>
+                  <div className="rounded-md border overflow-auto max-h-[calc(100vh-300px)]">
+                    <Table className="min-w-[1400px]">
                       <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
                           <TableHead>Employment Status</TableHead>
