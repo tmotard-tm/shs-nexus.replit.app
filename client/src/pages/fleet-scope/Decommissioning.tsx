@@ -63,6 +63,10 @@ interface DecommissioningVehicle {
   isAssigned: boolean; // Whether truck # is currently found in TPMS_EXTRACT
   withRental: boolean; // Whether truck # exists in Rentals Dashboard
   repairTrackerSource: boolean; // Whether address/phone came from Repair Tracker
+  nearestTechName: string | null;
+  nearestTechPhone: string | null;
+  nearestTechZip: string | null;
+  nearestTechDistance: number | null;
   partsCount: number | null; // Sum of ON_HAND from NTAO_FIELD_VIEW_ASSORTMENT
   partsSpace: number | null; // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT
   partsCountSyncedAt: string | null;
@@ -439,6 +443,10 @@ export default function Decommissioning() {
       "Manager Name": v.managerName || "",
       "Manager ZIP": v.managerZip || "",
       "Manager Distance": v.managerDistance !== null ? `${v.managerDistance} mi` : "",
+      "Nearest Tech": v.nearestTechName || "",
+      "Nearest Tech Phone": v.nearestTechPhone || "",
+      "Nearest Tech ZIP": v.nearestTechZip || "",
+      "Nearest Tech Dist": v.nearestTechDistance !== null ? `${v.nearestTechDistance} mi` : "",
       "Parts Count": v.partsCount !== null ? v.partsCount : "",
       "Parts Cu.Ft": v.partsSpace !== null ? v.partsSpace : "",
       "Decom Done": v.decomDone ? "Yes" : "No",
@@ -746,6 +754,10 @@ export default function Decommissioning() {
                         </label>
                       </div>
                     </TableHead>
+                    <TableHead className="w-36 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech</TableHead>
+                    <TableHead className="w-32 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech Phone</TableHead>
+                    <TableHead className="w-24 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech ZIP</TableHead>
+                    <TableHead className="w-28 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech Dist</TableHead>
                     <TableHead className="w-24 text-center">Parts Count</TableHead>
                     <TableHead className="w-24 text-center">Parts Cu.Ft</TableHead>
                     <TableHead className="w-24 text-center">Decom Done</TableHead>
@@ -881,6 +893,18 @@ export default function Decommissioning() {
                       </TableCell>
                       <TableCell className="text-sm font-mono bg-amber-50/50 dark:bg-amber-900/20">
                         {vehicle.managerDistance !== null ? `${vehicle.managerDistance} mi` : "-"}
+                      </TableCell>
+                      <TableCell className="text-sm bg-blue-50/50 dark:bg-blue-900/20">
+                        {vehicle.nearestTechName || "-"}
+                      </TableCell>
+                      <TableCell className="text-sm bg-blue-50/50 dark:bg-blue-900/20">
+                        {vehicle.nearestTechPhone || "-"}
+                      </TableCell>
+                      <TableCell className="text-sm font-mono bg-blue-50/50 dark:bg-blue-900/20">
+                        {vehicle.nearestTechZip || "-"}
+                      </TableCell>
+                      <TableCell className="text-sm font-mono bg-blue-50/50 dark:bg-blue-900/20">
+                        {vehicle.nearestTechDistance !== null ? `${vehicle.nearestTechDistance} mi` : "-"}
                       </TableCell>
                       <TableCell className="text-center text-sm font-mono" data-testid={`cell-parts-count-${vehicle.id}`}>
                         {vehicle.partsCount !== null ? vehicle.partsCount : "-"}

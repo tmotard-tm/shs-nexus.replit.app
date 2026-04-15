@@ -1304,6 +1304,10 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   sentToProcurementAt: timestamp("sent_to_procurement_at"), // When the checkbox was checked
   techMatchSource: varchar("tech_match_source", { length: 20 }), // 'truck' for direct match, 'zip_fallback' for ZIP-based match
   isAssigned: boolean("is_assigned").default(false), // Whether truck # is currently found in TPMS_EXTRACT
+  nearestTechName: varchar("nearest_tech_name", { length: 100 }),
+  nearestTechPhone: varchar("nearest_tech_phone", { length: 50 }),
+  nearestTechZip: varchar("nearest_tech_zip", { length: 20 }),
+  nearestTechDistance: integer("nearest_tech_distance"),
   partsCount: integer("parts_count"), // Sum of ON_HAND from NTAO_FIELD_VIEW_ASSORTMENT for latest CURR_DATE
   partsSpace: real("parts_space"), // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT for latest CURR_DATE
   partsCountSyncedAt: timestamp("parts_count_synced_at"),

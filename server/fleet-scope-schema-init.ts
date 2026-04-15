@@ -611,6 +611,18 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='sent_to_procurement_at') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "sent_to_procurement_at" timestamp;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_name') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_name" varchar(100);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_phone') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_phone" varchar(50);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_zip') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_zip" varchar(20);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_distance') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_distance" integer;
+  END IF;
 END $$;
 
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.

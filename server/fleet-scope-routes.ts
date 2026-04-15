@@ -13901,8 +13901,51 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (isNaN(num1) || isNaN(num2)) return Infinity;
         return Math.abs(num1 - num2);
       };
+
+      // Step 3: Get all techs with ZIP codes for nearest-tech lookup
+      interface TechInfo {
+        enterpriseId: string;
+        fullName: string;
+        mobilePhone: string;
+        primaryZip: string;
+      }
+
+      const techsWithZip: TechInfo[] = [];
+      try {
+        const techZipSql = `
+          SELECT DISTINCT
+            ENTERPRISE_ID,
+            FULL_NAME,
+            MOBILEPHONENUMBER,
+            PRIMARYZIP
+          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+          WHERE PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
+            AND ENTERPRISE_ID IS NOT NULL AND ENTERPRISE_ID != ''
+            AND FULL_NAME IS NOT NULL
+        `;
+        interface TechZipRow {
+          ENTERPRISE_ID: string;
+          FULL_NAME: string | null;
+          MOBILEPHONENUMBER: string | null;
+          PRIMARYZIP: string | null;
+        }
+        const techZipData = await executeQuery<TechZipRow>(techZipSql);
+        console.log(`[Decommissioning Tech Sync] Found ${techZipData.length} techs with ZIP codes for nearest-tech matching`);
+        for (const row of techZipData) {
+          if (row.ENTERPRISE_ID && row.PRIMARYZIP) {
+            techsWithZip.push({
+              enterpriseId: row.ENTERPRISE_ID.toString().trim(),
+              fullName: row.FULL_NAME?.toString().trim() || '',
+              mobilePhone: row.MOBILEPHONENUMBER?.toString().trim() || '',
+              primaryZip: row.PRIMARYZIP.toString().trim(),
+            });
+          }
+        }
+      } catch (techErr) {
+        console.error("[Decommissioning Tech Sync] Nearest tech lookup failed (non-fatal):", techErr);
+      }
       
-      // For each unmatched vehicle, find the nearest MANAGER by ZIP
+      // For each unmatched vehicle, find the nearest MANAGER and nearest TECH by ZIP
       for (const vehicle of unmatchedWithZip) {
         const vehicleZip = vehicle.zipCode?.trim() || '';
         if (!vehicleZip) continue;
@@ -13919,12 +13962,21 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             nearestManager = mgr;
           }
         }
+
+        let nearestTech: TechInfo | null = null;
+        let nearestTechDist = Infinity;
+        for (const tech of techsWithZip) {
+          if (!tech.primaryZip) continue;
+          const distance = getZipDistance(vehicleZip, tech.primaryZip);
+          if (distance < nearestTechDist) {
+            nearestTechDist = distance;
+            nearestTech = tech;
+          }
+        }
         
         if (nearestManager) {
           // Get VIN for this vehicle
           const vin = vinLookup.get(vehicle.truckNumber) || null;
-          // For unassigned trucks matched by manager ZIP, populate manager info in both tech and manager columns
-          // Both Tech ZIP and Manager ZIP are the same (manager's ZIP), so distances should be identical
           
           // Check if the fallback ZIP has changed - only clear distances if it changed
           const newFallbackZip = nearestManager.managerZip || null;
@@ -13943,6 +13995,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             isAssigned: false, // Not directly assigned in TPMS_EXTRACT
             techDataSyncedAt: new Date(),
           };
+
+          if (nearestTech) {
+            const newNearestTechZip = nearestTech.primaryZip || null;
+            const nearestTechZipChanged = vehicle.nearestTechZip !== newNearestTechZip;
+            updateData.nearestTechName = nearestTech.fullName || null;
+            updateData.nearestTechPhone = nearestTech.mobilePhone || null;
+            updateData.nearestTechZip = newNearestTechZip;
+            if (nearestTechZipChanged) {
+              updateData.nearestTechDistance = null;
+            }
+          } else {
+            updateData.nearestTechName = null;
+            updateData.nearestTechPhone = null;
+            updateData.nearestTechZip = null;
+            updateData.nearestTechDistance = null;
+          }
           
           // Only clear distance cache if ZIP changed - preserve existing distances otherwise
           if (zipChanged) {
@@ -13950,11 +14018,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             updateData.lastManagerZipForDistance = null;
             updateData.techDistance = null;
             updateData.managerDistance = null;
+            updateData.nearestTechDistance = null;
           }
           
           await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, updateData);
           zipFallbackSynced++;
-          console.log(`[Decommissioning Manager ZIP Fallback] Vehicle ${vehicle.truckNumber} (ZIP ${vehicleZip}) matched to nearest manager ${nearestManager.managerName} (ZIP ${nearestManager.managerZip})`);
+          console.log(`[Decommissioning Manager ZIP Fallback] Vehicle ${vehicle.truckNumber} (ZIP ${vehicleZip}) matched to nearest manager ${nearestManager.managerName} (ZIP ${nearestManager.managerZip})${nearestTech ? `, nearest tech ${nearestTech.fullName} (ZIP ${nearestTech.primaryZip})` : ''}`);
         } else {
           // No match found - mark as not assigned but preserve existing tech data
           // Still update VIN even if no tech data
@@ -14049,7 +14118,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // Calculate distances (both manager and tech) for decommissioning vehicles
   async function calculateDecommissioningDistances(): Promise<{ managerCalculated: number; techCalculated: number }> {
-    const { calculateDistancesForDecommissioningVehicles } = await import("./fleet-scope-distance-calculator");
+    const { calculateDistancesForDecommissioningVehicles, calculateZipToZipDistance } = await import("./fleet-scope-distance-calculator");
     
     const vehicles = await fleetScopeStorage.getDecommissioningVehiclesNeedingDistanceCalc();
     console.log(`[Decommissioning Distance] ${vehicles.length} vehicles need distance calculation`);
@@ -14093,6 +14162,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       
       if (result.managerDistance !== null) managerSuccess++;
       if (result.techDistance !== null) techSuccess++;
+    }
+
+    // Calculate nearest tech distances for vehicles that have nearestTechZip but no nearestTechDistance
+    const allVehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
+    const needsNearestTechDist = allVehicles.filter(v =>
+      v.zipCode && v.nearestTechZip && v.nearestTechDistance === null
+    );
+    let nearestTechSuccess = 0;
+    if (needsNearestTechDist.length > 0) {
+      console.log(`[Decommissioning Distance] Calculating ${needsNearestTechDist.length} nearest tech distances`);
+      for (const v of needsNearestTechDist) {
+        try {
+          const dist = await calculateZipToZipDistance(v.zipCode!, v.nearestTechZip!);
+          await fleetScopeStorage.updateDecommissioningVehicle(v.id, { nearestTechDistance: dist });
+          if (dist !== null) nearestTechSuccess++;
+        } catch (err) {
+          console.error(`[Decommissioning Distance] Nearest tech dist error for ${v.truckNumber}:`, err);
+        }
+      }
+      console.log(`[Decommissioning Distance] Calculated ${nearestTechSuccess} nearest tech distances`);
     }
     
     console.log(`[Decommissioning Distance] Calculated ${managerSuccess} manager distances, ${techSuccess} tech distances`);
