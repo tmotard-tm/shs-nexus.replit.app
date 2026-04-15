@@ -1334,8 +1334,9 @@ export default function WeeklyOffboarding() {
                           const lastWorkedDate = e.lastDateWorked ? new Date(e.lastDateWorked) : null;
                           const daysSinceLastWorked = lastWorkedDate ? differenceInDays(new Date(), lastWorkedDate) : null;
                           const isOver30Days = daysSinceLastWorked !== null && daysSinceLastWorked >= 30;
+                          const isLoaOver30 = isOver30Days && e.employmentStatus === 'L';
                           return (
-                          <TableRow key={e.enterpriseId} className={`cursor-pointer hover:bg-muted/50 ${isOver30Days ? 'bg-red-50 dark:bg-red-950/30' : ''}`} onClick={() => setSelectedLoaEntry(e)}>
+                          <TableRow key={e.enterpriseId} className={`cursor-pointer ${isLoaOver30 ? 'bg-red-100 hover:bg-red-200 dark:bg-red-950/50 dark:hover:bg-red-950/70' : 'hover:bg-muted/50'}`} onClick={() => setSelectedLoaEntry(e)}>
                             <TableCell>
                               <Badge
                                 variant="outline"
