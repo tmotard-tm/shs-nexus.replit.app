@@ -500,6 +500,19 @@ export default function WeeklyOffboarding() {
       (e.personalNumber || '').toLowerCase().includes(q)
     );
   }).sort((a, b) => {
+    const now = new Date();
+    const daysA = a.lastDateWorked ? differenceInDays(now, new Date(a.lastDateWorked)) : 0;
+    const daysB = b.lastDateWorked ? differenceInDays(now, new Date(b.lastDateWorked)) : 0;
+    const aOver30 = daysA >= 30;
+    const bOver30 = daysB >= 30;
+    if (aOver30 && !bOver30) return -1;
+    if (!aOver30 && bOver30) return 1;
+    if (aOver30 && bOver30) {
+      const profA = a.dailyProfit ?? Infinity;
+      const profB = b.dailyProfit ?? Infinity;
+      if (profA !== profB) return profA - profB;
+      return daysB - daysA;
+    }
     const dateA = a.lastDateWorked ? new Date(a.lastDateWorked).getTime() : 0;
     const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
     return dateA - dateB;
