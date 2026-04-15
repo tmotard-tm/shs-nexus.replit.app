@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { useLocation } from "wouter";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
@@ -96,6 +96,14 @@ export default function Decommissioning() {
   const [techDistanceFilter, setTechDistanceFilter] = useState<boolean>(false);
   const [managerDistanceFilter, setManagerDistanceFilter] = useState<boolean>(false);
   const [assignedFilter, setAssignedFilter] = useState<string>("all"); // "all", "yes", "no"
+
+  type SortDir = "none" | "asc" | "desc";
+  const [techDistSort, setTechDistSort] = useState<SortDir>("none");
+  const [mgrDistSort, setMgrDistSort] = useState<SortDir>("none");
+  const [nearestTechDistSort, setNearestTechDistSort] = useState<SortDir>("none");
+
+  const cycleSortDir = (current: SortDir): SortDir =>
+    current === "none" ? "asc" : current === "asc" ? "desc" : "none";
 
   const { data: vehicles = [], isLoading } = useQuery<DecommissioningVehicle[]>({
     queryKey: ["/api/fs/decommissioning"],
@@ -503,7 +511,29 @@ export default function Decommissioning() {
     }
     
     return true;
+  }).sort((a, b) => {
+    const activeSorts: { key: keyof DecommissioningVehicle; dir: SortDir }[] = [
+      { key: "techDistance", dir: techDistSort },
+      { key: "managerDistance", dir: mgrDistSort },
+      { key: "nearestTechDistance", dir: nearestTechDistSort },
+    ].filter(s => s.dir !== "none");
+
+    for (const { key, dir } of activeSorts) {
+      const aVal = a[key] as number | null;
+      const bVal = b[key] as number | null;
+      if (aVal === null && bVal === null) continue;
+      if (aVal === null) return 1;
+      if (bVal === null) return -1;
+      const diff = aVal - bVal;
+      if (diff !== 0) return dir === "asc" ? diff : -diff;
+    }
+    return 0;
   });
+
+  const SortIcon = ({ dir }: { dir: SortDir }) =>
+    dir === "asc" ? <ArrowUp className="h-3 w-3 inline ml-1" /> :
+    dir === "desc" ? <ArrowDown className="h-3 w-3 inline ml-1" /> :
+    <ArrowUpDown className="h-3 w-3 inline ml-1 opacity-40" />;
 
   return (
     <div className="container mx-auto p-4 max-w-full">
@@ -727,7 +757,12 @@ export default function Decommissioning() {
                     <TableHead className="w-24">Tech ZIP</TableHead>
                     <TableHead className="w-32 bg-amber-100/50 dark:bg-amber-900/30">
                       <div className="flex flex-col gap-1">
-                        <span>Tech Distance</span>
+                        <span
+                          className="cursor-pointer select-none hover:text-primary flex items-center"
+                          onClick={() => { setTechDistSort(cycleSortDir(techDistSort)); setMgrDistSort("none"); setNearestTechDistSort("none"); }}
+                        >
+                          Tech Distance <SortIcon dir={techDistSort} />
+                        </span>
                         <label className="flex items-center gap-1 text-xs font-normal cursor-pointer">
                           <Checkbox
                             checked={techDistanceFilter}
@@ -743,7 +778,12 @@ export default function Decommissioning() {
                     <TableHead className="w-28">Manager ZIP</TableHead>
                     <TableHead className="w-32 bg-amber-100/50 dark:bg-amber-900/30">
                       <div className="flex flex-col gap-1">
-                        <span>Manager Distance</span>
+                        <span
+                          className="cursor-pointer select-none hover:text-primary flex items-center"
+                          onClick={() => { setMgrDistSort(cycleSortDir(mgrDistSort)); setTechDistSort("none"); setNearestTechDistSort("none"); }}
+                        >
+                          Manager Distance <SortIcon dir={mgrDistSort} />
+                        </span>
                         <label className="flex items-center gap-1 text-xs font-normal cursor-pointer">
                           <Checkbox
                             checked={managerDistanceFilter}
@@ -757,7 +797,14 @@ export default function Decommissioning() {
                     <TableHead className="w-36 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech</TableHead>
                     <TableHead className="w-32 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech Phone</TableHead>
                     <TableHead className="w-24 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech ZIP</TableHead>
-                    <TableHead className="w-28 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech Dist</TableHead>
+                    <TableHead className="w-28 bg-blue-50/50 dark:bg-blue-900/20">
+                      <span
+                        className="cursor-pointer select-none hover:text-primary flex items-center"
+                        onClick={() => { setNearestTechDistSort(cycleSortDir(nearestTechDistSort)); setTechDistSort("none"); setMgrDistSort("none"); }}
+                      >
+                        Nearest Tech Dist <SortIcon dir={nearestTechDistSort} />
+                      </span>
+                    </TableHead>
                     <TableHead className="w-24 text-center">Parts Count</TableHead>
                     <TableHead className="w-24 text-center">Parts Cu.Ft</TableHead>
                     <TableHead className="w-24 text-center">Decom Done</TableHead>
