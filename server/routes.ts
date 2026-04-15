@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
 import { initVrmSchema } from "./vrm/init-schema";
+import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
 import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion } from "@shared/schema";
@@ -9671,7 +9672,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      const formatted = Array.from(deduped.values()).map(row => {
+      const dedupedValues = Array.from(deduped.values());
+      const ldaps = dedupedValues
+        .map(r => (r.ENTERPRISE_ID || '').trim().toUpperCase())
+        .filter(Boolean);
+
+      let profitMap = new Map<string, { dailyProfit: number; completes: number; totalRevenue: number }>();
+      try {
+        if (ldaps.length > 0) {
+          const profRows = await fetchProfitabilityCheck(ldaps);
+          for (const p of profRows) {
+            if (p.tech_ldap) {
+              profitMap.set(p.tech_ldap.toUpperCase(), {
+                dailyProfit: Number(p.daily_net_before_rental) || 0,
+                completes: Number(p.completes) || 0,
+                totalRevenue: Number(p.total_revenue) || 0,
+              });
+            }
+          }
+          console.log(`[LOA Trucks] Profitability data loaded for ${profitMap.size} of ${ldaps.length} techs`);
+        }
+      } catch (profErr: any) {
+        console.error('[LOA Trucks] Profitability lookup failed (non-fatal):', profErr.message);
+      }
+
+      const formatted = dedupedValues.map(row => {
         const addressParts = [
           row.PRIMARYADDR1?.trim(),
           row.PRIMARYADDR2?.trim(),
@@ -9687,9 +9712,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ].filter(Boolean);
         const uniquePersonalPhones = [...new Set(personalPhones)];
 
+        const eid = (row.ENTERPRISE_ID || '').trim().toUpperCase();
+        const prof = profitMap.get(eid);
+
         return {
           fullName: row.FULL_NAME?.trim() || '',
-          enterpriseId: (row.ENTERPRISE_ID || '').trim().toUpperCase(),
+          enterpriseId: eid,
           employmentStatus: row.EMPLOYMENT_STATUS?.trim() || '',
           employmentStatusLabel: statusLabels[row.EMPLOYMENT_STATUS?.trim() || ''] || row.EMPLOYMENT_STATUS?.trim() || '',
           jobTitle: row.JOB_TITLE?.trim() || '',
@@ -9702,6 +9730,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           lastKnownTruck: row.TRUCK_LU?.trim() || '',
           tpmsSource: row.TPMS_SOURCE || '',
           personalNumber: uniquePersonalPhones.join(' / ') || null,
+          dailyProfit: prof?.dailyProfit ?? null,
+          completes90d: prof?.completes ?? null,
+          totalRevenue90d: prof?.totalRevenue ?? null,
         };
       });
 

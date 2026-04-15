@@ -69,6 +69,9 @@ interface LoaTechEntry {
   lastKnownTruck: string;
   tpmsSource: string;
   personalNumber: string | null;
+  dailyProfit: number | null;
+  completes90d: number | null;
+  totalRevenue90d: number | null;
 }
 
 export default function WeeklyOffboarding() {
@@ -1322,6 +1325,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>Name</TableHead>
                           <TableHead>Enterprise ID</TableHead>
                           <TableHead>Date Last Worked</TableHead>
+                          <TableHead>Daily Profit</TableHead>
                           <TableHead>Truck</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
@@ -1362,6 +1366,13 @@ export default function WeeklyOffboarding() {
                                   <span className={`text-xs ${isOver30Days ? 'text-red-600 dark:text-red-400 font-medium' : 'text-muted-foreground'}`}>{daysSinceLastWorked}d ago</span>
                                 </div>
                               ) : <span className="text-muted-foreground">-</span>}
+                            </TableCell>
+                            <TableCell className="text-sm whitespace-nowrap">
+                              {e.dailyProfit !== null ? (
+                                <span className={`font-mono font-medium ${e.dailyProfit >= 0 ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'}`}>
+                                  {e.dailyProfit >= 0 ? '+' : ''}${e.dailyProfit.toFixed(2)}/day
+                                </span>
+                              ) : <span className="text-muted-foreground text-xs">No data</span>}
                             </TableCell>
                             <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
                             <TableCell className="text-sm">{e.district || '-'}</TableCell>
