@@ -712,6 +712,63 @@ export default function NewRentals() {
         </h1>
       </div>
 
+      {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
+      {decisionLog.length > 0 && (() => {
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const daysSinceSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
+        const currentWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceSat);
+
+        const weeks = Array.from({ length: 4 }, (_, i) => {
+          const start = new Date(currentWeekStart);
+          start.setDate(start.getDate() - i * 7);
+          const end = new Date(start);
+          end.setDate(end.getDate() + 6);
+          end.setHours(23, 59, 59, 999);
+          let approved = 0, denied = 0;
+          for (const d of decisionLog) {
+            const dt = new Date(d.createdAt);
+            if (dt >= start && dt <= end) {
+              if (d.recommendation === "Approve") approved++;
+              else if (d.recommendation === "Deny") denied++;
+            }
+          }
+          const fmtD = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
+          return { label: `${fmtD(start)} – ${fmtD(end)}`, approved, total: approved + denied };
+        });
+
+        const scTh: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", padding: "8px 16px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` };
+        const scTd: React.CSSProperties = { fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink, padding: "8px 16px", borderBottom: `1px solid ${colors.rule}` };
+
+        return (
+          <div style={{ marginBottom: 28, border: `1px solid ${colors.rule}`, borderRadius: 8, backgroundColor: colors.surface, overflow: "hidden", maxWidth: 520 }}>
+            <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
+              Weekly Rental Requests
+            </div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={scTh}>Week (Sat – Fri)</th>
+                  <th style={{ ...scTh, textAlign: "center" }}>Approved</th>
+                  <th style={{ ...scTh, textAlign: "center" }}>Requested</th>
+                </tr>
+              </thead>
+              <tbody>
+                {weeks.map((w, i) => (
+                  <tr key={i} style={{ backgroundColor: i === 0 ? `${colors.accent}08` : "transparent" }}>
+                    <td style={{ ...scTd, fontFamily: fonts.dmSans, fontWeight: i === 0 ? 600 : 400 }}>
+                      {w.label}{i === 0 ? " (current)" : ""}
+                    </td>
+                    <td style={{ ...scTd, textAlign: "center", color: colors.accent, fontWeight: 700 }}>{w.approved}</td>
+                    <td style={{ ...scTd, textAlign: "center", fontWeight: 600 }}>{w.total}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+      })()}
+
       {/* ── Search bar ────────────────────────────────────────────────────────── */}
       <div
         style={{
@@ -831,63 +888,6 @@ export default function NewRentals() {
           {(evaluateMut.error as Error).message}
         </div>
       )}
-
-      {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
-      {decisionLog.length > 0 && (() => {
-        const now = new Date();
-        const dayOfWeek = now.getDay();
-        const daysSinceSat = dayOfWeek === 6 ? 0 : dayOfWeek + 1;
-        const currentWeekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysSinceSat);
-
-        const weeks = Array.from({ length: 4 }, (_, i) => {
-          const start = new Date(currentWeekStart);
-          start.setDate(start.getDate() - i * 7);
-          const end = new Date(start);
-          end.setDate(end.getDate() + 6);
-          end.setHours(23, 59, 59, 999);
-          let approved = 0, denied = 0;
-          for (const d of decisionLog) {
-            const dt = new Date(d.createdAt);
-            if (dt >= start && dt <= end) {
-              if (d.recommendation === "Approve") approved++;
-              else if (d.recommendation === "Deny") denied++;
-            }
-          }
-          const fmtD = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
-          return { label: `${fmtD(start)} – ${fmtD(end)}`, approved, total: approved + denied };
-        });
-
-        const scTh: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", padding: "8px 16px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` };
-        const scTd: React.CSSProperties = { fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink, padding: "8px 16px", borderBottom: `1px solid ${colors.rule}` };
-
-        return (
-          <div style={{ marginBottom: 28, border: `1px solid ${colors.rule}`, borderRadius: 8, backgroundColor: colors.surface, overflow: "hidden", maxWidth: 520 }}>
-            <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
-              Weekly Rental Requests
-            </div>
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr>
-                  <th style={scTh}>Week (Sat – Fri)</th>
-                  <th style={{ ...scTh, textAlign: "center" }}>Approved</th>
-                  <th style={{ ...scTh, textAlign: "center" }}>Requested</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weeks.map((w, i) => (
-                  <tr key={i} style={{ backgroundColor: i === 0 ? `${colors.accent}08` : "transparent" }}>
-                    <td style={{ ...scTd, fontFamily: fonts.dmSans, fontWeight: i === 0 ? 600 : 400 }}>
-                      {w.label}{i === 0 ? " (current)" : ""}
-                    </td>
-                    <td style={{ ...scTd, textAlign: "center", color: colors.accent, fontWeight: 700 }}>{w.approved}</td>
-                    <td style={{ ...scTd, textAlign: "center", fontWeight: 600 }}>{w.total}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        );
-      })()}
 
       {/* ── Results table ─────────────────────────────────────────────────────── */}
       {evaluatedRows.length > 0 && (

@@ -613,22 +613,31 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
       )
   `);
 
-  // 2. Fill repair_shop_address from the most-recent Full Log record per LDAP
+  // 2. Fill repair_shop_address and repair_shop_phone from the most-recent Full Log record per LDAP
   const fullLogResult = await db.execute(sql`
     UPDATE vrm_repair_tracker rt
-    SET repair_shop_address = flog.repair_location
+    SET
+      repair_shop_address = COALESCE(NULLIF(rt.repair_shop_address, ''), flog.repair_location),
+      repair_shop_phone   = COALESCE(NULLIF(rt.repair_shop_phone,   ''), flog.repair_phone)
     FROM (
       SELECT DISTINCT ON (UPPER(enterprise_id))
         enterprise_id,
-        repair_location
+        repair_location,
+        repair_phone
       FROM vrm_new_rental_log
-      WHERE enterprise_id   IS NOT NULL AND enterprise_id   <> ''
-        AND repair_location IS NOT NULL AND repair_location <> ''
+      WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+        AND (
+          (repair_location IS NOT NULL AND repair_location <> '')
+          OR (repair_phone IS NOT NULL AND repair_phone <> '')
+        )
       ORDER BY UPPER(enterprise_id), date_of_request DESC NULLS LAST
     ) flog
     WHERE UPPER(flog.enterprise_id) = UPPER(rt.tech_ldap)
       AND rt.tech_ldap IS NOT NULL
-      AND (rt.repair_shop_address IS NULL OR rt.repair_shop_address = '')
+      AND (
+        rt.repair_shop_address IS NULL OR rt.repair_shop_address = ''
+        OR rt.repair_shop_phone IS NULL OR rt.repair_shop_phone = ''
+      )
   `);
 
   return ((tpmsResult as any).rowCount ?? 0) + ((fullLogResult as any).rowCount ?? 0);
