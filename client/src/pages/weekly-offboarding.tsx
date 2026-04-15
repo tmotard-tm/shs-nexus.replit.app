@@ -127,12 +127,17 @@ export default function WeeklyOffboarding() {
     },
   });
 
-  // Refs for synchronized scrollbars
+  // Refs for synchronized scrollbars (Term Roster)
   const topScrollRef = useRef<HTMLDivElement>(null);
   const tableScrollRef = useRef<HTMLDivElement>(null);
   const [tableWidth, setTableWidth] = useState(0);
 
-  // Sync scroll positions between top scrollbar and table
+  // Refs for synchronized scrollbars (LOA table)
+  const loaTopScrollRef = useRef<HTMLDivElement>(null);
+  const loaTableScrollRef = useRef<HTMLDivElement>(null);
+  const [loaTableWidth, setLoaTableWidth] = useState(0);
+
+  // Sync scroll positions between top scrollbar and table (Term Roster)
   const handleTopScroll = useCallback(() => {
     if (topScrollRef.current && tableScrollRef.current) {
       tableScrollRef.current.scrollLeft = topScrollRef.current.scrollLeft;
@@ -142,6 +147,19 @@ export default function WeeklyOffboarding() {
   const handleTableScroll = useCallback(() => {
     if (topScrollRef.current && tableScrollRef.current) {
       topScrollRef.current.scrollLeft = tableScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  // Sync scroll positions between top scrollbar and table (LOA)
+  const handleLoaTopScroll = useCallback(() => {
+    if (loaTopScrollRef.current && loaTableScrollRef.current) {
+      loaTableScrollRef.current.scrollLeft = loaTopScrollRef.current.scrollLeft;
+    }
+  }, []);
+
+  const handleLoaTableScroll = useCallback(() => {
+    if (loaTopScrollRef.current && loaTableScrollRef.current) {
+      loaTopScrollRef.current.scrollLeft = loaTableScrollRef.current.scrollLeft;
     }
   }, []);
 
@@ -218,14 +236,13 @@ export default function WeeklyOffboarding() {
     staleTime: 5 * 60 * 1000, // Cache for 5 minutes since Samsara data doesn't change frequently
   });
 
-  // Update table width for top scrollbar
+  // Update table width for top scrollbar (Term Roster)
   useEffect(() => {
     const updateWidth = () => {
       if (tableScrollRef.current) {
         setTableWidth(tableScrollRef.current.scrollWidth);
       }
     };
-    // Small delay to ensure table is rendered
     const timer = setTimeout(updateWidth, 100);
     window.addEventListener('resize', updateWidth);
     return () => {
@@ -233,6 +250,21 @@ export default function WeeklyOffboarding() {
       window.removeEventListener('resize', updateWidth);
     };
   }, [termRoster]);
+
+  // Update table width for top scrollbar (LOA)
+  useEffect(() => {
+    const updateWidth = () => {
+      if (loaTableScrollRef.current) {
+        setLoaTableWidth(loaTableScrollRef.current.scrollWidth);
+      }
+    };
+    const timer = setTimeout(updateWidth, 100);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [filteredLoa]);
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -1330,7 +1362,21 @@ export default function WeeklyOffboarding() {
                     )}
                   </div>
                 ) : (
-                  <div className="rounded-md border overflow-x-scroll overflow-y-auto max-h-[calc(100vh-300px)]" style={{ WebkitOverflowScrolling: 'touch' }}>
+                  <div className="rounded-md border">
+                    {/* Top scrollbar */}
+                    <div 
+                      ref={loaTopScrollRef}
+                      onScroll={handleLoaTopScroll}
+                      className="overflow-x-auto overflow-y-hidden"
+                      style={{ height: '12px' }}
+                    >
+                      <div style={{ width: loaTableWidth, height: '1px' }} />
+                    </div>
+                    <div 
+                      ref={loaTableScrollRef}
+                      onScroll={handleLoaTableScroll}
+                      className="overflow-x-auto overflow-y-auto max-h-[600px]"
+                    >
                     <Table style={{ minWidth: '1600px' }}>
                       <TableHeader className="sticky top-0 bg-background z-10">
                         <TableRow>
@@ -1424,6 +1470,7 @@ export default function WeeklyOffboarding() {
                         })}
                       </TableBody>
                     </Table>
+                    </div>
                   </div>
                 )}
               </CardContent>
