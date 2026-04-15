@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -481,6 +481,7 @@ export default function WeeklyOffboarding() {
   // ===== LOA / Paid Leave / Suspended Tab state & data fetching =====
   const [loaSearch, setLoaSearch] = useState("");
   const [loaStatusFilter, setLoaStatusFilter] = useState<string>("all");
+  const [loaSortDateWorked, setLoaSortDateWorked] = useState<"default" | "asc" | "desc">("default");
 
   const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
     queryKey: ['/api/loa-trucks-to-recover'],
@@ -499,6 +500,11 @@ export default function WeeklyOffboarding() {
       (e.personalNumber || '').toLowerCase().includes(q)
     );
   }).sort((a, b) => {
+    if (loaSortDateWorked !== "default") {
+      const dateA = a.lastDateWorked ? new Date(a.lastDateWorked).getTime() : 0;
+      const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
+      return loaSortDateWorked === "asc" ? dateA - dateB : dateB - dateA;
+    }
     const now = new Date();
     const daysA = a.lastDateWorked ? differenceInDays(now, new Date(a.lastDateWorked)) : 0;
     const daysB = b.lastDateWorked ? differenceInDays(now, new Date(b.lastDateWorked)) : 0;
@@ -1336,7 +1342,21 @@ export default function WeeklyOffboarding() {
                           <TableHead>Employment Status</TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Enterprise ID</TableHead>
-                          <TableHead>Date Last Worked</TableHead>
+                          <TableHead
+                            className="cursor-pointer select-none hover:bg-muted/50"
+                            onClick={() => setLoaSortDateWorked(prev => prev === "default" ? "asc" : prev === "asc" ? "desc" : "default")}
+                          >
+                            <div className="flex items-center gap-1">
+                              Date Last Worked
+                              {loaSortDateWorked === "default" ? (
+                                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                              ) : loaSortDateWorked === "asc" ? (
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              ) : (
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              )}
+                            </div>
+                          </TableHead>
                           <TableHead>Truck</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
