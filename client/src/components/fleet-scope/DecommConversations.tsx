@@ -20,7 +20,10 @@ import {
   MapPin,
   Download,
   Image,
+  Upload,
+  FileSpreadsheet,
 } from "lucide-react";
+import { readExcelFile } from "@/lib/xlsx-utils";
 import {
   Dialog,
   DialogContent,
@@ -122,6 +125,7 @@ interface BatchRecipient {
   contactPhone: string | null;
   contactName: string | null;
   contactType: string;
+  customVars: Record<string, string>;
 }
 
 interface BatchResult {
@@ -130,14 +134,10 @@ interface BatchResult {
   error?: string;
 }
 
-const TEMPLATE_VARS = [
-  { label: "Truck #", value: "{{TruckNumber}}" },
-  { label: "VIN", value: "{{VIN}}" },
-  { label: "Address", value: "{{Address}}" },
-  { label: "Phone", value: "{{Phone}}" },
-  { label: "Name", value: "{{Name}}" },
-  { label: "Zip Code", value: "{{ZipCode}}" },
-];
+interface BatchImportRow {
+  ldap: string;
+  customVars: Record<string, string>;
+}
 
 export function DecommConversations({ vehicleData, initialTruckNumber }: DecommConversationsProps) {
   const { toast } = useToast();
@@ -151,7 +151,6 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
-  const [batchLdapInput, setBatchLdapInput] = useState("");
   const [batchContactType, setBatchContactType] = useState<string>("tech");
   const [batchRecipients, setBatchRecipients] = useState<BatchRecipient[]>([]);
   const [batchUnresolved, setBatchUnresolved] = useState<string[]>([]);
@@ -160,6 +159,10 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [batchResolving, setBatchResolving] = useState(false);
   const [batchSending, setBatchSending] = useState(false);
   const batchTemplateRef = useRef<HTMLTextAreaElement>(null);
+  const batchFileRef = useRef<HTMLInputElement>(null);
+  const [batchImportRows, setBatchImportRows] = useState<BatchImportRow[]>([]);
+  const [batchDynamicHeaders, setBatchDynamicHeaders] = useState<string[]>([]);
+  const [batchFileName, setBatchFileName] = useState<string>("");
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -312,24 +315,78 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const handleBatchOpen = () => {
     setBatchOpen(true);
     setBatchStep("import");
-    setBatchLdapInput("");
+    setBatchImportRows([]);
+    setBatchDynamicHeaders([]);
+    setBatchFileName("");
     setBatchRecipients([]);
     setBatchUnresolved([]);
     setBatchTemplate("");
     setBatchResults([]);
+    if (batchFileRef.current) batchFileRef.current.value = "";
+  };
+
+  const handleBatchFileImport = async (file: File) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const rows = await readExcelFile(buffer);
+      if (rows.length === 0) {
+        toast({ title: "Empty file", description: "No data rows found in the spreadsheet.", variant: "destructive" });
+        return;
+      }
+
+      const headers = Object.keys(rows[0]);
+      if (headers.length === 0) {
+        toast({ title: "No columns", description: "Could not detect column headers.", variant: "destructive" });
+        return;
+      }
+
+      const ldapHeader = headers[0];
+      const dynamicHeaders = headers.slice(1);
+
+      const importRows: BatchImportRow[] = rows
+        .filter(row => row[ldapHeader] && String(row[ldapHeader]).trim())
+        .map(row => {
+          const customVars: Record<string, string> = {};
+          dynamicHeaders.forEach(h => {
+            customVars[h] = row[h] != null ? String(row[h]) : "";
+          });
+          return { ldap: String(row[ldapHeader]).trim(), customVars };
+        });
+
+      setBatchImportRows(importRows);
+      setBatchDynamicHeaders(dynamicHeaders);
+      setBatchFileName(file.name);
+      toast({ title: "File imported", description: `${importRows.length} rows with ${dynamicHeaders.length} variable column${dynamicHeaders.length !== 1 ? "s" : ""} detected.` });
+    } catch (err: any) {
+      toast({ title: "Import error", description: err.message, variant: "destructive" });
+    }
   };
 
   const handleBatchResolve = async () => {
-    const raw = batchLdapInput.trim();
-    if (!raw) return;
-    const ldaps = raw.split(/[\n,;\t]+/).map(s => s.trim()).filter(Boolean);
-    if (ldaps.length === 0) return;
+    if (batchImportRows.length === 0) return;
+    const ldaps = batchImportRows.map(r => r.ldap);
 
     setBatchResolving(true);
     try {
       const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", { ldaps, contactType: batchContactType });
       const data = await resp.json();
-      setBatchRecipients(data.resolved || []);
+      const resolvedRaw: any[] = data.resolved || [];
+      const importByLdap = new Map<string, BatchImportRow[]>();
+      batchImportRows.forEach(ir => {
+        const key = ir.ldap.toUpperCase();
+        if (!importByLdap.has(key)) importByLdap.set(key, []);
+        importByLdap.get(key)!.push(ir);
+      });
+      const ldapCounters = new Map<string, number>();
+      const resolved: BatchRecipient[] = resolvedRaw.map((r: any) => {
+        const key = r.ldap.toUpperCase();
+        const idx = ldapCounters.get(key) || 0;
+        ldapCounters.set(key, idx + 1);
+        const rows = importByLdap.get(key) || [];
+        const importRow = rows[idx] || rows[0];
+        return { ...r, customVars: importRow?.customVars || {} };
+      });
+      setBatchRecipients(resolved);
       setBatchUnresolved(data.unresolved || []);
       setBatchStep("compose");
     } catch (err: any) {
@@ -357,13 +414,21 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   };
 
   const renderPreview = (template: string, r: BatchRecipient) => {
-    return template
+    let result = template;
+    if (r.customVars) {
+      for (const [key, val] of Object.entries(r.customVars)) {
+        const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        result = result.replace(new RegExp(`\\{${escaped}\\}`, 'gi'), val || '');
+      }
+    }
+    result = result
       .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
       .replace(/\{\{VIN\}\}/gi, r.vin || '')
       .replace(/\{\{Address\}\}/gi, r.address || '')
       .replace(/\{\{Phone\}\}/gi, r.phone || '')
       .replace(/\{\{Name\}\}/gi, r.contactName || r.fullName || '')
       .replace(/\{\{ZipCode\}\}/gi, r.zipCode || '');
+    return result;
   };
 
   const handleBatchSend = async () => {
@@ -801,21 +866,81 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           {batchStep === "import" && (
             <div className="space-y-4">
               <div>
-                <label className="text-sm font-medium mb-1.5 block">Paste LDAPs / Enterprise IDs</label>
+                <label className="text-sm font-medium mb-1.5 block">Import Spreadsheet</label>
                 <p className="text-xs text-muted-foreground mb-2">
-                  One per line, or separated by commas. You can also paste Truck Numbers.
+                  Upload an XLSX file. Column A should contain the LDAP / Enterprise ID (used to look up the phone number).
+                  Columns B, C, D, etc. will become dynamic variables you can insert into the message — their headers become the variable names.
                 </p>
-                <Textarea
-                  value={batchLdapInput}
-                  onChange={(e) => setBatchLdapInput(e.target.value)}
-                  placeholder={"JSMITH1\nADOE02\nRJONES\n...or paste from Excel"}
-                  className="min-h-[180px] font-mono text-sm"
-                  data-testid="batch-ldap-input"
+                <input
+                  type="file"
+                  ref={batchFileRef}
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleBatchFileImport(file);
+                  }}
+                  data-testid="batch-file-input"
                 />
-                <p className="text-xs text-muted-foreground mt-1">
-                  {batchLdapInput.split(/[\n,;\t]+/).filter(s => s.trim()).length} entries detected
-                </p>
+                <div
+                  className="border-2 border-dashed rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 hover:bg-muted/30 transition-colors"
+                  onClick={() => batchFileRef.current?.click()}
+                >
+                  {batchFileName ? (
+                    <div className="space-y-2">
+                      <FileSpreadsheet className="h-8 w-8 mx-auto text-green-600" />
+                      <p className="text-sm font-medium">{batchFileName}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {batchImportRows.length} recipient{batchImportRows.length !== 1 ? "s" : ""} detected
+                        {batchDynamicHeaders.length > 0 && (
+                          <span> &middot; Variables: {batchDynamicHeaders.join(", ")}</span>
+                        )}
+                      </p>
+                      <Button variant="outline" size="sm" className="text-xs" onClick={(e) => { e.stopPropagation(); batchFileRef.current?.click(); }}>
+                        Replace File
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <Upload className="h-8 w-8 mx-auto text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">Click to upload an XLSX file</p>
+                      <p className="text-xs text-muted-foreground">Column A = LDAP, remaining columns = dynamic variables</p>
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {batchImportRows.length > 0 && batchDynamicHeaders.length > 0 && (
+                <div className="max-h-32 overflow-y-auto border rounded-md text-xs">
+                  <table className="w-full">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-1.5 font-medium">LDAP</th>
+                        {batchDynamicHeaders.map(h => (
+                          <th key={h} className="text-left p-1.5 font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchImportRows.slice(0, 10).map((row, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-1.5 font-mono">{row.ldap}</td>
+                          {batchDynamicHeaders.map(h => (
+                            <td key={h} className="p-1.5">{row.customVars[h] || "-"}</td>
+                          ))}
+                        </tr>
+                      ))}
+                      {batchImportRows.length > 10 && (
+                        <tr className="border-t">
+                          <td colSpan={batchDynamicHeaders.length + 1} className="p-1.5 text-center text-muted-foreground">
+                            ...and {batchImportRows.length - 10} more
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
 
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Send to</label>
@@ -834,7 +959,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 <Button variant="outline" onClick={() => setBatchOpen(false)}>Cancel</Button>
                 <Button
                   onClick={handleBatchResolve}
-                  disabled={batchResolving || !batchLdapInput.trim()}
+                  disabled={batchResolving || batchImportRows.length === 0}
                   data-testid="batch-resolve-btn"
                 >
                   {batchResolving ? <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 animate-spin" /> Resolving...</span> : "Resolve & Continue"}
@@ -891,16 +1016,20 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Message Template</label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  Click a variable below to insert it into your message. Variables from your spreadsheet use single braces like {"{ColumnName}"}.
+                </p>
                 <div className="flex flex-wrap gap-1 mb-2">
-                  {TEMPLATE_VARS.map((v) => (
+                  {batchDynamicHeaders.map((h) => (
                     <Button
-                      key={v.value}
+                      key={h}
                       variant="outline"
                       size="sm"
-                      className="text-xs h-6 px-2"
-                      onClick={() => insertTemplateVar(v.value)}
+                      className="text-xs h-6 px-2 border-blue-300 text-blue-700 dark:text-blue-400 dark:border-blue-700"
+                      onClick={() => insertTemplateVar(`{${h}}`)}
                     >
-                      {v.label}
+                      <FileSpreadsheet className="w-3 h-3 mr-1" />
+                      {h}
                     </Button>
                   ))}
                 </div>
@@ -908,7 +1037,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                   ref={batchTemplateRef}
                   value={batchTemplate}
                   onChange={(e) => setBatchTemplate(e.target.value)}
-                  placeholder="Hi {{Name}}, your truck {{TruckNumber}} (VIN: {{VIN}}) at {{Address}} is scheduled for decommissioning..."
+                  placeholder={`Hello {${batchDynamicHeaders[0] || "Name"}}, we are asking you to decommission truck {${batchDynamicHeaders[1] || "TruckNumber"}} at {${batchDynamicHeaders[2] || "Address"}}...`}
                   className="min-h-[120px] text-sm"
                   data-testid="batch-template-input"
                 />

@@ -15167,18 +15167,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       const allVehicles = await getDb().select().from(decommissioningVehicles);
-      const ldapSet = new Set(ldaps.map((l: string) => l.trim().toUpperCase()));
 
       const resolved: any[] = [];
-      const unresolved: string[] = [];
+      const unresolvedSet = new Set<string>();
 
-      for (const ldap of ldapSet) {
+      for (const rawLdap of ldaps) {
+        const ldap = String(rawLdap).trim().toUpperCase();
+        if (!ldap) continue;
+
         const vehicle = allVehicles.find(v =>
           v.enterpriseId?.toUpperCase() === ldap ||
           v.truckNumber === ldap.padStart(6, '0')
         );
         if (!vehicle) {
-          unresolved.push(ldap);
+          unresolvedSet.add(ldap);
           continue;
         }
 
@@ -15207,7 +15209,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         });
       }
 
-      res.json({ resolved, unresolved });
+      res.json({ resolved, unresolved: Array.from(unresolvedSet) });
     } catch (error: any) {
       console.error("[DecommBatch] Error resolving LDAPs:", error);
       res.status(500).json({ message: error.message });
@@ -15232,7 +15234,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           continue;
         }
 
-        const body = messageTemplate
+        let body = messageTemplate;
+        if (r.customVars && typeof r.customVars === 'object') {
+          for (const [key, val] of Object.entries(r.customVars)) {
+            const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            body = body.replace(new RegExp(`\\{${escaped}\\}`, 'gi'), String(val ?? ''));
+          }
+        }
+        body = body
           .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
           .replace(/\{\{VIN\}\}/gi, r.vin || '')
           .replace(/\{\{Address\}\}/gi, r.address || '')
