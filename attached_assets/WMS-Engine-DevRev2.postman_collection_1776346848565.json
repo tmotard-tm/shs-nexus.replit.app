@@ -1,0 +1,847 @@
+{
+  "info": {
+    "_postman_id": "1cec703e-29b0-4161-a902-ccd041e07cd7",
+    "name": "WMS_Engine",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "_exporter_id": "50583680",
+    "_collection_link": "https://go.postman.co/collection/50583680-1cec703e-29b0-4161-a902-ccd041e07cd7?source=collection_link"
+  },
+  "item": [
+    {
+      "name": "get purchaseOrder by id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseorder/12772047",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseorder",
+            "12772047"
+          ],
+          "query": [
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get location",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseorder/12772047",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseorder",
+            "12772047"
+          ],
+          "query": [
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get purchaseOrder by id Copy",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseorder/12772047",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseorder",
+            "12772047"
+          ],
+          "query": [
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get purchaseOrder by id Copy",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/journalEntry/12777694?expandSubResources=true",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "journalEntry",
+            "12777694"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true"
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get purchaseOrder by id Copy 2",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryadjustment/12817702?expandSubResources=true",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryadjustment",
+            "12817702"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true"
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create journalEntry",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    // \"approved\": true,\n    // \"cseg_ns_glsource\": {\n    //     \"id\": \"50\",\n    //     \"refName\": \"XJE\"\n    // },\n    \"customForm\": {\n        \"id\": \"326\",\n        \"refName\": \"Transform - Journal Entry\"\n    },\n    \"externalId\": \"CPD20250818_0000004923_test5.0000\",\n    \"memo\": \"CPD20250818_0000004923_test3.0000\",\n    // \"custbody_pdcc_so_no\":\"so-123\",\n    \"line\": {\n        \"items\": [\n            {\n                \"custcol_jebill_integrationid\": \"CPD20250818_0000004923_test5.0000\",\n                \"account\": {\n                    \"id\": \"1977\"\n                    // \"refName\": \"24121 ACCR INT DEBT\"\n                },\n                \"class\": {\n                    // \"id\": \"420\",\n                    \"refName\": \"0530\"\n                },\n                \"credit\": 100.0,\n                \"custcol_je_atmcode\":\"testatm\",\n                \"custcol_je_docnumber\": \"899978787888\",\n                \"custcol_je_miscnumber1\": \"ABHIJEET\",\n                \"custcol_je_miscnumber2\": \"DASH\",\n                \"custcol_je_miscnumber3\": \"ALTERNATE SERVICE PR\",\n                \"custcol_je_refnumber1\" : \"ref1-test\",\n                \"custcol_je_refnumber2\" : \"ref2-test\",\n                \"custcol_je_tofrom\": \"10KMT\", \n                \"cseg_ns_glsource\": {\n                    // \"id\": \"50\",\n                    \"refName\": \"XJE\"\n                },\n                \"custcol_je_linelo\": \"1168356\",\n                \"department\": {\n                    // \"id\": \"75\",\n                    \"refName\": \"34604\"\n                },\n                \"memo\": \"Load Beg Bal FY24\"\n            },\n            {\n                \"custcol_jebill_integrationid\": \"CPD20250818_0000004923_test5.0000\",\n                \"account\": {\n                    \"id\": \"1977\"\n                    // \"refName\": \"24121 ACCR INT DEBT\"\n                },\n                \"class\": {\n                    // \"id\": \"307\",\n                    \"refName\": \"0613\"\n                },\n                \"credit\": 50.0,\n                \"custcol_je_atmcode\":\"testatm\",\n                \"custcol_je_docnumber\": \"899978787888\",\n                \"custcol_je_miscnumber1\": \"ABHIJEET\",\n                \"custcol_je_miscnumber2\": \"DASH\",\n                \"custcol_je_miscnumber3\": \"ALTERNATE SERVICE PR\",\n                \"custcol_je_refnumber1\" : \"ref1-test\",\n                \"custcol_je_refnumber2\" : \"ref2-test\",\n                \"custcol_je_tofrom\": \"10KMT\", \n                \"cseg_ns_glsource\": {\n                    // \"id\": \"50\",\n                    \"refName\": \"XJE\"\n                },\n                \"custcol_je_linelo\": \"1168356\",\n                \"department\": {\n                    // \"id\": \"75\",\n                    \"refName\": \"34604\"\n                },\n                \"memo\": \"Load Beg Bal FY24\"\n            },\n            {\n                \n                \"custcol_jebill_integrationid\": \"CPD20250818_0000004923_test5.0000\",\n                \"account\": {\n                    \"id\": \"9644\"\n                    // \"refName\": \"23113 Accrued OH Expenses\"\n                },\n                \"class\": {\n                    // \"id\": \"413\",\n                    \"refName\": \"0530\"\n                },\n                \"debit\": 150.0,\n                \"custcol_je_atmcode\":\"testatm\",\n                \"custcol_je_docnumber\": \"899978787888\",\n                \"custcol_je_miscnumber1\": \"ABHIJEET\",\n                \"custcol_je_miscnumber2\": \"DASH\",\n                \"custcol_je_miscnumber3\": \"ALTERNATE SERVICE PR\",\n                \"custcol_je_refnumber1\" : \"ref1-test\",\n                \"custcol_je_refnumber2\" : \"ref2-test\",\n                \"custcol_je_tofrom\": \"10KMT\", \n                \"cseg_ns_glsource\": {\n                    // \"id\": \"50\",\n                    \"refName\": \"XJE\"\n                },\n                \"custcol_je_linelo\": \"1168356\",\n                // \"cseg_legal_entity\": {\n                //     \"id\": \"31\"\n                //     // \"refName\": \"51HMS\"\n                // },\n                \"department\": {\n                    // \"id\": \"75\",\n                    \"refName\": \"34604\"\n                },\n                \"memo\": \"Load Beg Bal FY24\"\n            }\n        ]\n    },\n    \"subsidiary\": {\n        \"id\": \"1\"\n    }\n    // \"tranDate\": \"2024-02-03\",\n    // \"tranId\": \"JE05\",\n    // \"void\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/journalEntry",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "journalEntry"
+          ],
+          "query": [
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "suiteQL get PurrchOrd",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Prefer",
+            "value": "transient",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"q\": \"SELECT * FROM Transaction WHERE type ='PurchOrd' AND tranid = 'PO739372';\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/query/v1/suiteql",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "query",
+            "v1",
+            "suiteql"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true",
+              "disabled": true
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "suiteQL get item",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Prefer",
+            "value": "transient",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"q\": \"SELECT DISTINCT vb.id AS vendor_bill_id, vb.tranid AS vendor_bill_tranid, ABS(vb.total) AS vendor_bill_total, vb.trandate AS vendor_bill_date, vb.status AS vendor_bill_status FROM nexttransactionlinelink l JOIN transaction vb ON vb.id = l.nextdoc WHERE l.previousdoc = 12399672 AND l.linktype = 'OrdBill' AND (vb.recordtype = 'VendBill' OR vb.type = 'VendBill') ORDER BY vb.trandate DESC\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/query/v1/suiteql",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "query",
+            "v1",
+            "suiteql"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true",
+              "disabled": true
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "suiteQL invetorybalance",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Prefer",
+            "value": "transient",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"q\": \"SELECT id, tranId, entity, status FROM transaction WHERE recordtype = 'purchaseorder' AND tranId = 'PO2040727'\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/query/v1/suiteql",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "query",
+            "v1",
+            "suiteql"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true",
+              "disabled": true
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "suiteQL invetory location",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Prefer",
+            "value": "transient",
+            "type": "text"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"q\": \"SELECT * FROM inventoryitemlocations WHERE item=3504\"\n}\n",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/query/v1/suiteql",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "query",
+            "v1",
+            "suiteql"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true",
+              "disabled": true
+            },
+            {
+              "key": "simpleEnumFormat",
+              "value": "true",
+              "disabled": true
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create purchaseOrder",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"department\": {\n        \"refName\": \"08555\"\n    },\n    \"classRef\": {\n        \"refName\": \"1093\"\n    },\n    \"entity\": {\n        \"id\": \"3176\"\n    },\n    \"location\": {\n        \"refName\": \"8555SO\"\n    },\n    \"item\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"02258715479180\"\n                },\n                \"quantity\": 1,\n                \"department\": {\n                    \"refName\": \"08555\"\n                },\n                \"installStatus\": {\n                    \"id\": \"1\"\n                },\n                \"rate\": 3.73,\n                \"soNo\": \"12048510aa\",\n                \"glSourceName\": {\n                    \"refName\": \"XPO\"\n                },\n                \"legalEntity\": {\n                    \"id\": \"31\"\n                }\n            }\n        ]\n    },\n    \"orderDate\": \"2025-04-02\",\n    \"orderNumber\": \"1694174\",\n    \"partOrderNumber\": \"1694174\",\n    \"custbody_pdcc_so_no\": \"123\",\n    \"customForm\": {\n        \"id\": \"333\"\n    },\n    \"glSourceName\": {\n        \"refName\": \"XPO\"\n    },\n    \"legalEntity\": {\n        \"id\": \"31\"\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseorder",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseorder"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Inventory Adjustment",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    //   \"customForm\": {\n    //     \"id\": \"319\"\n    //   },\n    \"subsidiary\": {\n        \"id\": \"1\"\n    },\n    \"account\": {\n        \"id\": \"9044\"\n    },\n    \"adjLocation\": {\n        \"refName\": \"8175DS\"\n    },\n    \"department\": {\n        \"refName\": \"08175\"\n    },\n    \"class\": {\n        \"refName\": \"1093\"\n    },\n    \"cseg_legal_entity\": {\n        \"refName\": \"51HMS\"\n    },\n    \"cseg_ns_glsource\": {\n        \"refName\": \"XIV\"\n    },\n    //   \"custbody10\": \"1093\",\n    //   \"custbody_ia_created_from\": \"IR2530045\",\n    //   \"custbody_pdcc_prt_ord_no\": \"2320772\",\n    //   \"custbody_pdcc_so_no\": \"12881409\",\n    //   \"custbody_po_number\": \"PO1639715\",\n    \"memo\": \"Drop Ship to COGS PO - In Home test\",\n    //   \"tranDate\": \"2025-10-21\",\n    \"inventory\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"026110W11626074\"\n                },\n                \"location\": {\n                  \"refName\": \"7108SO\"\n                },\n                \"department\": {\n                    \"refName\": \"08175\"\n                },\n                // \"class\": {\n                //     \"refName\": \"1093\"\n                // },\n                // \"cseg_legal_entity\": {\n                //   \"id\": \"31\"\n                // },\n                // \"cseg_ns_glsource\": {\n                //   \"id\": \"49\"\n                // },\n                // \"custcol_acs_prt_ord_no\": \"2320772\",\n                // \"custcol_nscs_glstring_cogs_amount\": 120.73,\n                // \"custcol_nscs_glstring_itemasst_id\": {\n                //   \"id\": \"2727\"\n                // },\n                // \"custcol_nscs_glstring_itemgl_acct_id\": {\n                //   \"id\": \"2729\"\n                // },\n                \"adjustQtyBy\": 5\n                // \"unitCost\": 53.84\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryadjustment",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryadjustment"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "Inventory Adjustment Copy",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    //   \"customForm\": {\n    //     \"id\": \"319\"\n    //   },\n    \"subsidiary\": {\n        \"id\": \"1\"\n    },\n    \"account\": {\n        \"id\": \"9044\"\n    },\n    \"adjLocation\": {\n        \"refName\": \"8175DS\"\n    },\n    \"department\": {\n        \"refName\": \"08175\"\n    },\n    \"class\": {\n        \"refName\": \"1093\"\n    },\n    \"cseg_legal_entity\": {\n        \"refName\": \"51HMS\"\n    },\n    \"cseg_ns_glsource\": {\n        \"refName\": \"XIV\"\n    },\n    //   \"custbody10\": \"1093\",\n    //   \"custbody_ia_created_from\": \"IR2530045\",\n    //   \"custbody_pdcc_prt_ord_no\": \"2320772\",\n    //   \"custbody_pdcc_so_no\": \"12881409\",\n    //   \"custbody_po_number\": \"PO1639715\",\n    \"memo\": \"Drop Ship to COGS PO - In Home test\",\n    //   \"tranDate\": \"2025-10-21\",\n    \"inventory\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"026110W11626074\"\n                },\n                \"location\": {\n                  \"refName\": \"7108SO\"\n                },\n                \"department\": {\n                    \"refName\": \"08175\"\n                },\n                // \"class\": {\n                //     \"refName\": \"1093\"\n                // },\n                // \"cseg_legal_entity\": {\n                //   \"id\": \"31\"\n                // },\n                // \"cseg_ns_glsource\": {\n                //   \"id\": \"49\"\n                // },\n                // \"custcol_acs_prt_ord_no\": \"2320772\",\n                // \"custcol_nscs_glstring_cogs_amount\": 120.73,\n                // \"custcol_nscs_glstring_itemasst_id\": {\n                //   \"id\": \"2727\"\n                // },\n                // \"custcol_nscs_glstring_itemgl_acct_id\": {\n                //   \"id\": \"2729\"\n                // },\n                \"adjustQtyBy\": 5\n                // \"unitCost\": 53.84\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryadjustment",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryadjustment"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create po itemReceipt",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"item\": {\n        \"items\": [\n            {\n                \"orderLine\": 2,\n                \"itemReceive\": true,\n                \"cseg_ns_glsource\": {\n                    \"refName\": \"XIV\"\n                }\n            },\n            {\n                \"orderLine\": 3,\n                \"itemReceive\": true,\n                \"cseg_ns_glsource\": {\n                    \"refName\": \"XIV\"\n                }\n            },\n            {\n                \"orderLine\": 4,\n                \"itemReceive\": true,\n                \"cseg_ns_glsource\": {\n                    \"refName\": \"XIV\"\n                }\n            },\n            {\n                \"orderLine\": 5,\n                \"itemReceive\": true,\n                \"cseg_ns_glsource\": {\n                    \"refName\": \"XIV\"\n                }\n            }\n        ]\n    },\n    \"tranDate\": \"2025-07-19\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseOrder/12772051/!transform/itemReceipt",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseOrder",
+            "12772051",
+            "!transform",
+            "itemReceipt"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create vendor bill",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"expense\": {\n        \"items\": [\n            {\n                \"orderLine\": 5,\n                \"cseg_ns_glsource\": {\n                    \"refName\": \"XAP\"\n                }\n            }\n        ]\n    },\n    \"tranId\": \"65201473-3\",\n    \"custbodynsps_billdate\": \"2025-06-02\",\n    \"approvalStatus\": {\n        \"id\": \"2\"\n    },\n    \"department\": {\n        \"refName\": \"54586\"\n    },\n    \"cseg_legal_entity\": {\n        \"id\": \"31\"\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/purchaseOrder/12769428/!transform/vendorBill",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "purchaseOrder",
+            "12769428",
+            "!transform",
+            "vendorBill"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create vendor bill Copy",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"entity\": {\n        \"id\": \"26219\"\n    },\n    \"account\": {\n        \"id\": \"111\"\n    },\n    \"approvalStatus\": {\n        \"id\": \"2\"\n    },\n    \"class\": {\n        \"id\": \"1249\"\n    },\n    \"cseg_legal_entity\": {\n        \"id\": \"31\"\n    },\n    \"custbodynsps_billdate\": \"2025-06-30\",\n    \"tranDate\": \"2025-06-30\",\n    \"tranId\": \"65850563-3\",\n    \"memo\": \"POxxxx PD Price Difference\",\n    \"department\": {\n        \"id\": \"1175\"\n    },\n    \"expense\": {\n        \"items\": [\n            {\n                \"amount\": 19.5,\n                \"memo\": \"Freight Expense\",\n                \"department\": {\n                    \"refName\": \"07670\"\n                },\n                \"account\": {\n                    \"id\": \"3041\"\n                }\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/vendorBill",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "vendorBill"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get invetoryitem",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"itemList\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"07191765139\"\n                },\n                \"quantity\": 1\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryItem/2787",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryItem",
+            "2787"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get invetoryitem Copy",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"isInactive\": false\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryItem/1546256",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryItem",
+            "1546256"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get transfer order by id",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/transferorder/171922?expandSubResources=true",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "transferorder",
+            "171922"
+          ],
+          "query": [
+            {
+              "key": "expandSubResources",
+              "value": "true"
+            }
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "patch transfer order by id",
+      "request": {
+        "method": "PATCH",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"custbody_aimscwo_orddate\": \"2024-07-05\"\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/transferorder/1034420",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "transferorder",
+            "1034420"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "create transfer order",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"department\": {\n        \"refName\": \"08998\"\n    },\n    \"class\": {\n        \"refName\": \"1093\"\n    },\n    \"custbody_aimscwo_orddate\": \"2024-06-05\",\n    \"custbody_aimscwo_ordnum\": \"123\",\n    \"customForm\": {\n        \"id\": \"342\"\n    },\n    \"location\": {\n        \"refName\": \"8998\"\n    },\n    \"transferLocation\": {\n        \"refName\": \"4766\"\n    },\n    \"item\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"07191765139\"\n                },\n                \"quantity\": 1,\n                \"department\": {\n                    \"refName\": \"08998\"\n                }\n            },\n            {\n                \"item\": {\n                    \"refName\": \"026909DE16782E\"\n                },\n                \"quantity\": 2,\n                \"department\": {\n                    \"refName\": \"08998\"\n                }\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/transferorder",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "transferorder"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get invetoryitem by external id",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"memo\": \"Item Fulfillment for Transfer Order 12345\",\n    // \"shipStatus\": \"shipped\",\n    \"item\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"07191765139\"\n                },\n                \"quantity\": 1\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/inventoryitem/eid:026417131777700",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "inventoryitem",
+            "eid:026417131777700"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "get location by externalId",
+      "protocolProfileBehavior": {
+        "disableBodyPruning": true
+      },
+      "request": {
+        "method": "GET",
+        "header": [],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n    \"memo\": \"Item Fulfillment for Transfer Order 12345\",\n    // \"shipStatus\": \"shipped\",\n    \"item\": {\n        \"items\": [\n            {\n                \"item\": {\n                    \"refName\": \"07191765139\"\n                },\n                \"quantity\": 1\n            }\n        ]\n    }\n}",
+          "options": {
+            "raw": {
+              "language": "json"
+            }
+          }
+        },
+        "url": {
+          "raw": "{{url}}/record/v1/location/eid:4766",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "location",
+            "eid:4766"
+          ]
+        }
+      },
+      "response": []
+    },
+    {
+      "name": "New Request",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{url}}/record/v1/department/1175",
+          "host": [
+            "{{url}}"
+          ],
+          "path": [
+            "record",
+            "v1",
+            "department",
+            "1175"
+          ]
+        }
+      },
+      "response": []
+    }
+  ],
+  "auth": {
+    "type": "oauth1",
+    "oauth1": [
+      {
+        "key": "realm",
+        "value": "{{account}}",
+        "type": "string"
+      },
+      {
+        "key": "tokenSecret",
+        "value": "{{token_secret}}",
+        "type": "string"
+      },
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      },
+      {
+        "key": "consumerSecret",
+        "value": "{{consumer_secret}}",
+        "type": "string"
+      },
+      {
+        "key": "consumerKey",
+        "value": "{{consumer_key}}",
+        "type": "string"
+      },
+      {
+        "key": "addParamsToHeader",
+        "value": true,
+        "type": "boolean"
+      },
+      {
+        "key": "signatureMethod",
+        "value": "HMAC-SHA256",
+        "type": "string"
+      },
+      {
+        "key": "version",
+        "value": "1.0",
+        "type": "string"
+      },
+      {
+        "key": "addEmptyParamsToSign",
+        "value": false,
+        "type": "boolean"
+      }
+    ]
+  },
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    },
+    {
+      "listen": "test",
+      "script": {
+        "type": "text/javascript",
+        "packages": {},
+        "exec": [
+          ""
+        ]
+      }
+    }
+  ]
+}
