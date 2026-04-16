@@ -111,6 +111,34 @@ interface DecommConversationsProps {
   initialTruckNumber?: string;
 }
 
+interface BatchRecipient {
+  ldap: string;
+  truckNumber: string;
+  vin: string;
+  address: string;
+  zipCode: string;
+  phone: string;
+  fullName: string;
+  contactPhone: string | null;
+  contactName: string | null;
+  contactType: string;
+}
+
+interface BatchResult {
+  truckNumber: string;
+  status: string;
+  error?: string;
+}
+
+const TEMPLATE_VARS = [
+  { label: "Truck #", value: "{{TruckNumber}}" },
+  { label: "VIN", value: "{{VIN}}" },
+  { label: "Address", value: "{{Address}}" },
+  { label: "Phone", value: "{{Phone}}" },
+  { label: "Name", value: "{{Name}}" },
+  { label: "Zip Code", value: "{{ZipCode}}" },
+];
+
 export function DecommConversations({ vehicleData, initialTruckNumber }: DecommConversationsProps) {
   const { toast } = useToast();
   const [selectedTruck, setSelectedTruck] = useState<string | null>(initialTruckNumber ?? null);
@@ -120,6 +148,18 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [newConvSearch, setNewConvSearch] = useState("");
   const [contactType, setContactType] = useState<string>("tech");
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const [batchOpen, setBatchOpen] = useState(false);
+  const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
+  const [batchLdapInput, setBatchLdapInput] = useState("");
+  const [batchContactType, setBatchContactType] = useState<string>("tech");
+  const [batchRecipients, setBatchRecipients] = useState<BatchRecipient[]>([]);
+  const [batchUnresolved, setBatchUnresolved] = useState<string[]>([]);
+  const [batchTemplate, setBatchTemplate] = useState("");
+  const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
+  const [batchResolving, setBatchResolving] = useState(false);
+  const [batchSending, setBatchSending] = useState(false);
+  const batchTemplateRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -269,6 +309,92 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     }
   };
 
+  const handleBatchOpen = () => {
+    setBatchOpen(true);
+    setBatchStep("import");
+    setBatchLdapInput("");
+    setBatchRecipients([]);
+    setBatchUnresolved([]);
+    setBatchTemplate("");
+    setBatchResults([]);
+  };
+
+  const handleBatchResolve = async () => {
+    const raw = batchLdapInput.trim();
+    if (!raw) return;
+    const ldaps = raw.split(/[\n,;\t]+/).map(s => s.trim()).filter(Boolean);
+    if (ldaps.length === 0) return;
+
+    setBatchResolving(true);
+    try {
+      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", { ldaps, contactType: batchContactType });
+      const data = await resp.json();
+      setBatchRecipients(data.resolved || []);
+      setBatchUnresolved(data.unresolved || []);
+      setBatchStep("compose");
+    } catch (err: any) {
+      toast({ title: "Error", description: err.message, variant: "destructive" });
+    } finally {
+      setBatchResolving(false);
+    }
+  };
+
+  const insertTemplateVar = (varStr: string) => {
+    const el = batchTemplateRef.current;
+    if (!el) {
+      setBatchTemplate(prev => prev + varStr);
+      return;
+    }
+    const start = el.selectionStart;
+    const end = el.selectionEnd;
+    const before = batchTemplate.slice(0, start);
+    const after = batchTemplate.slice(end);
+    setBatchTemplate(before + varStr + after);
+    setTimeout(() => {
+      el.focus();
+      el.setSelectionRange(start + varStr.length, start + varStr.length);
+    }, 0);
+  };
+
+  const renderPreview = (template: string, r: BatchRecipient) => {
+    return template
+      .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
+      .replace(/\{\{VIN\}\}/gi, r.vin || '')
+      .replace(/\{\{Address\}\}/gi, r.address || '')
+      .replace(/\{\{Phone\}\}/gi, r.phone || '')
+      .replace(/\{\{Name\}\}/gi, r.contactName || r.fullName || '')
+      .replace(/\{\{ZipCode\}\}/gi, r.zipCode || '');
+  };
+
+  const handleBatchSend = async () => {
+    const validRecipients = batchRecipients.filter(r => r.contactPhone);
+    if (validRecipients.length === 0) {
+      toast({ title: "No recipients with phone numbers", variant: "destructive" });
+      return;
+    }
+
+    setBatchSending(true);
+    try {
+      const resp = await apiRequest("POST", "/api/fs/decomm-batch-text", {
+        recipients: validRecipients,
+        messageTemplate: batchTemplate,
+        contactType: batchContactType,
+      });
+      const data = await resp.json();
+      setBatchResults(data.results || []);
+      setBatchStep("results");
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
+      toast({
+        title: "Batch text complete",
+        description: `${data.sent} sent, ${data.failed} failed out of ${data.total}`,
+      });
+    } catch (err: any) {
+      toast({ title: "Batch send failed", description: err.message, variant: "destructive" });
+    } finally {
+      setBatchSending(false);
+    }
+  };
+
   const filteredConversations = conversations.filter((c) => {
     if (!searchQuery) return true;
     const q = searchQuery.toLowerCase();
@@ -310,15 +436,27 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               data-testid="input-decomm-conv-search"
             />
           </div>
-          <Button
-            size="sm"
-            className="w-full"
-            onClick={() => setNewConvOpen(true)}
-            data-testid="button-new-decomm-conversation"
-          >
-            <Plus className="w-3.5 h-3.5 mr-1.5" />
-            New Conversation
-          </Button>
+          <div className="flex gap-1.5">
+            <Button
+              size="sm"
+              className="flex-1"
+              onClick={() => setNewConvOpen(true)}
+              data-testid="button-new-decomm-conversation"
+            >
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              New
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex-1"
+              onClick={handleBatchOpen}
+              data-testid="button-batch-text"
+            >
+              <Users className="w-3.5 h-3.5 mr-1.5" />
+              Batch Text
+            </Button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
@@ -643,6 +781,239 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               )}
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={batchOpen} onOpenChange={(open) => { if (!open) setBatchOpen(false); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5" />
+              Batch Text
+              {batchStep !== "import" && (
+                <span className="text-xs font-normal text-muted-foreground ml-2">
+                  Step: {batchStep === "compose" ? "2 — Compose" : batchStep === "preview" ? "3 — Preview" : "4 — Results"}
+                </span>
+              )}
+            </DialogTitle>
+          </DialogHeader>
+
+          {batchStep === "import" && (
+            <div className="space-y-4">
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Paste LDAPs / Enterprise IDs</label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  One per line, or separated by commas. You can also paste Truck Numbers.
+                </p>
+                <Textarea
+                  value={batchLdapInput}
+                  onChange={(e) => setBatchLdapInput(e.target.value)}
+                  placeholder={"JSMITH1\nADOE02\nRJONES\n...or paste from Excel"}
+                  className="min-h-[180px] font-mono text-sm"
+                  data-testid="batch-ldap-input"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {batchLdapInput.split(/[\n,;\t]+/).filter(s => s.trim()).length} entries detected
+                </p>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Send to</label>
+                <Select value={batchContactType} onValueChange={setBatchContactType}>
+                  <SelectTrigger className="w-48" data-testid="batch-contact-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="tech">Tech (Mobile Phone)</SelectItem>
+                    <SelectItem value="nearest_tech">Nearest Tech</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setBatchOpen(false)}>Cancel</Button>
+                <Button
+                  onClick={handleBatchResolve}
+                  disabled={batchResolving || !batchLdapInput.trim()}
+                  data-testid="batch-resolve-btn"
+                >
+                  {batchResolving ? <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 animate-spin" /> Resolving...</span> : "Resolve & Continue"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {batchStep === "compose" && (
+            <div className="space-y-4">
+              {batchUnresolved.length > 0 && (
+                <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3">
+                  <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-1">
+                    {batchUnresolved.length} LDAP(s) not found in decommissioning list:
+                  </p>
+                  <p className="text-xs text-amber-700 dark:text-amber-400 font-mono">
+                    {batchUnresolved.join(", ")}
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <p className="text-sm font-medium mb-1">
+                  {batchRecipients.length} recipient{batchRecipients.length !== 1 ? "s" : ""} matched
+                  {batchRecipients.filter(r => !r.contactPhone).length > 0 && (
+                    <span className="text-amber-600 text-xs ml-2">
+                      ({batchRecipients.filter(r => !r.contactPhone).length} missing phone)
+                    </span>
+                  )}
+                </p>
+                <div className="max-h-32 overflow-y-auto border rounded-md text-xs">
+                  <table className="w-full">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-1.5 font-medium">LDAP</th>
+                        <th className="text-left p-1.5 font-medium">Truck #</th>
+                        <th className="text-left p-1.5 font-medium">Name</th>
+                        <th className="text-left p-1.5 font-medium">Phone</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchRecipients.map((r, i) => (
+                        <tr key={i} className={`border-t ${!r.contactPhone ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                          <td className="p-1.5 font-mono">{r.ldap}</td>
+                          <td className="p-1.5 font-mono">{r.truckNumber.replace(/^0+/, "")}</td>
+                          <td className="p-1.5">{r.contactName || r.fullName || "-"}</td>
+                          <td className="p-1.5 font-mono">{r.contactPhone || <span className="text-amber-600">No phone</span>}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-sm font-medium mb-1.5 block">Message Template</label>
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {TEMPLATE_VARS.map((v) => (
+                    <Button
+                      key={v.value}
+                      variant="outline"
+                      size="sm"
+                      className="text-xs h-6 px-2"
+                      onClick={() => insertTemplateVar(v.value)}
+                    >
+                      {v.label}
+                    </Button>
+                  ))}
+                </div>
+                <Textarea
+                  ref={batchTemplateRef}
+                  value={batchTemplate}
+                  onChange={(e) => setBatchTemplate(e.target.value)}
+                  placeholder="Hi {{Name}}, your truck {{TruckNumber}} (VIN: {{VIN}}) at {{Address}} is scheduled for decommissioning..."
+                  className="min-h-[120px] text-sm"
+                  data-testid="batch-template-input"
+                />
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={() => setBatchStep("import")}>Back</Button>
+                <Button
+                  onClick={() => setBatchStep("preview")}
+                  disabled={!batchTemplate.trim() || batchRecipients.filter(r => r.contactPhone).length === 0}
+                  data-testid="batch-preview-btn"
+                >
+                  Preview Messages
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {batchStep === "preview" && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium mb-2">
+                  Preview — {batchRecipients.filter(r => r.contactPhone).length} messages will be sent
+                </p>
+                <div className="max-h-72 overflow-y-auto space-y-2">
+                  {batchRecipients.filter(r => r.contactPhone).map((r, i) => (
+                    <div key={i} className="border rounded-md p-2.5 text-sm">
+                      <div className="flex items-center gap-2 mb-1.5 text-xs text-muted-foreground">
+                        <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
+                        <span>{r.contactName || r.fullName}</span>
+                        <span className="font-mono">{r.contactPhone}</span>
+                      </div>
+                      <p className="whitespace-pre-wrap text-sm bg-muted/30 rounded p-2">{renderPreview(batchTemplate, r)}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex justify-between">
+                <Button variant="outline" onClick={() => setBatchStep("compose")}>Back</Button>
+                <Button
+                  onClick={handleBatchSend}
+                  disabled={batchSending}
+                  className="bg-primary"
+                  data-testid="batch-send-btn"
+                >
+                  {batchSending ? (
+                    <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 animate-spin" /> Sending...</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Send {batchRecipients.filter(r => r.contactPhone).length} Messages</span>
+                  )}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {batchStep === "results" && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-3">
+                <div className="rounded-md border p-3 text-center">
+                  <p className="text-2xl font-bold text-green-600">{batchResults.filter(r => r.status === "sent").length}</p>
+                  <p className="text-xs text-muted-foreground">Sent</p>
+                </div>
+                <div className="rounded-md border p-3 text-center">
+                  <p className="text-2xl font-bold text-red-600">{batchResults.filter(r => r.status === "failed").length}</p>
+                  <p className="text-xs text-muted-foreground">Failed</p>
+                </div>
+                <div className="rounded-md border p-3 text-center">
+                  <p className="text-2xl font-bold text-amber-600">{batchResults.filter(r => r.status === "skipped").length}</p>
+                  <p className="text-xs text-muted-foreground">Skipped</p>
+                </div>
+              </div>
+
+              {batchResults.filter(r => r.status !== "sent").length > 0 && (
+                <div className="max-h-40 overflow-y-auto border rounded-md text-xs">
+                  <table className="w-full">
+                    <thead className="bg-muted/50 sticky top-0">
+                      <tr>
+                        <th className="text-left p-1.5 font-medium">Truck #</th>
+                        <th className="text-left p-1.5 font-medium">Status</th>
+                        <th className="text-left p-1.5 font-medium">Error</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {batchResults.filter(r => r.status !== "sent").map((r, i) => (
+                        <tr key={i} className="border-t">
+                          <td className="p-1.5 font-mono">{r.truckNumber}</td>
+                          <td className="p-1.5">
+                            <Badge variant={r.status === "failed" ? "destructive" : "secondary"} className="text-[10px]">
+                              {r.status}
+                            </Badge>
+                          </td>
+                          <td className="p-1.5 text-muted-foreground">{r.error || "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="flex justify-end">
+                <Button onClick={() => setBatchOpen(false)}>Done</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

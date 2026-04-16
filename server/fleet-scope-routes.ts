@@ -15159,5 +15159,138 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  app.post("/decomm-batch-resolve", async (req, res) => {
+    try {
+      const { ldaps, contactType } = req.body;
+      if (!ldaps || !Array.isArray(ldaps) || ldaps.length === 0) {
+        return res.status(400).json({ message: "ldaps array is required" });
+      }
+
+      const allVehicles = await getDb().select().from(decommissioningVehicles);
+      const ldapSet = new Set(ldaps.map((l: string) => l.trim().toUpperCase()));
+
+      const resolved: any[] = [];
+      const unresolved: string[] = [];
+
+      for (const ldap of ldapSet) {
+        const vehicle = allVehicles.find(v =>
+          v.enterpriseId?.toUpperCase() === ldap ||
+          v.truckNumber === ldap.padStart(6, '0')
+        );
+        if (!vehicle) {
+          unresolved.push(ldap);
+          continue;
+        }
+
+        let phone: string | null = null;
+        let contactName: string | null = null;
+        const ct = contactType || 'tech';
+        if (ct === 'tech') {
+          phone = vehicle.mobilePhone;
+          contactName = vehicle.fullName;
+        } else if (ct === 'nearest_tech') {
+          phone = vehicle.nearestTechPhone;
+          contactName = vehicle.nearestTechName;
+        }
+
+        resolved.push({
+          ldap,
+          truckNumber: vehicle.truckNumber,
+          vin: vehicle.vin || '',
+          address: vehicle.address || '',
+          zipCode: vehicle.zipCode || '',
+          phone: vehicle.mobilePhone || vehicle.phone || '',
+          fullName: vehicle.fullName || '',
+          contactPhone: phone,
+          contactName,
+          contactType: ct,
+        });
+      }
+
+      res.json({ resolved, unresolved });
+    } catch (error: any) {
+      console.error("[DecommBatch] Error resolving LDAPs:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/decomm-batch-text", async (req, res) => {
+    try {
+      const { recipients, messageTemplate, contactType, sentBy, senderName } = req.body;
+      if (!recipients || !Array.isArray(recipients) || recipients.length === 0 || !messageTemplate) {
+        return res.status(400).json({ message: "recipients array and messageTemplate are required" });
+      }
+
+      const results: { truckNumber: string; status: string; error?: string }[] = [];
+      let sent = 0;
+      let failed = 0;
+
+      for (const r of recipients) {
+        if (!r.contactPhone) {
+          results.push({ truckNumber: r.truckNumber, status: 'skipped', error: 'No phone number' });
+          failed++;
+          continue;
+        }
+
+        const body = messageTemplate
+          .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
+          .replace(/\{\{VIN\}\}/gi, r.vin || '')
+          .replace(/\{\{Address\}\}/gi, r.address || '')
+          .replace(/\{\{Phone\}\}/gi, r.phone || '')
+          .replace(/\{\{Name\}\}/gi, r.contactName || r.fullName || '')
+          .replace(/\{\{ZipCode\}\}/gi, r.zipCode || '');
+
+        const normalized = r.truckNumber.padStart(6, '0');
+        const formattedPhone = r.contactPhone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
+
+        try {
+          const sid = await sendTwilioMessage(formattedPhone, body);
+
+          const [msg] = await getDb().insert(decommMessages).values({
+            truckNumber: normalized,
+            contactType: r.contactType || contactType || 'tech',
+            contactName: r.contactName || null,
+            contactPhone: formattedPhone,
+            direction: 'outbound',
+            body,
+            status: 'sent',
+            twilioSid: sid,
+            sentBy: sentBy || null,
+            senderName: senderName || null,
+          }).returning();
+
+          broadcastMessage(normalized, { message: msg, source: 'decomm' });
+          results.push({ truckNumber: r.truckNumber, status: 'sent' });
+          sent++;
+        } catch (err: any) {
+          console.error(`[DecommBatch] Failed to send to ${r.truckNumber}:`, err.message);
+          await getDb().insert(decommMessages).values({
+            truckNumber: normalized,
+            contactType: r.contactType || contactType || 'tech',
+            contactName: r.contactName || null,
+            contactPhone: formattedPhone,
+            direction: 'outbound',
+            body,
+            status: 'failed',
+            sentBy: sentBy || null,
+            senderName: senderName || null,
+          });
+          results.push({ truckNumber: r.truckNumber, status: 'failed', error: err.message });
+          failed++;
+        }
+
+        if (recipients.indexOf(r) < recipients.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+      }
+
+      console.log(`[DecommBatch] Complete: ${sent} sent, ${failed} failed out of ${recipients.length}`);
+      res.json({ sent, failed, total: recipients.length, results });
+    } catch (error: any) {
+      console.error("[DecommBatch] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   return app;
 }
