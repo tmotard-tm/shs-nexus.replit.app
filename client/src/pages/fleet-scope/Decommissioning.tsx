@@ -93,6 +93,7 @@ export default function Decommissioning() {
   const termFileInputRef = useRef<HTMLInputElement>(null);
   const [activeView, setActiveView] = useState<"table" | "conversations">("table");
   const [convTruck, setConvTruck] = useState<string | null>(null);
+  const [tableTab, setTableTab] = useState<"active" | "decommissioned">("active");
 
   // Column filters
   const [dateFilter, setDateFilter] = useState<string>("");
@@ -436,7 +437,7 @@ export default function Decommissioning() {
   };
 
   const handleExport = async () => {
-    const exportData = filteredVehicles.map((v) => ({
+    const exportData = displayedVehicles.map((v) => ({
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
       "Assigned": v.isAssigned ? "Yes" : "No",
@@ -533,6 +534,10 @@ export default function Decommissioning() {
     return 0;
   });
 
+  const activeVehicles = filteredVehicles.filter(v => !v.sentToProcurement);
+  const decommissionedVehicles = filteredVehicles.filter(v => v.sentToProcurement);
+  const displayedVehicles = tableTab === "active" ? activeVehicles : decommissionedVehicles;
+
   const SortIcon = ({ dir }: { dir: SortDir }) =>
     dir === "asc" ? <ArrowUp className="h-3 w-3 inline ml-1" /> :
     dir === "desc" ? <ArrowDown className="h-3 w-3 inline ml-1" /> :
@@ -544,7 +549,7 @@ export default function Decommissioning() {
         <div className="flex items-center gap-4">
           <h1 className="text-xl font-semibold" data-testid="text-page-title">Decommissioning</h1>
           <span className="text-muted-foreground">
-            {filteredVehicles.length} vehicle{filteredVehicles.length !== 1 ? "s" : ""}
+            {displayedVehicles.length} vehicle{displayedVehicles.length !== 1 ? "s" : ""}
           </span>
         </div>
 
@@ -635,7 +640,7 @@ export default function Decommissioning() {
           <Button
             variant="outline"
             onClick={handleExport}
-            disabled={filteredVehicles.length === 0}
+            disabled={displayedVehicles.length === 0}
             data-testid="button-export"
           >
             <Download className="h-4 w-4 mr-2" />
@@ -746,15 +751,40 @@ export default function Decommissioning() {
           initialTruckNumber={convTruck ?? undefined}
         />
       ) : (
+      <>
+      <div className="flex items-center gap-1 mb-3">
+        <Button
+          variant={tableTab === "active" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTableTab("active")}
+          data-testid="tab-active-vehicles"
+        >
+          Active
+          <span className="ml-1.5 text-xs opacity-80">({activeVehicles.length})</span>
+        </Button>
+        <Button
+          variant={tableTab === "decommissioned" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTableTab("decommissioned")}
+          className={tableTab === "decommissioned" ? "bg-emerald-600 hover:bg-emerald-700" : ""}
+          data-testid="tab-decommissioned-vehicles"
+        >
+          <Package className="h-3.5 w-3.5 mr-1.5" />
+          Decommissioned
+          <span className="ml-1.5 text-xs opacity-80">({decommissionedVehicles.length})</span>
+        </Button>
+      </div>
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
             <div className="flex items-center justify-center py-12">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
-          ) : filteredVehicles.length === 0 ? (
+          ) : displayedVehicles.length === 0 ? (
             <div className="text-center py-12 text-muted-foreground">
-              {searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
+              {tableTab === "decommissioned"
+                ? "No decommissioned trucks. Trucks appear here when \"Sent to Procurement\" is checked."
+                : searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
             </div>
           ) : (
             <div className="overflow-auto max-h-[calc(100vh-280px)]">
@@ -857,7 +887,7 @@ export default function Decommissioning() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredVehicles.map((vehicle) => (
+                  {displayedVehicles.map((vehicle) => (
                     <TableRow key={vehicle.id} data-testid={`row-vehicle-${vehicle.truckNumber}`} className={vehicle.sentToProcurement ? "bg-emerald-50 dark:bg-emerald-950/30" : ""}>
                       <TableCell className="font-mono font-medium">
                         <div className="flex items-center gap-1.5">
@@ -1076,6 +1106,7 @@ export default function Decommissioning() {
           )}
         </CardContent>
       </Card>
+      </>
       )}
 
       <Dialog open={!!termDialogVehicle} onOpenChange={(open) => { if (!open) setTermDialogVehicle(null); }}>
