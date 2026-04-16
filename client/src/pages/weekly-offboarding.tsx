@@ -156,10 +156,28 @@ export default function WeeklyOffboarding() {
   });
   const openRentalEidSet = new Set<string>((openRentalEids?.enterpriseIds || []).map(id => id.toUpperCase()));
 
-  // Collect all truck numbers from termRoster for batch fetch (including manual overrides)
+  // ===== BYOV Tab data (must be before truckNumbers so we include BYOV trucks in the batch nexus fetch) =====
+  const [byovSearch, setByovSearch] = useState("");
+
+  const { data: byovEnrollments = [], isLoading: byovLoading, refetch: refetchByov } = useQuery<ByovEnrollment[]>({
+    queryKey: ['/api/byov-enrollments'],
+  });
+
+  // ===== LOA Tab data (must be before truckNumbers so we include LOA trucks in the batch nexus fetch) =====
+  const [loaSearch, setLoaSearch] = useState("");
+  const [loaStatusFilter, setLoaStatusFilter] = useState<string>("all");
+  const [loaSortDateWorked, setLoaSortDateWorked] = useState<"default" | "asc" | "desc">("default");
+
+  const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
+    queryKey: ['/api/loa-trucks-to-recover'],
+  });
+
+  // Collect all truck numbers from all tabs for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
     ...termRoster.map(entry => entry.lastKnownTruckLu ?? entry.truck).filter((truck): truck is string => !!truck),
     ...Object.values(manualTruckOverrides),
+    ...byovEnrollments.map(e => e.truck_number?.toString().trim()).filter((t): t is string => !!t),
+    ...loaTechs.map(e => e.lastKnownTruck?.trim()).filter((t): t is string => !!t),
   ]));
 
   // Batch fetch nexus data for all trucks in the list
@@ -451,13 +469,7 @@ export default function WeeklyOffboarding() {
     return 'secondary';
   };
 
-  // ===== BYOV Tab state & data fetching =====
-  const [byovSearch, setByovSearch] = useState("");
-
-  const { data: byovEnrollments = [], isLoading: byovLoading, refetch: refetchByov } = useQuery<ByovEnrollment[]>({
-    queryKey: ['/api/byov-enrollments'],
-  });
-
+  // ===== BYOV Tab mutations & derived =====
   const backfillByovMutation = useMutation({
     mutationFn: async () => {
       const res = await apiRequest('POST', '/api/byov-enrollments/backfill');
@@ -478,15 +490,7 @@ export default function WeeklyOffboarding() {
       }, byovEnrollments[0].created_at)
     : null;
 
-  // ===== LOA / Paid Leave / Suspended Tab state & data fetching =====
-  const [loaSearch, setLoaSearch] = useState("");
-  const [loaStatusFilter, setLoaStatusFilter] = useState<string>("all");
-  const [loaSortDateWorked, setLoaSortDateWorked] = useState<"default" | "asc" | "desc">("default");
-
-  const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
-    queryKey: ['/api/loa-trucks-to-recover'],
-  });
-
+  // ===== LOA / Paid Leave / Suspended Tab derived =====
   const filteredLoa = loaTechs.filter(e => {
     if (loaStatusFilter !== "all" && e.employmentStatus !== loaStatusFilter) return false;
     if (!loaSearch.trim()) return true;
