@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
@@ -19,12 +20,12 @@ interface BodyField {
   label: string;
   placeholder: string;
   required?: boolean;
-  type?: "text" | "boolean";
+  type?: "text" | "boolean" | "json";
 }
 
 interface Endpoint {
   id: string;
-  group: "Debug" | "Trucks" | "Assignments";
+  group: "Debug" | "Trucks" | "Assignments" | "Receive Tasks" | "Return Tasks" | "Inventory";
   method: HttpMethod;
   name: string;
   description: string;
@@ -68,7 +69,12 @@ const ENDPOINTS: Endpoint[] = [
       { key: "description", label: "Description", placeholder: "Zone A delivery truck", type: "text" },
       { key: "subsidiary", label: "Subsidiary", placeholder: "1093", type: "text" },
       { key: "parentLocation", label: "Parent Location", placeholder: "Main Warehouse", type: "text" },
+      { key: "externalId", label: "External ID", placeholder: "EXT-001", type: "text" },
+      { key: "costCenter", label: "Cost Center", placeholder: "CC-500", type: "text" },
+      { key: "regionNo", label: "Region No", placeholder: "R01", type: "text" },
+      { key: "createdBy", label: "Created By", placeholder: "jsmith", type: "text" },
       { key: "isActive", label: "Active", placeholder: "", type: "boolean" },
+      { key: "spareTruck", label: "Spare Truck", placeholder: "", type: "boolean" },
     ],
   },
   {
@@ -95,7 +101,12 @@ const ENDPOINTS: Endpoint[] = [
       { key: "description", label: "Description", placeholder: "Zone A delivery truck", type: "text" },
       { key: "subsidiary", label: "Subsidiary", placeholder: "1093", type: "text" },
       { key: "parentLocation", label: "Parent Location", placeholder: "Main Warehouse", type: "text" },
+      { key: "externalId", label: "External ID", placeholder: "EXT-001", type: "text" },
+      { key: "costCenter", label: "Cost Center", placeholder: "CC-500", type: "text" },
+      { key: "regionNo", label: "Region No", placeholder: "R01", type: "text" },
+      { key: "createdBy", label: "Created By", placeholder: "jsmith", type: "text" },
       { key: "isActive", label: "Active", placeholder: "", type: "boolean" },
+      { key: "spareTruck", label: "Spare Truck", placeholder: "", type: "boolean" },
     ],
   },
   {
@@ -106,7 +117,10 @@ const ENDPOINTS: Endpoint[] = [
     description: "Disables the truck location in NetSuite. This cannot be undone from Nexus.",
     path: "/api/wms/trucks/:truckId",
     pathParams: ["truckId"],
-    bodyFields: [],
+    bodyFields: [
+      { key: "costCenter", label: "Cost Center", placeholder: "CC-500", type: "text" },
+      { key: "updatedBy", label: "Updated By", placeholder: "jsmith", type: "text" },
+    ],
   },
   {
     id: "create-assignment",
@@ -149,10 +163,74 @@ const ENDPOINTS: Endpoint[] = [
     group: "Assignments",
     method: "DELETE",
     name: "Delete Assignment",
-    description: "Removes the tech-to-truck assignment from NetSuite.",
+    description: "Removes the tech-to-truck assignment from NetSuite. Forwards techId and useCaseId in the request body.",
     path: "/api/wms/assignments/:techId",
     pathParams: ["techId"],
+    bodyFields: [
+      { key: "techId", label: "Tech ID", placeholder: "11024631241", type: "text" },
+    ],
+  },
+  {
+    id: "get-receive-tasks",
+    group: "Receive Tasks",
+    method: "GET",
+    name: "Get Receive Tasks",
+    description: "Returns all pending receive tasks for the specified truck.",
+    path: "/api/wms/trucks/:truckId/receive-tasks",
+    pathParams: ["truckId"],
     bodyFields: [],
+  },
+  {
+    id: "submit-receive-task",
+    group: "Receive Tasks",
+    method: "POST",
+    name: "Submit Receive Task",
+    description: "Submits a new receive task for the specified truck in NetSuite.",
+    path: "/api/wms/trucks/:truckId/receive-tasks",
+    pathParams: ["truckId"],
+    bodyFields: [
+      { key: "ldapId", label: "LDAP ID", placeholder: "jsmith", type: "text" },
+      { key: "techId", label: "Tech ID", placeholder: "RWATT1", type: "text" },
+      { key: "truckId", label: "Truck ID", placeholder: "TRUCK-1234", type: "text" },
+      { key: "unitId", label: "Unit ID", placeholder: "UNIT-001", type: "text" },
+      { key: "orderNum", label: "Order Number", placeholder: "ORD-9001", type: "text" },
+      { key: "netSuitePoNum", label: "NetSuite PO Num", placeholder: "PO-5001", type: "text" },
+      { key: "netSuiteIdNum", label: "NetSuite ID Num", placeholder: "NS-1234", type: "text" },
+      { key: "vendorOrderNum", label: "Vendor Order Num", placeholder: "VON-0001", type: "text" },
+      { key: "scacCode", label: "SCAC Code", placeholder: "FEDX", type: "text" },
+      { key: "taskType", label: "Task Type", placeholder: "RECEIVE", type: "text" },
+      { key: "receivedAt", label: "Received At", placeholder: "2026-04-16T12:00:00Z", type: "text" },
+      { key: "details", label: "Details (JSON array)", placeholder: '[{"partNum":"ABC","qty":2}]', type: "json" },
+    ],
+  },
+  {
+    id: "get-return-tasks",
+    group: "Return Tasks",
+    method: "GET",
+    name: "Get Return Tasks",
+    description: "Returns all return tasks for the specified truck, including RMA numbers, return type, ship-to address, and scheduled deletion date.",
+    path: "/api/wms/trucks/:truckId/return-tasks",
+    pathParams: ["truckId"],
+    bodyFields: [],
+  },
+  {
+    id: "submit-inventory-count",
+    group: "Inventory",
+    method: "POST",
+    name: "Process Inventory Count",
+    description: "Submits an inventory count for the specified truck. Provide inventory date, type, technician, and unit details.",
+    path: "/api/wms/trucks/:truckId/inventory-count",
+    pathParams: ["truckId"],
+    bodyFields: [
+      { key: "ldapId", label: "LDAP ID", placeholder: "jsmith", type: "text" },
+      { key: "techId", label: "Tech ID", placeholder: "RWATT1", type: "text" },
+      { key: "truckId", label: "Truck ID", placeholder: "TRUCK-1234", type: "text" },
+      { key: "unitId", label: "Unit ID", placeholder: "UNIT-001", type: "text" },
+      { key: "inventoryDate", label: "Inventory Date", placeholder: "2026-04-16T12:00:00Z", type: "text" },
+      { key: "inventoryType", label: "Inventory Type", placeholder: "FULL", type: "text" },
+      { key: "taskRefNum", label: "Task Ref Num", placeholder: "TASK-001", type: "text" },
+      { key: "inventoryDetails", label: "Inventory Details (JSON array)", placeholder: '[{"binId":"A01","items":[{"itemId":"P001","qty":5}]}]', type: "json" },
+    ],
   },
 ];
 
@@ -241,8 +319,15 @@ function ConfigBanner() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function WmsEnginePage() {
-  const groups = ["Debug", "Trucks", "Assignments"] as const;
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({ Debug: true, Trucks: true, Assignments: true });
+  const groups = ["Debug", "Trucks", "Assignments", "Receive Tasks", "Return Tasks", "Inventory"] as const;
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
+    Debug: true,
+    Trucks: true,
+    Assignments: true,
+    "Receive Tasks": true,
+    "Return Tasks": true,
+    Inventory: true,
+  });
   const [selected, setSelected] = useState<Endpoint>(ENDPOINTS[0]);
 
   const [pathParams, setPathParams] = useState<Record<string, string>>({});
@@ -268,6 +353,27 @@ export default function WmsEnginePage() {
     setSendError(null);
   }
 
+  function buildRequestBody(): string | undefined {
+    if (selected.bodyFields.length === 0) return undefined;
+    const payload: Record<string, unknown> = {};
+    for (const field of selected.bodyFields) {
+      const val = bodyValues[field.key];
+      if (field.type === "json") {
+        const raw = (val as string).trim();
+        if (raw) {
+          try {
+            payload[field.key] = JSON.parse(raw);
+          } catch {
+            payload[field.key] = raw;
+          }
+        }
+      } else {
+        payload[field.key] = val;
+      }
+    }
+    return JSON.stringify(payload);
+  }
+
   function toggleGroup(g: string) {
     setOpenGroups((prev) => ({ ...prev, [g]: !prev[g] }));
   }
@@ -281,7 +387,7 @@ export default function WmsEnginePage() {
 
     const url = resolvedPath(selected.path, pathParams);
     const hasBody = selected.bodyFields.length > 0;
-    const body = hasBody ? JSON.stringify(bodyValues) : undefined;
+    const body = buildRequestBody();
 
     const t0 = performance.now();
     try {
@@ -442,6 +548,21 @@ export default function WmsEnginePage() {
                                 checked={bodyValues[field.key] === true}
                                 onCheckedChange={(v) =>
                                   setBodyValues((b) => ({ ...b, [field.key]: v }))
+                                }
+                              />
+                            </div>
+                          ) : field.type === "json" ? (
+                            <div key={field.key}>
+                              <Label className="text-xs mb-1 block">
+                                {field.label}
+                                {field.required && <span className="text-destructive ml-0.5">*</span>}
+                              </Label>
+                              <Textarea
+                                className="text-xs font-mono resize-y min-h-[72px]"
+                                placeholder={field.placeholder}
+                                value={(bodyValues[field.key] as string) || ""}
+                                onChange={(e) =>
+                                  setBodyValues((b) => ({ ...b, [field.key]: e.target.value }))
                                 }
                               />
                             </div>

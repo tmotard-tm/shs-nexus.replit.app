@@ -18,17 +18,27 @@
  *
  * Methods:
  *  Trucks:
- *   - createTruck       — POST   /wms-engine/v1/trucks
- *   - getAllTrucks       — GET    /wms-engine/v1/trucks
- *   - getTruck          — GET    /wms-engine/v1/trucks/:truckId
- *   - updateTruck       — POST   /wms-engine/v1/trucks/:truckId
- *   - deleteTruck       — DELETE /wms-engine/v1/trucks/:truckId
+ *   - createTruck          — POST   /wms-engine/v1/trucks
+ *   - getAllTrucks          — GET    /wms-engine/v1/trucks
+ *   - getTruck             — GET    /wms-engine/v1/trucks/:truckId
+ *   - updateTruck          — POST   /wms-engine/v1/trucks/:truckId
+ *   - deleteTruck          — DELETE /wms-engine/v1/trucks/:truckId
  *
  *  Assignments:
- *   - createAssignment  — POST   /wms-engine/v1/trucks/assignments
- *   - getAssignment     — GET    /wms-engine/v1/trucks/assignments/:techId
- *   - updateAssignment  — PUT    /wms-engine/v1/trucks/assignments/:techId
- *   - deleteAssignment  — DELETE /wms-engine/v1/trucks/assignments/:techId
+ *   - createAssignment     — POST   /wms-engine/v1/trucks/assignments
+ *   - getAssignment        — GET    /wms-engine/v1/trucks/assignments/:techId
+ *   - updateAssignment     — PUT    /wms-engine/v1/trucks/assignments/:techId
+ *   - deleteAssignment     — DELETE /wms-engine/v1/trucks/assignments/:techId
+ *
+ *  Receive Tasks:
+ *   - getReceiveTasks      — GET    /wms-engine/v1/trucks/:truckId/receive-tasks
+ *   - submitReceiveTask    — POST   /wms-engine/v1/trucks/:truckId/receive-tasks
+ *
+ *  Return Tasks:
+ *   - getReturnTasks       — GET    /wms-engine/v1/trucks/:truckId/return-tasks
+ *
+ *  Inventory Count:
+ *   - submitInventoryCount — POST   /wms-engine/v1/trucks/:truckId/inventory-count
  */
 
 import { request as undiciRequest } from "undici";
@@ -200,6 +210,11 @@ export interface TruckRequest {
   isActive: boolean;
   subsidiary?: string;
   parentLocation?: string;
+  externalId?: string;
+  costCenter?: string;
+  regionNo?: string;
+  createdBy?: string;
+  spareTruck?: boolean;
 }
 
 export interface TruckResponse {
@@ -210,9 +225,16 @@ export interface TruckResponse {
   isActive: boolean;
   subsidiary?: string;
   parentLocation?: string;
+  externalId?: string;
   netsuiteId?: string;
   status?: string;
   message?: string;
+}
+
+export interface DeleteTruckBody {
+  useCaseId?: string;
+  costCenter?: string;
+  updatedBy?: string;
 }
 
 export interface TruckAssignmentRequest {
@@ -228,6 +250,11 @@ export interface TruckAssignmentResponse {
   message?: string;
 }
 
+export interface DeleteAssignmentBody {
+  techId?: string;
+  useCaseId?: string;
+}
+
 export interface NetSuiteTruckAssignmentResponse {
   id?: string;
   name?: string;
@@ -239,6 +266,32 @@ export interface NetSuiteTruckAssignmentResponse {
   bins?: any[];
   status?: string;
   message?: string;
+}
+
+export interface ReceiveTaskRequest {
+  ldapId?: string;
+  netSuiteIdNum?: string;
+  netSuitePoNum?: string;
+  orderNum?: string;
+  receivedAt?: string;
+  scacCode?: string;
+  taskType?: string;
+  techId?: string;
+  truckId?: string;
+  unitId?: string;
+  vendorOrderNum?: string;
+  details?: any[];
+}
+
+export interface InventoryCountRequest {
+  inventoryDate?: string;
+  inventoryDetails?: any[];
+  inventoryType?: string;
+  ldapId?: string;
+  taskRefNum?: string;
+  techId?: string;
+  truckId?: string;
+  unitId?: string;
 }
 
 export const wmsEngineService = {
@@ -287,10 +340,15 @@ export const wmsEngineService = {
     });
   },
 
-  async deleteTruck(truckId: string): Promise<TruckResponse> {
+  async deleteTruck(truckId: string, extra: DeleteTruckBody = {}): Promise<TruckResponse> {
+    const body = {
+      useCaseId: extra.useCaseId || WMS_ENGINE_USE_CASE_ID,
+      ...(extra.costCenter !== undefined && { costCenter: extra.costCenter }),
+      ...(extra.updatedBy !== undefined && { updatedBy: extra.updatedBy }),
+    };
     return apiFetch(`/wms-engine/v1/trucks/${encodeURIComponent(truckId)}`, {
       method: "DELETE",
-      body: JSON.stringify({ useCaseId: WMS_ENGINE_USE_CASE_ID }),
+      body: JSON.stringify(body),
     });
   },
 
@@ -324,10 +382,51 @@ export const wmsEngineService = {
     );
   },
 
-  async deleteAssignment(techId: string): Promise<TruckAssignmentResponse> {
+  async deleteAssignment(techId: string, extra: DeleteAssignmentBody = {}): Promise<TruckAssignmentResponse> {
+    const body = {
+      techId: extra.techId || techId,
+      useCaseId: extra.useCaseId || WMS_ENGINE_USE_CASE_ID,
+    };
     return apiFetch(
       `/wms-engine/v1/trucks/assignments/${encodeURIComponent(techId)}?useCaseId=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
-      { method: "DELETE" }
+      {
+        method: "DELETE",
+        body: JSON.stringify(body),
+      }
+    );
+  },
+
+  async getReceiveTasks(truckId: string): Promise<any> {
+    return apiFetch(
+      `/wms-engine/v1/trucks/${encodeURIComponent(truckId)}/receive-tasks?useCase=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
+      { method: "GET" }
+    );
+  },
+
+  async submitReceiveTask(truckId: string, data: ReceiveTaskRequest): Promise<any> {
+    return apiFetch(
+      `/wms-engine/v1/trucks/${encodeURIComponent(truckId)}/receive-tasks?useCase=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
+    );
+  },
+
+  async getReturnTasks(truckId: string): Promise<any> {
+    return apiFetch(
+      `/wms-engine/v1/trucks/${encodeURIComponent(truckId)}/return-tasks?useCase=${encodeURIComponent(WMS_ENGINE_USE_CASE_ID)}`,
+      { method: "GET" }
+    );
+  },
+
+  async submitInventoryCount(truckId: string, data: InventoryCountRequest): Promise<any> {
+    return apiFetch(
+      `/wms-engine/v1/trucks/${encodeURIComponent(truckId)}/inventory-count`,
+      {
+        method: "POST",
+        body: JSON.stringify(data),
+      }
     );
   },
 
