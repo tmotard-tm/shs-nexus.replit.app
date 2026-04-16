@@ -1333,16 +1333,18 @@ export const regMessages = pgTable("fs_reg_messages", {
   truckNumber: text("truck_number").notNull(),
   techId: text("tech_id"),
   techPhone: text("tech_phone").notNull(),
-  direction: text("direction").notNull(), // 'inbound' | 'outbound'
+  direction: text("direction").notNull(),
   body: text("body").notNull(),
-  status: text("status").default("sent"), // 'queued'|'sent'|'delivered'|'failed'|'received'
+  status: text("status").default("sent"),
   twilioSid: text("twilio_sid"),
   sentAt: timestamp("sent_at").default(sql`now()`),
   readAt: timestamp("read_at"),
   sentBy: text("sent_by"),
   senderName: text("sender_name"),
   autoTriggered: boolean("auto_triggered").default(false),
-  triggerType: text("trigger_type"), // 'expiry'|'mismatch'|'manual'
+  triggerType: text("trigger_type"),
+  mediaUrl: text("media_url"),
+  mediaType: text("media_type"),
 });
 
 export const insertRegMessageSchema = createInsertSchema(regMessages).omit({ id: true, sentAt: true });
@@ -1426,6 +1428,8 @@ export const decommMessages = pgTable("fs_decomm_messages", {
   readAt: timestamp("read_at"),
   sentBy: text("sent_by"),
   senderName: text("sender_name"),
+  mediaUrl: text("media_url"),
+  mediaType: text("media_type"),
 });
 
 export const insertDecommMessageSchema = createInsertSchema(decommMessages).omit({ id: true, sentAt: true });

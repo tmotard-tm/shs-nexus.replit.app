@@ -659,8 +659,25 @@ CREATE TABLE IF NOT EXISTS "fs_decomm_messages" (
   "sent_at" timestamp DEFAULT now(),
   "read_at" timestamp,
   "sent_by" text,
-  "sender_name" text
+  "sender_name" text,
+  "media_url" text,
+  "media_type" text
 );
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_url') THEN
+    ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_url" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_type') THEN
+    ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_type" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_reg_messages' AND column_name='media_url') THEN
+    ALTER TABLE "fs_reg_messages" ADD COLUMN "media_url" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_reg_messages' AND column_name='media_type') THEN
+    ALTER TABLE "fs_reg_messages" ADD COLUMN "media_type" text;
+  END IF;
+END $$;
 `;
 
 let initialized = false;

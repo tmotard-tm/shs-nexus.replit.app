@@ -14418,7 +14418,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             truckNumber: msg.truckNumber,
             techPhone: msg.techPhone,
             techId: msg.techId,
-            lastMessage: msg.body,
+            lastMessage: msg.body || (msg.mediaUrl ? '\ud83d\udcf7 Photo' : ''),
             lastMessageAt: msg.sentAt,
             unreadCount: 0,
           });
@@ -14560,61 +14560,270 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // POST /api/webhooks/twilio-reg — Twilio inbound SMS webhook
+  async function downloadTwilioMedia(mediaUrl: string, contentType: string, prefix: string): Promise<{ storageKey: string; mediaType: string }> {
+    const { Client } = await import("@replit/object-storage");
+    const client = new Client();
+    const accountSid = process.env.FS_TWILIO_ACCOUNT_SID || '';
+    const authToken = process.env.FS_TWILIO_AUTH_TOKEN || '';
+
+    const allowedHosts = ['api.twilio.com', 'media.twiliocdn.com'];
+    try {
+      const parsed = new URL(mediaUrl);
+      if (!allowedHosts.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+        throw new Error(`Rejected media URL from untrusted host: ${parsed.hostname}`);
+      }
+    } catch (e: any) {
+      if (e.message.startsWith('Rejected')) throw e;
+      throw new Error(`Invalid media URL: ${mediaUrl}`);
+    }
+
+    const resp = await fetch(mediaUrl, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64') },
+      redirect: 'follow',
+    });
+    if (!resp.ok) throw new Error(`Failed to download media from Twilio: ${resp.status}`);
+    const buffer = Buffer.from(await resp.arrayBuffer());
+
+    const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg'
+      : contentType.includes('png') ? 'png'
+      : contentType.includes('gif') ? 'gif'
+      : contentType.includes('webp') ? 'webp'
+      : contentType.includes('pdf') ? 'pdf'
+      : contentType.includes('mp4') ? 'mp4'
+      : 'bin';
+
+    const storageKey = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    await client.uploadFromBytes(storageKey, buffer);
+    console.log(`[MMS] Stored media: ${storageKey} (${contentType}, ${buffer.length} bytes)`);
+    return { storageKey, mediaType: contentType };
+  }
+
+  function validateTwilioSignature(req: any, webhookPath: string): boolean {
+    const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
+    if (!authToken) {
+      console.warn('[Twilio] FS_TWILIO_AUTH_TOKEN not set — skipping signature validation (dev mode)');
+      return true;
+    }
+    try {
+      const twilio = require('twilio');
+      const signature = req.headers['x-twilio-signature'] as string || '';
+      const webhookUrl = `${req.protocol}://${req.get('host')}${webhookPath}`;
+      return twilio.validateRequest(authToken, signature, webhookUrl, req.body);
+    } catch (err: any) {
+      console.error('[Twilio] Signature validation error:', err.message);
+      return false;
+    }
+  }
+
+  // POST /api/webhooks/twilio-reg — Twilio inbound SMS/MMS webhook
   app.post("/webhooks/twilio-reg", async (req, res) => {
     try {
-      // Validate Twilio signature if auth token is configured
-      const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
-      if (authToken) {
-        const twilio = await import('twilio');
-        const signature = req.headers['x-twilio-signature'] as string || '';
-        const webhookUrl = `${req.protocol}://${req.get('host')}/api/fs/webhooks/twilio-reg`;
-        const isValid = twilio.validateRequest(authToken, signature, webhookUrl, req.body);
-        if (!isValid) {
-          console.warn('[RegMsg] Invalid Twilio signature on webhook request');
-          res.set("Content-Type", "text/xml");
-          return res.status(403).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
-        }
+      if (!validateTwilioSignature(req, '/api/fs/webhooks/twilio-reg')) {
+        console.warn('[RegMsg] Invalid Twilio signature on webhook request');
+        res.set("Content-Type", "text/xml");
+        return res.status(403).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
       }
 
-      const { From, Body, MessageSid } = req.body;
+      const { From, Body, MessageSid, NumMedia } = req.body;
+      const numMedia = parseInt(NumMedia || '0', 10);
 
-      if (!From || !Body) {
+      if (!From || (!Body && numMedia === 0)) {
         res.set("Content-Type", "text/xml");
         return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
       }
 
+      let mediaUrl: string | null = null;
+      let mediaType: string | null = null;
+
+      if (numMedia > 0) {
+        const twilioMediaUrl = req.body['MediaUrl0'];
+        const twilioMediaType = req.body['MediaContentType0'] || 'application/octet-stream';
+        if (twilioMediaUrl) {
+          try {
+            const result = await downloadTwilioMedia(twilioMediaUrl, twilioMediaType, 'mms/reg');
+            mediaUrl = result.storageKey;
+            mediaType = result.mediaType;
+          } catch (err: any) {
+            console.error('[RegMsg] Failed to download MMS media:', err.message);
+          }
+        }
+      }
+
       const fromDigits = From.replace(/\D/g, '').slice(-10);
 
-      // Look up which truck this phone belongs to
       const lookup = await getTechPhoneLookup();
       const techInfo = lookup.get(fromDigits);
 
       const truckNumber = techInfo?.truckNumber || 'UNKNOWN';
       const techId = techInfo?.techId || null;
 
-      console.log(`[RegMsg] Inbound SMS from ${From} (truck ${truckNumber}): ${Body.slice(0, 80)}`);
+      const logBody = Body ? Body.slice(0, 80) : '(media only)';
+      console.log(`[RegMsg] Inbound ${numMedia > 0 ? 'MMS' : 'SMS'} from ${From} (truck ${truckNumber}): ${logBody}`);
 
       const [msg] = await getDb().insert(regMessages).values({
         truckNumber,
         techId,
         techPhone: From,
         direction: 'inbound',
-        body: Body,
+        body: Body || '',
         status: 'received',
         twilioSid: MessageSid || null,
         autoTriggered: false,
+        mediaUrl,
+        mediaType,
       }).returning();
 
       broadcastMessage(truckNumber, { message: msg });
 
-      // Always respond with empty TwiML
       res.set("Content-Type", "text/xml");
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
     } catch (error: any) {
       console.error("[RegMsg] Webhook error:", error);
       res.set("Content-Type", "text/xml");
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // POST /api/webhooks/twilio-decomm — Twilio inbound SMS/MMS webhook for decommissioning
+  app.post("/webhooks/twilio-decomm", async (req, res) => {
+    try {
+      if (!validateTwilioSignature(req, '/api/fs/webhooks/twilio-decomm')) {
+        console.warn('[DecommMsg] Invalid Twilio signature on webhook request');
+        res.set("Content-Type", "text/xml");
+        return res.status(403).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      }
+
+      const { From, Body, MessageSid, NumMedia } = req.body;
+      const numMedia = parseInt(NumMedia || '0', 10);
+
+      if (!From || (!Body && numMedia === 0)) {
+        res.set("Content-Type", "text/xml");
+        return res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      }
+
+      let mediaUrl: string | null = null;
+      let mediaType: string | null = null;
+
+      if (numMedia > 0) {
+        const twilioMediaUrl = req.body['MediaUrl0'];
+        const twilioMediaType = req.body['MediaContentType0'] || 'application/octet-stream';
+        if (twilioMediaUrl) {
+          try {
+            const result = await downloadTwilioMedia(twilioMediaUrl, twilioMediaType, 'mms/decomm');
+            mediaUrl = result.storageKey;
+            mediaType = result.mediaType;
+          } catch (err: any) {
+            console.error('[DecommMsg] Failed to download MMS media:', err.message);
+          }
+        }
+      }
+
+      const fromDigits = From.replace(/\D/g, '').slice(-10);
+
+      const decommVehicles = await getDb()
+        .select({ truckNumber: decommissioningVehicles.truckNumber, mobilePhone: decommissioningVehicles.mobilePhone, nearestTechPhone: decommissioningVehicles.nearestTechPhone, nearestTechName: decommissioningVehicles.nearestTechName, fullName: decommissioningVehicles.fullName })
+        .from(decommissioningVehicles);
+
+      let matchedTruck = 'UNKNOWN';
+      let contactType = 'tech';
+      let contactName: string | null = null;
+
+      for (const v of decommVehicles) {
+        const techDigits = (v.mobilePhone || '').replace(/\D/g, '').slice(-10);
+        const nearestDigits = (v.nearestTechPhone || '').replace(/\D/g, '').slice(-10);
+        if (techDigits === fromDigits) {
+          matchedTruck = v.truckNumber;
+          contactType = 'tech';
+          contactName = v.fullName || null;
+          break;
+        }
+        if (nearestDigits === fromDigits) {
+          matchedTruck = v.truckNumber;
+          contactType = 'nearest_tech';
+          contactName = v.nearestTechName || null;
+          break;
+        }
+      }
+
+      const logBody = Body ? Body.slice(0, 80) : '(media only)';
+      console.log(`[DecommMsg] Inbound ${numMedia > 0 ? 'MMS' : 'SMS'} from ${From} (truck ${matchedTruck}, ${contactType}): ${logBody}`);
+
+      const [msg] = await getDb().insert(decommMessages).values({
+        truckNumber: matchedTruck,
+        contactType,
+        contactName,
+        contactPhone: From,
+        direction: 'inbound',
+        body: Body || '',
+        status: 'received',
+        mediaUrl,
+        mediaType,
+      }).returning();
+
+      broadcastMessage(matchedTruck, { message: msg, source: 'decomm' });
+
+      res.set("Content-Type", "text/xml");
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    } catch (error: any) {
+      console.error("[DecommMsg] Webhook error:", error);
+      res.set("Content-Type", "text/xml");
+      res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  app.get("/mms-media/:key(*)", requireFsAuth, async (req, res) => {
+    try {
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const storageKey = req.params.key;
+
+      if (!storageKey.startsWith('mms/')) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const result = await client.downloadAsBytes(storageKey);
+      if (!result.ok) {
+        return res.status(404).json({ message: "Media not found" });
+      }
+
+      const ext = storageKey.split('.').pop()?.toLowerCase() || '';
+      const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', mp4: 'video/mp4' };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+
+      res.set('Content-Type', contentType);
+      res.set('Content-Disposition', `inline; filename="media.${ext}"`);
+      res.send(Buffer.from(result.value));
+    } catch (error: any) {
+      console.error("[MMS] Error serving media:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/mms-media-download/:key(*)", requireFsAuth, async (req, res) => {
+    try {
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const storageKey = req.params.key;
+
+      if (!storageKey.startsWith('mms/')) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+
+      const result = await client.downloadAsBytes(storageKey);
+      if (!result.ok) {
+        return res.status(404).json({ message: "Media not found" });
+      }
+
+      const ext = storageKey.split('.').pop()?.toLowerCase() || '';
+      const mimeMap: Record<string, string> = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', pdf: 'application/pdf', mp4: 'video/mp4' };
+      const contentType = mimeMap[ext] || 'application/octet-stream';
+
+      res.set('Content-Type', contentType);
+      res.set('Content-Disposition', `attachment; filename="mms-media.${ext}"`);
+      res.send(Buffer.from(result.value));
+    } catch (error: any) {
+      console.error("[MMS] Error downloading media:", error);
+      res.status(500).json({ message: error.message });
     }
   });
 
@@ -14826,7 +15035,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             contactPhone: msg.contactPhone,
             contactType: msg.contactType,
             contactName: msg.contactName,
-            lastMessage: msg.body,
+            lastMessage: msg.body || (msg.mediaUrl ? '\ud83d\udcf7 Photo' : ''),
             lastMessageAt: msg.sentAt,
             unreadCount: 0,
           });

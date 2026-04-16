@@ -21,6 +21,7 @@ import {
   Truck,
   Clock,
   X,
+  Download,
 } from "lucide-react";
 import {
   Dialog,
@@ -44,6 +45,8 @@ interface RegMessage {
   senderName: string | null;
   autoTriggered: boolean;
   triggerType: string | null;
+  mediaUrl: string | null;
+  mediaType: string | null;
 }
 
 interface Conversation {
@@ -485,7 +488,40 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
                       {msg.direction === "outbound" && msg.senderName && (
                         <p className="text-xs opacity-70 mb-1">{msg.senderName}</p>
                       )}
-                      <p className="whitespace-pre-wrap break-words">{msg.body}</p>
+                      {msg.mediaUrl && msg.mediaType?.startsWith('image/') && (
+                        <div className="mb-1.5">
+                          <a href={`/api/fs/mms-media/${msg.mediaUrl}`} target="_blank" rel="noopener noreferrer">
+                            <img
+                              src={`/api/fs/mms-media/${msg.mediaUrl}`}
+                              alt="MMS attachment"
+                              className="rounded max-w-full max-h-60 cursor-pointer hover:opacity-90 transition-opacity"
+                            />
+                          </a>
+                          <a
+                            href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+                            className={`inline-flex items-center gap-1 text-xs mt-1 hover:underline ${
+                              msg.direction === "outbound" ? "text-primary-foreground/80" : "text-muted-foreground"
+                            }`}
+                          >
+                            <Download className="h-3 w-3" />
+                            Download
+                          </a>
+                        </div>
+                      )}
+                      {msg.mediaUrl && !msg.mediaType?.startsWith('image/') && (
+                        <a
+                          href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+                          className={`inline-flex items-center gap-1.5 text-xs mb-1 px-2 py-1 rounded border hover:underline ${
+                            msg.direction === "outbound"
+                              ? "border-primary-foreground/30 text-primary-foreground/80"
+                              : "border-border text-muted-foreground"
+                          }`}
+                        >
+                          <Download className="h-3 w-3" />
+                          Download attachment ({msg.mediaType?.split('/')[1] || 'file'})
+                        </a>
+                      )}
+                      {msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
                       <div className={`flex items-center gap-1 mt-1 ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
                         <span className="text-xs opacity-60">
                           {formatTime(msg.sentAt)}
