@@ -1411,3 +1411,23 @@ export const callLogs = pgTable("fs_call_logs", {
 export const insertCallLogSchema = createInsertSchema(callLogs).omit({ id: true, createdAt: true });
 export type CallLog = typeof callLogs.$inferSelect;
 export type InsertCallLog = z.infer<typeof insertCallLogSchema>;
+
+export const decommMessages = pgTable("fs_decomm_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  truckNumber: text("truck_number").notNull(),
+  contactType: text("contact_type").notNull(),
+  contactName: text("contact_name"),
+  contactPhone: text("contact_phone").notNull(),
+  direction: text("direction").notNull(),
+  body: text("body").notNull(),
+  status: text("status").default("sent"),
+  twilioSid: text("twilio_sid"),
+  sentAt: timestamp("sent_at").default(sql`now()`),
+  readAt: timestamp("read_at"),
+  sentBy: text("sent_by"),
+  senderName: text("sender_name"),
+});
+
+export const insertDecommMessageSchema = createInsertSchema(decommMessages).omit({ id: true, sentAt: true });
+export type DecommMessage = typeof decommMessages.$inferSelect;
+export type InsertDecommMessage = z.infer<typeof insertDecommMessageSchema>;

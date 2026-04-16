@@ -2,7 +2,7 @@ import { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
-import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages } from "@shared/fleet-scope-schema";
+import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles } from "@shared/fleet-scope-schema";
 import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
@@ -14795,6 +14795,158 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     } catch (error: any) {
       console.error("[RentalSync] Manual sync failed:", error);
       res.status(500).json({ message: error.message || "Rental Ops sync failed" });
+    }
+  });
+
+  // ============================================================
+  // DECOMMISSIONING MESSAGING — Bidirectional SMS with technicians
+  // ============================================================
+
+  app.get("/decomm-conversations", async (req, res) => {
+    try {
+      const allMessages = await getDb()
+        .select()
+        .from(decommMessages)
+        .orderBy(desc(decommMessages.sentAt));
+
+      const conversationMap = new Map<string, {
+        truckNumber: string;
+        contactPhone: string;
+        contactType: string;
+        contactName: string | null;
+        lastMessage: string;
+        lastMessageAt: Date | null;
+        unreadCount: number;
+      }>();
+
+      for (const msg of allMessages) {
+        if (!conversationMap.has(msg.truckNumber)) {
+          conversationMap.set(msg.truckNumber, {
+            truckNumber: msg.truckNumber,
+            contactPhone: msg.contactPhone,
+            contactType: msg.contactType,
+            contactName: msg.contactName,
+            lastMessage: msg.body,
+            lastMessageAt: msg.sentAt,
+            unreadCount: 0,
+          });
+        }
+        const conv = conversationMap.get(msg.truckNumber)!;
+        if (msg.direction === 'inbound' && !msg.readAt) {
+          conv.unreadCount++;
+        }
+      }
+
+      res.json(Array.from(conversationMap.values()));
+    } catch (error: any) {
+      console.error("[DecommMsg] Error fetching conversations:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/decomm-messages/:truckNumber", async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const normalized = truckNumber.padStart(6, '0');
+      const messages = await getDb()
+        .select()
+        .from(decommMessages)
+        .where(eq(decommMessages.truckNumber, normalized))
+        .orderBy(decommMessages.sentAt);
+      res.json(messages);
+    } catch (error: any) {
+      console.error("[DecommMsg] Error fetching messages:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/decomm-messages", async (req, res) => {
+    try {
+      const { truckNumber, contactType, contactPhone, contactName, body, sentBy, senderName } = req.body;
+
+      if (!truckNumber || !body || !contactType) {
+        return res.status(400).json({ message: "truckNumber, contactType, and body are required" });
+      }
+
+      let phone = contactPhone;
+
+      if (!phone) {
+        const normalized = truckNumber.padStart(6, '0');
+        const vehicles = await getDb()
+          .select()
+          .from(decommissioningVehicles)
+          .where(eq(decommissioningVehicles.truckNumber, normalized));
+        const vehicle = vehicles[0];
+        if (vehicle) {
+          if (contactType === 'tech') phone = vehicle.mobilePhone;
+          else if (contactType === 'manager') phone = null;
+          else if (contactType === 'nearest_tech') phone = vehicle.nearestTechPhone;
+        }
+      }
+
+      if (!phone) {
+        return res.status(400).json({ message: `No phone number found for ${contactType} on this truck.` });
+      }
+
+      const normalized = truckNumber.padStart(6, '0');
+      const formattedPhone = phone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
+
+      let sid: string | undefined;
+      try {
+        sid = await sendTwilioMessage(formattedPhone, body);
+      } catch (err: any) {
+        console.error("[DecommMsg] Twilio send error:", err.message);
+        const [failedMsg] = await getDb().insert(decommMessages).values({
+          truckNumber: normalized,
+          contactType,
+          contactName: contactName || null,
+          contactPhone: formattedPhone,
+          direction: 'outbound',
+          body,
+          status: 'failed',
+          sentBy: sentBy || null,
+          senderName: senderName || null,
+        }).returning();
+        return res.status(500).json({ message: "Failed to send SMS: " + err.message, savedMessage: failedMsg });
+      }
+
+      const [msg] = await getDb().insert(decommMessages).values({
+        truckNumber: normalized,
+        contactType,
+        contactName: contactName || null,
+        contactPhone: formattedPhone,
+        direction: 'outbound',
+        body,
+        status: 'sent',
+        twilioSid: sid,
+        sentBy: sentBy || null,
+        senderName: senderName || null,
+      }).returning();
+
+      broadcastMessage(normalized, { message: msg, source: 'decomm' });
+      res.json(msg);
+    } catch (error: any) {
+      console.error("[DecommMsg] Error sending message:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/decomm-messages/read/:truckNumber", async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const normalized = truckNumber.padStart(6, '0');
+      await getDb()
+        .update(decommMessages)
+        .set({ readAt: new Date() })
+        .where(and(
+          eq(decommMessages.truckNumber, normalized),
+          eq(decommMessages.direction, 'inbound'),
+          isNull(decommMessages.readAt)
+        ));
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("[DecommMsg] Error marking messages read:", error);
+      res.status(500).json({ message: error.message });
     }
   });
 

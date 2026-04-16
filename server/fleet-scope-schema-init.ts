@@ -645,6 +645,22 @@ WHERE t.main_status IS NOT NULL
   AND t.id NOT IN (
     SELECT asset_id FROM fs_pmf_status_events WHERE source = 'fleet_scope'
   );
+
+CREATE TABLE IF NOT EXISTS "fs_decomm_messages" (
+  "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "truck_number" text NOT NULL,
+  "contact_type" text NOT NULL,
+  "contact_name" text,
+  "contact_phone" text NOT NULL,
+  "direction" text NOT NULL,
+  "body" text NOT NULL,
+  "status" text DEFAULT 'sent',
+  "twilio_sid" text,
+  "sent_at" timestamp DEFAULT now(),
+  "read_at" timestamp,
+  "sent_by" text,
+  "sender_name" text
+);
 `;
 
 let initialized = false;

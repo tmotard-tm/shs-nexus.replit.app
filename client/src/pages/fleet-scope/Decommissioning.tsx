@@ -29,8 +29,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
 import { useLocation } from "wouter";
+import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
 
@@ -90,6 +91,8 @@ export default function Decommissioning() {
   const [termUploading, setTermUploading] = useState(false);
   const [termSending, setTermSending] = useState(false);
   const termFileInputRef = useRef<HTMLInputElement>(null);
+  const [activeView, setActiveView] = useState<"table" | "conversations">("table");
+  const [convTruck, setConvTruck] = useState<string | null>(null);
 
   // Column filters
   const [dateFilter, setDateFilter] = useState<string>("");
@@ -546,6 +549,28 @@ export default function Decommissioning() {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="flex items-center border rounded-lg overflow-hidden mr-2">
+            <Button
+              variant={activeView === "table" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setActiveView("table")}
+              className="rounded-none"
+              data-testid="button-view-table"
+            >
+              Table
+            </Button>
+            <Button
+              variant={activeView === "conversations" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => { setConvTruck(null); setActiveView("conversations"); }}
+              className="rounded-none"
+              data-testid="button-view-conversations"
+            >
+              <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+              Conversations
+            </Button>
+          </div>
+
           <Button
             className="bg-indigo-600 hover:bg-indigo-700 text-white"
             onClick={() => navigate("/fleet-scope/decommissioning/procurement-history")}
@@ -703,6 +728,24 @@ export default function Decommissioning() {
         </div>
       </div>
 
+      {activeView === "conversations" ? (
+        <DecommConversations
+          vehicleData={vehicles.map(v => ({
+            id: v.id,
+            truckNumber: v.truckNumber,
+            vin: v.vin,
+            address: v.address,
+            zipCode: v.zipCode,
+            fullName: v.fullName,
+            mobilePhone: v.mobilePhone,
+            managerName: v.managerName,
+            nearestTechName: v.nearestTechName,
+            nearestTechPhone: v.nearestTechPhone,
+            techMatchSource: v.techMatchSource,
+          }))}
+          initialTruckNumber={convTruck ?? undefined}
+        />
+      ) : (
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
@@ -817,7 +860,19 @@ export default function Decommissioning() {
                   {filteredVehicles.map((vehicle) => (
                     <TableRow key={vehicle.id} data-testid={`row-vehicle-${vehicle.truckNumber}`} className={vehicle.sentToProcurement ? "bg-emerald-50 dark:bg-emerald-950/30" : ""}>
                       <TableCell className="font-mono font-medium">
-                        {vehicle.truckNumber}
+                        <div className="flex items-center gap-1.5">
+                          {vehicle.truckNumber}
+                          {(vehicle.mobilePhone || vehicle.nearestTechPhone) && (
+                            <button
+                              className="text-muted-foreground hover:text-primary transition-colors"
+                              title="Open conversation"
+                              onClick={(e) => { e.stopPropagation(); setConvTruck(vehicle.truckNumber); setActiveView("conversations"); }}
+                              data-testid={`btn-conv-${vehicle.truckNumber}`}
+                            >
+                              <MessageSquare className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
                         {vehicle.sentToProcurement && (
                           <div className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium mt-0.5">Sent to auction</div>
                         )}
@@ -1021,6 +1076,7 @@ export default function Decommissioning() {
           )}
         </CardContent>
       </Card>
+      )}
 
       <Dialog open={!!termDialogVehicle} onOpenChange={(open) => { if (!open) setTermDialogVehicle(null); }}>
         <DialogContent className="sm:max-w-md">
