@@ -469,7 +469,10 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   routeCleared: boolean("route_cleared").default(false),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  truckIdx: index("vrm_repair_tracker_truck_idx").on(table.truckNumber),
+  statusIdx: index("vrm_repair_tracker_status_idx").on(table.mainStatus),
+}));
 
 export const vrmRepairTrackerActions = pgTable("vrm_repair_tracker_actions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -478,7 +481,9 @@ export const vrmRepairTrackerActions = pgTable("vrm_repair_tracker_actions", {
   notes: text("notes"),
   performedByName: varchar("performed_by_name", { length: 255 }).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+}, (table) => ({
+  repairTrackerIdx: index("vrm_rt_actions_tracker_idx").on(table.repairTrackerId),
+}));
 
 export const insertVrmRepairTrackerSchema = createInsertSchema(vrmRepairTracker).omit({
   id: true,

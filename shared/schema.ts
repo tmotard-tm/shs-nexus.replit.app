@@ -679,6 +679,21 @@ export const insertOffboardingTruckOverrideSchema = createInsertSchema(offboardi
 export type InsertOffboardingTruckOverride = z.infer<typeof insertOffboardingTruckOverrideSchema>;
 export type OffboardingTruckOverride = typeof offboardingTruckOverrides.$inferSelect;
 
+export const byovEnrollments = pgTable("byov_enrollments", {
+  enterpriseId: text("enterprise_id").primaryKey(),
+  fullName: text("full_name"),
+  truckNumber: text("truck_number"),
+  enrollmentType: text("enrollment_type"),
+  inRental: boolean("in_rental").default(false),
+  district: text("district"),
+  status: text("status").default("approved"),
+  approvedDate: text("approved_date"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type ByovEnrollment = typeof byovEnrollments.$inferSelect;
+
 // Onboarding Hires from Snowflake HR data - tracks new tech hires for weekly truck assignment
 export const onboardingHires = pgTable("onboarding_hires", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
