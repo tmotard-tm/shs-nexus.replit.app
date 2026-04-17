@@ -2,7 +2,8 @@ import { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
-import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles } from "@shared/fleet-scope-schema";
+import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots } from "@shared/fleet-scope-schema";
+import { getAmsTruckStatusMap } from "./ams-truck-status-cache";
 import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
@@ -13421,6 +13422,171 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json(vehiclesWithRental);
     } catch (error: any) {
       console.error("[Decommissioning] Error fetching vehicles:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Helper: Monday (week start) for a given Date, normalized to local 00:00.
+  function mondayOf(date: Date): Date {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const dow = d.getDay();
+    const offset = dow === 0 ? 6 : dow - 1;
+    d.setDate(d.getDate() - offset);
+    return d;
+  }
+  function isoDate(d: Date): string {
+    return d.toISOString().split("T")[0];
+  }
+
+  // Weekly count of vehicles currently in AMS with TruckStatus === "Active".
+  // Strategy: every read captures (upserts) the current week's count from the
+  // shared truck-status cache (refreshed at most every 30 min), then returns
+  // the most recent N weeks of historical snapshots.
+  app.get("/ams/active-weekly", async (req, res) => {
+    try {
+      const weeks = Math.max(
+        1,
+        Math.min(52, parseInt((req.query.weeks as string) || "8", 10) || 8),
+      );
+
+      // 1. Capture current week (best-effort; never block the read on AMS errors)
+      try {
+        const map = await getAmsTruckStatusMap();
+        let active = 0;
+        for (const status of Object.values(map)) {
+          if (status && status.toString().trim().toLowerCase() === "active") {
+            active++;
+          }
+        }
+        const currentWeekStart = isoDate(mondayOf(new Date()));
+        await getDb()
+          .insert(amsActiveWeeklySnapshots)
+          .values({ weekStart: currentWeekStart, activeCount: active })
+          .onConflictDoUpdate({
+            target: amsActiveWeeklySnapshots.weekStart,
+            set: {
+              activeCount: active,
+              capturedAt: sql`now()`,
+            },
+          });
+      } catch (err: any) {
+        console.warn(
+          "[AMS Active Weekly] Capture failed (returning cached history):",
+          err.message,
+        );
+      }
+
+      // 2. Build expected last N weeks (most recent first)
+      const todayMonday = mondayOf(new Date());
+      const expected: string[] = [];
+      for (let i = 0; i < weeks; i++) {
+        const ws = new Date(todayMonday);
+        ws.setDate(ws.getDate() - i * 7);
+        expected.push(isoDate(ws));
+      }
+
+      // 3. Pull stored rows for those weeks
+      const rows = await getDb()
+        .select()
+        .from(amsActiveWeeklySnapshots)
+        .orderBy(desc(amsActiveWeeklySnapshots.weekStart));
+      const byWeek = new Map<string, { activeCount: number; capturedAt: Date | null }>();
+      for (const r of rows) {
+        byWeek.set(r.weekStart, {
+          activeCount: r.activeCount,
+          capturedAt: (r as any).capturedAt ?? null,
+        });
+      }
+
+      const result = expected.map((weekStart) => {
+        const ws = new Date(weekStart + "T00:00:00");
+        const we = new Date(ws);
+        we.setDate(we.getDate() + 6);
+        const stored = byWeek.get(weekStart);
+        return {
+          weekStart,
+          weekEnd: isoDate(we),
+          activeCount: stored?.activeCount ?? null,
+          capturedAt: stored?.capturedAt ?? null,
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[AMS Active Weekly] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Weekly count of brand-new "Pending Arrival" PMF vehicles (events whose
+  // previous_status is NULL — i.e. first time we've seen the vehicle).
+  app.get("/pmf/new-arrivals-weekly", async (req, res) => {
+    try {
+      const weeks = Math.max(
+        1,
+        Math.min(52, parseInt((req.query.weeks as string) || "8", 10) || 8),
+      );
+      const todayMonday = mondayOf(new Date());
+      const earliest = new Date(todayMonday);
+      earliest.setDate(earliest.getDate() - (weeks - 1) * 7);
+
+      // Reuse storage; events are already ordered by effectiveAt desc
+      const events = await fleetScopeStorage.getPmfStatusEvents(
+        earliest,
+        new Date(todayMonday.getTime() + 7 * 86400000 - 1),
+      );
+
+      const counts = new Map<string, number>();
+      // Initialize buckets so empty weeks render as 0
+      for (let i = 0; i < weeks; i++) {
+        const ws = new Date(todayMonday);
+        ws.setDate(ws.getDate() - i * 7);
+        counts.set(isoDate(ws), 0);
+      }
+
+      // Track which assets we've already counted as "new" in this window —
+      // an asset can have multiple events; only its very first qualifying
+      // (previousStatus === null + status === Pending Arrival) event counts.
+      const seenAssets = new Set<string>();
+      // Iterate oldest-first to attribute "new" to the earliest week it occurred
+      const ordered = [...events].sort(
+        (a, b) =>
+          new Date(a.effectiveAt).getTime() -
+          new Date(b.effectiveAt).getTime(),
+      );
+
+      for (const ev of ordered) {
+        if (ev.previousStatus !== null && ev.previousStatus !== undefined)
+          continue;
+        const status = (ev.status || "").toLowerCase();
+        if (!(status.includes("pending") && status.includes("arrival")))
+          continue;
+        if (ev.assetId && seenAssets.has(ev.assetId)) continue;
+        if (ev.assetId) seenAssets.add(ev.assetId);
+
+        const wsKey = isoDate(mondayOf(new Date(ev.effectiveAt)));
+        if (counts.has(wsKey)) {
+          counts.set(wsKey, (counts.get(wsKey) || 0) + 1);
+        }
+      }
+
+      const result = Array.from(counts.entries())
+        .map(([weekStart, newPendingArrival]) => {
+          const ws = new Date(weekStart + "T00:00:00");
+          const we = new Date(ws);
+          we.setDate(we.getDate() + 6);
+          return {
+            weekStart,
+            weekEnd: isoDate(we),
+            newPendingArrival,
+          };
+        })
+        .sort((a, b) => (a.weekStart < b.weekStart ? 1 : -1));
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[PMF New Arrivals Weekly] Error:", error);
       res.status(500).json({ message: error.message });
     }
   });

@@ -20,6 +20,9 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   FileInput,
+  Activity,
+  ShoppingCart,
+  ClipboardList,
 } from "lucide-react";
 import {
   Table,
@@ -60,6 +63,32 @@ interface RentalWeeklyStats {
   newRentals: number;
   rentalsReturned: number;
   totalImports: number;
+}
+
+interface AmsActiveWeekly {
+  weekStart: string;
+  weekEnd: string;
+  activeCount: number | null;
+  capturedAt: string | null;
+}
+
+interface ProcurementWeekly {
+  weekStart: string;
+  weekEnd: string;
+  count: number;
+}
+
+interface PmfNewArrivalsWeekly {
+  weekStart: string;
+  weekEnd: string;
+  newPendingArrival: number;
+}
+
+function formatWeekRange(weekStart: string, weekEnd: string): string {
+  const s = new Date(weekStart + "T00:00:00");
+  const e = new Date(weekEnd + "T00:00:00");
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
+  return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}`;
 }
 
 function formatDate(dateStr: string): string {
@@ -528,7 +557,247 @@ export default function MetricsDashboard() {
             </CardContent>
           </Card>
         </div>
+
+        {/* AMS Active Vehicles (Weekly, last 8 weeks) */}
+        <div className="mt-6">
+          <AmsActiveWeeklyCard />
+        </div>
+
+        {/* Vehicles Sent to Procurement (Weekly, last 8 weeks) */}
+        <div className="mt-6">
+          <ProcurementWeeklyCard />
+        </div>
+
+        {/* PMF New Pending Arrival Vehicles (Weekly, last 8 weeks) */}
+        <div className="mt-6">
+          <PmfNewArrivalsWeeklyCard />
+        </div>
       </main>
     </div>
+  );
+}
+
+function AmsActiveWeeklyCard() {
+  const { data, isLoading } = useQuery<AmsActiveWeekly[]>({
+    queryKey: ["/api/fs/ams/active-weekly", { weeks: 8 }],
+    queryFn: async () => {
+      const res = await fetch("/api/fs/ams/active-weekly?weeks=8");
+      if (!res.ok) throw new Error("Failed to fetch AMS active-weekly");
+      return res.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Activity className="w-5 h-5" />
+          AMS Active Vehicles (Weekly, Last 8 Weeks)
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Live count of vehicles in AMS with TruckStatus = "Active". Captured
+          on each refresh; historical weeks reflect the snapshot taken during
+          that week.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : !data || data.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No AMS data available yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Week</TableHead>
+                <TableHead className="text-center">Active Vehicles</TableHead>
+                <TableHead className="text-center">Captured</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((row, idx) => (
+                <TableRow key={row.weekStart} data-testid={`row-ams-active-${row.weekStart}`}>
+                  <TableCell className="font-medium">
+                    {formatWeekRange(row.weekStart, row.weekEnd)}
+                    {idx === 0 && (
+                      <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.activeCount === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="text-green-600 font-semibold">
+                        {row.activeCount.toLocaleString()}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center text-xs text-muted-foreground">
+                    {row.capturedAt
+                      ? new Date(row.capturedAt).toLocaleString("en-US", {
+                          month: "short",
+                          day: "numeric",
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })
+                      : "—"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ProcurementWeeklyCard() {
+  const { data, isLoading } = useQuery<ProcurementWeekly[]>({
+    queryKey: ["/api/fs/decommissioning/procurement-weekly-counts"],
+    refetchInterval: 5 * 60 * 1000,
+  });
+  const last8 = (data || []).slice(0, 8);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ShoppingCart className="w-5 h-5" />
+          Vehicles Sent to Procurement (Weekly, Last 8 Weeks)
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          From the Decommissioned History tab — counts vehicles whose
+          "Sent to Procurement" timestamp falls within each week.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : last8.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No vehicles have been sent to procurement yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Week</TableHead>
+                <TableHead className="text-center">Sent to Procurement</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {last8.map((row, idx) => (
+                <TableRow key={row.weekStart} data-testid={`row-procurement-${row.weekStart}`}>
+                  <TableCell className="font-medium">
+                    {formatWeekRange(row.weekStart, row.weekEnd)}
+                    {idx === 0 && (
+                      <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.count > 0 ? (
+                      <span className="text-purple-600 font-semibold">
+                        {row.count}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PmfNewArrivalsWeeklyCard() {
+  const { data, isLoading } = useQuery<PmfNewArrivalsWeekly[]>({
+    queryKey: ["/api/fs/pmf/new-arrivals-weekly", { weeks: 8 }],
+    queryFn: async () => {
+      const res = await fetch("/api/fs/pmf/new-arrivals-weekly?weeks=8");
+      if (!res.ok) throw new Error("Failed to fetch PMF new arrivals");
+      return res.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
+  });
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <ClipboardList className="w-5 h-5" />
+          PMF New "Pending Arrival" Vehicles (Weekly, Last 8 Weeks)
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Net new vehicles entering Pending Arrival each week — counts only
+          a vehicle's first appearance, not pre-existing ones still pending.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : !data || data.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No PMF status events recorded yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Week</TableHead>
+                <TableHead className="text-center">New Pending Arrival</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {data.map((row, idx) => (
+                <TableRow key={row.weekStart} data-testid={`row-pmf-new-${row.weekStart}`}>
+                  <TableCell className="font-medium">
+                    {formatWeekRange(row.weekStart, row.weekEnd)}
+                    {idx === 0 && (
+                      <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.newPendingArrival > 0 ? (
+                      <span className="text-amber-600 font-semibold">
+                        +{row.newPendingArrival}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   );
 }

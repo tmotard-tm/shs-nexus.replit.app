@@ -13354,6 +13354,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   let amsTruckStatusCache: { data: Record<string, string | null>; builtAt: number } | null = null;
   const AMS_TRUCK_STATUS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+  // Note: A shared cache module (server/ams-truck-status-cache.ts) mirrors this
+  // logic so other route files (e.g. fleet-scope-routes) can read the same data.
   async function buildAmsTruckStatusMap(): Promise<Record<string, string | null>> {
     console.log('[AMS TruckStatusMap] Building VIN→TruckStatus map...');
 
