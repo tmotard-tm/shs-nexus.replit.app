@@ -3,7 +3,10 @@ import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
 import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots } from "@shared/fleet-scope-schema";
-import { getAmsTruckStatusMap } from "./ams-truck-status-cache";
+import {
+  getAmsTruckStatusMap,
+  getAmsOutOfServiceMap,
+} from "./ams-truck-status-cache";
 import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
@@ -13455,10 +13458,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // cache hasn't been built yet — building takes ~50s).
       (async () => {
         try {
-          const map = await getAmsTruckStatusMap();
+          // "Active" = OutOfServiceDate is "Unk/NA" (or empty/null).
+          // Vehicles with a real date in OutOfServiceDate are excluded.
+          const oosMap = await getAmsOutOfServiceMap();
           let active = 0;
-          for (const status of Object.values(map)) {
-            if (status && status.toString().trim().toLowerCase() === "active") {
+          for (const oos of Object.values(oosMap)) {
+            const v = (oos ?? "").toString().trim();
+            if (v === "" || v.toLowerCase() === "unk/na") {
               active++;
             }
           }
