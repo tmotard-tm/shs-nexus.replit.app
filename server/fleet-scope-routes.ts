@@ -13495,7 +13495,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       for (const r of rows) {
         byWeek.set(r.weekStart, {
           activeCount: r.activeCount,
-          capturedAt: (r as any).capturedAt ?? null,
+          capturedAt: r.capturedAt ?? null,
         });
       }
 
