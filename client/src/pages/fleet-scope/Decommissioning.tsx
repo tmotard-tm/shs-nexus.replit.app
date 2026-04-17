@@ -443,6 +443,7 @@ export default function Decommissioning() {
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
       "District": v.district ? v.district.replace(/^0+/, "") : "",
+      "AMS Status": v.amsStatus || "",
       "Assigned": v.isAssigned ? "Yes" : "No",
       "With Rental": v.withRental ? "Yes" : "No",
       "Date Added": v.createdAt ? new Date(v.createdAt).toLocaleDateString() : "",
