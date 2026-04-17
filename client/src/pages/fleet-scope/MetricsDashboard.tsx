@@ -23,6 +23,7 @@ import {
   Activity,
   ShoppingCart,
   ClipboardList,
+  Radio,
 } from "lucide-react";
 import {
   Table,
@@ -572,6 +573,7 @@ export default function MetricsDashboard() {
           <AmsActiveWeeklyCard />
           <ProcurementWeeklyCard />
           <PmfNewArrivalsWeeklyCard />
+          <SamsaraPenetrationWeeklyCard />
         </div>
       </main>
     </div>
@@ -793,6 +795,125 @@ function PmfNewArrivalsWeeklyCard() {
                       </span>
                     ) : (
                       <span className="text-muted-foreground">0</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+interface SamsaraPenetrationWeekly {
+  weekStart: string;
+  weekEnd: string;
+  activeCount: number | null;
+  inactiveCount: number | null;
+  unpluggedCount: number | null;
+  notInstalledCount: number | null;
+  totalCount: number | null;
+  capturedAt: string | null;
+}
+
+function SamsaraPenetrationWeeklyCard() {
+  const { data, isLoading } = useQuery<SamsaraPenetrationWeekly[]>({
+    queryKey: ["/api/fs/samsara/penetration-weekly", { weeks: 8 }],
+    queryFn: async () => {
+      const res = await fetch("/api/fs/samsara/penetration-weekly?weeks=8");
+      if (!res.ok) throw new Error("Failed to fetch Samsara penetration weekly");
+      return res.json();
+    },
+    refetchInterval: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+  const visible = (data || []).filter((r) => isOnOrAfterCutoff(r.weekStart));
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Radio className="w-5 h-5" />
+          Samsara Penetration
+        </CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Weekly snapshot of Samsara device status across the AMS fleet.
+          Active = signal in last 24h, Inactive = 1-7d, Inactive/Unplugged
+          = 7d+, Not Installed = no Samsara record.
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <div className="space-y-3">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-10 w-full" />
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="text-center py-8 text-muted-foreground">
+            <Radio className="w-12 h-12 mx-auto mb-3 opacity-50" />
+            <p>No Samsara snapshots available yet.</p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Week</TableHead>
+                <TableHead className="text-center">Active</TableHead>
+                <TableHead className="text-center">Inactive</TableHead>
+                <TableHead className="text-center">Inactive / Unplugged</TableHead>
+                <TableHead className="text-center">Not Installed</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visible.map((row, idx) => (
+                <TableRow
+                  key={row.weekStart}
+                  data-testid={`row-samsara-penetration-${row.weekStart}`}
+                >
+                  <TableCell className="font-medium">
+                    {formatWeekRange(row.weekStart, row.weekEnd)}
+                    {idx === 0 && (
+                      <span className="ml-2 text-xs bg-primary/10 text-primary px-2 py-0.5 rounded">
+                        Current
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.activeCount === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="text-green-600 font-semibold">
+                        {row.activeCount.toLocaleString()}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.inactiveCount === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="text-amber-600 font-semibold">
+                        {row.inactiveCount.toLocaleString()}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.unpluggedCount === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="text-red-600 font-semibold">
+                        {row.unpluggedCount.toLocaleString()}
+                      </span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-center">
+                    {row.notInstalledCount === null ? (
+                      <span className="text-muted-foreground">—</span>
+                    ) : (
+                      <span className="font-semibold text-muted-foreground">
+                        {row.notInstalledCount.toLocaleString()}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>

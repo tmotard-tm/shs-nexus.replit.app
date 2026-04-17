@@ -2,7 +2,7 @@ import { Router } from "express";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
-import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots } from "@shared/fleet-scope-schema";
+import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots, samsaraPenetrationWeeklySnapshots } from "@shared/fleet-scope-schema";
 import {
   getAmsTruckStatusMap,
   getAmsOutOfServiceMap,
@@ -13525,6 +13525,117 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json(result);
     } catch (error: any) {
       console.error("[AMS Active Weekly] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Weekly snapshot of Samsara penetration counts (Active / Inactive /
+  // Inactive-Unplugged / Not Installed) across the AMS fleet. Captures the
+  // current week in the background on every read; returns the most recent
+  // N weekly snapshots.
+  app.get("/samsara/penetration-weekly", async (req, res) => {
+    try {
+      const weeks = Math.max(
+        1,
+        Math.min(52, parseInt((req.query.weeks as string) || "8", 10) || 8),
+      );
+
+      // Fire-and-forget current-week capture
+      (async () => {
+        try {
+          const truckMap = await getAmsTruckStatusMap();
+          const samsaraMap = await fetchSamsaraLocations();
+          const now = Date.now();
+
+          let active = 0,
+            inactive = 0,
+            unplugged = 0,
+            notInstalled = 0;
+          const total = Object.keys(truckMap).length;
+
+          for (const vin of Object.keys(truckMap)) {
+            const sam = samsaraMap.get(vin);
+            if (!sam || !sam.timestamp) {
+              notInstalled++;
+              continue;
+            }
+            const ts = new Date(sam.timestamp).getTime();
+            if (!ts || isNaN(ts)) {
+              notInstalled++;
+              continue;
+            }
+            const ageHours = (now - ts) / (1000 * 60 * 60);
+            if (ageHours <= 24) active++;
+            else if (ageHours <= 168) inactive++;
+            else unplugged++;
+          }
+
+          const currentWeekStart = isoDate(mondayOf(new Date()));
+          await getDb()
+            .insert(samsaraPenetrationWeeklySnapshots)
+            .values({
+              weekStart: currentWeekStart,
+              activeCount: active,
+              inactiveCount: inactive,
+              unpluggedCount: unplugged,
+              notInstalledCount: notInstalled,
+              totalCount: total,
+            })
+            .onConflictDoUpdate({
+              target: samsaraPenetrationWeeklySnapshots.weekStart,
+              set: {
+                activeCount: active,
+                inactiveCount: inactive,
+                unpluggedCount: unplugged,
+                notInstalledCount: notInstalled,
+                totalCount: total,
+                capturedAt: sql`now()`,
+              },
+            });
+        } catch (err: any) {
+          console.warn(
+            "[Samsara Penetration Weekly] Background capture failed:",
+            err.message,
+          );
+        }
+      })();
+
+      // Build expected last N weeks (most recent first)
+      const todayMonday = mondayOf(new Date());
+      const expected: string[] = [];
+      for (let i = 0; i < weeks; i++) {
+        const ws = new Date(todayMonday);
+        ws.setDate(ws.getDate() - i * 7);
+        expected.push(isoDate(ws));
+      }
+
+      const rows = await getDb()
+        .select()
+        .from(samsaraPenetrationWeeklySnapshots)
+        .orderBy(desc(samsaraPenetrationWeeklySnapshots.weekStart));
+      const byWeek = new Map<string, typeof rows[number]>();
+      for (const r of rows) byWeek.set(r.weekStart, r);
+
+      const result = expected.map((weekStart) => {
+        const ws = new Date(weekStart + "T00:00:00");
+        const we = new Date(ws);
+        we.setDate(we.getDate() + 6);
+        const stored = byWeek.get(weekStart);
+        return {
+          weekStart,
+          weekEnd: isoDate(we),
+          activeCount: stored?.activeCount ?? null,
+          inactiveCount: stored?.inactiveCount ?? null,
+          unpluggedCount: stored?.unpluggedCount ?? null,
+          notInstalledCount: stored?.notInstalledCount ?? null,
+          totalCount: stored?.totalCount ?? null,
+          capturedAt: stored?.capturedAt ?? null,
+        };
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[Samsara Penetration Weekly] Error:", error);
       res.status(500).json({ message: error.message });
     }
   });

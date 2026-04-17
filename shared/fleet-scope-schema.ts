@@ -609,6 +609,24 @@ export const amsActiveWeeklySnapshots = pgTable("fs_ams_active_weekly_snapshots"
 });
 export type AmsActiveWeeklySnapshot = typeof amsActiveWeeklySnapshots.$inferSelect;
 
+// Weekly snapshot of Samsara penetration counts across the AMS fleet.
+// Captured on read; one row per Monday week-start (ISO YYYY-MM-DD).
+export const samsaraPenetrationWeeklySnapshots = pgTable(
+  "fs_samsara_penetration_weekly_snapshots",
+  {
+    id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+    weekStart: text("week_start").notNull().unique(), // YYYY-MM-DD (Monday)
+    activeCount: integer("active_count").notNull().default(0),
+    inactiveCount: integer("inactive_count").notNull().default(0),
+    unpluggedCount: integer("unplugged_count").notNull().default(0),
+    notInstalledCount: integer("not_installed_count").notNull().default(0),
+    totalCount: integer("total_count").notNull().default(0),
+    capturedAt: timestamp("captured_at").default(sql`now()`),
+  },
+);
+export type SamsaraPenetrationWeeklySnapshot =
+  typeof samsaraPenetrationWeeklySnapshots.$inferSelect;
+
 // Metrics snapshots table for daily tracking
 export const metricsSnapshots = pgTable("fs_metrics_snapshots", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
