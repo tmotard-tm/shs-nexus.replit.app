@@ -78,13 +78,16 @@ async function build(): Promise<Record<string, string | null>> {
         const label = lookupMap.get(String(raw_status));
         result[vin] = label ?? String(raw_status);
       }
+      // AMS API returns this field as "OutofSvcDate" (verified against
+      // a live response). Other casings are kept as defensive fallbacks.
       const oosRaw =
+        v.OutofSvcDate ??
+        v.OutOfSvcDate ??
+        v.outofSvcDate ??
         v.OutOfServiceDate ??
         v.outOfServiceDate ??
         v.OutOfService ??
         v.outOfService ??
-        v.OutofService ??
-        v.OutOfServiceDt ??
         null;
       oosByVin[vin] = oosRaw == null ? null : String(oosRaw).trim();
     }
