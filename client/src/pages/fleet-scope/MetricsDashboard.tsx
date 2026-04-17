@@ -558,13 +558,9 @@ export default function MetricsDashboard() {
           </Card>
         </div>
 
-        {/* AMS Active Vehicles (Weekly, last 8 weeks) */}
-        <div className="mt-6">
+        {/* AMS Active Vehicles + Vehicles Sent to Procurement (side by side) */}
+        <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <AmsActiveWeeklyCard />
-        </div>
-
-        {/* Vehicles Sent to Procurement (Weekly, last 8 weeks) */}
-        <div className="mt-6">
           <ProcurementWeeklyCard />
         </div>
 
