@@ -91,6 +91,15 @@ function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}`;
 }
 
+// Only show weeks starting on or after this date. Weeks before are hidden
+// from the dashboard tables but the backend continues to keep up to 8
+// weeks of rolling history.
+const WEEKLY_DISPLAY_CUTOFF = "2026-04-12";
+
+function isOnOrAfterCutoff(weekStart: string): boolean {
+  return weekStart >= WEEKLY_DISPLAY_CUTOFF;
+}
+
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr + 'T00:00:00');
   return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
@@ -558,14 +567,10 @@ export default function MetricsDashboard() {
           </Card>
         </div>
 
-        {/* AMS Active Vehicles + Vehicles Sent to Procurement (side by side) */}
+        {/* Weekly metrics cards (half-width, aligned) */}
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
           <AmsActiveWeeklyCard />
           <ProcurementWeeklyCard />
-        </div>
-
-        {/* PMF New Pending Arrival Vehicles (Weekly, last 8 weeks) */}
-        <div className="mt-6">
           <PmfNewArrivalsWeeklyCard />
         </div>
       </main>
@@ -584,13 +589,14 @@ function AmsActiveWeeklyCard() {
     refetchInterval: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
   });
+  const visible = (data || []).filter((r) => isOnOrAfterCutoff(r.weekStart));
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <Activity className="w-5 h-5" />
-          AMS Active Vehicles (Weekly, Last 8 Weeks)
+          AMS Active Vehicles
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Live count of vehicles in AMS with TruckStatus = "Active". Captured
@@ -604,7 +610,7 @@ function AmsActiveWeeklyCard() {
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : !data || data.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <Activity className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No AMS data available yet.</p>
@@ -619,7 +625,7 @@ function AmsActiveWeeklyCard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((row, idx) => (
+              {visible.map((row, idx) => (
                 <TableRow key={row.weekStart} data-testid={`row-ams-active-${row.weekStart}`}>
                   <TableCell className="font-medium">
                     {formatWeekRange(row.weekStart, row.weekEnd)}
@@ -663,14 +669,14 @@ function ProcurementWeeklyCard() {
     queryKey: ["/api/fs/decommissioning/procurement-weekly-counts"],
     refetchInterval: 5 * 60 * 1000,
   });
-  const last8 = (data || []).slice(0, 8);
+  const last8 = (data || []).slice(0, 8).filter((r) => isOnOrAfterCutoff(r.weekStart));
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ShoppingCart className="w-5 h-5" />
-          Vehicles Sent to Procurement (Weekly, Last 8 Weeks)
+          Vehicles Sent to Procurement
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           From the Decommissioned History tab — counts vehicles whose
@@ -736,13 +742,14 @@ function PmfNewArrivalsWeeklyCard() {
     },
     refetchInterval: 5 * 60 * 1000,
   });
+  const visible = (data || []).filter((r) => isOnOrAfterCutoff(r.weekStart));
 
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <ClipboardList className="w-5 h-5" />
-          PMF New "Pending Arrival" Vehicles (Weekly, Last 8 Weeks)
+          PMF New "Pending Arrival" Vehicles
         </CardTitle>
         <p className="text-sm text-muted-foreground">
           Net new vehicles entering Pending Arrival each week — counts only
@@ -755,7 +762,7 @@ function PmfNewArrivalsWeeklyCard() {
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : !data || data.length === 0 ? (
+        ) : visible.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <ClipboardList className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No PMF status events recorded yet.</p>
@@ -769,7 +776,7 @@ function PmfNewArrivalsWeeklyCard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {data.map((row, idx) => (
+              {visible.map((row, idx) => (
                 <TableRow key={row.weekStart} data-testid={`row-pmf-new-${row.weekStart}`}>
                   <TableCell className="font-medium">
                     {formatWeekRange(row.weekStart, row.weekEnd)}
