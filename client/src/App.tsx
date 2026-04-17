@@ -513,7 +513,7 @@ function Router() {
         </RoleProtectedRoute>
       </Route>
 
-      <Route path="/fleet-scope/:rest*">
+      <Route path="/fleet-scope/*">
         <RoleProtectedRoute>
           <FleetScopeLayout />
         </RoleProtectedRoute>
