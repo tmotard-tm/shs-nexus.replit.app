@@ -13450,32 +13450,36 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         Math.min(52, parseInt((req.query.weeks as string) || "8", 10) || 8),
       );
 
-      // 1. Capture current week (best-effort; never block the read on AMS errors)
-      try {
-        const map = await getAmsTruckStatusMap();
-        let active = 0;
-        for (const status of Object.values(map)) {
-          if (status && status.toString().trim().toLowerCase() === "active") {
-            active++;
+      // 1. Kick off current-week capture in the BACKGROUND so the response
+      // is fast even on the very first call (when the AMS truck-status
+      // cache hasn't been built yet — building takes ~50s).
+      (async () => {
+        try {
+          const map = await getAmsTruckStatusMap();
+          let active = 0;
+          for (const status of Object.values(map)) {
+            if (status && status.toString().trim().toLowerCase() === "active") {
+              active++;
+            }
           }
+          const currentWeekStart = isoDate(mondayOf(new Date()));
+          await getDb()
+            .insert(amsActiveWeeklySnapshots)
+            .values({ weekStart: currentWeekStart, activeCount: active })
+            .onConflictDoUpdate({
+              target: amsActiveWeeklySnapshots.weekStart,
+              set: {
+                activeCount: active,
+                capturedAt: sql`now()`,
+              },
+            });
+        } catch (err: any) {
+          console.warn(
+            "[AMS Active Weekly] Background capture failed:",
+            err.message,
+          );
         }
-        const currentWeekStart = isoDate(mondayOf(new Date()));
-        await getDb()
-          .insert(amsActiveWeeklySnapshots)
-          .values({ weekStart: currentWeekStart, activeCount: active })
-          .onConflictDoUpdate({
-            target: amsActiveWeeklySnapshots.weekStart,
-            set: {
-              activeCount: active,
-              capturedAt: sql`now()`,
-            },
-          });
-      } catch (err: any) {
-        console.warn(
-          "[AMS Active Weekly] Capture failed (returning cached history):",
-          err.message,
-        );
-      }
+      })();
 
       // 2. Build expected last N weeks (most recent first)
       const todayMonday = mondayOf(new Date());
@@ -13519,8 +13523,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  // Weekly count of brand-new "Pending Arrival" PMF vehicles (events whose
-  // previous_status is NULL — i.e. first time we've seen the vehicle).
+  // Weekly count of vehicles that ENTERED "Pending Arrival" status that week.
+  // Counts any event whose status is Pending Arrival AND whose previous status
+  // was different (i.e. a real transition into the status, not a no-op repeat
+  // of the same status). Within a single week, each asset is counted at most
+  // once (first entry of that week).
   app.get("/pmf/new-arrivals-weekly", async (req, res) => {
     try {
       const weeks = Math.max(
@@ -13531,44 +13538,38 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const earliest = new Date(todayMonday);
       earliest.setDate(earliest.getDate() - (weeks - 1) * 7);
 
-      // Reuse storage; events are already ordered by effectiveAt desc
       const events = await fleetScopeStorage.getPmfStatusEvents(
         earliest,
         new Date(todayMonday.getTime() + 7 * 86400000 - 1),
       );
 
-      const counts = new Map<string, number>();
-      // Initialize buckets so empty weeks render as 0
+      // Per-week sets of asset IDs that entered Pending Arrival that week
+      const weeklyAssets = new Map<string, Set<string>>();
       for (let i = 0; i < weeks; i++) {
         const ws = new Date(todayMonday);
         ws.setDate(ws.getDate() - i * 7);
-        counts.set(isoDate(ws), 0);
+        weeklyAssets.set(isoDate(ws), new Set());
       }
 
-      // Track which assets we've already counted as "new" in this window —
-      // an asset can have multiple events; only its very first qualifying
-      // (previousStatus === null + status === Pending Arrival) event counts.
-      const seenAssets = new Set<string>();
-      // Iterate oldest-first to attribute "new" to the earliest week it occurred
-      const ordered = [...events].sort(
-        (a, b) =>
-          new Date(a.effectiveAt).getTime() -
-          new Date(b.effectiveAt).getTime(),
-      );
-
-      for (const ev of ordered) {
-        if (ev.previousStatus !== null && ev.previousStatus !== undefined)
-          continue;
+      for (const ev of events) {
         const status = (ev.status || "").toLowerCase();
         if (!(status.includes("pending") && status.includes("arrival")))
           continue;
-        if (ev.assetId && seenAssets.has(ev.assetId)) continue;
-        if (ev.assetId) seenAssets.add(ev.assetId);
+        // Skip same-status repeats (these are not real transitions)
+        const prev = (ev.previousStatus || "").toLowerCase();
+        if (prev && prev.includes("pending") && prev.includes("arrival"))
+          continue;
 
         const wsKey = isoDate(mondayOf(new Date(ev.effectiveAt)));
-        if (counts.has(wsKey)) {
-          counts.set(wsKey, (counts.get(wsKey) || 0) + 1);
+        const bucket = weeklyAssets.get(wsKey);
+        if (bucket && ev.assetId) {
+          bucket.add(ev.assetId);
         }
+      }
+
+      const counts = new Map<string, number>();
+      for (const [ws, set] of Array.from(weeklyAssets.entries())) {
+        counts.set(ws, set.size);
       }
 
       const result = Array.from(counts.entries())
