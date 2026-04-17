@@ -17,7 +17,7 @@ import {
   Calendar,
   CalendarDays,
 } from "lucide-react";
-import { format, subDays, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval } from "date-fns";
+import { format, subDays, startOfDay, endOfDay, startOfWeek, endOfWeek, startOfMonth, endOfMonth, eachDayOfInterval, eachWeekOfInterval, isWithinInterval } from "date-fns";
 
 interface AggregatedAsset {
   assetId: string;
@@ -194,47 +194,69 @@ export function PMFWeeklyTracker({ aggregatedAssets }: PMFWeeklyTrackerProps) {
     return periods;
   }, [statusEvents]);
 
-  // Compute daily breakdown for week/month view
+  // Compute breakdown for week/month view
+  // - Week view: day-by-day for last 7 days
+  // - Month view: week-by-week for last ~4 weeks (no daily breakdown)
   const dailyBreakdown = useMemo(() => {
     const today = new Date();
-    const daysToShow = viewMode === 'week' ? 7 : 30;
-    const startDate = startOfDay(subDays(today, daysToShow - 1));
-    const endDate = endOfDay(today);
-    
-    // Generate array of days
-    const days = eachDayOfInterval({ start: startDate, end: endDate });
-    
-    // Initialize counts per day per status
-    const dailyCounts: Array<{ date: Date; dateStr: string; counts: Record<string, number>; total: number }> = days.map(day => ({
-      date: day,
-      dateStr: format(day, 'MMM d'),
-      counts: TRACKED_STATUSES.reduce((acc, status) => ({ ...acc, [status]: 0 }), {} as Record<string, number>),
-      total: 0,
-    }));
-    
-    // Count events per day per status
+
+    type Bucket = { date: Date; dateStr: string; rangeStart: Date; rangeEnd: Date; counts: Record<string, number>; total: number };
+    let buckets: Bucket[] = [];
+
+    if (viewMode === 'week') {
+      const startDate = startOfDay(subDays(today, 6));
+      const endDate = endOfDay(today);
+      const days = eachDayOfInterval({ start: startDate, end: endDate });
+      buckets = days.map(day => ({
+        date: day,
+        dateStr: format(day, 'MMM d'),
+        rangeStart: startOfDay(day),
+        rangeEnd: endOfDay(day),
+        counts: TRACKED_STATUSES.reduce((acc, status) => ({ ...acc, [status]: 0 }), {} as Record<string, number>),
+        total: 0,
+      }));
+    } else {
+      // Month view: 4 trailing weeks ending with the current week (Mon–Sun)
+      const currentWeekStart = startOfWeek(today, { weekStartsOn: 1 });
+      const startDate = subDays(currentWeekStart, 7 * 3); // 4 weeks total
+      const weekStarts = eachWeekOfInterval(
+        { start: startDate, end: currentWeekStart },
+        { weekStartsOn: 1 }
+      );
+      buckets = weekStarts.map(weekStart => {
+        const weekEnd = endOfWeek(weekStart, { weekStartsOn: 1 });
+        return {
+          date: weekStart,
+          dateStr: `${format(weekStart, 'MMM d')} – ${format(weekEnd, 'MMM d')}`,
+          rangeStart: startOfDay(weekStart),
+          rangeEnd: endOfDay(weekEnd),
+          counts: TRACKED_STATUSES.reduce((acc, status) => ({ ...acc, [status]: 0 }), {} as Record<string, number>),
+          total: 0,
+        };
+      });
+    }
+
+    // Count events per bucket per status
     statusEvents.forEach(event => {
-      const eventDate = startOfDay(new Date(event.effectiveAt));
+      const eventDate = new Date(event.effectiveAt);
       const normalizedStatus = normalizeStatus(event.status);
-      
       if (!TRACKED_STATUSES.includes(normalizedStatus)) return;
-      
-      const dayIndex = days.findIndex(d => startOfDay(d).getTime() === eventDate.getTime());
-      if (dayIndex >= 0) {
-        dailyCounts[dayIndex].counts[normalizedStatus]++;
-        dailyCounts[dayIndex].total++;
+
+      const bucket = buckets.find(b => isWithinInterval(eventDate, { start: b.rangeStart, end: b.rangeEnd }));
+      if (bucket) {
+        bucket.counts[normalizedStatus]++;
+        bucket.total++;
       }
     });
-    
-    // Calculate totals per status
+
     const statusTotals = TRACKED_STATUSES.reduce((acc, status) => ({
       ...acc,
-      [status]: dailyCounts.reduce((sum, day) => sum + day.counts[status], 0),
+      [status]: buckets.reduce((sum, b) => sum + b.counts[status], 0),
     }), {} as Record<string, number>);
-    
+
     const grandTotal = Object.values(statusTotals).reduce((a, b) => a + b, 0);
-    
-    return { days: dailyCounts, statusTotals, grandTotal };
+
+    return { days: buckets, statusTotals, grandTotal };
   }, [statusEvents, viewMode]);
 
   const totalTracked = Object.values(statusCounts.counts).reduce((a, b) => a + b, 0);
@@ -391,17 +413,19 @@ export function PMFWeeklyTracker({ aggregatedAssets }: PMFWeeklyTrackerProps) {
               </thead>
               <tbody>
                 {dailyBreakdown.days.slice().reverse().map((day, idx) => {
-                  const isToday = format(day.date, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd');
+                  const now = new Date();
+                  const isCurrent = isWithinInterval(now, { start: day.rangeStart, end: day.rangeEnd });
+                  const currentLabel = viewMode === 'week' ? '(today)' : '(current week)';
                   return (
                     <tr 
                       key={day.dateStr} 
-                      className={`border-b last:border-0 ${isToday ? 'bg-primary/5' : idx % 2 === 0 ? '' : 'bg-muted/30'}`}
+                      className={`border-b last:border-0 ${isCurrent ? 'bg-primary/5' : idx % 2 === 0 ? '' : 'bg-muted/30'}`}
                     >
                       <td className="py-2 px-2 font-medium sticky left-0 bg-inherit">
                         <div className="flex items-center gap-1.5">
-                          {isToday && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
+                          {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-primary" />}
                           <span>{day.dateStr}</span>
-                          {isToday && <span className="text-muted-foreground">(today)</span>}
+                          {isCurrent && <span className="text-muted-foreground">{currentLabel}</span>}
                         </div>
                       </td>
                       {TRACKED_STATUSES.map(status => {
@@ -450,7 +474,7 @@ export function PMFWeeklyTracker({ aggregatedAssets }: PMFWeeklyTrackerProps) {
           
           {dailyBreakdown.grandTotal === 0 && (
             <div className="text-center py-4 text-muted-foreground text-sm">
-              No status changes recorded in the last {viewMode === 'week' ? '7' : '30'} days
+              No status changes recorded in the last {viewMode === 'week' ? '7 days' : '4 weeks'}
             </div>
           )}
         </div>
