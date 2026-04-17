@@ -2178,10 +2178,57 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     shopListLastRun = await runShopListAutoSync();
   });
 
+  // Samsara Penetration: capture every Friday at 8:00 AM Central
+  // (mirrors the All Vehicles tab figures into an 8-week rolling history).
+  cron.schedule(
+    "0 8 * * 5",
+    async () => {
+      const { captureWeeklySamsaraPenetrationSnapshot } = await import(
+        "./fleet-scope-samsara"
+      );
+      await captureWeeklySamsaraPenetrationSnapshot();
+    },
+    { timezone: "America/Chicago" },
+  );
+
+  // One-time startup backfill: if the current week has no snapshot yet,
+  // capture one in the background so the dashboard isn't empty after a
+  // fresh deploy / rollback. Delayed so other startup work (AMS warm,
+  // Samsara cache, etc.) has a chance to settle.
+  setTimeout(async () => {
+    try {
+      const {
+        captureWeeklySamsaraPenetrationSnapshot,
+        hasCurrentWeekSamsaraPenetrationSnapshot,
+      } = await import("./fleet-scope-samsara");
+      const exists = await hasCurrentWeekSamsaraPenetrationSnapshot();
+      if (!exists) {
+        console.log(
+          "[Samsara Penetration] No snapshot for current week — running startup backfill...",
+        );
+        await captureWeeklySamsaraPenetrationSnapshot();
+      } else {
+        console.log(
+          "[Samsara Penetration] Current week snapshot already exists — skipping backfill",
+        );
+      }
+    } catch (err: any) {
+      console.warn(
+        "[Samsara Penetration] Startup backfill failed:",
+        err?.message || err,
+      );
+    }
+  }, 60_000);
+
   // Apply authentication to all fleet-scope routes except /public/* and the
   // ElevenLabs webhook (which is called by ElevenLabs, not a browser session).
   app.use((req: any, res: any, next: any) => {
     if (req.path.startsWith('/public/') || req.path === '/public' || req.path === '/elevenlabs/webhook') {
+      return next();
+    }
+    const internalToken = req.headers['x-internal-cron'];
+    const expectedInternal = process.env.SESSION_SECRET;
+    if (internalToken && expectedInternal && internalToken === expectedInternal) {
       return next();
     }
     return requireAuth(req, res, next);
@@ -13549,65 +13596,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         Math.min(52, parseInt((req.query.weeks as string) || "8", 10) || 8),
       );
 
-      // Fire-and-forget current-week capture
-      (async () => {
-        try {
-          const truckMap = await getAmsTruckStatusMap();
-          const samsaraMap = await fetchSamsaraLocations();
-          const now = Date.now();
-
-          let active = 0,
-            inactive = 0,
-            unplugged = 0,
-            notInstalled = 0;
-          const total = Object.keys(truckMap).length;
-
-          for (const vin of Object.keys(truckMap)) {
-            const sam = samsaraMap.get(vin);
-            if (!sam || !sam.timestamp) {
-              notInstalled++;
-              continue;
-            }
-            const ts = new Date(sam.timestamp).getTime();
-            if (!ts || isNaN(ts)) {
-              notInstalled++;
-              continue;
-            }
-            const ageHours = (now - ts) / (1000 * 60 * 60);
-            if (ageHours <= 24) active++;
-            else if (ageHours <= 168) inactive++;
-            else unplugged++;
-          }
-
-          const currentWeekStart = isoDate(mondayOf(new Date()));
-          await getDb()
-            .insert(samsaraPenetrationWeeklySnapshots)
-            .values({
-              weekStart: currentWeekStart,
-              activeCount: active,
-              inactiveCount: inactive,
-              unpluggedCount: unplugged,
-              notInstalledCount: notInstalled,
-              totalCount: total,
-            })
-            .onConflictDoUpdate({
-              target: samsaraPenetrationWeeklySnapshots.weekStart,
-              set: {
-                activeCount: active,
-                inactiveCount: inactive,
-                unpluggedCount: unplugged,
-                notInstalledCount: notInstalled,
-                totalCount: total,
-                capturedAt: sql`now()`,
-              },
-            });
-        } catch (err: any) {
-          console.warn(
-            "[Samsara Penetration Weekly] Background capture failed:",
-            err.message,
-          );
-        }
-      })();
+      // Pure read: snapshots are populated by the Friday cron + startup
+      // backfill in `captureWeeklySamsaraPenetrationSnapshot()`.
 
       // Build expected last N weeks (most recent first)
       const todayMonday = mondayOf(new Date());

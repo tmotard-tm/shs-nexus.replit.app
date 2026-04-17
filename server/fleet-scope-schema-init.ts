@@ -182,6 +182,17 @@ CREATE TABLE IF NOT EXISTS "fs_ams_active_weekly_snapshots" (
   "captured_at" timestamp DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS "fs_samsara_penetration_weekly_snapshots" (
+  "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "week_start" text NOT NULL UNIQUE,
+  "active_count" integer DEFAULT 0 NOT NULL,
+  "inactive_count" integer DEFAULT 0 NOT NULL,
+  "unplugged_count" integer DEFAULT 0 NOT NULL,
+  "not_installed_count" integer DEFAULT 0 NOT NULL,
+  "total_count" integer DEFAULT 0 NOT NULL,
+  "captured_at" timestamp DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS "fs_byov_weekly_snapshots" (
   "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "captured_at" timestamp DEFAULT now(),

@@ -602,3 +602,144 @@ export function clearSamsaraCache(): void {
   samsaraCacheTimestamp = 0;
   console.log('[Samsara] Cache cleared');
 }
+
+/**
+ * Capture a weekly snapshot of Samsara penetration that EXACTLY mirrors
+ * the All Vehicles tab figures. We pull from the same /api/fs/all-vehicles
+ * endpoint and aggregate by `samsaraStatus` the same way the frontend's
+ * `samsaraStats` useMemo does.
+ *
+ * Snapshot is keyed by Monday-of-current-week and upserted into
+ * `fs_samsara_penetration_weekly_snapshots`. Snapshots older than 8 weeks
+ * are pruned.
+ */
+export async function captureWeeklySamsaraPenetrationSnapshot(): Promise<void> {
+  const startedAt = Date.now();
+  console.log("[Samsara Penetration] Capture starting...");
+  try {
+    const port = process.env.PORT || 5000;
+    // Warm Samsara location cache first so per-vehicle status is computed
+    // off the freshest signal (the cached /api/fs/all-vehicles response may
+    // have been built before Samsara was ready).
+    const samsaraLocationMap = await fetchSamsaraLocations();
+
+    const url = `http://localhost:${port}/api/fs/all-vehicles`;
+    const internalToken = process.env.SESSION_SECRET || "";
+    const response = await fetch(url, {
+      headers: internalToken ? { "x-internal-cron": internalToken } : undefined,
+    });
+    if (!response.ok) {
+      throw new Error(`Internal /api/fs/all-vehicles returned ${response.status}`);
+    }
+    const payload: any = await response.json();
+    const vehicles: any[] = Array.isArray(payload?.vehicles)
+      ? payload.vehicles
+      : Array.isArray(payload?.data)
+        ? payload.data
+        : Array.isArray(payload)
+          ? payload
+          : [];
+
+    const normalizeFleetId = (id: string): string => {
+      const digits = (id || "").replace(/\D/g, "");
+      return digits.replace(/^0+/, "") || "0";
+    };
+    const parseTimestamp = (ts: string | null | undefined): number => {
+      if (!ts) return 0;
+      const t = new Date(ts).getTime();
+      return Number.isFinite(t) ? t : 0;
+    };
+
+    let active = 0,
+      inactive = 0,
+      unplugged = 0,
+      notInstalled = 0;
+    const now = Date.now();
+    for (const v of vehicles) {
+      const rawNum = v?.vehicleNumber || v?.VEHICLE_NUMBER || "";
+      const key = normalizeFleetId(String(rawNum));
+      const samsaraData = samsaraLocationMap.get(key);
+      let status: "Active" | "Inactive" | "Inactive/Unplugged" | "Not Installed" =
+        "Not Installed";
+      if (samsaraData) {
+        const ts = parseTimestamp(samsaraData.timestamp);
+        if (ts > 0) {
+          const ageHours = (now - ts) / (1000 * 60 * 60);
+          if (ageHours <= 24) status = "Active";
+          else if (ageHours <= 168) status = "Inactive";
+          else status = "Inactive/Unplugged";
+        }
+      }
+      if (status === "Active") active++;
+      else if (status === "Inactive") inactive++;
+      else if (status === "Inactive/Unplugged") unplugged++;
+      else notInstalled++;
+    }
+    const total = vehicles.length;
+
+    // Monday-of-current-week (local), formatted YYYY-MM-DD
+    const monday = new Date();
+    monday.setHours(0, 0, 0, 0);
+    const dow = monday.getDay();
+    const offset = dow === 0 ? 6 : dow - 1;
+    monday.setDate(monday.getDate() - offset);
+    const weekStart = monday.toISOString().split("T")[0];
+
+    // Strict 8-week rolling window: keep current Monday + 7 prior Mondays.
+    // Anything older than (currentMonday - 7*7 days) is pruned.
+    const cutoff = new Date(monday);
+    cutoff.setDate(cutoff.getDate() - 7 * 7);
+    const cutoffStr = cutoff.toISOString().split("T")[0];
+
+    await fsDb.execute(sql`
+      INSERT INTO fs_samsara_penetration_weekly_snapshots
+        (week_start, active_count, inactive_count, unplugged_count, not_installed_count, total_count, captured_at)
+      VALUES (${weekStart}, ${active}, ${inactive}, ${unplugged}, ${notInstalled}, ${total}, now())
+      ON CONFLICT (week_start) DO UPDATE SET
+        active_count = EXCLUDED.active_count,
+        inactive_count = EXCLUDED.inactive_count,
+        unplugged_count = EXCLUDED.unplugged_count,
+        not_installed_count = EXCLUDED.not_installed_count,
+        total_count = EXCLUDED.total_count,
+        captured_at = now()
+    `);
+
+    await fsDb.execute(sql`
+      DELETE FROM fs_samsara_penetration_weekly_snapshots
+      WHERE week_start < ${cutoffStr}
+    `);
+
+    const ms = Date.now() - startedAt;
+    console.log(
+      `[Samsara Penetration] Captured weekStart=${weekStart} active=${active} inactive=${inactive} unplugged=${unplugged} notInstalled=${notInstalled} total=${total} (${ms}ms)`,
+    );
+  } catch (err: any) {
+    console.warn(
+      "[Samsara Penetration] Capture failed:",
+      err?.message || err,
+    );
+  }
+}
+
+/**
+ * Returns true if the current week's Samsara penetration snapshot already
+ * exists. Used to gate the startup backfill.
+ */
+export async function hasCurrentWeekSamsaraPenetrationSnapshot(): Promise<boolean> {
+  const monday = new Date();
+  monday.setHours(0, 0, 0, 0);
+  const dow = monday.getDay();
+  const offset = dow === 0 ? 6 : dow - 1;
+  monday.setDate(monday.getDate() - offset);
+  const weekStart = monday.toISOString().split("T")[0];
+  try {
+    const result: any = await fsDb.execute(sql`
+      SELECT 1 FROM fs_samsara_penetration_weekly_snapshots
+      WHERE week_start = ${weekStart} LIMIT 1
+    `);
+    const rows = result?.rows ?? result;
+    return Array.isArray(rows) ? rows.length > 0 : false;
+  } catch {
+    return false;
+  }
+}
