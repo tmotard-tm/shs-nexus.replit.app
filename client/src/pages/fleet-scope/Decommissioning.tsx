@@ -441,7 +441,7 @@ export default function Decommissioning() {
     const exportData = displayedVehicles.map((v) => ({
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
-      "District": v.district || "",
+      "District": v.district ? v.district.replace(/^0+/, "") : "",
       "Assigned": v.isAssigned ? "Yes" : "No",
       "With Rental": v.withRental ? "Yes" : "No",
       "Date Added": v.createdAt ? new Date(v.createdAt).toLocaleDateString() : "",
@@ -914,7 +914,7 @@ export default function Decommissioning() {
                         {vehicle.vin || "-"}
                       </TableCell>
                       <TableCell className="font-mono text-xs" data-testid={`cell-district-${vehicle.id}`}>
-                        {vehicle.district || "-"}
+                        {vehicle.district ? vehicle.district.replace(/^0+/, "") || "-" : "-"}
                       </TableCell>
                       <TableCell className="text-sm text-center">
                         <span className={vehicle.isAssigned ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>

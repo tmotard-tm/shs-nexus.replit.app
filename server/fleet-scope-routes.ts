@@ -15284,13 +15284,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             body = body.replace(new RegExp(`\\{${escaped}\\}`, 'gi'), String(val ?? ''));
           }
         }
-        body = body
-          .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
-          .replace(/\{\{VIN\}\}/gi, r.vin || '')
-          .replace(/\{\{Address\}\}/gi, r.address || '')
-          .replace(/\{\{Phone\}\}/gi, r.phone || '')
-          .replace(/\{\{Name\}\}/gi, r.contactName || r.fullName || '')
-          .replace(/\{\{ZipCode\}\}/gi, r.zipCode || '');
 
         const normalized = r.truckNumber.padStart(6, '0');
         const formattedPhone = r.contactPhone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');

@@ -421,13 +421,6 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         result = result.replace(new RegExp(`\\{${escaped}\\}`, 'gi'), val || '');
       }
     }
-    result = result
-      .replace(/\{\{TruckNumber\}\}/gi, r.truckNumber?.replace(/^0+/, '') || '')
-      .replace(/\{\{VIN\}\}/gi, r.vin || '')
-      .replace(/\{\{Address\}\}/gi, r.address || '')
-      .replace(/\{\{Phone\}\}/gi, r.phone || '')
-      .replace(/\{\{Name\}\}/gi, r.contactName || r.fullName || '')
-      .replace(/\{\{ZipCode\}\}/gi, r.zipCode || '');
     return result;
   };
 
@@ -1017,7 +1010,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Message Template</label>
                 <p className="text-xs text-muted-foreground mb-2">
-                  Click a variable below to insert it into your message. Variables from your spreadsheet use single braces like {"{ColumnName}"}.
+                  Click a variable below to insert it into your message. Variables come from the column headers in your uploaded spreadsheet and use single braces like {"{ColumnName}"}. Each row's value is substituted for the matching technician.
                 </p>
                 <div className="flex flex-wrap gap-1 mb-2">
                   {batchDynamicHeaders.map((h) => (
@@ -1037,7 +1030,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                   ref={batchTemplateRef}
                   value={batchTemplate}
                   onChange={(e) => setBatchTemplate(e.target.value)}
-                  placeholder={`Hello {${batchDynamicHeaders[0] || "Name"}}, we are asking you to decommission truck {${batchDynamicHeaders[1] || "TruckNumber"}} at {${batchDynamicHeaders[2] || "Address"}}...`}
+                  placeholder={
+                    batchDynamicHeaders.length > 0
+                      ? `Hello {${batchDynamicHeaders[0]}}, we are asking you to decommission truck {${batchDynamicHeaders[1] || batchDynamicHeaders[0]}} at {${batchDynamicHeaders[2] || batchDynamicHeaders[0]}}...`
+                      : "Add columns to your spreadsheet (e.g. TruckNumber, Address) and they will appear here as variables you can insert."
+                  }
                   className="min-h-[120px] text-sm"
                   data-testid="batch-template-input"
                 />
