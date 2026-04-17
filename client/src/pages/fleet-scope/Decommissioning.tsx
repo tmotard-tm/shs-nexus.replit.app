@@ -39,6 +39,7 @@ interface DecommissioningVehicle {
   id: number;
   truckNumber: string;
   vin: string | null;
+  district: string | null;
   address: string | null;
   zipCode: string | null;
   phone: string | null;
@@ -440,6 +441,7 @@ export default function Decommissioning() {
     const exportData = displayedVehicles.map((v) => ({
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
+      "District": v.district || "",
       "Assigned": v.isAssigned ? "Yes" : "No",
       "With Rental": v.withRental ? "Yes" : "No",
       "Date Added": v.createdAt ? new Date(v.createdAt).toLocaleDateString() : "",
@@ -793,6 +795,7 @@ export default function Decommissioning() {
                   <TableRow>
                     <TableHead className="w-24">Truck #</TableHead>
                     <TableHead className="w-40">VIN</TableHead>
+                    <TableHead className="w-20">District</TableHead>
                     <TableHead className="w-24">
                       <div className="flex flex-col gap-1">
                         <span>Assigned</span>
@@ -909,6 +912,9 @@ export default function Decommissioning() {
                       </TableCell>
                       <TableCell className="font-mono text-xs">
                         {vehicle.vin || "-"}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs" data-testid={`cell-district-${vehicle.id}`}>
+                        {vehicle.district || "-"}
                       </TableCell>
                       <TableCell className="text-sm text-center">
                         <span className={vehicle.isAssigned ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>

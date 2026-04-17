@@ -13656,7 +13656,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         MOBILEPHONENUMBER,
         PRIMARYZIP,
         MANAGER_ENT_ID,
-        MANAGER_NAME
+        MANAGER_NAME,
+        DISTRICT
       FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
       WHERE TRUCK_NO IN (${truckNumbers.join(', ')})
     `;
@@ -13669,6 +13670,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       PRIMARYZIP: string | null;
       MANAGER_ENT_ID: string | null;
       MANAGER_NAME: string | null;
+      DISTRICT: string | null;
     }
 
     const techData = await executeQuery<TechRow>(sql);
@@ -13744,6 +13746,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       managerEntId: string;
       managerName: string;
       managerZip: string;
+      district: string;
     }>();
 
     for (const row of techData) {
@@ -13760,8 +13763,33 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           managerEntId: managerEntId,
           managerName: row.MANAGER_NAME?.toString().trim() || '',
           managerZip: managerZipLookup.get(managerEntId) || '',
+          district: row.DISTRICT?.toString().trim() || '',
         });
       }
+    }
+
+    // District fallback from local holman_vehicles_cache for trucks not in TPMS_EXTRACT
+    // (Holman has district on every vehicle record, not just assigned ones)
+    const holmanDistrictLookup = new Map<string, string>();
+    try {
+      const { db } = await import("./db");
+      const { holmanVehiclesCache } = await import("@shared/schema");
+      const allHolman = await db
+        .select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          district: holmanVehiclesCache.district,
+        })
+        .from(holmanVehiclesCache);
+      for (const row of allHolman) {
+        if (row.holmanVehicleNumber && row.district) {
+          // Normalize to 6-digit padded format for matching
+          const padded = row.holmanVehicleNumber.toString().padStart(6, '0');
+          holmanDistrictLookup.set(padded, row.district.toString().trim());
+        }
+      }
+      console.log(`[Decommissioning Tech Sync] Loaded ${holmanDistrictLookup.size} district entries from holman_vehicles_cache`);
+    } catch (err: any) {
+      console.warn(`[Decommissioning Tech Sync] Holman district lookup failed (non-fatal): ${err.message}`);
     }
 
     // Update each vehicle - only update if Snowflake has data, otherwise preserve existing
@@ -13774,10 +13802,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Get VIN for this vehicle
       const vin = vinLookup.get(vehicle.truckNumber) || null;
       
+      // District: prefer TPMS DISTRICT (assigned trucks), fall back to holman_vehicles_cache,
+      // then preserve any existing value so a transient Holman miss can't blank it out.
+      const normalizedTruck = vehicle.truckNumber?.toString().trim().padStart(6, '0') || vehicle.truckNumber;
+      const district =
+        snowflakeData?.district ||
+        holmanDistrictLookup.get(normalizedTruck) ||
+        vehicle.district ||
+        null;
+
       if (snowflakeData) {
         // Update with fresh data from Snowflake (direct truck match)
         await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
           vin,
+          district,
           enterpriseId: snowflakeData.enterpriseId || null,
           fullName: snowflakeData.fullName || null,
           mobilePhone: snowflakeData.mobilePhone || null,
@@ -13796,9 +13834,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           unmatchedWithZip.push(vehicle);
         } else {
           // No ZIP code to try fallback - mark as not assigned but preserve existing tech data
-          // Still update VIN even if no tech data
+          // Still update VIN and district (from Holman) even if no tech data
           await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
             vin,
+            district,
             isAssigned: false,
           });
           preserved++;
@@ -13995,6 +14034,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           
           const updateData: Record<string, any> = {
             vin,
+            district: holmanDistrictLookup.get(vehicle.truckNumber?.toString().trim().padStart(6, '0') || vehicle.truckNumber) || vehicle.district || null,
             enterpriseId: nearestManager.enterpriseId || null,
             fullName: nearestManager.fullName || null,
             mobilePhone: nearestManager.mobilePhone || null,
@@ -14037,10 +14077,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           console.log(`[Decommissioning Manager ZIP Fallback] Vehicle ${vehicle.truckNumber} (ZIP ${vehicleZip}) matched to nearest manager ${nearestManager.managerName} (ZIP ${nearestManager.managerZip})${nearestTech ? `, nearest tech ${nearestTech.fullName} (ZIP ${nearestTech.primaryZip})` : ''}`);
         } else {
           // No match found - mark as not assigned but preserve existing tech data
-          // Still update VIN even if no tech data
+          // Still update VIN and district (from Holman fallback) even if no tech data
           const vin = vinLookup.get(vehicle.truckNumber) || null;
+          const normalizedTruck = vehicle.truckNumber?.toString().trim().padStart(6, '0') || vehicle.truckNumber;
+          const district = holmanDistrictLookup.get(normalizedTruck) || vehicle.district || null;
           await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
             vin,
+            district,
             isAssigned: false,
           });
           preserved++;

@@ -1282,6 +1282,7 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   id: serial("id").primaryKey(),
   truckNumber: varchar("truck_number", { length: 20 }).notNull().unique(),
   vin: varchar("vin", { length: 50 }), // VIN from HOLMAN_VEHICLES table
+  district: varchar("district", { length: 20 }), // District from TPMS_EXTRACT (assigned trucks) or holman_vehicles_cache (fallback)
   address: text("address"),
   zipCode: varchar("zip_code", { length: 20 }),
   phone: varchar("phone", { length: 50 }),
