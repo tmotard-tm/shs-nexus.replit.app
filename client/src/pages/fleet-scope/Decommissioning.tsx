@@ -40,6 +40,7 @@ interface DecommissioningVehicle {
   truckNumber: string;
   vin: string | null;
   district: string | null;
+  amsStatus: string | null;
   address: string | null;
   zipCode: string | null;
   phone: string | null;
@@ -796,6 +797,7 @@ export default function Decommissioning() {
                     <TableHead className="w-24">Truck #</TableHead>
                     <TableHead className="w-40">VIN</TableHead>
                     <TableHead className="w-20">District</TableHead>
+                    <TableHead className="w-28">AMS Status</TableHead>
                     <TableHead className="w-24">
                       <div className="flex flex-col gap-1">
                         <span>Assigned</span>
@@ -915,6 +917,9 @@ export default function Decommissioning() {
                       </TableCell>
                       <TableCell className="font-mono text-xs" data-testid={`cell-district-${vehicle.id}`}>
                         {vehicle.district ? vehicle.district.replace(/^0+/, "") || "-" : "-"}
+                      </TableCell>
+                      <TableCell className="text-xs" data-testid={`cell-ams-status-${vehicle.id}`}>
+                        {vehicle.amsStatus || "-"}
                       </TableCell>
                       <TableCell className="text-sm text-center">
                         <span className={vehicle.isAssigned ? "text-green-600 dark:text-green-400 font-medium" : "text-muted-foreground"}>

@@ -13388,9 +13388,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.error("[Decommissioning] Repair tracker enrichment failed (non-fatal):", err);
       }
       
+      let amsStatusByVin: Record<string, string | null> = {};
+      try {
+        amsStatusByVin = await getAmsTruckStatusMap();
+      } catch (err) {
+        console.error("[Decommissioning] AMS truck status enrichment failed (non-fatal):", err);
+      }
+
       const vehiclesWithRental = vehicles.map(v => {
         const normalizedTruck = (v.truckNumber || '').replace(/^0+/, '') || '0';
         const repairData = repairTrackerMap.get(normalizedTruck);
+        const amsStatus = v.vin ? (amsStatusByVin[v.vin.trim().toUpperCase()] ?? null) : null;
         let address = v.address;
         let zipCode = v.zipCode;
         let phone = v.phone;
@@ -13419,6 +13427,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           phone,
           repairTrackerSource,
           withRental: rentalTruckNumbers.has(normalizedTruck),
+          amsStatus,
         };
       });
       
