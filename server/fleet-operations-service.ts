@@ -1,7 +1,18 @@
 import { storage } from "./storage";
 import { db } from "./db";
 import { eq, and, lte, or, sql } from "drizzle-orm";
-import { holmanVehiclesCache, amsVehiclesCache, operationEvents, tpmsCachedAssignments, allTechs } from "@shared/schema";
+import {
+  holmanVehiclesCache,
+  amsVehiclesCache,
+  operationEvents,
+  tpmsCachedAssignments,
+  tpmsLastKnownTruckTech,
+  tpmsTechProfiles,
+  techVehicleAssignments,
+  techVehicleAssignmentHistory,
+  allTechs,
+  fleetOperationLog,
+} from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { sendEmail } from "./email-service";
@@ -49,10 +60,53 @@ interface UpdateAddressParams {
   requestedBy: string;
 }
 
+type SystemStatus = "success" | "failed" | "skipped" | "pending" | "conflict";
+
+/**
+ * Coerce a persisted (string|null) status column from fleet_operation_log
+ * back into the SystemResult.status union, defaulting unknown/null to "skipped".
+ * Used by retry merge so we don't smuggle `as any` into hot-path code.
+ */
+function normalizeSystemStatus(value: string | null | undefined): SystemStatus {
+  switch (value) {
+    case "success":
+    case "failed":
+    case "skipped":
+    case "pending":
+    case "conflict":
+      return value;
+    default:
+      return "skipped";
+  }
+}
+
 interface SystemResult {
-  status: "success" | "failed" | "skipped" | "pending";
+  status: SystemStatus;
   message: string;
   submissionDbId?: string;
+  /**
+   * The TPMS-side enterprise LDAP that was actually written to. May differ
+   * from `params.ldapId` when TPMS unassign resolves the holder via the
+   * truck-number cache (see callTpms unassign path). Used by writeThroughCaches
+   * so the canonical-tech cleanup operates on the real previous holder, not
+   * the request author.
+   */
+  effectiveLdap?: string;
+  /** TPMS truck number that was actually written, normalized as TPMS sees it. */
+  effectiveTruck?: string;
+  /** Back-compat aliases used by routes.ts bulk-fix handler on conflict status. */
+  conflictTech?: string;
+  conflictTruck?: string;
+  /** Used by Holman/AMS centralized cache writes — see writeThroughCaches. */
+  cachePayload?: {
+    system: "holman" | "ams";
+    holmanVehicleNumber?: string;
+    ldap?: string | null;
+    techName?: string | null;
+    statusCode?: string | null;
+    vin?: string;
+    rawResponse?: any;
+  };
 }
 
 interface OperationResult {
@@ -178,7 +232,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
           districtNo: liveTech?.districtNo ?? "",
           updatedBy: updatedBy.toUpperCase(),
         });
-        return { status: "success", message: "Unassigned (via live TPMS lookup fallback)" };
+        return { status: "success", message: "Unassigned (via live TPMS lookup fallback)", effectiveLdap: tpmsLdap };
       }
 
       // Step 2 (cache hit path): Verify the tech's truckNo still matches before clearing.
@@ -205,9 +259,12 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         return {
           status: "conflict",
           message: `${tpmsLdap} is currently assigned to truck ${current.truckNo} in TPMS. Confirm to unassign them.`,
+          effectiveLdap: tpmsLdap,
+          effectiveTruck: current.truckNo,
+          // Back-compat aliases for routes.ts bulk-fix handler.
           conflictTech: tpmsLdap,
           conflictTruck: current.truckNo,
-        } as any;
+        };
       }
       try {
         await tpms.updateTechInfo({
@@ -230,7 +287,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         }
         throw err;
       }
-      return { status: "success", message: "Unassigned" };
+      return { status: "success", message: "Unassigned", effectiveLdap: tpmsLdap };
     }
     if (action === "update_address") {
       await tpms.updateTechInfo({
@@ -283,17 +340,20 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
         holmanStatusCode === 'A' ? undefined : holmanStatusCode
       );
       if (result.success) {
-        try {
-          await db.update(holmanVehiclesCache)
-            .set({
-              holmanTechAssigned: params.ldapId,
-              holmanTechName: params.techName || params.ldapId,
-              lastLocalUpdateAt: new Date(),
-              holmanAssignedStatusCd: holmanStatusCode,
-            })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
-        } catch {}
-        return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
+        // Cache write deferred to writeThroughCaches (centralized) — return the
+        // payload describing the post-op cache state Holman has acked.
+        return {
+          status: "pending",
+          message: result.message || "Queued — awaiting Holman confirmation",
+          submissionDbId: result.submissionDbId,
+          cachePayload: {
+            system: "holman",
+            holmanVehicleNumber: holmanVehicleNum,
+            ldap: params.ldapId,
+            techName: params.techName || params.ldapId,
+            statusCode: holmanStatusCode,
+          },
+        };
       }
       return { status: "failed", message: result.message || "Holman assign failed" };
     }
@@ -303,12 +363,18 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
         null
       );
       if (result.success) {
-        try {
-          await db.update(holmanVehiclesCache)
-            .set({ holmanTechAssigned: null, holmanTechName: null, lastLocalUpdateAt: new Date() })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, holmanVehicleNum));
-        } catch {}
-        return { status: "pending", message: result.message || "Queued — awaiting Holman confirmation", submissionDbId: result.submissionDbId };
+        return {
+          status: "pending",
+          message: result.message || "Queued — awaiting Holman confirmation",
+          submissionDbId: result.submissionDbId,
+          cachePayload: {
+            system: "holman",
+            holmanVehicleNumber: holmanVehicleNum,
+            ldap: null,
+            techName: null,
+            statusCode: null,
+          },
+        };
       }
       return { status: "failed", message: result.message || "Holman unassign failed" };
     }
@@ -403,31 +469,15 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
           console.warn(`[FleetOps-AMS] Repair status update failed for ${vin}: ${repairErr.message}`);
         }
       }
-      // Synchronous post-operation verification: read back AMS state
+      // Synchronous post-operation verification: read back AMS state.
+      // Cache write is deferred to writeThroughCaches via cachePayload so all
+      // post-success cache mutations are consolidated into one transactional unit.
+      let postVehicle: any = null;
       try {
         const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
-        const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+        postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
         const postTech = (postVehicle?.Tech ?? "").trim().toUpperCase();
         const expectedTech = params.ldapId.trim().toUpperCase();
-        // Update cache with post-operation state
-        try {
-          await db.insert(amsVehiclesCache).values({
-            vin,
-            amsAssignedLdap: postVehicle?.Tech ?? null,
-            rawResponse: postVehicle ?? null,
-            lastAmsSyncAt: new Date(),
-            lastAmsError: null,
-          }).onConflictDoUpdate({
-            target: amsVehiclesCache.vin,
-            set: {
-              amsAssignedLdap: postVehicle?.Tech ?? null,
-              rawResponse: postVehicle ?? null,
-              lastAmsSyncAt: new Date(),
-              lastAmsError: null,
-              updatedAt: new Date(),
-            },
-          });
-        } catch {}
         if (postTech !== expectedTech) {
           console.warn(`[FleetOps-AMS] Post-assign verification mismatch for ${vin}: expected ${expectedTech}, got ${postTech}`);
         } else {
@@ -436,15 +486,21 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       } catch (verifyErr: any) {
         console.warn(`[FleetOps-AMS] Post-assign verification failed for ${vin}: ${verifyErr.message}`);
       }
-      return { status: "success", message: "Assigned" };
+      return {
+        status: "success",
+        message: "Assigned",
+        cachePayload: {
+          system: "ams",
+          vin,
+          ldap: postVehicle?.Tech ?? params.ldapId,
+          rawResponse: postVehicle ?? null,
+        },
+      };
     } catch (assignErr: any) {
       const msg = (assignErr.message || "").toLowerCase();
-      // Record error in cache (best-effort)
-      try {
-        await db.update(amsVehiclesCache)
-          .set({ lastAmsError: assignErr.message, updatedAt: new Date() })
-          .where(eq(amsVehiclesCache.vin, vin));
-      } catch {}
+      // Per write-through contract: failed downstream calls leave cache untouched.
+      // (Previously this path wrote lastAmsError into the cache; that violates the
+      // "update only on success" rule — surfacing the error via SystemResult only.)
       // AMS returns "not found in tech database" when the tech ID doesn't exist in AMS.
       // This is not an error in our system — skip gracefully.
       if (msg.includes("not found in tech database") || msg.includes("tech") && msg.includes("not found")) {
@@ -515,29 +571,13 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
         techEnterpriseId: "",
         updateUser,
       });
-      // Synchronous post-operation verification: read back AMS state
+      // Synchronous post-operation verification: read back AMS state.
+      // Cache write is deferred to writeThroughCaches via cachePayload.
+      let postVehicle: any = null;
       try {
         const postResult = await ams.searchVehicles({ vin, limit: 1, offset: 0 });
-        const postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
+        postVehicle = Array.isArray(postResult) ? postResult[0] : (postResult?.data?.[0] ?? postResult);
         const postTech = (postVehicle?.Tech ?? "").trim();
-        try {
-          await db.insert(amsVehiclesCache).values({
-            vin,
-            amsAssignedLdap: postVehicle?.Tech ?? null,
-            rawResponse: postVehicle ?? null,
-            lastAmsSyncAt: new Date(),
-            lastAmsError: null,
-          }).onConflictDoUpdate({
-            target: amsVehiclesCache.vin,
-            set: {
-              amsAssignedLdap: postVehicle?.Tech ?? null,
-              rawResponse: postVehicle ?? null,
-              lastAmsSyncAt: new Date(),
-              lastAmsError: null,
-              updatedAt: new Date(),
-            },
-          });
-        } catch {}
         if (postTech !== "") {
           console.warn(`[FleetOps-AMS] Post-unassign verification mismatch for ${vin}: expected empty, got ${postTech}`);
         } else {
@@ -546,7 +586,16 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
       } catch (verifyErr: any) {
         console.warn(`[FleetOps-AMS] Post-unassign verification failed for ${vin}: ${verifyErr.message}`);
       }
-      return { status: "success", message: "Unassigned" };
+      return {
+        status: "success",
+        message: "Unassigned",
+        cachePayload: {
+          system: "ams",
+          vin,
+          ldap: postVehicle?.Tech ?? null,
+          rawResponse: postVehicle ?? null,
+        },
+      };
     } catch (unassignErr: any) {
       const msg = (unassignErr.message || "").toLowerCase();
       if (msg.includes("not found") || msg.includes("tech not found") || msg.includes("invalid tech") || msg.includes("cannot clear") || msg.includes("empty tech")) {
@@ -755,6 +804,409 @@ async function resolveTargetTruckOccupant(truckNumber: string): Promise<string |
   return null;
 }
 
+/**
+ * Write-through cache args. Captures the orchestrator's per-system results plus
+ * any pre-existing context (the previous truck holder, the truck the incoming
+ * tech was on) needed to clear stale rows.
+ */
+export interface WriteThroughCacheArgs {
+  action: "assign" | "unassign";
+  params: Record<string, any>;
+  tpms: SystemResult;
+  holman: SystemResult;
+  ams: SystemResult;
+  previousTruckHolderLdap?: string | null;
+  previousTechTruck?: string | null;
+  changeSource?: string;
+  /**
+   * If provided, the fleet_operation_log row's per-system status/message
+   * columns are updated inside the same transaction as the cache writes,
+   * giving atomic "log says success ↔ caches reflect success" semantics.
+   * If omitted, the caller is responsible for updating the log separately
+   * (legacy behaviour).
+   */
+  fleetOpLogId?: number;
+}
+
+/**
+ * Pure description of the cache mutations a write-through should perform.
+ * Computed by `planTpmsCacheWrites`. Kept as data so the planner can be unit-
+ * tested without touching the database.
+ */
+export interface TpmsCacheWritePlan {
+  /** tpms_cached_assignments rows to upsert (lookupKey is the conflict target) */
+  cachedAssignmentUpserts: Array<{
+    lookupKey: string;
+    lookupType: "enterprise_id" | "truck_number";
+    truckNo: string | null;
+    enterpriseId: string | null;
+  }>;
+  /** Rows to "null out" the truckNo on (tech still exists, no longer on the truck) */
+  cachedAssignmentNullTruck: Array<{
+    lookupKey: string;
+    lookupType: "enterprise_id" | "truck_number";
+  }>;
+  /** Truck-keyed rows to delete outright (truck has no current tech) */
+  cachedAssignmentDeletes: Array<{
+    lookupKey: string;
+    lookupType: "truck_number";
+  }>;
+  /** tpms_last_known_truck_tech upserts (truckNo is conflict target) */
+  lastKnownUpserts: Array<{ truckNo: string; enterpriseId: string }>;
+  /** Truck numbers whose last_known row should be deleted */
+  lastKnownDeletes: string[];
+  /** tpms_tech_profiles updates: enterpriseId -> truckNo (null clears) */
+  techProfileTruckSets: Array<{ enterpriseId: string; truckNo: string | null }>;
+}
+
+/**
+ * Pure planner — given the orchestrator's args, returns the set of cache
+ * mutations needed to keep the four TPMS-side caches consistent with what just
+ * happened in TPMS. Returns an empty plan if the TPMS call did not succeed.
+ */
+export function planTpmsCacheWrites(args: WriteThroughCacheArgs): TpmsCacheWritePlan {
+  const empty: TpmsCacheWritePlan = {
+    cachedAssignmentUpserts: [],
+    cachedAssignmentNullTruck: [],
+    cachedAssignmentDeletes: [],
+    lastKnownUpserts: [],
+    lastKnownDeletes: [],
+    techProfileTruckSets: [],
+  };
+
+  if (args.tpms.status !== "success") return empty;
+
+  // For unassign, prefer the LDAP that TPMS actually acted on (resolved via
+  // truck-number cache) over the request author's ldapId — they can differ
+  // when the operator clears a truck assigned to a different tech.
+  const requestLdap = normalizeEnterpriseId(args.params.ldapId || "");
+  const tpmsEffective = args.tpms.effectiveLdap ? normalizeEnterpriseId(args.tpms.effectiveLdap) : "";
+  const ldap = args.action === "unassign" && tpmsEffective ? tpmsEffective : requestLdap;
+  const truck = (args.params.truckNumber || "").toString();
+  const truckCanonical = toCanonical(truck);
+  const truckPadded = toTpmsRef(truck) || truck;
+  const plan: TpmsCacheWritePlan = {
+    cachedAssignmentUpserts: [],
+    cachedAssignmentNullTruck: [],
+    cachedAssignmentDeletes: [],
+    lastKnownUpserts: [],
+    lastKnownDeletes: [],
+    techProfileTruckSets: [],
+  };
+
+  if (args.action === "assign" && ldap) {
+    plan.cachedAssignmentUpserts.push(
+      { lookupKey: ldap, lookupType: "enterprise_id", truckNo: truckPadded, enterpriseId: ldap },
+      { lookupKey: truckPadded, lookupType: "truck_number", truckNo: truckPadded, enterpriseId: ldap },
+    );
+    if (truckCanonical && truckCanonical !== truckPadded) {
+      plan.cachedAssignmentUpserts.push(
+        { lookupKey: truckCanonical, lookupType: "truck_number", truckNo: truckPadded, enterpriseId: ldap },
+      );
+    }
+    plan.lastKnownUpserts.push({ truckNo: truckPadded, enterpriseId: ldap });
+    plan.techProfileTruckSets.push({ enterpriseId: ldap, truckNo: truckPadded });
+
+    // Sweep stale enterprise-keyed row + tech-profiles row of the previous holder.
+    const prevHolder = args.previousTruckHolderLdap ? normalizeEnterpriseId(args.previousTruckHolderLdap) : null;
+    if (prevHolder && prevHolder !== ldap) {
+      plan.cachedAssignmentNullTruck.push({ lookupKey: prevHolder, lookupType: "enterprise_id" });
+      plan.techProfileTruckSets.push({ enterpriseId: prevHolder, truckNo: null });
+    }
+
+    // Sweep truck-keyed rows for the truck the incoming tech vacated.
+    if (args.previousTechTruck) {
+      const prevPadded = toTpmsRef(args.previousTechTruck) || args.previousTechTruck;
+      const prevCanonical = toCanonical(args.previousTechTruck);
+      const variants = Array.from(new Set([prevPadded, prevCanonical].filter(Boolean) as string[]));
+      for (const v of variants) {
+        plan.cachedAssignmentDeletes.push({ lookupKey: v, lookupType: "truck_number" });
+        plan.lastKnownDeletes.push(v);
+      }
+    }
+  }
+
+  if (args.action === "unassign" && (ldap || truck)) {
+    // Truck-keyed cache rows must be deleted under both variants.
+    const variants = Array.from(new Set([truckPadded, truckCanonical].filter(Boolean) as string[]));
+    for (const v of variants) {
+      plan.cachedAssignmentDeletes.push({ lookupKey: v, lookupType: "truck_number" });
+      plan.lastKnownDeletes.push(v);
+    }
+    if (ldap) {
+      plan.cachedAssignmentNullTruck.push({ lookupKey: ldap, lookupType: "enterprise_id" });
+      plan.techProfileTruckSets.push({ enterpriseId: ldap, truckNo: null });
+    }
+  }
+
+  return plan;
+}
+
+/**
+ * Write-through cache helper. After a successful downstream call, the
+ * corresponding local cache row is updated immediately so the UI no longer
+ * waits for the next scheduled sync. Failed/skipped downstream calls leave
+ * their caches untouched (queued for retry as today).
+ *
+ * Always updates `tech_vehicle_assignments` (Nexus's canonical assignment
+ * table) and writes a `tech_vehicle_assignment_history` row, regardless of
+ * which downstream systems partially succeeded — the row reflects what Nexus
+ * believes the truth to be after the operation, and the history table gives
+ * a complete audit trail.
+ */
+export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<void> {
+  const { action, params, previousTruckHolderLdap, changeSource } = args;
+  // Mirror planTpmsCacheWrites: prefer TPMS's effective LDAP for unassigns so
+  // the canonical tech_vehicle_assignments + history rows reference the tech
+  // TPMS actually unassigned (not the request author).
+  const requestLdap = normalizeEnterpriseId(params.ldapId || "");
+  const tpmsEffective = args.tpms.effectiveLdap ? normalizeEnterpriseId(args.tpms.effectiveLdap) : "";
+  const ldap = action === "unassign" && tpmsEffective ? tpmsEffective : requestLdap;
+  const truck = (params.truckNumber || "").toString();
+  const truckCanonical = toCanonical(truck);
+  const truckPadded = toTpmsRef(truck) || truck;
+  const now = new Date();
+  const notesParts = [
+    `tpms=${args.tpms.status}`,
+    `holman=${args.holman.status}`,
+    `ams=${args.ams.status}`,
+  ];
+  if (args.tpms.message) notesParts.push(`tpms_msg=${args.tpms.message}`);
+  if (params.notes) notesParts.unshift(String(params.notes));
+  const historyNotes = notesParts.join(" | ");
+
+  const plan = planTpmsCacheWrites(args);
+  const prevHolder = previousTruckHolderLdap ? normalizeEnterpriseId(previousTruckHolderLdap) : null;
+
+  // All cache writes for one operation execute in a single DB transaction, so
+  // partial failures cannot leave caches inconsistent (no row pointing the new
+  // tech at the truck while the previous holder still claims it). Outer
+  // try/catch logs and surfaces — orchestrator continues regardless.
+  try {
+    await db.transaction(async (tx) => {
+      // ── TPMS cache plan ─────────────────────────────────────────────────
+      for (const u of plan.cachedAssignmentUpserts) {
+        await tx.insert(tpmsCachedAssignments).values({
+          lookupKey: u.lookupKey,
+          lookupType: u.lookupType,
+          truckNo: u.truckNo,
+          enterpriseId: u.enterpriseId,
+          firstName: (params.firstName as string) || null,
+          lastName: (params.lastName as string) || null,
+          districtNo: (params.districtNo as string) || null,
+          status: "live",
+          lastSuccessAt: now,
+          lastAttemptAt: now,
+          failureCount: 0,
+        }).onConflictDoUpdate({
+          target: tpmsCachedAssignments.lookupKey,
+          set: {
+            lookupType: u.lookupType,
+            truckNo: u.truckNo,
+            enterpriseId: u.enterpriseId,
+            districtNo: (params.districtNo as string) || sql`${tpmsCachedAssignments.districtNo}`,
+            status: "live",
+            lastSuccessAt: now,
+            lastAttemptAt: now,
+            failureCount: 0,
+            updatedAt: now,
+          },
+        });
+      }
+      for (const n of plan.cachedAssignmentNullTruck) {
+        await tx.update(tpmsCachedAssignments)
+          .set({ truckNo: null, updatedAt: now })
+          .where(and(
+            eq(tpmsCachedAssignments.lookupKey, n.lookupKey),
+            eq(tpmsCachedAssignments.lookupType, n.lookupType),
+          ));
+      }
+      for (const d of plan.cachedAssignmentDeletes) {
+        await tx.delete(tpmsCachedAssignments)
+          .where(and(
+            eq(tpmsCachedAssignments.lookupKey, d.lookupKey),
+            eq(tpmsCachedAssignments.lookupType, d.lookupType),
+          ));
+      }
+      for (const u of plan.lastKnownUpserts) {
+        await tx.insert(tpmsLastKnownTruckTech).values({
+          truckNo: u.truckNo,
+          enterpriseId: u.enterpriseId,
+          firstName: (params.firstName as string) || null,
+          lastName: (params.lastName as string) || null,
+          districtNo: (params.districtNo as string) || null,
+          lastSeenAt: now,
+        }).onConflictDoUpdate({
+          target: tpmsLastKnownTruckTech.truckNo,
+          set: {
+            enterpriseId: u.enterpriseId,
+            districtNo: (params.districtNo as string) || sql`${tpmsLastKnownTruckTech.districtNo}`,
+            lastSeenAt: now,
+            updatedAt: now,
+          },
+        });
+      }
+      for (const t of plan.lastKnownDeletes) {
+        await tx.delete(tpmsLastKnownTruckTech)
+          .where(eq(tpmsLastKnownTruckTech.truckNo, t));
+      }
+      for (const t of plan.techProfileTruckSets) {
+        await tx.update(tpmsTechProfiles)
+          .set({ truckNo: t.truckNo, updatedAt: now })
+          .where(eq(tpmsTechProfiles.enterpriseId, t.enterpriseId));
+      }
+
+      // ── Holman cache (centralized via cachePayload) ─────────────────────
+      const holmanPayload = args.holman.cachePayload;
+      if ((args.holman.status === "success" || args.holman.status === "pending") && holmanPayload?.system === "holman" && holmanPayload.holmanVehicleNumber) {
+        await tx.insert(holmanVehiclesCache).values({
+          holmanVehicleNumber: holmanPayload.holmanVehicleNumber,
+          holmanTechAssigned: holmanPayload.ldap ?? null,
+          holmanTechName: holmanPayload.techName ?? null,
+          lastLocalUpdateAt: now,
+          holmanAssignedStatusCd: holmanPayload.statusCode ?? null,
+          dataSource: "manual",
+        }).onConflictDoUpdate({
+          target: holmanVehiclesCache.holmanVehicleNumber,
+          set: {
+            holmanTechAssigned: holmanPayload.ldap ?? null,
+            holmanTechName: holmanPayload.techName ?? null,
+            lastLocalUpdateAt: now,
+            holmanAssignedStatusCd: holmanPayload.statusCode ?? null,
+            updatedAt: now,
+          },
+        });
+      }
+
+      // ── AMS cache (centralized via cachePayload) ────────────────────────
+      // Note: pre-check / BYOV detection writes still live inside callAms
+      // because they reflect a *read* of AMS state for routing decisions
+      // (not a write-through of a Nexus operation). Only post-success cache
+      // mutation is centralized here so the contract — "failed downstream
+      // calls leave the cache untouched" — is enforced for the success path.
+      const amsPayload = args.ams.cachePayload;
+      if ((args.ams.status === "success" || args.ams.status === "pending") && amsPayload?.system === "ams" && amsPayload.vin) {
+        await tx.insert(amsVehiclesCache).values({
+          vin: amsPayload.vin,
+          amsAssignedLdap: amsPayload.ldap ?? null,
+          rawResponse: amsPayload.rawResponse ?? null,
+          lastAmsSyncAt: now,
+          lastAmsError: null,
+        }).onConflictDoUpdate({
+          target: amsVehiclesCache.vin,
+          set: {
+            amsAssignedLdap: amsPayload.ldap ?? null,
+            rawResponse: amsPayload.rawResponse ?? null,
+            lastAmsSyncAt: now,
+            lastAmsError: null,
+            updatedAt: now,
+          },
+        });
+      }
+
+      // History is always written (audit). Canonical assignment row is only
+      // mutated when TPMS did not block (conflict/failed) — avoids flipping
+      // a tech to inactive while user resolution is pending.
+      const tpmsBlocking = args.tpms.status === "conflict" || args.tpms.status === "failed";
+      if (ldap) {
+        const existingRows = await tx.select()
+          .from(techVehicleAssignments)
+          .where(eq(techVehicleAssignments.techRacfid, ldap))
+          .limit(1);
+        const existing = existingRows[0];
+        const previousTruckNo = existing?.truckNo ?? null;
+        const newTruckNo = action === "assign" ? truckPadded : null;
+        const newStatus = action === "assign" ? "active" : "inactive";
+
+        if (!tpmsBlocking) {
+          if (existing) {
+            await tx.update(techVehicleAssignments)
+              .set({
+                truckNo: newTruckNo,
+                assignmentStatus: newStatus,
+                districtNo: (params.districtNo as string) ?? existing.districtNo,
+                techName: (params.techName as string) ?? existing.techName,
+                updatedAt: now,
+              })
+              .where(eq(techVehicleAssignments.id, existing.id));
+          } else {
+            await tx.insert(techVehicleAssignments).values({
+              techRacfid: ldap,
+              truckNo: newTruckNo,
+              assignmentStatus: newStatus,
+              techName: (params.techName as string) || null,
+              districtNo: (params.districtNo as string) || null,
+            });
+          }
+        }
+
+        const changeType = tpmsBlocking
+          ? (args.tpms.status === "conflict" ? "conflict" : "failed")
+          : (action === "assign"
+              ? (previousTruckNo && previousTruckNo !== newTruckNo ? "changed" : "assigned")
+              : "unassigned");
+        const histTruck = tpmsBlocking ? previousTruckNo : newTruckNo;
+
+        await tx.insert(techVehicleAssignmentHistory).values({
+          techRacfid: ldap,
+          truckNo: histTruck,
+          previousTruckNo: previousTruckNo,
+          changeType,
+          changeSource: changeSource || (params.requestedBy?.includes(":bulk-fix") ? "bulk_fix" : "manual"),
+          changedBy: params.requestedBy || null,
+          notes: historyNotes,
+        });
+
+        // Displacement: clear previous holder's row so two techs aren't on
+        // the same truck. Skipped on TPMS conflict/failed (nothing applied).
+        if (action === "assign" && prevHolder && prevHolder !== ldap && !tpmsBlocking) {
+          const staleRows = await tx.select()
+            .from(techVehicleAssignments)
+            .where(eq(techVehicleAssignments.techRacfid, prevHolder))
+            .limit(1);
+          const stale = staleRows[0];
+          if (stale && stale.truckNo && toCanonical(stale.truckNo) === truckCanonical) {
+            await tx.update(techVehicleAssignments)
+              .set({ truckNo: null, assignmentStatus: "inactive", updatedAt: now })
+              .where(eq(techVehicleAssignments.id, stale.id));
+            await tx.insert(techVehicleAssignmentHistory).values({
+              techRacfid: prevHolder,
+              truckNo: null,
+              previousTruckNo: stale.truckNo,
+              changeType: "unassigned",
+              changeSource: "displacement",
+              changedBy: params.requestedBy || null,
+              notes: `Displaced by ${ldap} taking truck ${truckPadded}`,
+            });
+          }
+        }
+      }
+
+      // Atomic per-system log status update — commits with cache writes.
+      if (args.fleetOpLogId != null) {
+        // completedAt preserved (downstream reconciliation checks it).
+        await tx.update(fleetOperationLog)
+          .set({
+            tpmsStatus: args.tpms.status,
+            tpmsMessage: args.tpms.message,
+            holmanStatus: args.holman.status,
+            holmanMessage: args.holman.message,
+            amsStatus: args.ams.status,
+            amsMessage: args.ams.message,
+            updatedAt: now,
+            completedAt: now,
+          })
+          .where(eq(fleetOperationLog.id, args.fleetOpLogId));
+      }
+    });
+  } catch (err: any) {
+    console.warn(`[FleetOps-WriteThrough] transactional write-through failed: ${err.message}`);
+    // Rethrow so the caller can decide whether to mark the operation failed.
+    // Swallowing here would defeat atomicity (Requirement #7).
+    throw err;
+  }
+}
+
 export const fleetOpsService = {
   async assignTech(params: AssignTechParams): Promise<OperationResult | { locked: true; message: string }> {
     params = { ...params, ldapId: normalizeEnterpriseId(params.ldapId) };
@@ -803,13 +1255,16 @@ export const fleetOpsService = {
           callHolman("unassign", preUnassignParams),
           callAms("unassign", preUnassignParams),
         ]);
-        await storage.updateFleetOperationLog(preLog.id, {
-          tpmsStatus: preTpms.status,
-          tpmsMessage: preTpms.message,
-          holmanStatus: preHolman.status,
-          holmanMessage: preHolman.message,
-          amsStatus: preAms.status,
-          amsMessage: preAms.message,
+        // Atomic: writeThroughCaches updates the per-system status columns
+        // on `preLog` inside the same tx as the cache writes (Requirement #7).
+        await writeThroughCaches({
+          action: "unassign",
+          params: preUnassignParams,
+          tpms: preTpms,
+          holman: preHolman,
+          ams: preAms,
+          changeSource: "auto_unassign",
+          fleetOpLogId: preLog.id,
         });
         await logAllEvents(preLog.id, "unassign", preUnassignParams, preTpms, preHolman, preAms);
         console.log(`[FleetOps] Auto-unassign from ${currentTruck}: TPMS=${preTpms.status}, Holman=${preHolman.status}, AMS=${preAms.status}`);
@@ -852,23 +1307,17 @@ export const fleetOpsService = {
           callHolman("unassign", dispUnassignParams),
           callAms("unassign", dispUnassignParams),
         ]);
-        await storage.updateFleetOperationLog(dispLog.id, {
-          tpmsStatus: dispTpms.status,
-          tpmsMessage: dispTpms.message,
-          holmanStatus: dispHolman.status,
-          holmanMessage: dispHolman.message,
-          amsStatus: dispAms.status,
-          amsMessage: dispAms.message,
+        // Atomic: log status + cache writes commit together (Requirement #7).
+        await writeThroughCaches({
+          action: "unassign",
+          params: dispUnassignParams,
+          tpms: dispTpms,
+          holman: dispHolman,
+          ams: dispAms,
+          changeSource: "displacement",
+          fleetOpLogId: dispLog.id,
         });
         await logAllEvents(dispLog.id, "unassign", dispUnassignParams, dispTpms, dispHolman, dispAms);
-        // Update tpms_cached_assignments for the displaced tech (best-effort)
-        try {
-          const dispAssignment = await storage.getTechVehicleAssignmentByTechRacfid(normalizedTargetOccupant);
-          if (dispAssignment) {
-            await storage.updateTechVehicleAssignment(dispAssignment.id, { truckNo: "" });
-          }
-        } catch {}
-        // Update ams_vehicles_cache for the displaced tech's VIN
         console.log(`[FleetOps] Displacement unassign for ${normalizedTargetOccupant}: TPMS=${dispTpms.status}, Holman=${dispHolman.status}, AMS=${dispAms.status}`);
       } else if (normalizedTargetOccupant === normalizedIncoming) {
         console.log(`[FleetOps] Tech ${normalizedIncoming} is already on target truck ${params.truckNumber} — treating as no-op for TPMS`);
@@ -927,14 +1376,32 @@ export const fleetOpsService = {
         }
       }
 
-      log = await storage.updateFleetOperationLog(log.id, {
+      // Atomic write-through: log status update + all cache writes commit
+      // together inside a single transaction (Requirement #7). If any cache
+      // write fails, the per-system status columns also revert, so the log
+      // never claims success while caches are stale.
+      await writeThroughCaches({
+        action: "assign",
+        params,
+        tpms,
+        holman,
+        ams,
+        previousTruckHolderLdap: normalizedTargetOccupant,
+        previousTechTruck: currentTruckCanonical && currentTruckCanonical !== targetTruck ? currentTruck : null,
+        changeSource: "manual",
+        fleetOpLogId: log.id,
+      });
+      // Mirror the in-tx column updates onto the local `log` reference so
+      // downstream code (return value) sees the same status as persisted.
+      log = {
+        ...log,
         tpmsStatus: tpms.status,
         tpmsMessage: tpms.message,
         holmanStatus: holman.status,
         holmanMessage: holman.message,
         amsStatus: ams.status,
         amsMessage: ams.message,
-      }) ?? log;
+      };
 
       await logAllEvents(log.id, "assign", params, tpms, holman, ams);
 
@@ -1032,14 +1499,25 @@ export const fleetOpsService = {
         callAms("unassign", { ...params }),
       ]);
 
-      log = await storage.updateFleetOperationLog(log.id, {
+      // Atomic write-through: log status update + cache writes in one tx.
+      await writeThroughCaches({
+        action: "unassign",
+        params,
+        tpms,
+        holman,
+        ams,
+        changeSource: "manual",
+        fleetOpLogId: log.id,
+      });
+      log = {
+        ...log,
         tpmsStatus: tpms.status,
         tpmsMessage: tpms.message,
         holmanStatus: holman.status,
         holmanMessage: holman.message,
         amsStatus: ams.status,
         amsMessage: ams.message,
-      }) ?? log;
+      };
 
       await logAllEvents(log.id, "unassign", params, tpms, holman, ams);
 
@@ -1102,35 +1580,60 @@ export const fleetOpsService = {
     targetSystem: "holman" | "ams" | "tpms";
     requestedBy: string;
     notes?: string;
-  }): Promise<{ status: "success" | "failed" | "skipped" | "pending"; message: string; outcome: SystemResult | Record<string, string> }> {
+  }): Promise<{ status: SystemResult["status"]; message: string; outcome: SystemResult | Record<string, string> }> {
     const ldapId = normalizeEnterpriseId(params.ldapId);
     try {
+      let result: SystemResult;
       if (params.targetSystem === "tpms") {
-        const result = await callTpms("assign", {
+        result = await callTpms("assign", {
           truckNumber: params.truckNumber,
           ldapId,
           districtNo: params.districtNo,
           requestedBy: params.requestedBy,
         });
-        return { status: result.status, message: result.message || "", outcome: result };
       } else if (params.targetSystem === "holman") {
-        const result = await callHolman("assign", {
+        result = await callHolman("assign", {
           truckNumber: params.truckNumber,
           ldapId,
           districtNo: params.districtNo,
           requestedBy: params.requestedBy,
         });
-        return { status: result.status, message: result.message || "", outcome: result };
       } else if (params.targetSystem === "ams") {
-        const result = await callAms("assign", {
+        result = await callAms("assign", {
           truckNumber: params.truckNumber,
           ldapId,
           requestedBy: params.requestedBy,
           notes: params.notes,
         });
-        return { status: result.status, message: result.message || "", outcome: result };
+      } else {
+        return { status: "skipped", message: `Unknown target system: ${params.targetSystem}`, outcome: {} };
       }
-      return { status: "skipped", message: `Unknown target system: ${params.targetSystem}`, outcome: {} };
+
+      // Write-through after a successful (or pending) reconcile so the
+      // target system's local cache reflects the push immediately. Other
+      // systems are marked "skipped" so we don't touch their caches.
+      if (result.status === "success" || result.status === "pending") {
+        try {
+          const empty: SystemResult = { status: "skipped", message: "" };
+          await writeThroughCaches({
+            action: "assign",
+            params: {
+              ldapId,
+              truckNumber: params.truckNumber,
+              districtNo: params.districtNo,
+              requestedBy: params.requestedBy,
+              notes: params.notes,
+            },
+            tpms: params.targetSystem === "tpms" ? result : empty,
+            holman: params.targetSystem === "holman" ? result : empty,
+            ams: params.targetSystem === "ams" ? result : empty,
+            changeSource: "reconcile",
+          });
+        } catch (wtErr: any) {
+          console.warn(`[FleetOps-Reconcile] write-through failed for ${params.targetSystem} truck=${params.truckNumber}: ${wtErr.message}`);
+        }
+      }
+      return { status: result.status, message: result.message || "", outcome: result };
     } catch (err: any) {
       return { status: "failed", message: err.message, outcome: { error: err.message } };
     }
@@ -1188,7 +1691,43 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
           updatedAt: now,
         })
         .where(eq(operationEvents.id, event.id));
-      if (event.fleetOpLogId) {
+      // Atomic write-through on retry: per-system log status update commits
+      // in the same tx as the cache writes when fleetOpLogId is supplied.
+      const isAssignKind = event.action === "assign" || event.action === "unassign";
+      const succeededOrPending = result.status === "success" || result.status === "pending";
+      if (event.fleetOpLogId && isAssignKind && succeededOrPending) {
+        try {
+          // Merge with current log row so non-retried system statuses are preserved.
+          const currentLog = await db.select().from(fleetOperationLog)
+            .where(eq(fleetOperationLog.id, event.fleetOpLogId)).limit(1);
+          const cur = currentLog[0];
+          const tpmsRes: SystemResult = event.system === "tpms"
+            ? result
+            : { status: normalizeSystemStatus(cur?.tpmsStatus), message: cur?.tpmsMessage ?? "" };
+          const holmanRes: SystemResult = event.system === "holman"
+            ? result
+            : { status: normalizeSystemStatus(cur?.holmanStatus), message: cur?.holmanMessage ?? "" };
+          const amsRes: SystemResult = event.system === "ams"
+            ? result
+            : { status: normalizeSystemStatus(cur?.amsStatus), message: cur?.amsMessage ?? "" };
+          await writeThroughCaches({
+            action: event.action as "assign" | "unassign",
+            params,
+            tpms: tpmsRes,
+            holman: holmanRes,
+            ams: amsRes,
+            changeSource: "retry",
+            fleetOpLogId: event.fleetOpLogId,
+          });
+        } catch (wtErr: any) {
+          console.warn(`[FleetOps-Retry] write-through after retry failed for event ${event.id}: ${wtErr.message}`);
+          // Fall back to non-atomic log update so we at least record the status.
+          const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
+            : event.system === "holman" ? { holmanStatus: result.status, holmanMessage: result.message }
+            : { amsStatus: result.status, amsMessage: result.message };
+          await storage.updateFleetOperationLog(event.fleetOpLogId, field);
+        }
+      } else if (event.fleetOpLogId) {
         const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
           : event.system === "holman" ? { holmanStatus: result.status, holmanMessage: result.message }
           : { amsStatus: result.status, amsMessage: result.message };
