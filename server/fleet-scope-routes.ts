@@ -14336,6 +14336,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             updateData.nearestTechName = nearestTech.fullName || null;
             updateData.nearestTechPhone = nearestTech.mobilePhone || null;
             updateData.nearestTechZip = newNearestTechZip;
+            updateData.nearestTechEnterpriseId = nearestTech.enterpriseId || null;
             if (nearestTechZipChanged) {
               updateData.nearestTechDistance = null;
             }
@@ -14344,6 +14345,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             updateData.nearestTechPhone = null;
             updateData.nearestTechZip = null;
             updateData.nearestTechDistance = null;
+            updateData.nearestTechEnterpriseId = null;
           }
           
           // Only clear distance cache if ZIP changed - preserve existing distances otherwise

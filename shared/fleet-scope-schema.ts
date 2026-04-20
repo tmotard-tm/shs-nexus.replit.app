@@ -1337,6 +1337,7 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   nearestTechPhone: varchar("nearest_tech_phone", { length: 50 }),
   nearestTechZip: varchar("nearest_tech_zip", { length: 20 }),
   nearestTechDistance: integer("nearest_tech_distance"),
+  nearestTechEnterpriseId: varchar("nearest_tech_enterprise_id", { length: 50 }),
   partsCount: integer("parts_count"), // Sum of ON_HAND from NTAO_FIELD_VIEW_ASSORTMENT for latest CURR_DATE
   partsSpace: real("parts_space"), // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT for latest CURR_DATE
   partsCountSyncedAt: timestamp("parts_count_synced_at"),

@@ -641,6 +641,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_distance') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_distance" integer;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='nearest_tech_enterprise_id') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "nearest_tech_enterprise_id" varchar(50);
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='district') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "district" varchar(20);
   END IF;

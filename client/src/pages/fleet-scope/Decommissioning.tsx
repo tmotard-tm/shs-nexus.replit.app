@@ -70,6 +70,7 @@ interface DecommissioningVehicle {
   nearestTechPhone: string | null;
   nearestTechZip: string | null;
   nearestTechDistance: number | null;
+  nearestTechEnterpriseId: string | null;
   partsCount: number | null; // Sum of ON_HAND from NTAO_FIELD_VIEW_ASSORTMENT
   partsSpace: number | null; // CURRENT_TRUCK_CUFT from NTAO_FIELD_VIEW_ASSORTMENT
   partsCountSyncedAt: string | null;
@@ -459,6 +460,7 @@ export default function Decommissioning() {
       "Manager Name": v.managerName || "",
       "Manager ZIP": v.managerZip || "",
       "Manager Distance": v.managerDistance !== null ? `${v.managerDistance} mi` : "",
+      "Nearest Tech LDAP": v.nearestTechEnterpriseId || "",
       "Nearest Tech": v.nearestTechName || "",
       "Nearest Tech Phone": v.nearestTechPhone || "",
       "Nearest Tech ZIP": v.nearestTechZip || "",
@@ -873,6 +875,7 @@ export default function Decommissioning() {
                         </label>
                       </div>
                     </TableHead>
+                    <TableHead className="w-28 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech LDAP</TableHead>
                     <TableHead className="w-36 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech</TableHead>
                     <TableHead className="w-32 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech Phone</TableHead>
                     <TableHead className="w-24 bg-blue-50/50 dark:bg-blue-900/20">Nearest Tech ZIP</TableHead>
@@ -1037,6 +1040,9 @@ export default function Decommissioning() {
                       </TableCell>
                       <TableCell className="text-sm font-mono bg-amber-50/50 dark:bg-amber-900/20">
                         {vehicle.managerDistance !== null ? `${vehicle.managerDistance} mi` : "-"}
+                      </TableCell>
+                      <TableCell className="text-sm font-mono bg-blue-50/50 dark:bg-blue-900/20" data-testid={`cell-nearest-tech-ldap-${vehicle.id}`}>
+                        {vehicle.nearestTechEnterpriseId || "-"}
                       </TableCell>
                       <TableCell className="text-sm bg-blue-50/50 dark:bg-blue-900/20">
                         {vehicle.nearestTechName || "-"}
