@@ -34,6 +34,7 @@ import {
   Plus,
   AlertTriangle,
   ArrowLeft,
+  Download,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
@@ -1043,6 +1044,82 @@ export default function Spares() {
     }
   };
 
+  const handleExportCsv = () => {
+    const totalRows = filteredOtherLocations.length + filteredRepairShop.length;
+    if (totalRows === 0) {
+      toast({
+        title: "No data to export",
+        description: "Adjust your filters or wait for data to load.",
+      });
+      return;
+    }
+
+    const headers = [
+      "Group",
+      "Truck #",
+      "VIN",
+      "Confirmed Address",
+      "Samsara Address",
+      "Source",
+      "Keys",
+      "Repaired",
+      "Reg. Renewal",
+      "Contact",
+      "General Comments",
+      "Fleet Team Comments",
+      "Declined",
+    ];
+
+    const buildRow = (group: string, v: VehicleLocation) => [
+      group,
+      v.vehicleNumber || "",
+      v.vin || "",
+      v.confirmedAddress || "",
+      v.samsaraAddress || "",
+      v.locationSource || "",
+      (v.keysStatus && KEYS_STORED_TO_DISPLAY[v.keysStatus]) || v.keysStatus || "",
+      v.repairedStatus || "",
+      v.registrationRenewalDate ? formatDate(v.registrationRenewalDate) : "",
+      v.contactNamePhone || "",
+      v.generalComments || "",
+      v.fleetTeamComments || "",
+      v.isDeclined ? "Yes" : "No",
+    ];
+
+    const rows = [
+      ...filteredOtherLocations.map((v) => buildRow("Other Parking Locations", v)),
+      ...filteredRepairShop.map((v) => buildRow("In Repair Shops", v)),
+    ];
+
+    const sanitizeCell = (cell: unknown) => {
+      const str = String(cell ?? "");
+      const needsPrefix = /^[=+\-@\t\r]/.test(str);
+      const safe = needsPrefix ? `'${str}` : str;
+      return `"${safe.replace(/"/g, '""')}"`;
+    };
+
+    const csvContent = [headers, ...rows]
+      .map((row) => row.map(sanitizeCell).join(","))
+      .join("\n");
+
+    const today = new Date().toISOString().slice(0, 10);
+    const blob = new Blob(["\uFEFF" + csvContent], { type: "text/csv;charset=utf-8;" });
+    const link = document.createElement("a");
+    const url = URL.createObjectURL(blob);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `spare-vehicles-${today}.csv`);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    toast({
+      title: "Export successful",
+      description: `Exported ${totalRows} spare vehicle${totalRows === 1 ? "" : "s"} to CSV`,
+    });
+  };
+
   return (
     <div className="bg-background">
       <div className="flex flex-wrap items-center gap-2 mb-4 px-4 lg:px-8 pt-6">
@@ -1063,7 +1140,17 @@ export default function Spares() {
           <RefreshCw className={`w-4 h-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
           Refresh
         </Button>
-        
+
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleExportCsv}
+          data-testid="button-export-csv"
+        >
+          <Download className="w-4 h-4 mr-2" />
+          Export CSV
+        </Button>
+
         <Dialog open={bulkImportOpen} onOpenChange={setBulkImportOpen}>
           <DialogTrigger asChild>
             <Button variant="outline" size="sm" data-testid="button-bulk-import">
