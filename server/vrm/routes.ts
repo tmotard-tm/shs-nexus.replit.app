@@ -260,9 +260,15 @@ export function registerVrmRoutes(): Router {
       const planningAreaMap = new Map((planningAreas.rows as any[]).map((r) => [r.ldap as string, r.planning_area_name as string]));
 
       let upserted = 0;
+      let ldapMissing = 0;
       for (const row of roster) {
         const ldap = (row.ENTERPRISE_ID || "").trim();
-        if (!ldap) continue;
+        if (!ldap) {
+          // Row is in Fleet Scope's VW_RENTAL_LIST but has no ENTERPRISE_ID in
+          // the NEXUS enrichment view — cannot be evaluated by gating logic.
+          ldapMissing++;
+          continue;
+        }
 
         const sc = scorecardMap.get(ldap.toUpperCase());
         const rentalStart = row.RENTAL_START_DATE
@@ -297,7 +303,11 @@ export function registerVrmRoutes(): Router {
         upserted++;
       }
 
-      res.json({ ok: true, upserted, total: roster.length });
+      if (ldapMissing > 0) {
+        console.log(`[VRM] sync/roster: ${ldapMissing} Fleet Scope row(s) excluded — no ENTERPRISE_ID in NEXUS enrichment view`);
+      }
+
+      res.json({ ok: true, upserted, total: roster.length, ldapMissing });
     } catch (e: any) {
       console.error("[VRM] sync/roster error:", e.message);
       res.status(500).json({ error: e.message });

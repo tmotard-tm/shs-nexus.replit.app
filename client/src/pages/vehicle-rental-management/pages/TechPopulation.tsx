@@ -674,7 +674,9 @@ export default function TechPopulation() {
       return { roster: await r1.json(), net: await r2.json() };
     },
     onSuccess: (data) => {
-      setSyncMessage(`Sync complete — ${data.roster.upserted ?? 0} roster records, ${data.net.updated ?? 0} net records updated`);
+      const ldapMissing = data.roster.ldapMissing ?? 0;
+      const missingNote = ldapMissing > 0 ? `; ${ldapMissing} Fleet Scope row${ldapMissing === 1 ? "" : "s"} excluded (no LDAP)` : "";
+      setSyncMessage(`Sync complete — ${data.roster.upserted ?? 0} roster records, ${data.net.updated ?? 0} net records updated${missingNote}`);
       qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
       setTimeout(() => setSyncMessage(null), 6000);
     },
@@ -769,8 +771,9 @@ export default function TechPopulation() {
           <p style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14, color: colors.inkMuted, marginTop: 4 }}>
             All active rental technicians from{" "}
             <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
-              VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
+              VW_RENTAL_LIST
             </span>
+            {" "}enriched with LDAP &amp; AMS fields
           </p>
         </div>
         <div className="flex items-center gap-2">
