@@ -1323,6 +1323,7 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   primaryZip: varchar("primary_zip", { length: 20 }),
   managerEntId: varchar("manager_ent_id", { length: 50 }),
   managerName: varchar("manager_name", { length: 100 }),
+  managerPhone: varchar("manager_phone", { length: 50 }),
   managerZip: varchar("manager_zip", { length: 20 }),
   managerDistance: integer("manager_distance"), // Distance in miles from zipCode to managerZip
   lastManagerZipForDistance: varchar("last_manager_zip_for_distance", { length: 20 }), // Track which managerZip was used

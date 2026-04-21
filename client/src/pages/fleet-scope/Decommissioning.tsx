@@ -53,6 +53,7 @@ interface DecommissioningVehicle {
   primaryZip: string | null;
   managerEntId: string | null;
   managerName: string | null;
+  managerPhone: string | null;
   managerZip: string | null;
   // Distance calculations
   managerDistance: number | null;
@@ -750,6 +751,7 @@ export default function Decommissioning() {
             fullName: v.fullName,
             mobilePhone: v.mobilePhone,
             managerName: v.managerName,
+            managerPhone: v.managerPhone,
             nearestTechName: v.nearestTechName,
             nearestTechPhone: v.nearestTechPhone,
             techMatchSource: v.techMatchSource,

@@ -75,6 +75,7 @@ interface DecommVehicleInfo {
   fullName: string | null;
   mobilePhone: string | null;
   managerName: string | null;
+  managerPhone: string | null;
   nearestTechName: string | null;
   nearestTechPhone: string | null;
   techMatchSource: string | null;
@@ -224,6 +225,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     const options: { type: string; name: string | null; phone: string | null }[] = [];
     if (vehicle.mobilePhone) {
       options.push({ type: "tech", name: vehicle.fullName, phone: vehicle.mobilePhone });
+    }
+    if (vehicle.managerPhone) {
+      options.push({ type: "manager", name: vehicle.managerName, phone: vehicle.managerPhone });
     }
     if (vehicle.nearestTechPhone) {
       options.push({ type: "nearest_tech", name: vehicle.nearestTechName, phone: vehicle.nearestTechPhone });

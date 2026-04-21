@@ -13999,23 +13999,30 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
     }
 
-    // Lookup manager PRIMARYZIP using ENTERPRISE_ID
+    // Lookup manager PRIMARYZIP and MOBILEPHONENUMBER using ENTERPRISE_ID
     const managerZipLookup = new Map<string, string>();
+    const managerPhoneLookup = new Map<string, string>();
     if (managerEntIds.size > 0) {
       const managerIds = Array.from(managerEntIds).map(id => `'${id}'`).join(', ');
       const managerSql = `
-        SELECT ENTERPRISE_ID, PRIMARYZIP
+        SELECT ENTERPRISE_ID, PRIMARYZIP, MOBILEPHONENUMBER
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
         WHERE ENTERPRISE_ID IN (${managerIds})
       `;
       interface ManagerRow {
         ENTERPRISE_ID: string;
         PRIMARYZIP: string | null;
+        MOBILEPHONENUMBER: string | null;
       }
       const managerData = await executeQuery<ManagerRow>(managerSql);
       for (const row of managerData) {
-        if (row.ENTERPRISE_ID && row.PRIMARYZIP) {
-          managerZipLookup.set(row.ENTERPRISE_ID.toString().trim(), row.PRIMARYZIP);
+        const entId = row.ENTERPRISE_ID?.toString().trim();
+        if (!entId) continue;
+        if (row.PRIMARYZIP) {
+          managerZipLookup.set(entId, row.PRIMARYZIP);
+        }
+        if (row.MOBILEPHONENUMBER) {
+          managerPhoneLookup.set(entId, row.MOBILEPHONENUMBER.toString().trim());
         }
       }
     }
@@ -14028,6 +14035,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       primaryZip: string;
       managerEntId: string;
       managerName: string;
+      managerPhone: string;
       managerZip: string;
       district: string;
     }>();
@@ -14045,6 +14053,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           primaryZip: row.PRIMARYZIP?.toString().trim() || '',
           managerEntId: managerEntId,
           managerName: row.MANAGER_NAME?.toString().trim() || '',
+          managerPhone: managerPhoneLookup.get(managerEntId) || '',
           managerZip: managerZipLookup.get(managerEntId) || '',
           district: row.DISTRICT?.toString().trim() || '',
         });
@@ -14105,6 +14114,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           primaryZip: snowflakeData.primaryZip || null,
           managerEntId: snowflakeData.managerEntId || null,
           managerName: snowflakeData.managerName || null,
+          managerPhone: snowflakeData.managerPhone || null,
           managerZip: snowflakeData.managerZip || null,
           techMatchSource: 'truck', // Direct truck number match
           isAssigned: true, // Truck found in TPMS_EXTRACT
@@ -14324,6 +14334,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             primaryZip: newFallbackZip, // Tech ZIP = Manager ZIP (since we matched by manager)
             managerEntId: nearestManager.managerEntId || null,
             managerName: nearestManager.managerName || null,
+            managerPhone: nearestManager.mobilePhone || null,
             managerZip: newFallbackZip,
             techMatchSource: 'manager_zip_fallback', // Matched by nearest manager ZIP code
             isAssigned: false, // Not directly assigned in TPMS_EXTRACT
@@ -15443,7 +15454,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           const vehicle = vehicles[0];
           if (vehicle) {
             if (contactType === 'tech') phone = vehicle.mobilePhone;
-            else if (contactType === 'manager') phone = null;
+            else if (contactType === 'manager') phone = vehicle.managerPhone;
             else if (contactType === 'nearest_tech') phone = vehicle.nearestTechPhone;
           }
         }
