@@ -1,0 +1,61 @@
+GUARDRAILS APPROVED — BUILD, with the following modifications:
+
+1. G1 (generate + destructive-op gate): Non-negotiable. Remove `--force` from 
+   scripts/post-merge.sh and replace with `drizzle-kit generate` + a gate that 
+   FAILS the merge if the generated SQL contains DROP COLUMN, DROP TABLE, 
+   ALTER COLUMN TYPE, or RENAME without an explicit allow-list file 
+   (.drizzle/allowed-destructive-ops.txt, one op per line, requires human PR).
+
+2. G2 (pre-deploy snapshot): Write to a durable location outside the Repl 
+   workspace — Neon branch, S3, or Object Storage bucket. Ephemeral workspace 
+   storage is not acceptable. Retain last 10 snapshots.
+
+3. G3 (migration safety gate): Block on DROP COLUMN, DROP TABLE, ALTER COLUMN 
+   TYPE, RENAME. Allow ADD COLUMN, CREATE TABLE, DROP NOT NULL, CREATE INDEX.
+
+4. G4 (post-deploy integrity check): Make the row-count tolerance configurable 
+   per-table. vrm_repair_tracker has legitimate importer churn — set tolerance 
+   to ±20% there, ±2% everywhere else. Hard-fail below 50% of pre-deploy count 
+   on any table regardless of tolerance.
+
+5. G5 (rollback artifact): Keep as proposed.
+
+6. G6 (dedup DELETE fix): Replace the one-time flag with a persistent 
+   `protected_from_dedup BOOLEAN DEFAULT false` column on vrm_repair_tracker. 
+   Set to true automatically when ANY manual edit happens (notes, van_status, 
+   tech_contacted, byov, rental_returned, route_cleared, shop_status updates). 
+   The dedup DELETE must include `AND protected_from_dedup = false` in its 
+   WHERE clause. This is a permanent protection, not a one-time skip.
+
+7. G7 (refreshDevFromProd.js direction guard): Keep as proposed. Add an 
+   assertion that SOURCE host contains 'prod' markers and DEST host does not.
+
+8. NEW — G8 (env drift assertion): At boot, when NODE_ENV=production, assert 
+   DATABASE_URL host matches an expected pattern stored in a committed 
+   config file. Fail loud on mismatch — do not start the server. This closes 
+   the "prod accidentally points at dev DB" failure mode.
+
+Hard constraints for Phase 2:
+- Do NOT run any destructive migration during this work
+- Do NOT touch application code paths outside the guardrail scope
+- Do NOT modify Plan #201 closeout code (Steps 1–8 are locked)
+- Write all new scripts under scripts/guardrails/ with clear names
+- Each guardrail gets its own file; no single mega-script
+- Update .replit and package.json minimally and show diffs for approval 
+  before committing
+- Do NOT Publish. Guardrails go in first, then I validate, then I push Publish.
+
+Before starting, answer these two blocking UNKNOWNs:
+(a) What is the prod DATABASE_URL host suffix? (I need this for G8.)
+(b) Is prod on a named Neon branch or the default branch? (Threat-model sizing.)
+
+Parallelize while building: pull __drizzle_migrations contents from prod, 
+pull the Replit deploy audit log for the last 30 days, and produce a 
+historic row-count timeline for vrm_repair_tracker from any logs/snapshots 
+that exist.
+
+Stop after G1–G8 are installed and run a dry-run of each guardrail against 
+the current workspace. Report DRY-RUN PASS / DRY-RUN FAIL per guardrail. 
+Do NOT run them against prod yet.
+
+End state: GUARDRAILS INSTALLED — AWAITING DRY-RUN REVIEW.
