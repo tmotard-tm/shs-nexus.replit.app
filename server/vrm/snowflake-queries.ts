@@ -475,3 +475,48 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
 
   return rows;
 }
+
+
+// ─── Tech Punch Status (TimeHub) ────────────────────────────────────────────
+
+export interface TechPunchRow {
+  ldap: string;
+  punchDate: string;        // YYYY-MM-DD
+  punchInTs: string | null; // ISO timestamp
+  punchOutTs: string | null;
+}
+
+/**
+ * Fetch up to N days of tech time punches from
+ * IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+ *
+ * Source table is a 1-week rolling tabular punch list. We expect columns
+ * LDAP_ID, PUNCH_DATE, PUNCH_IN_TS, PUNCH_OUT_TS — adjust in this query if
+ * the upstream table uses different column names.
+ *
+ * Returns rows ordered most-recent-first. Empty array if no data / no LDAPs.
+ */
+export async function fetchTechPunchHistory(
+  ldaps: string[],
+  days: number = 7,
+): Promise<TechPunchRow[]> {
+  if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
+  const cleaned = ldaps.map((l) => (l || "").trim()).filter(Boolean);
+  if (cleaned.length === 0) return [];
+  const svc = getSnowflakeService();
+  const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
+  const lookback = Math.max(1, Math.min(7, days));
+
+  const rows = (await svc.executeQuery(`
+    SELECT
+      UPPER(LDAP_ID)                                    AS "ldap",
+      TO_CHAR(PUNCH_DATE, 'YYYY-MM-DD')                  AS "punchDate",
+      TO_CHAR(PUNCH_IN_TS,  'YYYY-MM-DD"T"HH24:MI:SS')   AS "punchInTs",
+      TO_CHAR(PUNCH_OUT_TS, 'YYYY-MM-DD"T"HH24:MI:SS')   AS "punchOutTs"
+    FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+    WHERE UPPER(LDAP_ID) IN (${ldapList.toUpperCase()})
+      AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
+    ORDER BY PUNCH_DATE DESC, PUNCH_IN_TS DESC NULLS LAST
+  `)) as TechPunchRow[];
+  return rows;
+}

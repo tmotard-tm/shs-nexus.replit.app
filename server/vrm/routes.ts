@@ -47,7 +47,7 @@ import {
   listRepairTrackerActions,
   addRepairTrackerAction,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, type TechPunchRow } from "./snowflake-queries";
 import { generateAuditPdf } from "./pdf-generator";
 import {
   vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
@@ -901,6 +901,109 @@ export function registerVrmRoutes(): Router {
       });
       res.status(201).json(action);
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Tech Punch Status (TimeHub via Snowflake) ──────────────────────────────
+  // Short server-side cache to avoid hammering Snowflake on every table render.
+  const PUNCH_TTL_MS = 90 * 1000;
+  type PunchCacheEntry = { ts: number; rows: TechPunchRow[] };
+  const punchHistoryCache = new Map<string, PunchCacheEntry>(); // key: ldap (uppercased)
+  let bulkStatusCache: { ts: number; payload: any } | null = null;
+
+  function todayStr(): string {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  function summarizeStatus(rows: TechPunchRow[]) {
+    const today = todayStr();
+    const todays = rows.filter((r) => r.punchDate === today);
+    if (todays.length === 0) {
+      const last = rows[0] ?? null;
+      return {
+        status: "no_punch_today" as const,
+        latestPunchTs: last?.punchOutTs ?? last?.punchInTs ?? null,
+        latestPunchType: last ? (last.punchOutTs ? "out" : "in") : null,
+      };
+    }
+    // Determine current state from latest record today
+    const latest = todays[0];
+    const isClockedIn = latest.punchInTs && !latest.punchOutTs;
+    return {
+      status: isClockedIn ? ("clocked_in" as const) : ("clocked_out" as const),
+      latestPunchTs: latest.punchOutTs ?? latest.punchInTs ?? null,
+      latestPunchType: isClockedIn ? "in" : "out",
+    };
+  }
+
+  // GET /api/vrm/repair-tracker/punch-status — bulk today status for all LDAPs on tracker
+  router.get("/repair-tracker/punch-status", async (_req, res) => {
+    try {
+      const now = Date.now();
+      if (bulkStatusCache && now - bulkStatusCache.ts < PUNCH_TTL_MS) {
+        return res.json(bulkStatusCache.payload);
+      }
+      const entries = await listRepairTracker();
+      const ldaps = Array.from(
+        new Set(
+          entries
+            .map((e: any) => (e.techLdap ?? "").trim().toUpperCase())
+            .filter((l: string) => l.length > 0),
+        ),
+      );
+      let allRows: TechPunchRow[] = [];
+      try {
+        allRows = await fetchTechPunchHistory(ldaps, 7);
+      } catch (e: any) {
+        console.error("[VRM] punch-status snowflake error:", e.message);
+      }
+      // Group by LDAP
+      const byLdap = new Map<string, TechPunchRow[]>();
+      for (const r of allRows) {
+        const key = (r.ldap || "").toUpperCase();
+        if (!byLdap.has(key)) byLdap.set(key, []);
+        byLdap.get(key)!.push(r);
+      }
+      const result: Record<string, ReturnType<typeof summarizeStatus> & { hasData: boolean }> = {};
+      for (const ldap of ldaps) {
+        const rows = byLdap.get(ldap) ?? [];
+        // also seed the per-ldap history cache so the side panel is instant
+        punchHistoryCache.set(ldap, { ts: now, rows });
+        result[ldap] = { ...summarizeStatus(rows), hasData: rows.length > 0 };
+      }
+      bulkStatusCache = { ts: now, payload: result };
+      res.json(result);
+    } catch (e: any) {
+      console.error("[VRM] punch-status error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/vrm/repair-tracker/punch-history/:ldap — full window for one tech
+  router.get("/repair-tracker/punch-history/:ldap", async (req, res) => {
+    try {
+      const ldap = (req.params.ldap || "").trim().toUpperCase();
+      if (!ldap) return res.status(400).json({ error: "ldap required" });
+      const force = String(req.query.refresh ?? "") === "1";
+      const now = Date.now();
+      const hit = punchHistoryCache.get(ldap);
+      if (!force && hit && now - hit.ts < PUNCH_TTL_MS) {
+        return res.json({ ldap, rows: hit.rows, summary: summarizeStatus(hit.rows), cached: true });
+      }
+      let rows: TechPunchRow[] = [];
+      try {
+        rows = await fetchTechPunchHistory([ldap], 7);
+      } catch (e: any) {
+        console.error("[VRM] punch-history snowflake error:", e.message);
+      }
+      punchHistoryCache.set(ldap, { ts: now, rows });
+      // Force-refresh also invalidates the bulk cache so the table picks up changes
+      if (force) bulkStatusCache = null;
+      res.json({ ldap, rows, summary: summarizeStatus(rows), cached: false });
+    } catch (e: any) {
+      console.error("[VRM] punch-history error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });

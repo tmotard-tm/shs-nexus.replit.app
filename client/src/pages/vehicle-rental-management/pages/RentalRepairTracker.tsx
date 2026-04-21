@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock, Download } from "lucide-react";
+import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock, Download, AlertTriangle } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -302,6 +302,118 @@ const EMPTY_FORM: RepairForm = {
   byovEnrolled: false,
 };
 
+// ─── Punch History Tab (side-panel) ───────────────────────────────────────────
+
+function PunchHistoryTab({
+  ldap,
+  query,
+  onRefresh,
+}: {
+  ldap: string;
+  query: ReturnType<typeof useQuery<{ ldap: string; rows: PunchHistoryRow[]; summary: PunchStatusEntry }>>;
+  onRefresh: () => void;
+}) {
+  const fmtDate = (d: string) => {
+    if (!d) return "—";
+    const dt = new Date(d + "T00:00:00");
+    if (isNaN(dt.getTime())) return d;
+    return dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  };
+  const fmtTime = (ts: string | null) => {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  };
+  const fmtDuration = (inTs: string | null, outTs: string | null) => {
+    if (!inTs || !outTs) return "—";
+    const a = new Date(inTs).getTime();
+    const b = new Date(outTs).getTime();
+    if (!isFinite(a) || !isFinite(b) || b < a) return "—";
+    const mins = Math.round((b - a) / 60000);
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  if (!ldap) {
+    return (
+      <div style={{ padding: "24px 0", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+        No LDAP on this entry — punch history unavailable.
+      </div>
+    );
+  }
+
+  const rows = query.data?.rows ?? [];
+  const summary = query.data?.summary;
+
+  return (
+    <div style={{ paddingTop: 18 }}>
+      {/* Summary header + refresh */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Today</span>
+          <PunchStatusCell ldap={ldap} status={summary ? { ...summary, hasData: rows.length > 0 } : undefined} />
+        </div>
+        <button
+          onClick={onRefresh}
+          disabled={query.isFetching}
+          style={{
+            display: "flex", alignItems: "center", gap: 6,
+            fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+            color: colors.inkSoft, backgroundColor: "#fff",
+            border: `1px solid ${colors.rule}`, borderRadius: 6,
+            padding: "6px 12px", cursor: query.isFetching ? "not-allowed" : "pointer",
+            opacity: query.isFetching ? 0.6 : 1,
+          }}
+        >
+          <RefreshCw size={12} className={query.isFetching ? "animate-spin" : ""} />
+          {query.isFetching ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
+
+      {query.isLoading ? (
+        <div style={{ padding: 30, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+          Loading punches…
+        </div>
+      ) : query.isError ? (
+        <div style={{ padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, fontSize: 13, color: colors.red, backgroundColor: "#FEF2F2" }}>
+          Failed to load punch history. Try Refresh.
+        </div>
+      ) : rows.length === 0 ? (
+        <div style={{ padding: 30, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+          No punches in the last 7 days.
+        </div>
+      ) : (
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ backgroundColor: colors.surface }}>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Date</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>In</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Out</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${colors.rule}` }}>Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={`${r.punchDate}-${r.punchInTs ?? ""}-${i}`}>
+                <td style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtDate(r.punchDate)}</td>
+                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(r.punchInTs)}</td>
+                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(r.punchOutTs)}</td>
+                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, textAlign: "right", whiteSpace: "nowrap" }}>{fmtDuration(r.punchInTs, r.punchOutTs)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <p style={{ marginTop: 14, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+        Source: TimeHub (1-week window). Data refreshes every ~90s server-side.
+      </p>
+    </div>
+  );
+}
+
 // ─── Unified Side Panel ───────────────────────────────────────────────────────
 
 function UnifiedPanel({
@@ -385,6 +497,33 @@ function UnifiedPanel({
   const [actionType, setActionType] = useState("called_tech");
   const [actionNotes, setActionNotes] = useState("");
   const [actionPerformer, setActionPerformer] = useState("");
+
+  // ── Side-panel tabs (Details vs Punch History) ──
+  type PanelTab = "details" | "punches";
+  const [panelTab, setPanelTab] = useState<PanelTab>("details");
+  useEffect(() => { setPanelTab("details"); }, [entry?.id]);
+
+  const punchLdap = (entry?.techLdap ?? "").trim().toUpperCase();
+  const punchHistoryQuery = useQuery<{ ldap: string; rows: PunchHistoryRow[]; summary: PunchStatusEntry }>({
+    queryKey: ["/api/vrm/repair-tracker/punch-history", punchLdap],
+    queryFn: async () => {
+      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}`);
+      if (!r.ok) throw new Error("Failed to load punch history");
+      return r.json();
+    },
+    enabled: panelTab === "punches" && !!punchLdap,
+  });
+  const refreshPunches = async () => {
+    if (!punchLdap) return;
+    try {
+      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}?refresh=1`);
+      if (!r.ok) throw new Error("Failed to refresh");
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker/punch-history", punchLdap] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker/punch-status"] });
+    } catch (e: any) {
+      toast({ title: "Refresh failed", description: e.message, variant: "destructive" });
+    }
+  };
 
   const addActionMutation = useMutation({
     mutationFn: async () => {
@@ -506,8 +645,48 @@ function UnifiedPanel({
           </button>
         </div>
 
+        {/* Tabs (edit mode only — new entries skip tabs entirely) */}
+        {isEdit && (
+          <div style={{ display: "flex", gap: 0, padding: "0 24px", borderBottom: `1px solid ${colors.rule}`, flexShrink: 0 }}>
+            {([
+              { key: "details" as const, label: "Details" },
+              { key: "punches" as const, label: "Punch History" },
+            ]).map((t) => {
+              const active = panelTab === t.key;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setPanelTab(t.key)}
+                  style={{
+                    fontFamily: fonts.dmSans,
+                    fontWeight: active ? 600 : 500,
+                    fontSize: 13,
+                    color: active ? colors.accent : colors.inkSoft,
+                    background: "none",
+                    border: "none",
+                    borderBottom: `2px solid ${active ? colors.accent : "transparent"}`,
+                    padding: "12px 14px",
+                    cursor: "pointer",
+                    marginBottom: -1,
+                  }}
+                >
+                  {t.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
         {/* Body */}
         <div style={{ flex: 1, padding: "0 24px 40px", overflowY: "auto" }}>
+          {isEdit && panelTab === "punches" ? (
+            <PunchHistoryTab
+              ldap={punchLdap}
+              query={punchHistoryQuery}
+              onRefresh={refreshPunches}
+            />
+          ) : (
+          <>
           {/* ── Tech & Vehicle Info ── */}
           <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Tech &amp; Vehicle Info
@@ -806,7 +985,11 @@ function UnifiedPanel({
             </>
           )}
 
-          {/* ── Footer buttons ── */}
+          </>
+          )}
+
+          {/* ── Footer buttons (always visible) ── */}
+          {!(isEdit && panelTab === "punches") && (
           <div style={{ display: "flex", gap: 10, marginTop: 24 }}>
             <button
               onClick={() => saveMutation.mutate()}
@@ -849,6 +1032,7 @@ function UnifiedPanel({
               </button>
             )}
           </div>
+          )}
         </div>
       </div>
     </div>
@@ -858,11 +1042,78 @@ function UnifiedPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type SortColumn =
-  | "techLdap" | "techName" | "techPhone" | "district" | "truckNumber"
+  | "techLdap" | "techName" | "techPhone" | "district" | "punchStatus" | "truckNumber"
   | "repairShopAddress" | "repairShopPhone" | "deniedAt"
   | "mainStatus" | "techStatus" | "techContacted" | "byovEnrolled"
   | "rentalReturned" | "routeCleared" | "supervisorName" | "supervisorPhone"
   | "lastActionNotes";
+
+// ─── Tech Punch Status types ──────────────────────────────────────────────────
+type PunchStatusKey = "clocked_in" | "clocked_out" | "no_punch_today";
+interface PunchStatusEntry {
+  status: PunchStatusKey;
+  latestPunchTs: string | null;
+  latestPunchType: "in" | "out" | null;
+  hasData: boolean;
+}
+type PunchStatusMap = Record<string, PunchStatusEntry>;
+interface PunchHistoryRow {
+  ldap: string;
+  punchDate: string;
+  punchInTs: string | null;
+  punchOutTs: string | null;
+}
+
+const PUNCH_STATUS_LABEL: Record<PunchStatusKey, string> = {
+  clocked_in: "Clocked In",
+  clocked_out: "Clocked Out",
+  no_punch_today: "No Punch Today",
+};
+
+function fmtPunchTime(ts: string | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+}
+
+function PunchStatusCell({ ldap, status }: { ldap: string | null; status: PunchStatusEntry | undefined }) {
+  if (!ldap) {
+    return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>—</span>;
+  }
+  if (!status) {
+    return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>…</span>;
+  }
+  if (!status.hasData) {
+    return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>No data</span>;
+  }
+  const isClockedIn = status.status === "clocked_in";
+  const palette =
+    status.status === "clocked_in"
+      ? { fg: "#FFFFFF", bg: "#EF4444" }     // red — should NOT be clocked in
+      : status.status === "clocked_out"
+      ? { fg: "#0F766E", bg: "#CCFBF1" }     // teal/neutral
+      : { fg: colors.inkMuted, bg: colors.surface };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+      <span style={{
+        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+        color: palette.fg, backgroundColor: palette.bg,
+        borderRadius: 6, padding: "3px 8px",
+        display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+      }}>
+        {isClockedIn && <AlertTriangle size={11} />}
+        {PUNCH_STATUS_LABEL[status.status]}
+      </span>
+      {status.latestPunchTs && (
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }}>
+          {status.latestPunchType === "in" ? "In " : status.latestPunchType === "out" ? "Out " : ""}
+          {fmtPunchTime(status.latestPunchTs)}
+        </span>
+      )}
+    </div>
+  );
+}
 
 export default function RentalRepairTracker() {
   const { toast } = useToast();
@@ -875,6 +1126,15 @@ export default function RentalRepairTracker() {
   const { data: entries = [], isLoading } = useQuery<RepairTrackerEntry[]>({
     queryKey: ["/api/vrm/repair-tracker"],
   });
+
+  // Tech Punch Status (today) — bulk lookup from Snowflake TimeHub.
+  // Cached server-side ~90s; refetch every 2m to keep the table reasonably fresh.
+  const { data: punchStatusMap = {} as PunchStatusMap, isFetching: isPunchFetching } =
+    useQuery<PunchStatusMap>({
+      queryKey: ["/api/vrm/repair-tracker/punch-status"],
+      refetchInterval: 120_000,
+      enabled: entries.length > 0,
+    });
 
   const syncMutation = useMutation({
     mutationFn: async () => {
@@ -1058,9 +1318,26 @@ export default function RentalRepairTracker() {
                 if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
                 return v;
               };
-              const headers = ["LDAP","Tech Name","Tech Phone","District","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
+              const headers = ["LDAP","Tech Name","Tech Phone","District","Tech Punch Status","Latest Punch Time","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
+              const punchLabel = (ldap: string | null) => {
+                if (!ldap) return "";
+                const s = punchStatusMap[ldap.toUpperCase()];
+                if (!s) return "";
+                if (!s.hasData) return "No data";
+                return PUNCH_STATUS_LABEL[s.status];
+              };
+              const punchTime = (ldap: string | null) => {
+                if (!ldap) return "";
+                const s = punchStatusMap[ldap.toUpperCase()];
+                if (!s || !s.latestPunchTs) return "";
+                const d = new Date(s.latestPunchTs);
+                if (isNaN(d.getTime())) return "";
+                return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+              };
               const rows = sorted.map((e) => [
-                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ? e.district.replace(/^0+/, "") || "0" : "", e.truckNumber ?? "",
+                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ? e.district.replace(/^0+/, "") || "0" : "",
+                punchLabel(e.techLdap), punchTime(e.techLdap),
+                e.truckNumber ?? "",
                 e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.deniedAt),
                 e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "",
                 boolStr(e.techContacted), boolStr(e.byovEnrolled),
@@ -1170,6 +1447,7 @@ export default function RentalRepairTracker() {
                 <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
                 <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
                 <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
+                <th style={thStyle} onClick={() => handleSort("punchStatus")}>Tech Punch Status{sortIndicator("punchStatus")}</th>
                 <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
                 <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
                 <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
@@ -1204,6 +1482,12 @@ export default function RentalRepairTracker() {
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.district ? entry.district.replace(/^0+/, "") || "0" : "—"}
+                  </td>
+                  <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
+                    <PunchStatusCell
+                      ldap={entry.techLdap}
+                      status={entry.techLdap ? punchStatusMap[entry.techLdap.toUpperCase()] : undefined}
+                    />
                   </td>
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
                     {entry.truckNumber ?? "—"}
