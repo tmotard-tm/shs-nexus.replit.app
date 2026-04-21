@@ -46,6 +46,13 @@ import {
   backfillRepairTrackerTruckNumbers,
   listRepairTrackerActions,
   addRepairTrackerAction,
+  listTechOutreach,
+  addTechOutreach,
+  reviseTechOutreach,
+  listShopContact,
+  addShopContact,
+  reviseShopContact,
+  getLegacyNotesIfUnmigrated,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchPunchSourceDiagnostic, type TechPunchRow } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -902,6 +909,126 @@ export function registerVrmRoutes(): Router {
         performedByName,
       });
       res.status(201).json(action);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Tech Outreach timeline ────────────────────────────────────────────────
+  router.get("/repair-tracker/:id/tech-outreach", async (req, res) => {
+    try {
+      const rows = await listTechOutreach(req.params.id);
+      res.json(rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker/:id/tech-outreach", async (req, res) => {
+    try {
+      const { authorName, occurredAt, method, outcome, body, byovStatus, byovDecisionDate } = req.body ?? {};
+      if (!authorName) return res.status(400).json({ error: "authorName is required" });
+      const sideEffect = (byovStatus !== undefined || byovDecisionDate !== undefined)
+        ? { byovStatus: byovStatus ?? null, byovDecisionDate: byovDecisionDate ?? null }
+        : undefined;
+      const row = await addTechOutreach({
+        repairTrackerId: req.params.id,
+        authorName,
+        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        method: method ?? null,
+        outcome: outcome ?? null,
+        body: body ?? null,
+      } as any, sideEffect);
+      res.status(201).json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch("/repair-tracker/:id/tech-outreach/:entryId", async (req, res) => {
+    try {
+      const { authorName, occurredAt, method, outcome, body } = req.body ?? {};
+      if (!authorName) return res.status(400).json({ error: "authorName is required" });
+      const row = await reviseTechOutreach(req.params.entryId, {
+        repairTrackerId: req.params.id,
+        authorName,
+        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        method: method ?? null,
+        outcome: outcome ?? null,
+        body: body ?? null,
+      } as any);
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Shop Contact Log timeline ─────────────────────────────────────────────
+  router.get("/repair-tracker/:id/shop-contact", async (req, res) => {
+    try {
+      const rows = await listShopContact(req.params.id);
+      res.json(rows);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker/:id/shop-contact", async (req, res) => {
+    try {
+      const {
+        authorName, occurredAt, body,
+        etaUpdate, mainStatusUpdate, subStatusUpdate, techStatusUpdate,
+      } = req.body ?? {};
+      if (!authorName) return res.status(400).json({ error: "authorName is required" });
+      const row = await addShopContact({
+        repairTrackerId: req.params.id,
+        authorName,
+        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        etaUpdate: etaUpdate ?? null,
+        mainStatusUpdate: mainStatusUpdate ?? null,
+        subStatusUpdate: subStatusUpdate ?? null,
+        techStatusUpdate: techStatusUpdate ?? null,
+        body: body ?? null,
+      } as any, {
+        etaUpdate: etaUpdate ?? null,
+        mainStatus: mainStatusUpdate ?? null,
+        subStatus: subStatusUpdate ?? null,
+        techStatus: techStatusUpdate ?? null,
+      });
+      res.status(201).json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.patch("/repair-tracker/:id/shop-contact/:entryId", async (req, res) => {
+    try {
+      const {
+        authorName, occurredAt, body,
+        etaUpdate, mainStatusUpdate, subStatusUpdate, techStatusUpdate,
+      } = req.body ?? {};
+      if (!authorName) return res.status(400).json({ error: "authorName is required" });
+      const row = await reviseShopContact(req.params.entryId, {
+        repairTrackerId: req.params.id,
+        authorName,
+        occurredAt: occurredAt ? new Date(occurredAt) : new Date(),
+        etaUpdate: etaUpdate ?? null,
+        mainStatusUpdate: mainStatusUpdate ?? null,
+        subStatusUpdate: subStatusUpdate ?? null,
+        techStatusUpdate: techStatusUpdate ?? null,
+        body: body ?? null,
+      } as any);
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Legacy notes (only returned when both timelines empty) ────────────────
+  router.get("/repair-tracker/:id/legacy-notes", async (req, res) => {
+    try {
+      const notes = await getLegacyNotesIfUnmigrated(req.params.id);
+      res.json({ notes });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }

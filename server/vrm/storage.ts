@@ -16,6 +16,8 @@ import {
   vrmNewRentalLog,
   vrmRepairTracker,
   vrmRepairTrackerActions,
+  vrmRepairTrackerTechOutreach,
+  vrmRepairTrackerShopContact,
   type VrmTech,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
@@ -24,6 +26,8 @@ import {
   type InsertVrmNewRentalLog,
   type InsertVrmRepairTracker,
   type InsertVrmRepairTrackerAction,
+  type InsertVrmRepairTrackerTechOutreach,
+  type InsertVrmRepairTrackerShopContact,
 } from "../../shared/vrm-schema";
 import {
   deriveStage,
@@ -900,4 +904,110 @@ export async function listRepairTrackerActions(repairTrackerId: string) {
 export async function addRepairTrackerAction(data: InsertVrmRepairTrackerAction) {
   const [row] = await db.insert(vrmRepairTrackerActions).values(data).returning();
   return row;
+}
+
+// ─── Tech Outreach timeline (append-only, with revisions) ─────────────────────
+
+export async function listTechOutreach(repairTrackerId: string) {
+  return db
+    .select()
+    .from(vrmRepairTrackerTechOutreach)
+    .where(eq(vrmRepairTrackerTechOutreach.repairTrackerId, repairTrackerId))
+    .orderBy(desc(vrmRepairTrackerTechOutreach.occurredAt));
+}
+
+export async function addTechOutreach(
+  data: InsertVrmRepairTrackerTechOutreach,
+  sideEffect?: { byovStatus?: string | null; byovDecisionDate?: string | null },
+) {
+  const [row] = await db.insert(vrmRepairTrackerTechOutreach).values(data).returning();
+  if (sideEffect && (sideEffect.byovStatus !== undefined || sideEffect.byovDecisionDate !== undefined)) {
+    const patch: Record<string, unknown> = { updatedAt: new Date() };
+    if (sideEffect.byovStatus !== undefined) patch.byovStatus = sideEffect.byovStatus;
+    if (sideEffect.byovDecisionDate !== undefined) patch.byovDecisionDate = sideEffect.byovDecisionDate;
+    await db.update(vrmRepairTracker).set(patch).where(eq(vrmRepairTracker.id, data.repairTrackerId));
+  }
+  return row;
+}
+
+export async function reviseTechOutreach(
+  originalId: string,
+  data: Omit<InsertVrmRepairTrackerTechOutreach, "revisedFromId">,
+) {
+  const [row] = await db
+    .insert(vrmRepairTrackerTechOutreach)
+    .values({ ...data, revisedFromId: originalId })
+    .returning();
+  return row;
+}
+
+// ─── Shop Contact Log timeline (append-only, with revisions) ──────────────────
+
+export async function listShopContact(repairTrackerId: string) {
+  return db
+    .select()
+    .from(vrmRepairTrackerShopContact)
+    .where(eq(vrmRepairTrackerShopContact.repairTrackerId, repairTrackerId))
+    .orderBy(desc(vrmRepairTrackerShopContact.occurredAt));
+}
+
+export async function addShopContact(
+  data: InsertVrmRepairTrackerShopContact,
+  sideEffect?: {
+    etaUpdate?: string | null;
+    mainStatus?: string | null;
+    subStatus?: string | null;
+    techStatus?: string | null;
+  },
+) {
+  const [row] = await db.insert(vrmRepairTrackerShopContact).values(data).returning();
+  // Use raw SQL to avoid drizzle's date/timestamp coercion surprises
+  // (date columns expect string, timestamp columns expect Date — patch both safely).
+  await db.execute(sql`
+    UPDATE vrm_repair_tracker
+    SET
+      shop_last_contacted_date = NOW(),
+      updated_at = NOW(),
+      shop_eta_on_road = COALESCE(${sideEffect?.etaUpdate ?? null}::date, shop_eta_on_road),
+      main_status = COALESCE(${sideEffect?.mainStatus ?? null}, main_status),
+      sub_status = ${sideEffect?.subStatus !== undefined
+        ? sql`${sideEffect.subStatus}`
+        : sql`sub_status`},
+      tech_status = COALESCE(${sideEffect?.techStatus ?? null}, tech_status)
+    WHERE id = ${data.repairTrackerId}
+  `);
+  return row;
+}
+
+export async function reviseShopContact(
+  originalId: string,
+  data: Omit<InsertVrmRepairTrackerShopContact, "revisedFromId">,
+) {
+  const [row] = await db
+    .insert(vrmRepairTrackerShopContact)
+    .values({ ...data, revisedFromId: originalId })
+    .returning();
+  return row;
+}
+
+/**
+ * Returns the legacy notes field IF both timelines are empty.
+ * Used by the UI to show the "Pre-migration notes" panel.
+ */
+export async function getLegacyNotesIfUnmigrated(repairTrackerId: string): Promise<string | null> {
+  const [tracker] = await db
+    .select({ notes: vrmRepairTracker.notes })
+    .from(vrmRepairTracker)
+    .where(eq(vrmRepairTracker.id, repairTrackerId));
+  if (!tracker?.notes || !tracker.notes.trim()) return null;
+  const [{ count: toCount }] = await db
+    .select({ count: count() })
+    .from(vrmRepairTrackerTechOutreach)
+    .where(eq(vrmRepairTrackerTechOutreach.repairTrackerId, repairTrackerId));
+  const [{ count: scCount }] = await db
+    .select({ count: count() })
+    .from(vrmRepairTrackerShopContact)
+    .where(eq(vrmRepairTrackerShopContact.repairTrackerId, repairTrackerId));
+  if (Number(toCount) > 0 || Number(scCount) > 0) return null;
+  return tracker.notes;
 }

@@ -1,0 +1,29 @@
+Checkpoint 1 approved. Three small guardrails for Step 5, then proceed.
+Guardrail 1 — Legacy notes preservation for the 6 affected rows (DMCLIEC, ASARWAR, RMADERO, WSCHMI0, TDOHERT, JMORGA1).
+When Step 5 retires the visible Last Action column, the existing free-form notes value on those rows must remain visible and obvious until a user explicitly migrates it. Specifically:
+
+In the row's main grid view, any row whose notes field is non-empty AND whose Tech Outreach timeline + Shop Contact Log timeline are both empty should render a small "Legacy notes present" indicator in the column where Last Action used to live (or in the Tech Outreach preview cell). Use a distinct style — a dashed border or italic label — so it's clear this is pre-migration data.
+Inside the edit modal, add a "Legacy Notes" read-only panel above the two timeline tabs that displays the original notes text verbatim with a header like "Pre-migration notes — not yet classified."
+Add two buttons on that panel: "Copy to Tech Outreach" and "Copy to Shop Contact Log." Each button creates a new timeline entry tagged [migrated from legacy notes] with the original timestamp if available, or today's date with a "migrated on {date}" note if not.
+Once all legacy notes have been copied into one of the two timelines, the panel and the row indicator both disappear automatically.
+Do not auto-delete or overwrite the original notes field during this process — it stays read-only in the DB as an audit trail, same treatment as last_action.
+
+Guardrail 2 — Follow-up tickets formalized, not left as comments.
+Before starting Step 5 code, file the two follow-ups the audit and build have surfaced:
+
+"Add uniqueness constraint on vrm_repair_tracker(tech_ldap, source_decision_id) to prevent duplicate denial inserts" (prompted by the JMORGA1 ×2 pattern).
+"Source a real time-punch table from data-platform to replace the start-order-activity heuristic" (punch-status yellow follow-up).
+
+Include the ticket IDs or references in the Step 3 changelog entry and the Step 5 kickoff notes so they're traceable.
+Guardrail 3 — Punch-status validation is a user task, not a build task.
+I'll validate the punch heuristic against a known day myself before the feature is considered production-trusted. This is not a blocker for Step 5 — Step 5 doesn't depend on punch-status correctness — but the Step 3 acceptance bullet stays open until I explicitly sign off. Do not mark Step 3 as fully accepted in the §12 changelog until I confirm.
+Proceed with Step 5 (Notes UX — two append-only timelines in the edit modal) now. Stop at the end of Step 5 and surface:
+
+A working Tech Outreach + Shop Contact Log tabbed modal with append-only timelines and revision indicators on edits.
+The Legacy Notes read-only panel and Copy-to-timeline buttons for the 6 affected rows.
+The optional BYOV status update in Tech Outreach (writes byov_status + byov_decision_date only — confirm no byov_* crossover per R2).
+The optional ETA picker + cascading main→sub Shop Status update + Van Status update in Shop Contact Log (writes only shop_eta_on_road, main_status, sub_status, tech_status on vrm_repair_tracker — confirm per Step 5 scope).
+A row-level demonstration: open one of the 6 legacy-notes rows, show the modal rendering the legacy notes panel, and migrate the note into whichever timeline is appropriate.
+
+Then reply STEP 5 DELIVERED — AWAITING APPROVAL and wait. Do not begin Step 6 until I reply STEP 5 APPROVED — CONTINUE.
+CHECKPOINT 1 APPROVED — CONTINUE

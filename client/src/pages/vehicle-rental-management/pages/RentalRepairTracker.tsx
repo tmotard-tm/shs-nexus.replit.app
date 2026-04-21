@@ -49,9 +49,46 @@ interface RepairTrackerEntry {
   byovStatus?: string | null;
   denialReasonDetail?: string | null;
   techPunchLastSyncedAt?: string | null;
+  shopEtaOnRoad?: string | null;
   lastTechOutreachAt?: string | null;
+  lastTechOutreachBody?: string | null;
+  lastTechOutreachAuthor?: string | null;
   lastShopContactAt?: string | null;
+  lastShopContactBody?: string | null;
+  lastShopContactAuthor?: string | null;
 }
+
+interface TechOutreachEntry {
+  id: string;
+  repairTrackerId: string;
+  authorName: string | null;
+  occurredAt: string;
+  method: string | null;
+  outcome: string | null;
+  body: string | null;
+  revisedFromId: string | null;
+  createdAt: string;
+}
+
+interface ShopContactEntry {
+  id: string;
+  repairTrackerId: string;
+  authorName: string | null;
+  occurredAt: string;
+  etaUpdate: string | null;
+  mainStatusUpdate: string | null;
+  subStatusUpdate: string | null;
+  techStatusUpdate: string | null;
+  body: string | null;
+  revisedFromId: string | null;
+  createdAt: string;
+}
+
+const OUTREACH_METHODS = ["phone", "sms", "email", "in_person", "other"] as const;
+const OUTREACH_OUTCOMES = [
+  "reached", "left_voicemail", "no_answer", "refused",
+  "committed_eta", "byov_accepted", "byov_declined", "other",
+] as const;
 
 interface DecisionRow {
   id: string;
@@ -317,6 +354,583 @@ const EMPTY_FORM: RepairForm = {
 
 // ─── Punch History Tab (side-panel) ───────────────────────────────────────────
 
+// ─── Shared timeline UI ───────────────────────────────────────────────────────
+
+function fmtTimelineDate(ts: string | null) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return ts;
+  return d.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function LegacyNotesPanel({
+  notes,
+  trackerId,
+  onChanged,
+  defaultTarget,
+}: {
+  notes: string;
+  trackerId: string;
+  onChanged: () => void;
+  defaultTarget: "tech_outreach" | "shop_contact";
+}) {
+  const { toast } = useToast();
+  const [author, setAuthor] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const copy = async (target: "tech_outreach" | "shop_contact") => {
+    if (!author.trim()) {
+      toast({ title: "Enter your name", description: "Required to attribute the migrated note.", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const path = target === "tech_outreach" ? "tech-outreach" : "shop-contact";
+      const r = await apiRequest("POST", `/api/vrm/repair-tracker/${trackerId}/${path}`, {
+        authorName: author.trim(),
+        body: `[migrated from legacy notes] ${notes}`,
+      });
+      if (!r.ok) throw new Error(await r.text());
+      toast({ title: target === "tech_outreach" ? "Copied to Tech Outreach" : "Copied to Shop Contact" });
+      onChanged();
+    } catch (e: any) {
+      toast({ title: "Copy failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ marginTop: 16, padding: 14, borderRadius: 10, border: `1px dashed ${colors.rule}`, backgroundColor: "#FFFBEB" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+        <AlertTriangle size={14} color="#B45309" />
+        <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: "#B45309", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+          Legacy Notes (pre-migration)
+        </span>
+      </div>
+      <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 12px", whiteSpace: "pre-wrap" }}>{notes}</p>
+      <div style={{ marginBottom: 8 }}>
+        <input
+          type="text"
+          placeholder="Your name (for attribution)"
+          value={author}
+          onChange={(e) => setAuthor(e.target.value)}
+          style={{ ...INPUT_STYLE, fontSize: 12 }}
+        />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button
+          onClick={() => copy("tech_outreach")}
+          disabled={busy || !author.trim()}
+          style={{
+            flex: defaultTarget === "tech_outreach" ? 1 : undefined,
+            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
+            color: "#fff", backgroundColor: defaultTarget === "tech_outreach" ? colors.accent : "#0EA5E9",
+            border: "none", borderRadius: 6, padding: "6px 10px",
+            cursor: busy || !author.trim() ? "not-allowed" : "pointer",
+            opacity: busy || !author.trim() ? 0.55 : 1,
+          }}
+        >
+          Copy to Tech Outreach
+        </button>
+        <button
+          onClick={() => copy("shop_contact")}
+          disabled={busy || !author.trim()}
+          style={{
+            flex: defaultTarget === "shop_contact" ? 1 : undefined,
+            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
+            color: "#fff", backgroundColor: defaultTarget === "shop_contact" ? colors.accent : "#7C3AED",
+            border: "none", borderRadius: 6, padding: "6px 10px",
+            cursor: busy || !author.trim() ? "not-allowed" : "pointer",
+            opacity: busy || !author.trim() ? 0.55 : 1,
+          }}
+        >
+          Copy to Shop Contact
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TechOutreachTab({
+  entries, isLoading, trackerId, currentByovStatus, legacyNotes, onChanged,
+}: {
+  entries: TechOutreachEntry[];
+  isLoading: boolean;
+  trackerId: string;
+  currentByovStatus: string | null;
+  legacyNotes: string | null;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [author, setAuthor] = useState("");
+  const [method, setMethod] = useState<string>("phone");
+  const [outcome, setOutcome] = useState<string>("reached");
+  const [body, setBody] = useState("");
+  const [byovDecision, setByovDecision] = useState<"" | "Accepted" | "Declined">("");
+  const [busy, setBusy] = useState(false);
+
+  // Build revision map: originalId -> [revisions]
+  const revisionsByOriginal = new Map<string, TechOutreachEntry[]>();
+  entries.forEach((e) => {
+    if (e.revisedFromId) {
+      const arr = revisionsByOriginal.get(e.revisedFromId) ?? [];
+      arr.push(e);
+      revisionsByOriginal.set(e.revisedFromId, arr);
+    }
+  });
+  const originals = entries.filter((e) => !e.revisedFromId);
+
+  const reset = () => {
+    setShowAdd(false);
+    setEditingId(null);
+    setAuthor("");
+    setMethod("phone");
+    setOutcome("reached");
+    setBody("");
+    setByovDecision("");
+  };
+
+  const submit = async () => {
+    if (!author.trim()) {
+      toast({ title: "Author required", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: any = {
+        authorName: author.trim(),
+        method: method || null,
+        outcome: outcome || null,
+        body: body || null,
+      };
+      if (!editingId && byovDecision) {
+        payload.byovStatus = byovDecision;
+        payload.byovDecisionDate = new Date().toISOString().slice(0, 10);
+      }
+      const url = editingId
+        ? `/api/vrm/repair-tracker/${trackerId}/tech-outreach/${editingId}`
+        : `/api/vrm/repair-tracker/${trackerId}/tech-outreach`;
+      const r = await apiRequest(editingId ? "PATCH" : "POST", url, payload);
+      if (!r.ok) throw new Error(await r.text());
+      toast({ title: editingId ? "Revision saved" : "Entry added" });
+      reset();
+      onChanged();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (e: TechOutreachEntry) => {
+    setEditingId(e.id);
+    setShowAdd(true);
+    setAuthor(e.authorName ?? "");
+    setMethod(e.method ?? "phone");
+    setOutcome(e.outcome ?? "reached");
+    setBody(e.body ?? "");
+  };
+
+  return (
+    <div style={{ paddingTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+          {isLoading ? "Loading…" : `${originals.length} entr${originals.length === 1 ? "y" : "ies"}`}
+        </span>
+        {!showAdd && (
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+              color: colors.accent, backgroundColor: "#EFF4FF",
+              border: "1px solid #C7D7F9", borderRadius: 6,
+              padding: "4px 10px", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <Plus size={12} /> Add Entry
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
+          <div style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.ink, marginBottom: 8 }}>
+            {editingId ? "Revise entry (creates new revision)" : "Add Tech Outreach Entry"}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+            <div>
+              <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Method</div>
+              <select value={method} onChange={(e) => setMethod(e.target.value)} style={INPUT_STYLE}>
+                {OUTREACH_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+            <div>
+              <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Outcome</div>
+              <select value={outcome} onChange={(e) => setOutcome(e.target.value)} style={INPUT_STYLE}>
+                {OUTREACH_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+            </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Notes</div>
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} style={{ ...INPUT_STYLE, resize: "vertical" as any }} />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Your Name</div>
+            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} style={INPUT_STYLE} />
+          </div>
+          {!editingId && (
+            <div style={{ marginBottom: 10, padding: 10, borderRadius: 6, backgroundColor: "#F0F9FF", border: "1px solid #BAE6FD" }}>
+              <div style={{ ...LABEL_STYLE, marginBottom: 4, color: "#0369A1" }}>BYOV Decision (optional)</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                {(["", "Accepted", "Declined"] as const).map((v) => (
+                  <button
+                    key={v || "none"}
+                    onClick={() => setByovDecision(v)}
+                    style={{
+                      fontFamily: fonts.dmSans, fontSize: 11, padding: "3px 10px",
+                      borderRadius: 5, cursor: "pointer",
+                      border: `1px solid ${byovDecision === v ? colors.accent : colors.rule}`,
+                      backgroundColor: byovDecision === v ? colors.accent : "transparent",
+                      color: byovDecision === v ? "#FFF" : colors.inkSoft,
+                    }}
+                  >
+                    {v || "No change"}
+                  </button>
+                ))}
+              </div>
+              {currentByovStatus && (
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, margin: "6px 0 0" }}>
+                  Current BYOV status: <b>{currentByovStatus}</b>
+                </p>
+              )}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={submit} disabled={busy || !author.trim()} style={{
+              fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
+              color: "#fff", backgroundColor: colors.accent, border: "none",
+              borderRadius: 6, padding: "6px 14px",
+              cursor: busy || !author.trim() ? "not-allowed" : "pointer",
+              opacity: busy || !author.trim() ? 0.55 : 1,
+            }}>
+              {busy ? "Saving…" : editingId ? "Save Revision" : "Add Entry"}
+            </button>
+            <button onClick={reset} style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+              color: colors.inkSoft, backgroundColor: "transparent",
+              border: `1px solid ${colors.rule}`, borderRadius: 6,
+              padding: "6px 12px", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {originals.length === 0 && !isLoading && !legacyNotes && (
+        <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
+          No tech outreach logged yet.
+        </p>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {originals.map((e) => {
+          const revs = revisionsByOriginal.get(e.id) ?? [];
+          // List is ordered occurredAt DESC, so revs[0] is the latest revision.
+          const latest = revs.length > 0 ? revs[0] : e;
+          return (
+            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  {latest.method && (
+                    <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#0369A1", backgroundColor: "#F0F9FF", padding: "2px 7px", borderRadius: 4 }}>
+                      {latest.method}
+                    </span>
+                  )}
+                  {latest.outcome && (
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkSoft, backgroundColor: colors.surface, padding: "2px 7px", borderRadius: 4 }}>
+                      {latest.outcome}
+                    </span>
+                  )}
+                  {revs.length > 0 && (
+                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#B45309", backgroundColor: "#FFFBEB", padding: "2px 7px", borderRadius: 4 }}>
+                      Revised ({revs.length})
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                    {fmtTimelineDate(latest.occurredAt)}
+                  </span>
+                  <button onClick={() => startEdit(latest)} title="Revise" style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+                    <Pencil size={12} color={colors.inkMuted} />
+                  </button>
+                </div>
+              </div>
+              {latest.body && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{latest.body}</p>}
+              {latest.authorName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {latest.authorName}</p>}
+            </div>
+          );
+        })}
+      </div>
+
+      {legacyNotes && (
+        <LegacyNotesPanel
+          notes={legacyNotes}
+          trackerId={trackerId}
+          onChanged={onChanged}
+          defaultTarget="tech_outreach"
+        />
+      )}
+    </div>
+  );
+}
+
+function ShopContactTab({
+  entries, isLoading, trackerId, currentMain, currentSub, currentTechStatus, currentEta, legacyNotes, onChanged,
+}: {
+  entries: ShopContactEntry[];
+  isLoading: boolean;
+  trackerId: string;
+  currentMain: string;
+  currentSub: string;
+  currentTechStatus: string;
+  currentEta: string;
+  legacyNotes: string | null;
+  onChanged: () => void;
+}) {
+  const { toast } = useToast();
+  const [showAdd, setShowAdd] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [author, setAuthor] = useState("");
+  const [body, setBody] = useState("");
+  const [eta, setEta] = useState("");
+  const [main, setMain] = useState("");
+  const [sub, setSub] = useState("");
+  const [tech, setTech] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const subOptions: readonly string[] =
+    main && MAIN_STATUSES.includes(main as MainStatus) ? SUB_STATUSES[main as MainStatus] : [];
+
+  const revisionsByOriginal = new Map<string, ShopContactEntry[]>();
+  entries.forEach((e) => {
+    if (e.revisedFromId) {
+      const arr = revisionsByOriginal.get(e.revisedFromId) ?? [];
+      arr.push(e);
+      revisionsByOriginal.set(e.revisedFromId, arr);
+    }
+  });
+  const originals = entries.filter((e) => !e.revisedFromId);
+
+  const reset = () => {
+    setShowAdd(false);
+    setEditingId(null);
+    setAuthor(""); setBody(""); setEta("");
+    setMain(""); setSub(""); setTech("");
+  };
+
+  const submit = async () => {
+    if (!author.trim()) {
+      toast({ title: "Author required", variant: "destructive" });
+      return;
+    }
+    setBusy(true);
+    try {
+      const payload: any = {
+        authorName: author.trim(),
+        body: body || null,
+      };
+      // Side-effects only on new entries (not on revisions — those are corrections of body/author).
+      if (!editingId) {
+        if (eta) payload.etaUpdate = eta;
+        if (main) payload.mainStatusUpdate = main;
+        if (main && sub) payload.subStatusUpdate = sub;
+        if (tech) payload.techStatusUpdate = tech;
+      }
+      const url = editingId
+        ? `/api/vrm/repair-tracker/${trackerId}/shop-contact/${editingId}`
+        : `/api/vrm/repair-tracker/${trackerId}/shop-contact`;
+      const r = await apiRequest(editingId ? "PATCH" : "POST", url, payload);
+      if (!r.ok) throw new Error(await r.text());
+      toast({ title: editingId ? "Revision saved" : "Entry added" });
+      reset();
+      onChanged();
+    } catch (e: any) {
+      toast({ title: "Save failed", description: e.message, variant: "destructive" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const startEdit = (e: ShopContactEntry) => {
+    setEditingId(e.id);
+    setShowAdd(true);
+    setAuthor(e.authorName ?? "");
+    setBody(e.body ?? "");
+    // Side-effect fields are not editable on revision (they only fire on creation).
+  };
+
+  return (
+    <div style={{ paddingTop: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+          {isLoading ? "Loading…" : `${originals.length} entr${originals.length === 1 ? "y" : "ies"}`}
+        </span>
+        {!showAdd && (
+          <button
+            onClick={() => setShowAdd(true)}
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+              color: colors.accent, backgroundColor: "#EFF4FF",
+              border: "1px solid #C7D7F9", borderRadius: 6,
+              padding: "4px 10px", cursor: "pointer",
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <Plus size={12} /> Add Entry
+          </button>
+        )}
+      </div>
+
+      {showAdd && (
+        <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
+          <div style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.ink, marginBottom: 8 }}>
+            {editingId ? "Revise entry (creates new revision; status side-effects do not re-fire)" : "Add Shop Contact Entry"}
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Notes</div>
+            <textarea value={body} onChange={(e) => setBody(e.target.value)} rows={3} style={{ ...INPUT_STYLE, resize: "vertical" as any }} />
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Your Name</div>
+            <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} style={INPUT_STYLE} />
+          </div>
+          {!editingId && (
+            <div style={{ padding: 10, borderRadius: 6, backgroundColor: "#FAF5FF", border: "1px solid #E9D5FF", marginBottom: 10 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+                Cascading Updates (optional)
+              </div>
+              <div style={{ marginBottom: 6 }}>
+                <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Updated ETA {currentEta ? `(current: ${currentEta})` : ""}</div>
+                <input type="date" value={eta} onChange={(e) => setEta(e.target.value)} style={INPUT_STYLE} />
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6, marginBottom: 6 }}>
+                <div>
+                  <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Shop Status {currentMain ? `(now: ${currentMain})` : ""}</div>
+                  <select value={main} onChange={(e) => { setMain(e.target.value); setSub(""); }} style={INPUT_STYLE}>
+                    <option value="">— no change —</option>
+                    {MAIN_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Sub-Status {currentSub ? `(now: ${currentSub})` : ""}</div>
+                  <select value={sub} onChange={(e) => setSub(e.target.value)} disabled={!main} style={{ ...INPUT_STYLE, opacity: main ? 1 : 0.5 }}>
+                    <option value="">— no change —</option>
+                    {subOptions.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div>
+                <div style={{ ...LABEL_STYLE, marginBottom: 4 }}>Van Status {currentTechStatus ? `(now: ${currentTechStatus})` : ""}</div>
+                <select value={tech} onChange={(e) => setTech(e.target.value)} style={INPUT_STYLE}>
+                  <option value="">— no change —</option>
+                  {TECH_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+                </select>
+              </div>
+              <p style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, margin: "8px 0 0" }}>
+                Any value selected here will overwrite the corresponding field on the case.
+              </p>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={submit} disabled={busy || !author.trim()} style={{
+              fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
+              color: "#fff", backgroundColor: colors.accent, border: "none",
+              borderRadius: 6, padding: "6px 14px",
+              cursor: busy || !author.trim() ? "not-allowed" : "pointer",
+              opacity: busy || !author.trim() ? 0.55 : 1,
+            }}>
+              {busy ? "Saving…" : editingId ? "Save Revision" : "Add Entry"}
+            </button>
+            <button onClick={reset} style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+              color: colors.inkSoft, backgroundColor: "transparent",
+              border: `1px solid ${colors.rule}`, borderRadius: 6,
+              padding: "6px 12px", cursor: "pointer",
+            }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {originals.length === 0 && !isLoading && !legacyNotes && (
+        <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
+          No shop contact logged yet.
+        </p>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {originals.map((e) => {
+          const revs = revisionsByOriginal.get(e.id) ?? [];
+          // List is ordered occurredAt DESC, so revs[0] is the latest revision.
+          const latest = revs.length > 0 ? revs[0] : e;
+          const sideEffects: string[] = [];
+          if (e.etaUpdate) sideEffects.push(`ETA → ${e.etaUpdate}`);
+          if (e.mainStatusUpdate) sideEffects.push(`Status → ${e.mainStatusUpdate}${e.subStatusUpdate ? ` / ${e.subStatusUpdate}` : ""}`);
+          if (e.techStatusUpdate) sideEffects.push(`Van → ${e.techStatusUpdate}`);
+          return (
+            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: "#fff" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#7C3AED", backgroundColor: "#FAF5FF", padding: "2px 7px", borderRadius: 4 }}>
+                    Shop
+                  </span>
+                  {revs.length > 0 && (
+                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#B45309", backgroundColor: "#FFFBEB", padding: "2px 7px", borderRadius: 4 }}>
+                      Revised ({revs.length})
+                    </span>
+                  )}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                    {fmtTimelineDate(latest.occurredAt)}
+                  </span>
+                  <button onClick={() => startEdit(latest)} title="Revise" style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}>
+                    <Pencil size={12} color={colors.inkMuted} />
+                  </button>
+                </div>
+              </div>
+              {sideEffects.length > 0 && (
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+                  {sideEffects.map((s) => (
+                    <span key={s} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#6D28D9", backgroundColor: "#F3E8FF", padding: "2px 6px", borderRadius: 4 }}>
+                      {s}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {latest.body && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0", whiteSpace: "pre-wrap" }}>{latest.body}</p>}
+              {latest.authorName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {latest.authorName}</p>}
+            </div>
+          );
+        })}
+      </div>
+
+      {legacyNotes && (
+        <LegacyNotesPanel
+          notes={legacyNotes}
+          trackerId={trackerId}
+          onChanged={onChanged}
+          defaultTarget="shop_contact"
+        />
+      )}
+    </div>
+  );
+}
+
 function PunchHistoryTab({
   ldap,
   query,
@@ -511,10 +1125,50 @@ function UnifiedPanel({
   const [actionNotes, setActionNotes] = useState("");
   const [actionPerformer, setActionPerformer] = useState("");
 
-  // ── Side-panel tabs (Details vs Punch History) ──
-  type PanelTab = "details" | "punches";
+  // ── Side-panel tabs ──
+  type PanelTab = "details" | "tech_outreach" | "shop_contact" | "punches";
   const [panelTab, setPanelTab] = useState<PanelTab>("details");
   useEffect(() => { setPanelTab("details"); }, [entry?.id]);
+
+  // Tech Outreach timeline
+  const techOutreachQuery = useQuery<TechOutreachEntry[]>({
+    queryKey: ["/api/vrm/repair-tracker", entry?.id, "tech-outreach"],
+    queryFn: async () => {
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/tech-outreach`);
+      if (!r.ok) throw new Error("Failed to load tech outreach");
+      return r.json();
+    },
+    enabled: isEdit,
+  });
+
+  // Shop Contact timeline
+  const shopContactQuery = useQuery<ShopContactEntry[]>({
+    queryKey: ["/api/vrm/repair-tracker", entry?.id, "shop-contact"],
+    queryFn: async () => {
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/shop-contact`);
+      if (!r.ok) throw new Error("Failed to load shop contact");
+      return r.json();
+    },
+    enabled: isEdit,
+  });
+
+  // Legacy notes (only present until both timelines have entries)
+  const legacyNotesQuery = useQuery<{ notes: string | null }>({
+    queryKey: ["/api/vrm/repair-tracker", entry?.id, "legacy-notes"],
+    queryFn: async () => {
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/legacy-notes`);
+      if (!r.ok) throw new Error("Failed to load legacy notes");
+      return r.json();
+    },
+    enabled: isEdit,
+  });
+
+  const invalidateTimelines = () => {
+    qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "tech-outreach"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "shop-contact"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "legacy-notes"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+  };
 
   const punchLdap = (entry?.techLdap ?? "").trim().toUpperCase();
   const punchHistoryQuery = useQuery<{ ldap: string; rows: PunchHistoryRow[]; summary: PunchStatusEntry }>({
@@ -663,6 +1317,8 @@ function UnifiedPanel({
           <div style={{ display: "flex", gap: 0, padding: "0 24px", borderBottom: `1px solid ${colors.rule}`, flexShrink: 0 }}>
             {([
               { key: "details" as const, label: "Details" },
+              { key: "tech_outreach" as const, label: `Tech Outreach${techOutreachQuery.data?.length ? ` (${techOutreachQuery.data.length})` : ""}` },
+              { key: "shop_contact" as const, label: `Shop Contact${shopContactQuery.data?.length ? ` (${shopContactQuery.data.length})` : ""}` },
               { key: "punches" as const, label: "Punch History" },
             ]).map((t) => {
               const active = panelTab === t.key;
@@ -697,6 +1353,27 @@ function UnifiedPanel({
               ldap={punchLdap}
               query={punchHistoryQuery}
               onRefresh={refreshPunches}
+            />
+          ) : isEdit && panelTab === "tech_outreach" ? (
+            <TechOutreachTab
+              entries={techOutreachQuery.data ?? []}
+              isLoading={techOutreachQuery.isLoading}
+              trackerId={entry!.id}
+              currentByovStatus={entry?.byovStatus ?? null}
+              legacyNotes={legacyNotesQuery.data?.notes ?? null}
+              onChanged={invalidateTimelines}
+            />
+          ) : isEdit && panelTab === "shop_contact" ? (
+            <ShopContactTab
+              entries={shopContactQuery.data ?? []}
+              isLoading={shopContactQuery.isLoading}
+              trackerId={entry!.id}
+              currentMain={entry?.mainStatus ?? ""}
+              currentSub={entry?.subStatus ?? ""}
+              currentTechStatus={entry?.techStatus ?? ""}
+              currentEta={entry?.shopEtaOnRoad as any ?? ""}
+              legacyNotes={legacyNotesQuery.data?.notes ?? null}
+              onChanged={invalidateTimelines}
             />
           ) : (
           <>
@@ -1578,12 +2255,47 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.supervisorPhone ?? entry.tpmsManagerPhone ?? "—"}
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 180 }}>
-                    {entry.lastActionNotes ? (
-                      <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {entry.lastActionNotes}
-                      </span>
-                    ) : "—"}
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 220 }}>
+                    {(() => {
+                      const tech = entry.lastTechOutreachAt ? new Date(entry.lastTechOutreachAt).getTime() : 0;
+                      const shop = entry.lastShopContactAt ? new Date(entry.lastShopContactAt).getTime() : 0;
+                      const useShop = shop >= tech && shop > 0;
+                      const useTech = tech > shop && tech > 0;
+                      const body = useShop ? entry.lastShopContactBody : useTech ? entry.lastTechOutreachBody : null;
+                      const tag = useShop ? "Shop" : useTech ? "Tech" : null;
+                      const noTimelines = !tech && !shop;
+                      const hasLegacy = noTimelines && entry.notes && entry.notes.trim().length > 0;
+                      if (body) {
+                        return (
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span style={{ fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: useShop ? "#7C3AED" : "#0EA5E9", marginRight: 6 }}>
+                              {tag}
+                            </span>
+                            {body}
+                          </div>
+                        );
+                      }
+                      if (hasLegacy) {
+                        return (
+                          <span
+                            title={entry.notes ?? ""}
+                            style={{
+                              display: "inline-block",
+                              fontFamily: fonts.dmSans,
+                              fontSize: 11,
+                              fontStyle: "italic",
+                              color: colors.inkMuted,
+                              border: `1px dashed ${colors.rule}`,
+                              borderRadius: 5,
+                              padding: "2px 8px",
+                            }}
+                          >
+                            Legacy notes — open to migrate
+                          </span>
+                        );
+                      }
+                      return "—";
+                    })()}
                   </td>
                   <td style={tdStyle}>
                     <Pencil size={14} color={colors.inkMuted} />
