@@ -6,7 +6,10 @@ import { spawnSync } from "child_process";
 
 type Case = { label: string; env: NodeJS.ProcessEnv; expectExit: number; expectStderrSubstr?: string; expectStdoutSubstr?: string };
 
-const SCRIPT = "scripts/guardrails/g8-env-drift-check.ts";
+// Canonical G8 module lives under server/guardrails/ so that server/index.ts
+// can import it via a project-local relative path. Harness spawns a fresh
+// tsx subprocess that imports the same canonical module — no duplicate file.
+const SCRIPT = "server/guardrails/g8-env-drift-check.ts";
 const CORRECT_HOST = "ep-lively-heart-adrhzx3e.c-2.us-east-1.aws.neon.tech";
 
 const cases: Case[] = [
