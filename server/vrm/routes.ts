@@ -47,7 +47,9 @@ import {
   listRepairTrackerActions,
   addRepairTrackerAction,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, type TechPunchRow } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchPunchSourceDiagnostic, type TechPunchRow } from "./snowflake-queries";
+import { sql as drizzleSql } from "drizzle-orm";
+import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
 import {
   vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
@@ -917,26 +919,174 @@ export function registerVrmRoutes(): Router {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  function summarizeStatus(rows: TechPunchRow[]) {
-    const today = todayStr();
-    const todays = rows.filter((r) => r.punchDate === today);
-    if (todays.length === 0) {
-      const last = rows[0] ?? null;
+  // status enum: "Punched In" | "Punched Out" | "Unknown"
+  type PunchStatusLabel = "Punched In" | "Punched Out" | "Unknown";
+  interface PunchStatusEntry {
+    status: PunchStatusLabel;
+    reason: string | null;        // why "Unknown" — surfaced in tooltip
+    latestPunchTs: string | null; // last punch (today preferred, else most recent)
+    latestPunchType: "in" | "out" | null;
+    hasData: boolean;             // any rows in the 7-day window
+    syncedAt: string;             // ISO timestamp of this fetch
+    error: string | null;         // populated if Snowflake threw for this batch
+  }
+
+  function summarizeStatus(
+    rows: TechPunchRow[],
+    opts: { error: string | null; sourceConfigured: boolean },
+  ): PunchStatusEntry {
+    const syncedAt = new Date().toISOString();
+    if (!opts.sourceConfigured) {
       return {
-        status: "no_punch_today" as const,
-        latestPunchTs: last?.punchOutTs ?? last?.punchInTs ?? null,
-        latestPunchType: last ? (last.punchOutTs ? "out" : "in") : null,
+        status: "Unknown", reason: "Snowflake not configured",
+        latestPunchTs: null, latestPunchType: null,
+        hasData: false, syncedAt, error: opts.error,
       };
     }
-    // Determine current state from latest record today
-    const latest = todays[0];
-    const isClockedIn = latest.punchInTs && !latest.punchOutTs;
+    if (opts.error) {
+      return {
+        status: "Unknown", reason: `Source error: ${opts.error}`,
+        latestPunchTs: null, latestPunchType: null,
+        hasData: false, syncedAt, error: opts.error,
+      };
+    }
+    // Source view emits one row per START ORDER event. Per domain rule:
+    //   first punch of the day = "Start Truck/Day" (Punched In)
+    //   last  punch of the day = "End Day"         (Punched Out)
+    // Inference:
+    //   • Today, multiple punches (first<last) → Punched Out (ended day)
+    //   • Today, single punch (first==last)    → Punched In  (still working)
+    //   • No today activity, prior in window   → Punched Out (last seen <date>)
+    //   • No activity in last 7 days           → Unknown
+    const today = todayStr();
+    const todaysRow = rows.find((r) => r.punchDate === today && (r.punchInTs || r.punchOutTs));
+    if (todaysRow) {
+      const startTs = todaysRow.punchInTs;
+      const endTs = todaysRow.punchOutTs;
+      const isActive = !!startTs && (!endTs || startTs === endTs);
+      return {
+        status: isActive ? "Punched In" : "Punched Out",
+        reason: isActive
+          ? `Start Truck ${fmtClock(startTs)}`
+          : `Start Truck ${fmtClock(startTs)} · End Day ${fmtClock(endTs)}`,
+        latestPunchTs: endTs ?? startTs ?? null,
+        latestPunchType: isActive ? "in" : "out",
+        hasData: true, syncedAt, error: null,
+      };
+    }
+    const last = rows.find((r) => r.punchInTs || r.punchOutTs) ?? null;
+    if (!last) {
+      return {
+        status: "Unknown", reason: "No activity in last 7 days",
+        latestPunchTs: null, latestPunchType: null,
+        hasData: rows.length > 0, syncedAt, error: null,
+      };
+    }
     return {
-      status: isClockedIn ? ("clocked_in" as const) : ("clocked_out" as const),
-      latestPunchTs: latest.punchOutTs ?? latest.punchInTs ?? null,
-      latestPunchType: isClockedIn ? "in" : "out",
+      status: "Punched Out",
+      reason: `Last seen ${last.punchDate}`,
+      latestPunchTs: last.punchOutTs ?? last.punchInTs ?? null,
+      latestPunchType: "out",
+      hasData: true, syncedAt, error: null,
     };
   }
+
+  function fmtClock(ts: string | null): string {
+    if (!ts) return "—";
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return "—";
+    return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  }
+
+  // Persist sync timestamp on the tracker rows for the LDAPs we just synced.
+  async function persistSyncedAt(ldaps: string[]) {
+    if (ldaps.length === 0) return;
+    try {
+      const placeholders = drizzleSql.join(
+        ldaps.map((l) => drizzleSql`${l}`),
+        drizzleSql`, `,
+      );
+      await db.execute(drizzleSql`
+        UPDATE vrm_repair_tracker
+        SET tech_punch_last_synced_at = NOW()
+        WHERE UPPER(tech_ldap) IN (${placeholders})
+      `);
+    } catch (e: any) {
+      console.error("[VRM] persistSyncedAt failed:", e?.message);
+    }
+  }
+
+  // Core sync — used by both the HTTP route and the 15-minute scheduler.
+  async function syncPunchStatusFor(ldaps: string[]) {
+    const now = Date.now();
+    const sourceConfigured = isSnowflakeConfigured();
+    let allRows: TechPunchRow[] = [];
+    let snowflakeError: string | null = null;
+    if (sourceConfigured && ldaps.length > 0) {
+      try {
+        allRows = await fetchTechPunchHistory(ldaps, 7);
+      } catch (e: any) {
+        snowflakeError = e?.message ?? String(e);
+        console.error("[VRM] punch-status snowflake error:", snowflakeError);
+      }
+    }
+    const byLdap = new Map<string, TechPunchRow[]>();
+    for (const r of allRows) {
+      const key = (r.ldap || "").toUpperCase();
+      if (!byLdap.has(key)) byLdap.set(key, []);
+      byLdap.get(key)!.push(r);
+    }
+    const result: Record<string, PunchStatusEntry> = {};
+    for (const ldap of ldaps) {
+      const rows = byLdap.get(ldap) ?? [];
+      punchHistoryCache.set(ldap, { ts: now, rows });
+      result[ldap] = summarizeStatus(rows, { error: snowflakeError, sourceConfigured });
+    }
+    // Diagnostic: when Snowflake is configured, returned no error, AND zero rows
+    // for every LDAP — the source/format mismatch case. Run a small diagnostic
+    // query so we can see what LDAP_IDs *do* exist in the source view.
+    if (sourceConfigured && !snowflakeError && allRows.length === 0 && ldaps.length > 0) {
+      const diag = await fetchPunchSourceDiagnostic();
+      if (diag) {
+        const reason = diag.rowCount === 0
+          ? "Source view is empty in the last 7 days"
+          : `Source contains ${diag.rowCount} distinct LDAPs in last 7d (sample: ${diag.sampleLdapIds.join(", ")}) — none match tracker LDAPs`;
+        console.warn("[VRM] punch-status diagnostic:", reason);
+        for (const ldap of ldaps) {
+          result[ldap] = { ...result[ldap], reason };
+        }
+      }
+    }
+    await persistSyncedAt(ldaps);
+    return result;
+  }
+
+  // TEMP diag: discover columns + sample values of source punch table
+  router.get("/repair-tracker/_punch-schema", async (_req, res) => {
+    try {
+      const { getSnowflakeService } = await import("../snowflake-service");
+      const svc = getSnowflakeService();
+      const cols = await svc.executeQuery(`
+        SELECT COLUMN_NAME, DATA_TYPE
+        FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'NFDT_METRIC_TBLS'
+          AND TABLE_NAME = 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
+        ORDER BY ORDINAL_POSITION
+      `);
+      const punchTypes = await svc.executeQuery(`
+        SELECT PUNCH_TYP, COUNT(*) AS CNT
+        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        GROUP BY PUNCH_TYP ORDER BY CNT DESC LIMIT 20
+      `);
+      const sample = await svc.executeQuery(`
+        SELECT * FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        WHERE UPPER(ENT_ID) = 'RDACPAN' ORDER BY RTE_DT DESC, PUNCH_TS DESC LIMIT 10
+      `);
+      res.json({ cols, punchTypes, sample });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
 
   // GET /api/vrm/repair-tracker/punch-status — bulk today status for all LDAPs on tracker
   router.get("/repair-tracker/punch-status", async (_req, res) => {
@@ -946,33 +1096,16 @@ export function registerVrmRoutes(): Router {
         return res.json(bulkStatusCache.payload);
       }
       const entries = await listRepairTracker();
+      // Only sync LDAPs from active sections (Action Needed + In Progress).
       const ldaps = Array.from(
         new Set(
           entries
+            .filter((e: any) => e.section === "Action Needed" || e.section === "In Progress")
             .map((e: any) => (e.techLdap ?? "").trim().toUpperCase())
             .filter((l: string) => l.length > 0),
         ),
       );
-      let allRows: TechPunchRow[] = [];
-      try {
-        allRows = await fetchTechPunchHistory(ldaps, 7);
-      } catch (e: any) {
-        console.error("[VRM] punch-status snowflake error:", e.message);
-      }
-      // Group by LDAP
-      const byLdap = new Map<string, TechPunchRow[]>();
-      for (const r of allRows) {
-        const key = (r.ldap || "").toUpperCase();
-        if (!byLdap.has(key)) byLdap.set(key, []);
-        byLdap.get(key)!.push(r);
-      }
-      const result: Record<string, ReturnType<typeof summarizeStatus> & { hasData: boolean }> = {};
-      for (const ldap of ldaps) {
-        const rows = byLdap.get(ldap) ?? [];
-        // also seed the per-ldap history cache so the side panel is instant
-        punchHistoryCache.set(ldap, { ts: now, rows });
-        result[ldap] = { ...summarizeStatus(rows), hasData: rows.length > 0 };
-      }
+      const result = await syncPunchStatusFor(ldaps);
       bulkStatusCache = { ts: now, payload: result };
       res.json(result);
     } catch (e: any) {
@@ -988,20 +1121,24 @@ export function registerVrmRoutes(): Router {
       if (!ldap) return res.status(400).json({ error: "ldap required" });
       const force = String(req.query.refresh ?? "") === "1";
       const now = Date.now();
+      const sourceConfigured = isSnowflakeConfigured();
       const hit = punchHistoryCache.get(ldap);
       if (!force && hit && now - hit.ts < PUNCH_TTL_MS) {
-        return res.json({ ldap, rows: hit.rows, summary: summarizeStatus(hit.rows), cached: true });
+        return res.json({ ldap, rows: hit.rows, summary: summarizeStatus(hit.rows, { error: null, sourceConfigured }), cached: true });
       }
       let rows: TechPunchRow[] = [];
+      let snowflakeError: string | null = null;
       try {
         rows = await fetchTechPunchHistory([ldap], 7);
       } catch (e: any) {
-        console.error("[VRM] punch-history snowflake error:", e.message);
+        snowflakeError = e?.message ?? String(e);
+        console.error("[VRM] punch-history snowflake error:", snowflakeError);
       }
       punchHistoryCache.set(ldap, { ts: now, rows });
+      await persistSyncedAt([ldap]);
       // Force-refresh also invalidates the bulk cache so the table picks up changes
       if (force) bulkStatusCache = null;
-      res.json({ ldap, rows, summary: summarizeStatus(rows), cached: false });
+      res.json({ ldap, rows, summary: summarizeStatus(rows, { error: snowflakeError, sourceConfigured }), cached: false });
     } catch (e: any) {
       console.error("[VRM] punch-history error:", e.message);
       res.status(500).json({ error: e.message });
@@ -1067,6 +1204,41 @@ export function registerVrmRoutes(): Router {
   scheduleImportAt(7, "7 AM ET");
   scheduleImportAt(13, "1 PM ET");
   console.log("[VRM Scheduler] Denied-import scheduler initialised (7 AM ET + 1 PM ET daily)");
+
+  // ─── Tech-Punch sync scheduler (every 15 min, active sections only) ─────────
+  const PUNCH_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+  async function runPunchSyncCycle() {
+    try {
+      const entries = await listRepairTracker();
+      const ldaps = Array.from(
+        new Set(
+          entries
+            .filter((e: any) => e.section === "Action Needed" || e.section === "In Progress")
+            .map((e: any) => (e.techLdap ?? "").trim().toUpperCase())
+            .filter((l: string) => l.length > 0),
+        ),
+      );
+      if (ldaps.length === 0) {
+        console.log("[VRM Scheduler] punch-sync skipped — no active LDAPs");
+        return;
+      }
+      const result = await syncPunchStatusFor(ldaps);
+      bulkStatusCache = { ts: Date.now(), payload: result };
+      const counts = { punchedIn: 0, punchedOut: 0, unknown: 0 };
+      for (const v of Object.values(result)) {
+        if (v.status === "Punched In") counts.punchedIn++;
+        else if (v.status === "Punched Out") counts.punchedOut++;
+        else counts.unknown++;
+      }
+      console.log(`[VRM Scheduler] punch-sync complete (${ldaps.length} LDAPs) — in:${counts.punchedIn} out:${counts.punchedOut} unknown:${counts.unknown}`);
+    } catch (e: any) {
+      console.error("[VRM Scheduler] punch-sync failed:", e?.message);
+    }
+  }
+  // Run once shortly after startup, then every 15 min.
+  setTimeout(runPunchSyncCycle, 30 * 1000);
+  setInterval(runPunchSyncCycle, PUNCH_SYNC_INTERVAL_MS);
+  console.log("[VRM Scheduler] Tech-Punch sync scheduler initialised (every 15 min, Action Needed + In Progress)");
 
   return router;
 }

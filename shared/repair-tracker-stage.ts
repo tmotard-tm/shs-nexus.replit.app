@@ -104,3 +104,108 @@ export function sectionForStage(stage: Stage): Section {
 export function deriveSection(input: StageInput): Section {
   return sectionForStage(deriveStage(input));
 }
+
+// ─── Auto-flag tints ──────────────────────────────────────────────────────────
+// Render-time tints applied to each row in the Repair Tracker table.
+// Multiple tints can apply to the same row (each is independent).
+// `red` and `yellow` set the row background; `blue` sets a left border accent.
+
+export const STALE_SHOP_CONTACT_DAYS = 5;
+export const STUCK_RENTAL_RETURN_DAYS = 7;
+export const ARCHIVE_AFTER_DAYS = 14;
+export const COMPLETE_AUTO_MOVE_HOURS = 24;
+
+export interface FlagInput extends StageInput {
+  deniedAt: Date | string | null | undefined;
+  shopLastContactedDate: Date | string | null | undefined;
+}
+
+export interface RowFlags {
+  red: { active: boolean; tooltip?: string };
+  yellow: { active: boolean; tooltip?: string };
+  blue: { active: boolean; tooltip?: string };
+}
+
+function asDate(v: Date | string | null | undefined): Date | null {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+function daysBetween(a: Date, b: Date): number {
+  return Math.floor((a.getTime() - b.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function deriveFlags(input: FlagInput, now: Date = new Date()): RowFlags {
+  const stage = deriveStage(input);
+  const section = sectionForStage(stage);
+
+  // Closed/Completed rows do not flag.
+  if (section === "Completed") {
+    return {
+      red: { active: false },
+      yellow: { active: false },
+      blue: { active: false },
+    };
+  }
+
+  const denied = asDate(input.deniedAt);
+  const rentalState = (input.rentalReturned ?? "").trim().toLowerCase();
+  const rentalOutstanding = rentalState !== "yes" && rentalState !== "n/a";
+
+  // RED — stuck on rental return: rental not returned AND denied N+ days ago.
+  let red: RowFlags["red"] = { active: false };
+  if (rentalOutstanding && denied) {
+    const days = daysBetween(now, denied);
+    if (days >= STUCK_RENTAL_RETURN_DAYS) {
+      red = {
+        active: true,
+        tooltip: `Stuck on rental return — denied ${days} days ago`,
+      };
+    }
+  }
+
+  // YELLOW — stale shop contact: no contact in N+ days (or never contacted, on a case
+  // that's been open at least N days).
+  let yellow: RowFlags["yellow"] = { active: false };
+  const lastShop = asDate(input.shopLastContactedDate);
+  if (lastShop) {
+    const days = daysBetween(now, lastShop);
+    if (days >= STALE_SHOP_CONTACT_DAYS) {
+      yellow = {
+        active: true,
+        tooltip: `Stale shop contact — last contacted ${days} days ago`,
+      };
+    }
+  } else if (denied) {
+    const days = daysBetween(now, denied);
+    if (days >= STALE_SHOP_CONTACT_DAYS) {
+      yellow = {
+        active: true,
+        tooltip: `Stale shop contact — never contacted, case open ${days} days`,
+      };
+    }
+  }
+
+  // BLUE (left border) — notify routing: rental back but route not cleared.
+  let blue: RowFlags["blue"] = { active: false };
+  if (rentalState === "yes" && !input.routeCleared) {
+    blue = {
+      active: true,
+      tooltip: "Notify routing — rental returned but route not yet cleared",
+    };
+  }
+
+  return { red, yellow, blue };
+}
+
+/** True when a Completed-section row should hide behind the "Show Archived" toggle. */
+export function isArchived(
+  closedAt: Date | string | null | undefined,
+  now: Date = new Date(),
+): boolean {
+  const d = asDate(closedAt);
+  if (!d) return false;
+  return daysBetween(now, d) >= ARCHIVE_AFTER_DAYS;
+}

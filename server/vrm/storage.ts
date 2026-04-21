@@ -25,6 +25,12 @@ import {
   type InsertVrmRepairTracker,
   type InsertVrmRepairTrackerAction,
 } from "../../shared/vrm-schema";
+import {
+  deriveStage,
+  sectionForStage,
+  deriveFlags,
+  isArchived,
+} from "../../shared/repair-tracker-stage";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
 
@@ -557,14 +563,37 @@ export async function listRepairTracker() {
       rt.supervisor_name AS "supervisorName",
       rt.supervisor_phone AS "supervisorPhone",
       rt.tech_contacted AS "techContacted",
+      rt.tech_contacted_date AS "techContactedDate",
+      rt.tech_contact_outcome AS "techContactOutcome",
       rt.rental_returned AS "rentalReturned",
       rt.rental_return_date AS "rentalReturnDate",
       rt.route_cleared AS "routeCleared",
+      rt.route_cleared_date AS "routeClearedDate",
+      rt.denial_reason AS "denialReason",
+      rt.denial_reason_detail AS "denialReasonDetail",
+      rt.byov_offered AS "byovOffered",
+      rt.byov_offered_date AS "byovOfferedDate",
+      rt.byov_status AS "byovStatus",
+      rt.byov_decision_date AS "byovDecisionDate",
+      rt.shop_last_contacted_date AS "shopLastContactedDate",
+      rt.shop_eta_on_road AS "shopEtaOnRoad",
+      rt.assigned_tech_liaison AS "assignedTechLiaison",
+      rt.assigned_shop_liaison AS "assignedShopLiaison",
+      rt.closed_at AS "closedAt",
+      rt.closed_by AS "closedBy",
+      rt.link_missing AS "linkMissing",
+      rt.tech_punch_last_synced_at AS "techPunchLastSyncedAt",
       rt.created_at AS "createdAt",
       rt.updated_at AS "updatedAt",
       rd.byov_enrolled AS "decisionByovEnrolled",
       la.notes AS "lastActionNotes",
       la.created_at AS "lastActionAt",
+      lto.body AS "lastTechOutreachBody",
+      lto.author_name AS "lastTechOutreachAuthor",
+      lto.occurred_at AS "lastTechOutreachAt",
+      lsc.body AS "lastShopContactBody",
+      lsc.author_name AS "lastShopContactAuthor",
+      lsc.occurred_at AS "lastShopContactAt",
       tp.tech_manager_name AS "tpmsManagerName",
       mgr.mobile_phone AS "tpmsManagerPhone",
       tp.district_no AS "district"
@@ -577,12 +606,53 @@ export async function listRepairTracker() {
       ORDER BY a.created_at DESC
       LIMIT 1
     ) la ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT t.body, t.author_name, t.occurred_at
+      FROM vrm_repair_tracker_tech_outreach t
+      WHERE t.repair_tracker_id = rt.id
+      ORDER BY t.occurred_at DESC
+      LIMIT 1
+    ) lto ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT s.body, s.author_name, s.occurred_at
+      FROM vrm_repair_tracker_shop_contact s
+      WHERE s.repair_tracker_id = rt.id
+      ORDER BY s.occurred_at DESC
+      LIMIT 1
+    ) lsc ON TRUE
     LEFT JOIN tpms_tech_profiles tp ON UPPER(rt.tech_ldap) = UPPER(tp.enterprise_id)
     LEFT JOIN tpms_tech_profiles mgr ON UPPER(mgr.enterprise_id) = UPPER(tp.tech_manager_ldap_id)
     WHERE rt.dismissed IS NOT TRUE
     ORDER BY rt.created_at DESC
   `);
-  return rows.rows;
+
+  // Enrich each row with derived stage / section / flags / archive eligibility.
+  const now = new Date();
+  return rows.rows.map((r: any) => {
+    const stageInput = {
+      mainStatus: r.mainStatus,
+      subStatus: r.subStatus,
+      techStatus: r.techStatus,
+      techContacted: r.techContacted,
+      rentalReturned: r.rentalReturned,
+      routeCleared: r.routeCleared,
+      byovOffered: r.byovOffered,
+      byovStatus: r.byovStatus,
+      closedAt: r.closedAt,
+      deniedAt: r.deniedAt,
+      shopLastContactedDate: r.shopLastContactedDate,
+    };
+    const stage = deriveStage(stageInput);
+    const section = sectionForStage(stage);
+    const flags = deriveFlags(stageInput, now);
+    return {
+      ...r,
+      stage,
+      section,
+      flags,
+      isArchived: isArchived(r.closedAt, now),
+    };
+  });
 }
 
 export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {

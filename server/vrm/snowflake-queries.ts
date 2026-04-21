@@ -481,20 +481,23 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
 
 export interface TechPunchRow {
   ldap: string;
-  punchDate: string;        // YYYY-MM-DD
-  punchInTs: string | null; // ISO timestamp
-  punchOutTs: string | null;
+  punchDate: string;            // YYYY-MM-DD
+  punchInTs: string | null;     // ISO timestamp of first IN that day (paired)
+  punchOutTs: string | null;    // ISO timestamp of last OUT that day (paired)
 }
 
 /**
  * Fetch up to N days of tech time punches from
  * IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
  *
- * Source table is a 1-week rolling tabular punch list. We expect columns
- * LDAP_ID, PUNCH_DATE, PUNCH_IN_TS, PUNCH_OUT_TS — adjust in this query if
- * the upstream table uses different column names.
+ * Actual source schema (verified 2026-04-21):
+ *   ENT_ID    TEXT  — employee LDAP id
+ *   RTE_DT    DATE  — route date (the day of the punch)
+ *   PUNCH_TS  TIME  — time of day of the punch
+ *   PUNCH_TYP TEXT  — 'IN' or 'OUT' (one row per punch event)
  *
- * Returns rows ordered most-recent-first. Empty array if no data / no LDAPs.
+ * We pivot to one row per (ENT_ID, RTE_DT) with first-IN / last-OUT for that
+ * day. Returned rows are ordered most-recent-first. Empty array if no data.
  */
 export async function fetchTechPunchHistory(
   ldaps: string[],
@@ -507,16 +510,64 @@ export async function fetchTechPunchHistory(
   const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const lookback = Math.max(1, Math.min(7, days));
 
+  // NOTE: This source view only emits ONE event type — PUNCH_TYP='START ORDER'.
+  // There is NO clock-out signal present, so we infer activity:
+  //   "first START ORDER of the day" → punchInTs
+  //   "last  START ORDER of the day" → punchOutTs (proxy: last activity)
+  // See follow-up ticket logged in plan changelog.
   const rows = (await svc.executeQuery(`
     SELECT
-      UPPER(LDAP_ID)                                    AS "ldap",
-      TO_CHAR(PUNCH_DATE, 'YYYY-MM-DD')                  AS "punchDate",
-      TO_CHAR(PUNCH_IN_TS,  'YYYY-MM-DD"T"HH24:MI:SS')   AS "punchInTs",
-      TO_CHAR(PUNCH_OUT_TS, 'YYYY-MM-DD"T"HH24:MI:SS')   AS "punchOutTs"
+      UPPER(ENT_ID)                              AS "ldap",
+      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
+      TO_CHAR(MIN(PUNCH_TS), 'HH24:MI:SS')       AS "_inTime",
+      TO_CHAR(MAX(PUNCH_TS), 'HH24:MI:SS')       AS "_outTime"
     FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-    WHERE UPPER(LDAP_ID) IN (${ldapList.toUpperCase()})
-      AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
-    ORDER BY PUNCH_DATE DESC, PUNCH_IN_TS DESC NULLS LAST
-  `)) as TechPunchRow[];
-  return rows;
+    WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
+      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      AND PUNCH_TS IS NOT NULL
+    GROUP BY UPPER(ENT_ID), RTE_DT
+    ORDER BY RTE_DT DESC
+  `)) as Array<{ ldap: string; punchDate: string; _inTime: string | null; _outTime: string | null }>;
+
+  // Combine date + time into ISO strings for downstream consumers.
+  return rows.map((r) => ({
+    ldap: r.ldap,
+    punchDate: r.punchDate,
+    punchInTs: r._inTime ? `${r.punchDate}T${r._inTime}` : null,
+    punchOutTs: r._outTime ? `${r.punchDate}T${r._outTime}` : null,
+  }));
+}
+
+/**
+ * Diagnostic — used when the bulk fetch returns zero rows for *every* requested
+ * LDAP. Returns a small sample of LDAP_IDs that DO exist in the source view so
+ * we can compare format (e.g. with/without domain suffix, casing, padding).
+ *
+ * Returns `null` when Snowflake isn't configured or the diagnostic itself fails.
+ */
+export async function fetchPunchSourceDiagnostic(): Promise<{
+  sampleLdapIds: string[];
+  rowCount: number;
+} | null> {
+  if (!isSnowflakeConfigured()) return null;
+  try {
+    const svc = getSnowflakeService();
+    const rows = (await svc.executeQuery(`
+      SELECT
+        UPPER(LDAP_ID) AS "ldap",
+        COUNT(*) OVER () AS "totalRows"
+      FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+      WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
+        AND LDAP_ID IS NOT NULL
+      QUALIFY ROW_NUMBER() OVER (PARTITION BY UPPER(LDAP_ID) ORDER BY PUNCH_DATE DESC) = 1
+      LIMIT 5
+    `)) as Array<{ ldap: string; totalRows: number }>;
+    return {
+      sampleLdapIds: rows.map((r) => r.ldap),
+      rowCount: rows[0]?.totalRows ?? 0,
+    };
+  } catch (e: any) {
+    console.error("[VRM] punch diagnostic failed:", e?.message);
+    return null;
+  }
 }

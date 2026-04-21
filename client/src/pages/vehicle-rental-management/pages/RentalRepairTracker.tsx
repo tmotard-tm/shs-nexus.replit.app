@@ -8,6 +8,7 @@ import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scop
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+interface FlagInfo { active: boolean; tooltip?: string }
 interface RepairTrackerEntry {
   id: string;
   truckNumber: string | null;
@@ -38,6 +39,18 @@ interface RepairTrackerEntry {
   tpmsManagerName: string | null;
   tpmsManagerPhone: string | null;
   district: string | null;
+  // Step 2 enrichment
+  stage: string;
+  section: "Action Needed" | "In Progress" | "Completed";
+  flags: { red: FlagInfo; yellow: FlagInfo; blue: FlagInfo };
+  isArchived: boolean;
+  techContactedDate?: string | null;
+  routeClearedDate?: string | null;
+  byovStatus?: string | null;
+  denialReasonDetail?: string | null;
+  techPunchLastSyncedAt?: string | null;
+  lastTechOutreachAt?: string | null;
+  lastShopContactAt?: string | null;
 }
 
 interface DecisionRow {
@@ -1049,12 +1062,15 @@ type SortColumn =
   | "lastActionNotes";
 
 // ─── Tech Punch Status types ──────────────────────────────────────────────────
-type PunchStatusKey = "clocked_in" | "clocked_out" | "no_punch_today";
+type PunchStatusLabel = "Punched In" | "Punched Out" | "Unknown";
 interface PunchStatusEntry {
-  status: PunchStatusKey;
+  status: PunchStatusLabel;
+  reason: string | null;
   latestPunchTs: string | null;
   latestPunchType: "in" | "out" | null;
   hasData: boolean;
+  syncedAt?: string;
+  error?: string | null;
 }
 type PunchStatusMap = Record<string, PunchStatusEntry>;
 interface PunchHistoryRow {
@@ -1064,12 +1080,6 @@ interface PunchHistoryRow {
   punchOutTs: string | null;
 }
 
-const PUNCH_STATUS_LABEL: Record<PunchStatusKey, string> = {
-  clocked_in: "Clocked In",
-  clocked_out: "Clocked Out",
-  no_punch_today: "No Punch Today",
-};
-
 function fmtPunchTime(ts: string | null): string {
   if (!ts) return "";
   const d = new Date(ts);
@@ -1077,38 +1087,48 @@ function fmtPunchTime(ts: string | null): string {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
-function PunchStatusCell({ ldap, status }: { ldap: string | null; status: PunchStatusEntry | undefined }) {
+function PunchStatusCell({ ldap, status, section }: { ldap: string | null; status: PunchStatusEntry | undefined; section?: string }) {
   if (!ldap) {
     return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>—</span>;
   }
   if (!status) {
+    // Completed cases aren't synced — show a clear "not tracked" rather than spinner-ish ellipsis
+    if (section === "Completed") {
+      return <span title="Punch sync disabled for completed cases" style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>—</span>;
+    }
     return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>…</span>;
   }
-  if (!status.hasData) {
-    return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>No data</span>;
-  }
-  const isClockedIn = status.status === "clocked_in";
-  const palette =
-    status.status === "clocked_in"
-      ? { fg: "#FFFFFF", bg: "#EF4444" }     // red — should NOT be clocked in
-      : status.status === "clocked_out"
-      ? { fg: "#0F766E", bg: "#CCFBF1" }     // teal/neutral
-      : { fg: colors.inkMuted, bg: colors.surface };
+  const isPunchedIn = status.status === "Punched In";
+  const isPunchedOut = status.status === "Punched Out";
+  const palette = isPunchedIn
+    ? { fg: "#FFFFFF", bg: "#EF4444" }   // red — should NOT be clocked in while denied
+    : isPunchedOut
+    ? { fg: "#0F766E", bg: "#CCFBF1" }   // teal — neutral
+    : { fg: colors.inkMuted, bg: colors.surface }; // unknown
+  const tooltip = status.reason ?? (status.syncedAt ? `Synced ${new Date(status.syncedAt).toLocaleTimeString()}` : "");
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}>
+    <div
+      style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}
+      title={tooltip}
+    >
       <span style={{
         fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
         color: palette.fg, backgroundColor: palette.bg,
         borderRadius: 6, padding: "3px 8px",
         display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
       }}>
-        {isClockedIn && <AlertTriangle size={11} />}
-        {PUNCH_STATUS_LABEL[status.status]}
+        {isPunchedIn && <AlertTriangle size={11} />}
+        {status.status}
       </span>
       {status.latestPunchTs && (
         <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }}>
           {status.latestPunchType === "in" ? "In " : status.latestPunchType === "out" ? "Out " : ""}
           {fmtPunchTime(status.latestPunchTs)}
+        </span>
+      )}
+      {status.status === "Unknown" && status.reason && (
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {status.reason}
         </span>
       )}
     </div>
@@ -1119,6 +1139,8 @@ export default function RentalRepairTracker() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
+  const [showArchived, setShowArchived] = useState(false);
+  const [collapsed, setCollapsed] = useState<{ [k: string]: boolean }>({ "Completed": true });
   const [panelEntry, setPanelEntry] = useState<RepairTrackerEntry | null | "new">(null);
   const [sortColumn, setSortColumn] = useState<SortColumn>("deniedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
@@ -1170,6 +1192,7 @@ export default function RentalRepairTracker() {
   };
 
   const filtered = entries.filter((e) => {
+    if (e.isArchived && !showArchived) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
@@ -1178,6 +1201,18 @@ export default function RentalRepairTracker() {
       (e.techLdap ?? "").toLowerCase().includes(q)
     );
   });
+
+  // Group by section then sort within each
+  const bySection: Record<"Action Needed" | "In Progress" | "Completed", RepairTrackerEntry[]> = {
+    "Action Needed": [],
+    "In Progress": [],
+    "Completed": [],
+  };
+  for (const e of filtered) {
+    if (e.section === "Action Needed" || e.section === "In Progress" || e.section === "Completed") {
+      bySection[e.section].push(e);
+    }
+  }
 
   const sorted = [...filtered].sort((a, b) => {
     const dir = sortDirection === "asc" ? 1 : -1;
@@ -1323,8 +1358,7 @@ export default function RentalRepairTracker() {
                 if (!ldap) return "";
                 const s = punchStatusMap[ldap.toUpperCase()];
                 if (!s) return "";
-                if (!s.hasData) return "No data";
-                return PUNCH_STATUS_LABEL[s.status];
+                return s.status;
               };
               const punchTime = (ldap: string | null) => {
                 if (!ldap) return "";
@@ -1422,57 +1456,59 @@ export default function RentalRepairTracker() {
         />
       </div>
 
-      {/* Table */}
-      <div
-        style={{
-          backgroundColor: "#fff",
-          border: `1px solid ${colors.rule}`,
-          borderRadius: 10,
-          overflow: "auto",
-        }}
-      >
-        {isLoading ? (
-          <div style={{ padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
-            Loading…
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
-            {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" to get started."}
-          </div>
-        ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ backgroundColor: colors.surface }}>
-                <th style={thStyle} onClick={() => handleSort("techLdap")}>LDAP{sortIndicator("techLdap")}</th>
-                <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
-                <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
-                <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
-                <th style={thStyle} onClick={() => handleSort("punchStatus")}>Tech Punch Status{sortIndicator("punchStatus")}</th>
-                <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
-                <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
-                <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
-                <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied Date{sortIndicator("deniedAt")}</th>
-                <th style={thStyle} onClick={() => handleSort("mainStatus")}>Shop Status{sortIndicator("mainStatus")}</th>
-                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techStatus")}>Van Status{sortIndicator("techStatus")}</th>
-                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techContacted")}>Tech Contacted{sortIndicator("techContacted")}</th>
-                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
-                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("rentalReturned")}>Rental Returned{sortIndicator("rentalReturned")}</th>
-                <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("routeCleared")}>Route Cleared{sortIndicator("routeCleared")}</th>
-                <th style={thStyle} onClick={() => handleSort("supervisorName")}>Supervisor{sortIndicator("supervisorName")}</th>
-                <th style={thStyle} onClick={() => handleSort("supervisorPhone")}>Sup. Phone{sortIndicator("supervisorPhone")}</th>
-                <th style={{ ...thStyle, maxWidth: 180 }} onClick={() => handleSort("lastActionNotes")}>Last Action{sortIndicator("lastActionNotes")}</th>
-                <th style={{ ...thStyle, width: 40, cursor: "default" }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {sorted.map((entry) => (
-                <tr
-                  key={entry.id}
-                  onClick={() => setPanelEntry(entry)}
-                  style={{ cursor: "pointer" }}
-                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
-                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
-                >
+      {/* Archived toggle */}
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, cursor: "pointer" }}>
+          <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
+          Show archived (Completed &gt;14 days)
+        </label>
+      </div>
+
+      {(() => {
+        // Section row tint (light bg). Red dominates over yellow over blue.
+        const flagBg = (entry: RepairTrackerEntry): string => {
+          if (entry.flags?.red?.active) return "#FEF2F2";    // light red
+          if (entry.flags?.yellow?.active) return "#FFFBEB"; // light yellow
+          if (entry.flags?.blue?.active) return "#EFF6FF";   // light blue
+          return "transparent";
+        };
+        const sectionMeta: Record<"Action Needed" | "In Progress" | "Completed", { color: string; bg: string }> = {
+          "Action Needed": { color: "#B91C1C", bg: "#FEF2F2" },
+          "In Progress":   { color: "#0369A1", bg: "#EFF6FF" },
+          "Completed":     { color: "#15803D", bg: "#F0FDF4" },
+        };
+        const sortRows = (rows: RepairTrackerEntry[]) => [...rows].sort((a, b) => {
+          const dir = sortDirection === "asc" ? 1 : -1;
+          const col = sortColumn;
+          const valA = (a as any)[col];
+          const valB = (b as any)[col];
+          if (valA == null && valB == null) return 0;
+          if (valA == null) return 1;
+          if (valB == null) return -1;
+          if (typeof valA === "boolean" && typeof valB === "boolean") {
+            return valA === valB ? 0 : valA ? -dir : dir;
+          }
+          if (col === "deniedAt") {
+            return (new Date(valA as string).getTime() - new Date(valB as string).getTime()) * dir;
+          }
+          return String(valA).localeCompare(String(valB)) * dir;
+        });
+
+        const renderRow = (entry: RepairTrackerEntry) => {
+          const tint = flagBg(entry);
+          const flagTooltip =
+            entry.flags?.red?.active ? entry.flags.red.tooltip :
+            entry.flags?.yellow?.active ? entry.flags.yellow.tooltip :
+            entry.flags?.blue?.active ? entry.flags.blue.tooltip : undefined;
+          return (
+            <tr
+              key={entry.id}
+              onClick={() => setPanelEntry(entry)}
+              title={flagTooltip}
+              style={{ cursor: "pointer", backgroundColor: tint }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = tint)}
+            >
                   <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace", fontSize: 12 }}>
                     {entry.techLdap ?? "—"}
                   </td>
@@ -1487,6 +1523,7 @@ export default function RentalRepairTracker() {
                     <PunchStatusCell
                       ldap={entry.techLdap}
                       status={entry.techLdap ? punchStatusMap[entry.techLdap.toUpperCase()] : undefined}
+                      section={entry.section}
                     />
                   </td>
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
@@ -1552,16 +1589,115 @@ export default function RentalRepairTracker() {
                     <Pencil size={14} color={colors.inkMuted} />
                   </td>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+          );
+        };
+
+        const renderHeader = () => (
+          <thead>
+            <tr style={{ backgroundColor: colors.surface }}>
+              <th style={thStyle} onClick={() => handleSort("techLdap")}>LDAP{sortIndicator("techLdap")}</th>
+              <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
+              <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
+              <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
+              <th style={thStyle} onClick={() => handleSort("punchStatus")}>Tech Punch Status{sortIndicator("punchStatus")}</th>
+              <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
+              <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
+              <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
+              <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied Date{sortIndicator("deniedAt")}</th>
+              <th style={thStyle} onClick={() => handleSort("mainStatus")}>Shop Status{sortIndicator("mainStatus")}</th>
+              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techStatus")}>Van Status{sortIndicator("techStatus")}</th>
+              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techContacted")}>Tech Contacted{sortIndicator("techContacted")}</th>
+              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
+              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("rentalReturned")}>Rental Returned{sortIndicator("rentalReturned")}</th>
+              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("routeCleared")}>Route Cleared{sortIndicator("routeCleared")}</th>
+              <th style={thStyle} onClick={() => handleSort("supervisorName")}>Supervisor{sortIndicator("supervisorName")}</th>
+              <th style={thStyle} onClick={() => handleSort("supervisorPhone")}>Sup. Phone{sortIndicator("supervisorPhone")}</th>
+              <th style={{ ...thStyle, maxWidth: 180 }} onClick={() => handleSort("lastActionNotes")}>Last Action{sortIndicator("lastActionNotes")}</th>
+              <th style={{ ...thStyle, width: 40, cursor: "default" }}></th>
+            </tr>
+          </thead>
+        );
+
+        const renderSection = (name: "Action Needed" | "In Progress" | "Completed") => {
+          const rows = sortRows(bySection[name]);
+          const meta = sectionMeta[name];
+          const isCollapsed = !!collapsed[name];
+          return (
+            <div
+              key={name}
+              style={{
+                backgroundColor: "#fff",
+                border: `1px solid ${colors.rule}`,
+                borderRadius: 10,
+                overflow: "hidden",
+                marginBottom: 16,
+              }}
+            >
+              <div
+                onClick={() => setCollapsed((c) => ({ ...c, [name]: !c[name] }))}
+                style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "10px 14px",
+                  backgroundColor: meta.bg,
+                  borderBottom: isCollapsed ? "none" : `1px solid ${colors.rule}`,
+                  cursor: "pointer", userSelect: "none",
+                }}
+              >
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: meta.color }}>
+                  {isCollapsed ? "▶" : "▼"}
+                </span>
+                <span style={{ fontFamily: fonts.dmSans, fontWeight: 700, fontSize: 13, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  {name}
+                </span>
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                  {rows.length} {rows.length === 1 ? "entry" : "entries"}
+                </span>
+              </div>
+              {!isCollapsed && (
+                rows.length === 0 ? (
+                  <div style={{ padding: 24, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                    No entries in this section.
+                  </div>
+                ) : (
+                  <div style={{ overflow: "auto" }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      {renderHeader()}
+                      <tbody>{rows.map(renderRow)}</tbody>
+                    </table>
+                  </div>
+                )
+              )}
+            </div>
+          );
+        };
+
+        if (isLoading) {
+          return (
+            <div style={{ backgroundColor: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+              Loading…
+            </div>
+          );
+        }
+        if (filtered.length === 0) {
+          return (
+            <div style={{ backgroundColor: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+              {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" to get started."}
+            </div>
+          );
+        }
+        return (
+          <>
+            {renderSection("Action Needed")}
+            {renderSection("In Progress")}
+            {renderSection("Completed")}
+          </>
+        );
+      })()}
 
       {/* Count */}
-      {!isLoading && sorted.length > 0 && (
+      {!isLoading && filtered.length > 0 && (
         <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, marginTop: 12 }}>
-          {sorted.length} {sorted.length === 1 ? "entry" : "entries"}
+          {filtered.length} {filtered.length === 1 ? "entry" : "entries"}
           {search && ` matching "${search}"`}
         </div>
       )}
