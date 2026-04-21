@@ -931,6 +931,104 @@ function ShopContactTab({
   );
 }
 
+function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any }) {
+  const [search, setSearch] = useState("");
+  if (!truckNumber) {
+    return <div style={{ padding: 24, fontFamily: fonts.dmSans, color: colors.inkMuted }}>No truck number on this case.</div>;
+  }
+  if (query.isLoading) {
+    return <div style={{ padding: 24, fontFamily: fonts.dmSans, color: colors.inkMuted }}>Loading AMS data…</div>;
+  }
+  if (query.isError) {
+    return <div style={{ padding: 24, fontFamily: fonts.dmSans, color: "#B91C1C" }}>Failed to load AMS data: {(query.error as any)?.message ?? "unknown error"}</div>;
+  }
+  const data = query.data;
+  if (!data) return null;
+
+  const linkMissing = !!data.linkMissing;
+  const v = data.vehicle ?? {};
+  const comments = Array.isArray(data.comments) ? data.comments : [];
+  const filtered = search.trim()
+    ? comments.filter((c: any) => {
+        const text = `${c.Comment ?? c.comment ?? ""} ${c.User ?? c.user ?? ""}`.toLowerCase();
+        return text.includes(search.toLowerCase());
+      })
+    : comments;
+
+  const Field = ({ label, value }: { label: string; value: any }) => (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.rule}`, gap: 12 }}>
+      <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, fontWeight: 500 }}>{label}</span>
+      <span style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, textAlign: "right", maxWidth: "60%" }}>
+        {value === null || value === undefined || value === "" ? "—" : String(value)}
+      </span>
+    </div>
+  );
+
+  return (
+    <div style={{ padding: "20px 0" }}>
+      {linkMissing && (
+        <div style={{
+          marginBottom: 16, padding: "10px 12px",
+          backgroundColor: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 6,
+          fontFamily: fonts.dmSans, fontSize: 12, color: "#92400E",
+        }}>
+          ⚠ AMS link missing for truck #{truckNumber}{data.reason ? ` — ${data.reason}` : ""}
+        </div>
+      )}
+
+      {!linkMissing && (
+        <>
+          <SectionHeading style={{ marginTop: 0, marginBottom: 10 }}>AMS Snapshot {data.vin ? <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.inkMuted, fontWeight: 400, marginLeft: 8 }}>{data.vin}</span> : null}</SectionHeading>
+          <Field label="Truck Number" value={v.VehicleNumber ?? truckNumber} />
+          <Field label="Status" value={v.TruckStatus ?? v.Status} />
+          <Field label="Year / Make / Model" value={[v.Year, v.Make, v.Model].filter(Boolean).join(" ")} />
+          <Field label="Color" value={v.Color} />
+          <Field label="License Plate" value={v.LicensePlate} />
+          <Field label="Odometer" value={v.Odometer != null ? `${Number(v.Odometer).toLocaleString()} mi` : null} />
+          <Field label="Region / District" value={[v.Region, v.District].filter(Boolean).join(" / ")} />
+          <Field label="Tech" value={[v.TechName, v.TechEnterpriseId].filter(Boolean).join(" — ")} />
+          <Field label="Last Update" value={v.LastUpdate} />
+          <div style={{ marginTop: 8, fontSize: 11, color: colors.inkMuted, fontFamily: fonts.dmSans }}>
+            Read-only. Open in fleet panel to edit.
+          </div>
+        </>
+      )}
+
+      <SectionHeading style={{ marginTop: 24, marginBottom: 10 }}>
+        Comments {comments.length > 0 ? `(${comments.length})` : ""}
+      </SectionHeading>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Search comments…"
+        style={{ ...INPUT_STYLE, marginBottom: 10 }}
+      />
+      {filtered.length === 0 ? (
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, padding: "12px 0" }}>
+          {comments.length === 0 ? "No comments in AMS." : "No comments match your search."}
+        </div>
+      ) : (
+        <div style={{ maxHeight: 360, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 6 }}>
+          {filtered.map((c: any, i: number) => (
+            <div key={i} style={{
+              padding: "10px 12px",
+              borderBottom: i < filtered.length - 1 ? `1px solid ${colors.rule}` : "none",
+              fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+                <span style={{ fontWeight: 600, fontSize: 12 }}>{c.User ?? c.user ?? "—"}</span>
+                <span style={{ fontSize: 11, color: colors.inkMuted }}>{c.CommentDate ?? c.commentDate ?? c.Date ?? c.date ?? ""}</span>
+              </div>
+              <div style={{ whiteSpace: "pre-wrap" }}>{c.Comment ?? c.comment ?? ""}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PunchHistoryTab({
   ldap,
   query,
@@ -1131,9 +1229,21 @@ function UnifiedPanel({
   const [actionPerformer, setActionPerformer] = useState("");
 
   // ── Side-panel tabs ──
-  type PanelTab = "details" | "tech_outreach" | "shop_contact" | "punches";
+  type PanelTab = "details" | "tech_outreach" | "shop_contact" | "punches" | "ams";
   const [panelTab, setPanelTab] = useState<PanelTab>("details");
   useEffect(() => { setPanelTab("details"); }, [entry?.id]);
+
+  // AMS snapshot + comments (Section A + B of drawer per closeout) — fetched on tab open only
+  const amsTruck = (entry?.truckNumber ?? "").trim();
+  const amsQuery = useQuery<{ found: boolean; linkMissing: boolean; vin?: string; vehicle: any; comments: any[]; reason?: string }>({
+    queryKey: ["/api/ams/by-truck", amsTruck],
+    queryFn: async () => {
+      const r = await fetch(`/api/ams/by-truck/${encodeURIComponent(amsTruck)}`);
+      if (!r.ok) throw new Error("Failed to load AMS data");
+      return r.json();
+    },
+    enabled: panelTab === "ams" && !!amsTruck,
+  });
 
   // Tech Outreach timeline
   const techOutreachQuery = useQuery<TechOutreachEntry[]>({
@@ -1325,6 +1435,7 @@ function UnifiedPanel({
               { key: "tech_outreach" as const, label: `Tech Outreach${techOutreachQuery.data?.length ? ` (${techOutreachQuery.data.length})` : ""}` },
               { key: "shop_contact" as const, label: `Shop Contact${shopContactQuery.data?.length ? ` (${shopContactQuery.data.length})` : ""}` },
               { key: "punches" as const, label: "Punch History" },
+              { key: "ams" as const, label: "AMS" },
             ]).map((t) => {
               const active = panelTab === t.key;
               return (
@@ -1353,7 +1464,9 @@ function UnifiedPanel({
 
         {/* Body */}
         <div style={{ flex: 1, padding: "0 24px 40px", overflowY: "auto" }}>
-          {isEdit && panelTab === "punches" ? (
+          {isEdit && panelTab === "ams" ? (
+            <AmsDrawerTab truckNumber={amsTruck} query={amsQuery} />
+          ) : isEdit && panelTab === "punches" ? (
             <PunchHistoryTab
               ldap={punchLdap}
               query={punchHistoryQuery}
@@ -1737,11 +1850,49 @@ function UnifiedPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type SortColumn =
-  | "techLdap" | "techName" | "techPhone" | "district" | "punchStatus" | "truckNumber"
-  | "repairShopAddress" | "repairShopPhone" | "deniedAt"
-  | "mainStatus" | "techStatus" | "techContacted" | "byovEnrolled"
-  | "rentalReturned" | "routeCleared" | "supervisorName" | "supervisorPhone"
-  | "lastActionNotes";
+  | "techName" | "punchStatus" | "truckNumber" | "deniedAt" | "stage"
+  | "mainStatus" | "techStatus" | "byovEnrolled"
+  | "rentalReturned" | "routeCleared";
+
+// ─── Stage pill ───────────────────────────────────────────────────────────────
+
+const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
+  "Needs Tech Call":          { fg: "#FFFFFF", bg: "#EF4444" },
+  "BYOV Decision":            { fg: "#FFFFFF", bg: "#F97316" },
+  "Awaiting Rental Return":   { fg: "#000000", bg: "#F5A623" },
+  "Awaiting Route Clear":     { fg: "#000000", bg: "#FBBF24" },
+  "In Repair":                { fg: "#FFFFFF", bg: "#3B82F6" },
+  "Ready for Pickup":         { fg: "#FFFFFF", bg: "#0EA5E9" },
+  "Complete":                 { fg: "#FFFFFF", bg: "#22C55E" },
+};
+
+function StagePill({ stage }: { stage: string }) {
+  if (!stage) return <span style={{ color: "#8891A4", fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
+  const c = STAGE_COLORS[stage] ?? { fg: "#475569", bg: "#F1F5F9" };
+  return (
+    <span style={{
+      fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+      color: c.fg, backgroundColor: c.bg,
+      borderRadius: 6, padding: "3px 8px",
+      display: "inline-block", whiteSpace: "nowrap",
+    }}>
+      {stage}
+    </span>
+  );
+}
+
+function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
+  if (flags?.red?.active) {
+    return <span title={flags.red.tooltip ?? "Red flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#EF4444" }} />;
+  }
+  if (flags?.yellow?.active) {
+    return <span title={flags.yellow.tooltip ?? "Yellow flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#F5A623" }} />;
+  }
+  if (flags?.blue?.active) {
+    return <span title={flags.blue.tooltip ?? "Blue flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" }} />;
+  }
+  return <span style={{ color: "#8891A4", fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
+}
 
 // ─── Tech Punch Status types ──────────────────────────────────────────────────
 type PunchStatusLabel = "Punched In" | "Punched Out" | "Unknown";
@@ -2042,31 +2193,54 @@ export default function RentalRepairTracker() {
                 if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
                 return v;
               };
-              const headers = ["LDAP","Tech Name","Tech Phone","District","Tech Punch Status","Latest Punch Time","Truck #","Repair Shop Address","Repair Phone","Denied Date","Shop Status","Sub-Status","Van Status","Tech Contacted","BYOV","Rental Returned","Rental Return Date","Route Cleared","Supervisor","Supervisor Phone","Last Action Notes","Last Action Date"];
+              const headers = [
+                "ldap","tech_name","tech_phone","district","supervisor","supervisor_phone",
+                "truck_number","repair_shop_address","repair_shop_phone",
+                "denied_date","denial_reason","denial_reason_detail",
+                "stage","section",
+                "tech_punch_status","tech_punch_latest","tech_punch_last_synced_at",
+                "main_status","sub_status","van_status","shop_eta_on_road",
+                "tech_contacted","tech_contacted_date","tech_contact_outcome",
+                "byov_status","byov_decision_date",
+                "shop_last_contacted_date",
+                "rental_returned","rental_return_date",
+                "route_cleared","route_cleared_date",
+                "link_missing","closed_at","closed_by",
+              ];
               const punchLabel = (ldap: string | null) => {
                 if (!ldap) return "";
                 const s = punchStatusMap[ldap.toUpperCase()];
-                if (!s) return "";
-                return s.status;
+                return s?.status ?? "";
               };
               const punchTime = (ldap: string | null) => {
                 if (!ldap) return "";
                 const s = punchStatusMap[ldap.toUpperCase()];
-                if (!s || !s.latestPunchTs) return "";
+                if (!s?.latestPunchTs) return "";
                 const d = new Date(s.latestPunchTs);
                 if (isNaN(d.getTime())) return "";
                 return d.toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
               };
-              const rows = sorted.map((e) => [
-                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "", e.district ? e.district.replace(/^0+/, "") || "0" : "",
-                punchLabel(e.techLdap), punchTime(e.techLdap),
-                e.truckNumber ?? "",
-                e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.deniedAt),
-                e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "",
-                boolStr(e.techContacted), boolStr(e.byovEnrolled),
+              const punchSynced = (ldap: string | null) => {
+                if (!ldap) return "";
+                const s = punchStatusMap[ldap.toUpperCase()];
+                return (s as any)?.lastSyncedAt ?? (s as any)?.syncedAt ?? "";
+              };
+              const rows = sorted.map((e: any) => [
+                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "",
+                e.district ? e.district.replace(/^0+/, "") || "0" : "",
+                e.supervisorName ?? e.tpmsManagerName ?? "", e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
+                e.truckNumber ?? "", e.repairShopAddress ?? "", e.repairShopPhone ?? "",
+                fmtDate(e.deniedAt), e.denialReason ?? "", e.denialReasonDetail ?? "",
+                e.stage ?? "", e.section ?? "",
+                punchLabel(e.techLdap), punchTime(e.techLdap), punchSynced(e.techLdap),
+                e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "", fmtDate(e.shopEtaOnRoad),
+                boolStr(e.techContacted), fmtDate(e.techContactedDate ?? e.techContactedAt), e.techContactOutcome ?? "",
+                e.byovStatus ?? (e.byovEnrolled ? "Accepted" : ""), fmtDate(e.byovDecisionDate),
+                fmtDate(e.shopLastContactedDate ?? e.lastShopContactAt),
                 e.rentalReturned ?? "N/A", fmtDate(e.rentalReturnDate),
-                boolStr(e.routeCleared), e.supervisorName ?? e.tpmsManagerName ?? "", e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
-                e.lastActionNotes ?? "", fmtDate(e.lastActionAt),
+                boolStr(e.routeCleared), fmtDate(e.routeClearedDate),
+                e.flags?.blue?.active ? "Yes" : "No",
+                fmtDate(e.closedAt), e.closedBy ?? "",
               ].map(esc));
               const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
               const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -2169,8 +2343,12 @@ export default function RentalRepairTracker() {
         const sortRows = (rows: RepairTrackerEntry[]) => [...rows].sort((a, b) => {
           const dir = sortDirection === "asc" ? 1 : -1;
           const col = sortColumn;
-          const valA = (a as any)[col];
-          const valB = (b as any)[col];
+          const punchSortValue = (e: RepairTrackerEntry) => {
+            const s = e.techLdap ? punchStatusMap[e.techLdap.toUpperCase()] : undefined;
+            return s?.label ?? s?.status ?? "";
+          };
+          const valA = col === "punchStatus" ? punchSortValue(a) : (a as any)[col];
+          const valB = col === "punchStatus" ? punchSortValue(b) : (b as any)[col];
           if (valA == null && valB == null) return 0;
           if (valA == null) return 1;
           if (valB == null) return -1;
@@ -2198,15 +2376,31 @@ export default function RentalRepairTracker() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = tint)}
             >
-                  <td style={{ ...tdStyle, fontWeight: 600, fontFamily: "monospace", fontSize: 12 }}>
-                    {entry.techLdap ?? "—"}
+                  <td style={tdStyle}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                      <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
+                        {entry.techName ?? "—"}
+                      </span>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: colors.inkMuted }}>
+                        {entry.techLdap ?? "—"}{entry.district ? ` · D${entry.district.replace(/^0+/, "") || "0"}` : ""}
+                      </span>
+                    </div>
                   </td>
-                  <td style={tdStyle}>{entry.techName ?? "—"}</td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.techPhone ?? "—"}
+                  <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted, fontWeight: 500 }}>
+                    {entry.truckNumber ?? "—"}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.district ? entry.district.replace(/^0+/, "") || "0" : "—"}
+                    {entry.deniedAt
+                      ? new Date(entry.deniedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+                      : "—"}
+                    {(entry as any).denialReason && (
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>
+                        {(entry as any).denialReason}
+                      </div>
+                    )}
+                  </td>
+                  <td style={tdStyle}>
+                    <StagePill stage={entry.stage ?? ""} />
                   </td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                     <PunchStatusCell
@@ -2214,22 +2408,6 @@ export default function RentalRepairTracker() {
                       status={entry.techLdap ? punchStatusMap[entry.techLdap.toUpperCase()] : undefined}
                       section={entry.section}
                     />
-                  </td>
-                  <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted }}>
-                    {entry.truckNumber ?? "—"}
-                  </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
-                    <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {entry.repairShopAddress ?? "—"}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.repairShopPhone ?? "—"}
-                  </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.deniedAt
-                      ? new Date(entry.deniedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
-                      : "—"}
                   </td>
                   <td style={tdStyle}>
                     <div>
@@ -2244,8 +2422,54 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     <TechStatusBadge status={entry.techStatus} />
                   </td>
-                  <td style={{ ...tdStyle, textAlign: "center" }}>
-                    {boolBadge(entry.techContacted)}
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
+                    <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {entry.repairShopPhone ?? entry.repairShopAddress ?? "—"}
+                    </div>
+                    {(entry as any).shopEtaOnRoad && (
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>
+                        ETA {new Date((entry as any).shopEtaOnRoad).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
+                    {(() => {
+                      const body = entry.lastTechOutreachBody;
+                      const at = entry.lastTechOutreachAt;
+                      const noTimeline = !at;
+                      const hasLegacy = noTimeline && entry.notes && entry.notes.trim().length > 0;
+                      if (body) {
+                        return (
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={body}>
+                            {body}
+                          </div>
+                        );
+                      }
+                      if (hasLegacy) {
+                        return (
+                          <span title={entry.notes ?? ""} style={{
+                            display: "inline-block", fontFamily: fonts.dmSans, fontSize: 11, fontStyle: "italic",
+                            color: colors.inkMuted, border: `1px dashed ${colors.rule}`, borderRadius: 5, padding: "2px 8px",
+                          }}>
+                            Legacy notes
+                          </span>
+                        );
+                      }
+                      return "—";
+                    })()}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
+                    {(() => {
+                      const body = entry.lastShopContactBody;
+                      if (body) {
+                        return (
+                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={body}>
+                            {body}
+                          </div>
+                        );
+                      }
+                      return "—";
+                    })()}
                   </td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     {boolBadge(entry.byovEnrolled)}
@@ -2261,56 +2485,67 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     {boolBadge(entry.routeCleared)}
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.supervisorName ?? entry.tpmsManagerName ?? "—"}
-                  </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
-                    {entry.supervisorPhone ?? entry.tpmsManagerPhone ?? "—"}
-                  </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 220 }}>
-                    {(() => {
-                      const tech = entry.lastTechOutreachAt ? new Date(entry.lastTechOutreachAt).getTime() : 0;
-                      const shop = entry.lastShopContactAt ? new Date(entry.lastShopContactAt).getTime() : 0;
-                      const useShop = shop >= tech && shop > 0;
-                      const useTech = tech > shop && tech > 0;
-                      const body = useShop ? entry.lastShopContactBody : useTech ? entry.lastTechOutreachBody : null;
-                      const tag = useShop ? "Shop" : useTech ? "Tech" : null;
-                      const noTimelines = !tech && !shop;
-                      const hasLegacy = noTimelines && entry.notes && entry.notes.trim().length > 0;
-                      if (body) {
-                        return (
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            <span style={{ fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, color: useShop ? "#7C3AED" : "#0EA5E9", marginRight: 6 }}>
-                              {tag}
-                            </span>
-                            {body}
-                          </div>
-                        );
-                      }
-                      if (hasLegacy) {
-                        return (
-                          <span
-                            title={entry.notes ?? ""}
-                            style={{
-                              display: "inline-block",
-                              fontFamily: fonts.dmSans,
-                              fontSize: 11,
-                              fontStyle: "italic",
-                              color: colors.inkMuted,
-                              border: `1px dashed ${colors.rule}`,
-                              borderRadius: 5,
-                              padding: "2px 8px",
-                            }}
-                          >
-                            Legacy notes — open to migrate
-                          </span>
-                        );
-                      }
-                      return "—";
-                    })()}
+                  <td style={{ ...tdStyle, textAlign: "center" }}>
+                    <FlagIcon flags={entry.flags} />
                   </td>
                   <td style={tdStyle}>
-                    <Pencil size={14} color={colors.inkMuted} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(ev) => ev.stopPropagation()}>
+                      <button
+                        onClick={() => setPanelEntry(entry)}
+                        title="Edit"
+                        style={{ background: "none", border: "none", cursor: "pointer", padding: 2 }}
+                      >
+                        <Pencil size={14} color={colors.inkMuted} />
+                      </button>
+                      {entry.stage === "Complete" && !entry.closedAt && (
+                        <button
+                          onClick={async () => {
+                            const closedBy = window.prompt("Your name (for audit log):");
+                            if (!closedBy?.trim()) return;
+                            try {
+                              const r = await apiRequest("POST", `/api/vrm/repair-tracker/${entry.id}/close`, { closedBy: closedBy.trim() });
+                              if (!r.ok) throw new Error(await r.text());
+                              qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+                              toast({ title: "Case closed" });
+                            } catch (e: any) {
+                              toast({ title: "Close failed", description: e.message, variant: "destructive" });
+                            }
+                          }}
+                          title="Close case"
+                          style={{
+                            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
+                            color: "#15803D", backgroundColor: "#F0FDF4",
+                            border: "1px solid #BBF7D0", borderRadius: 5,
+                            padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
+                          }}
+                        >
+                          Close
+                        </button>
+                      )}
+                      {entry.closedAt && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const r = await apiRequest("POST", `/api/vrm/repair-tracker/${entry.id}/reopen`, {});
+                              if (!r.ok) throw new Error(await r.text());
+                              qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+                              toast({ title: "Case reopened" });
+                            } catch (e: any) {
+                              toast({ title: "Reopen failed", description: e.message, variant: "destructive" });
+                            }
+                          }}
+                          title="Reopen case"
+                          style={{
+                            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
+                            color: "#0369A1", backgroundColor: "#F0F9FF",
+                            border: "1px solid #BAE6FD", borderRadius: 5,
+                            padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
+                          }}
+                        >
+                          Reopen
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
           );
@@ -2319,25 +2554,21 @@ export default function RentalRepairTracker() {
         const renderHeader = () => (
           <thead>
             <tr style={{ backgroundColor: colors.surface }}>
-              <th style={thStyle} onClick={() => handleSort("techLdap")}>LDAP{sortIndicator("techLdap")}</th>
-              <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
-              <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
-              <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
-              <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Inferred from start-order activity in the source view; no true clock-out signal exists upstream. First daily punch = 'Start Truck/Day' (Punched In), last = 'End Day' (Punched Out).">Tech Punch Status ⓘ{sortIndicator("punchStatus")}</th>
+              <th style={thStyle} onClick={() => handleSort("techName")}>Case{sortIndicator("techName")}</th>
               <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
-              <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
-              <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
-              <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied Date{sortIndicator("deniedAt")}</th>
+              <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied{sortIndicator("deniedAt")}</th>
+              <th style={thStyle} onClick={() => handleSort("stage")}>Stage{sortIndicator("stage")}</th>
+              <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Inferred from start-order activity in the source view; no true clock-out signal exists upstream. First daily punch = 'Start Truck/Day' (Punched In), last = 'End Day' (Punched Out).">Punch ⓘ{sortIndicator("punchStatus")}</th>
               <th style={thStyle} onClick={() => handleSort("mainStatus")}>Shop Status{sortIndicator("mainStatus")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techStatus")}>Van Status{sortIndicator("techStatus")}</th>
-              <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techContacted")}>Tech Contacted{sortIndicator("techContacted")}</th>
+              <th style={{ ...thStyle, cursor: "default" }}>Shop</th>
+              <th style={{ ...thStyle, cursor: "default" }}>Tech Outreach</th>
+              <th style={{ ...thStyle, cursor: "default" }}>Shop Log</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("rentalReturned")}>Rental Returned{sortIndicator("rentalReturned")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("routeCleared")}>Route Cleared{sortIndicator("routeCleared")}</th>
-              <th style={thStyle} onClick={() => handleSort("supervisorName")}>Supervisor{sortIndicator("supervisorName")}</th>
-              <th style={thStyle} onClick={() => handleSort("supervisorPhone")}>Sup. Phone{sortIndicator("supervisorPhone")}</th>
-              <th style={{ ...thStyle, maxWidth: 180 }} onClick={() => handleSort("lastActionNotes")}>Last Action{sortIndicator("lastActionNotes")}</th>
-              <th style={{ ...thStyle, width: 40, cursor: "default" }}></th>
+              <th style={{ ...thStyle, textAlign: "center", cursor: "default" }} title="Auto-flag from server: red (>14d action needed), yellow (>7d in progress), blue (link missing)">Flags</th>
+              <th style={{ ...thStyle, width: 90, cursor: "default" }}>Actions</th>
             </tr>
           </thead>
         );
@@ -2346,6 +2577,7 @@ export default function RentalRepairTracker() {
           const rows = sortRows(bySection[name]);
           const meta = sectionMeta[name];
           const isCollapsed = !!collapsed[name];
+          const eligibleArchive = name === "Completed" ? rows.filter((r: any) => r.stage === "Complete" && !r.closedAt).length : 0;
           return (
             <div
               key={name}
@@ -2376,6 +2608,33 @@ export default function RentalRepairTracker() {
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
                   {rows.length} {rows.length === 1 ? "entry" : "entries"}
                 </span>
+                {name === "Completed" && eligibleArchive > 0 && (
+                  <button
+                    onClick={async (ev) => {
+                      ev.stopPropagation();
+                      const closedBy = window.prompt(`Archive ${eligibleArchive} eligible Completed case(s)? Enter your name:`);
+                      if (!closedBy?.trim()) return;
+                      try {
+                        const r = await apiRequest("POST", "/api/vrm/repair-tracker/archive-eligible", { closedBy: closedBy.trim() });
+                        if (!r.ok) throw new Error(await r.text());
+                        const data = await r.json();
+                        qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+                        toast({ title: `Archived ${data.archived} case(s)` });
+                      } catch (e: any) {
+                        toast({ title: "Archive failed", description: e.message, variant: "destructive" });
+                      }
+                    }}
+                    style={{
+                      marginLeft: "auto",
+                      fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+                      color: meta.color, backgroundColor: "#FFFFFF",
+                      border: `1px solid ${meta.color}`, borderRadius: 5,
+                      padding: "3px 10px", cursor: "pointer",
+                    }}
+                  >
+                    Archive {eligibleArchive} eligible
+                  </button>
+                )}
               </div>
               {!isCollapsed && (
                 rows.length === 0 ? (

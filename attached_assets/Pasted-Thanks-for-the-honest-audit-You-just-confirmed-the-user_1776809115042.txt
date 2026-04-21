@@ -1,0 +1,42 @@
+Thanks for the honest audit. You just confirmed the user's complaint with hard code evidence (Last Action still at line 2339, CSV header stale at line 2045), which is exactly what was needed. Proceed with the work as proposed. Here's how we handle the screenshot gate.
+Screenshot protocol — two-part acceptance artifact. Since you cannot authenticate into production from your environment, per-bullet acceptance is now delivered in two parts:
+
+You produce: (a) a dev-preview screenshot from the stubbed-auth path for each acceptance bullet, and (b) a deterministic code/data verification note per bullet. Examples of acceptable verification notes:
+
+"Last Action column removed — grep -n 'Last Action' client/src/pages/vehicle-rental-management/pages/RentalRepairTracker.tsx returns zero matches."
+"Stage pill rendered at column index 4, immediately left of Shop Status — verified by JSX inspection at line X."
+"CSV header matches new column set — grep of the CSV export function shows denial_reason, stage, section, byov_status, closed_at, tech_punch_last_synced_at, etc. all present; last_action no longer in header."
+"Flag tints applied — deriveFlags return value is spread into <tr className={...}> at line Y; dev-preview screenshot shows red/yellow/blue on rows matching the live DB flag values."
+"ⓘ tooltip on Tech Punch Status header — rendered via <Tooltip> wrapping the <th> contents at line Z."
+
+
+User produces: production screenshots after the code lands, in a final pass. If anything in production disagrees with your dev-preview and code notes, I come back to you with the delta. Otherwise the closeout is accepted.
+
+Treat this as the binding acceptance standard for Steps 4–8. No step is marked Done without both a dev-preview screenshot and a verification note. "Compiles clean" is not acceptance. "API returns the right fields" is not acceptance. "The code exists somewhere in the file" is not acceptance — the JSX has to actually render it, and the old chrome has to actually be removed.
+Proceed with your proposed sequential pass: Step 4 fix → Step 5 finish (Legacy Notes panel required) → Step 6 (Close Case / Reopen / Bulk Archive + rewritten CSV) → Step 7 (AMS drawer audit + remove the temp _punch-schema diag route as cleanup) → Step 8 (changelog + R2 writer enumeration + file the two follow-up tickets in .local/tasks/).
+Explicit do's:
+
+Remove the old Last Action column from JSX and from any sort/filter/column-config map that still references it.
+Rewrite the CSV export function to build the header dynamically from the new column set so it can't drift again.
+When you audit flag tints, confirm the tints render from the server-derived flags field on each row, not from a client-side recomputation. Consistency between the section-assignment logic and the flag display is what prevents the "API says one thing, UI shows another" class of bug we already hit once.
+For the 6 Legacy Notes rows, hard-code the LDAPs into a dev-console seed for your dev-preview screenshots so you can demonstrate the panel rendering even if production data has moved on.
+
+Explicit don'ts:
+
+Do not touch Step 9 (AMS snapshot caching) until the user approves after reviewing the closeout package.
+Do not re-introduce rental_returned_date.
+Do not auto-classify the Legacy Notes content — the user migrates them via the two buttons.
+Do not widen scope. If you find a structural issue (e.g., the new section-rendering code is conditional on a flag that evaluates false in some code path), stop and ask before working around it.
+
+Delivery format: When done, post a single message titled "Plan #201 Closeout — Dev-Preview Package" containing:
+
+Per-bullet dev-preview screenshot + verification note table, grouped by step (4, 5, 6, 7, 8).
+Grep evidence that Last Action is gone from the tracker JSX and CSV.
+Link to the updated .local/tasks/repair-tracker-case-management.md.
+The two follow-up ticket files with IDs.
+R2 writer enumeration (every code path that writes byov_enrolled or vrm_rental_decisions.byov_*).
+Final section counts post-cleanup.
+One-line yes/no recommendation on Step 9 with reasoning.
+
+Then reply: PLAN #201 DEV-PREVIEW PACKAGE DELIVERED — USER TO VALIDATE IN PRODUCTION. Stop there. Do not start Step 9 or any new work until I reply PRODUCTION VALIDATED — SHIP or come back with deltas.
+Proceed.

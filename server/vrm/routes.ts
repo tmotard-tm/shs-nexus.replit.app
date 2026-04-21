@@ -42,6 +42,9 @@ import {
   createRepairTrackerEntry,
   updateRepairTrackerEntry,
   softDeleteRepairTrackerEntry,
+  closeRepairTrackerCase,
+  reopenRepairTrackerCase,
+  archiveEligibleCompleted,
   importDeniedToRepairTracker,
   backfillRepairTrackerTruckNumbers,
   listRepairTrackerActions,
@@ -887,6 +890,38 @@ export function registerVrmRoutes(): Router {
     }
   });
 
+  router.post("/repair-tracker/:id/close", async (req, res) => {
+    try {
+      const closedBy = String(req.body?.closedBy ?? "").trim();
+      if (!closedBy) return res.status(400).json({ error: "closedBy required" });
+      const row = await closeRepairTrackerCase(req.params.id, closedBy);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker/:id/reopen", async (req, res) => {
+    try {
+      const row = await reopenRepairTrackerCase(req.params.id);
+      if (!row) return res.status(404).json({ error: "Not found" });
+      res.json(row);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.post("/repair-tracker/archive-eligible", async (req, res) => {
+    try {
+      const closedBy = String(req.body?.closedBy ?? "").trim() || "bulk-archive";
+      const ids = await archiveEligibleCompleted(closedBy);
+      res.json({ archived: ids.length, ids });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   router.get("/repair-tracker/:id/actions", async (req, res) => {
     try {
       const actions = await listRepairTrackerActions(req.params.id);
@@ -1187,33 +1222,6 @@ export function registerVrmRoutes(): Router {
     await persistSyncedAt(ldaps);
     return result;
   }
-
-  // TEMP diag: discover columns + sample values of source punch table
-  router.get("/repair-tracker/_punch-schema", async (_req, res) => {
-    try {
-      const { getSnowflakeService } = await import("../snowflake-service");
-      const svc = getSnowflakeService();
-      const cols = await svc.executeQuery(`
-        SELECT COLUMN_NAME, DATA_TYPE
-        FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = 'NFDT_METRIC_TBLS'
-          AND TABLE_NAME = 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
-        ORDER BY ORDINAL_POSITION
-      `);
-      const punchTypes = await svc.executeQuery(`
-        SELECT PUNCH_TYP, COUNT(*) AS CNT
-        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        GROUP BY PUNCH_TYP ORDER BY CNT DESC LIMIT 20
-      `);
-      const sample = await svc.executeQuery(`
-        SELECT * FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE UPPER(ENT_ID) = 'RDACPAN' ORDER BY RTE_DT DESC, PUNCH_TS DESC LIMIT 10
-      `);
-      res.json({ cols, punchTypes, sample });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
 
   // GET /api/vrm/repair-tracker/punch-status — bulk today status for all LDAPs on tracker
   router.get("/repair-tracker/punch-status", async (_req, res) => {

@@ -160,6 +160,45 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
  * against the full AMS fleet (fetched once per hour, shared across all callers).
  * Zero per-vehicle HTTP calls after the cache is warm.
  */
+/**
+ * Look up the AMS VIN for a given truck number (uses the full-fleet cache).
+ * Returns null if no match. Triggers/awaits a cache build if not warm.
+ */
+export async function lookupAmsVinByTruckNumber(
+  truckNumber: string,
+  amsService: AmsApiService
+): Promise<string | null> {
+  if (!amsService.hasCredentials() || !truckNumber) return null;
+  const now = Date.now();
+  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= AMS_FULL_FLEET_CACHE_TTL_MS) {
+    if (!_amsFullFleetFetchPromise) {
+      _amsFullFleetFetchPromise = buildAmsFullFleetCache(amsService)
+        .then(cache => { _amsFullFleetCache = cache; _amsFullFleetFetchPromise = null; return cache; })
+        .catch(err => { _amsFullFleetFetchPromise = null; throw err; });
+    }
+    await _amsFullFleetFetchPromise;
+  }
+  if (!_amsFullFleetCache) return null;
+  const normalized = String(truckNumber).replace(/^0+/, '') || String(truckNumber);
+  // The cache stores AmsVehicleTypeData stripped of VIN; re-query AMS by VehicleNumber as fallback.
+  // Cache lookup first (we'd need vin in cache values); fall through to a focused search.
+  const data = _amsFullFleetCache.byVehicleNumber.get(normalized) as any;
+  if (data?.VIN) return String(data.VIN).toUpperCase();
+  // Fallback: targeted vehicle search by vehicleId (truck #). AMS supports this query param.
+  try {
+    const result = await amsService.searchVehicles({ vehicleId: normalized, limit: 5, offset: 0 });
+    const rows = (Array.isArray(result) ? result : (result?.data ?? result?.vehicles ?? result?.results ?? result?.items ?? [])) as any[];
+    for (const r of rows) {
+      const candidate = String(r.VehicleNumber ?? '').replace(/^0+/, '') || String(r.VehicleNumber ?? '');
+      if (candidate === normalized && r.VIN) return String(r.VIN).toUpperCase();
+    }
+    if (rows[0]?.VIN) return String(rows[0].VIN).toUpperCase();
+  } catch (e) {
+    console.warn(`[AMS] lookupAmsVinByTruckNumber search failed for ${truckNumber}:`, (e as Error).message);
+  }
+  return null;
+}
+
 export async function batchFetchAmsTypeData(
   vehicles: Array<{ truckNumber: string; vin?: string | null }>,
   amsService: AmsApiService

@@ -893,6 +893,40 @@ export async function softDeleteRepairTrackerEntry(id: string) {
     .where(eq(vrmRepairTracker.id, id));
 }
 
+export async function closeRepairTrackerCase(id: string, closedBy: string) {
+  const [row] = await db
+    .update(vrmRepairTracker)
+    .set({ closedAt: new Date(), closedBy, updatedAt: new Date() })
+    .where(eq(vrmRepairTracker.id, id))
+    .returning();
+  return row ?? null;
+}
+
+export async function reopenRepairTrackerCase(id: string) {
+  const [row] = await db
+    .update(vrmRepairTracker)
+    .set({ closedAt: null, closedBy: null, updatedAt: new Date() })
+    .where(eq(vrmRepairTracker.id, id))
+    .returning();
+  return row ?? null;
+}
+
+/**
+ * Bulk-close all "Complete" stage rows that are not yet closed.
+ * Returns the IDs that were closed.
+ */
+export async function archiveEligibleCompleted(closedBy: string): Promise<string[]> {
+  const entries = await listRepairTracker();
+  const eligible = entries.filter((e: any) => e.stage === "Complete" && !e.closedAt);
+  if (eligible.length === 0) return [];
+  const ids = eligible.map((e: any) => e.id);
+  await db
+    .update(vrmRepairTracker)
+    .set({ closedAt: new Date(), closedBy, updatedAt: new Date() })
+    .where(inArray(vrmRepairTracker.id, ids));
+  return ids;
+}
+
 export async function listRepairTrackerActions(repairTrackerId: string) {
   return db
     .select()

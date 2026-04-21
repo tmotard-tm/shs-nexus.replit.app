@@ -23,7 +23,7 @@ import { db } from "./db";
 import { sql, eq, and, or, gte, lte, lt, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
-import { AmsApiService } from "./ams-api-service";
+import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
 const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
@@ -13562,6 +13562,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error fetching AMS vehicle:", error);
       res.status(500).json({ message: error.message || "Failed to fetch vehicle" });
+    }
+  });
+
+  // GET /api/ams/by-truck/:truckNumber — single-call snapshot (vehicle + full comments) for repair tracker drawer
+  app.get("/api/ams/by-truck/:truckNumber", requireAuth, async (req: any, res) => {
+    const truckNumber = String(req.params.truckNumber ?? "").trim();
+    if (!truckNumber) return res.status(400).json({ error: "truckNumber required" });
+    try {
+      if (!amsApiService.isConfigured()) {
+        return res.json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: "AMS not configured" });
+      }
+      const vin = await lookupAmsVinByTruckNumber(truckNumber, amsApiService);
+      if (!vin) {
+        return res.json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: "No VIN found in AMS for this truck #" });
+      }
+      const [vehicleResult, commentsResult] = await Promise.allSettled([
+        amsApiService.getVehicleByVin(vin),
+        amsApiService.getComments(vin),
+      ]);
+      const vehicle = vehicleResult.status === "fulfilled" ? vehicleResult.value : null;
+      const rawComments = commentsResult.status === "fulfilled" ? commentsResult.value : [];
+      const comments: any[] = Array.isArray(rawComments)
+        ? rawComments
+        : (rawComments?.data ?? rawComments?.comments ?? rawComments?.results ?? rawComments?.items ?? []);
+      if (!vehicle) {
+        return res.json({ found: false, linkMissing: true, vin, vehicle: null, comments: [], reason: "Vehicle not found in AMS" });
+      }
+      res.json({ found: true, linkMissing: false, vin, vehicle, comments });
+    } catch (error: any) {
+      console.error(`[AMS by-truck] ${truckNumber}:`, error);
+      res.status(500).json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: error.message });
     }
   });
 
