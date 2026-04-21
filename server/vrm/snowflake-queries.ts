@@ -538,6 +538,55 @@ export async function fetchTechPunchHistory(
   }));
 }
 
+// ─── Tech Punch Events (raw, one row per PUNCH_TS) ─────────────────────────
+
+export interface TechPunchEvent {
+  ldap: string;
+  punchDate: string;            // YYYY-MM-DD
+  punchTs: string;              // ISO timestamp (date + time)
+  punchType: string;            // raw PUNCH_TYP from source ('START ORDER', etc.)
+  orderNumber: string | null;   // SO_NO
+}
+
+/**
+ * Returns raw punch events (one row per PUNCH_TS) for a single LDAP, ordered
+ * most-recent-first. Used by the per-tech Punch History tab so the UI can show
+ * the actual PUNCH_TYP value rather than a synthesized in/out pair.
+ */
+export async function fetchTechPunchEvents(
+  ldap: string,
+  days: number = 7,
+): Promise<TechPunchEvent[]> {
+  if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
+  const cleaned = (ldap || "").trim();
+  if (!cleaned) return [];
+  const svc = getSnowflakeService();
+  const lookback = Math.max(1, Math.min(7, days));
+  const safe = cleaned.replace(/'/g, "''").toUpperCase();
+
+  const rows = (await svc.executeQuery(`
+    SELECT
+      UPPER(ENT_ID)                              AS "ldap",
+      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
+      TO_CHAR(PUNCH_TS, 'HH24:MI:SS')            AS "_time",
+      PUNCH_TYP                                  AS "punchType",
+      SO_NO                                      AS "orderNumber"
+    FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+    WHERE UPPER(ENT_ID) = '${safe}'
+      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      AND PUNCH_TS IS NOT NULL
+    ORDER BY RTE_DT DESC, PUNCH_TS DESC
+  `)) as Array<{ ldap: string; punchDate: string; _time: string; punchType: string; orderNumber: string | null }>;
+
+  return rows.map((r) => ({
+    ldap: r.ldap,
+    punchDate: r.punchDate,
+    punchTs: `${r.punchDate}T${r._time}`,
+    punchType: r.punchType,
+    orderNumber: r.orderNumber,
+  }));
+}
+
 /**
  * Diagnostic — used when the bulk fetch returns zero rows for *every* requested
  * LDAP. Returns a small sample of LDAP_IDs that DO exist in the source view so

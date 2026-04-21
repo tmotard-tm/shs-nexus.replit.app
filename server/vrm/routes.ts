@@ -54,7 +54,7 @@ import {
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchPunchSourceDiagnostic, type TechPunchRow } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
@@ -1254,9 +1254,17 @@ export function registerVrmRoutes(): Router {
         return res.json({ ldap, rows: hit.rows, summary: summarizeStatus(hit.rows, { error: null, sourceConfigured }), cached: true });
       }
       let rows: TechPunchRow[] = [];
+      let events: TechPunchEvent[] = [];
       let snowflakeError: string | null = null;
       try {
-        rows = await fetchTechPunchHistory([ldap], 7);
+        // Daily-pivoted rows still drive the status summary (first/last activity).
+        // Raw events drive the per-event punch table in the UI.
+        const [pivot, raw] = await Promise.all([
+          fetchTechPunchHistory([ldap], 7),
+          fetchTechPunchEvents(ldap, 7),
+        ]);
+        rows = pivot;
+        events = raw;
       } catch (e: any) {
         snowflakeError = e?.message ?? String(e);
         console.error("[VRM] punch-history snowflake error:", snowflakeError);
@@ -1265,7 +1273,7 @@ export function registerVrmRoutes(): Router {
       await persistSyncedAt([ldap]);
       // Force-refresh also invalidates the bulk cache so the table picks up changes
       if (force) bulkStatusCache = null;
-      res.json({ ldap, rows, summary: summarizeStatus(rows, { error: snowflakeError, sourceConfigured }), cached: false });
+      res.json({ ldap, rows, events, summary: summarizeStatus(rows, { error: snowflakeError, sourceConfigured }), cached: false });
     } catch (e: any) {
       console.error("[VRM] punch-history error:", e.message);
       res.status(500).json({ error: e.message });

@@ -937,7 +937,7 @@ function PunchHistoryTab({
   onRefresh,
 }: {
   ldap: string;
-  query: ReturnType<typeof useQuery<{ ldap: string; rows: PunchHistoryRow[]; summary: PunchStatusEntry }>>;
+  query: ReturnType<typeof useQuery<{ ldap: string; rows: PunchHistoryRow[]; events?: PunchEvent[]; summary: PunchStatusEntry }>>;
   onRefresh: () => void;
 }) {
   const fmtDate = (d: string) => {
@@ -972,6 +972,7 @@ function PunchHistoryTab({
   }
 
   const rows = query.data?.rows ?? [];
+  const events = query.data?.events ?? [];
   const summary = query.data?.summary;
 
   return (
@@ -1007,7 +1008,7 @@ function PunchHistoryTab({
         <div style={{ padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, fontSize: 13, color: colors.red, backgroundColor: "#FEF2F2" }}>
           Failed to load punch history. Try Refresh.
         </div>
-      ) : rows.length === 0 ? (
+      ) : events.length === 0 ? (
         <div style={{ padding: 30, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
           No punches in the last 7 days.
         </div>
@@ -1016,18 +1017,22 @@ function PunchHistoryTab({
           <thead>
             <tr style={{ backgroundColor: colors.surface }}>
               <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Date</th>
-              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>In</th>
-              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Out</th>
-              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "right", borderBottom: `1px solid ${colors.rule}` }}>Duration</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Time</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Punch Type</th>
+              <th style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.06em", padding: "8px 10px", textAlign: "left", borderBottom: `1px solid ${colors.rule}` }}>Order #</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={`${r.punchDate}-${r.punchInTs ?? ""}-${i}`}>
-                <td style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtDate(r.punchDate)}</td>
-                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(r.punchInTs)}</td>
-                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(r.punchOutTs)}</td>
-                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, textAlign: "right", whiteSpace: "nowrap" }}>{fmtDuration(r.punchInTs, r.punchOutTs)}</td>
+            {events.map((e, i) => (
+              <tr key={`${e.punchDate}-${e.punchTs}-${i}`}>
+                <td style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtDate(e.punchDate)}</td>
+                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(e.punchTs)}</td>
+                <td style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#0369A1", backgroundColor: "#F0F9FF", padding: "2px 7px", borderRadius: 4 }}>
+                    {e.punchType || "—"}
+                  </span>
+                </td>
+                <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{e.orderNumber ?? "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -1035,7 +1040,7 @@ function PunchHistoryTab({
       )}
 
       <p style={{ marginTop: 14, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-        Source: TimeHub (1-week window). Data refreshes every ~90s server-side.
+        Source: TimeHub (1-week window, raw PUNCH_TYP from <span style={{ fontFamily: fonts.jetbrains }}>TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK</span>). Data refreshes every ~90s server-side.
       </p>
     </div>
   );
@@ -1755,6 +1760,13 @@ interface PunchHistoryRow {
   punchDate: string;
   punchInTs: string | null;
   punchOutTs: string | null;
+}
+interface PunchEvent {
+  ldap: string;
+  punchDate: string;
+  punchTs: string;
+  punchType: string;
+  orderNumber: string | null;
 }
 
 function fmtPunchTime(ts: string | null): string {
