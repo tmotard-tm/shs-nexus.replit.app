@@ -1,0 +1,19 @@
+Hold on Step 5. The Build-mode checkpoint after Step 1 was skipped — the plan required stopping there before Step 2 began. I need that summary now, retroactively, before you continue.
+Checkpoint 1 report — produce this against live current data, read-only:
+
+Row accounting. The plan baseline was 15 rows in vrm_repair_tracker. The live API returns 11 entries. Account for every row: how many are currently in Action Needed / In Progress / Completed / Archived / dismissed / any other state. Show the exact (id, tech_ldap, truck_number, main_status, sub_status, tech_status, section, isArchived, dismissed_flag_if_any) for every row so I can see the distribution.
+Unexpected-section rows. For any row where the computed section looks wrong given its data, list it and walk through the stage derivation. Specifically: confirm the 3 Route Canceled rows (Khan, Sarwary, Mcliechey) landed where R5 said they should (Off Road for Stage purposes, Route Canceled preserved as the visible Van Status pill).
+[migrated] ambiguity. The backfill was supposed to heuristically parse existing last_action strings into Tech Outreach vs Shop Contact Log timelines, tagging ambiguous ones [migrated]. List every row that received a [migrated] tag and the rule the heuristic used to classify it (or skip). If zero rows were tagged because last_action was already empty or vrm_repair_tracker_actions had 0 rows, say so explicitly.
+Silent-drift spot-checks. Confirm that link_missing and tech_punch_last_synced_at columns both exist on vrm_repair_tracker post-migration, with expected types and defaults.
+
+Punch-status inference sign-off — I also need explicit confirmation before Step 5:
+The punch-status logic you built on top of the START ORDER-only source view is a business heuristic that was not in the locked plan:
+
+First punch of the day → Punched In ("Start Truck/Day")
+Last punch of the day when multiple exist → Punched Out ("End Day")
+Single punch today → Punched In
+Active in last 7 days but no punch today → Punched Out
+Otherwise → Unknown
+
+Document this heuristic explicitly in the Step 3 changelog entry, including edge cases (lunch breaks, mid-day gaps, cross-midnight punches, partial-day schedules). Note the limitation in the UI — the column tooltip or a small info icon should say something like "Inferred from start-order activity; no true punch-out signal in source." I want to validate this heuristic against a day I know well before Step 5 builds on top of it.
+After you post the Checkpoint 1 report and the punch-status documentation, reply CHECKPOINT 1 DELIVERED — AWAITING APPROVAL and wait. Do not begin Step 5 until I reply CHECKPOINT 1 APPROVED — CONTINUE.

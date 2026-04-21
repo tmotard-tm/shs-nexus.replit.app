@@ -1599,7 +1599,7 @@ export default function RentalRepairTracker() {
               <th style={thStyle} onClick={() => handleSort("techName")}>Tech Name{sortIndicator("techName")}</th>
               <th style={thStyle} onClick={() => handleSort("techPhone")}>Tech Phone{sortIndicator("techPhone")}</th>
               <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
-              <th style={thStyle} onClick={() => handleSort("punchStatus")}>Tech Punch Status{sortIndicator("punchStatus")}</th>
+              <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Inferred from start-order activity in the source view; no true clock-out signal exists upstream. First daily punch = 'Start Truck/Day' (Punched In), last = 'End Day' (Punched Out).">Tech Punch Status ⓘ{sortIndicator("punchStatus")}</th>
               <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
               <th style={thStyle} onClick={() => handleSort("repairShopAddress")}>Repair Shop{sortIndicator("repairShopAddress")}</th>
               <th style={thStyle} onClick={() => handleSort("repairShopPhone")}>Repair Phone{sortIndicator("repairShopPhone")}</th>
