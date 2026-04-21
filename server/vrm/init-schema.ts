@@ -384,6 +384,62 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS rental_return_date DATE;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS route_cleared BOOLEAN DEFAULT FALSE;`);
 
+  // Case management overhaul (Task #201) — additive columns.
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_contacted_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_contact_outcome TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS route_cleared_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS denial_reason TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS denial_reason_detail TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS byov_offered BOOLEAN DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS byov_offered_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS byov_status TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS byov_decision_date DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS shop_last_contacted_date TIMESTAMP;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS shop_eta_on_road DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS assigned_tech_liaison VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS assigned_shop_liaison VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS closed_at TIMESTAMP;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS closed_by VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS link_missing BOOLEAN DEFAULT FALSE;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_punch_last_synced_at TIMESTAMP;`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_repair_tracker_closed_at_idx ON vrm_repair_tracker(closed_at);`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_repair_tracker_tech_outreach (
+      id                VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      repair_tracker_id VARCHAR NOT NULL REFERENCES vrm_repair_tracker(id),
+      author_id         VARCHAR(255),
+      author_name       VARCHAR(255),
+      occurred_at       TIMESTAMP DEFAULT NOW() NOT NULL,
+      method            VARCHAR(50),
+      outcome           VARCHAR(50),
+      body              TEXT,
+      revised_from_id   VARCHAR,
+      created_at        TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_tech_outreach_tracker_idx ON vrm_repair_tracker_tech_outreach(repair_tracker_id);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_tech_outreach_occurred_idx ON vrm_repair_tracker_tech_outreach(occurred_at);`);
+
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_repair_tracker_shop_contact (
+      id                  VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      repair_tracker_id   VARCHAR NOT NULL REFERENCES vrm_repair_tracker(id),
+      author_id           VARCHAR(255),
+      author_name         VARCHAR(255),
+      occurred_at         TIMESTAMP DEFAULT NOW() NOT NULL,
+      eta_update          DATE,
+      main_status_update  TEXT,
+      sub_status_update   TEXT,
+      tech_status_update  VARCHAR(50),
+      body                TEXT,
+      revised_from_id     VARCHAR,
+      created_at          TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_shop_contact_tracker_idx ON vrm_repair_tracker_shop_contact(repair_tracker_id);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_shop_contact_occurred_idx ON vrm_repair_tracker_shop_contact(occurred_at);`);
+
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS vrm_repair_tracker_actions (
       id                  VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),

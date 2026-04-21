@@ -1,0 +1,26 @@
+Audit received. Applying all Yellow edits. Answering Red items below. Do not proceed to implementation yet — there is one more read-only check (R3) I need you to run, then return a short delta and wait for final approval.
+Yellow edits — apply all six to the plan
+
+Y1. Replace "8 named techs land in Completed" with a rule-based assertion: "All rows where main_status = On Road AND sub_status = On Road (or equivalent (main, sub) pair) at first load land in the Completed section." Drop the hard-coded names throughout §11 and anywhere else they appear.
+Y2. Use the existing rental_return_date field. Do not introduce rental_returned_date. Update §1, §5, and the CSV export spec accordingly.
+Y3. Change the punch enum to Punched In, Punched Out, Unknown (3 values). Preserve the intent to add On Break / No Schedule Today by filing a follow-up ticket titled "Snowflake view enhancement: expose break and schedule signals for punch status" — do not block this plan on it.
+Y4. Rewrite AMS addendum §1 truck-number matching as: "canonical match via the existing shared/vehicle-number-utils.ts helper — strip leading zeros and case-insensitive. Display via toDisplayNumber. VIN fallback when canonical truck # is null on either side." Remove any language about preserving leading zeros in storage.
+Y5. AMS addendum §3: do not reuse the public 20-comment-capped endpoint. Add a new internal route GET /api/ams/by-truck/:truckNumber that returns the full snapshot plus full comment history (paginated), mirroring what the fleet-management side panel receives. Document it in the changelog.
+Y6. AMS addendum §4 and main spec §4 stage rules: operate on (main_status, sub_status) pairs, not a single shop_status field. Re-express every stage rule in that form before implementing.
+
+Red items — decisions
+
+R1. Drop the "AMS record exists but you do not have access" requirement. If no row-level ACL exists on the internal AMS endpoints today, do not add a fake branch for it. Remove that bullet from the addendum. If you discover an ACL does exist that I missed, stop and flag it.
+R2. BYOV canonical writer: vrm_repair_tracker.byov_status is the canonical case-level status for each denial event. vrm_techs.byov_enrolled remains the tech-level long-term flag (source of truth for "is this tech in BYOV today"). vrm_rental_decisions is read-only regarding BYOV — it references but does not write. Before implementing, identify every code path that currently writes to byov_enrolled or any vrm_rental_decisions.byov_* column and list them in the changelog so we can confirm none need to change writer. Do not implement writes from the tracker to vrm_techs.byov_enrolled; that stays owned by its current writer.
+R3. Run this check NOW, read-only, before proceeding. Grep PUT /api/vehicle-nexus-data/:vehicleNumber and any other route under /api/vehicle-nexus-data/* for writes to notes, last_action, or any field we plan to deprecate or reshape (timeline-related fields in particular). Produce a short R3 delta report: every field that route writes, whether any collide with our deprecation plan, and your recommendation. Do not modify anything. Pause after producing the delta.
+R4. Accept rule-based assertions as replacements for the named-tech acceptance gates. Confirmed — the snapshot the spec was written against is slightly older than current data, and the rules are what matters. This is resolved by Y1 above.
+R5. Map Route Canceled → Off Road for Stage computation, but preserve Route Canceled as its own visible pill in the Van Status column (do not collapse it in the UI). Also: identify where Route Canceled gets written today and include that in the R3 delta report so we know whether it's a manual status or system-set. If it's a concept we should first-class elsewhere (e.g., as a derived flag), call that out as a follow-up — do not expand this plan to cover it.
+
+Final step before approval
+
+Apply Y1–Y6 to the plan in place (read-only plan edits only — do not touch code).
+Run the R3 delta check (read-only grep) and append the findings to the audit as a new section 2.11 R3 Delta.
+Reply with the updated plan diff and the 2.11 delta, then say AUDIT REVISION COMPLETE — AWAITING FINAL APPROVAL.
+Do not begin implementation until I reply with AUDIT APPROVED — PROCEED.
+
+If anything in R1–R5 or Y1–Y6 conflicts with something you find during the R3 check, stop and flag it rather than silently adjusting.

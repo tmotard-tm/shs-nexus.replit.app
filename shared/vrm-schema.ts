@@ -464,14 +464,84 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   supervisorName: varchar("supervisor_name", { length: 255 }),
   supervisorPhone: varchar("supervisor_phone", { length: 50 }),
   techContacted: boolean("tech_contacted").default(false),
+  techContactedDate: date("tech_contacted_date"),
+  techContactOutcome: text("tech_contact_outcome"),
   rentalReturned: varchar("rental_returned", { length: 10 }),
   rentalReturnDate: date("rental_return_date"),
   routeCleared: boolean("route_cleared").default(false),
+  routeClearedDate: date("route_cleared_date"),
+  // Denial reason — populated prospectively via the edit modal.
+  // Source `vrm_rental_decisions` has no denial_reason column, so backfill leaves these NULL.
+  denialReason: text("denial_reason"),
+  denialReasonDetail: text("denial_reason_detail"),
+  // BYOV case-level lifecycle (canonical writer per R2).
+  // tech-level long-term flag stays on `vrm_techs.byov_enrolled` (separate writer).
+  byovOffered: boolean("byov_offered").default(false),
+  byovOfferedDate: date("byov_offered_date"),
+  byovStatus: text("byov_status"),
+  byovDecisionDate: date("byov_decision_date"),
+  // Shop contact tracking
+  shopLastContactedDate: timestamp("shop_last_contacted_date"),
+  shopEtaOnRoad: date("shop_eta_on_road"),
+  // Liaison assignments — nullable until claimed by a user.
+  assignedTechLiaison: varchar("assigned_tech_liaison", { length: 255 }),
+  assignedShopLiaison: varchar("assigned_shop_liaison", { length: 255 }),
+  // Case closure
+  closedAt: timestamp("closed_at"),
+  closedBy: varchar("closed_by", { length: 255 }),
+  // AMS link / punch sync metadata
+  linkMissing: boolean("link_missing").default(false),
+  techPunchLastSyncedAt: timestamp("tech_punch_last_synced_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({
   truckIdx: index("vrm_repair_tracker_truck_idx").on(table.truckNumber),
   statusIdx: index("vrm_repair_tracker_status_idx").on(table.mainStatus),
+  closedAtIdx: index("vrm_repair_tracker_closed_at_idx").on(table.closedAt),
+}));
+
+// ─── Repair Tracker — Tech Outreach timeline (append-only) ────────────────────
+// Replaces ad-hoc usage of vrm_repair_tracker_actions for tech-side notes.
+export const vrmRepairTrackerTechOutreach = pgTable("vrm_repair_tracker_tech_outreach", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  repairTrackerId: varchar("repair_tracker_id").notNull(),
+  authorId: varchar("author_id", { length: 255 }),
+  authorName: varchar("author_name", { length: 255 }),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  // contact method: phone / sms / email / in_person / other
+  method: varchar("method", { length: 50 }),
+  // outcome: reached / left_voicemail / no_answer / refused / committed_eta / etc.
+  outcome: varchar("outcome", { length: 50 }),
+  body: text("body"),
+  // Self-reference for revisions; null on the original entry.
+  revisedFromId: varchar("revised_from_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  trackerIdx: index("vrm_rt_tech_outreach_tracker_idx").on(table.repairTrackerId),
+  occurredAtIdx: index("vrm_rt_tech_outreach_occurred_idx").on(table.occurredAt),
+}));
+
+// ─── Repair Tracker — Shop Contact Log timeline (append-only) ─────────────────
+export const vrmRepairTrackerShopContact = pgTable("vrm_repair_tracker_shop_contact", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  repairTrackerId: varchar("repair_tracker_id").notNull(),
+  authorId: varchar("author_id", { length: 255 }),
+  authorName: varchar("author_name", { length: 255 }),
+  occurredAt: timestamp("occurred_at").defaultNow().notNull(),
+  // Optional ETA update — when set, also writes vrm_repair_tracker.shop_eta_on_road.
+  etaUpdate: date("eta_update"),
+  // Optional cascading status updates (sourced from MAIN_STATUSES / SUB_STATUSES);
+  // when set, also writes vrm_repair_tracker.main_status / sub_status.
+  mainStatusUpdate: text("main_status_update"),
+  subStatusUpdate: text("sub_status_update"),
+  // Optional Van Status update; when set, also writes vrm_repair_tracker.tech_status.
+  techStatusUpdate: varchar("tech_status_update", { length: 50 }),
+  body: text("body"),
+  revisedFromId: varchar("revised_from_id"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  trackerIdx: index("vrm_rt_shop_contact_tracker_idx").on(table.repairTrackerId),
+  occurredAtIdx: index("vrm_rt_shop_contact_occurred_idx").on(table.occurredAt),
 }));
 
 export const vrmRepairTrackerActions = pgTable("vrm_repair_tracker_actions", {
@@ -499,3 +569,17 @@ export const insertVrmRepairTrackerActionSchema = createInsertSchema(vrmRepairTr
 });
 export type VrmRepairTrackerAction = typeof vrmRepairTrackerActions.$inferSelect;
 export type InsertVrmRepairTrackerAction = z.infer<typeof insertVrmRepairTrackerActionSchema>;
+
+export const insertVrmRepairTrackerTechOutreachSchema = createInsertSchema(vrmRepairTrackerTechOutreach).omit({
+  id: true,
+  createdAt: true,
+});
+export type VrmRepairTrackerTechOutreach = typeof vrmRepairTrackerTechOutreach.$inferSelect;
+export type InsertVrmRepairTrackerTechOutreach = z.infer<typeof insertVrmRepairTrackerTechOutreachSchema>;
+
+export const insertVrmRepairTrackerShopContactSchema = createInsertSchema(vrmRepairTrackerShopContact).omit({
+  id: true,
+  createdAt: true,
+});
+export type VrmRepairTrackerShopContact = typeof vrmRepairTrackerShopContact.$inferSelect;
+export type InsertVrmRepairTrackerShopContact = z.infer<typeof insertVrmRepairTrackerShopContactSchema>;
