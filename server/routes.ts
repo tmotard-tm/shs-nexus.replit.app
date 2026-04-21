@@ -406,6 +406,18 @@ function getAccessibleQueueModules(user: any): QueueModule[] {
   return [];
 }
 
+// Auth middleware that allows either a valid session OR a valid X-API-Key
+// matching the RENTAL_OPS_API_KEY secret. Used by external server-to-server
+// consumers of /api/rental-ops/open.
+function requireAuthOrRentalOpsApiKey(req: any, res: any, next: any): any {
+  const provided = req.headers["x-api-key"];
+  const expected = process.env.RENTAL_OPS_API_KEY;
+  if (expected && typeof provided === "string" && provided === expected) {
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
+
 // Authentication middleware
 async function requireAuth(req: any, res: any, next: any): Promise<any> {
   const cookieHeader = req.headers.cookie;
@@ -14150,7 +14162,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   }
 
-  app.get("/api/rental-ops/open", requireAuth, async (req: any, res) => {
+  // Enrich rental-ops rows with mainStatus/subStatus from Fleet Scope trucks,
+  // joined on the normalized padded vehicle number. Single batched query.
+  const enrichWithTruckStatus = async (rows: any[]) => {
+    const { trucks } = await import("@shared/fleet-scope-schema");
+    const vns = Array.from(new Set(
+      rows.map(r => String(r.vehicleNumberPadded || "").trim()).filter(Boolean)
+    ));
+    const statusByVn = new Map<string, { mainStatus: string | null; subStatus: string | null }>();
+    if (vns.length > 0) {
+      const truckRows = await fsDb
+        .select({ truckNumber: trucks.truckNumber, mainStatus: trucks.mainStatus, subStatus: trucks.subStatus })
+        .from(trucks)
+        .where(inArray(trucks.truckNumber, vns));
+      for (const t of truckRows) {
+        statusByVn.set(t.truckNumber, { mainStatus: t.mainStatus ?? null, subStatus: t.subStatus ?? null });
+      }
+    }
+    for (const r of rows) {
+      const s = statusByVn.get(String(r.vehicleNumberPadded || "").trim());
+      r.mainStatus = s ? s.mainStatus : null;
+      r.subStatus = s ? s.subStatus : null;
+    }
+  };
+
+  app.get("/api/rental-ops/open", requireAuthOrRentalOpsApiKey, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
@@ -14207,6 +14243,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             source: "holman_raw",
           };
         });
+        await enrichWithTruckStatus(data);
         const rawResult = { data, total: data.length, totalPOLines: rows.length, view: "raw" };
         setRentalOpsCache(openCacheKey, rawResult);
         return res.json(rawResult);
@@ -14330,6 +14367,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
       const data = allData;
+
+      await enrichWithTruckStatus(data);
 
       const openBizResult = {
         data,
