@@ -452,5 +452,26 @@ export async function initVrmSchema(): Promise<void> {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rt_actions_tracker_idx ON vrm_repair_tracker_actions(repair_tracker_id);`);
 
+  // Guardrail G6 — persistent dedup protection.
+  // Loads scripts/guardrails/g6-dedup-protection.sql which adds a
+  // `protected_from_dedup` BOOLEAN column + a BEFORE-UPDATE trigger that flips
+  // it to TRUE on any manual edit. The dedup DELETE in
+  // server/vrm/storage.ts (importDeniedToRepairTracker) MUST add
+  // `AND protected_from_dedup = false` to its WHERE clause.
+  try {
+    const fs = await import("fs");
+    const path = await import("path");
+    const g6Path = path.resolve(process.cwd(), "scripts/guardrails/g6-dedup-protection.sql");
+    if (fs.existsSync(g6Path)) {
+      const g6Sql = fs.readFileSync(g6Path, "utf8");
+      await db.execute(sql.raw(g6Sql));
+      console.log("[VRM] Guardrail G6 dedup-protection installed");
+    } else {
+      console.warn("[VRM] G6 SQL file missing — skipping dedup protection install");
+    }
+  } catch (e: any) {
+    console.warn("[VRM] G6 dedup-protection install failed (non-fatal):", e?.message);
+  }
+
   console.log("[VRM] Schema initialised");
 }

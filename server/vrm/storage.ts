@@ -735,9 +735,14 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
   //   - Rows sourced from Decision Log where the actual decision was NOT 'denied' (e.g.
   //     recommendation=Deny but manager overrode to Approved)
   //   Only hard-delete non-dismissed rows for these cases.
+  // Guardrail G6: never delete rows that have manual edits (the BEFORE-UPDATE
+  // trigger sets protected_from_dedup=true on any user touch). Without this
+  // condition, manual notes/status updates would be wiped on every scheduler
+  // tick that re-classified the row as wrong-source.
   await db.execute(sql`
     DELETE FROM vrm_repair_tracker
     WHERE dismissed IS NOT TRUE
+      AND protected_from_dedup = false
       AND (
         source_check_id IS NOT NULL
         OR (
@@ -750,11 +755,15 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
       )
   `);
 
-  // Step 2: One-time cleanup — for each tech_ldap with more than one non-dismissed row,
-  // keep only the most recent (by denied_at, falling back to created_at) and delete the rest.
+  // Step 2: Per-LDAP dedup — for each tech_ldap with more than one non-dismissed
+  // row, keep only the most recent (by denied_at, falling back to created_at)
+  // and delete the rest.
+  // Guardrail G6: AND protected_from_dedup = false ensures any row with manual
+  // edits is excluded from this pass.
   await db.execute(sql`
     DELETE FROM vrm_repair_tracker
     WHERE dismissed IS NOT TRUE
+      AND protected_from_dedup = false
       AND id IN (
         SELECT id FROM (
           SELECT id,

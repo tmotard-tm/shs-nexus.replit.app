@@ -1,0 +1,9 @@
+# G1 destructive-op allow-list.
+# One destructive SQL line per entry, matched by exact substring.
+# To permit a DROP COLUMN / DROP TABLE / ALTER COLUMN ... TYPE / RENAME, add a line
+# here in a HUMAN-REVIEWED PR. Empty file = block everything destructive.
+#
+# Example:
+#   ALTER TABLE legacy_table DROP COLUMN deprecated_at
+#
+# (no entries — strict-deny default)
