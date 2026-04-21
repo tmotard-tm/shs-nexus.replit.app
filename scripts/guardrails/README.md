@@ -11,7 +11,7 @@ Scripts that protect production data on merge and deploy. Each guardrail is one 
 | G5 | `g5-rollback-artifact.ts` + `g5-rollback.sh` | post-deploy success / break-glass | Records bundle hash + snapshot key + migration list in `deploys/history.json`; rollback shell reads the file and prints recovery steps. |
 | G6 | `g6-dedup-protection.sql` | run on app boot via `server/vrm/init-schema.ts` | Adds `protected_from_dedup` column + BEFORE-UPDATE trigger that flips it on any manual edit. Dedup DELETE in `server/vrm/storage.ts` adds `AND protected_from_dedup = false`. |
 | G7 | `g7-refresh-direction-guard.js` | pre-flight before `refreshDevFromProd.js` | Refuses to run unless source host contains a prod marker and dest host does not. |
-| G8 | *(not yet built)* | app boot | Asserts `DATABASE_URL` host matches expected pattern when `NODE_ENV=production`. Blocked on operator providing the prod host suffix. |
+| G8 | `g8-env-drift-check.ts` | app boot (first import in `server/index.ts`) | Asserts `DATABASE_URL.host` exactly matches `EXPECTED_PROD_HOST` when `NODE_ENV=production`; calls `process.exit(1)` on mismatch. No-op in non-production. Auto-fires on module load so it runs before any DB-touching import. |
 
 ## Dry-run env vars
 - `G1_DRY_RUN=1` — generates diff and classifies, but does not call `drizzle-kit push`.
@@ -20,6 +20,7 @@ Scripts that protect production data on merge and deploy. Each guardrail is one 
 - `G4_DRY_RUN=1` — prints diff vs. latest snapshot but skips alert writing/email.
 - `G5_DRY_RUN=1` — prints the would-be history entry without touching `deploys/history.json`.
 - `G7_DRY_RUN=1` — exits 0 on missing args (no destructive consequence).
+- G8 has no dry-run env var; instead use `tsx scripts/guardrails/g8-dry-run.ts` which spawns three subprocesses (match / mismatch / dev) and reports pass/fail per case.
 
 ## Wiring (proposed, not yet applied)
 - `scripts/post-merge.sh`: replace the `drizzle-kit push --force` line with `bash scripts/guardrails/g1-merge-schema-gate.sh`.

@@ -22,7 +22,7 @@ const source = arg("--source") || process.env.SOURCE_DATABASE_URL || process.env
 const dest = arg("--dest") || process.env.DEST_DATABASE_URL || process.env.DEV_DATABASE_URL;
 const dryRun = process.env.G7_DRY_RUN === "1";
 
-const markers = (process.env.G7_PROD_MARKERS || "prod,production,main-branch")
+const markers = (process.env.G7_PROD_MARKERS || "prod,production,main-branch,ep-lively-heart-adrhzx3e")
   .split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
 
 function hostOf(url) {

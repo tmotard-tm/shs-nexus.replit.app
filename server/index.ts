@@ -1,3 +1,8 @@
+// G8 — env drift check. MUST be the first import in this file. The module
+// auto-fires assertProdDatabaseHost() on load, so by importing it before any
+// DB-touching module (./storage, ./routes, etc.) we guarantee the prod-host
+// assertion runs before any database connection can be opened.
+import { assertProdDatabaseHost } from "./guardrails/g8-env-drift-check";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { elevenLabsWebhookHandler } from "./fleet-scope-routes";
