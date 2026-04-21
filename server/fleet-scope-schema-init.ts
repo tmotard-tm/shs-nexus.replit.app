@@ -673,6 +673,12 @@ WHERE t.main_status IS NOT NULL
     SELECT asset_id FROM fs_pmf_status_events WHERE source = 'fleet_scope'
   );
 
+CREATE TABLE IF NOT EXISTS "fs_decomm_excluded_trucks" (
+  "truck_number" varchar(20) PRIMARY KEY,
+  "excluded_at" timestamp DEFAULT now(),
+  "excluded_by" varchar(100)
+);
+
 CREATE TABLE IF NOT EXISTS "fs_decomm_messages" (
   "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
   "truck_number" text NOT NULL,

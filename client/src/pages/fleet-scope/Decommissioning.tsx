@@ -29,7 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw } from "lucide-react";
 import { useLocation } from "wouter";
 import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
 import ExcelJS from 'exceljs';
@@ -166,9 +166,10 @@ export default function Decommissioning() {
     },
     onSuccess: (result: any) => {
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
+      const skippedNote = result.excluded ? `, Skipped (deleted): ${result.excluded}` : "";
       toast({
         title: "Synced from POs",
-        description: `Added: ${result.added}, Already exists: ${result.alreadyExists}`,
+        description: `Added: ${result.added}, Already exists: ${result.alreadyExists}${skippedNote}`,
       });
     },
     onError: (error: any) => {
@@ -643,6 +644,9 @@ export default function Decommissioning() {
             )}
             Sync from POs
           </Button>
+
+          <RestoreDeletedTrucksDialog />
+
 
           <Button
             variant="outline"
@@ -1193,5 +1197,105 @@ export default function Decommissioning() {
         </DialogContent>
       </Dialog>
     </div>
+  );
+}
+
+interface ExcludedTruck {
+  truckNumber: string;
+  excludedAt: string | null;
+}
+
+function RestoreDeletedTrucksDialog() {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+
+  const { data: excluded = [], isLoading } = useQuery<ExcludedTruck[]>({
+    queryKey: ["/api/fs/decommissioning/excluded"],
+    enabled: open,
+  });
+
+  const restoreMutation = useMutation({
+    mutationFn: async (truckNumber: string) => {
+      return apiRequest("DELETE", `/api/fs/decommissioning/excluded/${truckNumber}`);
+    },
+    onSuccess: (_data, truckNumber) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning/excluded"] });
+      toast({
+        title: "Truck restored",
+        description: `Truck ${truckNumber} can be re-added on the next PO sync.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to restore truck",
+        variant: "destructive",
+      });
+    },
+  });
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" data-testid="button-restore-deleted">
+          <RotateCcw className="h-4 w-4 mr-2" />
+          Restore Deleted ({excluded.length || 0})
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Restore Deleted Trucks</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Trucks deleted via the X button stay out of the Decommissioning table even when "Sync from POs" runs.
+            Restore one here to make it eligible to be re-added on the next sync.
+          </p>
+          {isLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin" />
+            </div>
+          ) : excluded.length === 0 ? (
+            <div className="text-sm text-muted-foreground text-center py-6">
+              No deleted trucks. Anything you remove with the X will appear here.
+            </div>
+          ) : (
+            <div className="border rounded max-h-96 overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Truck #</TableHead>
+                    <TableHead>Deleted</TableHead>
+                    <TableHead className="text-right">Action</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {excluded.map(t => (
+                    <TableRow key={t.truckNumber} data-testid={`row-excluded-${t.truckNumber}`}>
+                      <TableCell className="font-mono">{t.truckNumber}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground">
+                        {t.excludedAt ? new Date(t.excludedAt).toLocaleString() : "-"}
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={restoreMutation.isPending}
+                          onClick={() => restoreMutation.mutate(t.truckNumber)}
+                          data-testid={`button-restore-${t.truckNumber}`}
+                        >
+                          <RotateCcw className="h-3.5 w-3.5 mr-1" />
+                          Restore
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

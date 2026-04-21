@@ -10806,10 +10806,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 console.log(`[Auto-Sync] Updated truck ${vehicleNo} to "Declined Repair" status`);
               }
               
-              // Also add to Decommissioning table (if not already there)
+              // Also add to Decommissioning table (if not already there AND not explicitly excluded)
               const paddedTruckNumber = vehicleNo.toString().padStart(6, '0');
               const existingDecom = await fleetScopeStorage.getDecommissioningVehicle(paddedTruckNumber);
-              if (!existingDecom) {
+              const excludedSet = new Set(await fleetScopeStorage.getExcludedDecommTruckNumbers());
+              if (!existingDecom && !excludedSet.has(paddedTruckNumber)) {
                 await fleetScopeStorage.upsertDecommissioningVehicle({
                   truckNumber: paddedTruckNumber,
                   address: null,
@@ -10820,6 +10821,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 });
                 addedToDecommissioning = true;
                 console.log(`[Auto-Sync] Added truck ${paddedTruckNumber} to Decommissioning table`);
+              } else if (excludedSet.has(paddedTruckNumber)) {
+                console.log(`[Auto-Sync] Skipped truck ${paddedTruckNumber} — explicitly excluded from Decommissioning table`);
               }
             }
           }
@@ -14413,10 +14416,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const allPurchaseOrders = await fleetScopeStorage.getAllPurchaseOrders();
       const existingDecomVehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
       const existingTruckNumbers = new Set(existingDecomVehicles.map(v => v.truckNumber));
+      const excludedTruckNumbers = new Set(await fleetScopeStorage.getExcludedDecommTruckNumbers());
       
       let added = 0;
       let alreadyExists = 0;
+      let excluded = 0;
       const addedVehicles: string[] = [];
+      const excludedVehicles: string[] = [];
       
       for (const po of allPurchaseOrders) {
         // Check if this PO has "Decline and Submit for Sale" final approval
@@ -14430,7 +14436,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             if (vehicleNo) {
               const paddedTruckNumber = vehicleNo.toString().padStart(6, '0');
               
-              if (paddedTruckNumber !== '000000' && !existingTruckNumbers.has(paddedTruckNumber)) {
+              if (paddedTruckNumber !== '000000' && excludedTruckNumbers.has(paddedTruckNumber)) {
+                excludedVehicles.push(paddedTruckNumber);
+                excluded++;
+              } else if (paddedTruckNumber !== '000000' && !existingTruckNumbers.has(paddedTruckNumber)) {
                 await fleetScopeStorage.upsertDecommissioningVehicle({
                   truckNumber: paddedTruckNumber,
                   address: null,
@@ -14452,16 +14461,41 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
       
-      console.log(`[Decommissioning Sync from POs] Added: ${added}, Already exists: ${alreadyExists}`);
+      console.log(`[Decommissioning Sync from POs] Added: ${added}, Already exists: ${alreadyExists}, Excluded (skipped): ${excluded}`);
       
       res.json({ 
         success: true, 
         added, 
         alreadyExists,
-        addedVehicles
+        excluded,
+        addedVehicles,
+        excludedVehicles,
       });
     } catch (error: any) {
       console.error("[Decommissioning Sync from POs] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // List trucks excluded from PO-driven decommissioning syncs (deleted via X)
+  app.get("/decommissioning/excluded", async (_req, res) => {
+    try {
+      const rows = await fleetScopeStorage.getExcludedDecommTrucks();
+      res.json(rows);
+    } catch (error: any) {
+      console.error("[Decommissioning Excluded] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Restore a previously deleted truck so PO syncs can re-add it
+  app.delete("/decommissioning/excluded/:truckNumber", async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      await fleetScopeStorage.removeExcludedDecommTruck(truckNumber);
+      res.json({ success: true, truckNumber });
+    } catch (error: any) {
+      console.error("[Decommissioning Excluded] Error removing exclusion:", error);
       res.status(500).json({ message: error.message });
     }
   });

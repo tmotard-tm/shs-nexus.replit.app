@@ -1,4 +1,4 @@
-import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, callLogs, truckStatusEvents, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
+import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, decommExcludedTrucks, callLogs, truckStatusEvents, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
 import { fsDb } from "./fleet-scope-db";
 import { eq, desc, gte, lte, and, inArray, sql } from "drizzle-orm";
 
@@ -1632,7 +1632,28 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deleteDecommissioningVehicle(id: number): Promise<void> {
+    const existing = await this.getDecommissioningVehicleById(id);
     await getDb().delete(decommissioningVehicles).where(eq(decommissioningVehicles.id, id));
+    if (existing?.truckNumber) {
+      await getDb()
+        .insert(decommExcludedTrucks)
+        .values({ truckNumber: existing.truckNumber })
+        .onConflictDoNothing();
+    }
+  }
+
+  async getExcludedDecommTruckNumbers(): Promise<string[]> {
+    const rows = await getDb().select().from(decommExcludedTrucks);
+    return rows.map(r => r.truckNumber);
+  }
+
+  async getExcludedDecommTrucks(): Promise<{ truckNumber: string; excludedAt: Date | null }[]> {
+    const rows = await getDb().select().from(decommExcludedTrucks);
+    return rows.map(r => ({ truckNumber: r.truckNumber, excludedAt: r.excludedAt }));
+  }
+
+  async removeExcludedDecommTruck(truckNumber: string): Promise<void> {
+    await getDb().delete(decommExcludedTrucks).where(eq(decommExcludedTrucks.truckNumber, truckNumber));
   }
 
   async bulkUpsertDecommissioningVehicles(vehicles: InsertDecommissioningVehicle[]): Promise<{ inserted: number; updated: number }> {

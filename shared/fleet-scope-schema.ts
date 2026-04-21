@@ -1358,6 +1358,16 @@ export const insertDecommissioningVehicleSchema = createInsertSchema(decommissio
 export type DecommissioningVehicle = typeof decommissioningVehicles.$inferSelect;
 export type InsertDecommissioningVehicle = z.infer<typeof insertDecommissioningVehicleSchema>;
 
+// Truck numbers explicitly removed from the Decommissioning table via the X button.
+// PO-driven syncs (manual sweep + Final-Approval auto-sync) skip these so deletions are sticky.
+export const decommExcludedTrucks = pgTable("fs_decomm_excluded_trucks", {
+  truckNumber: varchar("truck_number", { length: 20 }).primaryKey(),
+  excludedAt: timestamp("excluded_at").default(sql`now()`),
+  excludedBy: varchar("excluded_by", { length: 100 }),
+});
+
+export type DecommExcludedTruck = typeof decommExcludedTrucks.$inferSelect;
+
 // Registration Messages - bidirectional SMS conversations with technicians
 export const regMessages = pgTable("fs_reg_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
