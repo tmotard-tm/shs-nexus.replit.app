@@ -2188,6 +2188,7 @@ export const bulkFixRuns = pgTable("bulk_fix_runs", {
   startedAt: timestamp("started_at").defaultNow().notNull(),
   cancelledAt: timestamp("cancelled_at"),
   completedAt: timestamp("completed_at"),
+  highFailureWarning: boolean("high_failure_warning").default(false),
 }, (table) => {
   return {
     statusIdx: index("bulk_fix_runs_status_idx").on(table.status),
