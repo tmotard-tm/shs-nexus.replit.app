@@ -101,13 +101,22 @@ const CONTACT_TYPE_LABELS: Record<string, string> = {
   tech: "Tech",
   manager: "Manager",
   nearest_tech: "Nearest Tech",
+  adhoc: "Direct",
 };
 
 const CONTACT_TYPE_COLORS: Record<string, string> = {
   tech: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-300",
   manager: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300",
   nearest_tech: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300",
+  adhoc: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-300",
 };
+
+function formatPhone(phone: string | null | undefined): string {
+  if (!phone) return "";
+  const digits = phone.replace(/\D/g, "").slice(-10);
+  if (digits.length !== 10) return phone;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
 
 interface DecommConversationsProps {
   vehicleData: DecommVehicleInfo[];
@@ -165,6 +174,12 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [batchFileName, setBatchFileName] = useState<string>("");
   const wsRef = useRef<WebSocket | null>(null);
 
+  const [adhocContacts, setAdhocContacts] = useState<Record<string, { phone: string; name: string | null }>>({});
+  const [adhocPhoneInput, setAdhocPhoneInput] = useState("");
+  const [adhocNameInput, setAdhocNameInput] = useState("");
+
+  const isAdhocTruck = (t: string | null | undefined) => !!t && t.startsWith("ADHOC-");
+
   useEffect(() => {
     if (initialTruckNumber) {
       setSelectedTruck(initialTruckNumber);
@@ -190,9 +205,19 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     },
   });
 
-  const selectedVehicle = selectedTruck
+  const selectedVehicle = selectedTruck && !isAdhocTruck(selectedTruck)
     ? vehicleData.find((v) => v.truckNumber === selectedTruck)
     : null;
+
+  const adhocSelectedContact = (() => {
+    if (!isAdhocTruck(selectedTruck)) return null;
+    const stored = adhocContacts[selectedTruck!];
+    if (stored) return { type: "adhoc", name: stored.name, phone: stored.phone };
+    const fromConv = conversations.find((c) => c.truckNumber === selectedTruck);
+    if (fromConv) return { type: "adhoc", name: fromConv.contactName, phone: fromConv.contactPhone };
+    const digits = selectedTruck!.replace(/^ADHOC-/, "");
+    return { type: "adhoc", name: null, phone: `+1${digits}` };
+  })();
 
   const getContactOptions = useCallback((vehicle: DecommVehicleInfo | null | undefined) => {
     if (!vehicle) return [];
@@ -206,7 +231,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     return options;
   }, []);
 
-  const contactOptions = getContactOptions(selectedVehicle);
+  const contactOptions = adhocSelectedContact
+    ? [adhocSelectedContact]
+    : getContactOptions(selectedVehicle);
   const selectedContact = contactOptions.find(c => c.type === contactType) || contactOptions[0];
 
   useEffect(() => {
@@ -218,7 +245,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const sendMutation = useMutation({
     mutationFn: (body: string) =>
       apiRequest("POST", "/api/fs/decomm-messages", {
-        truckNumber: selectedTruck,
+        truckNumber: isAdhocTruck(selectedTruck) ? null : selectedTruck,
         contactType: selectedContact?.type || contactType,
         contactPhone: selectedContact?.phone,
         contactName: selectedContact?.name,
@@ -538,10 +565,21 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 >
                   <div className="flex items-start justify-between gap-1">
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <Truck className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
-                      <span className="font-mono text-sm font-semibold truncate">
-                        {conv.truckNumber.replace(/^0+/, "") || conv.truckNumber}
-                      </span>
+                      {isAdhocTruck(conv.truckNumber) ? (
+                        <>
+                          <Phone className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                          <span className="text-sm font-semibold truncate">
+                            {conv.contactName || formatPhone(conv.contactPhone)}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Truck className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                          <span className="font-mono text-sm font-semibold truncate">
+                            {conv.truckNumber.replace(/^0+/, "") || conv.truckNumber}
+                          </span>
+                        </>
+                      )}
                     </div>
                     <div className="flex items-center gap-1 flex-shrink-0">
                       {conv.unreadCount > 0 && (
@@ -586,14 +624,31 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               <div className="flex items-start gap-3 min-w-0">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="font-mono font-bold text-base">
-                      #{selectedTruck.replace(/^0+/, "") || selectedTruck}
-                    </span>
-                    {selectedVehicle?.address && (
-                      <span className="text-xs text-muted-foreground flex items-center gap-1">
-                        <MapPin className="w-3 h-3" />
-                        {selectedVehicle.address}
-                      </span>
+                    {isAdhocTruck(selectedTruck) ? (
+                      <>
+                        <Badge variant="outline" className={`text-xs px-1.5 py-0.5 ${CONTACT_TYPE_COLORS.adhoc}`}>
+                          Direct
+                        </Badge>
+                        <span className="font-semibold text-base">
+                          {adhocSelectedContact?.name || "Direct text"}
+                        </span>
+                        <span className="text-xs text-muted-foreground font-mono flex items-center gap-1">
+                          <Phone className="w-3 h-3" />
+                          {formatPhone(adhocSelectedContact?.phone)}
+                        </span>
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-mono font-bold text-base">
+                          #{selectedTruck.replace(/^0+/, "") || selectedTruck}
+                        </span>
+                        {selectedVehicle?.address && (
+                          <span className="text-xs text-muted-foreground flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            {selectedVehicle.address}
+                          </span>
+                        )}
+                      </>
                     )}
                   </div>
                   <div className="flex items-center gap-3 mt-1 flex-wrap">
@@ -777,6 +832,55 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
             <DialogTitle>Start New Conversation</DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
+            <div className="rounded-md border p-3 space-y-2 bg-muted/20">
+              <div className="text-xs font-semibold flex items-center gap-1.5">
+                <Phone className="w-3.5 h-3.5" />
+                Text any phone number
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <Input
+                  placeholder="Phone (e.g. 555-123-4567)"
+                  value={adhocPhoneInput}
+                  onChange={(e) => setAdhocPhoneInput(e.target.value)}
+                  className="h-8 text-sm"
+                  data-testid="input-adhoc-phone"
+                />
+                <Input
+                  placeholder="Contact name (optional)"
+                  value={adhocNameInput}
+                  onChange={(e) => setAdhocNameInput(e.target.value)}
+                  className="h-8 text-sm"
+                  data-testid="input-adhoc-name"
+                />
+              </div>
+              <Button
+                size="sm"
+                className="w-full"
+                disabled={adhocPhoneInput.replace(/\D/g, "").slice(-10).length !== 10}
+                onClick={() => {
+                  const digits = adhocPhoneInput.replace(/\D/g, "").slice(-10);
+                  if (digits.length !== 10) {
+                    toast({ title: "Invalid phone", description: "Enter a valid 10-digit US phone number.", variant: "destructive" });
+                    return;
+                  }
+                  const truck = `ADHOC-${digits}`;
+                  const name = adhocNameInput.trim() || null;
+                  setAdhocContacts((prev) => ({ ...prev, [truck]: { phone: `+1${digits}`, name } }));
+                  setContactType("adhoc");
+                  setSelectedTruck(truck);
+                  setMessageBody("");
+                  setNewConvOpen(false);
+                  setAdhocPhoneInput("");
+                  setAdhocNameInput("");
+                }}
+                data-testid="button-open-adhoc-conversation"
+              >
+                Open conversation
+              </Button>
+            </div>
+
+            <div className="text-xs text-muted-foreground text-center">— or pick a truck —</div>
+
             <div className="relative">
               <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-muted-foreground" />
               <Input
@@ -784,7 +888,6 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 value={newConvSearch}
                 onChange={(e) => setNewConvSearch(e.target.value)}
                 className="pl-8"
-                autoFocus
                 data-testid="input-new-decomm-conv-search"
               />
             </div>

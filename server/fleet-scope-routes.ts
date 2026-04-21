@@ -15073,6 +15073,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
 
+      if (matchedTruck === 'UNKNOWN' && fromDigits.length === 10) {
+        const adhocBucket = `ADHOC-${fromDigits}`;
+        const prior = await getDb()
+          .select({ contactName: decommMessages.contactName })
+          .from(decommMessages)
+          .where(eq(decommMessages.truckNumber, adhocBucket))
+          .orderBy(desc(decommMessages.sentAt))
+          .limit(1);
+        matchedTruck = adhocBucket;
+        contactType = 'adhoc';
+        contactName = prior[0]?.contactName || null;
+      }
+
       const logBody = Body ? Body.slice(0, 80) : '(media only)';
       console.log(`[DecommMsg] Inbound ${numMedia > 0 ? 'MMS' : 'SMS'} from ${From} (truck ${matchedTruck}, ${contactType}): ${logBody}`);
 
@@ -15401,23 +15414,38 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     try {
       const { truckNumber, contactType, contactPhone, contactName, body, sentBy, senderName } = req.body;
 
-      if (!truckNumber || !body || !contactType) {
+      const isAdhoc = contactType === 'adhoc' || (!truckNumber && !!contactPhone);
+
+      if (!body || (!isAdhoc && (!truckNumber || !contactType))) {
         return res.status(400).json({ message: "truckNumber, contactType, and body are required" });
+      }
+      if (isAdhoc && !contactPhone) {
+        return res.status(400).json({ message: "contactPhone is required for ad-hoc messages" });
       }
 
       let phone = contactPhone;
+      let normalized: string;
+      const effectiveContactType = isAdhoc ? 'adhoc' : contactType;
 
-      if (!phone) {
-        const normalized = truckNumber.padStart(6, '0');
-        const vehicles = await getDb()
-          .select()
-          .from(decommissioningVehicles)
-          .where(eq(decommissioningVehicles.truckNumber, normalized));
-        const vehicle = vehicles[0];
-        if (vehicle) {
-          if (contactType === 'tech') phone = vehicle.mobilePhone;
-          else if (contactType === 'manager') phone = null;
-          else if (contactType === 'nearest_tech') phone = vehicle.nearestTechPhone;
+      if (isAdhoc) {
+        const adhocDigits = phone.replace(/\D/g, '').slice(-10);
+        if (adhocDigits.length !== 10) {
+          return res.status(400).json({ message: "A valid 10-digit phone number is required for ad-hoc messages." });
+        }
+        normalized = `ADHOC-${adhocDigits}`;
+      } else {
+        normalized = truckNumber.padStart(6, '0');
+        if (!phone) {
+          const vehicles = await getDb()
+            .select()
+            .from(decommissioningVehicles)
+            .where(eq(decommissioningVehicles.truckNumber, normalized));
+          const vehicle = vehicles[0];
+          if (vehicle) {
+            if (contactType === 'tech') phone = vehicle.mobilePhone;
+            else if (contactType === 'manager') phone = null;
+            else if (contactType === 'nearest_tech') phone = vehicle.nearestTechPhone;
+          }
         }
       }
 
@@ -15425,7 +15453,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: `No phone number found for ${contactType} on this truck.` });
       }
 
-      const normalized = truckNumber.padStart(6, '0');
       const formattedPhone = phone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
 
       let sid: string | undefined;
@@ -15435,7 +15462,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.error("[DecommMsg] Twilio send error:", err.message);
         const [failedMsg] = await getDb().insert(decommMessages).values({
           truckNumber: normalized,
-          contactType,
+          contactType: effectiveContactType,
           contactName: contactName || null,
           contactPhone: formattedPhone,
           direction: 'outbound',
@@ -15449,7 +15476,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const [msg] = await getDb().insert(decommMessages).values({
         truckNumber: normalized,
-        contactType,
+        contactType: effectiveContactType,
         contactName: contactName || null,
         contactPhone: formattedPhone,
         direction: 'outbound',
