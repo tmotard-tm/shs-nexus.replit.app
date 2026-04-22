@@ -21,6 +21,7 @@ import { AmsApiService, batchFetchAmsTypeData, type AmsVehicleTypeData } from ".
 const _amsApiServiceForEnrichment = new AmsApiService();
 import { reverseGeocode, batchReverseGeocode, getGeocodeStats } from "./fleet-scope-reverse-geocode";
 import sgMail from "@sendgrid/mail";
+import twilio from "twilio";
 import multer from "multer";
 import cron from "node-cron";
 import * as XLSX from "xlsx";
@@ -14986,7 +14987,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       return true;
     }
     try {
-      const twilio = require('twilio');
       const signature = req.headers['x-twilio-signature'] as string || '';
       const webhookUrl = `${req.protocol}://${req.get('host')}${webhookPath}`;
       return twilio.validateRequest(authToken, signature, webhookUrl, req.body);
