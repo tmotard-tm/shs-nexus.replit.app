@@ -131,6 +131,28 @@
   --status-orange-fg: #000000;
   --status-gray: hsl(0, 0%, 62%);
   --status-gray-fg: #FFFFFF;
+
+  /* Vehicle Rental Management — Light Theme */
+  --vrm-background: #FFFFFF;
+  --vrm-surface: #F7F8FA;
+  --vrm-ink: #0F1117;
+  --vrm-ink-soft: #3D4152;
+  --vrm-ink-muted: #8891A4;
+  --vrm-rule: #E8EAEF;
+  --vrm-accent: #1A56DB;
+  --vrm-accent-light: #EFF4FF;
+  --vrm-green: #0D9668;
+  --vrm-green-light: #ECFDF5;
+  --vrm-green-deep: #065F46;
+  --vrm-green-deep-light: #D1FAE5;
+  --vrm-amber: #B45309;
+  --vrm-amber-light: #FFFBEB;
+  --vrm-red: #DC2626;
+  --vrm-red-light: #FEF2F2;
+  --vrm-red-deep: #991B1B;
+  --vrm-red-deep-light: #FEE2E2;
+  --vrm-sidebar-bg: #0F1117;
+  --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
 
 .dark {
@@ -197,6 +219,28 @@
   --status-orange-fg: #000000;
   --status-gray: hsl(0, 0%, 45%);
   --status-gray-fg: #FFFFFF;
+
+  /* Vehicle Rental Management — Dark Theme */
+  --vrm-background: #0A0B10;
+  --vrm-surface: #14161D;
+  --vrm-ink: #E6E8EE;
+  --vrm-ink-soft: #B7BCCB;
+  --vrm-ink-muted: #7A8290;
+  --vrm-rule: #262932;
+  --vrm-accent: #5B8BF5;
+  --vrm-accent-light: #1A2540;
+  --vrm-green: #34D399;
+  --vrm-green-light: #0F2620;
+  --vrm-green-deep: #6EE7B7;
+  --vrm-green-deep-light: #0F2620;
+  --vrm-amber: #FBBF24;
+  --vrm-amber-light: #2A2014;
+  --vrm-red: #F87171;
+  --vrm-red-light: #2A1414;
+  --vrm-red-deep: #FCA5A5;
+  --vrm-red-deep-light: #2A1414;
+  --vrm-sidebar-bg: #0F1117;
+  --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
 
 @layer base {
