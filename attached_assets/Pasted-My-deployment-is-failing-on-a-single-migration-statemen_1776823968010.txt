@@ -1,0 +1,68 @@
+My deployment is failing on a single migration statement that Replit's deploy planner is generating on the fly (it is NOT in any file under migrations/):
+ALTER TABLE "all_techs" ALTER COLUMN "last_known_truck_file_date" SET DATA TYPE date;
+Error: column "last_known_truck_file_date" cannot be cast automatically to type date.
+Context you need to know before doing anything:
+
+shared/schema.ts line 482 currently defines this column as text("last_known_truck_file_date") with a comment saying "Do not change to date()". So the committed source already matches prod.
+The failing SET DATA TYPE date is therefore being generated because the planner's target snapshot disagrees with the committed schema — likely because drizzle.config.ts is pointing at a built artifact (e.g. dist/schema.js) instead of shared/schema.ts, or the deploy step is resolving DATABASE_URL to the dev database instead of prod.
+Do NOT use the "copy development schema & data to production" option. Do not overwrite prod data.
+Do NOT edit shared/schema.ts to date(...) as a standalone fix — that doesn't solve the underlying cast problem.
+Do NOT run any ALTER, UPDATE, or other write SQL yet. Investigation only until I approve.
+
+Please do the following, in order, and report back after each step:
+
+Confirm planner source. Open drizzle.config.ts and report:
+
+What path schema: points at (source .ts or a built artifact).
+How dbCredentials.url is resolved and which env var it reads at deploy time.
+Whether there is a dist/ or similar build output containing a stale schema.js that still defines this column as date.
+
+
+Confirm effective target DB at deploy. Show me which DATABASE_URL the deploy build step actually uses (prod vs dev). If it's pointing at dev, that's the root cause and we need to fix the env var precedence.
+Inspect prod data (read-only). Run these against the production database and paste the full output:
+
+sql   SELECT column_name, data_type, udt_name, is_nullable
+   FROM information_schema.columns
+   WHERE table_name = 'all_techs' AND column_name = 'last_known_truck_file_date';
+
+   SELECT count(*) AS total,
+          count(*) FILTER (WHERE last_known_truck_file_date IS NULL) AS nulls,
+          count(*) FILTER (WHERE last_known_truck_file_date = '') AS empty_strings,
+          count(DISTINCT last_known_truck_file_date) AS distinct_vals
+   FROM all_techs;
+
+   SELECT last_known_truck_file_date, count(*)
+   FROM all_techs
+   GROUP BY last_known_truck_file_date
+   ORDER BY count(*) DESC
+   LIMIT 20;
+
+   SELECT last_known_truck_file_date
+   FROM all_techs
+   WHERE last_known_truck_file_date IS NOT NULL
+     AND last_known_truck_file_date !~ '^\d{4}-\d{2}-\d{2}($|[ T])'
+     AND last_known_truck_file_date !~ '^\d{1,2}/\d{1,2}/\d{2,4}$'
+   LIMIT 50;
+
+Also sanity-check the other "harmless" changes that could still fail silently:
+
+sql   -- Will the varchar(128) widening fit?
+   SELECT max(length(token)) FROM offboarding_return_tokens;
+
+   -- Will SET NOT NULL on created_at fail?
+   SELECT count(*) FROM offboarding_return_tokens WHERE created_at IS NULL;
+
+   -- Will the new UNIQUE(token) constraint fail?
+   SELECT token, count(*) FROM offboarding_return_tokens
+   GROUP BY token HAVING count(*) > 1;
+
+Summarize findings and propose a plan — do not execute it. I want to see:
+
+Root cause of why the planner is emitting the date cast (config pointing at wrong schema, wrong DB, stale build, etc.).
+Whether prod data will cast cleanly, needs a USING NULLIF(..., '')::date, or needs a pre-cleanup UPDATE for mixed formats.
+Whether any of the "harmless" changes in step 4 would actually fail.
+A recommended one-shot ALTER ... USING ... statement (wrapped in BEGIN; ... COMMIT;) to run manually against prod outside the deploy pipeline, so the planner's diff for this column disappears on the next publish.
+
+
+
+Wait for my explicit approval before running any write SQL, editing shared/schema.ts, or changing drizzle.config.ts.
