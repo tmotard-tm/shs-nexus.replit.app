@@ -222,10 +222,10 @@
 
   /* Vehicle Rental Management — Dark Theme */
   --vrm-background: #0A0B10;
-  --vrm-surface: #14161D;
-  --vrm-ink: #E6E8EE;
-  --vrm-ink-soft: #B7BCCB;
-  --vrm-ink-muted: #7A8290;
+  --vrm-surface: #1B1E27;
+  --vrm-ink: #F1F3F8;
+  --vrm-ink-soft: #C9CED8;
+  --vrm-ink-muted: #A0A8B5;
   --vrm-rule: #262932;
   --vrm-accent: #5B8BF5;
   --vrm-accent-light: #1A2540;

@@ -232,7 +232,7 @@ const INPUT_STYLE: React.CSSProperties = {
   fontFamily: fonts.dmSans,
   fontSize: 13,
   color: colors.ink,
-  backgroundColor: "#fff",
+  backgroundColor: colors.background,
   border: `1px solid ${colors.rule}`,
   borderRadius: 6,
   padding: "6px 10px",
@@ -642,7 +642,7 @@ function TechOutreachTab({
           // List is ordered occurredAt DESC, so revs[0] is the latest revision.
           const latest = revs.length > 0 ? revs[0] : e;
           return (
-            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: "#fff" }}>
+            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.background }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {latest.method && (
@@ -882,7 +882,7 @@ function ShopContactTab({
           if (e.mainStatusUpdate) sideEffects.push(`Status → ${e.mainStatusUpdate}${e.subStatusUpdate ? ` / ${e.subStatusUpdate}` : ""}`);
           if (e.techStatusUpdate) sideEffects.push(`Van → ${e.techStatusUpdate}`);
           return (
-            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: "#fff" }}>
+            <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.background }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#7C3AED", backgroundColor: "#FAF5FF", padding: "2px 7px", borderRadius: 4 }}>
@@ -1087,7 +1087,7 @@ function PunchHistoryTab({
           style={{
             display: "flex", alignItems: "center", gap: 6,
             fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-            color: colors.inkSoft, backgroundColor: "#fff",
+            color: colors.inkSoft, backgroundColor: colors.background,
             border: `1px solid ${colors.rule}`, borderRadius: 6,
             padding: "6px 12px", cursor: query.isFetching ? "not-allowed" : "pointer",
             opacity: query.isFetching ? 0.6 : 1,
@@ -1390,7 +1390,7 @@ function UnifiedPanel({
         style={{
           width: 520,
           height: "100%",
-          backgroundColor: "#fff",
+          backgroundColor: colors.background,
           overflowY: "auto",
           display: "flex",
           flexDirection: "column",
@@ -1867,8 +1867,8 @@ const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
 };
 
 function StagePill({ stage }: { stage: string }) {
-  if (!stage) return <span style={{ color: "#8891A4", fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = STAGE_COLORS[stage] ?? { fg: "#475569", bg: "#F1F5F9" };
+  if (!stage) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
+  const c = STAGE_COLORS[stage] ?? { fg: colors.inkSoft, bg: colors.surface };
   return (
     <span style={{
       fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
@@ -1891,7 +1891,7 @@ function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
   if (flags?.blue?.active) {
     return <span title={flags.blue.tooltip ?? "Blue flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" }} />;
   }
-  return <span style={{ color: "#8891A4", fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
+  return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
 }
 
 // ─── Tech Punch Status types ──────────────────────────────────────────────────
@@ -2166,7 +2166,7 @@ export default function RentalRepairTracker() {
               fontWeight: 500,
               fontSize: 13,
               color: colors.inkSoft,
-              backgroundColor: "#fff",
+              backgroundColor: colors.background,
               border: `1px solid ${colors.rule}`,
               borderRadius: 8,
               padding: "8px 14px",
@@ -2260,7 +2260,7 @@ export default function RentalRepairTracker() {
               fontWeight: 500,
               fontSize: 13,
               color: colors.inkSoft,
-              backgroundColor: "#fff",
+              backgroundColor: colors.background,
               border: `1px solid ${colors.rule}`,
               borderRadius: 8,
               padding: "8px 14px",
@@ -2309,7 +2309,7 @@ export default function RentalRepairTracker() {
             fontFamily: fonts.dmSans,
             fontSize: 13,
             color: colors.ink,
-            backgroundColor: "#fff",
+            backgroundColor: colors.background,
             border: `1px solid ${colors.rule}`,
             borderRadius: 8,
             padding: "8px 12px 8px 32px",
@@ -2582,7 +2582,7 @@ export default function RentalRepairTracker() {
             <div
               key={name}
               style={{
-                backgroundColor: "#fff",
+                backgroundColor: colors.background,
                 border: `1px solid ${colors.rule}`,
                 borderRadius: 10,
                 overflow: "hidden",
@@ -2627,7 +2627,7 @@ export default function RentalRepairTracker() {
                     style={{
                       marginLeft: "auto",
                       fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-                      color: meta.color, backgroundColor: "#FFFFFF",
+                      color: meta.color, backgroundColor: colors.background,
                       border: `1px solid ${meta.color}`, borderRadius: 5,
                       padding: "3px 10px", cursor: "pointer",
                     }}
@@ -2656,14 +2656,14 @@ export default function RentalRepairTracker() {
 
         if (isLoading) {
           return (
-            <div style={{ backgroundColor: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            <div style={{ backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
               Loading…
             </div>
           );
         }
         if (filtered.length === 0) {
           return (
-            <div style={{ backgroundColor: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
+            <div style={{ backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 40, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
               {search ? "No entries match your search." : "No entries yet. Click \"Add Entry\" to get started."}
             </div>
           );
