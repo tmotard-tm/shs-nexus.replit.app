@@ -137,7 +137,11 @@ export function getNextAllowedSendTime(state: string): Date | null {
 }
 
 // Send a message via Twilio
-export async function sendTwilioMessage(to: string, body: string): Promise<string> {
+export async function sendTwilioMessage(
+  to: string,
+  body: string,
+  mediaUrl?: string[],
+): Promise<string> {
   const accountSid = process.env.FS_TWILIO_ACCOUNT_SID;
   const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
   const from = process.env.FS_TWILIO_PHONE_NUMBER;
@@ -147,7 +151,11 @@ export async function sendTwilioMessage(to: string, body: string): Promise<strin
   }
 
   const client = twilio(accountSid, authToken);
-  const message = await client.messages.create({ body, to, from });
+  const params: any = { body, to, from };
+  if (mediaUrl && mediaUrl.length > 0) {
+    params.mediaUrl = mediaUrl;
+  }
+  const message = await client.messages.create(params);
   return message.sid;
 }
 

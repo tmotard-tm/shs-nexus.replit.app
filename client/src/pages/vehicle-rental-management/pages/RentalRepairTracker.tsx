@@ -34,8 +34,6 @@ interface RepairTrackerEntry {
   routeCleared: boolean;
   createdAt: string;
   updatedAt: string;
-  lastActionNotes: string | null;
-  lastActionAt: string | null;
   tpmsManagerName: string | null;
   tpmsManagerPhone: string | null;
   district: string | null;
@@ -375,7 +373,23 @@ function LegacyNotesPanel({
   defaultTarget: "tech_outreach" | "shop_contact";
 }) {
   const { toast } = useToast();
-  const [author, setAuthor] = useState("");
+  const KNOWN_LDAPS = ["DMCLIEC", "ASARWAR", "RMADERO", "WSCHMI0", "TDOHERT", "JMORGA1"];
+  // Pre-detect a known LDAP in the notes body so we can attribute the migrated
+  // entry to the original author when it's clearly identifiable.
+  const detectedLdap = (() => {
+    if (!notes) return null;
+    const upper = notes.toUpperCase();
+    for (const l of KNOWN_LDAPS) {
+      if (upper.includes(l)) return l;
+    }
+    return null;
+  })();
+  const [author, setAuthor] = useState(detectedLdap ?? "");
+  // Re-detect author whenever a different note body comes in (e.g., user
+  // switches between cases without unmounting the panel).
+  useEffect(() => {
+    setAuthor(detectedLdap ?? "");
+  }, [notes]);
   const [busy, setBusy] = useState(false);
 
   const copy = async (target: "tech_outreach" | "shop_contact") => {
@@ -933,6 +947,7 @@ function ShopContactTab({
 
 function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any }) {
   const [search, setSearch] = useState("");
+  const [authorFilter, setAuthorFilter] = useState<string | null>(null);
   if (!truckNumber) {
     return <div style={{ padding: 24, fontFamily: fonts.dmSans, color: colors.inkMuted }}>No truck number on this case.</div>;
   }
@@ -948,12 +963,29 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
   const linkMissing = !!data.linkMissing;
   const v = data.vehicle ?? {};
   const comments = Array.isArray(data.comments) ? data.comments : [];
-  const filtered = search.trim()
-    ? comments.filter((c: any) => {
-        const text = `${c.Comment ?? c.comment ?? ""} ${c.User ?? c.user ?? ""}`.toLowerCase();
-        return text.includes(search.toLowerCase());
-      })
-    : comments;
+  // Top authors for filter chips — show up to 6 most-frequent users.
+  // Normalize to uppercase so "JMORGA1" and "jmorga1" collapse into one chip.
+  const normalizeAuthor = (raw: any) => String(raw ?? "").trim().toUpperCase();
+  const authorCounts: Record<string, number> = {};
+  for (const c of comments) {
+    const u = normalizeAuthor(c.User ?? c.user);
+    if (!u) continue;
+    authorCounts[u] = (authorCounts[u] ?? 0) + 1;
+  }
+  const topAuthors = Object.entries(authorCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 6)
+    .map(([u]) => u);
+  const filtered = comments.filter((c: any) => {
+    if (authorFilter) {
+      if (normalizeAuthor(c.User ?? c.user) !== authorFilter) return false;
+    }
+    if (search.trim()) {
+      const text = `${c.Comment ?? c.comment ?? ""} ${c.User ?? c.user ?? ""}`.toLowerCase();
+      if (!text.includes(search.toLowerCase())) return false;
+    }
+    return true;
+  });
 
   const Field = ({ label, value }: { label: string; value: any }) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: `1px solid ${colors.rule}`, gap: 12 }}>
@@ -988,8 +1020,26 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
           <Field label="Region / District" value={[v.Region, v.District].filter(Boolean).join(" / ")} />
           <Field label="Tech" value={[v.TechName, v.TechEnterpriseId].filter(Boolean).join(" — ")} />
           <Field label="Last Update" value={v.LastUpdate} />
-          <div style={{ marginTop: 8, fontSize: 11, color: colors.inkMuted, fontFamily: fonts.dmSans }}>
-            Read-only. Open in fleet panel to edit.
+          <div style={{ marginTop: 8, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 11, color: colors.inkMuted, fontFamily: fonts.dmSans }}>
+              Read-only. Open in fleet panel to edit.
+            </span>
+            {truckNumber && (
+              <a
+                href={`/fleet-management?openTruck=${encodeURIComponent(truckNumber)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
+                  color: colors.accent, textDecoration: "none",
+                  border: `1px solid ${colors.accent}`, borderRadius: 5,
+                  padding: "3px 8px", whiteSpace: "nowrap",
+                }}
+                data-testid="link-ams-fleet-panel"
+              >
+                Open in Fleet Panel ↗
+              </a>
+            )}
           </div>
         </>
       )}
@@ -1002,8 +1052,42 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         placeholder="Search comments…"
-        style={{ ...INPUT_STYLE, marginBottom: 10 }}
+        style={{ ...INPUT_STYLE, marginBottom: 8 }}
+        data-testid="input-ams-comments-search"
       />
+      {topAuthors.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+          <button
+            onClick={() => setAuthorFilter(null)}
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+              color: authorFilter === null ? "#fff" : colors.inkSoft,
+              backgroundColor: authorFilter === null ? colors.accent : colors.background,
+              border: `1px solid ${authorFilter === null ? colors.accent : colors.rule}`,
+              borderRadius: 999, padding: "3px 10px", cursor: "pointer",
+            }}
+            data-testid="chip-ams-author-all"
+          >
+            All ({comments.length})
+          </button>
+          {topAuthors.map((u) => (
+            <button
+              key={u}
+              onClick={() => setAuthorFilter(authorFilter === u ? null : u)}
+              style={{
+                fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+                color: authorFilter === u ? "#fff" : colors.inkSoft,
+                backgroundColor: authorFilter === u ? colors.accent : colors.background,
+                border: `1px solid ${authorFilter === u ? colors.accent : colors.rule}`,
+                borderRadius: 999, padding: "3px 10px", cursor: "pointer",
+              }}
+              data-testid={`chip-ams-author-${u}`}
+            >
+              {u} ({authorCounts[u]})
+            </button>
+          ))}
+        </div>
+      )}
       {filtered.length === 0 ? (
         <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, padding: "12px 0" }}>
           {comments.length === 0 ? "No comments in AMS." : "No comments match your search."}
@@ -2382,7 +2466,7 @@ export default function RentalRepairTracker() {
                         {entry.techName ?? "—"}
                       </span>
                       <span style={{ fontFamily: "monospace", fontSize: 11, color: colors.inkSoft, fontWeight: 500 }}>
-                        {entry.techLdap ?? "—"}{entry.district ? ` · D${entry.district.replace(/^0+/, "") || "0"}` : ""}
+                        {entry.techLdap ?? "—"}
                       </span>
                     </div>
                   </td>
@@ -2451,7 +2535,7 @@ export default function RentalRepairTracker() {
                             display: "inline-block", fontFamily: fonts.dmSans, fontSize: 11, fontStyle: "italic",
                             color: colors.inkMuted, border: `1px dashed ${colors.rule}`, borderRadius: 5, padding: "2px 8px",
                           }}>
-                            Legacy notes
+                            Legacy notes present
                           </span>
                         );
                       }

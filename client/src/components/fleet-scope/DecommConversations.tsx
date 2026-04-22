@@ -22,6 +22,8 @@ import {
   Image,
   Upload,
   FileSpreadsheet,
+  Paperclip,
+  Loader2,
 } from "lucide-react";
 import { readExcelFile } from "@/lib/xlsx-utils";
 import {
@@ -179,6 +181,10 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [adhocPhoneInput, setAdhocPhoneInput] = useState("");
   const [adhocNameInput, setAdhocNameInput] = useState("");
 
+  const mediaFileRef = useRef<HTMLInputElement>(null);
+  const [pendingMedia, setPendingMedia] = useState<{ dataUrl: string; mediaType: string; filename: string; size: number } | null>(null);
+  const [uploadingMedia, setUploadingMedia] = useState(false);
+
   const isAdhocTruck = (t: string | null | undefined) => !!t && t.startsWith("ADHOC-");
 
   useEffect(() => {
@@ -247,17 +253,38 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   }, [contactOptions, contactType]);
 
   const sendMutation = useMutation({
-    mutationFn: (body: string) =>
-      apiRequest("POST", "/api/fs/decomm-messages", {
+    mutationFn: async (body: string) => {
+      let mediaStorageKey: string | undefined;
+      let mediaType: string | undefined;
+      if (pendingMedia) {
+        setUploadingMedia(true);
+        try {
+          const upResp = await apiRequest("POST", "/api/fs/decomm-messages/upload-media", {
+            dataUrl: pendingMedia.dataUrl,
+            filename: pendingMedia.filename,
+          });
+          const upData = await upResp.json();
+          mediaStorageKey = upData.storageKey;
+          mediaType = upData.mediaType;
+        } finally {
+          setUploadingMedia(false);
+        }
+      }
+      return apiRequest("POST", "/api/fs/decomm-messages", {
         truckNumber: isAdhocTruck(selectedTruck) ? null : selectedTruck,
         contactType: selectedContact?.type || contactType,
         contactPhone: selectedContact?.phone,
         contactName: selectedContact?.name,
         body,
         triggerType: "manual",
-      }),
+        mediaStorageKey,
+        mediaType,
+      });
+    },
     onSuccess: (data: any) => {
       setMessageBody("");
+      setPendingMedia(null);
+      if (mediaFileRef.current) mediaFileRef.current.value = "";
       if (data?.scheduled) {
         toast({ title: "Message Scheduled", description: data.message });
       } else {
@@ -274,6 +301,32 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       });
     },
   });
+
+  const handleMediaPick = (file: File) => {
+    const MAX = 5 * 1024 * 1024;
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+    if (!allowed.includes(file.type.toLowerCase())) {
+      toast({ title: "Unsupported file type", description: "Please choose a JPG, PNG, GIF, WebP, or HEIC image.", variant: "destructive" });
+      return;
+    }
+    if (file.size > MAX) {
+      toast({ title: "File too large", description: `Maximum size is ${MAX / 1024 / 1024} MB.`, variant: "destructive" });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      setPendingMedia({
+        dataUrl: reader.result as string,
+        mediaType: file.type,
+        filename: file.name,
+        size: file.size,
+      });
+    };
+    reader.onerror = () => {
+      toast({ title: "Could not read file", variant: "destructive" });
+    };
+    reader.readAsDataURL(file);
+  };
 
   const selectedTruckRef = useRef<string | null>(null);
   selectedTruckRef.current = selectedTruck;
@@ -803,7 +856,59 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                     </span>
                   )}
                 </div>
+                {pendingMedia && (
+                  <div className="flex items-center gap-2 p-2 rounded border bg-muted/30">
+                    <img
+                      src={pendingMedia.dataUrl}
+                      alt={pendingMedia.filename}
+                      className="h-12 w-12 rounded object-cover border"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-medium truncate">{pendingMedia.filename}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {(pendingMedia.size / 1024).toFixed(0)} KB · {pendingMedia.mediaType}
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0"
+                      onClick={() => {
+                        setPendingMedia(null);
+                        if (mediaFileRef.current) mediaFileRef.current.value = "";
+                      }}
+                      data-testid="button-decomm-remove-media"
+                      aria-label="Remove attachment"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
+                )}
                 <div className="flex gap-2 items-end">
+                  <input
+                    ref={mediaFileRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
+                    className="hidden"
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) handleMediaPick(f);
+                    }}
+                    data-testid="input-decomm-media-file"
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-10 w-10 flex-shrink-0"
+                    onClick={() => mediaFileRef.current?.click()}
+                    disabled={sendMutation.isPending || uploadingMedia}
+                    title="Attach photo"
+                    data-testid="button-decomm-attach-media"
+                  >
+                    <Paperclip className="w-4 h-4" />
+                  </Button>
                   <Textarea
                     value={messageBody}
                     onChange={(e) => setMessageBody(e.target.value)}
@@ -814,10 +919,10 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                   />
                   <Button
                     onClick={handleSend}
-                    disabled={!messageBody.trim() || sendMutation.isPending || !selectedContact}
+                    disabled={(!messageBody.trim() && !pendingMedia) || sendMutation.isPending || uploadingMedia || !selectedContact}
                     data-testid="button-decomm-send-message"
                   >
-                    {sendMutation.isPending ? (
+                    {sendMutation.isPending || uploadingMedia ? (
                       <Clock className="w-4 h-4 animate-pulse" />
                     ) : (
                       <Send className="w-4 h-4" />

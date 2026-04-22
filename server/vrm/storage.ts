@@ -590,8 +590,6 @@ export async function listRepairTracker() {
       rt.created_at AS "createdAt",
       rt.updated_at AS "updatedAt",
       rd.byov_enrolled AS "decisionByovEnrolled",
-      la.notes AS "lastActionNotes",
-      la.created_at AS "lastActionAt",
       lto.body AS "lastTechOutreachBody",
       lto.author_name AS "lastTechOutreachAuthor",
       lto.occurred_at AS "lastTechOutreachAt",
@@ -603,13 +601,6 @@ export async function listRepairTracker() {
       tp.district_no AS "district"
     FROM vrm_repair_tracker rt
     LEFT JOIN vrm_rental_decisions rd ON rt.source_decision_id = rd.id
-    LEFT JOIN LATERAL (
-      SELECT a.notes, a.created_at
-      FROM vrm_repair_tracker_actions a
-      WHERE a.repair_tracker_id = rt.id
-      ORDER BY a.created_at DESC
-      LIMIT 1
-    ) la ON TRUE
     LEFT JOIN LATERAL (
       SELECT t.body, t.author_name, t.occurred_at
       FROM vrm_repair_tracker_tech_outreach t

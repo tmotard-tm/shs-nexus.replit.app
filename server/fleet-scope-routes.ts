@@ -24,6 +24,7 @@ import sgMail from "@sendgrid/mail";
 import multer from "multer";
 import cron from "node-cron";
 import * as XLSX from "xlsx";
+import { randomUUID } from "node:crypto";
 
 // ---------------------------------------------------------------------------
 // Shared: Spare Vehicle Scoring/Enrichment Helper
@@ -2220,10 +2221,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   }, 60_000);
 
-  // Apply authentication to all fleet-scope routes except /public/* and the
-  // ElevenLabs webhook (which is called by ElevenLabs, not a browser session).
+  // Apply authentication to all fleet-scope routes except /public/*, the
+  // ElevenLabs webhook, and the Twilio inbound webhooks (all called by
+  // external services with their own signature/auth, not a browser session).
   app.use((req: any, res: any, next: any) => {
-    if (req.path.startsWith('/public/') || req.path === '/public' || req.path === '/elevenlabs/webhook') {
+    if (
+      req.path.startsWith('/public/') ||
+      req.path === '/public' ||
+      req.path === '/elevenlabs/webhook' ||
+      req.path === '/webhooks/twilio-decomm' ||
+      req.path === '/webhooks/twilio-reg'
+    ) {
       return next();
     }
     const internalToken = req.headers['x-internal-cron'];
@@ -15457,12 +15465,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-messages", async (req, res) => {
     try {
-      const { truckNumber, contactType, contactPhone, contactName, body, sentBy, senderName } = req.body;
+      const { truckNumber, contactType, contactPhone, contactName, body, sentBy, senderName, mediaStorageKey, mediaType: mediaTypeIn } = req.body;
 
       const isAdhoc = contactType === 'adhoc' || (!truckNumber && !!contactPhone);
+      const hasMedia = !!mediaStorageKey;
+      const messageBody = body || '';
 
-      if (!body || (!isAdhoc && (!truckNumber || !contactType))) {
-        return res.status(400).json({ message: "truckNumber, contactType, and body are required" });
+      if (!hasMedia && !messageBody) {
+        return res.status(400).json({ message: "Either body or media is required" });
+      }
+      if (!isAdhoc && (!truckNumber || !contactType)) {
+        return res.status(400).json({ message: "truckNumber and contactType are required" });
       }
       if (isAdhoc && !contactPhone) {
         return res.status(400).json({ message: "contactPhone is required for ad-hoc messages" });
@@ -15500,9 +15513,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const formattedPhone = phone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
 
+      // Build a public Twilio-fetchable URL for the media (if any). The
+      // /public/mms-out/:key route below is auth-exempt and served by this app.
+      let twilioMediaUrls: string[] | undefined;
+      if (mediaStorageKey) {
+        const host = (process.env.REPLIT_DOMAINS || '').split(',')[0]?.trim() || req.get('host');
+        twilioMediaUrls = [`https://${host}/api/fs/public/mms-out/${encodeURIComponent(mediaStorageKey)}`];
+      }
+
       let sid: string | undefined;
       try {
-        sid = await sendTwilioMessage(formattedPhone, body);
+        sid = await sendTwilioMessage(formattedPhone, messageBody, twilioMediaUrls);
       } catch (err: any) {
         console.error("[DecommMsg] Twilio send error:", err.message);
         const [failedMsg] = await getDb().insert(decommMessages).values({
@@ -15511,10 +15532,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           contactName: contactName || null,
           contactPhone: formattedPhone,
           direction: 'outbound',
-          body,
+          body: messageBody,
           status: 'failed',
           sentBy: sentBy || null,
           senderName: senderName || null,
+          mediaUrl: mediaStorageKey || null,
+          mediaType: mediaTypeIn || null,
         }).returning();
         return res.status(500).json({ message: "Failed to send SMS: " + err.message, savedMessage: failedMsg });
       }
@@ -15525,17 +15548,91 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         contactName: contactName || null,
         contactPhone: formattedPhone,
         direction: 'outbound',
-        body,
+        body: messageBody,
         status: 'sent',
         twilioSid: sid,
         sentBy: sentBy || null,
         senderName: senderName || null,
+        mediaUrl: mediaStorageKey || null,
+        mediaType: mediaTypeIn || null,
       }).returning();
 
       broadcastMessage(normalized, { message: msg, source: 'decomm' });
       res.json(msg);
     } catch (error: any) {
       console.error("[DecommMsg] Error sending message:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // POST /decomm-messages/upload-media — accept a base64 image from the
+  // composer, store it in object storage, return the storage key the client
+  // then includes in the subsequent send POST. Auth is enforced by the
+  // global session middleware (this is a logged-in user uploading from the UI).
+  app.post("/decomm-messages/upload-media", async (req, res) => {
+    try {
+      const { dataUrl, filename } = req.body as { dataUrl?: string; filename?: string };
+      if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:')) {
+        return res.status(400).json({ message: "dataUrl (data: URI) is required" });
+      }
+      const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+      if (!match) {
+        return res.status(400).json({ message: "Invalid data URL — must be base64-encoded" });
+      }
+      const contentType = match[1];
+      const buffer = Buffer.from(match[2], 'base64');
+      const MAX_BYTES = 5 * 1024 * 1024;
+      if (buffer.length > MAX_BYTES) {
+        return res.status(413).json({ message: `File too large (max ${MAX_BYTES / 1024 / 1024} MB)` });
+      }
+      const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/heic', 'image/heif'];
+      if (!allowed.includes(contentType.toLowerCase())) {
+        return res.status(415).json({ message: `Unsupported media type: ${contentType}` });
+      }
+      const ext = contentType.split('/')[1] || 'bin';
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const storageKey = `mms/decomm-out/${randomUUID()}.${ext}`;
+      const upload = await client.uploadFromBytes(storageKey, buffer);
+      if (!upload.ok) {
+        return res.status(500).json({ message: "Object storage upload failed" });
+      }
+      console.log(`[MMS] Uploaded outbound media ${storageKey} (${contentType}, ${buffer.length} bytes)${filename ? ` from "${filename}"` : ''}`);
+      res.json({ storageKey, mediaType: contentType, size: buffer.length });
+    } catch (error: any) {
+      console.error("[DecommMsg] Upload error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GET /public/mms-out/:key(*) — public read of an outbound media object so
+  // Twilio can fetch it during messages.create. Auth-exempt via the /public/
+  // path prefix. Path is restricted to mms/decomm-out/* (and mms/reg-out/*)
+  // so only outbound MMS uploads are reachable publicly.
+  app.get("/public/mms-out/:key(*)", async (req, res) => {
+    try {
+      const storageKey = req.params.key;
+      if (!storageKey.startsWith('mms/decomm-out/') && !storageKey.startsWith('mms/reg-out/')) {
+        return res.status(403).json({ message: "Access denied" });
+      }
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
+      const dl = await client.downloadAsBytes(storageKey);
+      if (!dl.ok) {
+        return res.status(404).json({ message: "Not found" });
+      }
+      const ext = (storageKey.split('.').pop() || '').toLowerCase();
+      const ctMap: Record<string, string> = {
+        jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png',
+        gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif',
+      };
+      res.set('Content-Type', ctMap[ext] || 'application/octet-stream');
+      res.set('Cache-Control', 'public, max-age=3600');
+      const value = (dl as any).value;
+      const bufOut = Array.isArray(value) ? Buffer.concat(value.map((b: any) => Buffer.isBuffer(b) ? b : Buffer.from(b))) : Buffer.from(value);
+      res.send(bufOut);
+    } catch (error: any) {
+      console.error("[MMS] Public serve error:", error);
       res.status(500).json({ message: error.message });
     }
   });
