@@ -478,8 +478,8 @@ export const allTechs = pgTable("all_techs", {
   // to prevent destructive drop on deploy. Do not write new code against it.
   truckLu: text("truck_lu"),
   lastKnownTruckLu: text("last_known_truck_lu"), // TRUCK_LU — last snapshot, not current assignment
-  // Stored as text in prod (mixed/legacy date formats); parse at read time. Do not change to date().
-  lastKnownTruckFileDate: text("last_known_truck_file_date"), // FILE_DATE of the snapshot row
+  // Converted in prod from text to date on 2026-04-21 via manual ALTER to unblock deploy planner (dev-as-source-of-truth). mode:"string" preserves existing string-based read contract for all existing read sites.
+  lastKnownTruckFileDate: date("last_known_truck_file_date", { mode: "string" }), // FILE_DATE of the snapshot row
   // Offboarding tracking (previously only in termed_techs)
   offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
   offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id
