@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index, jsonb, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, timestamp, boolean, integer, decimal, date, index, jsonb, serial, uuid } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -474,8 +474,12 @@ export const allTechs = pgTable("all_techs", {
   // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED (joined by ENTERPRISE_ID)
   // These fields are informational-only: they reflect the last snapshot in which a truck was
   // associated with this tech. The value may be weeks or months stale. Never treat as current.
+  // Legacy column preserved (13K rows in prod). Superseded by lastKnownTruckLu but retained
+  // to prevent destructive drop on deploy. Do not write new code against it.
+  truckLu: text("truck_lu"),
   lastKnownTruckLu: text("last_known_truck_lu"), // TRUCK_LU — last snapshot, not current assignment
-  lastKnownTruckFileDate: date("last_known_truck_file_date"), // FILE_DATE of the snapshot row
+  // Stored as text in prod (mixed/legacy date formats); parse at read time. Do not change to date().
+  lastKnownTruckFileDate: text("last_known_truck_file_date"), // FILE_DATE of the snapshot row
   // Offboarding tracking (previously only in termed_techs)
   offboardingTaskCreated: boolean("offboarding_task_created").notNull().default(false),
   offboardingTaskId: varchar("offboarding_task_id"), // Reference to queue_items.id
@@ -2231,8 +2235,8 @@ export type InsertBulkFixRunItem = z.infer<typeof insertBulkFixRunItemSchema>;
 // ===============================
 
 export const offboardingReturnTokens = pgTable("offboarding_return_tokens", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  token: varchar("token", { length: 128 }).notNull().unique(),
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  token: varchar("token", { length: 64 }).notNull().unique(),
   queueItemId: varchar("queue_item_id").notNull().references(() => queueItems.id),
   expiresAt: timestamp("expires_at").notNull(),
   consumedAt: timestamp("consumed_at"),
