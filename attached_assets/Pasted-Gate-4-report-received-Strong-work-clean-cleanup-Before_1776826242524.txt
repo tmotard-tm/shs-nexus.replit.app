@@ -1,0 +1,45 @@
+Gate 4 report received. Strong work, clean cleanup. Before I approve Publish, close the two caveats you flagged with additional read-only verification. Do NOT Publish. Do NOT make any schema edits.
+Check 1 — Dev ↔ Prod column-level comparison (closes caveat 2, the important one)
+The deploy planner uses dev as its source-of-truth. Gate 2 fixed the one known dev↔prod mismatch. You need to verify there are no other dev↔prod mismatches that would cause the planner to emit additional destructive ALTERs on the next Publish.
+Using both PROD_DATABASE_URL and whatever legitimate dev connection is available (DEV_DATABASE_URL or equivalent Replit Secret — same hygiene rules, never echoed, never logged), run against both databases:
+sqlSELECT table_schema, table_name, column_name, data_type, udt_name, character_maximum_length, is_nullable, column_default
+FROM information_schema.columns
+WHERE table_schema = 'public'
+ORDER BY table_name, ordinal_position;
+Then compute the set difference in both directions:
+
+Columns present in dev but missing in prod (planner would CREATE/ADD — usually safe).
+Columns present in prod but missing in dev (planner might DROP — DANGEROUS, flag loudly).
+Columns present in both but with different types, nullability, character_maximum_length, or defaults (planner would ALTER — any of these could be destructive).
+
+Report a table of every mismatch. Exclude cosmetic-only differences (e.g., text and character varying with no max length have identical semantics in Postgres, but report them anyway so I can judge).
+Specifically highlight:
+
+Any type difference where an automatic cast would fail (text→integer, text→date, varchar→uuid, etc.)
+Any NOT NULL in dev that's NULL in prod (would cause SET NOT NULL to fail if prod has NULL rows)
+Any column shorter in dev than in prod (would cause data truncation)
+Any column present only in prod (would be dropped if the planner is aggressive)
+
+If the set difference shows only the new tables and columns from the originally-failing migration (which prod doesn't have yet but dev does), that's expected and fine — those are the ADD operations the planner is supposed to emit. What you're looking for is anything else.
+Check 2 — shared/schema.ts table enumeration vs prod (partially closes caveat 1)
+Enumerate every table defined in shared/schema.ts (every pgTable(...) call). For each one, query information_schema.tables on prod and confirm whether the table exists. Report:
+
+Tables defined in shared/schema.ts but missing from prod (planner will CREATE — flag the originally-failing migration's two new tables as expected; anything else is unknown drift).
+Tables present in prod but NOT defined in shared/schema.ts (interesting for a different reason — not a deploy risk, but indicates shared/schema.ts is missing entries and the codebase has tables no one tracks).
+
+For category 1, anything beyond the two vrm_repair_tracker_* tables we already know about needs to be flagged explicitly.
+Reporting
+Consolidated report with:
+
+Check 1: full mismatch table, with loud highlighting of any dangerous mismatch.
+Check 2: full list of category 1 and category 2 tables.
+Explicit verdict: "Safe to Publish — no unknown drift, only expected additive changes" OR "Unsafe — here's what else the planner will try to change."
+Cleanup confirmation (no writes attempted, connections closed, temp files deleted, migrations/ and shared/schema.ts unchanged, git status clean).
+
+Hard rules still in effect:
+
+Read-only on both prod and dev.
+Connection string hygiene — never echoed, never logged.
+No file edits.
+No Publish.
+If any dangerous mismatch is found, STOP after the report — do not attempt to fix. We decide together.
