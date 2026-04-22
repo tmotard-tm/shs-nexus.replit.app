@@ -2381,7 +2381,7 @@ export default function RentalRepairTracker() {
                       <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
                         {entry.techName ?? "—"}
                       </span>
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: colors.inkMuted }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: colors.inkSoft, fontWeight: 500 }}>
                         {entry.techLdap ?? "—"}{entry.district ? ` · D${entry.district.replace(/^0+/, "") || "0"}` : ""}
                       </span>
                     </div>
