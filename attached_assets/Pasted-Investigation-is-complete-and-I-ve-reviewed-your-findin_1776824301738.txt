@@ -1,0 +1,64 @@
+Investigation is complete and I've reviewed your findings. The root cause is confirmed: Replit's deploy planner is using the dev database as its desired-schema source, not shared/schema.ts. Cast safety on prod data is confirmed (2,005 non-null values, all clean ISO dates, 0 bad-format rows). The "harmless" ops are all verified safe (offboarding_return_tokens is empty in prod).
+Before executing the plan, do these additional read-only checks and then proceed only with my explicit go-ahead at each gate.
+Gate 1 — Additional read-only checks on prod (do now, report back, do not proceed past this gate without my approval):
+
+Check for constraints, views, generated columns, or foreign keys that reference all_techs.last_known_truck_file_date and could block or cascade on the ALTER:
+
+sql   SELECT conname, contype, pg_get_constraintdef(oid)
+   FROM pg_constraint
+   WHERE conrelid = 'all_techs'::regclass;
+
+   SELECT dependent_ns.nspname AS dependent_schema,
+          dependent_view.relname AS dependent_view
+   FROM pg_depend
+   JOIN pg_rewrite ON pg_depend.objid = pg_rewrite.oid
+   JOIN pg_class AS dependent_view ON pg_rewrite.ev_class = dependent_view.oid
+   JOIN pg_class AS source_table ON pg_depend.refobjid = source_table.oid
+   JOIN pg_attribute ON pg_depend.refobjid = pg_attribute.attrelid
+     AND pg_depend.refobjsubid = pg_attribute.attnum
+   JOIN pg_namespace dependent_ns ON dependent_view.relnamespace = dependent_ns.oid
+   WHERE source_table.relname = 'all_techs'
+     AND pg_attribute.attname = 'last_known_truck_file_date';
+
+Grep the codebase for every read site of this column and list them. Search for both lastKnownTruckFileDate and last_known_truck_file_date. For each hit, note whether the code assumes the value is a string (regex, .includes, string comparison, passing to an API expecting a string) or whether it's already date-object-safe. I need this list before Step 2.
+
+Report back with the results of both checks. Do not write anything yet.
+Gate 2 — Step 1: manual ALTER against prod (only after I approve Gate 1 results):
+Run this in a single explicit transaction against the production database, outside the deploy pipeline. Use the pre/post count comparison — do NOT just assume "expected 2005":
+sqlBEGIN;
+
+SELECT count(*) FILTER (WHERE last_known_truck_file_date IS NOT NULL) AS before_non_null,
+       count(*) AS before_total
+FROM all_techs;
+-- Expected: before_non_null = 2005, before_total = 13248
+
+ALTER TABLE all_techs
+  ALTER COLUMN last_known_truck_file_date TYPE date
+  USING NULLIF(last_known_truck_file_date, '')::date;
+
+SELECT count(*) FILTER (WHERE last_known_truck_file_date IS NOT NULL) AS after_non_null,
+       count(*) AS after_total
+FROM all_techs;
+-- Must match: after_non_null = 2005, after_total = 13248
+
+SELECT column_name, data_type, udt_name
+FROM information_schema.columns
+WHERE table_name = 'all_techs' AND column_name = 'last_known_truck_file_date';
+-- Must show data_type = 'date'
+If any count is off or the data_type is not date, ROLLBACK and report back. If all three checks pass, COMMIT. Report back with the full output before proceeding.
+Gate 3 — Step 2: update shared/schema.ts (only after Step 1 is committed AND I approve the code-audit list from Gate 1):
+Change line 482 from:
+ts// Stored as text in prod (mixed/legacy date formats); parse at read time. Do not change to date().
+lastKnownTruckFileDate: text("last_known_truck_file_date"),
+to:
+ts// Converted in prod from text to date on <today's date> via manual ALTER to unblock deploy planner (dev-as-source-of-truth).
+lastKnownTruckFileDate: date("last_known_truck_file_date"),
+Make sure date is imported from drizzle-orm/pg-core if it isn't already. Do NOT modify any read sites yet — list them for me separately if Gate 1 surfaced any that need updating.
+Gate 4 — Pre-publish verification (do not Publish without my approval):
+After Gate 3, before re-Publishing:
+
+Re-run the information_schema.columns query on prod and confirm the column type is now date.
+If Replit offers a deploy plan preview without executing, generate it and paste the full planned migration SQL. Confirm the failing ALTER ... SET DATA TYPE date is gone, and confirm nothing new or unexpected has appeared in the diff.
+Confirm the code-audit fixes (if any were needed from Gate 1) are complete.
+
+Report back with all three. I will give the final Publish approval separately.
