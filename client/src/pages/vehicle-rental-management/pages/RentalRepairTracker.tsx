@@ -2330,15 +2330,15 @@ export default function RentalRepairTracker() {
       {(() => {
         // Section row tint (light bg). Red dominates over yellow over blue.
         const flagBg = (entry: RepairTrackerEntry): string => {
-          if (entry.flags?.red?.active) return "#FEF2F2";    // light red
-          if (entry.flags?.yellow?.active) return "#FFFBEB"; // light yellow
-          if (entry.flags?.blue?.active) return "#EFF6FF";   // light blue
+          if (entry.flags?.red?.active) return colors.redLight;
+          if (entry.flags?.yellow?.active) return colors.amberLight;
+          if (entry.flags?.blue?.active) return colors.blueLight;
           return "transparent";
         };
         const sectionMeta: Record<"Action Needed" | "In Progress" | "Completed", { color: string; bg: string }> = {
-          "Action Needed": { color: "#B91C1C", bg: "#FEF2F2" },
-          "In Progress":   { color: "#0369A1", bg: "#EFF6FF" },
-          "Completed":     { color: "#15803D", bg: "#F0FDF4" },
+          "Action Needed": { color: colors.redDeep,   bg: colors.redLight },
+          "In Progress":   { color: colors.blueDeep,  bg: colors.blueLight },
+          "Completed":     { color: colors.greenDeep, bg: colors.greenLight },
         };
         const sortRows = (rows: RepairTrackerEntry[]) => [...rows].sort((a, b) => {
           const dir = sortDirection === "asc" ? 1 : -1;

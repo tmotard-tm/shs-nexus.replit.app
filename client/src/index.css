@@ -151,6 +151,10 @@
   --vrm-red-light: #FEF2F2;
   --vrm-red-deep: #991B1B;
   --vrm-red-deep-light: #FEE2E2;
+  --vrm-blue: #0EA5E9;
+  --vrm-blue-light: #EFF6FF;
+  --vrm-blue-deep: #0369A1;
+  --vrm-blue-deep-light: #F0F9FF;
   --vrm-sidebar-bg: #0F1117;
   --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
@@ -239,6 +243,10 @@
   --vrm-red-light: #2A1414;
   --vrm-red-deep: #FCA5A5;
   --vrm-red-deep-light: #2A1414;
+  --vrm-blue: #93C5FD;
+  --vrm-blue-light: #0F1A2A;
+  --vrm-blue-deep: #BAE6FD;
+  --vrm-blue-deep-light: #0F1A2A;
   --vrm-sidebar-bg: #0F1117;
   --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
