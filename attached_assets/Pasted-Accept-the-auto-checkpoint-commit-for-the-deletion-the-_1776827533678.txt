@@ -1,0 +1,31 @@
+Accept the auto-checkpoint commit for the deletion — the deletion itself is correct and complete, the commit message doesn't need to be verbatim. Do NOT hand off to a project task.
+One small follow-up task to preserve the explanation somewhere durable:
+
+Open .local/tasks/followup-truck-lu-rename-investigation.md.
+Append a new section at the bottom titled ## Resolution with approximately this content (adjust the date and commit SHA to match reality):
+
+markdown   ## Resolution
+
+   Resolved: migration file `migrations/0003_rename_truck_lu_to_last_known_truck_lu.sql` deleted from the repo.
+
+   Context: the file was authored before the reconciliation commit (4975254) that explicitly decided to keep both `truck_lu` and `last_known_truck_lu` as separate columns in order to preserve 13,248 rows of legacy `truck_lu` data. It was never journaled in `migrations/meta/_journal.json` and never applied to prod or dev — both columns already exist in both databases, and `shared/schema.ts` defines both.
+
+   The file remained on disk and was caught by the G3 migration safety gate on every deploy attempt, blocking the build step with a false-positive destructive-DDL error (the `RENAME COLUMN` statement). Removing it unblocks the deploy without changing any database state.
+
+   The second statement in the file (`ADD COLUMN IF NOT EXISTS last_known_truck_file_date date`) was also obsolete: that column was manually converted from `text` to `date` in prod during the Gate 2 operation of this same deploy-unblock effort, and `shared/schema.ts` now defines it as `date("last_known_truck_file_date", { mode: "string" })`.
+
+   No schema.ts change was needed. No database change was made by the deletion. The remaining question in this followup (whether to eventually drop `truck_lu` after backfill verification) is unaffected and remains open.
+
+Do NOT modify anything else — no schema.ts changes, no other migration files, no database writes.
+git status after the edit should show the file deletion from earlier plus this one markdown file modified, and nothing else.
+The auto-checkpoint will commit both changes together. That's fine.
+Report back with git status --short output and confirmation that only the two expected changes are present.
+
+After that report, I will approve retrying Publish. The G3 gate should no longer catch the deleted migration file. The planner's additive-only migration (the one you verified in Gate 4) will run, and the deploy should succeed through Provision → Security Scan → Build → Bundle → Promote.
+Hard rules still in effect:
+
+Read-only on all databases.
+Only the markdown edit described above — no other file changes.
+No manual git commit, no project task handoff — auto-checkpoint is fine.
+No Publish retry until I explicitly approve after the report.
+If anything unexpected appears in git status, STOP and report
