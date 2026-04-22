@@ -1,0 +1,39 @@
+Prompt for Replit:
+The planner's generated SQL looks correct — additive-only, the failing last_known_truck_file_date ALTER is gone, Gate 4b's worst-case scenario was not realized. Before Publishing, do one final read-only check: confirm the five new foreign keys will not fail on existing data.
+Using the legitimate PROD_DATABASE_URL connection (same hygiene as prior gates — never echoed, never logged, closed after use), run these orphan-count queries against prod:
+sql-- vrm_rental_decision_actions.decision_id → vrm_rental_decisions.id
+SELECT count(*) AS orphan_count
+FROM vrm_rental_decision_actions a
+LEFT JOIN vrm_rental_decisions d ON a.decision_id = d.id
+WHERE a.decision_id IS NOT NULL AND d.id IS NULL;
+
+-- vrm_reachability_log.exception_case_id → vrm_exception_cases.id
+SELECT count(*) AS orphan_count
+FROM vrm_reachability_log r
+LEFT JOIN vrm_exception_cases e ON r.exception_case_id = e.id
+WHERE r.exception_case_id IS NOT NULL AND e.id IS NULL;
+
+-- vrm_alternative_tasks.exception_case_id → vrm_exception_cases.id
+SELECT count(*) AS orphan_count
+FROM vrm_alternative_tasks t
+LEFT JOIN vrm_exception_cases e ON t.exception_case_id = e.id
+WHERE t.exception_case_id IS NOT NULL AND e.id IS NULL;
+
+-- bulk_fix_run_items.run_id → bulk_fix_runs.run_id
+SELECT count(*) AS orphan_count
+FROM bulk_fix_run_items i
+LEFT JOIN bulk_fix_runs r ON i.run_id = r.run_id
+WHERE i.run_id IS NOT NULL AND r.run_id IS NULL;
+
+-- offboarding_return_tokens.queue_item_id → queue_items.id (table is empty, expected 0)
+SELECT count(*) AS orphan_count
+FROM offboarding_return_tokens t
+LEFT JOIN queue_items q ON t.queue_item_id = q.id
+WHERE t.queue_item_id IS NOT NULL AND q.id IS NULL;
+Report all five counts. If all are zero, the FK ADD CONSTRAINT statements will succeed and Publish is safe. If any are nonzero, STOP and report which FK has how many orphans — do not propose a fix, do not Publish.
+Additionally confirm one last time:
+sqlSELECT column_name, data_type
+FROM information_schema.columns
+WHERE table_name = 'all_techs' AND column_name = 'last_known_truck_file_date';
+Expected: data_type = 'date'. This is a final sanity check that nothing has regressed since Gate 2.
+Hard rules still in effect: read-only only, no writes, connection closed after use, no file edits, no Publish until I explicitly approve after reviewing this report.
