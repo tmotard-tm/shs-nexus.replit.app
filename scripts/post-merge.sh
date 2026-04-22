@@ -21,7 +21,18 @@ for f in migrations/*.sql; do
   fi
 done
 
-yes "No" | timeout 55 npx drizzle-kit push --force 2>&1 || echo "[post-merge] drizzle-kit push completed or skipped"
+# Guardrail G1 — destructive-op gate (dry-run mode).
+# Replaces the previous unconditional `drizzle-kit push --force` which was the
+# primary data-loss surface. In dry-run mode G1 reports the diff classification
+# but does NOT call drizzle-kit push. Schema sync continues to happen at app
+# boot via server/vrm/init-schema.ts (idempotent runtime DDL), so this gate
+# acts as a tripwire for destructive intent without trying to apply changes.
+# To apply additive diffs through G1, unset G1_DRY_RUN and ensure the
+# Drizzle migration baseline matches the live DB.
+G1_DRY_RUN=1 bash scripts/guardrails/g1-merge-schema-gate.sh 2>&1 || {
+  echo "[post-merge] G1 schema gate detected destructive DDL — see above. Manual review required."
+  exit 1
+}
 
 echo "[post-merge] Re-initializing fleet-scope schema (safety net)..."
 npx tsx -e "

@@ -404,5 +404,18 @@ async function patchStoredRolePermissions() {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+    // Guardrail G4 — fire post-deploy integrity check non-blocking.
+    // Compares current row counts against the latest G2 snapshot in object
+    // storage. Fails open (no-baseline / network errors) so it can never
+    // block server startup. Output is prefixed `[G4]`.
+    if (process.env.NODE_ENV === "production") {
+      import("./guardrails/g4-post-deploy-integrity")
+        .then((m) => m.runIntegrityCheck?.().catch((e: unknown) => {
+          console.warn("[G4] Integrity check threw (non-fatal):", e instanceof Error ? e.message : e);
+        }))
+        .catch((e: unknown) => {
+          console.warn("[G4] Integrity module failed to load (non-fatal):", e instanceof Error ? e.message : e);
+        });
+    }
   });
 })();
