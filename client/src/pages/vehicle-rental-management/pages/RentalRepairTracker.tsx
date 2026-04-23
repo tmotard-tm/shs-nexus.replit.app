@@ -135,58 +135,73 @@ const RT_ACTION_TYPE_LABELS: Record<string, string> = {
 
 // ─── Status badge colour map ──────────────────────────────────────────────────
 
-// Statuses that mean the case is "moving on" — these get a green pill.
-// Everything else renders as plain dark text.
-const PROGRESSING_STATUSES = new Set<string>([
-  "On Road",
-  "In Transit",
-  "Scheduling",
-  "Available to be assigned",
-]);
+// Semantic color palette for tint-pill cells.
+// fg = dark text, bg = saturated hue used for the left-border accent (and to compute the pale tint).
+const TINT = {
+  red:    { fg: "#B91C1C", bg: "#EF4444" },
+  amber:  { fg: "#B45309", bg: "#F5A623" },
+  green:  { fg: "#15803D", bg: "#22C55E" },
+  blue:   { fg: "#1D4ED8", bg: "#3B82F6" },
+  teal:   { fg: "#0F766E", bg: "#14B8A6" },
+  neutral:{ fg: "#475569", bg: "#94A3B8" },
+} as const;
 
-const PROGRESSING_TECH_STATUSES = new Set<string>([
-  "On Road",
-]);
-
-const PLAIN_TEXT_STYLE: React.CSSProperties = {
-  fontFamily: fonts.dmSans,
-  fontWeight: 500,
-  fontSize: 13,
-  color: colors.ink,
-  whiteSpace: "nowrap",
+const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
+  "Confirming Status":        TINT.amber,
+  "Decision Pending":         TINT.red,
+  "Repairing":                TINT.amber,
+  "Declined Repair":          TINT.red,
+  "Approved for sale":        TINT.amber,
+  "Tags":                     TINT.amber,
+  "Scheduling":               TINT.green,
+  "PMF":                      TINT.amber,
+  "In Transit":               TINT.blue,
+  "On Road":                  TINT.green,
+  "Needs truck assigned":     TINT.amber,
+  "Available to be assigned": TINT.green,
+  "Relocate Van":             TINT.amber,
+  "NLWC - Return Rental":     TINT.red,
+  "Truck Swap":               TINT.blue,
 };
 
-const GREEN_PILL_STYLE: React.CSSProperties = {
-  fontFamily: fonts.dmSans,
-  fontWeight: 500,
-  fontSize: 11,
-  color: colors.green,
-  backgroundColor: colors.greenLight,
-  borderRadius: 6,
+const TECH_STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
+  "On Road":        TINT.green,
+  "Back in Van":    TINT.blue,
+  "Off Road":       TINT.red,
+  "Route Canceled": TINT.amber,
 };
+
+// Pill that matches the PunchStatusCell look: pale tint bg + colored left border + dark text.
+function TintPill({ label, fg, bg, size = 11 }: { label: string; fg: string; bg: string; size?: number }) {
+  return (
+    <span
+      className="inline-flex items-center whitespace-nowrap"
+      style={{
+        fontFamily: fonts.dmSans,
+        fontWeight: 600,
+        fontSize: size,
+        color: fg,
+        backgroundColor: tintColor(bg, 0.12),
+        borderLeft: `3px solid ${bg}`,
+        borderRadius: 4,
+        padding: "4px 8px",
+      }}
+    >
+      {label}
+    </span>
+  );
+}
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  if (PROGRESSING_STATUSES.has(status)) {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
-        {status}
-      </span>
-    );
-  }
-  return <span style={PLAIN_TEXT_STYLE}>{status}</span>;
+  const c = STATUS_COLORS[status] ?? TINT.neutral;
+  return <TintPill label={status} fg={c.fg} bg={c.bg} />;
 }
 
 function TechStatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  if (PROGRESSING_TECH_STATUSES.has(status)) {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
-        {status}
-      </span>
-    );
-  }
-  return <span style={PLAIN_TEXT_STYLE}>{status}</span>;
+  const c = TECH_STATUS_COLORS[status] ?? TINT.neutral;
+  return <TintPill label={status} fg={c.fg} bg={c.bg} />;
 }
 
 function RecPill({ rec }: { rec: string }) {
@@ -1912,24 +1927,20 @@ type SortColumn =
 
 // ─── Stage pill ───────────────────────────────────────────────────────────────
 
-// Stages that mean the case is in motion or done — these get a green pill.
-// Action-Needed stages render as plain dark text.
-const PROGRESSING_STAGES = new Set<string>([
-  "In Repair",
-  "Ready for Pickup",
-  "Complete",
-]);
+const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
+  "Needs Tech Call":        TINT.red,
+  "BYOV Decision":          TINT.amber,
+  "Awaiting Rental Return": TINT.amber,
+  "Awaiting Route Clear":   TINT.amber,
+  "In Repair":              TINT.blue,
+  "Ready for Pickup":       TINT.blue,
+  "Complete":               TINT.green,
+};
 
 function StagePill({ stage }: { stage: string }) {
   if (!stage) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  if (PROGRESSING_STAGES.has(stage)) {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
-        {stage}
-      </span>
-    );
-  }
-  return <span style={PLAIN_TEXT_STYLE}>{stage}</span>;
+  const c = STAGE_COLORS[stage] ?? TINT.neutral;
+  return <TintPill label={stage} fg={c.fg} bg={c.bg} />;
 }
 
 function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
@@ -2171,64 +2182,16 @@ export default function RentalRepairTracker() {
 
   const boolBadge = (val: boolean | null | undefined) => {
     const yes = !!val;
-    return (
-      <span style={{
-        fontFamily: fonts.dmSans,
-        fontWeight: 600,
-        fontSize: 11,
-        color: yes ? "#15803D" : "#94A3B8",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        whiteSpace: "nowrap",
-      }}>
-        <span style={{
-          display: "inline-block",
-          width: 7,
-          height: 7,
-          borderRadius: 999,
-          backgroundColor: yes ? "#22C55E" : "#CBD5E1",
-        }} />
-        {yes ? "Yes" : "No"}
-      </span>
-    );
+    const palette = yes ? TINT.green : TINT.neutral;
+    return <TintPill label={yes ? "Yes" : "No"} fg={palette.fg} bg={palette.bg} />;
   };
 
   const rentalReturnedBadge = (val: string | null) => {
     if (!val || val === "N/A") {
-      return (
-        <span style={{
-          fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-          color: colors.inkMuted,
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          whiteSpace: "nowrap",
-        }}>N/A</span>
-      );
+      return <TintPill label="N/A" fg={TINT.neutral.fg} bg={TINT.neutral.bg} />;
     }
-    const yes = val === "Yes";
-    return (
-      <span style={{
-        fontFamily: fonts.dmSans,
-        fontWeight: 600,
-        fontSize: 11,
-        color: yes ? "#15803D" : "#B91C1C",
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 6,
-        whiteSpace: "nowrap",
-      }}>
-        <span style={{
-          display: "inline-block",
-          width: 7,
-          height: 7,
-          borderRadius: 999,
-          backgroundColor: yes ? "#22C55E" : "#EF4444",
-        }} />
-        {val}
-      </span>
-    );
+    const palette = val === "Yes" ? TINT.green : TINT.red;
+    return <TintPill label={val} fg={palette.fg} bg={palette.bg} />;
   };
 
   return (
@@ -2550,19 +2513,6 @@ export default function RentalRepairTracker() {
                       return "—";
                     })()}
                   </td>
-                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
-                    {(() => {
-                      const body = entry.lastShopContactBody;
-                      if (body) {
-                        return (
-                          <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={body}>
-                            {body}
-                          </div>
-                        );
-                      }
-                      return "—";
-                    })()}
-                  </td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     {boolBadge(entry.byovEnrolled)}
                   </td>
@@ -2656,7 +2606,6 @@ export default function RentalRepairTracker() {
               <th style={{ ...thStyle, cursor: "default" }}>Shop</th>
               <th style={{ ...thStyle, cursor: "default" }}>Shop Phone</th>
               <th style={{ ...thStyle, cursor: "default" }}>Tech Outreach</th>
-              <th style={{ ...thStyle, cursor: "default" }}>Shop Log</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("rentalReturned")}>Rental Returned{sortIndicator("rentalReturned")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("routeCleared")}>Route Cleared{sortIndicator("routeCleared")}</th>

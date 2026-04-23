@@ -68,20 +68,23 @@ Fleet Scope's `fs_trucks.enterprise_id` is null on every rental row (all 336 sho
 ### What I added
 1. **`normalizeNameForMatch(raw)`** helper — uppercase, strip punctuation, strip `JR|SR|II|III|IV|V` suffixes, collapse whitespace.
 2. **`levenshtein(a, b)`** helper — classic edit-distance DP.
-3. **`listActiveRentalsFromFleetScope()` rewrite** — builds a `nameToLdap` Map keyed by normalized name, seeding from `vrm_techs` (preferred), then filling gaps from `tpms_tech_profiles` (via raw SQL). For every Fleet Scope row with null `enterprise_id`, tries exact normalized match first, then Levenshtein ≤1 (tight — catches typos only). Populates `ldap` and a new `ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | null` field on the response row. Looks up VRM context by the recovered ldap.
-4. **`ActiveRentalRow` interface** — added `ldapMatchSource` field.
+3. **`listActiveRentalsFromFleetScope()` rewrite** — builds a `nameToLdap` Map keyed by normalized name, seeding from `vrm_techs` (preferred), then filling gaps from `tpms_tech_profiles` (via raw SQL). For every Fleet Scope row with null `enterprise_id`, tries exact normalized match first, then Levenshtein ≤1 (tight — catches typos only). Looks up VRM context by the recovered ldap.
+4. **Truck-number fallback** — builds a separate `truckToLdap` Map from `tpms_tech_profiles.truck_no`. Only used when the Fleet Scope row has NO `tech_name` at all (null/empty). If a name is present but didn't match, we trust the name over a possibly-stale truck assignment — preview data showed cases like "RYAN VAN DER BURGH | truck 46063" where tpms says that truck belongs to a different LDAP (likely a stale transfer). Restricting truck-matching to no-name rows avoids false positives.
+5. **`ActiveRentalRow` interface** — added `ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null` field.
+6. **`Array.from(nameToLdap.keys())`** — wrapped the Map iterator so it satisfies the default-ES3 tsc target (no `target` in tsconfig.json). Runtime is fine either way since tsx/vite uses esnext, but this eliminates the strict tsc warning.
 
 ### Preview on real data (before deploying)
 ```
-name map size: 1792 (vrm_techs = 355, tpms adds = 1437)
-fs_trucks with tech_name: 312
-already had enterprise_id on fleet: 0
-exact name match via lookup: 289   ← 93% recovery
-fuzzy match (≤1 edits):          0
-no match:                        23
+fs_trucks total: 336
+  already had enterprise_id on fleet:  0
+  matched by name (exact or fuzzy):   289  (~86%)
+  matched by truck_number fallback:   +24  (rows with null/empty tech_name only)
+  no match:                            23  (truly unknown — no name AND no truck in tpms)
 ```
 
-So after the dev server restart, `ldapMissing` should drop from 336 → ~25, and ~289 of those rentals should become `contextStatus: "matched"` (or `"no_vrm_match"` if the name was found in tpms but not vrm_techs).
+So after the dev server restart, `ldapMissing` should drop from 336 → ~23, and ~313 rentals should become `contextStatus: "matched"` (or `"no_vrm_match"` if the name/truck matched tpms but the tech isn't in `vrm_techs`).
+
+`ldapMatchSource` on each row tells you the origin of the match: `"fleet"` (enterprise_id was already on Fleet Scope), `"exact_name"` (normalized name hit), `"fuzzy_name"` (Levenshtein ≤1), `"truck_number"` (no name but truck_no matched a tpms row), or `null` (no match).
 
 ### User action needed
 **Restart the dev server** (Replit Stop → Run). The running process hasn't hot-reloaded my `server/vrm/storage.ts` changes. After restart, verify via:
