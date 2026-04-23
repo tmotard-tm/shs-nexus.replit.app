@@ -135,75 +135,58 @@ const RT_ACTION_TYPE_LABELS: Record<string, string> = {
 
 // ─── Status badge colour map ──────────────────────────────────────────────────
 
-const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
-  "Confirming Status":        { fg: "#000000", bg: "#F5A623" },
-  "Decision Pending":         { fg: "#FFFFFF", bg: "#EF4444" },
-  "Repairing":                { fg: "#000000", bg: "#F5A623" },
-  "Declined Repair":          { fg: "#FFFFFF", bg: "#EF4444" },
-  "Approved for sale":        { fg: "#000000", bg: "#F5A623" },
-  "Tags":                     { fg: "#000000", bg: "#F5A623" },
-  "Scheduling":               { fg: "#FFFFFF", bg: "#22C55E" },
-  "PMF":                      { fg: "#000000", bg: "#F5A623" },
-  "In Transit":               { fg: "#FFFFFF", bg: "#22C55E" },
-  "On Road":                  { fg: "#FFFFFF", bg: "#22C55E" },
-  "Needs truck assigned":     { fg: "#000000", bg: "#F5A623" },
-  "Available to be assigned": { fg: "#FFFFFF", bg: "#22C55E" },
-  "Relocate Van":             { fg: "#000000", bg: "#F5A623" },
-  "NLWC - Return Rental":     { fg: "#FFFFFF", bg: "#EF4444" },
-  "Truck Swap":               { fg: "#155E75", bg: "#CFFAFE" },
+// Statuses that mean the case is "moving on" — these get a green pill.
+// Everything else renders as plain dark text.
+const PROGRESSING_STATUSES = new Set<string>([
+  "On Road",
+  "In Transit",
+  "Scheduling",
+  "Available to be assigned",
+]);
+
+const PROGRESSING_TECH_STATUSES = new Set<string>([
+  "On Road",
+]);
+
+const PLAIN_TEXT_STYLE: React.CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontWeight: 500,
+  fontSize: 13,
+  color: colors.ink,
+  whiteSpace: "nowrap",
 };
 
-const TECH_STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
-  "On Road":       { fg: "#FFFFFF", bg: "#22C55E" },
-  "Back in Van":   { fg: "#0F172A", bg: "#DBEAFE" },
-  "Off Road":      { fg: "#FFFFFF", bg: "#EF4444" },
-  "Route Canceled":{ fg: "#000000", bg: "#F5A623" },
+const GREEN_PILL_STYLE: React.CSSProperties = {
+  fontFamily: fonts.dmSans,
+  fontWeight: 500,
+  fontSize: 11,
+  color: colors.green,
+  backgroundColor: colors.greenLight,
+  borderRadius: 6,
 };
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: "#CBD5E1" };
-  return (
-    <span
-      style={{
-        fontFamily: fonts.dmSans,
-        fontWeight: 600,
-        fontSize: 11,
-        color: c.bg,
-        backgroundColor: tintColor(c.bg, 0.12),
-        borderLeft: `3px solid ${c.bg}`,
-        borderRadius: 4,
-        padding: "5px 8px",
-        display: "inline-flex",
-        alignItems: "center",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {status}
-    </span>
-  );
+  if (PROGRESSING_STATUSES.has(status)) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
+        {status}
+      </span>
+    );
+  }
+  return <span style={PLAIN_TEXT_STYLE}>{status}</span>;
 }
 
 function TechStatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = TECH_STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: "#CBD5E1" };
-  return (
-    <span
-      style={{
-        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-        color: c.bg,
-        backgroundColor: tintColor(c.bg, 0.12),
-        borderLeft: `3px solid ${c.bg}`,
-        borderRadius: 4,
-        padding: "5px 8px",
-        display: "inline-flex",
-        alignItems: "center",
-        whiteSpace: "nowrap",
-      }}
-    >
-      {status}
-    </span>
-  );
+  if (PROGRESSING_TECH_STATUSES.has(status)) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
+        {status}
+      </span>
+    );
+  }
+  return <span style={PLAIN_TEXT_STYLE}>{status}</span>;
 }
 
 function RecPill({ rec }: { rec: string }) {
@@ -1352,17 +1335,6 @@ function UnifiedPanel({
     enabled: !!hasDecision,
   });
 
-  const { data: actionsData, isLoading: actionsLoading } = useQuery<TrackerAction[]>({
-    queryKey: ["/api/vrm/repair-tracker", entry?.id, "actions"],
-    queryFn: async () => {
-      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/actions`);
-      if (!r.ok) throw new Error("Failed to load actions");
-      return r.json();
-    },
-    enabled: isEdit,
-  });
-  const actionLog = actionsData ?? [];
-
   // AMS snapshot + comments (Section A + B of drawer per closeout) — fetched on tab open only
   const amsTruck = (currentEntry?.truckNumber ?? "").trim();
   const amsQuery = useQuery<{ found: boolean; linkMissing: boolean; vin?: string; vehicle: any; comments: any[]; reason?: string }>({
@@ -1381,17 +1353,6 @@ function UnifiedPanel({
     queryFn: async () => {
       const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/tech-outreach`);
       if (!r.ok) throw new Error("Failed to load tech outreach");
-      return r.json();
-    },
-    enabled: isEdit,
-  });
-
-  // Shop Contact timeline
-  const shopContactQuery = useQuery<ShopContactEntry[]>({
-    queryKey: ["/api/vrm/repair-tracker", entry?.id, "shop-contact"],
-    queryFn: async () => {
-      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/shop-contact`);
-      if (!r.ok) throw new Error("Failed to load shop contact");
       return r.json();
     },
     enabled: isEdit,
@@ -1524,15 +1485,19 @@ function UnifiedPanel({
   const compactActionBtnStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
     fontWeight: 600,
-    fontSize: 12,
+    fontSize: 14,
     color: "#FFFFFF",
     backgroundColor: colors.accent,
     border: "none",
-    borderRadius: 7,
-    padding: "7px 12px",
+    borderRadius: 8,
+    padding: "12px 18px",
     cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
     opacity: quickPatchMutation.isPending ? 0.6 : 1,
-    whiteSpace: "nowrap",
+    width: "100%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
   };
 
   const compactWorkflowAction = currentEntry ? (() => {
@@ -1558,7 +1523,10 @@ function UnifiedPanel({
           }),
         };
       case "In Repair":
-        return { label: "Open Shop Contact", run: () => setPanelTab("shop_contact") };
+        return {
+          label: "Mark Ready for Pickup",
+          run: () => quickPatchMutation.mutate({ mainStatus: "On Road" }),
+        };
       case "Ready for Pickup":
         return currentEntry.techStatus === "Back in Van"
           ? { label: "Mark On Road", run: () => quickPatchMutation.mutate({ techStatus: "On Road" }) }
@@ -1602,7 +1570,7 @@ function UnifiedPanel({
               <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{currentEntry.techLdap}</span>
             )}
             {isEdit && currentEntry?.sourceDecisionId && (
-              <span style={{ display: "inline-block", marginLeft: 8, fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: colors.red, backgroundColor: colors.redLight, padding: "2px 8px", borderRadius: 5 }}>
+              <span style={{ display: "inline-block", marginLeft: 8, fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: colors.inkSoft, backgroundColor: colors.surface, border: `1px solid ${colors.rule}`, padding: "2px 8px", borderRadius: 5 }}>
                 Denied
               </span>
             )}
@@ -1618,7 +1586,6 @@ function UnifiedPanel({
             {([
               { key: "details" as const, label: "Details" },
               { key: "tech_outreach" as const, label: `Tech Outreach${techOutreachQuery.data?.length ? ` (${techOutreachQuery.data.length})` : ""}` },
-              { key: "shop_contact" as const, label: `Shop Contact${shopContactQuery.data?.length ? ` (${shopContactQuery.data.length})` : ""}` },
               { key: "punches" as const, label: "Punch History" },
               { key: "ams" as const, label: "AMS" },
             ]).map((t) => {
@@ -1634,7 +1601,7 @@ function UnifiedPanel({
                     color: active ? colors.accent : colors.inkSoft,
                     background: "none",
                     border: "none",
-                    borderBottom: `2px solid ${active ? colors.accent : "transparent"}`,
+                    borderBottom: `1px solid ${active ? colors.accent : "transparent"}`,
                     padding: "12px 14px",
                     cursor: "pointer",
                     marginBottom: -1,
@@ -1666,18 +1633,6 @@ function UnifiedPanel({
               legacyNotes={legacyNotesQuery.data?.notes ?? null}
               onChanged={invalidateTimelines}
             />
-          ) : isEdit && panelTab === "shop_contact" ? (
-            <ShopContactTab
-              entries={shopContactQuery.data ?? []}
-              isLoading={shopContactQuery.isLoading}
-              trackerId={entry!.id}
-              currentMain={currentEntry?.mainStatus ?? ""}
-              currentSub={currentEntry?.subStatus ?? ""}
-              currentTechStatus={currentEntry?.techStatus ?? ""}
-              currentEta={currentEntry?.shopEtaOnRoad as any ?? ""}
-              legacyNotes={legacyNotesQuery.data?.notes ?? null}
-              onChanged={invalidateTimelines}
-            />
           ) : (
           <>
           {isEdit && currentEntry && (
@@ -1686,21 +1641,41 @@ function UnifiedPanel({
                 Case Status
               </SectionHeading>
 
-              <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                  <div>
-                    <div style={labelStyle}>Stage</div>
-                    <StagePill stage={currentEntry.stage} />
-                  </div>
-                  {compactWorkflowAction ? (
-                    <button onClick={compactWorkflowAction.run} style={compactActionBtnStyle}>
-                      {compactWorkflowAction.label}
-                    </button>
-                  ) : null}
+              <div style={{ padding: 16, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                  <div style={labelStyle}>Stage</div>
+                  <StagePill stage={currentEntry.stage} />
                 </div>
-                <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, marginBottom: compactWorkflowAction ? 14 : 0 }}>
                   {workflowNextStep}
                 </div>
+                {compactWorkflowAction ? (
+                  <button onClick={compactWorkflowAction.run} style={compactActionBtnStyle}>
+                    {compactWorkflowAction.label} <span aria-hidden>→</span>
+                  </button>
+                ) : null}
+                {currentEntry.section === "In Progress" && currentEntry.routeCleared ? (
+                  <button
+                    onClick={() => quickPatchMutation.mutate({ routeCleared: false })}
+                    disabled={quickPatchMutation.isPending}
+                    style={{
+                      fontFamily: fonts.dmSans,
+                      fontWeight: 500,
+                      fontSize: 13,
+                      color: colors.ink,
+                      backgroundColor: colors.background,
+                      border: `1px solid ${colors.rule}`,
+                      borderRadius: 8,
+                      padding: "10px 14px",
+                      cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
+                      opacity: quickPatchMutation.isPending ? 0.6 : 1,
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                  >
+                    Route Turned Back On
+                  </button>
+                ) : null}
               </div>
             </>
           )}
@@ -1839,45 +1814,6 @@ function UnifiedPanel({
             </div>
           </div>
 
-          {/* ── Action Log (edit mode only) ── */}
-          {isEdit && (
-            <>
-              <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-                Action Log
-              </SectionHeading>
-
-              <div style={{ marginBottom: 12 }}>
-                <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-                  {actionsLoading ? "Loading…" : `${actionLog.length} historical action${actionLog.length !== 1 ? "s" : ""}`}
-                </span>
-              </div>
-
-              {actionLog.length === 0 && !actionsLoading ? (
-                <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No historical action rows on this case.</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  {actionLog.map((a) => (
-                    <div key={a.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: a.notes ? 6 : 0 }}>
-                        <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.accent, backgroundColor: "#EFF4FF", padding: "2px 8px", borderRadius: 5 }}>
-                          {RT_ACTION_TYPE_LABELS[a.actionType] ?? a.actionType}
-                        </span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4, color: colors.inkMuted }}>
-                          <Clock size={12} />
-                          <span style={{ fontFamily: fonts.dmSans, fontSize: 11 }}>
-                            {new Date(a.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                          </span>
-                        </div>
-                      </div>
-                      {a.notes && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0" }}>{a.notes}</p>}
-                      {a.performedByName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {a.performedByName}</p>}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </>
-          )}
-
           {/* ── Decision Summary (only if sourceDecisionId exists) ── */}
           {hasDecision && decision && (
             <>
@@ -1976,43 +1912,45 @@ type SortColumn =
 
 // ─── Stage pill ───────────────────────────────────────────────────────────────
 
-const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
-  "Needs Tech Call":          { fg: "#FFFFFF", bg: "#EF4444" },
-  "BYOV Decision":            { fg: "#FFFFFF", bg: "#F97316" },
-  "Awaiting Rental Return":   { fg: "#000000", bg: "#F5A623" },
-  "Awaiting Route Clear":     { fg: "#000000", bg: "#FBBF24" },
-  "In Repair":                { fg: "#FFFFFF", bg: "#3B82F6" },
-  "Ready for Pickup":         { fg: "#FFFFFF", bg: "#0EA5E9" },
-  "Complete":                 { fg: "#FFFFFF", bg: "#22C55E" },
-};
+// Stages that mean the case is in motion or done — these get a green pill.
+// Action-Needed stages render as plain dark text.
+const PROGRESSING_STAGES = new Set<string>([
+  "In Repair",
+  "Ready for Pickup",
+  "Complete",
+]);
 
 function StagePill({ stage }: { stage: string }) {
   if (!stage) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = STAGE_COLORS[stage] ?? { fg: colors.inkSoft, bg: "#CBD5E1" };
-  return (
-    <span style={{
-      fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-      color: c.bg, backgroundColor: tintColor(c.bg, 0.12),
-      borderLeft: `3px solid ${c.bg}`,
-      borderRadius: 4, padding: "5px 8px",
-      display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
-    }}>
-      {stage}
-    </span>
-  );
+  if (PROGRESSING_STAGES.has(stage)) {
+    return (
+      <span className="inline-flex items-center px-2 py-0.5 whitespace-nowrap" style={GREEN_PILL_STYLE}>
+        {stage}
+      </span>
+    );
+  }
+  return <span style={PLAIN_TEXT_STYLE}>{stage}</span>;
 }
 
 function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
-  if (flags?.red?.active) {
-    return <span title={flags.red.tooltip ?? "Red flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#B91C1C" }}>Red</span>;
-  }
-  if (flags?.yellow?.active) {
-    return <span title={flags.yellow.tooltip ?? "Yellow flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#B45309" }}>Yellow</span>;
-  }
-  if (flags?.blue?.active) {
-    return <span title={flags.blue.tooltip ?? "Blue flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#1D4ED8" }}>Blue</span>;
-  }
-  return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
+  const active = flags?.red?.active
+    ? { label: "Red", tooltip: flags.red.tooltip ?? "Red flag", dot: colors.red }
+    : flags?.yellow?.active
+    ? { label: "Yellow", tooltip: flags.yellow.tooltip ?? "Yellow flag", dot: colors.amber }
+    : flags?.blue?.active
+    ? { label: "Blue", tooltip: flags.blue.tooltip ?? "Blue flag", dot: colors.blue }
+    : null;
+  if (!active) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
+  return (
+    <span
+      title={active.tooltip}
+      className="inline-flex items-center gap-1.5"
+      style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.ink }}
+    >
+      <span style={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", backgroundColor: active.dot }} />
+      {active.label}
+    </span>
+  );
 }
 
 // ─── Tech Punch Status types ──────────────────────────────────────────────────
@@ -2084,7 +2022,7 @@ function PunchStatusCell({ ldap, status, section }: { ldap: string | null; statu
       title={tooltip}
     >
       <span style={{
-        fontFamily: fonts.dmSans, fontWeight: 700, fontSize: 11,
+        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
         color: palette.fg,
         display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
       }}>
@@ -2480,17 +2418,13 @@ export default function RentalRepairTracker() {
       </div>
 
       {(() => {
-        // Section row tint (light bg). Red dominates over yellow over blue.
-        const flagBg = (entry: RepairTrackerEntry): string => {
-          if (entry.flags?.red?.active) return colors.redLight;
-          if (entry.flags?.yellow?.active) return colors.amberLight;
-          if (entry.flags?.blue?.active) return colors.blueLight;
-          return "transparent";
-        };
+        // Row backgrounds stay neutral — flag semantics come from the FlagIcon dot.
+        const flagBg = (_entry: RepairTrackerEntry): string => "transparent";
+        // Section headers are neutral; the green pill on stage conveys progress.
         const sectionMeta: Record<"Action Needed" | "In Progress" | "Completed", { color: string; bg: string }> = {
-          "Action Needed": { color: colors.redDeep,   bg: colors.redLight },
-          "In Progress":   { color: colors.blueDeep,  bg: colors.blueLight },
-          "Completed":     { color: colors.greenDeep, bg: colors.greenLight },
+          "Action Needed": { color: colors.ink, bg: colors.surface },
+          "In Progress":   { color: colors.ink, bg: colors.surface },
+          "Completed":     { color: colors.ink, bg: colors.surface },
         };
         const sortRows = (rows: RepairTrackerEntry[]) => [...rows].sort((a, b) => {
           const dir = sortDirection === "asc" ? 1 : -1;
@@ -2531,7 +2465,7 @@ export default function RentalRepairTracker() {
               onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = hoverBg)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = baseBg)}
             >
-                  <td style={{ ...tdStyle, borderLeft: `4px solid ${sectionAccent}` }}>
+                  <td style={{ ...tdStyle, borderLeft: `3px solid ${colors.rule}` }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                       <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
                         {entry.techName ?? "—"}

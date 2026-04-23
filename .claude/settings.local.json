@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\nContent-Type: %{content_type}\\\\n\" http://localhost:5000/api/vrm/active-rentals?refresh=1 --max-time 10)"
+    ],
+    "additionalDirectories": [
+      "/home/runner/workspace",
+      "/home/runner/workspace/.claude"
+    ]
+  }
+}

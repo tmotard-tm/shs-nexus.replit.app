@@ -86,6 +86,7 @@ export interface ActiveRentalRow {
   smsSentAt: Date | string | null;
   hasVrmContext: boolean;
   contextStatus: "matched" | "no_ldap" | "no_vrm_match";
+  ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | null;
   liveTruckStatus: string | null;
   liveSource: string | null;
 }
@@ -170,6 +171,36 @@ async function findFleetScopeTruckForTracker(
   );
 }
 
+function normalizeNameForMatch(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return String(raw)
+    .toUpperCase()
+    .replace(/[.,'"-]/g, " ")
+    .replace(/\b(JR|SR|II|III|IV|V)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function levenshtein(a: string, b: string): number {
+  if (a === b) return 0;
+  const m = a.length;
+  const n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  const dp = new Array(n + 1);
+  for (let j = 0; j <= n; j++) dp[j] = j;
+  for (let i = 1; i <= m; i++) {
+    let prev = dp[0];
+    dp[0] = i;
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j];
+      dp[j] = a[i - 1] === b[j - 1] ? prev : Math.min(prev, dp[j], dp[j - 1]) + 1;
+      prev = tmp;
+    }
+  }
+  return dp[n];
+}
+
 export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow[]> {
   const fleetTrucks = await fleetScopeStorage.getAllTrucks();
   const techRows = await db.select().from(vrmTechs);
@@ -177,8 +208,62 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     techRows.map((tech) => [String(tech.ldap || "").trim().toUpperCase(), tech]),
   );
 
+  // Build a name → ldap lookup so we can recover LDAPs for rentals that arrive
+  // from Fleet Scope without enterprise_id populated. vrm_techs wins over tpms
+  // when the same normalized name appears in both.
+  const nameToLdap = new Map<string, { ldap: string; source: "vrm_techs" | "tpms" }>();
+  for (const tech of techRows) {
+    const key = normalizeNameForMatch(tech.name);
+    if (key && !nameToLdap.has(key)) {
+      nameToLdap.set(key, { ldap: String(tech.ldap).trim().toUpperCase(), source: "vrm_techs" });
+    }
+  }
+  const tpmsResult = await db.execute(sql`
+    SELECT enterprise_id, first_name, last_name
+    FROM tpms_tech_profiles
+    WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+  `);
+  const tpmsRows = (tpmsResult.rows ?? []) as Array<{
+    enterprise_id: string;
+    first_name: string | null;
+    last_name: string | null;
+  }>;
+  for (const raw of tpmsRows) {
+    const key = normalizeNameForMatch(`${raw.first_name ?? ""} ${raw.last_name ?? ""}`);
+    if (key && !nameToLdap.has(key)) {
+      nameToLdap.set(key, { ldap: String(raw.enterprise_id).trim().toUpperCase(), source: "tpms" });
+    }
+  }
+
   return fleetTrucks.map((row) => {
-    const ldap = normalizeLdap(row.enterpriseId);
+    let ldap = normalizeLdap(row.enterpriseId);
+    let ldapMatchSource: ActiveRentalRow["ldapMatchSource"] = ldap ? "fleet" : null;
+
+    if (!ldap && row.techName) {
+      const key = normalizeNameForMatch(row.techName);
+      if (key) {
+        const exact = nameToLdap.get(key);
+        if (exact) {
+          ldap = exact.ldap;
+          ldapMatchSource = "exact_name";
+        } else {
+          let best: { key: string; dist: number } | null = null;
+          for (const candKey of nameToLdap.keys()) {
+            if (Math.abs(candKey.length - key.length) > 1) continue;
+            const d = levenshtein(candKey, key);
+            if (d <= 1 && (!best || d < best.dist)) {
+              best = { key: candKey, dist: d };
+              if (d === 0) break;
+            }
+          }
+          if (best) {
+            ldap = nameToLdap.get(best.key)!.ldap;
+            ldapMatchSource = "fuzzy_name";
+          }
+        }
+      }
+    }
+
     const tech = ldap ? techByLdap.get(ldap) ?? null : null;
     const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
       ? "no_ldap"
@@ -221,6 +306,7 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       smsSentAt: tech?.smsSentAt ?? null,
       hasVrmContext: !!tech,
       contextStatus,
+      ldapMatchSource,
       liveTruckStatus: row.status ?? null,
       liveSource: "fs_trucks",
     };
