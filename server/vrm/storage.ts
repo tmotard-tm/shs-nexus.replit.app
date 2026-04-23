@@ -86,7 +86,7 @@ export interface ActiveRentalRow {
   smsSentAt: Date | string | null;
   hasVrmContext: boolean;
   contextStatus: "matched" | "no_ldap" | "no_vrm_match";
-  ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | null;
+  ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null;
   liveTruckStatus: string | null;
   liveSource: string | null;
 }
@@ -219,7 +219,7 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     }
   }
   const tpmsResult = await db.execute(sql`
-    SELECT enterprise_id, first_name, last_name
+    SELECT enterprise_id, first_name, last_name, truck_no
     FROM tpms_tech_profiles
     WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
   `);
@@ -227,11 +227,23 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     enterprise_id: string;
     first_name: string | null;
     last_name: string | null;
+    truck_no: string | null;
   }>;
   for (const raw of tpmsRows) {
     const key = normalizeNameForMatch(`${raw.first_name ?? ""} ${raw.last_name ?? ""}`);
     if (key && !nameToLdap.has(key)) {
       nameToLdap.set(key, { ldap: String(raw.enterprise_id).trim().toUpperCase(), source: "tpms" });
+    }
+  }
+
+  // Truck-number → ldap map as a last-resort fallback. Only used when tech_name
+  // is missing on the Fleet Scope row — if a name is present but didn't match,
+  // trust the name over a possibly-stale truck assignment in tpms.
+  const truckToLdap = new Map<string, string>();
+  for (const raw of tpmsRows) {
+    const key = normalizeTruckNumber(raw.truck_no);
+    if (key && !truckToLdap.has(key)) {
+      truckToLdap.set(key, String(raw.enterprise_id).trim().toUpperCase());
     }
   }
 
@@ -248,7 +260,8 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
           ldapMatchSource = "exact_name";
         } else {
           let best: { key: string; dist: number } | null = null;
-          for (const candKey of nameToLdap.keys()) {
+          const candidates = Array.from(nameToLdap.keys());
+          for (const candKey of candidates) {
             if (Math.abs(candKey.length - key.length) > 1) continue;
             const d = levenshtein(candKey, key);
             if (d <= 1 && (!best || d < best.dist)) {
@@ -261,6 +274,16 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
             ldapMatchSource = "fuzzy_name";
           }
         }
+      }
+    }
+
+    // Truck-number fallback: only when tech_name was missing on the Fleet Scope row.
+    if (!ldap && !(row.techName ?? "").trim()) {
+      const truckKey = normalizeTruckNumber(row.truckNumber);
+      const byTruck = truckKey ? truckToLdap.get(truckKey) : null;
+      if (byTruck) {
+        ldap = byTruck;
+        ldapMatchSource = "truck_number";
       }
     }
 
