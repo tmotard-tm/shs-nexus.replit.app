@@ -15148,7 +15148,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
 
-      const fromDigits = From.replace(/\D/g, '').slice(-10);
+      const fromDigits = (From as string).replace(/\D/g, '').slice(-10);
 
       const decommVehicles = await getDb()
         .select({ truckNumber: decommissioningVehicles.truckNumber, mobilePhone: decommissioningVehicles.mobilePhone, nearestTechPhone: decommissioningVehicles.nearestTechPhone, nearestTechName: decommissioningVehicles.nearestTechName, fullName: decommissioningVehicles.fullName })
@@ -15199,6 +15199,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         direction: 'inbound',
         body: Body || '',
         status: mediaError ? 'media_failed' : 'received',
+        twilioSid: MessageSid || null,
         mediaUrl,
         mediaType,
       }).returning();
@@ -15211,6 +15212,84 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.error("[DecommMsg] Webhook error:", error);
       res.set("Content-Type", "text/xml");
       res.send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+    }
+  });
+
+  // POST /api/fs/decomm-messages/:id/retry-media — re-fetch MMS media from Twilio for a media_failed row
+  app.post("/decomm-messages/:id/retry-media", requireFsAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [row] = await getDb().select().from(decommMessages).where(eq(decommMessages.id, id)).limit(1);
+      if (!row) return res.status(404).json({ message: "Message not found" });
+      if (row.direction !== 'inbound') return res.status(400).json({ message: "Only inbound messages can have media retried" });
+      if (row.mediaUrl) return res.status(400).json({ message: "Message already has media" });
+
+      const accountSid = process.env.FS_TWILIO_ACCOUNT_SID;
+      const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
+      if (!accountSid || !authToken) return res.status(500).json({ message: "Twilio credentials not configured" });
+
+      const twilioClient = twilio(accountSid, authToken);
+
+      // Find the originating Twilio MessageSid: prefer stored twilioSid, else search by phone+timestamp
+      let messageSid: string | null = row.twilioSid || null;
+      if (!messageSid) {
+        if (!row.sentAt) return res.status(400).json({ message: "Cannot recover: no timestamp on message" });
+        const center = new Date(row.sentAt).getTime();
+        // Twilio's DateSent filter is date-precision (YYYY-MM-DD), so widen by 1 day on each side
+        // to safely span midnight; we narrow back down locally below.
+        const after = new Date(center - 24 * 60 * 60 * 1000);
+        const before = new Date(center + 24 * 60 * 60 * 1000);
+        const fsTwilioFrom = process.env.FS_TWILIO_PHONE_NUMBER;
+        const candidates = await twilioClient.messages.list({
+          from: row.contactPhone,
+          to: fsTwilioFrom,
+          dateSentAfter: after,
+          dateSentBefore: before,
+          limit: 100,
+        });
+        // Narrow to ±10 minutes from the row's stored timestamp, prefer ones with media.
+        const TEN_MIN = 10 * 60 * 1000;
+        const near = candidates.filter(m => {
+          const d = new Date(m.dateSent || m.dateCreated).getTime();
+          return Math.abs(d - center) <= TEN_MIN;
+        });
+        const withMedia = near.filter(m => parseInt((m.numMedia as any) || '0', 10) > 0);
+        const pool = withMedia.length > 0 ? withMedia : near;
+        if (pool.length === 0) {
+          return res.status(404).json({ message: "No matching Twilio message found within ±10 minutes of this row's timestamp" });
+        }
+        pool.sort((a, b) => Math.abs(new Date(a.dateSent || a.dateCreated).getTime() - center) - Math.abs(new Date(b.dateSent || b.dateCreated).getTime() - center));
+        messageSid = pool[0].sid;
+      }
+
+      const mediaList = await twilioClient.messages(messageSid).media.list({ limit: 10 });
+      if (mediaList.length === 0) {
+        return res.status(404).json({ message: "Twilio reports no media on this message (it may have expired or never had any)" });
+      }
+
+      const media = mediaList[0];
+      const mediaContentType = media.contentType || 'application/octet-stream';
+      const mediaResourceUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${media.sid}`;
+
+      const result = await downloadTwilioMedia(mediaResourceUrl, mediaContentType, 'mms/decomm');
+
+      const [updated] = await getDb()
+        .update(decommMessages)
+        .set({
+          mediaUrl: result.storageKey,
+          mediaType: result.mediaType,
+          status: 'received',
+          twilioSid: messageSid,
+        })
+        .where(eq(decommMessages.id, id))
+        .returning();
+
+      console.log(`[DecommMsg] Retried media for ${id} via Twilio SID ${messageSid} -> ${result.storageKey}`);
+      broadcastMessage(row.truckNumber, { message: updated, source: 'decomm' });
+      res.json(updated);
+    } catch (err: any) {
+      console.error('[DecommMsg] Retry media failed:', err);
+      res.status(500).json({ message: err.message || 'Retry failed' });
     }
   });
 
