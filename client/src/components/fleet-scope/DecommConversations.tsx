@@ -806,6 +806,15 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                           Download attachment ({msg.mediaType?.split('/')[1] || 'file'})
                         </a>
                       )}
+                      {!msg.mediaUrl && msg.status === 'media_failed' && (
+                        <div className={`inline-flex items-center gap-1.5 text-xs mb-1 px-2 py-1 rounded border italic ${
+                          msg.direction === "outbound"
+                            ? "border-primary-foreground/30 text-primary-foreground/80"
+                            : "border-amber-300 bg-amber-50 text-amber-800"
+                        }`}>
+                          📷 Photo attached but failed to download — ask sender to resend
+                        </div>
+                      )}
                       {msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
                       <div className={`flex items-center gap-1 mt-1 ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
                         <span className="text-xs opacity-60">

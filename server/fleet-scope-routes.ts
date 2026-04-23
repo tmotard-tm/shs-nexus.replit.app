@@ -14942,9 +14942,47 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  async function downloadTwilioMedia(mediaUrl: string, contentType: string, prefix: string): Promise<{ storageKey: string; mediaType: string }> {
+  let cachedStorageClient: any = null;
+  async function getStorageClient(): Promise<any> {
+    if (cachedStorageClient) return cachedStorageClient;
     const { Client } = await import("@replit/object-storage");
-    const client = new Client();
+    let lastErr: any = null;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const c = new Client();
+        const probe = await c.list();
+        if (probe && (probe.ok || Array.isArray(probe.value))) {
+          cachedStorageClient = c;
+          return c;
+        }
+        lastErr = new Error('Storage client probe returned not-ok');
+      } catch (e: any) {
+        lastErr = e;
+        const delay = 200 * Math.pow(2.5, attempt - 1);
+        console.warn(`[MMS] Storage client init attempt ${attempt}/3 failed: ${e.message} — retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw new Error(`Storage client init failed after 3 attempts: ${lastErr?.message || 'unknown'}`);
+  }
+
+  async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+    let lastErr: any = null;
+    for (let i = 1; i <= attempts; i++) {
+      try {
+        return await fn();
+      } catch (e: any) {
+        lastErr = e;
+        if (i === attempts) break;
+        const delay = 200 * Math.pow(2.5, i - 1);
+        console.warn(`[MMS] ${label} attempt ${i}/${attempts} failed: ${e.message} — retrying in ${delay}ms`);
+        await new Promise(r => setTimeout(r, delay));
+      }
+    }
+    throw lastErr;
+  }
+
+  async function downloadTwilioMedia(mediaUrl: string, contentType: string, prefix: string): Promise<{ storageKey: string; mediaType: string }> {
     const accountSid = process.env.FS_TWILIO_ACCOUNT_SID || '';
     const authToken = process.env.FS_TWILIO_AUTH_TOKEN || '';
 
@@ -14959,12 +14997,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       throw new Error(`Invalid media URL: ${mediaUrl}`);
     }
 
-    const resp = await fetch(mediaUrl, {
-      headers: { 'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64') },
-      redirect: 'follow',
+    const buffer = await withRetry('twilio-fetch', async () => {
+      const resp = await fetch(mediaUrl, {
+        headers: { 'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64') },
+        redirect: 'follow',
+      });
+      if (!resp.ok) throw new Error(`Failed to download media from Twilio: ${resp.status}`);
+      return Buffer.from(await resp.arrayBuffer());
     });
-    if (!resp.ok) throw new Error(`Failed to download media from Twilio: ${resp.status}`);
-    const buffer = Buffer.from(await resp.arrayBuffer());
 
     const ext = contentType.includes('jpeg') || contentType.includes('jpg') ? 'jpg'
       : contentType.includes('png') ? 'png'
@@ -14975,7 +15015,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       : 'bin';
 
     const storageKey = `${prefix}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
-    await client.uploadFromBytes(storageKey, buffer);
+    await withRetry('storage-upload', async () => {
+      const client = await getStorageClient();
+      const r = await client.uploadFromBytes(storageKey, buffer);
+      if (r && r.ok === false) throw new Error(`Storage upload returned not-ok: ${r.error?.message || 'unknown'}`);
+      return r;
+    });
     console.log(`[MMS] Stored media: ${storageKey} (${contentType}, ${buffer.length} bytes)`);
     return { storageKey, mediaType: contentType };
   }
@@ -15015,6 +15060,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       let mediaUrl: string | null = null;
       let mediaType: string | null = null;
+      let mediaError = false;
 
       if (numMedia > 0) {
         const twilioMediaUrl = req.body['MediaUrl0'];
@@ -15026,6 +15072,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             mediaType = result.mediaType;
           } catch (err: any) {
             console.error('[RegMsg] Failed to download MMS media:', err.message);
+            mediaError = true;
           }
         }
       }
@@ -15047,7 +15094,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         techPhone: From,
         direction: 'inbound',
         body: Body || '',
-        status: 'received',
+        status: mediaError ? 'media_failed' : 'received',
         twilioSid: MessageSid || null,
         autoTriggered: false,
         mediaUrl,
@@ -15084,6 +15131,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       let mediaUrl: string | null = null;
       let mediaType: string | null = null;
+      let mediaError = false;
 
       if (numMedia > 0) {
         const twilioMediaUrl = req.body['MediaUrl0'];
@@ -15095,6 +15143,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             mediaType = result.mediaType;
           } catch (err: any) {
             console.error('[DecommMsg] Failed to download MMS media:', err.message);
+            mediaError = true;
           }
         }
       }
@@ -15149,7 +15198,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         contactPhone: From,
         direction: 'inbound',
         body: Body || '',
-        status: 'received',
+        status: mediaError ? 'media_failed' : 'received',
         mediaUrl,
         mediaType,
       }).returning();
