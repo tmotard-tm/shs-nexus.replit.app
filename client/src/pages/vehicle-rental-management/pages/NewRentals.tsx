@@ -625,6 +625,7 @@ export default function NewRentals() {
     onSuccess: () => {
       setFormRow(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
     },
   });
 

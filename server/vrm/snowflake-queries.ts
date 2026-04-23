@@ -484,20 +484,16 @@ export interface TechPunchRow {
   punchDate: string;            // YYYY-MM-DD
   punchInTs: string | null;     // ISO timestamp of first IN that day (paired)
   punchOutTs: string | null;    // ISO timestamp of last OUT that day (paired)
+  latestRawPunchLabel: string | null; // raw PUNCH_TYP of the latest punch that day
 }
 
 /**
  * Fetch up to N days of tech time punches from
  * IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
  *
- * Actual source schema (verified 2026-04-21):
- *   ENT_ID    TEXT  — employee LDAP id
- *   RTE_DT    DATE  — route date (the day of the punch)
- *   PUNCH_TS  TIME  — time of day of the punch
- *   PUNCH_TYP TEXT  — 'IN' or 'OUT' (one row per punch event)
- *
- * We pivot to one row per (ENT_ID, RTE_DT) with first-IN / last-OUT for that
- * day. Returned rows are ordered most-recent-first. Empty array if no data.
+ * We pivot to one row per (ENT_ID, RTE_DT) with first/last punch times for the
+ * day, plus the raw PUNCH_TYP of the latest punch for UI context. Returned rows
+ * are ordered most-recent-first. Empty array if no data.
  */
 export async function fetchTechPunchHistory(
   ldaps: string[],
@@ -516,18 +512,62 @@ export async function fetchTechPunchHistory(
   //   "last  START ORDER of the day" → punchOutTs (proxy: last activity)
   // See follow-up ticket logged in plan changelog.
   const rows = (await svc.executeQuery(`
+    WITH base AS (
+      SELECT
+        UPPER(ENT_ID)                            AS ldap,
+        RTE_DT                                   AS route_date,
+        PUNCH_TS                                 AS punch_ts,
+        PUNCH_TYP                                AS punch_type
+      FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+      WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
+        AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+        AND PUNCH_TS IS NOT NULL
+    ),
+    daily AS (
+      SELECT
+        ldap,
+        route_date,
+        TO_CHAR(MIN(punch_ts), 'HH24:MI:SS')     AS in_time,
+        TO_CHAR(MAX(punch_ts), 'HH24:MI:SS')     AS out_time
+      FROM base
+      GROUP BY ldap, route_date
+    ),
+    latest AS (
+      SELECT
+        ldap,
+        route_date,
+        punch_type
+      FROM (
+        SELECT
+          ldap,
+          route_date,
+          punch_type,
+          ROW_NUMBER() OVER (
+            PARTITION BY ldap, route_date
+            ORDER BY punch_ts DESC
+          ) AS rn
+        FROM base
+      ) ranked
+      WHERE rn = 1
+    )
     SELECT
-      UPPER(ENT_ID)                              AS "ldap",
-      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
-      TO_CHAR(MIN(PUNCH_TS), 'HH24:MI:SS')       AS "_inTime",
-      TO_CHAR(MAX(PUNCH_TS), 'HH24:MI:SS')       AS "_outTime"
-    FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-    WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
-      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-      AND PUNCH_TS IS NOT NULL
-    GROUP BY UPPER(ENT_ID), RTE_DT
-    ORDER BY RTE_DT DESC
-  `)) as Array<{ ldap: string; punchDate: string; _inTime: string | null; _outTime: string | null }>;
+      daily.ldap                                 AS "ldap",
+      TO_CHAR(daily.route_date, 'YYYY-MM-DD')    AS "punchDate",
+      daily.in_time                              AS "_inTime",
+      daily.out_time                             AS "_outTime",
+      latest.punch_type                          AS "latestRawPunchLabel"
+    FROM daily
+    LEFT JOIN latest
+      ON latest.ldap = daily.ldap
+     AND latest.route_date = daily.route_date
+    ORDER BY daily.route_date DESC
+  `)) as Array<{
+    ldap: string;
+    punchDate: string;
+    _inTime: string | null;
+    _outTime: string | null;
+    latestRawPunchLabel: string | null;
+  }>;
 
   // Combine date + time into ISO strings for downstream consumers.
   return rows.map((r) => ({
@@ -535,6 +575,7 @@ export async function fetchTechPunchHistory(
     punchDate: r.punchDate,
     punchInTs: r._inTime ? `${r.punchDate}T${r._inTime}` : null,
     punchOutTs: r._outTime ? `${r.punchDate}T${r._outTime}` : null,
+    latestRawPunchLabel: r.latestRawPunchLabel ?? null,
   }));
 }
 

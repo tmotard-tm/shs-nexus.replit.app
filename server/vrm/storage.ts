@@ -19,6 +19,7 @@ import {
   vrmRepairTrackerTechOutreach,
   vrmRepairTrackerShopContact,
   type VrmTech,
+  type VrmRentalDecision,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -35,6 +36,8 @@ import {
   deriveFlags,
   isArchived,
 } from "../../shared/repair-tracker-stage";
+import { fleetScopeStorage } from "../fleet-scope-storage";
+import type { Truck as FleetScopeTruck, InsertTruck as InsertFleetScopeTruck } from "../../shared/fleet-scope-schema";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
 
@@ -47,6 +50,62 @@ export interface TechListFilters {
   page?: number;
   pageSize?: number;
 }
+
+export interface ActiveRentalRow {
+  id: string | null;
+  truckNumber: string | null;
+  ldap: string | null;
+  name: string;
+  market: string | null;
+  primaryZip: string | null;
+  tenureMonths: number | null;
+  gate1DaysInRental: number | null;
+  gate1Completes: number | null;
+  gate1TotalRevenue: string | null;
+  gate1LaborDirect: string | null;
+  gate1LaborBenefits: string | null;
+  gate1PartsCogs: string | null;
+  gate1PartsShipping: string | null;
+  gate1TruckExpense: string | null;
+  gate1PptProfit: string | null;
+  gate1FuelEst: string | null;
+  gate1RentalCost: string | null;
+  gate1AdjustedNet: string | null;
+  gate1PayrollCost: string | null;
+  gate1Classification: string | null;
+  gate2Exempt: boolean;
+  gate2WeightedScore: string | null;
+  newHireExempt: boolean;
+  dcaReviewOutcome: string | null;
+  currentStatus: string;
+  createdAt: Date | string | null;
+  rentalStartDate: Date | string | null;
+  outreachFlagged: boolean;
+  returnedRental: boolean;
+  escalationPath: string | null;
+  smsSentAt: Date | string | null;
+  hasVrmContext: boolean;
+  contextStatus: "matched" | "no_ldap" | "no_vrm_match";
+  liveTruckStatus: string | null;
+  liveSource: string | null;
+}
+
+type RepairTrackerFleetScopeSyncInput = {
+  id: string;
+  truckNumber: string | null;
+  techLdap: string | null;
+  mainStatus: string | null;
+  subStatus: string | null;
+  techStatus: string | null;
+  repairShopAddress: string | null;
+  repairShopPhone: string | null;
+  rentalReturned: string | null;
+};
+
+type RepairTrackerFleetScopeChangedFields = Partial<Record<
+  "mainStatus" | "subStatus" | "techStatus" | "repairShopAddress" | "repairShopPhone" | "rentalReturned",
+  boolean
+>>;
 
 export async function listTechs(filters: TechListFilters = {}) {
   const { status, market, gateClass, search, page = 1, pageSize = 25 } = filters;
@@ -89,6 +148,156 @@ export async function listTechs(filters: TechListFilters = {}) {
   ]);
 
   return { rows, total: totalResult[0]?.count ?? 0 };
+}
+
+function normalizeTruckNumber(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim().toUpperCase().replace(/^0+/, "");
+  return normalized || null;
+}
+
+async function findFleetScopeTruckForTracker(
+  input: Pick<RepairTrackerFleetScopeSyncInput, "truckNumber" | "techLdap">,
+): Promise<FleetScopeTruck | null> {
+  const normalizedTruck = normalizeTruckNumber(input.truckNumber);
+  const normalizedLdap = normalizeLdap(input.techLdap);
+  if (!normalizedTruck && !normalizedLdap) return null;
+
+  const allTrucks = await fleetScopeStorage.getAllTrucks();
+  return (
+    allTrucks.find((truck) => normalizedTruck && normalizeTruckNumber(truck.truckNumber) === normalizedTruck) ??
+    allTrucks.find((truck) => normalizedLdap && normalizeLdap(truck.enterpriseId) === normalizedLdap) ??
+    null
+  );
+}
+
+export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow[]> {
+  const fleetTrucks = await fleetScopeStorage.getAllTrucks();
+  const techRows = await db.select().from(vrmTechs);
+  const techByLdap = new Map(
+    techRows.map((tech) => [String(tech.ldap || "").trim().toUpperCase(), tech]),
+  );
+
+  return fleetTrucks.map((row) => {
+    const ldap = normalizeLdap(row.enterpriseId);
+    const tech = ldap ? techByLdap.get(ldap) ?? null : null;
+    const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
+      ? "no_ldap"
+      : tech
+      ? "matched"
+      : "no_vrm_match";
+
+    return {
+      id: tech?.id ?? null,
+      truckNumber: row.truckNumber ?? null,
+      ldap,
+      name: row.techName || tech?.name || ldap || row.truckNumber || "Unknown Active Rental",
+      market: tech?.market ?? null,
+      primaryZip: tech?.primaryZip ?? null,
+      tenureMonths: tech?.tenureMonths ?? null,
+      gate1DaysInRental: tech?.gate1DaysInRental ?? null,
+      gate1Completes: tech?.gate1Completes ?? null,
+      gate1TotalRevenue: tech?.gate1TotalRevenue ?? null,
+      gate1LaborDirect: tech?.gate1LaborDirect ?? null,
+      gate1LaborBenefits: tech?.gate1LaborBenefits ?? null,
+      gate1PartsCogs: tech?.gate1PartsCogs ?? null,
+      gate1PartsShipping: tech?.gate1PartsShipping ?? null,
+      gate1TruckExpense: tech?.gate1TruckExpense ?? null,
+      gate1PptProfit: tech?.gate1PptProfit ?? null,
+      gate1FuelEst: tech?.gate1FuelEst ?? null,
+      gate1RentalCost: tech?.gate1RentalCost ?? null,
+      gate1AdjustedNet: tech?.gate1AdjustedNet ?? null,
+      gate1PayrollCost: tech?.gate1PayrollCost ?? null,
+      gate1Classification: tech?.gate1Classification ?? null,
+      gate2Exempt: tech?.gate2Exempt ?? false,
+      gate2WeightedScore: tech?.gate2WeightedScore ?? null,
+      newHireExempt: tech?.newHireExempt ?? false,
+      dcaReviewOutcome: tech?.dcaReviewOutcome ?? null,
+      currentStatus: tech?.currentStatus ?? "in_rental",
+      createdAt: tech?.createdAt ?? null,
+      rentalStartDate: row.rentalStartDate ?? (tech?.rentalStartDate as string | null) ?? null,
+      outreachFlagged: tech?.outreachFlagged ?? false,
+      returnedRental: row.rentalReturned ?? tech?.returnedRental ?? false,
+      escalationPath: tech?.escalationPath ?? null,
+      smsSentAt: tech?.smsSentAt ?? null,
+      hasVrmContext: !!tech,
+      contextStatus,
+      liveTruckStatus: row.status ?? null,
+      liveSource: "fs_trucks",
+    };
+  });
+}
+
+export async function syncRepairTrackerToFleetScope(
+  row: RepairTrackerFleetScopeSyncInput,
+  changedFields: RepairTrackerFleetScopeChangedFields = {},
+): Promise<{ truckId: string; applied: boolean } | null> {
+  const truck = await findFleetScopeTruckForTracker(row);
+  if (!truck) return null;
+
+  const updates: Partial<InsertFleetScopeTruck> = {};
+  let changed = false;
+
+  const nextRepairAddress = row.repairShopAddress?.trim() || null;
+  if (changedFields.repairShopAddress && nextRepairAddress && nextRepairAddress !== (truck.repairAddress ?? null)) {
+    updates.repairAddress = nextRepairAddress;
+    changed = true;
+  }
+
+  const nextRepairPhone = row.repairShopPhone?.trim() || null;
+  if (changedFields.repairShopPhone && nextRepairPhone && nextRepairPhone !== (truck.repairPhone ?? null)) {
+    updates.repairPhone = nextRepairPhone;
+    changed = true;
+  }
+
+  const nextMainStatus = row.mainStatus?.trim() || null;
+  const nextSubStatus = row.subStatus?.trim() || null;
+  if ((changedFields.mainStatus || changedFields.subStatus) && nextMainStatus) {
+    if (nextMainStatus !== (truck.mainStatus ?? null)) {
+      updates.mainStatus = nextMainStatus as InsertFleetScopeTruck["mainStatus"];
+      changed = true;
+    }
+    if (nextSubStatus !== (truck.subStatus ?? null)) {
+      updates.subStatus = nextSubStatus;
+      changed = true;
+    }
+  }
+
+  const rentalReturned = (row.rentalReturned ?? "").trim().toLowerCase();
+  if (changedFields.rentalReturned && rentalReturned === "yes" && truck.rentalReturned !== true) {
+    updates.rentalReturned = true;
+    changed = true;
+  } else if (changedFields.rentalReturned && rentalReturned === "no" && truck.rentalReturned !== false) {
+    updates.rentalReturned = false;
+    changed = true;
+  }
+
+  const techStatus = (row.techStatus ?? "").trim().toLowerCase();
+  if (changedFields.techStatus && techStatus === "back in van" && truck.vanPickedUp !== true) {
+    updates.vanPickedUp = true;
+    changed = true;
+  }
+  if (changedFields.techStatus && techStatus === "on road") {
+    if (truck.vanPickedUp !== true) {
+      updates.vanPickedUp = true;
+      changed = true;
+    }
+    if (truck.mainStatus !== "On Road") {
+      updates.mainStatus = "On Road";
+      changed = true;
+    }
+    if (truck.subStatus !== "Delivered to technician") {
+      updates.subStatus = "Delivered to technician";
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return { truckId: truck.id, applied: false };
+  }
+
+  updates.lastUpdatedBy = "VRM Rental Repair Tracker";
+  await fleetScopeStorage.updateTruck(truck.id, updates);
+  return { truckId: truck.id, applied: true };
 }
 
 export async function getDashboardStats() {
@@ -708,6 +917,151 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
   return ((tpmsResult as any).rowCount ?? 0) + ((fullLogResult as any).rowCount ?? 0);
 }
 
+type RepairTrackerTpmsContext = {
+  truckByLdap: Map<string, string>;
+  phoneByLdap: Map<string, string>;
+  mgrNameByLdap: Map<string, string>;
+  mgrPhoneByLdap: Map<string, string>;
+};
+
+function normalizeLdap(value: string | null | undefined): string | null {
+  const normalized = (value ?? "").trim().toUpperCase();
+  return normalized || null;
+}
+
+async function fetchRepairTrackerTpmsContext(ldaps: Array<string | null | undefined>): Promise<RepairTrackerTpmsContext> {
+  const uniqueLdaps = Array.from(
+    new Set(
+      ldaps
+        .map((ldap) => normalizeLdap(ldap))
+        .filter((ldap): ldap is string => Boolean(ldap)),
+    ),
+  );
+
+  if (!uniqueLdaps.length) {
+    return {
+      truckByLdap: new Map(),
+      phoneByLdap: new Map(),
+      mgrNameByLdap: new Map(),
+      mgrPhoneByLdap: new Map(),
+    };
+  }
+
+  const tpmsRows = await db.execute(sql`
+    SELECT
+      UPPER(t.enterprise_id) AS ldap,
+      t.truck_no,
+      t.mobile_phone,
+      t.tech_manager_name,
+      t.tech_manager_ldap_id,
+      mgr.mobile_phone AS manager_phone
+    FROM tpms_tech_profiles t
+    LEFT JOIN tpms_tech_profiles mgr ON UPPER(mgr.enterprise_id) = UPPER(t.tech_manager_ldap_id)
+    WHERE UPPER(t.enterprise_id) IN (${sql.join(uniqueLdaps.map((ldap) => sql`${ldap}`), sql`, `)})
+  `);
+
+  const rows = ((tpmsRows as any).rows ?? []) as Array<{
+    ldap: string;
+    truck_no: string | null;
+    mobile_phone: string | null;
+    tech_manager_name: string | null;
+    manager_phone: string | null;
+  }>;
+
+  return {
+    truckByLdap: new Map(rows.filter((row) => row.truck_no).map((row) => [row.ldap, row.truck_no as string])),
+    phoneByLdap: new Map(rows.filter((row) => row.mobile_phone).map((row) => [row.ldap, row.mobile_phone as string])),
+    mgrNameByLdap: new Map(rows.filter((row) => row.tech_manager_name).map((row) => [row.ldap, row.tech_manager_name as string])),
+    mgrPhoneByLdap: new Map(rows.filter((row) => row.manager_phone).map((row) => [row.ldap, row.manager_phone as string])),
+  };
+}
+
+function buildRepairTrackerRowsFromDeniedDecisions(
+  decisions: Pick<VrmRentalDecision, "id" | "techLdap" | "techName" | "recommendation" | "createdAt" | "notes" | "byovEnrolled">[],
+  context: RepairTrackerTpmsContext,
+): InsertVrmRepairTracker[] {
+  return decisions.map((decision) => {
+    const ldap = normalizeLdap(decision.techLdap);
+    return {
+      techLdap: decision.techLdap,
+      techName: decision.techName ?? decision.techLdap ?? "Unknown",
+      truckNumber: ldap ? context.truckByLdap.get(ldap) ?? null : null,
+      techPhone: ldap ? context.phoneByLdap.get(ldap) ?? null : null,
+      mainStatus: "Confirming Status",
+      recommendation: decision.recommendation,
+      deniedAt: decision.createdAt,
+      sourceDecisionId: decision.id,
+      notes: decision.notes ?? null,
+      byovEnrolled: decision.byovEnrolled ?? false,
+      rentalReturned: "No",
+      supervisorName: ldap ? context.mgrNameByLdap.get(ldap) ?? null : null,
+      supervisorPhone: ldap ? context.mgrPhoneByLdap.get(ldap) ?? null : null,
+    };
+  });
+}
+
+export async function syncDeniedDecisionToRepairTracker(
+  decisionId: string,
+): Promise<{ imported: boolean; skipped: boolean; reason: string | null; trackerId: string | null }> {
+  const decision = await getRentalDecision(decisionId);
+  if (!decision) {
+    return { imported: false, skipped: true, reason: "decision_not_found", trackerId: null };
+  }
+
+  if ((decision.decision ?? "").toLowerCase() !== "denied") {
+    return { imported: false, skipped: true, reason: "decision_not_denied", trackerId: null };
+  }
+
+  const [existingByDecision] = await db
+    .select({ id: vrmRepairTracker.id, dismissed: vrmRepairTracker.dismissed })
+    .from(vrmRepairTracker)
+    .where(eq(vrmRepairTracker.sourceDecisionId, decision.id))
+    .limit(1);
+
+  if (existingByDecision) {
+    return {
+      imported: false,
+      skipped: true,
+      reason: existingByDecision.dismissed ? "already_dismissed" : "already_exists",
+      trackerId: existingByDecision.id,
+    };
+  }
+
+  const normalizedLdap = normalizeLdap(decision.techLdap);
+  if (normalizedLdap) {
+    const activeRows = await db.execute(sql`
+      SELECT id
+      FROM vrm_repair_tracker
+      WHERE dismissed IS NOT TRUE
+        AND tech_ldap IS NOT NULL
+        AND UPPER(tech_ldap) = ${normalizedLdap}
+      ORDER BY COALESCE(denied_at, created_at) DESC
+      LIMIT 1
+    `);
+
+    const existingActiveId = (((activeRows as any).rows ?? [])[0]?.id as string | undefined) ?? null;
+    if (existingActiveId) {
+      return { imported: false, skipped: true, reason: "active_case_exists", trackerId: existingActiveId };
+    }
+  }
+
+  const context = await fetchRepairTrackerTpmsContext([decision.techLdap]);
+  const [rowToInsert] = buildRepairTrackerRowsFromDeniedDecisions([decision], context);
+  const [inserted] = await db
+    .insert(vrmRepairTracker)
+    .values(rowToInsert)
+    .returning({ id: vrmRepairTracker.id });
+
+  await backfillRepairTrackerTruckNumbers();
+
+  return {
+    imported: true,
+    skipped: false,
+    reason: null,
+    trackerId: inserted?.id ?? null,
+  };
+}
+
 export async function importDeniedToRepairTracker(): Promise<{ imported: number; skipped: number }> {
   const dismissedBlockers = await db
     .select({
@@ -822,52 +1176,8 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   if (newDecisions.length === 0) return { imported: 0, skipped: totalSkipped };
 
-  // Step 5: Look up truck numbers and phone from TPMS for all new LDAPs
-  const allNewLdaps = newDecisions.map((d) => (d.techLdap ?? "").toUpperCase()).filter(Boolean);
-
-  const tpmsRows = allNewLdaps.length
-    ? await db.execute(sql`
-        SELECT
-          UPPER(t.enterprise_id) AS ldap,
-          t.truck_no,
-          t.mobile_phone,
-          t.tech_manager_name,
-          t.tech_manager_ldap_id,
-          mgr.mobile_phone AS manager_phone
-        FROM tpms_tech_profiles t
-        LEFT JOIN tpms_tech_profiles mgr ON UPPER(mgr.enterprise_id) = UPPER(t.tech_manager_ldap_id)
-        WHERE UPPER(t.enterprise_id) IN (${sql.join(allNewLdaps.map((l) => sql`${l}`), sql`, `)})
-      `)
-    : { rows: [] };
-
-  const truckByLdap = new Map<string, string>(
-    ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.truck_no as string]),
-  );
-  const phoneByLdap = new Map<string, string>(
-    ((tpmsRows as any).rows ?? []).map((r: any) => [r.ldap as string, r.mobile_phone as string]),
-  );
-  const mgrNameByLdap = new Map<string, string>(
-    ((tpmsRows as any).rows ?? []).filter((r: any) => r.tech_manager_name).map((r: any) => [r.ldap as string, r.tech_manager_name as string]),
-  );
-  const mgrPhoneByLdap = new Map<string, string>(
-    ((tpmsRows as any).rows ?? []).filter((r: any) => r.manager_phone).map((r: any) => [r.ldap as string, r.manager_phone as string]),
-  );
-
-  const rows: InsertVrmRepairTracker[] = newDecisions.map((d) => ({
-    techLdap: d.techLdap,
-    techName: d.techName ?? d.techLdap ?? "Unknown",
-    truckNumber: truckByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-    techPhone: phoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-    mainStatus: "Confirming Status",
-    recommendation: d.recommendation,
-    deniedAt: d.createdAt,
-    sourceDecisionId: d.id,
-    notes: d.notes ?? null,
-    byovEnrolled: d.byovEnrolled ?? false,
-    rentalReturned: "No",
-    supervisorName: mgrNameByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-    supervisorPhone: mgrPhoneByLdap.get((d.techLdap ?? "").toUpperCase()) ?? null,
-  }));
+  const context = await fetchRepairTrackerTpmsContext(newDecisions.map((decision) => decision.techLdap));
+  const rows = buildRepairTrackerRowsFromDeniedDecisions(newDecisions, context);
 
   await db.insert(vrmRepairTracker).values(rows);
 
@@ -883,6 +1193,26 @@ export async function updateRepairTrackerEntry(id: string, data: Partial<InsertV
     .set({ ...data, updatedAt: new Date() })
     .where(eq(vrmRepairTracker.id, id))
     .returning();
+  if (row) {
+    await syncRepairTrackerToFleetScope({
+      id: row.id,
+      truckNumber: row.truckNumber,
+      techLdap: row.techLdap,
+      mainStatus: row.mainStatus,
+      subStatus: row.subStatus,
+      techStatus: row.techStatus,
+      repairShopAddress: row.repairShopAddress,
+      repairShopPhone: row.repairShopPhone,
+      rentalReturned: row.rentalReturned,
+    }, {
+      mainStatus: data.mainStatus !== undefined,
+      subStatus: data.subStatus !== undefined,
+      techStatus: data.techStatus !== undefined,
+      repairShopAddress: data.repairShopAddress !== undefined,
+      repairShopPhone: data.repairShopPhone !== undefined,
+      rentalReturned: data.rentalReturned !== undefined,
+    });
+  }
   return row ?? null;
 }
 
@@ -952,13 +1282,28 @@ export async function listTechOutreach(repairTrackerId: string) {
 
 export async function addTechOutreach(
   data: InsertVrmRepairTrackerTechOutreach,
-  sideEffect?: { byovStatus?: string | null; byovDecisionDate?: string | null },
+  sideEffect?: {
+    byovStatus?: string | null;
+    byovDecisionDate?: string | null;
+    techContacted?: boolean | null;
+    techContactedDate?: string | null;
+    techContactOutcome?: string | null;
+  },
 ) {
   const [row] = await db.insert(vrmRepairTrackerTechOutreach).values(data).returning();
-  if (sideEffect && (sideEffect.byovStatus !== undefined || sideEffect.byovDecisionDate !== undefined)) {
+  if (sideEffect && (
+    sideEffect.byovStatus !== undefined ||
+    sideEffect.byovDecisionDate !== undefined ||
+    sideEffect.techContacted !== undefined ||
+    sideEffect.techContactedDate !== undefined ||
+    sideEffect.techContactOutcome !== undefined
+  )) {
     const patch: Record<string, unknown> = { updatedAt: new Date() };
     if (sideEffect.byovStatus !== undefined) patch.byovStatus = sideEffect.byovStatus;
     if (sideEffect.byovDecisionDate !== undefined) patch.byovDecisionDate = sideEffect.byovDecisionDate;
+    if (sideEffect.techContacted !== undefined) patch.techContacted = sideEffect.techContacted;
+    if (sideEffect.techContactedDate !== undefined) patch.techContactedDate = sideEffect.techContactedDate;
+    if (sideEffect.techContactOutcome !== undefined) patch.techContactOutcome = sideEffect.techContactOutcome;
     await db.update(vrmRepairTracker).set(patch).where(eq(vrmRepairTracker.id, data.repairTrackerId));
   }
   return row;
@@ -1010,6 +1355,27 @@ export async function addShopContact(
       tech_status = COALESCE(${sideEffect?.techStatus ?? null}, tech_status)
     WHERE id = ${data.repairTrackerId}
   `);
+  const [tracker] = await db
+    .select()
+    .from(vrmRepairTracker)
+    .where(eq(vrmRepairTracker.id, data.repairTrackerId));
+  if (tracker) {
+    await syncRepairTrackerToFleetScope({
+      id: tracker.id,
+      truckNumber: tracker.truckNumber,
+      techLdap: tracker.techLdap,
+      mainStatus: tracker.mainStatus,
+      subStatus: tracker.subStatus,
+      techStatus: tracker.techStatus,
+      repairShopAddress: tracker.repairShopAddress,
+      repairShopPhone: tracker.repairShopPhone,
+      rentalReturned: tracker.rentalReturned,
+    }, {
+      mainStatus: sideEffect?.mainStatus !== undefined,
+      subStatus: sideEffect?.subStatus !== undefined,
+      techStatus: sideEffect?.techStatus !== undefined,
+    });
+  }
   return row;
 }
 

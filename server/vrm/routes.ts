@@ -3,6 +3,7 @@ import { db } from "../db";
 import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
 import {
   listTechs,
+  listActiveRentalsFromFleetScope,
   getDashboardStats,
   getAutoFlaggedTechIds,
   getTechById,
@@ -25,6 +26,7 @@ import {
   updateEscalation,
   confirmEpv,
   addRentalDecision,
+  syncDeniedDecisionToRepairTracker,
   listRentalDecisions,
   getRentalDecision,
   updateRentalDecision,
@@ -57,7 +59,7 @@ import {
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
@@ -108,6 +110,36 @@ export function registerVrmRoutes(): Router {
       res.json({ rows: enriched, total });
     } catch (e: any) {
       console.error("[VRM] techs error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  type ActiveRentalsPayload = Awaited<ReturnType<typeof listActiveRentalsFromFleetScope>>;
+  let activeRentalsCache: { ts: number; payload: { rows: ActiveRentalsPayload; total: number; ldapMissing: number; vrmContextMissing: number } } | null = null;
+  const invalidateActiveRentalsCache = () => {
+    activeRentalsCache = null;
+  };
+
+  // GET /api/vrm/active-rentals — Fleet Scope rentals-dashboard table merged with optional VRM context
+  router.get("/active-rentals", async (req, res) => {
+    try {
+      const force = String(req.query.refresh ?? "") === "1";
+      const now = Date.now();
+      if (!force && activeRentalsCache && now - activeRentalsCache.ts < 90 * 1000) {
+        return res.json({ ...activeRentalsCache.payload, cached: true });
+      }
+
+      const rows = await listActiveRentalsFromFleetScope();
+      const payload = {
+        rows,
+        total: rows.length,
+        ldapMissing: rows.filter((row) => row.contextStatus === "no_ldap").length,
+        vrmContextMissing: rows.filter((row) => row.contextStatus === "no_vrm_match").length,
+      };
+      activeRentalsCache = { ts: now, payload };
+      res.json({ ...payload, cached: false });
+    } catch (e: any) {
+      console.error("[VRM] active-rentals error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
@@ -268,7 +300,11 @@ export function registerVrmRoutes(): Router {
         db.execute(sql`SELECT UPPER(tech_racfid) AS ldap, planning_area_name FROM all_techs WHERE planning_area_name IS NOT NULL`),
       ]);
 
-      const scorecardMap = new Map(scorecardRows.map((r) => [(r.ldap_id || "").trim().toUpperCase(), r]).filter(([k]) => k));
+      const scorecardMap = new Map<string, ScorecardRow>(
+        scorecardRows
+          .map((r): [string, ScorecardRow] => [((r.ldap_id || "").trim().toUpperCase()), r])
+          .filter(([ldap]) => Boolean(ldap)),
+      );
       const planningAreaMap = new Map((planningAreas.rows as any[]).map((r) => [r.ldap as string, r.planning_area_name as string]));
 
       let upserted = 0;
@@ -319,6 +355,7 @@ export function registerVrmRoutes(): Router {
         console.log(`[VRM] sync/roster: ${ldapMissing} Fleet Scope row(s) excluded — no ENTERPRISE_ID in NEXUS enrichment view`);
       }
 
+      activeRentalsCache = null;
       res.json({ ok: true, upserted, total: roster.length, ldapMissing });
     } catch (e: any) {
       console.error("[VRM] sync/roster error:", e.message);
@@ -385,6 +422,7 @@ export function registerVrmRoutes(): Router {
         updated++;
       }
 
+      activeRentalsCache = null;
       res.json({ ok: true, updated });
     } catch (e: any) {
       console.error("[VRM] sync/adjusted-net error:", e.message);
@@ -463,6 +501,7 @@ export function registerVrmRoutes(): Router {
         .set({ outreachFlagged: newVal, updatedAt: new Date() })
         .where(eq(vrmTechs.id, req.params.id))
         .returning();
+      activeRentalsCache = null;
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -494,6 +533,7 @@ export function registerVrmRoutes(): Router {
       if (req.body.byovEnrolled === true && tech.currentStatus !== "byov_enrolled") {
         await updateTechStatus(req.params.id, "byov_enrolled", "system", "Enrolled via tracking panel");
       }
+      activeRentalsCache = null;
       res.json(updated);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -588,7 +628,18 @@ export function registerVrmRoutes(): Router {
         scorecardScore: scorecardScore != null ? String(scorecardScore) : null,
         tenureMonths: tenureMonths ?? null,
       });
-      res.json(row);
+
+      let trackerSync: { imported: boolean; skipped: boolean; reason: string | null; trackerId: string | null } | null = null;
+      if (String(decision).toLowerCase() === "denied") {
+        try {
+          trackerSync = await syncDeniedDecisionToRepairTracker(row.id);
+        } catch (syncError: any) {
+          console.error("[VRM] profitability/log immediate tracker sync error:", syncError.message);
+          trackerSync = { imported: false, skipped: false, reason: "sync_failed", trackerId: null };
+        }
+      }
+
+      res.json({ ...row, trackerSync });
     } catch (e: any) {
       console.error("[VRM] profitability/log error:", e.message);
       res.status(500).json({ error: e.message });
@@ -862,7 +913,9 @@ export function registerVrmRoutes(): Router {
     try {
       const parsed = insertVrmRepairTrackerSchema.safeParse(req.body);
       if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-      res.status(201).json(await createRepairTrackerEntry(parsed.data));
+      const row = await createRepairTrackerEntry(parsed.data);
+      invalidateActiveRentalsCache();
+      res.status(201).json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -875,6 +928,7 @@ export function registerVrmRoutes(): Router {
       const { dismissed, ...rest } = parsed.data;
       const row = await updateRepairTrackerEntry(req.params.id, rest);
       if (!row) return res.status(404).json({ error: "Not found" });
+      invalidateActiveRentalsCache();
       res.json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -961,10 +1015,33 @@ export function registerVrmRoutes(): Router {
 
   router.post("/repair-tracker/:id/tech-outreach", async (req, res) => {
     try {
-      const { authorName, occurredAt, method, outcome, body, byovStatus, byovDecisionDate } = req.body ?? {};
+      const {
+        authorName,
+        occurredAt,
+        method,
+        outcome,
+        body,
+        byovStatus,
+        byovDecisionDate,
+        techContacted,
+        techContactedDate,
+        techContactOutcome,
+      } = req.body ?? {};
       if (!authorName) return res.status(400).json({ error: "authorName is required" });
-      const sideEffect = (byovStatus !== undefined || byovDecisionDate !== undefined)
-        ? { byovStatus: byovStatus ?? null, byovDecisionDate: byovDecisionDate ?? null }
+      const sideEffect = (
+        byovStatus !== undefined ||
+        byovDecisionDate !== undefined ||
+        techContacted !== undefined ||
+        techContactedDate !== undefined ||
+        techContactOutcome !== undefined
+      )
+        ? {
+            byovStatus: byovStatus ?? null,
+            byovDecisionDate: byovDecisionDate ?? null,
+            techContacted: techContacted ?? null,
+            techContactedDate: techContactedDate ?? null,
+            techContactOutcome: techContactOutcome ?? null,
+          }
         : undefined;
       const row = await addTechOutreach({
         repairTrackerId: req.params.id,
@@ -1030,6 +1107,7 @@ export function registerVrmRoutes(): Router {
         subStatus: subStatusUpdate ?? null,
         techStatus: techStatusUpdate ?? null,
       });
+      invalidateActiveRentalsCache();
       res.status(201).json(row);
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1088,6 +1166,7 @@ export function registerVrmRoutes(): Router {
     reason: string | null;        // why "Unknown" — surfaced in tooltip
     latestPunchTs: string | null; // last punch (today preferred, else most recent)
     latestPunchType: "in" | "out" | null;
+    latestRawPunchLabel: string | null;
     hasData: boolean;             // any rows in the 7-day window
     syncedAt: string;             // ISO timestamp of this fetch
     error: string | null;         // populated if Snowflake threw for this batch
@@ -1101,14 +1180,14 @@ export function registerVrmRoutes(): Router {
     if (!opts.sourceConfigured) {
       return {
         status: "Unknown", reason: "Snowflake not configured",
-        latestPunchTs: null, latestPunchType: null,
+        latestPunchTs: null, latestPunchType: null, latestRawPunchLabel: null,
         hasData: false, syncedAt, error: opts.error,
       };
     }
     if (opts.error) {
       return {
         status: "Unknown", reason: `Source error: ${opts.error}`,
-        latestPunchTs: null, latestPunchType: null,
+        latestPunchTs: null, latestPunchType: null, latestRawPunchLabel: null,
         hasData: false, syncedAt, error: opts.error,
       };
     }
@@ -1133,6 +1212,7 @@ export function registerVrmRoutes(): Router {
           : `Start Truck ${fmtClock(startTs)} · End Day ${fmtClock(endTs)}`,
         latestPunchTs: endTs ?? startTs ?? null,
         latestPunchType: isActive ? "in" : "out",
+        latestRawPunchLabel: todaysRow.latestRawPunchLabel ?? null,
         hasData: true, syncedAt, error: null,
       };
     }
@@ -1140,7 +1220,7 @@ export function registerVrmRoutes(): Router {
     if (!last) {
       return {
         status: "Unknown", reason: "No activity in last 7 days",
-        latestPunchTs: null, latestPunchType: null,
+        latestPunchTs: null, latestPunchType: null, latestRawPunchLabel: null,
         hasData: rows.length > 0, syncedAt, error: null,
       };
     }
@@ -1149,6 +1229,7 @@ export function registerVrmRoutes(): Router {
       reason: `Last seen ${last.punchDate}`,
       latestPunchTs: last.punchOutTs ?? last.punchInTs ?? null,
       latestPunchType: "out",
+      latestRawPunchLabel: last.latestRawPunchLabel ?? null,
       hasData: true, syncedAt, error: null,
     };
   }

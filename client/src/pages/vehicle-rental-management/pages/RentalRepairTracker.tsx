@@ -43,11 +43,18 @@ interface RepairTrackerEntry {
   flags: { red: FlagInfo; yellow: FlagInfo; blue: FlagInfo };
   isArchived: boolean;
   techContactedDate?: string | null;
+  techContactOutcome?: string | null;
   routeClearedDate?: string | null;
   byovStatus?: string | null;
+  byovOffered?: boolean | null;
   denialReasonDetail?: string | null;
   techPunchLastSyncedAt?: string | null;
   shopEtaOnRoad?: string | null;
+  shopLastContactedDate?: string | null;
+  assignedTechLiaison?: string | null;
+  assignedShopLiaison?: string | null;
+  closedAt?: string | null;
+  closedBy?: string | null;
   lastTechOutreachAt?: string | null;
   lastTechOutreachBody?: string | null;
   lastTechOutreachAuthor?: string | null;
@@ -113,7 +120,7 @@ interface TrackerAction {
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const TECH_STATUSES = ["On Road", "Off Road"] as const;
+const TECH_STATUSES = ["On Road", "Back in Van", "Off Road"] as const;
 
 const RT_ACTION_TYPE_LABELS: Record<string, string> = {
   called_tech: "Called Tech",
@@ -148,24 +155,27 @@ const STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
 
 const TECH_STATUS_COLORS: Record<string, { fg: string; bg: string }> = {
   "On Road":       { fg: "#FFFFFF", bg: "#22C55E" },
+  "Back in Van":   { fg: "#0F172A", bg: "#DBEAFE" },
   "Off Road":      { fg: "#FFFFFF", bg: "#EF4444" },
   "Route Canceled":{ fg: "#000000", bg: "#F5A623" },
 };
 
 function StatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: colors.surface };
+  const c = STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: "#CBD5E1" };
   return (
     <span
       style={{
         fontFamily: fonts.dmSans,
-        fontWeight: 500,
+        fontWeight: 600,
         fontSize: 11,
-        color: c.fg,
-        backgroundColor: c.bg,
-        borderRadius: 6,
-        padding: "3px 8px",
-        display: "inline-block",
+        color: c.bg,
+        backgroundColor: tintColor(c.bg, 0.12),
+        borderLeft: `3px solid ${c.bg}`,
+        borderRadius: 4,
+        padding: "5px 8px",
+        display: "inline-flex",
+        alignItems: "center",
         whiteSpace: "nowrap",
       }}
     >
@@ -176,18 +186,18 @@ function StatusBadge({ status }: { status: string | null }) {
 
 function TechStatusBadge({ status }: { status: string | null }) {
   if (!status) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = TECH_STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: colors.surface };
+  const c = TECH_STATUS_COLORS[status] ?? { fg: colors.inkMuted, bg: "#CBD5E1" };
   return (
     <span
       style={{
-        fontFamily: fonts.dmSans,
-        fontWeight: 500,
-        fontSize: 11,
-        color: c.fg,
-        backgroundColor: c.bg,
-        borderRadius: 6,
-        padding: "3px 8px",
-        display: "inline-block",
+        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+        color: c.bg,
+        backgroundColor: tintColor(c.bg, 0.12),
+        borderLeft: `3px solid ${c.bg}`,
+        borderRadius: 4,
+        padding: "5px 8px",
+        display: "inline-flex",
+        alignItems: "center",
         whiteSpace: "nowrap",
       }}
     >
@@ -222,6 +232,20 @@ function RecPill({ rec }: { rec: string }) {
       {rec}
     </span>
   );
+}
+
+function tintColor(hex: string, alpha: number): string {
+  const normalized = hex.replace("#", "");
+  if (![3, 6].includes(normalized.length)) return colors.surface;
+  const expanded = normalized.length === 3
+    ? normalized.split("").map((ch) => ch + ch).join("")
+    : normalized;
+  const value = parseInt(expanded, 16);
+  if (Number.isNaN(value)) return colors.surface;
+  const r = (value >> 16) & 255;
+  const g = (value >> 8) & 255;
+  const b = value & 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
 // ─── Module-level style constants ─────────────────────────────────────────────
@@ -520,6 +544,11 @@ function TechOutreachTab({
         outcome: outcome || null,
         body: body || null,
       };
+      if (!editingId) {
+        payload.techContacted = true;
+        payload.techContactedDate = new Date().toISOString().slice(0, 10);
+        payload.techContactOutcome = outcome || null;
+      }
       if (!editingId && byovDecision) {
         payload.byovStatus = byovDecision;
         payload.byovDecisionDate = new Date().toISOString().slice(0, 10);
@@ -1010,7 +1039,7 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
 
       {!linkMissing && (
         <>
-          <SectionHeading style={{ marginTop: 0, marginBottom: 10 }}>AMS Snapshot {data.vin ? <span style={{ fontFamily: fonts.mono, fontSize: 11, color: colors.inkMuted, fontWeight: 400, marginLeft: 8 }}>{data.vin}</span> : null}</SectionHeading>
+          <SectionHeading style={{ marginTop: 0, marginBottom: 10 }}>AMS Snapshot {data.vin ? <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, fontWeight: 400, marginLeft: 8 }}>{data.vin}</span> : null}</SectionHeading>
           <Field label="Truck Number" value={v.VehicleNumber ?? truckNumber} />
           <Field label="Status" value={v.TruckStatus ?? v.Status} />
           <Field label="Year / Make / Model" value={[v.Year, v.Make, v.Model].filter(Boolean).join(" ")} />
@@ -1243,6 +1272,17 @@ function UnifiedPanel({
   const qc = useQueryClient();
   const isEdit = !!entry;
   const [form, setForm] = useState<RepairForm>(entry ? entryToForm(entry) : { ...EMPTY_FORM });
+  const [currentEntry, setCurrentEntry] = useState<RepairTrackerEntry | null>(entry);
+
+  // ── Side-panel tabs ──
+  type PanelTab = "details" | "tech_outreach" | "shop_contact" | "punches" | "ams";
+  const [panelTab, setPanelTab] = useState<PanelTab>("details");
+
+  useEffect(() => {
+    setCurrentEntry(entry);
+    setForm(entry ? entryToForm(entry) : { ...EMPTY_FORM });
+    setPanelTab("details");
+  }, [entry?.id]);
 
   const set = useCallback((field: keyof RepairForm, val: string | boolean) => {
     if (field === "mainStatus") {
@@ -1256,6 +1296,22 @@ function UnifiedPanel({
     form.mainStatus && MAIN_STATUSES.includes(form.mainStatus as MainStatus)
       ? SUB_STATUSES[form.mainStatus as MainStatus]
       : [];
+
+  const refreshCurrentEntry = useCallback(async () => {
+    if (!entry?.id) return;
+    try {
+      const r = await fetch("/api/vrm/repair-tracker");
+      if (!r.ok) return;
+      const rows = await r.json() as RepairTrackerEntry[];
+      const latest = rows.find((row) => row.id === entry.id) ?? null;
+      if (latest) {
+        setCurrentEntry(latest);
+        setForm(entryToForm(latest));
+      }
+    } catch {
+      // Keep the local panel stable even if the background refresh fails.
+    }
+  }, [entry?.id]);
 
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
     fontFamily: fonts.dmSans,
@@ -1283,8 +1339,8 @@ function UnifiedPanel({
     transition: "all 120ms",
   });
 
-  const hasDecision = isEdit && entry?.sourceDecisionId;
-  const decisionId = entry?.sourceDecisionId;
+  const hasDecision = isEdit && currentEntry?.sourceDecisionId;
+  const decisionId = currentEntry?.sourceDecisionId;
 
   const { data: decision } = useQuery<DecisionRow>({
     queryKey: ["/api/vrm/profitability/log", decisionId],
@@ -1307,18 +1363,8 @@ function UnifiedPanel({
   });
   const actionLog = actionsData ?? [];
 
-  const [showAddAction, setShowAddAction] = useState(false);
-  const [actionType, setActionType] = useState("called_tech");
-  const [actionNotes, setActionNotes] = useState("");
-  const [actionPerformer, setActionPerformer] = useState("");
-
-  // ── Side-panel tabs ──
-  type PanelTab = "details" | "tech_outreach" | "shop_contact" | "punches" | "ams";
-  const [panelTab, setPanelTab] = useState<PanelTab>("details");
-  useEffect(() => { setPanelTab("details"); }, [entry?.id]);
-
   // AMS snapshot + comments (Section A + B of drawer per closeout) — fetched on tab open only
-  const amsTruck = (entry?.truckNumber ?? "").trim();
+  const amsTruck = (currentEntry?.truckNumber ?? "").trim();
   const amsQuery = useQuery<{ found: boolean; linkMissing: boolean; vin?: string; vehicle: any; comments: any[]; reason?: string }>({
     queryKey: ["/api/ams/by-truck", amsTruck],
     queryFn: async () => {
@@ -1367,10 +1413,11 @@ function UnifiedPanel({
     qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "shop-contact"] });
     qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "legacy-notes"] });
     qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+    void refreshCurrentEntry();
   };
 
-  const punchLdap = (entry?.techLdap ?? "").trim().toUpperCase();
-  const punchHistoryQuery = useQuery<{ ldap: string; rows: PunchHistoryRow[]; summary: PunchStatusEntry }>({
+  const punchLdap = (currentEntry?.techLdap ?? "").trim().toUpperCase();
+  const punchHistoryQuery = useQuery<{ ldap: string; rows: PunchHistoryRow[]; events?: PunchEvent[]; summary: PunchStatusEntry }>({
     queryKey: ["/api/vrm/repair-tracker/punch-history", punchLdap],
     queryFn: async () => {
       const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}`);
@@ -1391,22 +1438,19 @@ function UnifiedPanel({
     }
   };
 
-  const addActionMutation = useMutation({
-    mutationFn: async () => {
-      const r = await apiRequest("POST", `/api/vrm/repair-tracker/${entry!.id}/actions`, {
-        actionType,
-        notes: actionNotes || null,
-        performedByName: actionPerformer,
-      });
+  const quickPatchMutation = useMutation({
+    mutationFn: async (payload: Record<string, unknown>) => {
+      const r = await apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
+      if (!r.ok) throw new Error(await r.text());
       return r.json();
     },
-    onSuccess: () => {
-      setShowAddAction(false);
-      setActionType("called_tech");
-      setActionNotes("");
-      setActionPerformer("");
-      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker", entry!.id, "actions"] });
+    onSuccess: async () => {
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      await refreshCurrentEntry();
+      toast({ title: "Case updated" });
+    },
+    onError: (e: any) => {
+      toast({ title: "Update failed", description: e.message, variant: "destructive" });
     },
   });
 
@@ -1467,6 +1511,63 @@ function UnifiedPanel({
     marginBottom: 6,
   };
 
+  const workflowNextStep = currentEntry ? ({
+    "Needs Tech Call": "Open Tech Outreach and log the first contact.",
+    "BYOV Decision": "Use Tech Outreach to record the BYOV decision.",
+    "Awaiting Rental Return": "Confirm the rental return and stamp the return date.",
+    "Awaiting Route Clear": "Mark Route Cleared once routing confirms the tech is off rental.",
+    "In Repair": "Use Shop Contact to capture the latest status or ETA.",
+    "Ready for Pickup": "Mark Back in Van, then Mark On Road when the tech is working again.",
+    "Complete": "Close the case when the audit trail is finished.",
+  }[currentEntry.stage] ?? "Review the current case state.") : "—";
+
+  const compactActionBtnStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontWeight: 600,
+    fontSize: 12,
+    color: "#FFFFFF",
+    backgroundColor: colors.accent,
+    border: "none",
+    borderRadius: 7,
+    padding: "7px 12px",
+    cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
+    opacity: quickPatchMutation.isPending ? 0.6 : 1,
+    whiteSpace: "nowrap",
+  };
+
+  const compactWorkflowAction = currentEntry ? (() => {
+    switch (currentEntry.stage) {
+      case "Needs Tech Call":
+        return { label: "Open Tech Outreach", run: () => setPanelTab("tech_outreach") };
+      case "BYOV Decision":
+        return { label: "Record BYOV Decision", run: () => setPanelTab("tech_outreach") };
+      case "Awaiting Rental Return":
+        return {
+          label: "Mark Rental Returned",
+          run: () => quickPatchMutation.mutate({
+            rentalReturned: "Yes",
+            rentalReturnDate: new Date().toISOString().slice(0, 10),
+          }),
+        };
+      case "Awaiting Route Clear":
+        return {
+          label: "Mark Route Cleared",
+          run: () => quickPatchMutation.mutate({
+            routeCleared: true,
+            routeClearedDate: new Date().toISOString().slice(0, 10),
+          }),
+        };
+      case "In Repair":
+        return { label: "Open Shop Contact", run: () => setPanelTab("shop_contact") };
+      case "Ready for Pickup":
+        return currentEntry.techStatus === "Back in Van"
+          ? { label: "Mark On Road", run: () => quickPatchMutation.mutate({ techStatus: "On Road" }) }
+          : { label: "Mark Back in Van", run: () => quickPatchMutation.mutate({ techStatus: "Back in Van" }) };
+      default:
+        return null;
+    }
+  })() : null;
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
       <div style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.18)" }} onClick={onClose} />
@@ -1495,12 +1596,12 @@ function UnifiedPanel({
         >
           <div>
             <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-              {isEdit ? (entry.techName ?? entry.techLdap ?? "Repair Entry") : "Add Entry"}
+              {isEdit ? (currentEntry?.techName ?? currentEntry?.techLdap ?? "Repair Entry") : "Add Entry"}
             </h2>
-            {isEdit && entry.techLdap && (
-              <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{entry.techLdap}</span>
+            {isEdit && currentEntry?.techLdap && (
+              <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{currentEntry.techLdap}</span>
             )}
-            {isEdit && entry.sourceDecisionId && (
+            {isEdit && currentEntry?.sourceDecisionId && (
               <span style={{ display: "inline-block", marginLeft: 8, fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: colors.red, backgroundColor: colors.redLight, padding: "2px 8px", borderRadius: 5 }}>
                 Denied
               </span>
@@ -1561,7 +1662,7 @@ function UnifiedPanel({
               entries={techOutreachQuery.data ?? []}
               isLoading={techOutreachQuery.isLoading}
               trackerId={entry!.id}
-              currentByovStatus={entry?.byovStatus ?? null}
+              currentByovStatus={currentEntry?.byovStatus ?? null}
               legacyNotes={legacyNotesQuery.data?.notes ?? null}
               onChanged={invalidateTimelines}
             />
@@ -1570,15 +1671,40 @@ function UnifiedPanel({
               entries={shopContactQuery.data ?? []}
               isLoading={shopContactQuery.isLoading}
               trackerId={entry!.id}
-              currentMain={entry?.mainStatus ?? ""}
-              currentSub={entry?.subStatus ?? ""}
-              currentTechStatus={entry?.techStatus ?? ""}
-              currentEta={entry?.shopEtaOnRoad as any ?? ""}
+              currentMain={currentEntry?.mainStatus ?? ""}
+              currentSub={currentEntry?.subStatus ?? ""}
+              currentTechStatus={currentEntry?.techStatus ?? ""}
+              currentEta={currentEntry?.shopEtaOnRoad as any ?? ""}
               legacyNotes={legacyNotesQuery.data?.notes ?? null}
               onChanged={invalidateTimelines}
             />
           ) : (
           <>
+          {isEdit && currentEntry && (
+            <>
+              <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+                Case Status
+              </SectionHeading>
+
+              <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={labelStyle}>Stage</div>
+                    <StagePill stage={currentEntry.stage} />
+                  </div>
+                  {compactWorkflowAction ? (
+                    <button onClick={compactWorkflowAction.run} style={compactActionBtnStyle}>
+                      {compactWorkflowAction.label}
+                    </button>
+                  ) : null}
+                </div>
+                <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
+                  {workflowNextStep}
+                </div>
+              </div>
+            </>
+          )}
+
           {/* ── Tech & Vehicle Info ── */}
           <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
             Tech &amp; Vehicle Info
@@ -1607,11 +1733,11 @@ function UnifiedPanel({
           </SectionHeading>
           <div style={{ marginBottom: 14 }}>
             <label style={LABEL_STYLE}>Supervisor Name</label>
-            <input type="text" value={form.supervisorName} onChange={(e) => set("supervisorName", e.target.value)} placeholder={entry?.tpmsManagerName ?? ""} style={INPUT_STYLE} />
+            <input type="text" value={form.supervisorName} onChange={(e) => set("supervisorName", e.target.value)} placeholder={currentEntry?.tpmsManagerName ?? ""} style={INPUT_STYLE} />
           </div>
           <div style={{ marginBottom: 14 }}>
             <label style={LABEL_STYLE}>Supervisor Phone</label>
-            <input type="text" value={form.supervisorPhone} onChange={(e) => set("supervisorPhone", e.target.value)} placeholder={entry?.tpmsManagerPhone ?? ""} style={INPUT_STYLE} />
+            <input type="text" value={form.supervisorPhone} onChange={(e) => set("supervisorPhone", e.target.value)} placeholder={currentEntry?.tpmsManagerPhone ?? ""} style={INPUT_STYLE} />
           </div>
 
           {/* ── Repair Shop ── */}
@@ -1619,11 +1745,11 @@ function UnifiedPanel({
             Repair Shop
           </SectionHeading>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Repair Shop Address</label>
+            <label style={LABEL_STYLE}>Shop</label>
             <input type="text" value={form.repairShopAddress} onChange={(e) => set("repairShopAddress", e.target.value)} style={INPUT_STYLE} />
           </div>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Repair Shop Phone</label>
+            <label style={LABEL_STYLE}>Shop Phone</label>
             <input type="text" value={form.repairShopPhone} onChange={(e) => set("repairShopPhone", e.target.value)} style={INPUT_STYLE} />
           </div>
 
@@ -1720,104 +1846,14 @@ function UnifiedPanel({
                 Action Log
               </SectionHeading>
 
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <div style={{ marginBottom: 12 }}>
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-                  {actionsLoading ? "Loading…" : `${actionLog.length} action${actionLog.length !== 1 ? "s" : ""}`}
+                  {actionsLoading ? "Loading…" : `${actionLog.length} historical action${actionLog.length !== 1 ? "s" : ""}`}
                 </span>
-                <button
-                  onClick={() => setShowAddAction((v) => !v)}
-                  style={{
-                    fontFamily: fonts.dmSans,
-                    fontWeight: 500,
-                    fontSize: 12,
-                    color: colors.accent,
-                    backgroundColor: "#EFF4FF",
-                    border: "1px solid #C7D7F9",
-                    borderRadius: 6,
-                    padding: "4px 10px",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 4,
-                  }}
-                >
-                  <Plus size={12} /> Add Action
-                </button>
               </div>
 
-              {showAddAction && (
-                <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div>
-                      <div style={labelStyle}>Action Type</div>
-                      <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={NR_SELECT_STYLE}>
-                        {Object.entries(RT_ACTION_TYPE_LABELS).map(([v, l]) => (
-                          <option key={v} value={v}>{l}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div>
-                      <div style={labelStyle}>Notes</div>
-                      <textarea
-                        value={actionNotes}
-                        onChange={(e) => setActionNotes(e.target.value)}
-                        placeholder="Optional notes…"
-                        rows={2}
-                        style={{ ...INPUT_STYLE, resize: "vertical" as any }}
-                      />
-                    </div>
-                    <div>
-                      <div style={labelStyle}>Performed By</div>
-                      <input
-                        type="text"
-                        value={actionPerformer}
-                        onChange={(e) => setActionPerformer(e.target.value)}
-                        placeholder="Your name"
-                        style={INPUT_STYLE}
-                      />
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        onClick={() => addActionMutation.mutate()}
-                        disabled={!actionPerformer.trim() || addActionMutation.isPending}
-                        style={{
-                          fontFamily: fonts.dmSans,
-                          fontWeight: 500,
-                          fontSize: 12,
-                          color: "#fff",
-                          backgroundColor: colors.accent,
-                          border: "none",
-                          borderRadius: 6,
-                          padding: "6px 14px",
-                          cursor: !actionPerformer.trim() || addActionMutation.isPending ? "not-allowed" : "pointer",
-                          opacity: !actionPerformer.trim() || addActionMutation.isPending ? 0.55 : 1,
-                        }}
-                      >
-                        {addActionMutation.isPending ? "Saving…" : "Log Action"}
-                      </button>
-                      <button
-                        onClick={() => setShowAddAction(false)}
-                        style={{
-                          fontFamily: fonts.dmSans,
-                          fontWeight: 500,
-                          fontSize: 12,
-                          color: colors.inkSoft,
-                          backgroundColor: "transparent",
-                          border: `1px solid ${colors.rule}`,
-                          borderRadius: 6,
-                          padding: "6px 12px",
-                          cursor: "pointer",
-                        }}
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-
               {actionLog.length === 0 && !actionsLoading ? (
-                <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No actions logged yet.</p>
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No historical action rows on this case.</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {actionLog.map((a) => (
@@ -1952,13 +1988,14 @@ const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
 
 function StagePill({ stage }: { stage: string }) {
   if (!stage) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
-  const c = STAGE_COLORS[stage] ?? { fg: colors.inkSoft, bg: colors.surface };
+  const c = STAGE_COLORS[stage] ?? { fg: colors.inkSoft, bg: "#CBD5E1" };
   return (
     <span style={{
       fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-      color: c.fg, backgroundColor: c.bg,
-      borderRadius: 6, padding: "3px 8px",
-      display: "inline-block", whiteSpace: "nowrap",
+      color: c.bg, backgroundColor: tintColor(c.bg, 0.12),
+      borderLeft: `3px solid ${c.bg}`,
+      borderRadius: 4, padding: "5px 8px",
+      display: "inline-flex", alignItems: "center", whiteSpace: "nowrap",
     }}>
       {stage}
     </span>
@@ -1967,13 +2004,13 @@ function StagePill({ stage }: { stage: string }) {
 
 function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
   if (flags?.red?.active) {
-    return <span title={flags.red.tooltip ?? "Red flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#EF4444" }} />;
+    return <span title={flags.red.tooltip ?? "Red flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#B91C1C" }}>Red</span>;
   }
   if (flags?.yellow?.active) {
-    return <span title={flags.yellow.tooltip ?? "Yellow flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#F5A623" }} />;
+    return <span title={flags.yellow.tooltip ?? "Yellow flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#B45309" }}>Yellow</span>;
   }
   if (flags?.blue?.active) {
-    return <span title={flags.blue.tooltip ?? "Blue flag"} style={{ display: "inline-block", width: 8, height: 8, borderRadius: 4, backgroundColor: "#3B82F6" }} />;
+    return <span title={flags.blue.tooltip ?? "Blue flag"} style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 700, color: "#1D4ED8" }}>Blue</span>;
   }
   return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 11 }}>—</span>;
 }
@@ -1985,6 +2022,7 @@ interface PunchStatusEntry {
   reason: string | null;
   latestPunchTs: string | null;
   latestPunchType: "in" | "out" | null;
+  latestRawPunchLabel: string | null;
   hasData: boolean;
   syncedAt?: string;
   error?: string | null;
@@ -1995,6 +2033,7 @@ interface PunchHistoryRow {
   punchDate: string;
   punchInTs: string | null;
   punchOutTs: string | null;
+  latestRawPunchLabel?: string | null;
 }
 interface PunchEvent {
   ldap: string;
@@ -2025,29 +2064,36 @@ function PunchStatusCell({ ldap, status, section }: { ldap: string | null; statu
   const isPunchedIn = status.status === "Punched In";
   const isPunchedOut = status.status === "Punched Out";
   const palette = isPunchedIn
-    ? { fg: "#FFFFFF", bg: "#EF4444" }   // red — should NOT be clocked in while denied
+    ? { fg: "#B91C1C", bg: "#EF4444" }
     : isPunchedOut
-    ? { fg: "#0F766E", bg: "#CCFBF1" }   // teal — neutral
-    : { fg: colors.inkMuted, bg: colors.surface }; // unknown
+    ? { fg: "#0F766E", bg: "#14B8A6" }
+    : { fg: colors.inkMuted, bg: "#CBD5E1" };
   const tooltip = status.reason ?? (status.syncedAt ? `Synced ${new Date(status.syncedAt).toLocaleTimeString()}` : "");
   return (
     <div
-      style={{ display: "flex", flexDirection: "column", gap: 2, alignItems: "flex-start" }}
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+        alignItems: "flex-start",
+        padding: "6px 8px",
+        backgroundColor: tintColor(palette.bg, 0.12),
+        borderLeft: `3px solid ${palette.bg}`,
+        borderRadius: 4,
+      }}
       title={tooltip}
     >
       <span style={{
-        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
-        color: palette.fg, backgroundColor: palette.bg,
-        borderRadius: 6, padding: "3px 8px",
+        fontFamily: fonts.dmSans, fontWeight: 700, fontSize: 11,
+        color: palette.fg,
         display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
       }}>
-        {isPunchedIn && <AlertTriangle size={11} />}
         {status.status}
       </span>
-      {status.latestPunchTs && (
+      {(status.latestRawPunchLabel || status.latestPunchTs) && (
         <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }}>
-          {status.latestPunchType === "in" ? "In " : status.latestPunchType === "out" ? "Out " : ""}
-          {fmtPunchTime(status.latestPunchTs)}
+          {status.latestRawPunchLabel ?? "Latest punch"}
+          {status.latestPunchTs ? ` · ${fmtPunchTime(status.latestPunchTs)}` : ""}
         </span>
       )}
       {status.status === "Unknown" && status.reason && (
@@ -2074,11 +2120,11 @@ export default function RentalRepairTracker() {
   });
 
   // Tech Punch Status (today) — bulk lookup from Snowflake TimeHub.
-  // Cached server-side ~90s; refetch every 2m to keep the table reasonably fresh.
-  const { data: punchStatusMap = {} as PunchStatusMap, isFetching: isPunchFetching } =
+  // Cached server-side ~90s; refetch every 30m while the 15-minute backend sync keeps data moving.
+  const { data: punchStatusMap = {} as PunchStatusMap } =
     useQuery<PunchStatusMap>({
       queryKey: ["/api/vrm/repair-tracker/punch-status"],
-      refetchInterval: 120_000,
+      refetchInterval: 1_800_000,
       enabled: entries.length > 0,
     });
 
@@ -2165,11 +2211,10 @@ export default function RentalRepairTracker() {
   const thStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
     fontWeight: 600,
-    fontSize: 11,
+    fontSize: 12,
     color: colors.inkMuted,
-    textTransform: "uppercase",
-    letterSpacing: "0.06em",
-    padding: "10px 14px",
+    letterSpacing: "0.01em",
+    padding: "12px 14px",
     textAlign: "left",
     borderBottom: `1px solid ${colors.rule}`,
     whiteSpace: "nowrap",
@@ -2181,7 +2226,7 @@ export default function RentalRepairTracker() {
     fontFamily: fonts.dmSans,
     fontSize: 13,
     color: colors.ink,
-    padding: "11px 14px",
+    padding: "13px 14px",
     borderBottom: `1px solid ${colors.rule}`,
     verticalAlign: "middle",
   };
@@ -2190,12 +2235,22 @@ export default function RentalRepairTracker() {
     const yes = !!val;
     return (
       <span style={{
-        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-        color: yes ? "#FFFFFF" : "#FFFFFF",
-        backgroundColor: yes ? "#22C55E" : "#EF4444",
-        borderRadius: 6, padding: "3px 8px",
-        display: "inline-block", whiteSpace: "nowrap",
+        fontFamily: fonts.dmSans,
+        fontWeight: 600,
+        fontSize: 11,
+        color: yes ? "#15803D" : "#94A3B8",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        whiteSpace: "nowrap",
       }}>
+        <span style={{
+          display: "inline-block",
+          width: 7,
+          height: 7,
+          borderRadius: 999,
+          backgroundColor: yes ? "#22C55E" : "#CBD5E1",
+        }} />
         {yes ? "Yes" : "No"}
       </span>
     );
@@ -2205,21 +2260,34 @@ export default function RentalRepairTracker() {
     if (!val || val === "N/A") {
       return (
         <span style={{
-          fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-          color: "#000000", backgroundColor: "#F5A623",
-          borderRadius: 6, padding: "3px 8px",
-          display: "inline-block", whiteSpace: "nowrap",
+          fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
+          color: colors.inkMuted,
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          whiteSpace: "nowrap",
         }}>N/A</span>
       );
     }
     const yes = val === "Yes";
     return (
       <span style={{
-        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-        color: "#FFFFFF", backgroundColor: yes ? "#22C55E" : "#EF4444",
-        borderRadius: 6, padding: "3px 8px",
-        display: "inline-block", whiteSpace: "nowrap",
+        fontFamily: fonts.dmSans,
+        fontWeight: 600,
+        fontSize: 11,
+        color: yes ? "#15803D" : "#B91C1C",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        whiteSpace: "nowrap",
       }}>
+        <span style={{
+          display: "inline-block",
+          width: 7,
+          height: 7,
+          borderRadius: 999,
+          backgroundColor: yes ? "#22C55E" : "#EF4444",
+        }} />
         {val}
       </span>
     );
@@ -2429,7 +2497,7 @@ export default function RentalRepairTracker() {
           const col = sortColumn;
           const punchSortValue = (e: RepairTrackerEntry) => {
             const s = e.techLdap ? punchStatusMap[e.techLdap.toUpperCase()] : undefined;
-            return s?.label ?? s?.status ?? "";
+            return s?.latestRawPunchLabel ?? s?.status ?? "";
           };
           const valA = col === "punchStatus" ? punchSortValue(a) : (a as any)[col];
           const valB = col === "punchStatus" ? punchSortValue(b) : (b as any)[col];
@@ -2447,6 +2515,9 @@ export default function RentalRepairTracker() {
 
         const renderRow = (entry: RepairTrackerEntry) => {
           const tint = flagBg(entry);
+          const baseBg = tint === "transparent" ? "#FCFDFE" : tint;
+          const hoverBg = tint === "transparent" ? "#F8FAFC" : tint;
+          const sectionAccent = sectionMeta[entry.section]?.color ?? colors.accent;
           const flagTooltip =
             entry.flags?.red?.active ? entry.flags.red.tooltip :
             entry.flags?.yellow?.active ? entry.flags.yellow.tooltip :
@@ -2456,11 +2527,11 @@ export default function RentalRepairTracker() {
               key={entry.id}
               onClick={() => setPanelEntry(entry)}
               title={flagTooltip}
-              style={{ cursor: "pointer", backgroundColor: tint }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
-              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = tint)}
+              style={{ cursor: "pointer", backgroundColor: baseBg }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = hoverBg)}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = baseBg)}
             >
-                  <td style={tdStyle}>
+                  <td style={{ ...tdStyle, borderLeft: `4px solid ${sectionAccent}` }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                       <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
                         {entry.techName ?? "—"}
@@ -2508,13 +2579,16 @@ export default function RentalRepairTracker() {
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 160 }}>
                     <div style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {entry.repairShopPhone ?? entry.repairShopAddress ?? "—"}
+                      {entry.repairShopAddress ?? "—"}
                     </div>
                     {(entry as any).shopEtaOnRoad && (
                       <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>
                         ETA {new Date((entry as any).shopEtaOnRoad).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
                       </div>
                     )}
+                  </td>
+                  <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 120, whiteSpace: "nowrap" }}>
+                    {entry.repairShopPhone ?? "—"}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, maxWidth: 200 }}>
                     {(() => {
@@ -2637,15 +2711,16 @@ export default function RentalRepairTracker() {
 
         const renderHeader = () => (
           <thead>
-            <tr style={{ backgroundColor: colors.surface }}>
+            <tr style={{ backgroundColor: "#F8FAFC" }}>
               <th style={thStyle} onClick={() => handleSort("techName")}>Case{sortIndicator("techName")}</th>
               <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
               <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied{sortIndicator("deniedAt")}</th>
               <th style={thStyle} onClick={() => handleSort("stage")}>Stage{sortIndicator("stage")}</th>
-              <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Inferred from start-order activity in the source view; no true clock-out signal exists upstream. First daily punch = 'Start Truck/Day' (Punched In), last = 'End Day' (Punched Out).">Punch ⓘ{sortIndicator("punchStatus")}</th>
+              <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Status is still inferred from first-vs-last punch activity in the current source view. The smaller line shows the latest raw upstream PUNCH_TYP for context.">Punch ⓘ{sortIndicator("punchStatus")}</th>
               <th style={thStyle} onClick={() => handleSort("mainStatus")}>Shop Status{sortIndicator("mainStatus")}</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("techStatus")}>Van Status{sortIndicator("techStatus")}</th>
               <th style={{ ...thStyle, cursor: "default" }}>Shop</th>
+              <th style={{ ...thStyle, cursor: "default" }}>Shop Phone</th>
               <th style={{ ...thStyle, cursor: "default" }}>Tech Outreach</th>
               <th style={{ ...thStyle, cursor: "default" }}>Shop Log</th>
               <th style={{ ...thStyle, textAlign: "center" }} onClick={() => handleSort("byovEnrolled")}>BYOV{sortIndicator("byovEnrolled")}</th>
@@ -2686,7 +2761,7 @@ export default function RentalRepairTracker() {
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: meta.color }}>
                   {isCollapsed ? "▶" : "▼"}
                 </span>
-                <span style={{ fontFamily: fonts.dmSans, fontWeight: 700, fontSize: 13, color: meta.color, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                <span style={{ fontFamily: fonts.dmSans, fontWeight: 700, fontSize: 14, color: meta.color }}>
                   {name}
                 </span>
                 <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>

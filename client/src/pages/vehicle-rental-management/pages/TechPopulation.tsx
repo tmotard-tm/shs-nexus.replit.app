@@ -8,8 +8,9 @@ import { apiRequest } from "@/lib/queryClient";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface TechPopRow {
-  id: string;
-  ldap: string;
+  id: string | null;
+  truckNumber: string | null;
+  ldap: string | null;
   name: string;
   market: string | null;
   primaryZip: string | null;
@@ -34,12 +35,16 @@ interface TechPopRow {
   newHireExempt: boolean;
   dcaReviewOutcome: string | null;
   currentStatus: string;
-  createdAt: string;
+  createdAt: string | null;
   rentalStartDate: string | null;
   outreachFlagged: boolean;
   returnedRental: boolean;
   escalationPath: string | null;
   smsSentAt: string | null;
+  hasVrmContext: boolean;
+  contextStatus: "matched" | "no_ldap" | "no_vrm_match";
+  liveTruckStatus: string | null;
+  liveSource: string | null;
 }
 
 interface TechDetail extends TechPopRow {
@@ -57,6 +62,14 @@ interface OutreachEntry {
   notes: string | null;
   performedByName: string | null;
   createdAt: string;
+}
+
+interface ActiveRentalsResponse {
+  rows: TechPopRow[];
+  total: number;
+  ldapMissing: number;
+  vrmContextMissing: number;
+  cached: boolean;
 }
 
 // ─── Gate pill helpers ────────────────────────────────────────────────────────
@@ -229,6 +242,7 @@ function DetailPanel({ techId, onClose, onUpdated }: { techId: string; onClose: 
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
       onUpdated();
     },
   });
@@ -588,9 +602,28 @@ export default function TechPopulation() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const outreachInputRef = useRef<HTMLInputElement>(null);
 
-  const { data: allTechs = [], isLoading } = useQuery<TechPopRow[]>({
-    queryKey: ["/api/vrm/techs?pageSize=500"],
-    select: (data: any) => (data as any).rows ?? [],
+  const { data: activeRentalsData, isLoading } = useQuery<ActiveRentalsResponse>({
+    queryKey: ["/api/vrm/active-rentals"],
+    queryFn: async () => {
+      const r = await fetch("/api/vrm/active-rentals");
+      if (!r.ok) throw new Error("Failed to load active rentals");
+      return r.json();
+    },
+  });
+  const allTechs = activeRentalsData?.rows ?? [];
+
+  const refreshRosterMutation = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/vrm/active-rentals?refresh=1");
+      if (!r.ok) throw new Error("Failed to refresh active rentals");
+      return r.json() as Promise<ActiveRentalsResponse>;
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(["/api/vrm/active-rentals"], data);
+      setSyncMessage(`Fleet Scope rentals refreshed — ${data.total} active rental row${data.total === 1 ? "" : "s"} loaded`);
+      setTimeout(() => setSyncMessage(null), 6000);
+    },
+    onError: (e: any) => setSyncMessage(`Refresh failed: ${e.message}`),
   });
 
   const displayRows = allTechs.filter((t) => {
@@ -598,7 +631,7 @@ export default function TechPopulation() {
     if (gateFilter && t.gate1Classification !== gateFilter) return false;
     if (search) {
       const q = search.toLowerCase();
-      if (!t.name.toLowerCase().includes(q) && !t.ldap.toLowerCase().includes(q)) return false;
+      if (!t.name.toLowerCase().includes(q) && !(t.ldap ?? "").toLowerCase().includes(q)) return false;
     }
     return true;
   });
@@ -635,7 +668,7 @@ export default function TechPopulation() {
       const incremental = adjNet != null && payroll != null ? (adjNet + payroll).toFixed(2) : "";
       return [
         // Identity
-        t.ldap, t.name, t.market ?? "", t.primaryZip ?? "", t.tenureMonths ?? "", t.rentalStartDate ?? "",
+        t.ldap ?? "", t.name, t.market ?? "", t.primaryZip ?? "", t.tenureMonths ?? "", t.rentalStartDate ?? "",
         // Volume
         t.gate1DaysInRental ?? "", t.gate1Completes ?? "",
         // Revenue
@@ -678,6 +711,7 @@ export default function TechPopulation() {
       const missingNote = ldapMissing > 0 ? `; ${ldapMissing} Fleet Scope row${ldapMissing === 1 ? "" : "s"} excluded (no LDAP)` : "";
       setSyncMessage(`Sync complete — ${data.roster.upserted ?? 0} roster records, ${data.net.updated ?? 0} net records updated${missingNote}`);
       qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
       setTimeout(() => setSyncMessage(null), 6000);
     },
     onError: (e: any) => setSyncMessage(`Sync failed: ${e.message}`),
@@ -769,11 +803,11 @@ export default function TechPopulation() {
             Active Rentals
           </h1>
           <p style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14, color: colors.inkMuted, marginTop: 4 }}>
-            All active rental technicians from{" "}
+            Fleet Scope rentals-dashboard rows from{" "}
             <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
-              VW_RENTAL_LIST
+              fs_trucks
             </span>
-            {" "}enriched with LDAP &amp; AMS fields
+            {" "}with optional VRM context merged by LDAP
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -793,6 +827,21 @@ export default function TechPopulation() {
           >
             <Download className="h-4 w-4" />
             Export CSV
+          </button>
+
+          <button
+            onClick={() => refreshRosterMutation.mutate()}
+            disabled={refreshRosterMutation.isPending}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg"
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
+              color: colors.inkSoft, backgroundColor: colors.background,
+              border: `1px solid ${colors.rule}`, cursor: refreshRosterMutation.isPending ? "not-allowed" : "pointer",
+              opacity: refreshRosterMutation.isPending ? 0.6 : 1,
+            }}
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshRosterMutation.isPending ? "animate-spin" : ""}`} />
+            {refreshRosterMutation.isPending ? "Refreshing…" : "Refresh Roster"}
           </button>
 
           <button
@@ -846,13 +895,24 @@ export default function TechPopulation() {
       {importSummary && <ImportSummary summary={importSummary} onClose={() => setImportSummary(null)} />}
       {syncMessage && (
         <div className="flex items-center gap-2 p-3 mb-4 rounded-lg" style={{
-          backgroundColor: syncMessage.startsWith("Sync failed") || syncMessage.startsWith("Import failed") || syncMessage.startsWith("Upload failed") ? "#FEF2F2" : "#ECFDF5",
+          backgroundColor: syncMessage.startsWith("Sync failed") || syncMessage.startsWith("Import failed") || syncMessage.startsWith("Upload failed") || syncMessage.startsWith("Refresh failed") ? "#FEF2F2" : "#ECFDF5",
           border: `1px solid ${syncMessage.includes("failed") ? colors.red : colors.green}`,
         }}>
           {syncMessage.includes("failed")
             ? <AlertCircle className="h-4 w-4 shrink-0" style={{ color: colors.red }} />
             : <CheckCircle className="h-4 w-4 shrink-0" style={{ color: colors.green }} />}
           <span style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13, color: colors.ink }}>{syncMessage}</span>
+        </div>
+      )}
+
+      {!!activeRentalsData && (activeRentalsData.ldapMissing > 0 || activeRentalsData.vrmContextMissing > 0) && (
+        <div className="flex items-center gap-2 p-3 mb-4 rounded-lg" style={{ backgroundColor: "#FFFBEB", border: "1px solid #F59E0B" }}>
+          <AlertCircle className="h-4 w-4 shrink-0" style={{ color: "#B45309" }} />
+          <span style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13, color: colors.ink }}>
+            {activeRentalsData.ldapMissing > 0 ? `${activeRentalsData.ldapMissing} live rental row${activeRentalsData.ldapMissing === 1 ? "" : "s"} have no LDAP` : null}
+            {activeRentalsData.ldapMissing > 0 && activeRentalsData.vrmContextMissing > 0 ? "; " : null}
+            {activeRentalsData.vrmContextMissing > 0 ? `${activeRentalsData.vrmContextMissing} live rental row${activeRentalsData.vrmContextMissing === 1 ? "" : "s"} have no VRM context yet` : null}
+          </span>
         </div>
       )}
 
@@ -889,7 +949,7 @@ export default function TechPopulation() {
           </button>
         )}
         <span style={{ marginLeft: "auto", fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
-          {isLoading ? "Loading…" : `${displayRows.length} of ${allTechs.length} technicians`}
+          {isLoading ? "Loading…" : `${displayRows.length} of ${allTechs.length} active rentals`}
         </span>
       </div>
 
@@ -925,26 +985,33 @@ export default function TechPopulation() {
               <tr>
                 <td colSpan={11} style={{ padding: "48px 16px", textAlign: "center", fontFamily: fonts.dmSans, fontSize: 14, color: colors.inkMuted }}>
                   {allTechs.length === 0
-                    ? "No technicians found — click Sync Eligibility to pull from Snowflake"
-                    : "No technicians match the current filters"}
+                    ? "No active rentals found in the Fleet Scope rentals table"
+                    : "No active rentals match the current filters"}
                 </td>
               </tr>
             ) : (
               displayRows.map((tech) => (
                 <tr
-                  key={tech.id}
-                  onClick={() => setSelectedTechId(tech.id)}
-                  style={{ cursor: "pointer", transition: "background-color 100ms" }}
-                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = colors.surface; }}
+                  key={tech.id ?? `${tech.ldap ?? "no-ldap"}-${tech.name}-${tech.rentalStartDate ?? "no-date"}`}
+                  onClick={() => tech.id && setSelectedTechId(tech.id)}
+                  style={{ cursor: tech.id ? "pointer" : "default", transition: "background-color 100ms" }}
+                  onMouseEnter={(e) => { if (tech.id) (e.currentTarget as HTMLElement).style.backgroundColor = colors.surface; }}
                   onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                 >
                   <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                     <div className="flex items-center gap-1">
-                      <div>
-                        <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{tech.name}</div>
-                        <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>{tech.ldap}</div>
+                        <div>
+                          <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{tech.name}</div>
+                        <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, marginTop: 2 }}>
+                          {tech.ldap ?? "—"}{tech.truckNumber ? ` • Truck ${tech.truckNumber}` : ""}
+                        </div>
+                        {tech.contextStatus !== "matched" && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#B45309", marginTop: 2 }}>
+                            {tech.contextStatus === "no_ldap" ? "Fleet Scope rental only — no LDAP on truck record" : "Fleet Scope rental only — no VRM match"}
+                          </div>
+                        )}
                       </div>
-                      <ChevronRight className="h-3.5 w-3.5 ml-1 shrink-0" style={{ color: colors.inkMuted }} />
+                      {tech.id && <ChevronRight className="h-3.5 w-3.5 ml-1 shrink-0" style={{ color: colors.inkMuted }} />}
                     </div>
                   </td>
                   <td style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
@@ -989,7 +1056,20 @@ export default function TechPopulation() {
                     <StatusPill status={tech.dcaReviewOutcome ?? "pending"} />
                   </td>
                   <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
-                    <StatusPill status={tech.currentStatus} />
+                    <div className="flex flex-col gap-1">
+                      {tech.hasVrmContext ? (
+                        <StatusPill status={tech.currentStatus} />
+                      ) : (
+                        <span style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11, color: colors.inkMuted }}>
+                          Live rental
+                        </span>
+                      )}
+                      {tech.liveTruckStatus && (
+                        <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkSoft }}>
+                          {tech.liveTruckStatus}
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
                     {tech.rentalStartDate ? new Date(tech.rentalStartDate).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—"}
@@ -1006,7 +1086,10 @@ export default function TechPopulation() {
         <DetailPanel
           techId={selectedTechId}
           onClose={() => setSelectedTechId(null)}
-          onUpdated={() => qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") })}
+          onUpdated={() => {
+            qc.invalidateQueries({ predicate: (q) => (q.queryKey[0] as string).startsWith("/api/vrm/techs") });
+            qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
+          }}
         />
       )}
     </div>
