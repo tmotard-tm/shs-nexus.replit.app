@@ -1357,8 +1357,12 @@ function UnifiedPanel({
     queryFn: async () => {
       const r = await fetch(`/api/ams/by-truck/${encodeURIComponent(amsTruck)}`, { credentials: "include" });
       if (!r.ok) {
+        // Match the server's graceful fallback: render the soft "AMS link missing"
+        // banner instead of a hard red error when the endpoint 5xx's (e.g., AMS
+        // upstream outage surfacing past the server's own catch).
         const body = await r.text().catch(() => "");
-        throw new Error(`HTTP ${r.status}${body ? ` — ${body.slice(0, 160)}` : ""}`);
+        const snippet = body ? ` — ${body.slice(0, 160)}` : "";
+        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `AMS unavailable (HTTP ${r.status})${snippet}` };
       }
       return r.json();
     },

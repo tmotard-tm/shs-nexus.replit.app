@@ -1444,7 +1444,7 @@ export const fleetOpsService = {
             ].join("\n");
             await sendEmail({
               to: "nfdt@transformco.com",
-              cc: ["tmotard@transformco.com", "Swong@transformco.com"],
+              cc: ["tmotard@transformco.com", "Stephen.Wong@transformco.com", "Sean.Chen@transformco.com"],
               from: "",
               subject: "Action Required: Nexus assignment failed - Tech missing from AMS database",
               text: emailBody,
