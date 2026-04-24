@@ -402,6 +402,9 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS closed_by VARCHAR(255);`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS link_missing BOOLEAN DEFAULT FALSE;`);
   await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS tech_punch_last_synced_at TIMESTAMP;`);
+  // User-selectable Stage — wins over auto-derivation for the row.
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS stage_override TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_repair_tracker ADD COLUMN IF NOT EXISTS stage_override_sub TEXT;`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_repair_tracker_closed_at_idx ON vrm_repair_tracker(closed_at);`);
 
   await db.execute(sql`

@@ -5,6 +5,7 @@ import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
+import { MANUAL_STAGES } from "@shared/repair-tracker-stage";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -39,6 +40,10 @@ interface RepairTrackerEntry {
   district: string | null;
   // Step 2 enrichment
   stage: string;
+  stageSub?: string | null;
+  stageSource?: "closed" | "manual" | "auto";
+  stageOverride?: string | null;
+  stageOverrideSub?: string | null;
   section: "Action Needed" | "In Progress" | "Completed";
   flags: { red: FlagInfo; yellow: FlagInfo; blue: FlagInfo };
   isArchived: boolean;
@@ -330,6 +335,9 @@ interface RepairForm {
   rentalReturnDate: string;
   routeCleared: boolean;
   byovEnrolled: boolean;
+  // Manual Stage override — blank means auto-derivation still wins for this row.
+  stageOverride: string;
+  stageOverrideSub: string;
 }
 
 function entryToForm(entry: RepairTrackerEntry): RepairForm {
@@ -350,6 +358,8 @@ function entryToForm(entry: RepairTrackerEntry): RepairForm {
     rentalReturnDate: entry.rentalReturnDate ?? "",
     routeCleared: entry.routeCleared ?? false,
     byovEnrolled: entry.byovEnrolled ?? false,
+    stageOverride: entry.stageOverride ?? "",
+    stageOverrideSub: entry.stageOverrideSub ?? "",
   };
 }
 
@@ -370,6 +380,8 @@ const EMPTY_FORM: RepairForm = {
   rentalReturnDate: "",
   routeCleared: false,
   byovEnrolled: false,
+  stageOverride: "",
+  stageOverrideSub: "",
 };
 
 // ─── Punch History Tab (side-panel) ───────────────────────────────────────────

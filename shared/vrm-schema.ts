@@ -492,6 +492,10 @@ export const vrmRepairTracker = pgTable("vrm_repair_tracker", {
   // AMS link / punch sync metadata
   linkMissing: boolean("link_missing").default(false),
   techPunchLastSyncedAt: timestamp("tech_punch_last_synced_at"),
+  // User-selectable Stage — overrides auto-derivation when set. See
+  // MANUAL_STAGES in shared/repair-tracker-stage.ts for valid values.
+  stageOverride: text("stage_override"),
+  stageOverrideSub: text("stage_override_sub"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => ({

@@ -35,6 +35,7 @@ import {
   sectionForStage,
   deriveFlags,
   isArchived,
+  resolveStage,
 } from "../../shared/repair-tracker-stage";
 import { fleetScopeStorage } from "../fleet-scope-storage";
 import type { Truck as FleetScopeTruck, InsertTruck as InsertFleetScopeTruck } from "../../shared/fleet-scope-schema";
@@ -905,6 +906,8 @@ export async function listRepairTracker() {
       rt.closed_by AS "closedBy",
       rt.link_missing AS "linkMissing",
       rt.tech_punch_last_synced_at AS "techPunchLastSyncedAt",
+      rt.stage_override AS "stageOverride",
+      rt.stage_override_sub AS "stageOverrideSub",
       rt.created_at AS "createdAt",
       rt.updated_at AS "updatedAt",
       rd.byov_enrolled AS "decisionByovEnrolled",
@@ -955,13 +958,14 @@ export async function listRepairTracker() {
       deniedAt: r.deniedAt,
       shopLastContactedDate: r.shopLastContactedDate,
     };
-    const stage = deriveStage(stageInput);
-    const section = sectionForStage(stage);
+    const resolved = resolveStage(stageInput, { stage: r.stageOverride, sub: r.stageOverrideSub });
     const flags = deriveFlags(stageInput, now);
     return {
       ...r,
-      stage,
-      section,
+      stage: resolved.stage,
+      stageSub: resolved.subStage,
+      stageSource: resolved.source, // "closed" | "manual" | "auto" — UI uses this for disclosure
+      section: resolved.section,
       flags,
       isArchived: isArchived(r.closedAt, now),
     };

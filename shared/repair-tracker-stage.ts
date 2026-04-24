@@ -105,6 +105,73 @@ export function deriveSection(input: StageInput): Section {
   return sectionForStage(deriveStage(input));
 }
 
+// ─── Manual stage override (Task: user-selectable Stage) ─────────────────────
+// The auto-derivation above is too opinionated for real workflows — everything
+// with main_status=Repairing ends up in "In Repair", which isn't always
+// accurate. MANUAL_STAGES is the curated picker menu: the user chooses a
+// Stage (and optional Sub-stage), and that wins over auto-derivation for the
+// row. closed_at still overrides manual (a closed case is Complete, period).
+
+export const MANUAL_STAGES: Record<Section, Record<string, readonly string[]>> = {
+  "Action Needed": {
+    "Needs Tech Call":       [],
+    "Needs Shop Info":       [],
+    "Needs Shop Update":     [],
+    "BYOV Decision Pending": [],
+    "Awaiting Rental Return":[],
+  },
+  "In Progress": {
+    "In Repair":        ["Awaiting Estimate", "Estimate Approved", "Under Repair", "Parts on Order"],
+    "Ready for Pickup": [],
+    "Declined Repair":  ["Looking for reassignment", "Need to find a spare"],
+  },
+  "Completed": {
+    "On Road":          [],
+    "BYOV Permanent":   [],
+    "Closed / Archived":[],
+  },
+};
+
+/** Reverse lookup: manual-stage label → section. Null if the string isn't a
+ *  valid manual stage (e.g., an old auto-derived label or a typo). */
+export function sectionForManualStage(stage: string | null | undefined): Section | null {
+  if (!stage) return null;
+  for (const [section, stages] of Object.entries(MANUAL_STAGES)) {
+    if (stage in stages) return section as Section;
+  }
+  return null;
+}
+
+export interface ResolvedStage {
+  stage: string;
+  subStage: string | null;
+  section: Section;
+  source: "closed" | "manual" | "auto";
+}
+
+/**
+ * Decide which stage and section a row is in. closed_at always wins (a closed
+ * row is Complete); otherwise, a manually-set stage wins over auto-derivation.
+ * Auto-derivation is the fallback so legacy rows without a manual choice still
+ * render a sensible pill.
+ */
+export function resolveStage(
+  input: StageInput,
+  override: { stage: string | null | undefined; sub: string | null | undefined },
+): ResolvedStage {
+  if (input.closedAt) {
+    return { stage: "Complete", subStage: null, section: "Completed", source: "closed" };
+  }
+  const manualSection = sectionForManualStage(override.stage);
+  if (override.stage && manualSection) {
+    const allowedSubs = MANUAL_STAGES[manualSection][override.stage] ?? [];
+    const sub = override.sub && allowedSubs.includes(override.sub) ? override.sub : null;
+    return { stage: override.stage, subStage: sub, section: manualSection, source: "manual" };
+  }
+  const stage = deriveStage(input);
+  return { stage, subStage: null, section: sectionForStage(stage), source: "auto" };
+}
+
 // ─── Auto-flag tints ──────────────────────────────────────────────────────────
 // Render-time tints applied to each row in the Repair Tracker table.
 // Multiple tints can apply to the same row (each is independent).
