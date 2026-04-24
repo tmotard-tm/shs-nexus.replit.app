@@ -505,7 +505,14 @@ function TechOutreachTab({
   const [method, setMethod] = useState<string>("phone");
   const [outcome, setOutcome] = useState<string>("reached");
   const [body, setBody] = useState("");
-  const [byovDecision, setByovDecision] = useState<"" | "Accepted" | "Declined">("");
+  // BYOV decision values:
+  //   "Temporary" — tech will drive their own van while we finish repairing theirs
+  //                 (case stays active; van still needs repair + reassignment gated on return).
+  //   "Permanent" — tech is permanently BYOV'd; their side is complete, but the van
+  //                 still needs repair and can be reassigned to another tech later.
+  //   "Declined"  — tech refused BYOV entirely.
+  //   "Accepted"  — legacy value, rendered as "Accepted (legacy)" and readable only.
+  const [byovDecision, setByovDecision] = useState<"" | "Temporary" | "Permanent" | "Declined">("");
   const [busy, setBusy] = useState(false);
 
   // Build revision map: originalId -> [revisions]
@@ -627,8 +634,8 @@ function TechOutreachTab({
           {!editingId && (
             <div style={{ marginBottom: 10, padding: 10, borderRadius: 6, backgroundColor: "#F0F9FF", border: "1px solid #BAE6FD" }}>
               <div style={{ ...LABEL_STYLE, marginBottom: 4, color: "#0369A1" }}>BYOV Decision (optional)</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {(["", "Accepted", "Declined"] as const).map((v) => (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(["", "Temporary", "Permanent", "Declined"] as const).map((v) => (
                   <button
                     key={v || "none"}
                     onClick={() => setByovDecision(v)}
@@ -639,6 +646,13 @@ function TechOutreachTab({
                       backgroundColor: byovDecision === v ? colors.accent : "transparent",
                       color: byovDecision === v ? "#FFF" : colors.inkSoft,
                     }}
+                    data-testid={`button-byov-${v.toLowerCase() || "none"}`}
+                    title={
+                      v === "Temporary" ? "Tech drives own van while we still repair theirs — case stays active."
+                      : v === "Permanent" ? "Tech is permanently BYOV. Their side is complete; van can be repaired and reassigned later."
+                      : v === "Declined" ? "Tech refused BYOV."
+                      : "Leave BYOV unchanged."
+                    }
                   >
                     {v || "No change"}
                   </button>
@@ -1083,7 +1097,7 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
         );
       })()}
 
-      {!linkMissing && (
+      {!linkMissing && data.vehicle && (
         <>
           <SectionHeading style={{ marginTop: 0, marginBottom: 10 }}>AMS Snapshot {data.vin ? <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, fontWeight: 400, marginLeft: 8 }}>{data.vin}</span> : null}</SectionHeading>
           <Field label="Truck Number" value={v.VehicleNumber ?? truckNumber} />
@@ -1117,6 +1131,33 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
             )}
           </div>
         </>
+      )}
+
+      {!linkMissing && !data.vehicle && (
+        // AMS comments loaded, but the per-VIN snapshot call didn't return a
+        // vehicle record — show a compact inline note (no alarming banner) and
+        // link out to Fleet Panel where the full snapshot can be edited.
+        <div style={{ padding: "10px 12px", backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+            AMS snapshot isn't available for this VIN right now. Comments below are current.
+          </span>
+          {truckNumber && (
+            <a
+              href={`/fleet-management?openTruck=${encodeURIComponent(truckNumber)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
+                color: colors.accent, textDecoration: "none",
+                border: `1px solid ${colors.accent}`, borderRadius: 5,
+                padding: "3px 8px", whiteSpace: "nowrap",
+              }}
+              data-testid="link-ams-fleet-panel-partial"
+            >
+              Open in Fleet Panel ↗
+            </a>
+          )}
+        </div>
       )}
 
       <SectionHeading style={{ marginTop: 24, marginBottom: 10 }}>
@@ -1442,20 +1483,40 @@ function UnifiedPanel({
         return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `#${amsTruck} is in Holman but has no VIN on file` };
       }
       // Step 3: per-VIN AMS fetch — same endpoints Fleet Management uses.
+      // CRITICAL: comments are the load-bearing data (staff log shop updates there
+      // to dedupe outreach). The snapshot is nice-to-have. If the per-VIN vehicle
+      // call errors but comments succeed, we still surface comments.
       const [vehicleRes, commentsRes] = await Promise.all([
         fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}`, { credentials: "include" }),
         fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}/comments`, { credentials: "include" }),
       ]);
       const vehicle = vehicleRes.ok ? await vehicleRes.json().catch(() => null) : null;
-      const rawComments = commentsRes.ok ? await commentsRes.json().catch(() => []) : [];
+      const rawComments = commentsRes.ok ? await commentsRes.json().catch(() => []) : null;
       const comments: any[] = Array.isArray(rawComments)
         ? rawComments
         : (rawComments?.data ?? rawComments?.comments ?? rawComments?.results ?? rawComments?.items ?? []);
-      if (!vehicle) {
-        return { found: false, linkMissing: true, vin, vehicle: null, comments: [], reason: `VIN ${vin} not found in AMS (Holman has it, AMS doesn't)` };
+
+      // Suppress the yellow "link missing" banner whenever either endpoint
+      // returned real data — the snapshot and comments are independent, so a
+      // partial success is a successful AMS link, just missing one half.
+      if (vehicle || rawComments !== null) {
+        return { found: true, linkMissing: false, vin, vehicle, comments };
       }
-      return { found: true, linkMissing: false, vin, vehicle, comments };
+      // Neither came back — truly unreachable for this VIN right now.
+      return {
+        found: false,
+        linkMissing: true,
+        vin,
+        vehicle: null,
+        comments: [],
+        reason: `VIN ${vin} not reachable in AMS (snapshot: HTTP ${vehicleRes.status}, comments: HTTP ${commentsRes.status})`,
+      };
     },
+    // Always refetch on mount/open so staff see the latest shop notes from AMS
+    // — this is the primary dedup mechanism the team relies on.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
     enabled: panelTab === "ams" && !!amsTruck,
   });
 
@@ -2367,6 +2428,28 @@ export default function RentalRepairTracker() {
     return <TintPill label={val} fg={palette.fg} bg={palette.bg} />;
   };
 
+  // BYOV visual indicator — at-a-glance so another user doesn't reassign a van
+  // whose tech is on Temporary BYOV. Permanent = tech side done (van reassignable
+  // once repaired). Temporary = tech still depends on their van coming back.
+  const byovBadge = (entry: RepairTrackerEntry) => {
+    const status = (entry.byovStatus ?? "").trim();
+    if (status === "Temporary") {
+      return <TintPill label="Temp BYOV" fg="#B45309" bg={TINT.amber.bg} />;
+    }
+    if (status === "Permanent") {
+      return <TintPill label="Perm BYOV" fg={TINT.teal.fg} bg={TINT.teal.bg} />;
+    }
+    if (status === "Declined") {
+      return <TintPill label="Declined" fg={TINT.red.fg} bg={TINT.red.bg} />;
+    }
+    if (status === "Accepted" || entry.byovEnrolled) {
+      // Legacy: earlier entries only recorded "Accepted"; surface it but flag as
+      // needing classification so the team can convert it to Temp/Perm.
+      return <TintPill label="BYOV (set type)" fg={TINT.blue.fg} bg={TINT.blue.bg} />;
+    }
+    return <TintPill label="No" fg={TINT.neutral.fg} bg={TINT.neutral.bg} />;
+  };
+
   return (
     <div>
       {/* Page header */}
@@ -2687,7 +2770,7 @@ export default function RentalRepairTracker() {
                     })()}
                   </td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
-                    {boolBadge(entry.byovEnrolled)}
+                    {byovBadge(entry)}
                   </td>
                   <td style={{ ...tdStyle, textAlign: "center" }}>
                     {rentalReturnedBadge(entry.rentalReturned)}
