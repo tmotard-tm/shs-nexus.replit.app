@@ -6617,15 +6617,27 @@ export class DatabaseStorage implements IStorage {
       db.selectDistinct({ d: truckInventory.district }).from(truckInventory),
       db.selectDistinct({ d: tpmsCachedAssignments.districtNo }).from(tpmsCachedAssignments),
       db.selectDistinct({ d: techVehicleAssignments.districtNo }).from(techVehicleAssignments),
+      // TPMS change log records historical district changes; pull both old and new values
+      db.select({
+        before: tpmsChangeLog.valueBefore,
+        after: tpmsChangeLog.valueAfter,
+      }).from(tpmsChangeLog).where(
+        sql`lower(${tpmsChangeLog.fieldChanged}) in ('district', 'district_no', 'districtno')`
+      ),
     ]);
 
     const seen = new Set<string>();
-    for (const rows of sources) {
+    for (let i = 0; i < sources.length; i++) {
+      const rows = sources[i];
       for (const row of rows) {
-        const raw = (row as any).d;
-        if (raw === null || raw === undefined) continue;
-        const padded = padDistrict(String(raw));
-        if (padded) seen.add(padded);
+        const r = row as any;
+        // First three sources expose `d`; the change-log source exposes before/after
+        const candidates: any[] = r.d !== undefined ? [r.d] : [r.before, r.after];
+        for (const raw of candidates) {
+          if (raw === null || raw === undefined) continue;
+          const padded = padDistrict(String(raw));
+          if (padded) seen.add(padded);
+        }
       }
     }
 

@@ -486,6 +486,20 @@ export default function CostCenterManagement() {
                                     if (e.key === "Enter") commitEdit(row);
                                     if (e.key === "Escape") cancelEdit();
                                   }}
+                                  onBlur={(e) => {
+                                    // Don't commit if blur is caused by clicking the
+                                    // save/cancel buttons inside this row — they handle it.
+                                    const next = e.relatedTarget as HTMLElement | null;
+                                    if (
+                                      next?.getAttribute?.("data-testid") ===
+                                        `button-save-${row.district}` ||
+                                      next?.getAttribute?.("data-testid") ===
+                                        `button-cancel-edit-${row.district}`
+                                    ) {
+                                      return;
+                                    }
+                                    commitEdit(row);
+                                  }}
                                   className="h-8 w-28 font-mono"
                                   data-testid={`input-edit-${row.district}`}
                                 />

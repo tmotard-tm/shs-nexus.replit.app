@@ -7330,8 +7330,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===============================
   console.log("Registering District Cost Centers API routes...");
 
-  function isCostCenterAdmin(user: any): boolean {
-    return user && (user.role === 'developer' || user.role === 'admin');
+  // (Legacy isCostCenterAdmin role-only helper removed in favor of the
+  //  permission-key based userCanManageCostCenters below.)
+
+  // Permission-key based check that mirrors the frontend
+  // RolePermissionSettings.sidebar.management.costCenterManagement gate
+  // so backend authorization always matches the role/permission matrix
+  // and any per-user permission overrides.
+  async function userCanManageCostCenters(user: any): Promise<boolean> {
+    if (!user) return false;
+    const role = user.role as string | undefined;
+    if (!role) return false;
+
+    // Developers always have full access
+    if (role === 'developer') return true;
+
+    // Look up role-level permission settings
+    let allowed = false;
+    try {
+      const rolePerm = await storage.getRolePermission(role);
+      const settings: any = rolePerm?.permissions ?? null;
+      allowed = !!settings?.sidebar?.management?.costCenterManagement;
+    } catch (err) {
+      console.error("Error checking role permissions for cost centers:", err);
+    }
+
+    // Apply user-level permission overrides if present
+    const overrides: any = (user as any).permissionOverrides ?? null;
+    const override = overrides?.sidebar?.management?.costCenterManagement;
+    if (typeof override === 'boolean') {
+      allowed = override;
+    }
+
+    return allowed;
   }
 
   // Pad/normalize a district number to 7-digit zero-padded format.
@@ -7345,8 +7376,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/cost-centers", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!isCostCenterAdmin(currentUser)) {
-        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
       const items = await storage.listDistrictCostCenters();
       res.json(items);
@@ -7360,8 +7391,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/cost-centers", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!isCostCenterAdmin(currentUser)) {
-        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
       const bodySchema = z.object({
@@ -7404,8 +7435,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/cost-centers/:district", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!isCostCenterAdmin(currentUser)) {
-        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
       const padded = padDistrictForApi(req.params.district);
@@ -7451,8 +7482,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.delete("/api/cost-centers/:district", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!isCostCenterAdmin(currentUser)) {
-        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
       const padded = padDistrictForApi(req.params.district);
@@ -7489,8 +7520,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/cost-centers/init-defaults", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!isCostCenterAdmin(currentUser)) {
-        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
       const result = await storage.seedDefaultDistrictCostCenters(currentUser!.username);
