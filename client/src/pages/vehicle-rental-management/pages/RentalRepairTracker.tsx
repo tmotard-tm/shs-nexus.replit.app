@@ -1249,7 +1249,7 @@ function PunchHistoryTab({
       )}
 
       <p style={{ marginTop: 14, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-        Source: TimeHub (1-week window, raw PUNCH_TYP from <span style={{ fontFamily: fonts.jetbrains }}>TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK</span>). Data refreshes every ~90s server-side.
+        Source: <span style={{ fontFamily: fonts.jetbrains }}>HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL</span> (1-week window, START / END events derived from per-row START_TIME / END_TIME). Data refreshes every ~90s server-side.
       </p>
     </div>
   );
