@@ -5,6 +5,7 @@ import { fsDb } from "./fleet-scope-db";
 import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots, samsaraPenetrationWeeklySnapshots } from "@shared/fleet-scope-schema";
 import {
   getAmsTruckStatusMap,
+  getAmsStatusForMissingVins,
   getAmsOutOfServiceMap,
 } from "./ams-truck-status-cache";
 import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
@@ -13468,6 +13469,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         amsStatusByVin = await getAmsTruckStatusMap();
       } catch (err) {
         console.error("[Decommissioning] AMS truck status enrichment failed (non-fatal):", err);
+      }
+
+      // For VINs that were missed by the bulk map (e.g. when the AMS bulk
+      // search 500s and we fall back to a Snowflake table that doesn't
+      // include older trucks), fall back to per-VIN AMS lookups so the
+      // Old Declines tab and other off-fleet trucks still get a status.
+      try {
+        const missingVins = vehicles
+          .map((v) => (v.vin || "").trim().toUpperCase())
+          .filter((vin) => vin && !(vin in amsStatusByVin));
+        if (missingVins.length > 0) {
+          const perVinResult = await getAmsStatusForMissingVins(missingVins);
+          Object.assign(amsStatusByVin, perVinResult);
+        }
+      } catch (err) {
+        console.error(
+          "[Decommissioning] Per-VIN AMS fallback failed (non-fatal):",
+          err,
+        );
       }
 
       const vehiclesWithRental = vehicles.map(v => {

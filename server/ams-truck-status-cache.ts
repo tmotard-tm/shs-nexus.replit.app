@@ -173,6 +173,129 @@ export function getAmsTruckStatusMapCachedOnly():
   return cache?.data ?? null;
 }
 
+// Per-VIN fallback cache for VINs that don't appear in the bulk map.
+// The bulk AMS search occasionally returns 500 and we fall back to a
+// Snowflake mirror that doesn't include older trucks (e.g. old declines).
+// For those VINs we hit /api/v1/vehicles/{vin} individually and cache here.
+const perVinCache = new Map<
+  string,
+  { status: string | null; oos: string | null; builtAt: number }
+>();
+const PER_VIN_TTL_MS = 24 * 60 * 60 * 1000; // 24h
+const PER_VIN_NEGATIVE_TTL_MS = 6 * 60 * 60 * 1000; // 6h for "not in AMS"
+
+let lookupMapCache: { data: Map<string, string>; builtAt: number } | null = null;
+
+async function getTruckStatusLookup(): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (lookupMapCache && now - lookupMapCache.builtAt < TTL_MS) {
+    return lookupMapCache.data;
+  }
+  const lookupItems: any[] = await amsApiService
+    .getLookup("truck-status")
+    .catch(() => []);
+  const map = new Map<string, string>();
+  const skipKeys = new Set(["UniqueID", "uniqueID", "Id", "id"]);
+  for (const item of lookupItems) {
+    const id = String(item.UniqueID ?? item.id ?? "");
+    let label: string | undefined;
+    for (const [key, val] of Object.entries(item)) {
+      if (skipKeys.has(key)) continue;
+      if (typeof val === "string" && val.trim()) {
+        label = val.trim();
+        break;
+      }
+    }
+    if (id) map.set(id, label ?? id);
+  }
+  lookupMapCache = { data: map, builtAt: now };
+  return map;
+}
+
+// Lookup AMS truck status for a list of VINs that are missing from the bulk
+// map. Performs per-VIN /vehicles/{vin} requests with caching, in small
+// concurrent batches to avoid hammering AMS. Returns a VIN→status map (only
+// includes VINs that resolved or are negatively cached).
+export async function getAmsStatusForMissingVins(
+  vins: string[],
+): Promise<Record<string, string | null>> {
+  const result: Record<string, string | null> = {};
+  if (vins.length === 0) return result;
+
+  const lookupMap = await getTruckStatusLookup();
+  const now = Date.now();
+  const toFetch: string[] = [];
+
+  for (const rawVin of vins) {
+    const vin = (rawVin || "").trim().toUpperCase();
+    if (!vin) continue;
+    const cached = perVinCache.get(vin);
+    if (cached) {
+      const age = now - cached.builtAt;
+      const ttl =
+        cached.status === null ? PER_VIN_NEGATIVE_TTL_MS : PER_VIN_TTL_MS;
+      if (age < ttl) {
+        result[vin] = cached.status;
+        continue;
+      }
+    }
+    toFetch.push(vin);
+  }
+
+  if (toFetch.length === 0) return result;
+
+  console.log(
+    `[AMS PerVin] Fetching ${toFetch.length} VINs individually (bulk map missed)`,
+  );
+
+  const CONCURRENCY = 6;
+  let fetched = 0;
+  let found = 0;
+  for (let i = 0; i < toFetch.length; i += CONCURRENCY) {
+    const slice = toFetch.slice(i, i + CONCURRENCY);
+    await Promise.all(
+      slice.map(async (vin) => {
+        try {
+          const v: any = await amsApiService.getVehicleByVin(vin);
+          const rawStatus = v?.TruckStatus ?? v?.truckStatus ?? v?.truck_status;
+          let status: string | null = null;
+          if (rawStatus != null && String(rawStatus).trim() !== "") {
+            const label = lookupMap.get(String(rawStatus));
+            status = label ?? String(rawStatus);
+          }
+          const oosRaw =
+            v?.OutofSvcDate ??
+            v?.OutOfSvcDate ??
+            v?.outofSvcDate ??
+            v?.OutOfServiceDate ??
+            v?.outOfServiceDate ??
+            null;
+          const oos = oosRaw == null ? null : String(oosRaw).trim();
+          perVinCache.set(vin, { status, oos, builtAt: Date.now() });
+          if (oosCache) oosCache.data[vin] = oos;
+          result[vin] = status;
+          fetched++;
+          if (status !== null) found++;
+        } catch (err: any) {
+          // 404 or other error: cache as null (not in AMS) with shorter TTL.
+          perVinCache.set(vin, {
+            status: null,
+            oos: null,
+            builtAt: Date.now(),
+          });
+          result[vin] = null;
+          fetched++;
+        }
+      }),
+    );
+  }
+
+  console.log(
+    `[AMS PerVin] Done: ${fetched} requested, ${found} returned a status`,
+  );
+  return result;
+}
+
 export function isAmsTruckStatusCacheStale(): boolean {
   if (!cache) return true;
   return Date.now() - cache.builtAt > TTL_MS;
