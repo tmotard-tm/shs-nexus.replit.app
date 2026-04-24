@@ -506,21 +506,27 @@ export async function fetchTechPunchHistory(
   const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const lookback = Math.max(1, Math.min(7, days));
 
-  // Source has real event types: START TRUCK / START DAY / START PAY /
-  // START ORDER / END ORDER / RESCHEDULE JOB / END ROUTE / END PAY / END DAY.
-  // Identifier column is ENT_ID (confirmed populated — older LDAP_ID column
-  // name guess returned zero rows in live testing).
+  // Source: IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL — has
+  // one row per (tech, day, punch_type, rank) with separate START_TIME and
+  // END_TIME columns. We UNION both into a single event stream prefixed with
+  // "START " / "END ", which reproduces the cadence the user sees in Snowflake:
+  // START TRUCK, START DAY, START PAY, START ORDER, END ORDER, END ROUTE,
+  // END PAY, END DAY, etc.
   const rows = (await svc.executeQuery(`
     WITH base AS (
-      SELECT
-        UPPER(ENT_ID)                            AS ldap,
-        RTE_DT                                   AS route_date,
-        PUNCH_TS                                 AS punch_ts,
-        PUNCH_TYP                                AS punch_type
-      FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-      WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
-        AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-        AND PUNCH_TS IS NOT NULL
+      SELECT UPPER(EMP_ENT_ID) AS ldap, PUNCH_DT AS route_date, START_TIME AS punch_ts,
+             'START ' || PUNCH_TYP AS punch_type
+      FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
+      WHERE UPPER(EMP_ENT_ID) IN (${ldapList.toUpperCase()})
+        AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+        AND START_TIME IS NOT NULL
+      UNION ALL
+      SELECT UPPER(EMP_ENT_ID) AS ldap, PUNCH_DT AS route_date, END_TIME AS punch_ts,
+             'END ' || PUNCH_TYP AS punch_type
+      FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
+      WHERE UPPER(EMP_ENT_ID) IN (${ldapList.toUpperCase()})
+        AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+        AND END_TIME IS NOT NULL
     ),
     daily AS (
       SELECT
@@ -605,17 +611,26 @@ export async function fetchTechPunchEvents(
   const safe = cleaned.replace(/'/g, "''").toUpperCase();
 
   const rows = (await svc.executeQuery(`
-    SELECT
-      UPPER(ENT_ID)                              AS "ldap",
-      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
-      TO_CHAR(PUNCH_TS, 'HH24:MI:SS')            AS "_time",
-      PUNCH_TYP                                  AS "punchType",
-      PUNCH_DTL                                  AS "orderNumber"
-    FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-    WHERE UPPER(ENT_ID) = '${safe}'
-      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-      AND PUNCH_TS IS NOT NULL
-    ORDER BY RTE_DT DESC, PUNCH_TS DESC
+    SELECT UPPER(EMP_ENT_ID) AS "ldap",
+           TO_CHAR(PUNCH_DT, 'YYYY-MM-DD') AS "punchDate",
+           TO_CHAR(START_TIME, 'HH24:MI:SS') AS "_time",
+           'START ' || PUNCH_TYP AS "punchType",
+           PUNCH_DTL AS "orderNumber"
+    FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
+    WHERE UPPER(EMP_ENT_ID) = '${safe}'
+      AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      AND START_TIME IS NOT NULL
+    UNION ALL
+    SELECT UPPER(EMP_ENT_ID) AS "ldap",
+           TO_CHAR(PUNCH_DT, 'YYYY-MM-DD') AS "punchDate",
+           TO_CHAR(END_TIME, 'HH24:MI:SS') AS "_time",
+           'END ' || PUNCH_TYP AS "punchType",
+           PUNCH_DTL AS "orderNumber"
+    FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
+    WHERE UPPER(EMP_ENT_ID) = '${safe}'
+      AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      AND END_TIME IS NOT NULL
+    ORDER BY "punchDate" DESC, "_time" DESC
   `)) as Array<{ ldap: string; punchDate: string; _time: string; punchType: string; orderNumber: string | null }>;
 
   return rows.map((r) => ({
@@ -644,6 +659,7 @@ export async function fetchPunchSourceShape(): Promise<{
   rowsUnfiltered: any[];
   rowCount1d: number;
   rowCount7d: number;
+  siblingPunchTables: Array<{ schema: string; table: string; columns: string[] }>;
 } | null> {
   if (!isSnowflakeConfigured()) return null;
   try {
@@ -672,11 +688,37 @@ export async function fetchPunchSourceShape(): Promise<{
       FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
     `);
     const c = (countsRes as any[])[0] ?? {};
+    // Hunt for sibling tables/views in the same schema that look like a richer
+    // punch source (contain PUNCH_DTL, ROW_NUM, TIME_ZONE — the columns from
+    // the user's screenshot). Limit to a reasonable set so the response stays
+    // readable.
+    const siblingsRes = await svc.executeQuery(`
+      SELECT TABLE_SCHEMA AS "schema", TABLE_NAME AS "table",
+             LISTAGG(COLUMN_NAME, ',') WITHIN GROUP (ORDER BY ORDINAL_POSITION) AS "cols"
+      FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA IN ('NFDT_METRIC_TBLS', 'NFDT_STG_TBLS', 'NFDT_BASE_TBLS', 'NFDT_RAW_TBLS')
+        AND (
+          UPPER(TABLE_NAME) LIKE '%PUNCH%'
+          OR UPPER(TABLE_NAME) LIKE '%TIMEHUB%'
+          OR UPPER(TABLE_NAME) LIKE '%TIMEPUNCH%'
+          OR UPPER(TABLE_NAME) LIKE '%CLOCK%'
+        )
+        AND TABLE_NAME <> 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
+      GROUP BY TABLE_SCHEMA, TABLE_NAME
+      ORDER BY TABLE_SCHEMA, TABLE_NAME
+      LIMIT 20
+    `);
+    const siblings = (siblingsRes as any[]).map((r) => ({
+      schema: String(r.schema),
+      table: String(r.table),
+      columns: String(r.cols ?? "").split(",").filter(Boolean),
+    }));
     return {
       columns: (colsRes as any[]).map((r) => ({ name: String(r.name), type: String(r.type) })),
       rowsUnfiltered: (rowsUnfilteredRes as any[]) ?? [],
       rowCount1d: Number(c.c1d ?? 0),
       rowCount7d: Number(c.c7d ?? 0),
+      siblingPunchTables: siblings,
     };
   } catch (e: any) {
     console.error("[VRM] punch source shape failed:", e?.message);
