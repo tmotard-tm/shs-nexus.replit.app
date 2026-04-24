@@ -7328,16 +7328,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   // ===============================
   // District Cost Centers API (Task 207)
-  // ===============================
   console.log("Registering District Cost Centers API routes...");
 
-  // Permission-key based check that mirrors the frontend
-  // RolePermissionSettings.sidebar.management.costCenterManagement gate.
-  // Builds the user's effective permissions the same way the rest of the
-  // app does: server defaults for the role, deep-merged with the stored
-  // role row (if any), then deep-merged with per-user overrides (if any).
-  // This guarantees the API never deny/allow drifts from the matrix
-  // shown on the Role Permissions page or the navigation sidebar.
+  // Mirrors the frontend gate at sidebar.management.costCenterManagement:
+  // defaults -> stored role row -> per-user overrides.
   async function userCanManageCostCenters(user: User | undefined): Promise<boolean> {
     if (!user || !user.role) return false;
 
@@ -7361,18 +7355,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return !!effective?.sidebar?.management?.costCenterManagement;
   }
 
-  // Pad/normalize a district number to 7-digit zero-padded format.
   function padDistrictForApi(input: string | undefined | null): string {
     const digits = String(input ?? "").trim().replace(/\D/g, "");
     if (!digits) return "";
     return digits.padStart(7, "0").slice(-7);
   }
 
-  // Body schema reuses the drizzle-zod insert schema from shared/schema.ts
-  // so the API contract stays in lockstep with the table definition.
-  // - district: accept 4-7 digits (we zero-pad to 7 server-side).
-  // - costCenter: enforced 5-char alphanumeric.
-  // - updatedBy: omitted from input; always set from the session.
   const costCenterCreateSchema = insertDistrictCostCenterSchema
     .omit({ updatedBy: true })
     .extend({
