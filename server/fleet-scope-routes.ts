@@ -27,6 +27,22 @@ import cron from "node-cron";
 import * as XLSX from "xlsx";
 import { randomUUID } from "node:crypto";
 
+// Extract a 5-digit US ZIP code from an address string. Looks for ZIP[+4]
+// at the end of the address first (most reliable), then falls back to the
+// last 5-digit run anywhere in the string. Returns null when no ZIP is
+// detectable. Used to auto-populate the zipCode column from address values
+// pasted by users (e.g. "5495 GLENWAY AVE, CINCINNATI, OH, 45238" → "45238").
+function extractZipFromAddress(address: string | null | undefined): string | null {
+  if (!address) return null;
+  const trimmed = address.toString().trim();
+  if (!trimmed) return null;
+  const tail = trimmed.match(/\b(\d{5})(?:-\d{4})?\s*$/);
+  if (tail) return tail[1];
+  const matches = trimmed.match(/\b\d{5}\b/g);
+  if (matches && matches.length > 0) return matches[matches.length - 1];
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Shared: Spare Vehicle Scoring/Enrichment Helper
 // Used by both /rental/suggested-replacements and /public/spares/search
@@ -13768,7 +13784,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       } else if (updates.sentToProcurement === false) {
         updates.sentToProcurementAt = null;
       }
-      
+
+      // If the user edited the address inline and didn't separately set the
+      // zipCode, auto-extract a 5-digit ZIP from the new address. We only
+      // overwrite zipCode when the user supplied an address with a ZIP — if
+      // no ZIP is found we leave the existing zipCode alone (don't blank it).
+      if (Object.prototype.hasOwnProperty.call(updates, "address") && !Object.prototype.hasOwnProperty.call(updates, "zipCode")) {
+        const extracted = extractZipFromAddress(updates.address);
+        if (extracted) {
+          updates.zipCode = extracted;
+        }
+      }
+
       const vehicle = await fleetScopeStorage.updateDecommissioningVehicle(parseInt(id), updates);
       if (!vehicle) {
         return res.status(404).json({ message: "Vehicle not found" });
@@ -13947,7 +13974,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       let invalidRows = 0;
-      const normalized: { truckNumber: string; address: string | null }[] = [];
+      const normalized: { truckNumber: string; address: string | null; zipCode: string | null }[] = [];
       const seenInBatch = new Set<string>();
 
       for (const row of rows) {
@@ -13966,7 +13993,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         seenInBatch.add(truckNumber);
 
         const address = row.address && row.address.toString().trim() ? row.address.toString().trim() : null;
-        normalized.push({ truckNumber, address });
+        // Auto-extract ZIP from the address (e.g. trailing "...OH, 45238")
+        const zipCode = extractZipFromAddress(address);
+        normalized.push({ truckNumber, address, zipCode });
       }
 
       if (normalized.length === 0) {
@@ -14017,9 +14046,30 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // Helper function to sync decommissioning tech data from Snowflake
   async function syncDecommissioningTechData(): Promise<{ synced: number; preserved: number; total: number }> {
-    const vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
+    let vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
     if (vehicles.length === 0) {
       return { synced: 0, preserved: 0, total: 0 };
+    }
+
+    // Backfill: for any vehicle missing a zipCode but whose address contains
+    // a 5-digit ZIP at the end (e.g. "...CINCINNATI, OH, 45238"), populate
+    // zipCode from the address. Lets the manager/tech ZIP fallback below
+    // actually find a match for trucks imported with address only.
+    let zipBackfilled = 0;
+    for (const v of vehicles) {
+      const hasZip = v.zipCode && v.zipCode.toString().trim();
+      if (hasZip) continue;
+      const extracted = extractZipFromAddress(v.address);
+      if (extracted) {
+        await fleetScopeStorage.updateDecommissioningVehicle(v.id, { zipCode: extracted });
+        zipBackfilled++;
+      }
+    }
+    if (zipBackfilled > 0) {
+      console.log(`[Decommissioning Tech Sync] Backfilled zipCode from address for ${zipBackfilled} vehicles`);
+      // Re-load with the freshly populated ZIPs so the rest of this function
+      // (and its ZIP-fallback branch) can use them.
+      vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
     }
 
     // TRUCK_NO in TPMS_EXTRACT has leading zeros (e.g., "036023") - keep them
@@ -14509,7 +14559,142 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
     }
 
+    // Final pass: populate "Nearest Tech" fields for ALL vehicles with a
+    // zipCode, including those that ARE assigned in TPMS_EXTRACT. Previously
+    // nearest tech was only computed in the unassigned ZIP-fallback branch,
+    // so assigned trucks always showed blank in the "Nearest Tech" columns.
+    try {
+      await populateNearestTechForAllVehicles();
+    } catch (err: any) {
+      console.error("[Decommissioning Tech Sync] Nearest-tech-for-assigned pass failed (non-fatal):", err?.message || err);
+    }
+
     return { synced, preserved, zipFallbackSynced, total: vehicles.length };
+  }
+
+  // For every decommissioning vehicle that has a zipCode, find the nearest
+  // field tech (excluding managers, and excluding the truck's own assigned
+  // tech) by ZIP-code numeric distance and update the nearest_tech_* columns.
+  // Runs for assigned + unassigned trucks. Idempotent — only writes when
+  // values actually changed, and clears the cached nearestTechDistance when
+  // the matched ZIP changes so the distance recompute pass picks it up.
+  async function populateNearestTechForAllVehicles(): Promise<{ updated: number; total: number }> {
+    const vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
+    const candidates = vehicles.filter(v => v.zipCode && v.zipCode.trim());
+    if (candidates.length === 0) {
+      return { updated: 0, total: 0 };
+    }
+
+    // Build a set of MANAGER_ENT_IDs so we can exclude managers from the
+    // nearest-tech candidate pool (managers shouldn't be surfaced as "nearest tech").
+    const managerEntIdSet = new Set<string>();
+    try {
+      const managerSql = `
+        SELECT DISTINCT MANAGER_ENT_ID
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE MANAGER_ENT_ID IS NOT NULL AND MANAGER_ENT_ID != ''
+      `;
+      interface MgrRow { MANAGER_ENT_ID: string; }
+      const mgrRows = await executeQuery<MgrRow>(managerSql);
+      for (const r of mgrRows) {
+        if (r.MANAGER_ENT_ID) managerEntIdSet.add(r.MANAGER_ENT_ID.toString().trim());
+      }
+    } catch (err: any) {
+      console.warn(`[Nearest Tech Pass] Manager set query failed (continuing without filter): ${err?.message || err}`);
+    }
+
+    // Load all techs that have a primary ZIP, excluding managers.
+    interface TechInfo {
+      enterpriseId: string;
+      fullName: string;
+      mobilePhone: string;
+      primaryZip: string;
+    }
+    const techsWithZip: TechInfo[] = [];
+    try {
+      const techSql = `
+        SELECT DISTINCT ENTERPRISE_ID, FULL_NAME, MOBILEPHONENUMBER, PRIMARYZIP
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
+          AND ENTERPRISE_ID IS NOT NULL AND ENTERPRISE_ID != ''
+          AND FULL_NAME IS NOT NULL
+      `;
+      interface TechRow {
+        ENTERPRISE_ID: string;
+        FULL_NAME: string | null;
+        MOBILEPHONENUMBER: string | null;
+        PRIMARYZIP: string | null;
+      }
+      const rows = await executeQuery<TechRow>(techSql);
+      for (const r of rows) {
+        const entId = r.ENTERPRISE_ID?.toString().trim();
+        if (!entId || managerEntIdSet.has(entId)) continue;
+        if (!r.PRIMARYZIP) continue;
+        techsWithZip.push({
+          enterpriseId: entId,
+          fullName: r.FULL_NAME?.toString().trim() || '',
+          mobilePhone: r.MOBILEPHONENUMBER?.toString().trim() || '',
+          primaryZip: r.PRIMARYZIP.toString().trim(),
+        });
+      }
+      console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers excluded)`);
+    } catch (err: any) {
+      console.error(`[Nearest Tech Pass] Tech pool query failed: ${err?.message || err}`);
+      return { updated: 0, total: candidates.length };
+    }
+
+    if (techsWithZip.length === 0) return { updated: 0, total: candidates.length };
+
+    const zipDist = (a: string, b: string): number => {
+      const n1 = parseInt(a.replace(/\D/g, '').substring(0, 5), 10);
+      const n2 = parseInt(b.replace(/\D/g, '').substring(0, 5), 10);
+      if (isNaN(n1) || isNaN(n2)) return Infinity;
+      return Math.abs(n1 - n2);
+    };
+
+    let updated = 0;
+    for (const v of candidates) {
+      const vZip = v.zipCode!.trim();
+      // Exclude the assigned tech themselves so "nearest tech" ≠ "assigned tech".
+      const ownEntId = v.enterpriseId?.trim() || '';
+      let best: TechInfo | null = null;
+      let bestD = Infinity;
+      for (const t of techsWithZip) {
+        if (ownEntId && t.enterpriseId === ownEntId) continue;
+        const d = zipDist(vZip, t.primaryZip);
+        if (d < bestD) { bestD = d; best = t; }
+      }
+      if (!best) continue;
+
+      const newName = best.fullName || null;
+      const newPhone = best.mobilePhone || null;
+      const newZip = best.primaryZip || null;
+      const newEnt = best.enterpriseId || null;
+
+      // Skip if nothing changed
+      if (
+        v.nearestTechName === newName &&
+        v.nearestTechPhone === newPhone &&
+        v.nearestTechZip === newZip &&
+        v.nearestTechEnterpriseId === newEnt
+      ) continue;
+
+      const update: Record<string, any> = {
+        nearestTechName: newName,
+        nearestTechPhone: newPhone,
+        nearestTechZip: newZip,
+        nearestTechEnterpriseId: newEnt,
+      };
+      // Force distance recompute when the matched ZIP moves
+      if (v.nearestTechZip !== newZip) {
+        update.nearestTechDistance = null;
+      }
+      await fleetScopeStorage.updateDecommissioningVehicle(v.id, update);
+      updated++;
+    }
+
+    console.log(`[Nearest Tech Pass] Updated ${updated} of ${candidates.length} vehicles`);
+    return { updated, total: candidates.length };
   }
 
   // Sync tech data from Snowflake to decommissioning vehicles (manual trigger or daily auto)

@@ -1675,7 +1675,7 @@ export class DatabaseStorage implements IStorage {
 
   // Old-declines import: only insert if truckNumber not already present (any category).
   // Skips trucks that exist in Active/Decommissioned (category='standard') AND existing old declines.
-  async insertOldDeclineVehicles(rows: { truckNumber: string; address: string | null }[]): Promise<{
+  async insertOldDeclineVehicles(rows: { truckNumber: string; address: string | null; zipCode?: string | null }[]): Promise<{
     added: number;
     skippedExistingStandard: number;
     skippedExistingOldDecline: number;
@@ -1703,6 +1703,7 @@ export class DatabaseStorage implements IStorage {
         .values({
           truckNumber: row.truckNumber,
           address: row.address,
+          zipCode: row.zipCode ?? null,
           stillNotSold: true,
           category: "old_decline",
         })
