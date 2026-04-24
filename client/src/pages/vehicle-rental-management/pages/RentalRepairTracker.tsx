@@ -2034,31 +2034,71 @@ function fmtPunchTime(ts: string | null): string {
   return d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 
+function fmtRelativeDay(ts: string | null): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const today = new Date();
+  const sameDay = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+  if (sameDay) return "today";
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const isYesterday = d.getFullYear() === yesterday.getFullYear() && d.getMonth() === yesterday.getMonth() && d.getDate() === yesterday.getDate();
+  if (isYesterday) return "yesterday";
+  return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function fmtSyncedAgo(ts: string | null | undefined): string {
+  if (!ts) return "";
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return "";
+  const ms = Date.now() - d.getTime();
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
+}
+
 function PunchStatusCell({ ldap, status, section }: { ldap: string | null; status: PunchStatusEntry | undefined; section?: string }) {
   if (!ldap) {
     return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>—</span>;
   }
   if (!status) {
-    // Completed cases aren't synced — show a clear "not tracked" rather than spinner-ish ellipsis
     if (section === "Completed") {
       return <span title="Punch sync disabled for completed cases" style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>—</span>;
     }
     return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 12 }}>…</span>;
   }
-  const isPunchedIn = status.status === "Punched In";
-  const isPunchedOut = status.status === "Punched Out";
-  const palette = isPunchedIn
-    ? { fg: "#B91C1C", bg: "#EF4444" }
-    : isPunchedOut
-    ? { fg: "#0F766E", bg: "#14B8A6" }
-    : { fg: colors.inkMuted, bg: "#CBD5E1" };
+
+  // No source data at all in the last 7 days — say so plainly.
+  if (!status.hasData || (!status.latestRawPunchLabel && !status.latestPunchTs)) {
+    return (
+      <div title={status.reason ?? status.error ?? ""} style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+        <span style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12, color: colors.inkMuted }}>
+          No punches in 7 days
+        </span>
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }}>
+          synced {fmtSyncedAgo(status.syncedAt)}
+        </span>
+      </div>
+    );
+  }
+
+  // Hero: the latest raw punch event from the source. Color hints freshness:
+  //   today  → green   (recent activity)
+  //   yesterday → amber (somewhat fresh)
+  //   older  → neutral (stale)
+  const day = fmtRelativeDay(status.latestPunchTs);
+  const palette = day === "today" ? TINT.green : day === "yesterday" ? TINT.amber : TINT.neutral;
   const tooltip = status.reason ?? (status.syncedAt ? `Synced ${new Date(status.syncedAt).toLocaleTimeString()}` : "");
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
-        gap: 3,
+        gap: 2,
         alignItems: "flex-start",
         padding: "6px 8px",
         backgroundColor: tintColor(palette.bg, 0.12),
@@ -2070,21 +2110,13 @@ function PunchStatusCell({ ldap, status, section }: { ldap: string | null; statu
       <span style={{
         fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11,
         color: palette.fg,
-        display: "inline-flex", alignItems: "center", gap: 4, whiteSpace: "nowrap",
+        whiteSpace: "nowrap",
       }}>
-        {status.status}
+        {status.latestRawPunchLabel ?? "Punch"} · {fmtPunchTime(status.latestPunchTs)}
       </span>
-      {(status.latestRawPunchLabel || status.latestPunchTs) && (
-        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }}>
-          {status.latestRawPunchLabel ?? "Latest punch"}
-          {status.latestPunchTs ? ` · ${fmtPunchTime(status.latestPunchTs)}` : ""}
-        </span>
-      )}
-      {status.status === "Unknown" && status.reason && (
-        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {status.reason}
-        </span>
-      )}
+      <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, whiteSpace: "nowrap" }}>
+        {day}{status.syncedAt ? ` · synced ${fmtSyncedAgo(status.syncedAt)}` : ""}
+      </span>
     </div>
   );
 }

@@ -643,13 +643,15 @@ export async function fetchTechPunchEvents(
 export async function fetchPunchSourceShape(): Promise<{
   totalRowsLast7d: number;
   distinctTechsLast7d: number;
+  columns: Array<{ name: string; type: string }>;
   punchTypes: Array<{ punchType: string; count: number }>;
   topTechsByEvents: Array<{ ldap: string; events: number; days: number }>;
+  sampleRecentRowsForBusiestTech: any[];
 } | null> {
   if (!isSnowflakeConfigured()) return null;
   try {
     const svc = getSnowflakeService();
-    const [typesRes, techsRes, totalsRes] = await Promise.all([
+    const [typesRes, techsRes, totalsRes, colsRes] = await Promise.all([
       svc.executeQuery(`
         SELECT PUNCH_TYP AS "punchType", COUNT(*) AS "count"
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
@@ -676,13 +678,37 @@ export async function fetchPunchSourceShape(): Promise<{
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
         WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
       `),
+      svc.executeQuery(`
+        SELECT COLUMN_NAME AS "name", DATA_TYPE AS "type"
+        FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'NFDT_METRIC_TBLS'
+          AND TABLE_NAME = 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
+        ORDER BY ORDINAL_POSITION
+      `),
     ]);
     const t = (totalsRes as any[])[0] ?? {};
+    const topTechs = (techsRes as any[]).map((r) => ({ ldap: String(r.ldap), events: Number(r.events), days: Number(r.days) }));
+    const busiestLdap = topTechs[0]?.ldap;
+    let sampleRecentRowsForBusiestTech: any[] = [];
+    if (busiestLdap) {
+      const safe = busiestLdap.replace(/'/g, "''");
+      const sampleRes = await svc.executeQuery(`
+        SELECT *
+        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        WHERE UPPER(ENT_ID) = '${safe}'
+          AND RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+        ORDER BY RTE_DT DESC, PUNCH_TS DESC
+        LIMIT 30
+      `);
+      sampleRecentRowsForBusiestTech = (sampleRes as any[]) ?? [];
+    }
     return {
       totalRowsLast7d: Number(t.totalRows ?? 0),
       distinctTechsLast7d: Number(t.distinctTechs ?? 0),
+      columns: (colsRes as any[]).map((r) => ({ name: String(r.name), type: String(r.type) })),
       punchTypes: (typesRes as any[]).map((r) => ({ punchType: String(r.punchType ?? "(null)"), count: Number(r.count) })),
-      topTechsByEvents: (techsRes as any[]).map((r) => ({ ldap: String(r.ldap), events: Number(r.events), days: Number(r.days) })),
+      topTechsByEvents: topTechs,
+      sampleRecentRowsForBusiestTech,
     };
   } catch (e: any) {
     console.error("[VRM] punch source shape failed:", e?.message);
