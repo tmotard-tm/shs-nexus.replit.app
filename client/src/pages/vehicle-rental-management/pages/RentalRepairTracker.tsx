@@ -1398,21 +1398,63 @@ function UnifiedPanel({
     enabled: !!hasDecision,
   });
 
-  // AMS snapshot + comments (Section A + B of drawer per closeout) — fetched on tab open only
+  // AMS snapshot + comments — follows the EXACT same path Fleet Management uses:
+  //   1) Load the Holman fleet list (same endpoint Fleet Management hits, React
+  //      Query shares the cache under ["/api/holman/fleet-vehicles"]).
+  //   2) Find the truck's VIN by leading-zero-normalized match — Holman stores
+  //      whichever pad the API returns, so normalize both sides.
+  //   3) Hit /api/ams/vehicles/:vin and /api/ams/vehicles/:vin/comments (the
+  //      per-VIN endpoints that Fleet Management's slide-out uses successfully).
+  // This keeps the tracker's AMS drawer in lockstep with Fleet Management without
+  // touching any server code that Fleet Management or Fleet Scope also depend on.
   const amsTruck = (currentEntry?.truckNumber ?? "").trim();
   const amsQuery = useQuery<{ found: boolean; linkMissing: boolean; vin?: string; vehicle: any; comments: any[]; reason?: string }>({
-    queryKey: ["/api/ams/by-truck", amsTruck],
+    queryKey: ["/api/ams/by-truck-via-fm", amsTruck],
     queryFn: async () => {
-      const r = await fetch(`/api/ams/by-truck/${encodeURIComponent(amsTruck)}`, { credentials: "include" });
-      if (!r.ok) {
-        // Match the server's graceful fallback: render the soft "AMS link missing"
-        // banner instead of a hard red error when the endpoint 5xx's (e.g., AMS
-        // upstream outage surfacing past the server's own catch).
-        const body = await r.text().catch(() => "");
-        const snippet = body ? ` — ${body.slice(0, 160)}` : "";
-        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `AMS unavailable (HTTP ${r.status})${snippet}` };
+      const stripZeros = (s: string) => s.replace(/^0+/, '') || s;
+      const normalizedTruck = stripZeros(amsTruck);
+      // Step 1: Holman fleet list — same call Fleet Management makes.
+      let holmanResp: any;
+      try {
+        const r = await fetch("/api/holman/fleet-vehicles", { credentials: "include" });
+        if (!r.ok) {
+          return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `Could not load Holman fleet list (HTTP ${r.status})` };
+        }
+        holmanResp = await r.json();
+      } catch (e: any) {
+        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `Could not load Holman fleet list — ${e?.message ?? "network error"}` };
       }
-      return r.json();
+      const vehicles: any[] = Array.isArray(holmanResp?.vehicles) ? holmanResp.vehicles : [];
+      if (vehicles.length === 0) {
+        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: "Holman fleet list is empty" };
+      }
+      // Step 2: find the vehicle by leading-zero-normalized truck number.
+      const match = vehicles.find((v: any) => {
+        const num = String(v.holmanVehicleNumber ?? v.vehicleNumber ?? v.holmanVehicleRef ?? "").trim();
+        const ref = String(v.holmanVehicleRef ?? "").trim();
+        return stripZeros(num) === normalizedTruck || stripZeros(ref) === normalizedTruck;
+      });
+      if (!match) {
+        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `#${amsTruck} not found in Holman fleet list (same list Fleet Management uses)` };
+      }
+      const vin = String(match.vin ?? "").trim().toUpperCase();
+      if (!vin) {
+        return { found: false, linkMissing: true, vehicle: null, comments: [], reason: `#${amsTruck} is in Holman but has no VIN on file` };
+      }
+      // Step 3: per-VIN AMS fetch — same endpoints Fleet Management uses.
+      const [vehicleRes, commentsRes] = await Promise.all([
+        fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}`, { credentials: "include" }),
+        fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}/comments`, { credentials: "include" }),
+      ]);
+      const vehicle = vehicleRes.ok ? await vehicleRes.json().catch(() => null) : null;
+      const rawComments = commentsRes.ok ? await commentsRes.json().catch(() => []) : [];
+      const comments: any[] = Array.isArray(rawComments)
+        ? rawComments
+        : (rawComments?.data ?? rawComments?.comments ?? rawComments?.results ?? rawComments?.items ?? []);
+      if (!vehicle) {
+        return { found: false, linkMissing: true, vin, vehicle: null, comments: [], reason: `VIN ${vin} not found in AMS (Holman has it, AMS doesn't)` };
+      }
+      return { found: true, linkMissing: false, vin, vehicle, comments };
     },
     enabled: panelTab === "ams" && !!amsTruck,
   });

@@ -13571,7 +13571,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!truckNumber) return res.status(400).json({ error: "truckNumber required" });
     // Version tag so we can verify from the UI that the latest handler code is
     // actually running in whatever environment we're looking at. Bump when changing.
-    const BUILD_TAG = "v3-holman-diag";
+    const BUILD_TAG = "v4-ltrim";
     // Declared outside the try so the outer catch can still include the
     // diagnostic trail when something throws unexpectedly.
     let vin: string | null = null;
@@ -13595,26 +13595,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       ]));
 
       // 1) Holman vehicles cache — Fleet Management's source of truth for VIN.
+      // Match on leading-zero-normalized value so any padding variant Holman
+      // returns (e.g., "46688", "046688", "0046688") resolves the same row.
       try {
         const hRows = await db
           .select({ vin: holmanVehiclesCache.vin, ref: holmanVehiclesCache.holmanVehicleRef, num: holmanVehiclesCache.holmanVehicleNumber })
           .from(holmanVehiclesCache)
-          .where(or(
-            inArray(holmanVehiclesCache.holmanVehicleNumber, candidates),
-            inArray(holmanVehiclesCache.holmanVehicleRef, candidates),
-          ));
+          .where(sql`(
+            LTRIM(${holmanVehiclesCache.holmanVehicleNumber}, '0') = ${normalized}
+            OR LTRIM(COALESCE(${holmanVehiclesCache.holmanVehicleRef}, ''), '0') = ${normalized}
+          )`);
         const hit = hRows.find(r => r.vin && r.vin.trim());
         if (hit?.vin) {
           vin = hit.vin.trim().toUpperCase();
           vinSource = "holman";
-          diag.push(`Holman hit (vin ok)`);
+          diag.push(`Holman hit (vin ok, stored as ${hit.num ?? hit.ref})`);
         } else if (hRows.length > 0) {
-          diag.push(`Holman matched ${hRows.length} row(s) but no VIN`);
+          diag.push(`Holman matched ${hRows.length} row(s) but no VIN (stored as ${hRows[0].num ?? hRows[0].ref})`);
         } else {
-          diag.push(`Holman no match`);
+          diag.push(`Holman no match (tried LTRIM='${normalized}')`);
         }
       } catch (hErr: any) {
-        diag.push(`Holman error`);
+        diag.push(`Holman error: ${hErr.message?.slice(0, 80) ?? ""}`);
         console.warn(`[AMS by-truck] Holman VIN lookup failed for ${truckNumber}:`, hErr.message);
       }
 
@@ -13625,7 +13627,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const rows = await fsDb
             .select({ vin: trucks.vin, num: trucks.truckNumber })
             .from(trucks)
-            .where(inArray(trucks.truckNumber, candidates));
+            .where(sql`LTRIM(${trucks.truckNumber}, '0') = ${normalized}`);
           const withVin = rows.find(r => r.vin && r.vin.trim());
           if (withVin?.vin) {
             vin = withVin.vin.trim().toUpperCase();
@@ -13637,7 +13639,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             diag.push(`Fleet Scope no match`);
           }
         } catch (fsErr: any) {
-          diag.push(`Fleet Scope error`);
+          diag.push(`Fleet Scope error: ${fsErr.message?.slice(0, 80) ?? ""}`);
           console.warn(`[AMS by-truck] Fleet Scope VIN lookup failed for ${truckNumber}:`, fsErr.message);
         }
       }
