@@ -1191,31 +1191,11 @@ export function registerVrmRoutes(): Router {
         hasData: false, syncedAt, error: opts.error,
       };
     }
-    // Source view emits one row per START ORDER event. Per domain rule:
-    //   first punch of the day = "Start Truck/Day" (Punched In)
-    //   last  punch of the day = "End Day"         (Punched Out)
-    // Inference:
-    //   • Today, multiple punches (first<last) → Punched Out (ended day)
-    //   • Today, single punch (first==last)    → Punched In  (still working)
-    //   • No today activity, prior in window   → Punched Out (last seen <date>)
-    //   • No activity in last 7 days           → Unknown
-    const today = todayStr();
-    const todaysRow = rows.find((r) => r.punchDate === today && (r.punchInTs || r.punchOutTs));
-    if (todaysRow) {
-      const startTs = todaysRow.punchInTs;
-      const endTs = todaysRow.punchOutTs;
-      const isActive = !!startTs && (!endTs || startTs === endTs);
-      return {
-        status: isActive ? "Punched In" : "Punched Out",
-        reason: isActive
-          ? `Start Truck ${fmtClock(startTs)}`
-          : `Start Truck ${fmtClock(startTs)} · End Day ${fmtClock(endTs)}`,
-        latestPunchTs: endTs ?? startTs ?? null,
-        latestPunchType: isActive ? "in" : "out",
-        latestRawPunchLabel: todaysRow.latestRawPunchLabel ?? null,
-        hasData: true, syncedAt, error: null,
-      };
-    }
+    // Source has real event types: START TRUCK / START DAY / START PAY /
+    // START ORDER / END ORDER / RESCHEDULE JOB / END ROUTE / END PAY / END DAY.
+    // We derive status directly from the latest raw event type — END DAY (or
+    // END PAY after END DAY) means out for the day; anything else means still
+    // working.
     const last = rows.find((r) => r.punchInTs || r.punchOutTs) ?? null;
     if (!last) {
       return {
@@ -1224,11 +1204,22 @@ export function registerVrmRoutes(): Router {
         hasData: rows.length > 0, syncedAt, error: null,
       };
     }
+    const today = todayStr();
+    const latestLabel = (last.latestRawPunchLabel ?? "").trim().toUpperCase();
+    const latestTs = last.punchOutTs ?? last.punchInTs ?? null;
+    const isEndOfDay = latestLabel === "END DAY" || latestLabel === "END PAY" || latestLabel === "END ROUTE";
+    const onToday = last.punchDate === today;
+    const status: PunchStatusLabel = onToday && !isEndOfDay ? "Punched In" : "Punched Out";
+    const reason = onToday
+      ? isEndOfDay
+        ? `${latestLabel} ${fmtClock(latestTs)}`
+        : `${latestLabel} ${fmtClock(latestTs)} (still active)`
+      : `Last seen ${last.punchDate} — ${latestLabel || "punch"} ${fmtClock(latestTs)}`;
     return {
-      status: "Punched Out",
-      reason: `Last seen ${last.punchDate}`,
-      latestPunchTs: last.punchOutTs ?? last.punchInTs ?? null,
-      latestPunchType: "out",
+      status,
+      reason,
+      latestPunchTs: latestTs,
+      latestPunchType: status === "Punched In" ? "in" : "out",
       latestRawPunchLabel: last.latestRawPunchLabel ?? null,
       hasData: true, syncedAt, error: null,
     };

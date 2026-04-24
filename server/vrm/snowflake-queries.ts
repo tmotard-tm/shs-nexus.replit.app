@@ -491,9 +491,9 @@ export interface TechPunchRow {
  * Fetch up to N days of tech time punches from
  * IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
  *
- * We pivot to one row per (ENT_ID, RTE_DT) with first/last punch times for the
- * day, plus the raw PUNCH_TYP of the latest punch for UI context. Returned rows
- * are ordered most-recent-first. Empty array if no data.
+ * We pivot to one row per (LDAP_ID, PUNCH_DATE) with first/last punch times
+ * for the day, plus the raw PUNCH_TYP of the latest punch for UI context.
+ * Returned rows are ordered most-recent-first. Empty array if no data.
  */
 export async function fetchTechPunchHistory(
   ldaps: string[],
@@ -506,21 +506,20 @@ export async function fetchTechPunchHistory(
   const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const lookback = Math.max(1, Math.min(7, days));
 
-  // NOTE: This source view only emits ONE event type — PUNCH_TYP='START ORDER'.
-  // There is NO clock-out signal present, so we infer activity:
-  //   "first START ORDER of the day" → punchInTs
-  //   "last  START ORDER of the day" → punchOutTs (proxy: last activity)
-  // See follow-up ticket logged in plan changelog.
+  // Source columns: LDAP_ID (the tech's LDAP username), PUNCH_DATE (the date),
+  // PUNCH_TS (the time), PUNCH_TYP (event type — START TRUCK / START DAY /
+  // START ORDER / END ORDER / RESCHEDULE JOB / END ROUTE / END PAY / END DAY /
+  // etc), PUNCH_DTL (order number when applicable).
   const rows = (await svc.executeQuery(`
     WITH base AS (
       SELECT
-        UPPER(ENT_ID)                            AS ldap,
-        RTE_DT                                   AS route_date,
+        UPPER(LDAP_ID)                           AS ldap,
+        PUNCH_DATE                               AS route_date,
         PUNCH_TS                                 AS punch_ts,
         PUNCH_TYP                                AS punch_type
       FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-      WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
-        AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      WHERE UPPER(LDAP_ID) IN (${ldapList.toUpperCase()})
+        AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
         AND PUNCH_TS IS NOT NULL
     ),
     daily AS (
@@ -586,7 +585,7 @@ export interface TechPunchEvent {
   punchDate: string;            // YYYY-MM-DD
   punchTs: string;              // ISO timestamp (date + time)
   punchType: string;            // raw PUNCH_TYP from source ('START ORDER', etc.)
-  orderNumber: string | null;   // SO_NO
+  orderNumber: string | null;   // PUNCH_DTL (order number when applicable)
 }
 
 /**
@@ -607,16 +606,16 @@ export async function fetchTechPunchEvents(
 
   const rows = (await svc.executeQuery(`
     SELECT
-      UPPER(ENT_ID)                              AS "ldap",
-      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
+      UPPER(LDAP_ID)                             AS "ldap",
+      TO_CHAR(PUNCH_DATE, 'YYYY-MM-DD')          AS "punchDate",
       TO_CHAR(PUNCH_TS, 'HH24:MI:SS')            AS "_time",
       PUNCH_TYP                                  AS "punchType",
-      SO_NO                                      AS "orderNumber"
+      PUNCH_DTL                                  AS "orderNumber"
     FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-    WHERE UPPER(ENT_ID) = '${safe}'
-      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+    WHERE UPPER(LDAP_ID) = '${safe}'
+      AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
       AND PUNCH_TS IS NOT NULL
-    ORDER BY RTE_DT DESC, PUNCH_TS DESC
+    ORDER BY PUNCH_DATE DESC, PUNCH_TS DESC
   `)) as Array<{ ldap: string; punchDate: string; _time: string; punchType: string; orderNumber: string | null }>;
 
   return rows.map((r) => ({
@@ -655,28 +654,28 @@ export async function fetchPunchSourceShape(): Promise<{
       svc.executeQuery(`
         SELECT PUNCH_TYP AS "punchType", COUNT(*) AS "count"
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
         GROUP BY PUNCH_TYP
         ORDER BY COUNT(*) DESC
       `),
       svc.executeQuery(`
         SELECT
-          UPPER(ENT_ID) AS "ldap",
+          UPPER(LDAP_ID) AS "ldap",
           COUNT(*) AS "events",
-          COUNT(DISTINCT RTE_DT) AS "days"
+          COUNT(DISTINCT PUNCH_DATE) AS "days"
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
-          AND ENT_ID IS NOT NULL
-        GROUP BY UPPER(ENT_ID)
+        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
+          AND LDAP_ID IS NOT NULL
+        GROUP BY UPPER(LDAP_ID)
         ORDER BY COUNT(*) DESC
         LIMIT 10
       `),
       svc.executeQuery(`
         SELECT
           COUNT(*) AS "totalRows",
-          COUNT(DISTINCT UPPER(ENT_ID)) AS "distinctTechs"
+          COUNT(DISTINCT UPPER(LDAP_ID)) AS "distinctTechs"
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
       `),
       svc.executeQuery(`
         SELECT COLUMN_NAME AS "name", DATA_TYPE AS "type"
@@ -695,9 +694,9 @@ export async function fetchPunchSourceShape(): Promise<{
       const sampleRes = await svc.executeQuery(`
         SELECT *
         FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE UPPER(ENT_ID) = '${safe}'
-          AND RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
-        ORDER BY RTE_DT DESC, PUNCH_TS DESC
+        WHERE UPPER(LDAP_ID) = '${safe}'
+          AND PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
+        ORDER BY PUNCH_DATE DESC, PUNCH_TS DESC
         LIMIT 30
       `);
       sampleRecentRowsForBusiestTech = (sampleRes as any[]) ?? [];
