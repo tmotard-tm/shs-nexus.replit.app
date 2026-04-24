@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useAuth } from "@/hooks/use-auth";
+import { usePermissions } from "@/hooks/use-permissions";
 import { useToast } from "@/hooks/use-toast";
 import { checkFormAccess, getAccessDeniedMessage } from "@/lib/form-permissions";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,45 +21,50 @@ export function PermissionProtectedRoute({
   redirectOnDenied = false 
 }: PermissionProtectedRouteProps) {
   const { user, isLoading } = useAuth();
+  const { permissions, isLoading: permissionsLoading } = usePermissions();
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const [redirected, setRedirected] = useState(false);
   const [accessChecked, setAccessChecked] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && !redirected && !accessChecked) {
-      // First check if user is authenticated
-      if (!user) {
-        const path = window.location.pathname;
-        const search = window.location.search || "";
-        const hash = window.location.hash || "";
-        setRedirected(true);
-        setLocation(`/login?next=${encodeURIComponent(`${path}${search}${hash}`)}`);
-        return;
-      }
+    // Wait until both auth and permissions queries have settled. We do not
+    // gate on `accessChecked` here so this effect re-evaluates whenever the
+    // merged permissions matrix changes (e.g., after `/api/role-permissions`
+    // or `/api/users/:id/permission-overrides` finishes loading or refetches).
+    if (isLoading || permissionsLoading) return;
+    if (redirected) return;
 
-      // Then check form access permissions
-      const hasAccess = checkFormAccess(user, formKey);
-      if (!hasAccess) {
-        if (redirectOnDenied) {
-          // Redirect to dashboard with toast notification
-          toast({
-            title: "Access Denied",
-            description: getAccessDeniedMessage(formKey),
-            variant: "destructive",
-          });
-          setRedirected(true);
-          setLocation("/dashboard");
-        }
-        // If not redirecting, we'll show inline access denied message
-      }
-      
-      setAccessChecked(true);
+    // First check if user is authenticated
+    if (!user) {
+      const path = window.location.pathname;
+      const search = window.location.search || "";
+      const hash = window.location.hash || "";
+      setRedirected(true);
+      setLocation(`/login?next=${encodeURIComponent(`${path}${search}${hash}`)}`);
+      return;
     }
-  }, [isLoading, user, formKey, redirectOnDenied, redirected, accessChecked, setLocation, toast]);
+
+    // Then check form access permissions using the merged effective
+    // permissions (defaults -> stored role row -> user overrides) so the
+    // route guard, sidebar, and API authorization stay in lock-step.
+    const hasAccess = checkFormAccess(user, formKey, permissions);
+    if (!hasAccess && redirectOnDenied) {
+      toast({
+        title: "Access Denied",
+        description: getAccessDeniedMessage(formKey),
+        variant: "destructive",
+      });
+      setRedirected(true);
+      setLocation("/dashboard");
+    }
+    // Otherwise (denied + inline) the render path shows the access-denied card.
+
+    setAccessChecked(true);
+  }, [isLoading, permissionsLoading, permissions, user, formKey, redirectOnDenied, redirected, setLocation, toast]);
 
   // Loading state
-  if (isLoading || !accessChecked) {
+  if (isLoading || permissionsLoading || !accessChecked) {
     return (
       <>
         <div className="min-h-screen bg-background flex items-center justify-center">
@@ -76,8 +82,8 @@ export function PermissionProtectedRoute({
     return null; // Redirect handling is in useEffect
   }
 
-  // Check permissions
-  const hasAccess = checkFormAccess(user, formKey);
+  // Check permissions using effective merged permissions (matches API/sidebar)
+  const hasAccess = checkFormAccess(user, formKey, permissions);
   
   // Access denied - show inline message
   if (!hasAccess && !redirectOnDenied) {

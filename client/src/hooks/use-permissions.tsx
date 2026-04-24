@@ -101,14 +101,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     gcTime: 10 * 60 * 1000,
   });
 
-  const { data: rolePermission } = useQuery<RolePermission>({
+  const { data: rolePermission, isLoading: isRolePermissionLoading } = useQuery<RolePermission>({
     queryKey: ['/api/role-permissions', user?.role],
     enabled: !!user && user.role !== 'developer',
     staleTime: 5 * 60 * 1000,
     gcTime: 10 * 60 * 1000,
   });
 
-  const { data: userOverridesData } = useQuery<UserOverridesResponse>({
+  const { data: userOverridesData, isLoading: isUserOverridesLoading } = useQuery<UserOverridesResponse>({
     queryKey: ['/api/users', user?.id, 'permission-overrides'],
     enabled: !!user,
     staleTime: 2 * 60 * 1000,
@@ -179,7 +179,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   return (
     <PermissionsContext.Provider value={{
       permissions: getPermissions(),
-      isLoading: isAuthLoading || isLoading,
+      // Reflect every query the merge depends on so consumers (e.g. route
+      // guards) can wait until the full effective matrix is ready, not just
+      // role defaults. `isLoading` is false for disabled queries, so this
+      // remains correct for unauthenticated users and developers (who skip
+      // the per-role fetch).
+      isLoading: isAuthLoading || isLoading || isRolePermissionLoading || isUserOverridesLoading,
       refetch,
       effectiveRole,
     }}>
