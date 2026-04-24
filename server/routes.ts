@@ -5,7 +5,8 @@ import { initVrmSchema } from "./vrm/init-schema";
 import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion, insertDistrictCostCenterSchema, type User, type RolePermissionSettings } from "@shared/schema";
+import { deepMergePermissions, getServerDefaultPermissions } from "./permission-utils";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
 import { activeVehicles } from "../client/src/data/fleetData";
@@ -7330,47 +7331,67 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ===============================
   console.log("Registering District Cost Centers API routes...");
 
-  // (Legacy isCostCenterAdmin role-only helper removed in favor of the
-  //  permission-key based userCanManageCostCenters below.)
-
   // Permission-key based check that mirrors the frontend
-  // RolePermissionSettings.sidebar.management.costCenterManagement gate
-  // so backend authorization always matches the role/permission matrix
-  // and any per-user permission overrides.
-  async function userCanManageCostCenters(user: any): Promise<boolean> {
-    if (!user) return false;
-    const role = user.role as string | undefined;
-    if (!role) return false;
+  // RolePermissionSettings.sidebar.management.costCenterManagement gate.
+  // Builds the user's effective permissions the same way the rest of the
+  // app does: server defaults for the role, deep-merged with the stored
+  // role row (if any), then deep-merged with per-user overrides (if any).
+  // This guarantees the API never deny/allow drifts from the matrix
+  // shown on the Role Permissions page or the navigation sidebar.
+  async function userCanManageCostCenters(user: User | undefined): Promise<boolean> {
+    if (!user || !user.role) return false;
 
-    // Developers always have full access
-    if (role === 'developer') return true;
+    const defaults = getServerDefaultPermissions(user.role);
+    const stored = await storage.getRolePermission(user.role);
+    const merged = deepMergePermissions(
+      defaults,
+      stored?.permissions ?? null,
+    ) as RolePermissionSettings;
 
-    // Look up role-level permission settings
-    let allowed = false;
-    try {
-      const rolePerm = await storage.getRolePermission(role);
-      const settings: any = rolePerm?.permissions ?? null;
-      allowed = !!settings?.sidebar?.management?.costCenterManagement;
-    } catch (err) {
-      console.error("Error checking role permissions for cost centers:", err);
-    }
+    const overrides = user.permissionOverrides as
+      | Partial<RolePermissionSettings>
+      | null
+      | undefined;
+    const effective = (
+      overrides
+        ? deepMergePermissions(merged, overrides)
+        : merged
+    ) as RolePermissionSettings;
 
-    // Apply user-level permission overrides if present
-    const overrides: any = (user as any).permissionOverrides ?? null;
-    const override = overrides?.sidebar?.management?.costCenterManagement;
-    if (typeof override === 'boolean') {
-      allowed = override;
-    }
-
-    return allowed;
+    return !!effective?.sidebar?.management?.costCenterManagement;
   }
 
   // Pad/normalize a district number to 7-digit zero-padded format.
-  function padDistrictForApi(input: string): string {
+  function padDistrictForApi(input: string | undefined | null): string {
     const digits = String(input ?? "").trim().replace(/\D/g, "");
     if (!digits) return "";
     return digits.padStart(7, "0").slice(-7);
   }
+
+  // Body schema reuses the drizzle-zod insert schema from shared/schema.ts
+  // so the API contract stays in lockstep with the table definition.
+  // - district: accept 4-7 digits (we zero-pad to 7 server-side).
+  // - costCenter: enforced 5-char alphanumeric.
+  // - updatedBy: omitted from input; always set from the session.
+  const costCenterCreateSchema = insertDistrictCostCenterSchema
+    .omit({ updatedBy: true })
+    .extend({
+      district: z
+        .string()
+        .trim()
+        .regex(/^\d{4,7}$/, "District must be 4 to 7 digits"),
+      costCenter: z
+        .string()
+        .trim()
+        .regex(
+          /^[A-Za-z0-9]{5}$/,
+          "Cost Center must be exactly 5 alphanumeric characters",
+        ),
+    });
+
+  const costCenterUpdateSchema = costCenterCreateSchema.pick({
+    costCenter: true,
+  });
 
   // GET /api/cost-centers - list all
   app.get("/api/cost-centers", requireAuth, async (req: any, res) => {
@@ -7395,11 +7416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
-      const bodySchema = z.object({
-        district: z.string().trim().regex(/^\d{4,7}$/, "District must be 4 to 7 digits"),
-        costCenter: z.string().trim().regex(/^[A-Za-z0-9]{5}$/, "Cost Center must be exactly 5 alphanumeric characters"),
-      });
-      const parsed = bodySchema.parse(req.body);
+      const parsed = costCenterCreateSchema.parse(req.body);
 
       const padded = padDistrictForApi(parsed.district);
       const existing = await storage.getDistrictCostCenter(padded);
@@ -7439,15 +7456,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
-      const padded = padDistrictForApi(req.params.district);
-      if (!padded) {
-        return res.status(400).json({ message: "Invalid district" });
+      const rawDistrict = String(req.params.district ?? "").trim();
+      if (!/^\d{4,7}$/.test(rawDistrict)) {
+        return res.status(400).json({ message: "Invalid district. Must be 4 to 7 digits." });
       }
+      const padded = padDistrictForApi(rawDistrict);
 
-      const bodySchema = z.object({
-        costCenter: z.string().trim().regex(/^[A-Za-z0-9]{5}$/, "Cost Center must be exactly 5 alphanumeric characters"),
-      });
-      const { costCenter } = bodySchema.parse(req.body);
+      const { costCenter } = costCenterUpdateSchema.parse(req.body);
 
       const existing = await storage.getDistrictCostCenter(padded);
       if (!existing) {
@@ -7486,10 +7501,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
-      const padded = padDistrictForApi(req.params.district);
-      if (!padded) {
-        return res.status(400).json({ message: "Invalid district" });
+      const rawDistrict = String(req.params.district ?? "").trim();
+      if (!/^\d{4,7}$/.test(rawDistrict)) {
+        return res.status(400).json({ message: "Invalid district. Must be 4 to 7 digits." });
       }
+      const padded = padDistrictForApi(rawDistrict);
 
       const existing = await storage.getDistrictCostCenter(padded);
       if (!existing) {

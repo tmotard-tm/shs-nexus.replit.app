@@ -6626,19 +6626,23 @@ export class DatabaseStorage implements IStorage {
       ),
     ]);
 
+    type DistrictRow = { d?: string | null };
+    type ChangeLogRow = { before?: string | null; after?: string | null };
+    const [truckRows, tpmsCachedRows, techVehicleRows, changeLogRows] =
+      sources as [DistrictRow[], DistrictRow[], DistrictRow[], ChangeLogRow[]];
+
     const seen = new Set<string>();
-    for (let i = 0; i < sources.length; i++) {
-      const rows = sources[i];
-      for (const row of rows) {
-        const r = row as any;
-        // First three sources expose `d`; the change-log source exposes before/after
-        const candidates: any[] = r.d !== undefined ? [r.d] : [r.before, r.after];
-        for (const raw of candidates) {
-          if (raw === null || raw === undefined) continue;
-          const padded = padDistrict(String(raw));
-          if (padded) seen.add(padded);
-        }
-      }
+    const collect = (raw: string | null | undefined) => {
+      if (raw === null || raw === undefined) return;
+      const padded = padDistrict(String(raw));
+      if (padded) seen.add(padded);
+    };
+    for (const row of truckRows) collect(row.d);
+    for (const row of tpmsCachedRows) collect(row.d);
+    for (const row of techVehicleRows) collect(row.d);
+    for (const row of changeLogRows) {
+      collect(row.before);
+      collect(row.after);
     }
 
     if (seen.size === 0) {
