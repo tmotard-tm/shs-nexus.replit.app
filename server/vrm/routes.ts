@@ -59,7 +59,7 @@ import {
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
 } from "./storage";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
@@ -1331,6 +1331,22 @@ export function registerVrmRoutes(): Router {
   });
 
   // GET /api/vrm/repair-tracker/punch-history/:ldap — full window for one tech
+  // GET /api/vrm/repair-tracker/punch-source-shape — diagnostic: tells us
+  // what PUNCH_TYP values, row counts, and per-tech cadence the source view
+  // actually emits. Use this to verify whether the displayed cadence matches
+  // the source, or whether we're looking at a limited subset.
+  router.get("/repair-tracker/punch-source-shape", async (_req, res) => {
+    try {
+      const sourceConfigured = isSnowflakeConfigured();
+      if (!sourceConfigured) return res.json({ configured: false });
+      const shape = await fetchPunchSourceShape();
+      res.json({ configured: true, shape });
+    } catch (e: any) {
+      console.error("[VRM] punch-source-shape error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   router.get("/repair-tracker/punch-history/:ldap", async (req, res) => {
     try {
       const ldap = (req.params.ldap || "").trim().toUpperCase();

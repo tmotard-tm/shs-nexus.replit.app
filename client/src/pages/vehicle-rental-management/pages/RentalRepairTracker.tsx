@@ -1661,12 +1661,47 @@ function UnifiedPanel({
                   <div style={labelStyle}>Stage</div>
                   <StagePill stage={currentEntry.stage} />
                 </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, marginBottom: compactWorkflowAction ? 14 : 0 }}>
+                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, marginBottom: 14 }}>
                   {workflowNextStep}
                 </div>
+                {currentEntry.section === "Action Needed" ? (
+                  <button
+                    onClick={() => quickPatchMutation.mutate({ mainStatus: "Repairing", techContacted: true })}
+                    disabled={quickPatchMutation.isPending}
+                    style={compactActionBtnStyle}
+                  >
+                    Move to In Progress <span aria-hidden>→</span>
+                  </button>
+                ) : currentEntry.section === "In Progress" ? (
+                  <button
+                    onClick={() => quickPatchMutation.mutate({ mainStatus: "On Road", techStatus: "On Road" })}
+                    disabled={quickPatchMutation.isPending}
+                    style={compactActionBtnStyle}
+                  >
+                    Move to Completed <span aria-hidden>→</span>
+                  </button>
+                ) : null}
                 {compactWorkflowAction ? (
-                  <button onClick={compactWorkflowAction.run} style={compactActionBtnStyle}>
-                    {compactWorkflowAction.label} <span aria-hidden>→</span>
+                  <button
+                    onClick={compactWorkflowAction.run}
+                    disabled={quickPatchMutation.isPending}
+                    style={{
+                      fontFamily: fonts.dmSans,
+                      fontWeight: 500,
+                      fontSize: 13,
+                      color: colors.ink,
+                      backgroundColor: colors.background,
+                      border: `1px solid ${colors.rule}`,
+                      borderRadius: 8,
+                      padding: "10px 14px",
+                      cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
+                      opacity: quickPatchMutation.isPending ? 0.6 : 1,
+                      width: "100%",
+                      marginTop: 8,
+                    }}
+                    title="Step-by-step alternative to the section move above"
+                  >
+                    {compactWorkflowAction.label}
                   </button>
                 ) : null}
                 {currentEntry.section === "In Progress" && currentEntry.routeCleared ? (
@@ -2539,6 +2574,52 @@ export default function RentalRepairTracker() {
                       >
                         <Pencil size={14} color={colors.inkMuted} />
                       </button>
+                      {entry.section === "Action Needed" && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const r = await apiRequest("PATCH", `/api/vrm/repair-tracker/${entry.id}`, { mainStatus: "Repairing", techContacted: true });
+                              if (!r.ok) throw new Error(await r.text());
+                              qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+                              toast({ title: "Moved to In Progress" });
+                            } catch (e: any) {
+                              toast({ title: "Move failed", description: e.message, variant: "destructive" });
+                            }
+                          }}
+                          title="Move to In Progress"
+                          style={{
+                            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
+                            color: "#1D4ED8", backgroundColor: "#EFF6FF",
+                            border: "1px solid #BFDBFE", borderRadius: 5,
+                            padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
+                          }}
+                        >
+                          → In Progress
+                        </button>
+                      )}
+                      {entry.section === "In Progress" && !entry.closedAt && (
+                        <button
+                          onClick={async () => {
+                            try {
+                              const r = await apiRequest("PATCH", `/api/vrm/repair-tracker/${entry.id}`, { mainStatus: "On Road", techStatus: "On Road" });
+                              if (!r.ok) throw new Error(await r.text());
+                              qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+                              toast({ title: "Moved to Completed" });
+                            } catch (e: any) {
+                              toast({ title: "Move failed", description: e.message, variant: "destructive" });
+                            }
+                          }}
+                          title="Move to Completed"
+                          style={{
+                            fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
+                            color: "#15803D", backgroundColor: "#F0FDF4",
+                            border: "1px solid #BBF7D0", borderRadius: 5,
+                            padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
+                          }}
+                        >
+                          → Completed
+                        </button>
+                      )}
                       {entry.stage === "Complete" && !entry.closedAt && (
                         <button
                           onClick={async () => {

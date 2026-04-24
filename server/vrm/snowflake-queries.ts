@@ -635,6 +635,61 @@ export async function fetchTechPunchEvents(
  *
  * Returns `null` when Snowflake isn't configured or the diagnostic itself fails.
  */
+/**
+ * Source-shape introspection. Returns distinct PUNCH_TYP values with counts,
+ * recent activity totals per tech, and a row-count snapshot. Used to verify
+ * what event cadence the source view actually emits vs what we're displaying.
+ */
+export async function fetchPunchSourceShape(): Promise<{
+  totalRowsLast7d: number;
+  distinctTechsLast7d: number;
+  punchTypes: Array<{ punchType: string; count: number }>;
+  topTechsByEvents: Array<{ ldap: string; events: number; days: number }>;
+} | null> {
+  if (!isSnowflakeConfigured()) return null;
+  try {
+    const svc = getSnowflakeService();
+    const [typesRes, techsRes, totalsRes] = await Promise.all([
+      svc.executeQuery(`
+        SELECT PUNCH_TYP AS "punchType", COUNT(*) AS "count"
+        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+        GROUP BY PUNCH_TYP
+        ORDER BY COUNT(*) DESC
+      `),
+      svc.executeQuery(`
+        SELECT
+          UPPER(ENT_ID) AS "ldap",
+          COUNT(*) AS "events",
+          COUNT(DISTINCT RTE_DT) AS "days"
+        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+          AND ENT_ID IS NOT NULL
+        GROUP BY UPPER(ENT_ID)
+        ORDER BY COUNT(*) DESC
+        LIMIT 10
+      `),
+      svc.executeQuery(`
+        SELECT
+          COUNT(*) AS "totalRows",
+          COUNT(DISTINCT UPPER(ENT_ID)) AS "distinctTechs"
+        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+        WHERE RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+      `),
+    ]);
+    const t = (totalsRes as any[])[0] ?? {};
+    return {
+      totalRowsLast7d: Number(t.totalRows ?? 0),
+      distinctTechsLast7d: Number(t.distinctTechs ?? 0),
+      punchTypes: (typesRes as any[]).map((r) => ({ punchType: String(r.punchType ?? "(null)"), count: Number(r.count) })),
+      topTechsByEvents: (techsRes as any[]).map((r) => ({ ldap: String(r.ldap), events: Number(r.events), days: Number(r.days) })),
+    };
+  } catch (e: any) {
+    console.error("[VRM] punch source shape failed:", e?.message);
+    return null;
+  }
+}
+
 export async function fetchPunchSourceDiagnostic(): Promise<{
   sampleLdapIds: string[];
   rowCount: number;
