@@ -13591,8 +13591,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       res.json({ found: true, linkMissing: false, vin, vehicle, comments });
     } catch (error: any) {
+      // AMS upstream failures (5xx, timeouts) shouldn't surface as our own 500
+      // — the drawer already has a graceful linkMissing fallback that renders
+      // a soft "AMS link missing — <reason>" panel.
       console.error(`[AMS by-truck] ${truckNumber}:`, error);
-      res.status(500).json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: error.message });
+      res.status(200).json({
+        found: false,
+        linkMissing: true,
+        vehicle: null,
+        comments: [],
+        reason: `AMS upstream unavailable — ${error.message}`,
+      });
     }
   });
 

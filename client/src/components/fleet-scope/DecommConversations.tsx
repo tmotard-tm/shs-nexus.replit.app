@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useToast } from "@/hooks/use-toast";
 import {
   MessageSquare,
@@ -56,6 +57,7 @@ interface DecommMessage {
   senderName: string | null;
   mediaUrl: string | null;
   mediaType: string | null;
+  ccForLdap: string | null;
 }
 
 interface DecommConversation {
@@ -138,12 +140,26 @@ interface BatchRecipient {
   contactName: string | null;
   contactType: string;
   customVars: Record<string, string>;
+  // CC-manager metadata returned by /decomm-batch-resolve when ccManager flag is on.
+  managerPhone?: string | null;
+  managerName?: string | null;
+  managerEntId?: string | null;
+  isManager?: boolean;
+  ccStatus?: 'ready' | 'no_manager_phone' | 'same_as_tech' | 'no_tech_phone' | null;
+  // Per-row toggle: when ccManager is on, user can opt-out a single row.
+  ccEnabled?: boolean;
 }
 
 interface BatchResult {
   truckNumber: string;
+  ldap?: string;
   status: string;
   error?: string;
+  manager?: {
+    status: 'sent' | 'failed' | 'skipped' | 'duplicate' | 'same_as_tech' | 'no_manager_phone' | 'disabled';
+    error?: string;
+    managerPhone?: string;
+  };
 }
 
 interface BatchImportRow {
@@ -164,6 +180,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
   const [batchContactType, setBatchContactType] = useState<string>("tech");
+  const [batchCcManager, setBatchCcManager] = useState<boolean>(false);
   const [batchRecipients, setBatchRecipients] = useState<BatchRecipient[]>([]);
   const [batchUnresolved, setBatchUnresolved] = useState<string[]>([]);
   const [batchTemplate, setBatchTemplate] = useState("");
@@ -423,6 +440,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     setBatchUnresolved([]);
     setBatchTemplate("");
     setBatchResults([]);
+    setBatchCcManager(false);
     if (batchFileRef.current) batchFileRef.current.value = "";
   };
 
@@ -469,7 +487,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
     setBatchResolving(true);
     try {
-      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", { ldaps, contactType: batchContactType });
+      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", {
+        ldaps,
+        contactType: batchContactType,
+        ccManager: batchCcManager,
+      });
       const data = await resp.json();
       const resolvedRaw: any[] = data.resolved || [];
       const importByLdap = new Map<string, BatchImportRow[]>();
@@ -485,7 +507,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         ldapCounters.set(key, idx + 1);
         const rows = importByLdap.get(key) || [];
         const importRow = rows[idx] || rows[0];
-        return { ...r, customVars: importRow?.customVars || {} };
+        // Default ccEnabled to true only when the row is actually CC-eligible.
+        const ccEnabledDefault = batchCcManager && r.ccStatus === 'ready';
+        return { ...r, customVars: importRow?.customVars || {}, ccEnabled: ccEnabledDefault };
       });
       setBatchRecipients(resolved);
       setBatchUnresolved(data.unresolved || []);
@@ -538,14 +562,19 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         recipients: validRecipients,
         messageTemplate: batchTemplate,
         contactType: batchContactType,
+        ccManager: batchCcManager,
       });
       const data = await resp.json();
       setBatchResults(data.results || []);
       setBatchStep("results");
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
+      const ccSummary = batchCcManager
+        ? `; CC ${data.managerSent || 0} sent, ${data.managerFailed || 0} failed, ${data.managerSkipped || 0} skipped`
+        : "";
+      const skippedSegment = data.skipped ? `, ${data.skipped} skipped` : "";
       toast({
         title: "Batch text complete",
-        description: `${data.sent} sent, ${data.failed} failed out of ${data.total}`,
+        description: `${data.sent} sent, ${data.failed} failed${skippedSegment} out of ${data.total}${ccSummary}`,
       });
     } catch (err: any) {
       toast({ title: "Batch send failed", description: err.message, variant: "destructive" });
@@ -787,7 +816,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                             ? "border-primary-foreground/30 text-primary-foreground/80"
                             : CONTACT_TYPE_COLORS[msg.contactType] || ""
                         }`}>
-                          {CONTACT_TYPE_LABELS[msg.contactType] || msg.contactType}
+                          {msg.contactType === "manager" && msg.ccForLdap
+                            ? `Manager CC (${msg.ccForLdap})`
+                            : (CONTACT_TYPE_LABELS[msg.contactType] || msg.contactType)}
                         </Badge>
                       </div>
                       {msg.mediaUrl && msg.mediaType?.startsWith('image/') && (
@@ -1207,6 +1238,23 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 </Select>
               </div>
 
+              <div className="flex items-start gap-2 rounded-md border p-3 bg-muted/30">
+                <Checkbox
+                  id="batch-cc-manager"
+                  checked={batchCcManager}
+                  onCheckedChange={(checked) => setBatchCcManager(checked === true)}
+                  data-testid="batch-cc-manager-toggle"
+                />
+                <div className="text-sm leading-tight">
+                  <label htmlFor="batch-cc-manager" className="font-medium cursor-pointer">
+                    Also CC each tech's manager
+                  </label>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Sends a separate text to the manager with the same message body, prefixed by the tech's LDAP in brackets (e.g. <code className="font-mono">[jsmith42] ...</code>). One CC per tech.
+                  </p>
+                </div>
+              </div>
+
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setBatchOpen(false)}>Cancel</Button>
                 <Button
@@ -1241,24 +1289,80 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                       ({batchRecipients.filter(r => !r.contactPhone).length} missing phone)
                     </span>
                   )}
+                  {batchCcManager && (
+                    <span className="text-blue-700 dark:text-blue-300 text-xs ml-2">
+                      · CC eligible: {batchRecipients.filter(r => r.ccStatus === 'ready').length}
+                    </span>
+                  )}
                 </p>
-                <div className="max-h-32 overflow-y-auto border rounded-md text-xs">
+                <div className="max-h-48 overflow-y-auto border rounded-md text-xs">
                   <table className="w-full">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
                         <th className="text-left p-1.5 font-medium">LDAP</th>
                         <th className="text-left p-1.5 font-medium">Truck #</th>
-                        <th className="text-left p-1.5 font-medium">Name</th>
+                        <th className="text-left p-1.5 font-medium">Tech</th>
                         <th className="text-left p-1.5 font-medium">Phone</th>
+                        {batchCcManager && (
+                          <>
+                            <th className="text-left p-1.5 font-medium">CC</th>
+                            <th className="text-left p-1.5 font-medium">Manager</th>
+                          </>
+                        )}
                       </tr>
                     </thead>
                     <tbody>
                       {batchRecipients.map((r, i) => (
                         <tr key={i} className={`border-t ${!r.contactPhone ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-                          <td className="p-1.5 font-mono">{r.ldap}</td>
+                          <td className="p-1.5 font-mono whitespace-nowrap">
+                            <span className="inline-flex items-center gap-1">
+                              {r.ldap}
+                              {r.isManager && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700"
+                                  title="This recipient is themselves a manager (their enterprise ID appears as MANAGER_ENT_ID for at least one other tech)."
+                                >
+                                  Is manager
+                                </Badge>
+                              )}
+                            </span>
+                          </td>
                           <td className="p-1.5 font-mono">{r.truckNumber.replace(/^0+/, "")}</td>
                           <td className="p-1.5">{r.contactName || r.fullName || "-"}</td>
                           <td className="p-1.5 font-mono">{r.contactPhone || <span className="text-amber-600">No phone</span>}</td>
+                          {batchCcManager && (
+                            <>
+                              <td className="p-1.5">
+                                <Checkbox
+                                  checked={r.ccEnabled === true}
+                                  disabled={r.ccStatus !== 'ready'}
+                                  onCheckedChange={(checked) => {
+                                    setBatchRecipients(prev => prev.map((row, idx) =>
+                                      idx === i ? { ...row, ccEnabled: checked === true } : row,
+                                    ));
+                                  }}
+                                  data-testid={`batch-cc-row-toggle-${i}`}
+                                />
+                              </td>
+                              <td className="p-1.5">
+                                {r.managerPhone ? (
+                                  <div className="space-y-0.5">
+                                    <div className="text-[11px]">{r.managerName || "-"}</div>
+                                    <div className="font-mono text-[11px] text-muted-foreground">{r.managerPhone}</div>
+                                    {r.ccStatus === 'same_as_tech' && (
+                                      <div className="text-[10px] text-amber-700 dark:text-amber-400">Same # as tech</div>
+                                    )}
+                                    {r.ccStatus === 'no_tech_phone' && (
+                                      <div className="text-[10px] text-amber-700 dark:text-amber-400">No tech phone — CC disabled</div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-amber-700 dark:text-amber-400">No manager phone</span>
+                                )}
+                              </td>
+                            </>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -1312,93 +1416,180 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
             </div>
           )}
 
-          {batchStep === "preview" && (
-            <div className="space-y-4">
-              <div>
-                <p className="text-sm font-medium mb-2">
-                  Preview — {batchRecipients.filter(r => r.contactPhone).length} messages will be sent
-                </p>
-                <div className="max-h-72 overflow-y-auto space-y-2">
-                  {batchRecipients.filter(r => r.contactPhone).map((r, i) => (
-                    <div key={i} className="border rounded-md p-2.5 text-sm">
-                      <div className="flex items-center gap-2 mb-1.5 text-xs text-muted-foreground">
-                        <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
-                        <span>{r.contactName || r.fullName}</span>
-                        <span className="font-mono">{r.contactPhone}</span>
-                      </div>
-                      <p className="whitespace-pre-wrap text-sm bg-muted/30 rounded p-2">{renderPreview(batchTemplate, r)}</p>
+          {batchStep === "preview" && (() => {
+            const valid = batchRecipients.filter(r => r.contactPhone);
+            const ccCount = batchCcManager ? valid.filter(r => r.ccEnabled && r.ccStatus === 'ready').length : 0;
+            const total = valid.length + ccCount;
+            return (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">
+                    Preview — {total} message{total !== 1 ? "s" : ""} will be sent
+                    {batchCcManager && (
+                      <span className="text-xs text-muted-foreground ml-1">
+                        ({valid.length} tech + {ccCount} manager CC)
+                      </span>
+                    )}
+                  </p>
+                  <div className="max-h-72 overflow-y-auto space-y-2">
+                    {valid.map((r, i) => {
+                      const techBody = renderPreview(batchTemplate, r);
+                      const willCc = batchCcManager && r.ccEnabled && r.ccStatus === 'ready' && r.managerPhone;
+                      const ccBody = `[${r.ldap}] ${techBody}`;
+                      return (
+                        <div key={i} className="border rounded-md p-2.5 text-sm space-y-2">
+                          <div>
+                            <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground flex-wrap">
+                              <Badge variant="outline" className={`text-[10px] px-1 py-0 ${CONTACT_TYPE_COLORS[r.contactType] || CONTACT_TYPE_COLORS.tech}`}>
+                                {CONTACT_TYPE_LABELS[r.contactType] || "Tech"}
+                              </Badge>
+                              <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
+                              <span>{r.contactName || r.fullName}</span>
+                              <span className="font-mono">{r.contactPhone}</span>
+                              {r.isManager && (
+                                <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700">
+                                  Is manager
+                                </Badge>
+                              )}
+                            </div>
+                            <p className="whitespace-pre-wrap text-sm bg-muted/30 rounded p-2">{techBody}</p>
+                          </div>
+                          {willCc && (
+                            <div className="border-l-2 border-blue-300 dark:border-blue-700 pl-2">
+                              <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground flex-wrap">
+                                <Badge variant="outline" className={`text-[10px] px-1 py-0 ${CONTACT_TYPE_COLORS.manager}`}>
+                                  Manager CC
+                                </Badge>
+                                <span>{r.managerName || "-"}</span>
+                                <span className="font-mono">{r.managerPhone}</span>
+                              </div>
+                              <p className="whitespace-pre-wrap text-sm bg-blue-50 dark:bg-blue-950/30 rounded p-2">{ccBody}</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex justify-between">
+                  <Button variant="outline" onClick={() => setBatchStep("compose")}>Back</Button>
+                  <Button
+                    onClick={handleBatchSend}
+                    disabled={batchSending}
+                    className="bg-primary"
+                    data-testid="batch-send-btn"
+                  >
+                    {batchSending ? (
+                      <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 animate-spin" /> Sending...</span>
+                    ) : (
+                      <span className="flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Send {total} Message{total !== 1 ? "s" : ""}</span>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+
+          {batchStep === "results" && (() => {
+            const techSent = batchResults.filter(r => r.status === "sent").length;
+            const techFailed = batchResults.filter(r => r.status === "failed").length;
+            const techSkipped = batchResults.filter(r => r.status === "skipped" || r.status === "duplicate").length;
+            const ccResults = batchResults.map(r => r.manager).filter((m): m is NonNullable<typeof m> => !!m);
+            const mgrSent = ccResults.filter(m => m.status === "sent").length;
+            const mgrFailed = ccResults.filter(m => m.status === "failed").length;
+            const mgrSkipped = ccResults.filter(m => ["skipped","duplicate","same_as_tech","no_manager_phone","disabled"].includes(m.status)).length;
+            const showCc = batchCcManager && ccResults.length > 0;
+            const problemRows = batchResults.filter(r =>
+              r.status !== "sent" || (r.manager && r.manager.status === "failed"),
+            );
+            return (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Tech</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-green-600">{techSent}</p>
+                      <p className="text-xs text-muted-foreground">Sent</p>
                     </div>
-                  ))}
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-red-600">{techFailed}</p>
+                      <p className="text-xs text-muted-foreground">Failed</p>
+                    </div>
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-amber-600">{techSkipped}</p>
+                      <p className="text-xs text-muted-foreground">Skipped</p>
+                    </div>
+                  </div>
                 </div>
-              </div>
 
-              <div className="flex justify-between">
-                <Button variant="outline" onClick={() => setBatchStep("compose")}>Back</Button>
-                <Button
-                  onClick={handleBatchSend}
-                  disabled={batchSending}
-                  className="bg-primary"
-                  data-testid="batch-send-btn"
-                >
-                  {batchSending ? (
-                    <span className="flex items-center gap-1.5"><Clock className="w-3.5 h-3.5 animate-spin" /> Sending...</span>
-                  ) : (
-                    <span className="flex items-center gap-1.5"><Send className="w-3.5 h-3.5" /> Send {batchRecipients.filter(r => r.contactPhone).length} Messages</span>
-                  )}
-                </Button>
-              </div>
-            </div>
-          )}
+                {showCc && (
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Manager CC</p>
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="rounded-md border p-3 text-center">
+                        <p className="text-2xl font-bold text-green-600">{mgrSent}</p>
+                        <p className="text-xs text-muted-foreground">Sent</p>
+                      </div>
+                      <div className="rounded-md border p-3 text-center">
+                        <p className="text-2xl font-bold text-red-600">{mgrFailed}</p>
+                        <p className="text-xs text-muted-foreground">Failed</p>
+                      </div>
+                      <div className="rounded-md border p-3 text-center">
+                        <p className="text-2xl font-bold text-amber-600">{mgrSkipped}</p>
+                        <p className="text-xs text-muted-foreground">Skipped</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
-          {batchStep === "results" && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-3">
-                <div className="rounded-md border p-3 text-center">
-                  <p className="text-2xl font-bold text-green-600">{batchResults.filter(r => r.status === "sent").length}</p>
-                  <p className="text-xs text-muted-foreground">Sent</p>
-                </div>
-                <div className="rounded-md border p-3 text-center">
-                  <p className="text-2xl font-bold text-red-600">{batchResults.filter(r => r.status === "failed").length}</p>
-                  <p className="text-xs text-muted-foreground">Failed</p>
-                </div>
-                <div className="rounded-md border p-3 text-center">
-                  <p className="text-2xl font-bold text-amber-600">{batchResults.filter(r => r.status === "skipped").length}</p>
-                  <p className="text-xs text-muted-foreground">Skipped</p>
-                </div>
-              </div>
-
-              {batchResults.filter(r => r.status !== "sent").length > 0 && (
-                <div className="max-h-40 overflow-y-auto border rounded-md text-xs">
-                  <table className="w-full">
-                    <thead className="bg-muted/50 sticky top-0">
-                      <tr>
-                        <th className="text-left p-1.5 font-medium">Truck #</th>
-                        <th className="text-left p-1.5 font-medium">Status</th>
-                        <th className="text-left p-1.5 font-medium">Error</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {batchResults.filter(r => r.status !== "sent").map((r, i) => (
-                        <tr key={i} className="border-t">
-                          <td className="p-1.5 font-mono">{r.truckNumber}</td>
-                          <td className="p-1.5">
-                            <Badge variant={r.status === "failed" ? "destructive" : "secondary"} className="text-[10px]">
-                              {r.status}
-                            </Badge>
-                          </td>
-                          <td className="p-1.5 text-muted-foreground">{r.error || "-"}</td>
+                {problemRows.length > 0 && (
+                  <div className="max-h-48 overflow-y-auto border rounded-md text-xs">
+                    <table className="w-full">
+                      <thead className="bg-muted/50 sticky top-0">
+                        <tr>
+                          <th className="text-left p-1.5 font-medium">Truck #</th>
+                          <th className="text-left p-1.5 font-medium">Tech</th>
+                          {showCc && <th className="text-left p-1.5 font-medium">Manager CC</th>}
+                          <th className="text-left p-1.5 font-medium">Detail</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {problemRows.map((r, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="p-1.5 font-mono">{r.truckNumber}</td>
+                            <td className="p-1.5">
+                              <Badge variant={r.status === "failed" ? "destructive" : r.status === "sent" ? "secondary" : "secondary"} className="text-[10px]">
+                                {r.status}
+                              </Badge>
+                            </td>
+                            {showCc && (
+                              <td className="p-1.5">
+                                {r.manager ? (
+                                  <Badge variant={r.manager.status === "failed" ? "destructive" : r.manager.status === "sent" ? "default" : "secondary"} className="text-[10px]">
+                                    {r.manager.status}
+                                  </Badge>
+                                ) : (
+                                  <span className="text-muted-foreground">-</span>
+                                )}
+                              </td>
+                            )}
+                            <td className="p-1.5 text-muted-foreground">
+                              {r.error || r.manager?.error || "-"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
 
-              <div className="flex justify-end">
-                <Button onClick={() => setBatchOpen(false)}>Done</Button>
+                <div className="flex justify-end">
+                  <Button onClick={() => setBatchOpen(false)}>Done</Button>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </div>

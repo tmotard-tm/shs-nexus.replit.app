@@ -1334,6 +1334,7 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   sentToProcurementAt: timestamp("sent_to_procurement_at"), // When the checkbox was checked
   techMatchSource: varchar("tech_match_source", { length: 20 }), // 'truck' for direct match, 'zip_fallback' for ZIP-based match
   isAssigned: boolean("is_assigned").default(false), // Whether truck # is currently found in TPMS_EXTRACT
+  isManager: boolean("is_manager").default(false), // True if this tech's enterpriseId appears as a MANAGER_ENT_ID for some other tech in TPMS_EXTRACT
   nearestTechName: varchar("nearest_tech_name", { length: 100 }),
   nearestTechPhone: varchar("nearest_tech_phone", { length: 50 }),
   nearestTechZip: varchar("nearest_tech_zip", { length: 20 }),
@@ -1471,6 +1472,7 @@ export const decommMessages = pgTable("fs_decomm_messages", {
   senderName: text("sender_name"),
   mediaUrl: text("media_url"),
   mediaType: text("media_type"),
+  ccForLdap: text("cc_for_ldap"), // Set when this is a manager-CC of a batch tech text; value is the tech's LDAP / enterprise ID
 });
 
 export const insertDecommMessageSchema = createInsertSchema(decommMessages).omit({ id: true, sentAt: true });

@@ -13970,6 +13970,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
     const techData = await executeQuery<TechRow>(sql);
 
+    // Build a global set of every enterprise ID that appears as MANAGER_ENT_ID
+    // for any tech in TPMS_EXTRACT. We use this to flag is_manager on each
+    // decommissioning vehicle so the UI can warn when a recipient is themselves
+    // a manager (Task #204 - CC manager on batch texts).
+    const globalManagerEntIdSet = new Set<string>();
+    try {
+      const allManagersSql = `
+        SELECT DISTINCT MANAGER_ENT_ID
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE MANAGER_ENT_ID IS NOT NULL AND MANAGER_ENT_ID != ''
+      `;
+      interface AllManagerRow { MANAGER_ENT_ID: string; }
+      const allManagerRows = await executeQuery<AllManagerRow>(allManagersSql);
+      for (const row of allManagerRows) {
+        if (row.MANAGER_ENT_ID) {
+          globalManagerEntIdSet.add(row.MANAGER_ENT_ID.toString().trim());
+        }
+      }
+      console.log(`[Decommissioning Tech Sync] Loaded ${globalManagerEntIdSet.size} distinct manager enterprise IDs (for is_manager flag)`);
+    } catch (mgrErr: any) {
+      console.warn(`[Decommissioning Tech Sync] Global manager set query failed (non-fatal): ${mgrErr.message}`);
+    }
+
     // Query VIN from HOLMAN_VEHICLES - HOLMAN_VEHICLE_NUMBER is 5 digits (remove first leading zero from our 6-digit format)
     const holmanTruckNumbers = vehicles.map(v => {
       // Remove only the first leading zero to convert 6-digit to 5-digit format
@@ -14117,6 +14140,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       if (snowflakeData) {
         // Update with fresh data from Snowflake (direct truck match)
+        const techEntId = snowflakeData.enterpriseId?.trim() || '';
         await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
           vin,
           district,
@@ -14130,6 +14154,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           managerZip: snowflakeData.managerZip || null,
           techMatchSource: 'truck', // Direct truck number match
           isAssigned: true, // Truck found in TPMS_EXTRACT
+          isManager: !!techEntId && globalManagerEntIdSet.has(techEntId),
           techDataSyncedAt: new Date(),
         });
         synced++;
@@ -14350,6 +14375,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             managerZip: newFallbackZip,
             techMatchSource: 'manager_zip_fallback', // Matched by nearest manager ZIP code
             isAssigned: false, // Not directly assigned in TPMS_EXTRACT
+            // The fallback "tech" we matched is itself a manager (enterpriseId == managerEntId)
+            isManager: true,
             techDataSyncedAt: new Date(),
           };
 
@@ -15786,7 +15813,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-batch-resolve", async (req, res) => {
     try {
-      const { ldaps, contactType } = req.body;
+      const { ldaps, contactType, ccManager } = req.body;
       if (!ldaps || !Array.isArray(ldaps) || ldaps.length === 0) {
         return res.status(400).json({ message: "ldaps array is required" });
       }
@@ -15795,6 +15822,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const resolved: any[] = [];
       const unresolvedSet = new Set<string>();
+      const digitsOnly = (s: string | null | undefined) => (s || '').replace(/\D/g, '').slice(-10);
 
       for (const rawLdap of ldaps) {
         const ldap = String(rawLdap).trim().toUpperCase();
@@ -15820,6 +15848,31 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           contactName = vehicle.nearestTechName;
         }
 
+        // CC-manager metadata: only populated when ccManager flag is set.
+        // ccStatus values:
+        //   'ready'             - manager phone is present, tech phone is present, and the two differ
+        //   'no_manager_phone'  - vehicle row has no managerPhone on file
+        //   'same_as_tech'      - managerPhone digits match the tech contactPhone digits
+        //   'no_tech_phone'     - tech contact phone is missing, so there is no tech message to CC
+        let ccStatus:
+          | 'ready'
+          | 'no_manager_phone'
+          | 'same_as_tech'
+          | 'no_tech_phone'
+          | null = null;
+        if (ccManager) {
+          if (!vehicle.managerPhone) {
+            ccStatus = 'no_manager_phone';
+          } else if (!phone) {
+            // Tech message will be skipped — do not fire a CC on its own.
+            ccStatus = 'no_tech_phone';
+          } else if (digitsOnly(vehicle.managerPhone) === digitsOnly(phone)) {
+            ccStatus = 'same_as_tech';
+          } else {
+            ccStatus = 'ready';
+          }
+        }
+
         resolved.push({
           ldap,
           truckNumber: vehicle.truckNumber,
@@ -15831,6 +15884,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           contactPhone: phone,
           contactName,
           contactType: ct,
+          // Manager / is_manager surfacing for the CC-manager UI (Task #204).
+          managerPhone: vehicle.managerPhone || null,
+          managerName: vehicle.managerName || null,
+          managerEntId: vehicle.managerEntId || null,
+          isManager: !!vehicle.isManager,
+          ccStatus,
         });
       }
 
@@ -15843,21 +15902,54 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-batch-text", async (req, res) => {
     try {
-      const { recipients, messageTemplate, contactType, sentBy, senderName } = req.body;
+      const { recipients, messageTemplate, contactType, sentBy, senderName, ccManager } = req.body;
       if (!recipients || !Array.isArray(recipients) || recipients.length === 0 || !messageTemplate) {
         return res.status(400).json({ message: "recipients array and messageTemplate are required" });
       }
 
-      const results: { truckNumber: string; status: string; error?: string }[] = [];
+      // Per-row outcome captures BOTH the tech send and (when applicable) the manager-CC send,
+      // so the UI can show two pills per recipient and explain failures independently.
+      type CcOutcome = 'sent' | 'failed' | 'skipped' | 'duplicate' | 'same_as_tech' | 'no_manager_phone' | 'disabled';
+      const results: {
+        truckNumber: string;
+        ldap?: string;
+        status: string;
+        error?: string;
+        manager?: { status: CcOutcome; error?: string; managerPhone?: string };
+      }[] = [];
       let sent = 0;
       let failed = 0;
+      let skipped = 0;
+      let managerSent = 0;
+      let managerFailed = 0;
+      let managerSkipped = 0;
+
+      const formatPhoneE164 = (p: string) =>
+        p.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
+      const digitsOnly = (s: string | null | undefined) => (s || '').replace(/\D/g, '').slice(-10);
+
+      // Dedupe true duplicates only:
+      //  - Tech: same (truckNumber, contactPhone) appearing twice in the batch is sent once.
+      //  - Manager CC: same (managerPhone, techLdap) is sent once. Two different techs sharing
+      //    the same manager BOTH cause a CC (one per tech) — that is intentional.
+      const seenTechKeys = new Set<string>();
+      const seenCcKeys = new Set<string>();
 
       for (const r of recipients) {
         if (!r.contactPhone) {
-          results.push({ truckNumber: r.truckNumber, status: 'skipped', error: 'No phone number' });
-          failed++;
+          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'skipped', error: 'No phone number' });
+          skipped++;
           continue;
         }
+
+        const techDigits = digitsOnly(r.contactPhone);
+        const techKey = `${r.truckNumber}::${techDigits}`;
+        if (seenTechKeys.has(techKey)) {
+          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'duplicate', error: 'Duplicate (truck + phone)' });
+          skipped++;
+          continue;
+        }
+        seenTechKeys.add(techKey);
 
         let body = messageTemplate;
         if (r.customVars && typeof r.customVars === 'object') {
@@ -15868,7 +15960,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
 
         const normalized = r.truckNumber.padStart(6, '0');
-        const formattedPhone = r.contactPhone.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
+        const formattedPhone = formatPhoneE164(r.contactPhone);
+        const techLdap = (r.ldap || r.enterpriseId || '').toString().trim();
+
+        let techSent = false;
 
         try {
           const sid = await sendTwilioMessage(formattedPhone, body);
@@ -15887,7 +15982,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           }).returning();
 
           broadcastMessage(normalized, { message: msg, source: 'decomm' });
-          results.push({ truckNumber: r.truckNumber, status: 'sent' });
+          techSent = true;
           sent++;
         } catch (err: any) {
           console.error(`[DecommBatch] Failed to send to ${r.truckNumber}:`, err.message);
@@ -15902,8 +15997,98 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             sentBy: sentBy || null,
             senderName: senderName || null,
           });
-          results.push({ truckNumber: r.truckNumber, status: 'failed', error: err.message });
+          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'failed', error: err.message });
           failed++;
+        }
+
+        // Manager CC — independent of tech result *only* when the tech send succeeded.
+        // Spec: per-row try/catch keeps the two failures isolated, but we don't CC if the
+        // tech text itself never went out (keeps manager noise down on hard Twilio errors).
+        let ccOutcome: CcOutcome | null = null;
+        let ccError: string | undefined;
+        const wantsCc = !!ccManager && r.ccEnabled !== false;
+
+        if (wantsCc && techSent) {
+          if (!r.managerPhone) {
+            ccOutcome = 'no_manager_phone';
+            managerSkipped++;
+          } else {
+            const mgrDigits = digitsOnly(r.managerPhone);
+            if (mgrDigits === techDigits) {
+              ccOutcome = 'same_as_tech';
+              managerSkipped++;
+            } else {
+              const ccKey = `${mgrDigits}::${techLdap.toUpperCase()}`;
+              if (seenCcKeys.has(ccKey)) {
+                ccOutcome = 'duplicate';
+                managerSkipped++;
+              } else {
+                seenCcKeys.add(ccKey);
+                const formattedMgr = formatPhoneE164(r.managerPhone);
+                const ccBody = `[${techLdap || (r.contactName || 'tech')}] ${body}`;
+                try {
+                  const ccSid = await sendTwilioMessage(formattedMgr, ccBody);
+                  const [ccMsg] = await getDb().insert(decommMessages).values({
+                    truckNumber: normalized,
+                    contactType: 'manager',
+                    contactName: r.managerName || null,
+                    contactPhone: formattedMgr,
+                    direction: 'outbound',
+                    body: ccBody,
+                    status: 'sent',
+                    twilioSid: ccSid,
+                    sentBy: sentBy || null,
+                    senderName: senderName || null,
+                    ccForLdap: techLdap || null,
+                  }).returning();
+                  broadcastMessage(normalized, { message: ccMsg, source: 'decomm' });
+                  ccOutcome = 'sent';
+                  managerSent++;
+                } catch (ccErr: any) {
+                  console.error(`[DecommBatch] Failed manager CC for ${r.truckNumber} (${techLdap}):`, ccErr.message);
+                  await getDb().insert(decommMessages).values({
+                    truckNumber: normalized,
+                    contactType: 'manager',
+                    contactName: r.managerName || null,
+                    contactPhone: formattedMgr,
+                    direction: 'outbound',
+                    body: ccBody,
+                    status: 'failed',
+                    sentBy: sentBy || null,
+                    senderName: senderName || null,
+                    ccForLdap: techLdap || null,
+                  });
+                  ccOutcome = 'failed';
+                  ccError = ccErr.message;
+                  managerFailed++;
+                }
+              }
+            }
+          }
+        } else if (wantsCc && !techSent) {
+          ccOutcome = 'skipped';
+          managerSkipped++;
+          ccError = 'Tech send failed';
+        } else if (!ccManager) {
+          ccOutcome = null; // CC not requested at all
+        } else {
+          ccOutcome = 'disabled'; // user un-checked CC for this row
+        }
+
+        if (techSent) {
+          results.push({
+            truckNumber: r.truckNumber,
+            ldap: r.ldap,
+            status: 'sent',
+            manager: ccOutcome ? { status: ccOutcome, error: ccError, managerPhone: r.managerPhone || undefined } : undefined,
+          });
+        } else {
+          // Failure result was already pushed in the catch above; attach manager
+          // outcome onto the most-recent result so the UI shows both columns.
+          const last = results[results.length - 1];
+          if (last && last.truckNumber === r.truckNumber && ccOutcome) {
+            last.manager = { status: ccOutcome, error: ccError, managerPhone: r.managerPhone || undefined };
+          }
         }
 
         if (recipients.indexOf(r) < recipients.length - 1) {
@@ -15911,8 +16096,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
       }
 
-      console.log(`[DecommBatch] Complete: ${sent} sent, ${failed} failed out of ${recipients.length}`);
-      res.json({ sent, failed, total: recipients.length, results });
+      console.log(`[DecommBatch] Complete: ${sent} sent, ${failed} failed, ${skipped} skipped out of ${recipients.length}; manager CC: ${managerSent} sent, ${managerFailed} failed, ${managerSkipped} skipped`);
+      res.json({
+        sent,
+        failed,
+        skipped,
+        total: recipients.length,
+        managerSent,
+        managerFailed,
+        managerSkipped,
+        results,
+      });
     } catch (error: any) {
       console.error("[DecommBatch] Error:", error);
       res.status(500).json({ message: error.message });

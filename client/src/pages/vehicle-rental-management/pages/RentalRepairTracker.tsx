@@ -1343,7 +1343,7 @@ function UnifiedPanel({
   const { data: decision } = useQuery<DecisionRow>({
     queryKey: ["/api/vrm/profitability/log", decisionId],
     queryFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decisionId}`);
+      const r = await fetch(`/api/vrm/profitability/log/${decisionId}`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load decision");
       return r.json();
     },
@@ -1355,8 +1355,11 @@ function UnifiedPanel({
   const amsQuery = useQuery<{ found: boolean; linkMissing: boolean; vin?: string; vehicle: any; comments: any[]; reason?: string }>({
     queryKey: ["/api/ams/by-truck", amsTruck],
     queryFn: async () => {
-      const r = await fetch(`/api/ams/by-truck/${encodeURIComponent(amsTruck)}`);
-      if (!r.ok) throw new Error("Failed to load AMS data");
+      const r = await fetch(`/api/ams/by-truck/${encodeURIComponent(amsTruck)}`, { credentials: "include" });
+      if (!r.ok) {
+        const body = await r.text().catch(() => "");
+        throw new Error(`HTTP ${r.status}${body ? ` — ${body.slice(0, 160)}` : ""}`);
+      }
       return r.json();
     },
     enabled: panelTab === "ams" && !!amsTruck,
@@ -1366,7 +1369,7 @@ function UnifiedPanel({
   const techOutreachQuery = useQuery<TechOutreachEntry[]>({
     queryKey: ["/api/vrm/repair-tracker", entry?.id, "tech-outreach"],
     queryFn: async () => {
-      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/tech-outreach`);
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/tech-outreach`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load tech outreach");
       return r.json();
     },
@@ -1377,7 +1380,7 @@ function UnifiedPanel({
   const legacyNotesQuery = useQuery<{ notes: string | null }>({
     queryKey: ["/api/vrm/repair-tracker", entry?.id, "legacy-notes"],
     queryFn: async () => {
-      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/legacy-notes`);
+      const r = await fetch(`/api/vrm/repair-tracker/${entry!.id}/legacy-notes`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load legacy notes");
       return r.json();
     },
@@ -1396,7 +1399,7 @@ function UnifiedPanel({
   const punchHistoryQuery = useQuery<{ ldap: string; rows: PunchHistoryRow[]; events?: PunchEvent[]; summary: PunchStatusEntry }>({
     queryKey: ["/api/vrm/repair-tracker/punch-history", punchLdap],
     queryFn: async () => {
-      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}`);
+      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to load punch history");
       return r.json();
     },
@@ -1410,7 +1413,7 @@ function UnifiedPanel({
   const refreshPunches = async () => {
     if (!punchLdap) return;
     try {
-      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}?refresh=1`);
+      const r = await fetch(`/api/vrm/repair-tracker/punch-history/${encodeURIComponent(punchLdap)}?refresh=1`, { credentials: "include" });
       if (!r.ok) throw new Error("Failed to refresh");
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker/punch-history", punchLdap] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker/punch-status"] });

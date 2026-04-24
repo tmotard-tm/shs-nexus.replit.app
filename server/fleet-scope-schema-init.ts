@@ -650,6 +650,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='manager_phone') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "manager_phone" varchar(50);
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='is_manager') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "is_manager" boolean DEFAULT false;
+  END IF;
 END $$;
 
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.
@@ -703,6 +706,9 @@ DO $$ BEGIN
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_type') THEN
     ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_type" text;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='cc_for_ldap') THEN
+    ALTER TABLE "fs_decomm_messages" ADD COLUMN "cc_for_ldap" text;
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_reg_messages' AND column_name='media_url') THEN
     ALTER TABLE "fs_reg_messages" ADD COLUMN "media_url" text;
