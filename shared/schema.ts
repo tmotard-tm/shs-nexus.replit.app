@@ -80,6 +80,7 @@ export interface RolePermissionSettings {
       integrations: boolean;
       userManagement: boolean;
       templateManagement: boolean;
+      costCenterManagement: boolean;
       rolePermissions: boolean;
       fleetManagement: boolean;
       weeklyOnboarding: boolean;
@@ -2254,3 +2255,24 @@ export const insertOffboardingReturnTokenSchema = createInsertSchema(offboarding
 });
 export type OffboardingReturnToken = typeof offboardingReturnTokens.$inferSelect;
 export type InsertOffboardingReturnToken = z.infer<typeof insertOffboardingReturnTokenSchema>;
+
+// ===============================
+// District Cost Centers (Task 207)
+// Maps each district number to its accounting cost center.
+// Default rule: cost_center = "0" + last 4 digits of district (e.g. 0004766 -> 04766)
+// Editable overrides win over the default.
+// ===============================
+
+export const districtCostCenters = pgTable("district_cost_centers", {
+  district: varchar("district", { length: 7 }).primaryKey(), // zero-padded 7-digit district
+  costCenter: varchar("cost_center", { length: 5 }).notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: varchar("updated_by", { length: 100 }),
+});
+
+export const insertDistrictCostCenterSchema = createInsertSchema(districtCostCenters).omit({
+  updatedAt: true,
+});
+export type DistrictCostCenter = typeof districtCostCenters.$inferSelect;
+export type InsertDistrictCostCenter = z.infer<typeof insertDistrictCostCenterSchema>;
+

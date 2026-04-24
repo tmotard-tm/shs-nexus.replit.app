@@ -10,6 +10,7 @@ export const FORM_ACCESS_MAP = {
   'byov-enrollment': ['developer', 'admin', 'agent'],
   'user-management': ['developer', 'admin'],
   'template-management': ['developer', 'admin'],
+  'cost-center-management': ['developer', 'admin'],
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;
@@ -47,6 +48,7 @@ export const FORM_DISPLAY_NAMES: Record<FormKey, string> = {
   'byov-enrollment': 'BYOV Enrollment',
   'user-management': 'User Management',
   'template-management': 'Template Management',
+  'cost-center-management': 'District Cost Centers',
 };
 
 // Get forms accessible by a user's role

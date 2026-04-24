@@ -291,6 +291,15 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
+    key: "costCenterManagement",
+    label: "District Cost Centers",
+    description: "Manage district-to-cost-center mappings",
+    path: "/cost-center-management",
+    icon: ClipboardList,
+    category: "management",
+    permissionKey: "costCenterManagement",
+  },
+  {
     key: "communicationHub",
     label: "Communication Hub",
     description: "Manage email and SMS templates, whitelists, and message logs",

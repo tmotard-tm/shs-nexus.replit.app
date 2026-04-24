@@ -330,6 +330,8 @@ interface RepairForm {
   rentalReturnDate: string;
   routeCleared: boolean;
   byovEnrolled: boolean;
+  // BYOV type — "" | "Temporary" | "Permanent" | "Declined" | "Accepted" (legacy)
+  byovStatus: string;
 }
 
 function entryToForm(entry: RepairTrackerEntry): RepairForm {
@@ -350,6 +352,7 @@ function entryToForm(entry: RepairTrackerEntry): RepairForm {
     rentalReturnDate: entry.rentalReturnDate ?? "",
     routeCleared: entry.routeCleared ?? false,
     byovEnrolled: entry.byovEnrolled ?? false,
+    byovStatus: entry.byovStatus ?? "",
   };
 }
 
@@ -370,6 +373,7 @@ const EMPTY_FORM: RepairForm = {
   rentalReturnDate: "",
   routeCleared: false,
   byovEnrolled: false,
+  byovStatus: "",
 };
 
 // ─── Punch History Tab (side-panel) ───────────────────────────────────────────
@@ -1612,6 +1616,8 @@ function UnifiedPanel({
         rentalReturnDate: form.rentalReturned === "Yes" ? (form.rentalReturnDate || null) : null,
         routeCleared: form.routeCleared,
         byovEnrolled: form.byovEnrolled,
+        byovStatus: form.byovStatus || null,
+        byovDecisionDate: form.byovStatus && form.byovStatus !== "" ? new Date().toISOString().slice(0, 10) : null,
       };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
@@ -2025,6 +2031,46 @@ function UnifiedPanel({
                 </button>
               ))}
             </div>
+          </div>
+
+          {/* ── BYOV Type ──
+              Visible signal of whether the tech's BYOV is a stop-gap (their van
+              still needs to come back to them) or a permanent switch (their van
+              can be reassigned to another tech once repaired). Drives the "Temp
+              BYOV" / "Perm BYOV" pill on the main tracker list so the team
+              doesn't accidentally reassign a van whose tech still depends on it. */}
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Type</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(["", "Temporary", "Permanent", "Declined"] as const).map((val) => (
+                <button
+                  key={val || "none"}
+                  type="button"
+                  onClick={() => set("byovStatus", val)}
+                  style={{
+                    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+                    padding: "5px 12px", borderRadius: 6, cursor: "pointer",
+                    border: `1px solid ${form.byovStatus === val ? colors.accent : colors.rule}`,
+                    backgroundColor: form.byovStatus === val ? colors.accent : "transparent",
+                    color: form.byovStatus === val ? "#FFFFFF" : colors.inkSoft,
+                  }}
+                  data-testid={`details-byov-${val.toLowerCase() || "none"}`}
+                  title={
+                    val === "Temporary" ? "Tech drives own van while we still repair theirs — case stays active."
+                    : val === "Permanent" ? "Tech is permanently BYOV. Tech side is complete; van can be repaired and reassigned."
+                    : val === "Declined" ? "Tech refused BYOV."
+                    : "No BYOV set."
+                  }
+                >
+                  {val || "None"}
+                </button>
+              ))}
+            </div>
+            {form.byovStatus === "Accepted" && (
+              <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
+                Legacy value "Accepted" — please reclassify as Temporary or Permanent.
+              </p>
+            )}
           </div>
 
           {/* ── Decision Summary (only if sourceDecisionId exists) ── */}

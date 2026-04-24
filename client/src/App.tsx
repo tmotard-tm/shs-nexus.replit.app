@@ -38,6 +38,7 @@ import QueueManagement from "@/pages/queue-management";
 import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import TemplateManagement from "@/pages/template-management";
+import CostCenterManagement from "@/pages/cost-center-management";
 import RolePermissions from "@/pages/role-permissions";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
@@ -421,6 +422,14 @@ function Router() {
         <PermissionProtectedRoute formKey="template-management" redirectOnDenied={true}>
           <MainContent>
             <TemplateManagement />
+          </MainContent>
+        </PermissionProtectedRoute>
+      </Route>
+
+      <Route path="/cost-center-management">
+        <PermissionProtectedRoute formKey="cost-center-management" redirectOnDenied={true}>
+          <MainContent>
+            <CostCenterManagement />
           </MainContent>
         </PermissionProtectedRoute>
       </Route>

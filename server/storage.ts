@@ -71,7 +71,11 @@ import {
   type InsertFleetOperationLog,
   type AutomationDetail,
   type OffboardingReturnToken,
+  type DistrictCostCenter,
+  type InsertDistrictCostCenter,
   offboardingReturnTokens,
+  districtCostCenters,
+  tpmsChangeLog,
   users,
   requests,
   apiConfigurations,
@@ -470,6 +474,13 @@ export interface IStorage {
   validateReturnToken(token: string): Promise<{ queueItem: QueueItem; tokenRecord: OffboardingReturnToken; status: 'valid' } | { status: 'invalid' } | { status: 'expired' }>;
   logReturnPageVisit(queueItemId: string): Promise<void>;
   markReturnTokenConsumed(tokenId: string): Promise<void>;
+
+  // District Cost Centers (Task 207)
+  listDistrictCostCenters(): Promise<DistrictCostCenter[]>;
+  getDistrictCostCenter(district: string): Promise<DistrictCostCenter | undefined>;
+  upsertDistrictCostCenter(record: InsertDistrictCostCenter): Promise<DistrictCostCenter>;
+  deleteDistrictCostCenter(district: string): Promise<boolean>;
+  seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }>;
 }
 
 export class MemStorage implements IStorage {
@@ -3554,6 +3565,22 @@ export class MemStorage implements IStorage {
   }
   async logReturnPageVisit(_queueItemId: string): Promise<void> {}
   async markReturnTokenConsumed(_tokenId: string): Promise<void> {}
+
+  async listDistrictCostCenters(): Promise<DistrictCostCenter[]> {
+    return [];
+  }
+  async getDistrictCostCenter(_district: string): Promise<DistrictCostCenter | undefined> {
+    return undefined;
+  }
+  async upsertDistrictCostCenter(_record: InsertDistrictCostCenter): Promise<DistrictCostCenter> {
+    throw new Error("MemStorage does not support district cost centers. Use DatabaseStorage.");
+  }
+  async deleteDistrictCostCenter(_district: string): Promise<boolean> {
+    return false;
+  }
+  async seedDefaultDistrictCostCenters(_updatedBy: string): Promise<{ inserted: number; existing: number }> {
+    return { inserted: 0, existing: 0 };
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6537,6 +6564,111 @@ export class DatabaseStorage implements IStorage {
 
     console.log('[Backfill] Vehicle reference columns up to date');
   }
+
+  // ===============================
+  // District Cost Centers (Task 207)
+  // ===============================
+
+  async listDistrictCostCenters(): Promise<DistrictCostCenter[]> {
+    return await db.select().from(districtCostCenters).orderBy(districtCostCenters.district);
+  }
+
+  async getDistrictCostCenter(district: string): Promise<DistrictCostCenter | undefined> {
+    const padded = padDistrict(district);
+    const result = await db.select().from(districtCostCenters)
+      .where(eq(districtCostCenters.district, padded))
+      .limit(1);
+    return result[0];
+  }
+
+  async upsertDistrictCostCenter(record: InsertDistrictCostCenter): Promise<DistrictCostCenter> {
+    const padded = padDistrict(record.district);
+    const values = {
+      district: padded,
+      costCenter: record.costCenter,
+      updatedBy: record.updatedBy ?? null,
+      updatedAt: new Date(),
+    };
+    const result = await db.insert(districtCostCenters)
+      .values(values)
+      .onConflictDoUpdate({
+        target: districtCostCenters.district,
+        set: {
+          costCenter: values.costCenter,
+          updatedBy: values.updatedBy,
+          updatedAt: values.updatedAt,
+        },
+      })
+      .returning();
+    return result[0];
+  }
+
+  async deleteDistrictCostCenter(district: string): Promise<boolean> {
+    const padded = padDistrict(district);
+    const result = await db.delete(districtCostCenters)
+      .where(eq(districtCostCenters.district, padded))
+      .returning({ district: districtCostCenters.district });
+    return result.length > 0;
+  }
+
+  async seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }> {
+    // Collect distinct districts from live sources
+    const sources = await Promise.all([
+      db.selectDistinct({ d: truckInventory.district }).from(truckInventory),
+      db.selectDistinct({ d: tpmsCachedAssignments.districtNo }).from(tpmsCachedAssignments),
+      db.selectDistinct({ d: techVehicleAssignments.districtNo }).from(techVehicleAssignments),
+    ]);
+
+    const seen = new Set<string>();
+    for (const rows of sources) {
+      for (const row of rows) {
+        const raw = (row as any).d;
+        if (raw === null || raw === undefined) continue;
+        const padded = padDistrict(String(raw));
+        if (padded) seen.add(padded);
+      }
+    }
+
+    if (seen.size === 0) {
+      return { inserted: 0, existing: 0 };
+    }
+
+    const districts = Array.from(seen);
+    const existingRows = await db.select({ district: districtCostCenters.district })
+      .from(districtCostCenters)
+      .where(inArray(districtCostCenters.district, districts));
+    const existingSet = new Set(existingRows.map(r => r.district));
+
+    const toInsert = districts
+      .filter(d => !existingSet.has(d))
+      .map(d => ({
+        district: d,
+        costCenter: defaultCostCenterFor(d),
+        updatedBy,
+        updatedAt: new Date(),
+      }));
+
+    if (toInsert.length > 0) {
+      await db.insert(districtCostCenters).values(toInsert).onConflictDoNothing();
+    }
+
+    return { inserted: toInsert.length, existing: existingSet.size };
+  }
+}
+
+// Pad/normalize a district number to 7-digit zero-padded format.
+// Accepts user input with or without leading zeros (e.g. "4766" -> "0004766").
+function padDistrict(input: string): string {
+  const digits = String(input ?? "").trim().replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.padStart(7, "0").slice(-7);
+}
+
+// Compute the default cost center: "0" + last 4 digits of the district.
+function defaultCostCenterFor(district: string): string {
+  const padded = padDistrict(district);
+  const last4 = padded.slice(-4);
+  return ("0" + last4).slice(-5);
 }
 
 // Choose storage implementation based on environment variable

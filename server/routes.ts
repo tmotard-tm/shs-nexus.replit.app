@@ -7325,6 +7325,191 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===============================
+  // District Cost Centers API (Task 207)
+  // ===============================
+  console.log("Registering District Cost Centers API routes...");
+
+  function isCostCenterAdmin(user: any): boolean {
+    return user && (user.role === 'developer' || user.role === 'admin');
+  }
+
+  // Pad/normalize a district number to 7-digit zero-padded format.
+  function padDistrictForApi(input: string): string {
+    const digits = String(input ?? "").trim().replace(/\D/g, "");
+    if (!digits) return "";
+    return digits.padStart(7, "0").slice(-7);
+  }
+
+  // GET /api/cost-centers - list all
+  app.get("/api/cost-centers", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!isCostCenterAdmin(currentUser)) {
+        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      }
+      const items = await storage.listDistrictCostCenters();
+      res.json(items);
+    } catch (error) {
+      console.error("Error fetching cost centers:", error);
+      res.status(500).json({ message: "Failed to fetch cost centers" });
+    }
+  });
+
+  // POST /api/cost-centers - create or upsert
+  app.post("/api/cost-centers", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!isCostCenterAdmin(currentUser)) {
+        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      }
+
+      const bodySchema = z.object({
+        district: z.string().trim().regex(/^\d{4,7}$/, "District must be 4 to 7 digits"),
+        costCenter: z.string().trim().regex(/^[A-Za-z0-9]{5}$/, "Cost Center must be exactly 5 alphanumeric characters"),
+      });
+      const parsed = bodySchema.parse(req.body);
+
+      const padded = padDistrictForApi(parsed.district);
+      const existing = await storage.getDistrictCostCenter(padded);
+      if (existing) {
+        return res.status(409).json({ message: `District ${padded} already exists. Use PATCH to update.` });
+      }
+
+      const record = await storage.upsertDistrictCostCenter({
+        district: padded,
+        costCenter: parsed.costCenter,
+        updatedBy: currentUser!.username,
+      });
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_created",
+        entityType: "district_cost_center",
+        entityId: padded,
+        details: `District ${padded} cost center set to ${parsed.costCenter}`,
+      });
+
+      res.status(201).json(record);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid cost center data", errors: error.errors });
+      }
+      console.error("Error creating cost center:", error);
+      res.status(500).json({ message: "Failed to create cost center" });
+    }
+  });
+
+  // PATCH /api/cost-centers/:district - update existing
+  app.patch("/api/cost-centers/:district", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!isCostCenterAdmin(currentUser)) {
+        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      }
+
+      const padded = padDistrictForApi(req.params.district);
+      if (!padded) {
+        return res.status(400).json({ message: "Invalid district" });
+      }
+
+      const bodySchema = z.object({
+        costCenter: z.string().trim().regex(/^[A-Za-z0-9]{5}$/, "Cost Center must be exactly 5 alphanumeric characters"),
+      });
+      const { costCenter } = bodySchema.parse(req.body);
+
+      const existing = await storage.getDistrictCostCenter(padded);
+      if (!existing) {
+        return res.status(404).json({ message: "District not found" });
+      }
+
+      const record = await storage.upsertDistrictCostCenter({
+        district: padded,
+        costCenter,
+        updatedBy: currentUser!.username,
+      });
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_updated",
+        entityType: "district_cost_center",
+        entityId: padded,
+        details: `District ${padded} cost center changed from ${existing.costCenter} to ${costCenter}`,
+      });
+
+      res.json(record);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid cost center data", errors: error.errors });
+      }
+      console.error("Error updating cost center:", error);
+      res.status(500).json({ message: "Failed to update cost center" });
+    }
+  });
+
+  // DELETE /api/cost-centers/:district
+  app.delete("/api/cost-centers/:district", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!isCostCenterAdmin(currentUser)) {
+        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      }
+
+      const padded = padDistrictForApi(req.params.district);
+      if (!padded) {
+        return res.status(400).json({ message: "Invalid district" });
+      }
+
+      const existing = await storage.getDistrictCostCenter(padded);
+      if (!existing) {
+        return res.status(404).json({ message: "District not found" });
+      }
+
+      const ok = await storage.deleteDistrictCostCenter(padded);
+      if (!ok) {
+        return res.status(404).json({ message: "District not found" });
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_deleted",
+        entityType: "district_cost_center",
+        entityId: padded,
+        details: `District ${padded} cost center removed (was ${existing.costCenter})`,
+      });
+
+      res.json({ message: "Cost center removed" });
+    } catch (error) {
+      console.error("Error deleting cost center:", error);
+      res.status(500).json({ message: "Failed to delete cost center" });
+    }
+  });
+
+  // POST /api/cost-centers/init-defaults - seed defaults from live district sources
+  app.post("/api/cost-centers/init-defaults", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!isCostCenterAdmin(currentUser)) {
+        return res.status(403).json({ message: "Access denied. District Cost Centers requires Developer or Admin role." });
+      }
+
+      const result = await storage.seedDefaultDistrictCostCenters(currentUser!.username);
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_seed_defaults",
+        entityType: "district_cost_center",
+        entityId: "*",
+        details: `Initialized defaults: ${result.inserted} inserted, ${result.existing} existing`,
+      });
+
+      res.json(result);
+    } catch (error) {
+      console.error("Error seeding default cost centers:", error);
+      res.status(500).json({ message: "Failed to initialize default cost centers" });
+    }
+  });
+
   // Role Permissions API Routes
   console.log("Registering Role Permissions API routes...");
 
