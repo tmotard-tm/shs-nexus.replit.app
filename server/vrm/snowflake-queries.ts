@@ -506,27 +506,18 @@ export async function fetchTechPunchHistory(
   const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const lookback = Math.max(1, Math.min(7, days));
 
-  // Source: IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL — has
-  // one row per (tech, day, punch_type, rank) with separate START_TIME and
-  // END_TIME columns. We UNION both into a single event stream prefixed with
-  // "START " / "END ", which reproduces the cadence the user sees in Snowflake:
-  // START TRUCK, START DAY, START PAY, START ORDER, END ORDER, END ROUTE,
-  // END PAY, END DAY, etc.
+  // Source: IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_1WK —
+  // raw 1-week-window punch table. Each row IS one punch event; PUNCH_TYP
+  // already carries the full label ("START TRUCK", "START DAY", "END ORDER",
+  // "END DAY", etc.). No derivation needed — we just read it.
   const rows = (await svc.executeQuery(`
     WITH base AS (
-      SELECT UPPER(EMP_ENT_ID) AS ldap, PUNCH_DT AS route_date, START_TIME AS punch_ts,
-             'START ' || PUNCH_TYP AS punch_type
-      FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
-      WHERE UPPER(EMP_ENT_ID) IN (${ldapList.toUpperCase()})
-        AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-        AND START_TIME IS NOT NULL
-      UNION ALL
-      SELECT UPPER(EMP_ENT_ID) AS ldap, PUNCH_DT AS route_date, END_TIME AS punch_ts,
-             'END ' || PUNCH_TYP AS punch_type
-      FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
-      WHERE UPPER(EMP_ENT_ID) IN (${ldapList.toUpperCase()})
-        AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-        AND END_TIME IS NOT NULL
+      SELECT UPPER(ENT_ID) AS ldap, RTE_DT AS route_date, PUNCH_TS AS punch_ts,
+             PUNCH_TYP AS punch_type
+      FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_1WK
+      WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
+        AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+        AND PUNCH_TS IS NOT NULL
     ),
     daily AS (
       SELECT
@@ -611,26 +602,16 @@ export async function fetchTechPunchEvents(
   const safe = cleaned.replace(/'/g, "''").toUpperCase();
 
   const rows = (await svc.executeQuery(`
-    SELECT UPPER(EMP_ENT_ID) AS "ldap",
-           TO_CHAR(PUNCH_DT, 'YYYY-MM-DD') AS "punchDate",
-           TO_CHAR(START_TIME, 'HH24:MI:SS') AS "_time",
-           'START ' || PUNCH_TYP AS "punchType",
+    SELECT UPPER(ENT_ID) AS "ldap",
+           TO_CHAR(RTE_DT, 'YYYY-MM-DD') AS "punchDate",
+           TO_CHAR(PUNCH_TS, 'HH24:MI:SS') AS "_time",
+           PUNCH_TYP AS "punchType",
            PUNCH_DTL AS "orderNumber"
-    FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
-    WHERE UPPER(EMP_ENT_ID) = '${safe}'
-      AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-      AND START_TIME IS NOT NULL
-    UNION ALL
-    SELECT UPPER(EMP_ENT_ID) AS "ldap",
-           TO_CHAR(PUNCH_DT, 'YYYY-MM-DD') AS "punchDate",
-           TO_CHAR(END_TIME, 'HH24:MI:SS') AS "_time",
-           'END ' || PUNCH_TYP AS "punchType",
-           PUNCH_DTL AS "orderNumber"
-    FROM IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL
-    WHERE UPPER(EMP_ENT_ID) = '${safe}'
-      AND PUNCH_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
-      AND END_TIME IS NOT NULL
-    ORDER BY "punchDate" DESC, "_time" DESC
+    FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_1WK
+    WHERE UPPER(ENT_ID) = '${safe}'
+      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      AND PUNCH_TS IS NOT NULL
+    ORDER BY RTE_DT DESC, PUNCH_TS DESC
   `)) as Array<{ ldap: string; punchDate: string; _time: string; punchType: string; orderNumber: string | null }>;
 
   return rows.map((r) => ({

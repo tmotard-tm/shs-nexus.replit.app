@@ -1,4 +1,4 @@
-// Confirm TIME_PUNCH_DAY_DETAIL is the real source: pull TBOTTOM's last-7d events.
+// Verify TBL_PROCESSTECHTIMETECHHUB_1WK has the screenshot cadence + recent data.
 import { getSnowflakeService, initializeSnowflakeService } from "../server/snowflake-service";
 
 async function main() {
@@ -16,40 +16,38 @@ async function main() {
   });
   const svc = getSnowflakeService();
 
-  const fq = "IH_DATASCIENCE.HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL";
+  const fq = "IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_1WK";
 
-  // Distinct PUNCH_TYP values in last 7d
-  console.log("distinct PUNCH_TYP in last 7d:");
+  // Date range + total
+  const range = await svc.executeQuery(`
+    SELECT MIN(RTE_DT) AS "min", MAX(RTE_DT) AS "max", COUNT(*) AS "total"
+    FROM ${fq}
+  `);
+  console.log("range:", JSON.stringify(range[0]));
+
+  // Distinct PUNCH_TYP
   const types = await svc.executeQuery(`
     SELECT PUNCH_TYP AS "t", COUNT(*) AS "n"
     FROM ${fq}
-    WHERE PUNCH_DT >= DATEADD('day', -7, CURRENT_DATE)
     GROUP BY PUNCH_TYP
     ORDER BY COUNT(*) DESC
+    LIMIT 25
   `);
+  console.log("\ndistinct PUNCH_TYP:");
   (types as any[]).forEach((r) => console.log("  ", r.t, "→", r.n));
 
-  // UNION with safe TRY_TO_TIME — emits "START X" and "END X" as separate events
-  console.log("\nTBOTTOM last-7d punches (UNION'd):");
-  const rows = await svc.executeQuery(`
-    WITH unioned AS (
-      SELECT EMP_ENT_ID AS ent, PUNCH_DT AS dt, 'START ' || PUNCH_TYP AS ptyp, START_TIME AS pts
-      FROM ${fq}
-      WHERE UPPER(EMP_ENT_ID) = 'TBOTTOM'
-        AND PUNCH_DT >= DATEADD('day', -7, CURRENT_DATE)
-        AND START_TIME IS NOT NULL
-      UNION ALL
-      SELECT EMP_ENT_ID AS ent, PUNCH_DT AS dt, 'END ' || PUNCH_TYP AS ptyp, END_TIME AS pts
-      FROM ${fq}
-      WHERE UPPER(EMP_ENT_ID) = 'TBOTTOM'
-        AND PUNCH_DT >= DATEADD('day', -7, CURRENT_DATE)
-        AND END_TIME IS NOT NULL
-    )
-    SELECT * FROM unioned
-    ORDER BY dt DESC, pts DESC
+  // TBOTTOM's last 7 days
+  const events = await svc.executeQuery(`
+    SELECT RTE_DT, PUNCH_TS, PUNCH_TYP, PUNCH_DTL, ROW_NUM, TIME_ZONE
+    FROM ${fq}
+    WHERE UPPER(ENT_ID) = 'TBOTTOM'
+      AND RTE_DT >= DATEADD('day', -7, CURRENT_DATE)
+    ORDER BY RTE_DT DESC, PUNCH_TS DESC
     LIMIT 30
   `);
-  (rows as any[]).forEach((r) => console.log("  ", r.DT, r.PTS, "|", r.PTYP));
+  console.log(`\nTBOTTOM last-7d events (${events.length}):`);
+  (events as any[]).forEach((r) => console.log(" ", r.RTE_DT?.toISOString?.()?.slice(0,10) ?? r.RTE_DT, r.PUNCH_TS, "|", r.PUNCH_TYP, "|", r.PUNCH_DTL ?? "—", "| rn", r.ROW_NUM));
+
   process.exit(0);
 }
 

@@ -1249,7 +1249,7 @@ function PunchHistoryTab({
       )}
 
       <p style={{ marginTop: 14, fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-        Source: <span style={{ fontFamily: fonts.jetbrains }}>HS_FIELD_PERFORMANCE.TIME_PUNCH_DAY_DETAIL</span> (1-week window, START / END events derived from per-row START_TIME / END_TIME). Data refreshes every ~90s server-side.
+        Source: <span style={{ fontFamily: fonts.jetbrains }}>NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_1WK</span> (raw 1-week window — every PUNCH_TYP value as it appears in Snowflake). Data refreshes every ~90s server-side.
       </p>
     </div>
   );
@@ -1401,6 +1401,11 @@ function UnifiedPanel({
       return r.json();
     },
     enabled: panelTab === "punches" && !!punchLdap,
+    // Override the global staleTime: Infinity — punches change throughout the
+    // day, so fetch fresh every time the user opens the tab, and treat the
+    // result as stale immediately so subsequent opens refetch in the background.
+    staleTime: 0,
+    refetchOnMount: "always",
   });
   const refreshPunches = async () => {
     if (!punchLdap) return;
@@ -1601,7 +1606,7 @@ function UnifiedPanel({
             {([
               { key: "details" as const, label: "Details" },
               { key: "tech_outreach" as const, label: `Tech Outreach${techOutreachQuery.data?.length ? ` (${techOutreachQuery.data.length})` : ""}` },
-              { key: "punches" as const, label: "Punch History" },
+              { key: "punches" as const, label: `Punch History${punchHistoryQuery.data?.events?.length ? ` (${punchHistoryQuery.data.events.length})` : ""}` },
               { key: "ams" as const, label: "AMS" },
             ]).map((t) => {
               const active = panelTab === t.key;
@@ -2142,6 +2147,10 @@ export default function RentalRepairTracker() {
       queryKey: ["/api/vrm/repair-tracker/punch-status"],
       refetchInterval: 1_800_000,
       enabled: entries.length > 0,
+      // Override global staleTime: Infinity so a fresh page load (or tab focus
+      // after restart) actually refetches.
+      staleTime: 0,
+      refetchOnMount: "always",
     });
 
   const syncMutation = useMutation({

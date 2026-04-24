@@ -1150,7 +1150,7 @@ export function registerVrmRoutes(): Router {
   // ─── Tech Punch Status (TimeHub via Snowflake) ──────────────────────────────
   // Short server-side cache to avoid hammering Snowflake on every table render.
   const PUNCH_TTL_MS = 90 * 1000;
-  type PunchCacheEntry = { ts: number; rows: TechPunchRow[] };
+  type PunchCacheEntry = { ts: number; rows: TechPunchRow[]; events: TechPunchEvent[] };
   const punchHistoryCache = new Map<string, PunchCacheEntry>(); // key: ldap (uppercased)
   let bulkStatusCache: { ts: number; payload: any } | null = null;
 
@@ -1273,7 +1273,10 @@ export function registerVrmRoutes(): Router {
     const result: Record<string, PunchStatusEntry> = {};
     for (const ldap of ldaps) {
       const rows = byLdap.get(ldap) ?? [];
-      punchHistoryCache.set(ldap, { ts: now, rows });
+      // Bulk path doesn't fetch raw events — preserve any events already cached
+      // for this ldap so a per-tech drawer doesn't lose them on bulk refresh.
+      const existingEvents = punchHistoryCache.get(ldap)?.events ?? [];
+      punchHistoryCache.set(ldap, { ts: now, rows, events: existingEvents });
       result[ldap] = summarizeStatus(rows, { error: snowflakeError, sourceConfigured });
     }
     // Diagnostic: when Snowflake is configured, returned no error, AND zero rows
@@ -1346,8 +1349,16 @@ export function registerVrmRoutes(): Router {
       const now = Date.now();
       const sourceConfigured = isSnowflakeConfigured();
       const hit = punchHistoryCache.get(ldap);
-      if (!force && hit && now - hit.ts < PUNCH_TTL_MS) {
-        return res.json({ ldap, rows: hit.rows, summary: summarizeStatus(hit.rows, { error: null, sourceConfigured }), cached: true });
+      // Only return cached if events were populated — the bulk path may have
+      // written rows without events, in which case we need to fetch raw events.
+      if (!force && hit && hit.events.length > 0 && now - hit.ts < PUNCH_TTL_MS) {
+        return res.json({
+          ldap,
+          rows: hit.rows,
+          events: hit.events,
+          summary: summarizeStatus(hit.rows, { error: null, sourceConfigured }),
+          cached: true,
+        });
       }
       let rows: TechPunchRow[] = [];
       let events: TechPunchEvent[] = [];
@@ -1365,7 +1376,7 @@ export function registerVrmRoutes(): Router {
         snowflakeError = e?.message ?? String(e);
         console.error("[VRM] punch-history snowflake error:", snowflakeError);
       }
-      punchHistoryCache.set(ldap, { ts: now, rows });
+      punchHistoryCache.set(ldap, { ts: now, rows, events });
       await persistSyncedAt([ldap]);
       // Force-refresh also invalidates the bulk cache so the table picks up changes
       if (force) bulkStatusCache = null;
