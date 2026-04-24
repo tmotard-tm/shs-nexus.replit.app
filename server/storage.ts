@@ -6664,11 +6664,20 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       }));
 
+    let actuallyInserted = 0;
     if (toInsert.length > 0) {
-      await db.insert(districtCostCenters).values(toInsert).onConflictDoNothing();
+      const insertedRows = await db
+        .insert(districtCostCenters)
+        .values(toInsert)
+        .onConflictDoNothing()
+        .returning({ district: districtCostCenters.district });
+      actuallyInserted = insertedRows.length;
     }
 
-    return { inserted: toInsert.length, existing: existingSet.size };
+    return {
+      inserted: actuallyInserted,
+      existing: existingSet.size + (toInsert.length - actuallyInserted),
+    };
   }
 }
 
