@@ -13932,6 +13932,89 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // Import a list of "Old Decline" trucks. Pasted format is one truck per line:
+  //   <truckNumber><tab or whitespace><address...>
+  // Truck numbers without leading zeros are accepted; we strip non-digits and pad to 6.
+  // Trucks already present in fs_decommissioning_vehicles (any category) are skipped.
+  // After insert, run the existing tech-data + parts-count enrichment so new rows
+  // populate immediately rather than waiting for the next manual sync.
+  app.post("/decommissioning/import-old-declines", async (req, res) => {
+    try {
+      const { rows } = req.body as { rows?: { truckNumber?: string; address?: string | null }[] };
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+
+      let invalidRows = 0;
+      const normalized: { truckNumber: string; address: string | null }[] = [];
+      const seenInBatch = new Set<string>();
+
+      for (const row of rows) {
+        const rawTruck = (row.truckNumber ?? "").toString();
+        const digits = rawTruck.replace(/\D/g, "");
+        if (!digits) {
+          invalidRows++;
+          continue;
+        }
+        const truckNumber = digits.padStart(6, "0");
+        if (truckNumber === "000000") {
+          invalidRows++;
+          continue;
+        }
+        if (seenInBatch.has(truckNumber)) continue;
+        seenInBatch.add(truckNumber);
+
+        const address = row.address && row.address.toString().trim() ? row.address.toString().trim() : null;
+        normalized.push({ truckNumber, address });
+      }
+
+      if (normalized.length === 0) {
+        return res.json({
+          success: true,
+          added: 0,
+          skippedExistingStandard: 0,
+          skippedExistingOldDecline: 0,
+          invalidRows,
+          total: rows.length,
+        });
+      }
+
+      const result = await fleetScopeStorage.insertOldDeclineVehicles(normalized);
+
+      console.log(
+        `[Old Declines Import] Added: ${result.added}, Already in Active/Decommissioned: ${result.skippedExistingStandard}, Already in Old Declines: ${result.skippedExistingOldDecline}, Invalid: ${invalidRows}`
+      );
+
+      // Best-effort enrichment for the rows we just added. Run sequentially and
+      // non-fatally so a Snowflake hiccup doesn't fail the import response.
+      if (result.added > 0) {
+        try {
+          await syncDecommissioningTechData();
+        } catch (err) {
+          console.error("[Old Declines Import] Tech-data enrichment failed (non-fatal):", err);
+        }
+        try {
+          await syncDecommissioningPartsCount();
+        } catch (err) {
+          console.error("[Old Declines Import] Parts-count enrichment failed (non-fatal):", err);
+        }
+      }
+
+      res.json({
+        success: true,
+        added: result.added,
+        skippedExistingStandard: result.skippedExistingStandard,
+        skippedExistingOldDecline: result.skippedExistingOldDecline,
+        invalidRows,
+        total: rows.length,
+      });
+    } catch (error: any) {
+      console.error("[Old Declines Import] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Helper function to sync decommissioning tech data from Snowflake
   async function syncDecommissioningTechData(): Promise<{ synced: number; preserved: number; total: number }> {
     const vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();

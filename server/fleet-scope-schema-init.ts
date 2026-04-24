@@ -653,6 +653,9 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='is_manager') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "is_manager" boolean DEFAULT false;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='category') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "category" varchar(20) NOT NULL DEFAULT 'standard';
+  END IF;
 END $$;
 
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.

@@ -1673,6 +1673,59 @@ export class DatabaseStorage implements IStorage {
     return { inserted, updated };
   }
 
+  // Old-declines import: only insert if truckNumber not already present (any category).
+  // Skips trucks that exist in Active/Decommissioned (category='standard') AND existing old declines.
+  async insertOldDeclineVehicles(rows: { truckNumber: string; address: string | null }[]): Promise<{
+    added: number;
+    skippedExistingStandard: number;
+    skippedExistingOldDecline: number;
+    addedTruckNumbers: string[];
+  }> {
+    let added = 0;
+    let skippedExistingStandard = 0;
+    let skippedExistingOldDecline = 0;
+    const addedTruckNumbers: string[] = [];
+
+    for (const row of rows) {
+      const existing = await this.getDecommissioningVehicle(row.truckNumber);
+      if (existing) {
+        if (existing.category === "old_decline") {
+          skippedExistingOldDecline++;
+        } else {
+          skippedExistingStandard++;
+        }
+        continue;
+      }
+      // Use RETURNING + onConflictDoNothing so we only count rows that were
+      // actually inserted (concurrent imports of the same truck# won't double-count).
+      const inserted = await getDb()
+        .insert(decommissioningVehicles)
+        .values({
+          truckNumber: row.truckNumber,
+          address: row.address,
+          stillNotSold: true,
+          category: "old_decline",
+        })
+        .onConflictDoNothing({ target: decommissioningVehicles.truckNumber })
+        .returning({ truckNumber: decommissioningVehicles.truckNumber });
+
+      if (inserted.length > 0) {
+        added++;
+        addedTruckNumbers.push(row.truckNumber);
+      } else {
+        // Row already existed (race with concurrent import). Re-classify it.
+        const now = await this.getDecommissioningVehicle(row.truckNumber);
+        if (now?.category === "old_decline") {
+          skippedExistingOldDecline++;
+        } else {
+          skippedExistingStandard++;
+        }
+      }
+    }
+
+    return { added, skippedExistingStandard, skippedExistingOldDecline, addedTruckNumbers };
+  }
+
   async updateDecommissioningVehicleDistance(
     id: number, 
     managerDistance: number | null, 

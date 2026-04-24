@@ -78,6 +78,7 @@ interface DecommissioningVehicle {
   techDataSyncedAt: string | null;
   termRequestFileName: string | null;
   termRequestStorageKey: string | null;
+  category: string; // 'standard' or 'old_decline'
   createdAt: string;
   updatedAt: string;
 }
@@ -97,7 +98,9 @@ export default function Decommissioning() {
   const termFileInputRef = useRef<HTMLInputElement>(null);
   const [activeView, setActiveView] = useState<"table" | "conversations">("table");
   const [convTruck, setConvTruck] = useState<string | null>(null);
-  const [tableTab, setTableTab] = useState<"active" | "decommissioned">("active");
+  const [tableTab, setTableTab] = useState<"active" | "decommissioned" | "oldDeclines">("active");
+  const [oldDeclinesDialogOpen, setOldDeclinesDialogOpen] = useState(false);
+  const [oldDeclinesPaste, setOldDeclinesPaste] = useState("");
 
   // Column filters
   const [dateFilter, setDateFilter] = useState<string>("");
@@ -216,6 +219,70 @@ export default function Decommissioning() {
       });
     },
   });
+
+  const importOldDeclinesMutation = useMutation({
+    mutationFn: async (rows: { truckNumber: string; address: string | null }[]) => {
+      return apiRequest("POST", "/api/fs/decommissioning/import-old-declines", { rows });
+    },
+    onSuccess: (result: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
+      const parts = [`Added: ${result.added}`];
+      if (result.skippedExistingStandard) parts.push(`Already in Active/Decommissioned: ${result.skippedExistingStandard}`);
+      if (result.skippedExistingOldDecline) parts.push(`Already in Old Declines: ${result.skippedExistingOldDecline}`);
+      if (result.invalidRows) parts.push(`Invalid: ${result.invalidRows}`);
+      toast({
+        title: "Old Declines Import Complete",
+        description: parts.join(", "),
+      });
+      setOldDeclinesDialogOpen(false);
+      setOldDeclinesPaste("");
+      setTableTab("oldDeclines");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Import Error",
+        description: error.message || "Failed to import old declines",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleImportOldDeclines = () => {
+    const text = oldDeclinesPaste.trim();
+    if (!text) {
+      toast({
+        title: "Error",
+        description: "Please paste at least one line",
+        variant: "destructive",
+      });
+      return;
+    }
+    // Parse: each non-empty line is "<truck#><tab or whitespace><address...>".
+    // The address may contain commas (e.g. "5495 GLENWAY AVE, CINCINNATI, OH, 45238")
+    // so we split on the first run of whitespace only.
+    const rows: { truckNumber: string; address: string | null }[] = [];
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const match = line.match(/^(\S+)\s+(.*)$/);
+      if (match) {
+        const [, truckNumber, address] = match;
+        rows.push({ truckNumber, address: address.trim() || null });
+      } else {
+        // Truck number only, no address
+        rows.push({ truckNumber: line, address: null });
+      }
+    }
+    if (rows.length === 0) {
+      toast({
+        title: "Error",
+        description: "No valid rows found",
+        variant: "destructive",
+      });
+      return;
+    }
+    importOldDeclinesMutation.mutate(rows);
+  };
 
   const importMutation = useMutation({
     mutationFn: async (data: any[]) => {
@@ -442,7 +509,9 @@ export default function Decommissioning() {
   };
 
   const handleExport = async () => {
-    const exportData = displayedVehicles.map((v) => ({
+    // Map any vehicle row to the same set of export columns so all three sheets
+    // line up identically — easier to read in Excel and easier to diff later.
+    const toExportRow = (v: typeof displayedVehicles[number]) => ({
       "Truck #": v.truckNumber,
       "VIN": v.vin || "",
       "District": v.district ? v.district.replace(/^0+/, "") : "",
@@ -472,17 +541,19 @@ export default function Decommissioning() {
       "Decom Done": v.decomDone ? "Yes" : "No",
       "Sent to Procurement": v.sentToProcurement ? "Yes" : "No",
       "Comments": v.comments || "",
-    }));
+    });
 
     const wb = new ExcelJS.Workbook();
-    addJsonWorksheet(wb, exportData, "Decommissioning");
+    addJsonWorksheet(wb, activeVehicles.map(toExportRow), "Active");
+    addJsonWorksheet(wb, decommissionedVehicles.map(toExportRow), "Decommissioned");
+    addJsonWorksheet(wb, oldDeclinesVehicles.map(toExportRow), "Old Declines");
 
     const date = new Date().toISOString().split("T")[0];
     await downloadExcelWorkbook(wb, `Decommissioning_${date}.xlsx`);
-    
+
     toast({
       title: "Export Complete",
-      description: `Exported ${exportData.length} vehicles to Excel`,
+      description: `Active: ${activeVehicles.length}, Decommissioned: ${decommissionedVehicles.length}, Old Declines: ${oldDeclinesVehicles.length}`,
     });
   };
 
@@ -542,9 +613,20 @@ export default function Decommissioning() {
     return 0;
   });
 
-  const activeVehicles = filteredVehicles.filter(v => !v.sentToProcurement);
+  // Three-way bucketing:
+  //  - Decommissioned: anything sent to procurement, regardless of category. So
+  //    when an Old Declines row's "Sent to Procurement" gets checked, it lands here.
+  //  - Active: standard rows that are NOT yet sent to procurement.
+  //  - Old Declines: old_decline rows that are NOT yet sent to procurement.
+  const activeVehicles = filteredVehicles.filter(v => !v.sentToProcurement && v.category !== "old_decline");
+  const oldDeclinesVehicles = filteredVehicles.filter(v => !v.sentToProcurement && v.category === "old_decline");
   const decommissionedVehicles = filteredVehicles.filter(v => v.sentToProcurement);
-  const displayedVehicles = tableTab === "active" ? activeVehicles : decommissionedVehicles;
+  const displayedVehicles =
+    tableTab === "active"
+      ? activeVehicles
+      : tableTab === "oldDeclines"
+        ? oldDeclinesVehicles
+        : decommissionedVehicles;
 
   const SortIcon = ({ dir }: { dir: SortDir }) =>
     dir === "asc" ? <ArrowUp className="h-3 w-3 inline ml-1" /> :
@@ -741,6 +823,55 @@ export default function Decommissioning() {
               </div>
             </DialogContent>
           </Dialog>
+
+          <Dialog open={oldDeclinesDialogOpen} onOpenChange={setOldDeclinesDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" data-testid="button-import-old-declines">
+                <Upload className="h-4 w-4 mr-2" />
+                Import Old Declines
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Import Old Declines</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Paste rows in the format <code className="bg-muted px-1 rounded">truck#&nbsp;address</code> (whitespace
+                  between truck # and address). Truck numbers without leading zeros are accepted; they'll be padded to
+                  6 digits. Trucks already present in Active or Decommissioned are skipped.
+                </p>
+                <Textarea
+                  placeholder={"37090\t5495 GLENWAY AVE, CINCINNATI, OH, 45238\n37091\t102 RED RD..."}
+                  value={oldDeclinesPaste}
+                  onChange={(e) => setOldDeclinesPaste(e.target.value)}
+                  className="min-h-[260px] font-mono text-sm"
+                  data-testid="textarea-import-old-declines"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setOldDeclinesDialogOpen(false)}
+                    data-testid="button-cancel-import-old-declines"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleImportOldDeclines}
+                    disabled={importOldDeclinesMutation.isPending || !oldDeclinesPaste.trim()}
+                    data-testid="button-confirm-import-old-declines"
+                  >
+                    {importOldDeclinesMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Upload className="h-4 w-4 mr-2" />
+                    )}
+                    Import Old Declines
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
@@ -785,6 +916,16 @@ export default function Decommissioning() {
           Decommissioned
           <span className="ml-1.5 text-xs opacity-80">({decommissionedVehicles.length})</span>
         </Button>
+        <Button
+          variant={tableTab === "oldDeclines" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setTableTab("oldDeclines")}
+          className={tableTab === "oldDeclines" ? "bg-amber-600 hover:bg-amber-700" : ""}
+          data-testid="tab-old-declines-vehicles"
+        >
+          Old Declines
+          <span className="ml-1.5 text-xs opacity-80">({oldDeclinesVehicles.length})</span>
+        </Button>
       </div>
       <Card>
         <CardContent className="p-0">
@@ -796,7 +937,9 @@ export default function Decommissioning() {
             <div className="text-center py-12 text-muted-foreground">
               {tableTab === "decommissioned"
                 ? "No decommissioned trucks. Trucks appear here when \"Sent to Procurement\" is checked."
-                : searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
+                : tableTab === "oldDeclines"
+                  ? "No old declines yet. Click \"Import Old Declines\" to paste truck #/address rows."
+                  : searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
             </div>
           ) : (
             <div className="overflow-auto max-h-[calc(100vh-280px)]">

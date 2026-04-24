@@ -1335,6 +1335,7 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   techMatchSource: varchar("tech_match_source", { length: 20 }), // 'truck' for direct match, 'zip_fallback' for ZIP-based match
   isAssigned: boolean("is_assigned").default(false), // Whether truck # is currently found in TPMS_EXTRACT
   isManager: boolean("is_manager").default(false), // True if this tech's enterpriseId appears as a MANAGER_ENT_ID for some other tech in TPMS_EXTRACT
+  category: varchar("category", { length: 20 }).notNull().default("standard"), // 'standard' (Active/Decommissioned) or 'old_decline' (Old Declines tab)
   nearestTechName: varchar("nearest_tech_name", { length: 100 }),
   nearestTechPhone: varchar("nearest_tech_phone", { length: 50 }),
   nearestTechZip: varchar("nearest_tech_zip", { length: 20 }),
