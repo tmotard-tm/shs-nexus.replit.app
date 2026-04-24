@@ -506,20 +506,20 @@ export async function fetchTechPunchHistory(
   const ldapList = cleaned.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const lookback = Math.max(1, Math.min(7, days));
 
-  // Source columns: LDAP_ID (the tech's LDAP username), PUNCH_DATE (the date),
-  // PUNCH_TS (the time), PUNCH_TYP (event type — START TRUCK / START DAY /
-  // START ORDER / END ORDER / RESCHEDULE JOB / END ROUTE / END PAY / END DAY /
-  // etc), PUNCH_DTL (order number when applicable).
+  // Source has real event types: START TRUCK / START DAY / START PAY /
+  // START ORDER / END ORDER / RESCHEDULE JOB / END ROUTE / END PAY / END DAY.
+  // Identifier column is ENT_ID (confirmed populated — older LDAP_ID column
+  // name guess returned zero rows in live testing).
   const rows = (await svc.executeQuery(`
     WITH base AS (
       SELECT
-        UPPER(LDAP_ID)                           AS ldap,
-        PUNCH_DATE                               AS route_date,
+        UPPER(ENT_ID)                            AS ldap,
+        RTE_DT                                   AS route_date,
         PUNCH_TS                                 AS punch_ts,
         PUNCH_TYP                                AS punch_type
       FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-      WHERE UPPER(LDAP_ID) IN (${ldapList.toUpperCase()})
-        AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
+      WHERE UPPER(ENT_ID) IN (${ldapList.toUpperCase()})
+        AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
         AND PUNCH_TS IS NOT NULL
     ),
     daily AS (
@@ -606,16 +606,16 @@ export async function fetchTechPunchEvents(
 
   const rows = (await svc.executeQuery(`
     SELECT
-      UPPER(LDAP_ID)                             AS "ldap",
-      TO_CHAR(PUNCH_DATE, 'YYYY-MM-DD')          AS "punchDate",
+      UPPER(ENT_ID)                              AS "ldap",
+      TO_CHAR(RTE_DT, 'YYYY-MM-DD')              AS "punchDate",
       TO_CHAR(PUNCH_TS, 'HH24:MI:SS')            AS "_time",
       PUNCH_TYP                                  AS "punchType",
       PUNCH_DTL                                  AS "orderNumber"
     FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-    WHERE UPPER(LDAP_ID) = '${safe}'
-      AND PUNCH_DATE >= DATEADD('day', -${lookback}, CURRENT_DATE)
+    WHERE UPPER(ENT_ID) = '${safe}'
+      AND RTE_DT >= DATEADD('day', -${lookback}, CURRENT_DATE)
       AND PUNCH_TS IS NOT NULL
-    ORDER BY PUNCH_DATE DESC, PUNCH_TS DESC
+    ORDER BY RTE_DT DESC, PUNCH_TS DESC
   `)) as Array<{ ldap: string; punchDate: string; _time: string; punchType: string; orderNumber: string | null }>;
 
   return rows.map((r) => ({
@@ -640,74 +640,43 @@ export async function fetchTechPunchEvents(
  * what event cadence the source view actually emits vs what we're displaying.
  */
 export async function fetchPunchSourceShape(): Promise<{
-  totalRowsLast7d: number;
-  distinctTechsLast7d: number;
   columns: Array<{ name: string; type: string }>;
-  punchTypes: Array<{ punchType: string; count: number }>;
-  topTechsByEvents: Array<{ ldap: string; events: number; days: number }>;
-  sampleRecentRowsForBusiestTech: any[];
+  rowsUnfiltered: any[];
+  rowCount1d: number;
+  rowCount7d: number;
 } | null> {
   if (!isSnowflakeConfigured()) return null;
   try {
     const svc = getSnowflakeService();
-    const [typesRes, techsRes, totalsRes, colsRes] = await Promise.all([
-      svc.executeQuery(`
-        SELECT PUNCH_TYP AS "punchType", COUNT(*) AS "count"
-        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
-        GROUP BY PUNCH_TYP
-        ORDER BY COUNT(*) DESC
-      `),
-      svc.executeQuery(`
-        SELECT
-          UPPER(LDAP_ID) AS "ldap",
-          COUNT(*) AS "events",
-          COUNT(DISTINCT PUNCH_DATE) AS "days"
-        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
-          AND LDAP_ID IS NOT NULL
-        GROUP BY UPPER(LDAP_ID)
-        ORDER BY COUNT(*) DESC
-        LIMIT 10
-      `),
-      svc.executeQuery(`
-        SELECT
-          COUNT(*) AS "totalRows",
-          COUNT(DISTINCT UPPER(LDAP_ID)) AS "distinctTechs"
-        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
-      `),
-      svc.executeQuery(`
-        SELECT COLUMN_NAME AS "name", DATA_TYPE AS "type"
-        FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = 'NFDT_METRIC_TBLS'
-          AND TABLE_NAME = 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
-        ORDER BY ORDINAL_POSITION
-      `),
-    ]);
-    const t = (totalsRes as any[])[0] ?? {};
-    const topTechs = (techsRes as any[]).map((r) => ({ ldap: String(r.ldap), events: Number(r.events), days: Number(r.days) }));
-    const busiestLdap = topTechs[0]?.ldap;
-    let sampleRecentRowsForBusiestTech: any[] = [];
-    if (busiestLdap) {
-      const safe = busiestLdap.replace(/'/g, "''");
-      const sampleRes = await svc.executeQuery(`
-        SELECT *
-        FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
-        WHERE UPPER(LDAP_ID) = '${safe}'
-          AND PUNCH_DATE >= DATEADD('day', -7, CURRENT_DATE)
-        ORDER BY PUNCH_DATE DESC, PUNCH_TS DESC
-        LIMIT 30
-      `);
-      sampleRecentRowsForBusiestTech = (sampleRes as any[]) ?? [];
-    }
+    // Column list from information_schema — doesn't depend on knowing any column name.
+    const colsRes = await svc.executeQuery(`
+      SELECT COLUMN_NAME AS "name", DATA_TYPE AS "type"
+      FROM IH_DATASCIENCE.INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = 'NFDT_METRIC_TBLS'
+        AND TABLE_NAME = 'TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK'
+      ORDER BY ORDINAL_POSITION
+    `);
+    // Blind SELECT * — 5 rows, every column, no filter. Shows us what's really
+    // in each column regardless of column names.
+    const rowsUnfilteredRes = await svc.executeQuery(`
+      SELECT * FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+      LIMIT 5
+    `);
+    // Unfiltered row-count snapshots — if the 1d value is tiny while 7d is big,
+    // the table lag is the problem; if both are big, our filter is the problem.
+    const countsRes = await svc.executeQuery(`
+      SELECT
+        COUNT(*) AS "total",
+        SUM(CASE WHEN RTE_DT >= DATEADD('day', -1, CURRENT_DATE) THEN 1 ELSE 0 END) AS "c1d",
+        SUM(CASE WHEN RTE_DT >= DATEADD('day', -7, CURRENT_DATE) THEN 1 ELSE 0 END) AS "c7d"
+      FROM IH_DATASCIENCE.NFDT_METRIC_TBLS.TBL_PROCESSTECHTIMETECHHUB_TIMEPUNCH_TABULAR_1WK
+    `);
+    const c = (countsRes as any[])[0] ?? {};
     return {
-      totalRowsLast7d: Number(t.totalRows ?? 0),
-      distinctTechsLast7d: Number(t.distinctTechs ?? 0),
       columns: (colsRes as any[]).map((r) => ({ name: String(r.name), type: String(r.type) })),
-      punchTypes: (typesRes as any[]).map((r) => ({ punchType: String(r.punchType ?? "(null)"), count: Number(r.count) })),
-      topTechsByEvents: topTechs,
-      sampleRecentRowsForBusiestTech,
+      rowsUnfiltered: (rowsUnfilteredRes as any[]) ?? [],
+      rowCount1d: Number(c.c1d ?? 0),
+      rowCount7d: Number(c.c7d ?? 0),
     };
   } catch (e: any) {
     console.error("[VRM] punch source shape failed:", e?.message);
