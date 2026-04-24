@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -627,6 +627,22 @@ export default function Decommissioning() {
       : tableTab === "oldDeclines"
         ? oldDeclinesVehicles
         : decommissionedVehicles;
+
+  // When the user types a search and the current tab has zero matches but
+  // another tab does, jump them to the tab with results so the search "feels"
+  // global across all three tables. Priority: keep current tab if it has hits,
+  // otherwise prefer Active → Old Declines → Decommissioned.
+  useEffect(() => {
+    if (!searchTerm.trim()) return;
+    if (displayedVehicles.length > 0) return;
+    if (activeVehicles.length > 0) {
+      setTableTab("active");
+    } else if (oldDeclinesVehicles.length > 0) {
+      setTableTab("oldDeclines");
+    } else if (decommissionedVehicles.length > 0) {
+      setTableTab("decommissioned");
+    }
+  }, [searchTerm, displayedVehicles.length, activeVehicles.length, oldDeclinesVehicles.length, decommissionedVehicles.length]);
 
   const SortIcon = ({ dir }: { dir: SortDir }) =>
     dir === "asc" ? <ArrowUp className="h-3 w-3 inline ml-1" /> :
