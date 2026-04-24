@@ -17,6 +17,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Plus,
@@ -105,52 +106,95 @@ export default function CostCenterManagement() {
     queryKey: ["/api/cost-centers"],
   });
 
+  const COST_CENTER_KEY = ["/api/cost-centers"] as const;
+
   const createMutation = useMutation({
     mutationFn: (data: CreateFormData) => apiRequest("POST", "/api/cost-centers", data),
+    onMutate: async (data: CreateFormData) => {
+      await queryClient.cancelQueries({ queryKey: COST_CENTER_KEY });
+      const previous = queryClient.getQueryData<DistrictCostCenter[]>(COST_CENTER_KEY);
+      const padded = padDistrict(data.district) || data.district;
+      const optimistic: DistrictCostCenter = {
+        district: padded,
+        costCenter: data.costCenter,
+        updatedAt: new Date(),
+        updatedBy: null,
+      };
+      queryClient.setQueryData<DistrictCostCenter[]>(COST_CENTER_KEY, (old = []) => {
+        const without = old.filter((r) => r.district !== padded);
+        return [...without, optimistic];
+      });
+      return { previous };
+    },
+    onError: (error: Error, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(COST_CENTER_KEY, ctx.previous);
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cost-centers"] });
       setIsCreateOpen(false);
       toast({ title: "District added", description: "The cost center has been saved." });
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
     },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ district, costCenter }: { district: string; costCenter: string }) =>
       apiRequest("PATCH", `/api/cost-centers/${district}`, { costCenter }),
+    onMutate: async ({ district, costCenter }) => {
+      await queryClient.cancelQueries({ queryKey: COST_CENTER_KEY });
+      const previous = queryClient.getQueryData<DistrictCostCenter[]>(COST_CENTER_KEY);
+      queryClient.setQueryData<DistrictCostCenter[]>(COST_CENTER_KEY, (old = []) =>
+        old.map((r) => (r.district === district ? { ...r, costCenter, updatedAt: new Date() } : r))
+      );
+      return { previous };
+    },
+    onError: (error: Error, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(COST_CENTER_KEY, ctx.previous);
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cost-centers"] });
       setEditingDistrict(null);
       setEditingValue("");
       setEditingError(null);
       toast({ title: "Updated", description: "Cost center updated." });
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (district: string) => apiRequest("DELETE", `/api/cost-centers/${district}`),
+    onMutate: async (district: string) => {
+      await queryClient.cancelQueries({ queryKey: COST_CENTER_KEY });
+      const previous = queryClient.getQueryData<DistrictCostCenter[]>(COST_CENTER_KEY);
+      queryClient.setQueryData<DistrictCostCenter[]>(COST_CENTER_KEY, (old = []) =>
+        old.filter((r) => r.district !== district)
+      );
+      return { previous };
+    },
+    onError: (error: Error, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(COST_CENTER_KEY, ctx.previous);
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["/api/cost-centers"] });
       setDeleting(null);
       toast({ title: "Removed", description: "District removed." });
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
     },
   });
 
   const seedMutation = useMutation({
-    mutationFn: () => apiRequest("POST", "/api/cost-centers/init-defaults"),
-    onSuccess: async (response: any) => {
-      const data = await (response.json ? response.json() : response);
-      const inserted = data?.inserted ?? 0;
-      const existing = data?.existing ?? 0;
-      queryClient.invalidateQueries({ queryKey: ["/api/cost-centers"] });
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cost-centers/init-defaults");
+      return (await res.json()) as { inserted: number; existing: number };
+    },
+    onSuccess: ({ inserted, existing }) => {
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
       toast({
         title: "Defaults initialized",
         description: `${inserted} new district${inserted === 1 ? "" : "s"} added (${existing} already existed).`,
@@ -417,7 +461,11 @@ export default function CostCenterManagement() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <p className="text-muted-foreground py-6">Loading mappings...</p>
+            <div className="space-y-2 py-2" data-testid="loading-skeleton">
+              {[0, 1, 2, 3, 4].map((i) => (
+                <Skeleton key={i} className="h-12 w-full" />
+              ))}
+            </div>
           ) : isEmpty ? (
             <div className="py-10 text-center space-y-3">
               <p className="text-muted-foreground">
