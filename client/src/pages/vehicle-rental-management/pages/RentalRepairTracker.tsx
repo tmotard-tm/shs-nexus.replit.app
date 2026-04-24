@@ -1025,15 +1025,63 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
 
   return (
     <div style={{ padding: "20px 0" }}>
-      {linkMissing && (
-        <div style={{
-          marginBottom: 16, padding: "10px 12px",
-          backgroundColor: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 6,
-          fontFamily: fonts.dmSans, fontSize: 12, color: "#92400E",
-        }}>
-          ⚠ AMS link missing for truck #{truckNumber}{data.reason ? ` — ${data.reason}` : ""}
-        </div>
-      )}
+      {linkMissing && (() => {
+        const rawReason = String(data.reason ?? "");
+        // Strip cosmetic duplication (AMS upstream echoes "Internal Server Error"
+        // in both statusText and body) but keep the full diagnostic payload — the
+        // server now tags its reason with [v3-holman-diag] + a source trail so we
+        // can see exactly which VIN source hit/missed. If no tagged reason is
+        // present AND we see a generic "upstream unavailable" from an older build,
+        // fall back to the friendly label.
+        const hasBuildTag = /\[v\d+-[\w-]+\]/.test(rawReason);
+        const isGenericUpstream = !hasBuildTag && /upstream unavailable/i.test(rawReason);
+        const cleanedReason = isGenericUpstream
+          ? "AMS is temporarily unavailable — try again in a minute."
+          : rawReason.replace(/\s*-\s*Internal Server Error\s*$/i, "");
+        return (
+          <div style={{
+            marginBottom: 16, padding: "10px 12px",
+            backgroundColor: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 6,
+            fontFamily: fonts.dmSans, fontSize: 12, color: "#92400E",
+            display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
+          }}>
+            <span>
+              ⚠ AMS link missing for truck #{truckNumber}{cleanedReason ? ` — ${cleanedReason}` : ""}
+            </span>
+            <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button
+                onClick={() => query.refetch?.()}
+                disabled={!!query.isFetching}
+                style={{
+                  fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
+                  color: "#92400E", backgroundColor: "transparent",
+                  border: "1px solid #F59E0B", borderRadius: 5,
+                  padding: "3px 8px", cursor: query.isFetching ? "wait" : "pointer", whiteSpace: "nowrap",
+                }}
+                data-testid="button-ams-retry"
+              >
+                {query.isFetching ? "Retrying…" : "Retry"}
+              </button>
+              {truckNumber && (
+                <a
+                  href={`/fleet-management?openTruck=${encodeURIComponent(truckNumber)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
+                    color: "#92400E", textDecoration: "none",
+                    border: "1px solid #F59E0B", borderRadius: 5,
+                    padding: "3px 8px", whiteSpace: "nowrap",
+                  }}
+                  data-testid="link-ams-fleet-panel-fallback"
+                >
+                  Open in Fleet Panel ↗
+                </a>
+              )}
+            </span>
+          </div>
+        );
+      })()}
 
       {!linkMissing && (
         <>

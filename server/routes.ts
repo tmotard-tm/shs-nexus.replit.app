@@ -13569,13 +13569,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/ams/by-truck/:truckNumber", requireAuth, async (req: any, res) => {
     const truckNumber = String(req.params.truckNumber ?? "").trim();
     if (!truckNumber) return res.status(400).json({ error: "truckNumber required" });
+    // Version tag so we can verify from the UI that the latest handler code is
+    // actually running in whatever environment we're looking at. Bump when changing.
+    const BUILD_TAG = "v3-holman-diag";
+    // Declared outside the try so the outer catch can still include the
+    // diagnostic trail when something throws unexpectedly.
+    let vin: string | null = null;
+    let vinSource: string = "none";
+    const diag: string[] = [];
     try {
       if (!amsApiService.isConfigured()) {
-        return res.json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: "AMS not configured" });
+        return res.json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: `AMS not configured [${BUILD_TAG}]` });
       }
-      const vin = await lookupAmsVinByTruckNumber(truckNumber, amsApiService);
+      // Resolve VIN using the same sources Fleet Management uses, in order of
+      // reliability. AMS's /vehicles?vehicleId=N search endpoint has been
+      // returning intermittent 500s; the per-VIN AMS endpoints
+      // (/vehicles/:vin and /vehicles/:vin/comments) are the ones Fleet
+      // Management successfully calls with a VIN from Holman.
+      const normalized = truckNumber.replace(/^0+/, '') || truckNumber;
+      const candidates = Array.from(new Set([
+        truckNumber,
+        normalized,
+        normalized.padStart(5, '0'),
+        normalized.padStart(6, '0'),
+      ]));
+
+      // 1) Holman vehicles cache — Fleet Management's source of truth for VIN.
+      try {
+        const hRows = await db
+          .select({ vin: holmanVehiclesCache.vin, ref: holmanVehiclesCache.holmanVehicleRef, num: holmanVehiclesCache.holmanVehicleNumber })
+          .from(holmanVehiclesCache)
+          .where(or(
+            inArray(holmanVehiclesCache.holmanVehicleNumber, candidates),
+            inArray(holmanVehiclesCache.holmanVehicleRef, candidates),
+          ));
+        const hit = hRows.find(r => r.vin && r.vin.trim());
+        if (hit?.vin) {
+          vin = hit.vin.trim().toUpperCase();
+          vinSource = "holman";
+          diag.push(`Holman hit (vin ok)`);
+        } else if (hRows.length > 0) {
+          diag.push(`Holman matched ${hRows.length} row(s) but no VIN`);
+        } else {
+          diag.push(`Holman no match`);
+        }
+      } catch (hErr: any) {
+        diag.push(`Holman error`);
+        console.warn(`[AMS by-truck] Holman VIN lookup failed for ${truckNumber}:`, hErr.message);
+      }
+
+      // 2) Fleet Scope's fs_trucks.vin (some trucks are in Fleet Scope but not Holman).
       if (!vin) {
-        return res.json({ found: false, linkMissing: true, vehicle: null, comments: [], reason: "No VIN found in AMS for this truck #" });
+        try {
+          const { trucks } = await import("@shared/fleet-scope-schema");
+          const rows = await fsDb
+            .select({ vin: trucks.vin, num: trucks.truckNumber })
+            .from(trucks)
+            .where(inArray(trucks.truckNumber, candidates));
+          const withVin = rows.find(r => r.vin && r.vin.trim());
+          if (withVin?.vin) {
+            vin = withVin.vin.trim().toUpperCase();
+            vinSource = "fleet-scope";
+            diag.push(`Fleet Scope hit (vin ok)`);
+          } else if (rows.length > 0) {
+            diag.push(`Fleet Scope matched ${rows.length} row(s) but no VIN`);
+          } else {
+            diag.push(`Fleet Scope no match`);
+          }
+        } catch (fsErr: any) {
+          diag.push(`Fleet Scope error`);
+          console.warn(`[AMS by-truck] Fleet Scope VIN lookup failed for ${truckNumber}:`, fsErr.message);
+        }
+      }
+
+      // 3) Last resort: AMS search by vehicleId (flaky, may 500).
+      if (!vin) {
+        try {
+          vin = await lookupAmsVinByTruckNumber(truckNumber, amsApiService);
+          if (vin) {
+            vinSource = "ams-search";
+            diag.push(`AMS search hit`);
+          } else {
+            diag.push(`AMS search no match`);
+          }
+        } catch {
+          diag.push(`AMS search error`);
+        }
+      }
+
+      console.log(`[AMS by-truck] ${truckNumber} → vin=${vin ?? "null"} (source=${vinSource}, candidates=${candidates.join(",")})`);
+      if (!vin) {
+        return res.json({
+          found: false,
+          linkMissing: true,
+          vehicle: null,
+          comments: [],
+          reason: `No VIN for #${truckNumber} [${BUILD_TAG}] — ${diag.join("; ")}`,
+        });
       }
       const [vehicleResult, commentsResult] = await Promise.allSettled([
         amsApiService.getVehicleByVin(vin),
@@ -13593,14 +13683,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       // AMS upstream failures (5xx, timeouts) shouldn't surface as our own 500
       // — the drawer already has a graceful linkMissing fallback that renders
-      // a soft "AMS link missing — <reason>" panel.
+      // a soft "AMS link missing — <reason>" panel. Include the diagnostic
+      // trail we built before the throw so we can see how far we got.
       console.error(`[AMS by-truck] ${truckNumber}:`, error);
+      const diagTail = diag.length > 0 ? ` | diag: ${diag.join("; ")}` : "";
+      const vinInfo = vin ? ` | vin=${vin} (source=${vinSource})` : "";
       res.status(200).json({
         found: false,
         linkMissing: true,
         vehicle: null,
         comments: [],
-        reason: `AMS upstream unavailable — ${error.message}`,
+        reason: `AMS upstream unavailable [${BUILD_TAG}] — ${error.message}${vinInfo}${diagTail}`,
       });
     }
   });

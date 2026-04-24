@@ -1138,10 +1138,14 @@ export async function syncDeniedDecisionToRepairTracker(
 
   const normalizedLdap = normalizeLdap(decision.techLdap);
   if (normalizedLdap) {
+    // A closed case (closed_at IS NOT NULL) is a resolved past case and must
+    // NOT block a new denial — otherwise techs who went back on the road and
+    // later get denied again silently never appear in the tracker.
     const activeRows = await db.execute(sql`
       SELECT id
       FROM vrm_repair_tracker
       WHERE dismissed IS NOT TRUE
+        AND closed_at IS NULL
         AND tech_ldap IS NOT NULL
         AND UPPER(tech_ldap) = ${normalizedLdap}
       ORDER BY COALESCE(denied_at, created_at) DESC
@@ -1261,15 +1265,16 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   // Step 4: Fetch existing Repair Tracker rows for dedup.
   // Decision ID dedup uses ALL rows (dismissed included — merged from dismissedDecisionIds).
-  // Tech LDAP dedup uses only ACTIVE (non-dismissed) rows — dismissed techs CAN be
-  // re-imported when they receive a brand new denial.
+  // Tech LDAP dedup uses only ACTIVE rows — both dismissed AND closed rows
+  // are excluded so techs whose prior case was closed (back on road) or
+  // dismissed CAN be re-imported when they receive a brand new denial.
   const existingRows = await db
-    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap, dismissed: vrmRepairTracker.dismissed })
+    .select({ sourceDecisionId: vrmRepairTracker.sourceDecisionId, techLdap: vrmRepairTracker.techLdap, dismissed: vrmRepairTracker.dismissed, closedAt: vrmRepairTracker.closedAt })
     .from(vrmRepairTracker);
 
   const existingDecisionIds = new Set(existingRows.map((r) => r.sourceDecisionId).filter(Boolean) as string[]);
   const existingTechLdaps = new Set(
-    existingRows.filter((r) => !r.dismissed).map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
+    existingRows.filter((r) => !r.dismissed && !r.closedAt).map((r) => (r.techLdap ?? "").toUpperCase()).filter(Boolean),
   );
 
   dismissedDecisionIds.forEach((id) => existingDecisionIds.add(id));
