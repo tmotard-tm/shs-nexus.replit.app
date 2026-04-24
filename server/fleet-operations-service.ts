@@ -1412,16 +1412,21 @@ export const fleetOpsService = {
             let firstName = "N/A";
             let lastName = "N/A";
             try {
+              // Case-insensitive lookup: tech_racfid is stored uppercase in
+              // all_techs but normalizeEnterpriseId() lowercases params.ldapId.
+              const lookupId = (params.ldapId || "").trim();
               const techRows = await db.select({
                 firstName: allTechs.firstName,
                 lastName: allTechs.lastName,
               })
                 .from(allTechs)
-                .where(eq(allTechs.techRacfid, params.ldapId))
+                .where(sql`upper(${allTechs.techRacfid}) = ${lookupId.toUpperCase()}`)
                 .limit(1);
               if (techRows[0]) {
                 firstName = techRows[0].firstName || "N/A";
                 lastName = techRows[0].lastName || "N/A";
+              } else {
+                console.warn(`[FleetOps-AMS] Tech roster lookup found no row for ldapId='${lookupId}'`);
               }
             } catch (lookupErr: any) {
               console.warn(`[FleetOps-AMS] Tech roster lookup failed for ${params.ldapId}: ${lookupErr.message}`);
