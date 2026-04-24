@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -128,6 +128,13 @@ export default function CostCenterManagement() {
     },
     onError: (error: Error, _vars, ctx) => {
       if (ctx?.previous) queryClient.setQueryData(COST_CENTER_KEY, ctx.previous);
+      if (error.message.startsWith("409:")) {
+        form.setError("district", {
+          type: "manual",
+          message: "This district is already mapped. Edit the existing row instead.",
+        });
+        return;
+      }
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
     onSuccess: () => {
@@ -211,13 +218,18 @@ export default function CostCenterManagement() {
   });
 
   const districtWatch = form.watch("district");
-  const onDistrictBlur = () => {
-    const cc = form.getValues("costCenter");
-    if (!cc && districtWatch && districtRegex.test(districtWatch.trim())) {
-      const def = defaultCostCenterFor(districtWatch.trim());
-      if (def) form.setValue("costCenter", def, { shouldValidate: false });
+  const costCenterWatch = form.watch("costCenter");
+  const [userTouchedCostCenter, setUserTouchedCostCenter] = useState(false);
+
+  useEffect(() => {
+    if (userTouchedCostCenter) return;
+    const trimmed = (districtWatch ?? "").trim();
+    if (!trimmed || !districtRegex.test(trimmed)) return;
+    const def = defaultCostCenterFor(trimmed);
+    if (def && def !== costCenterWatch) {
+      form.setValue("costCenter", def, { shouldValidate: false });
     }
-  };
+  }, [districtWatch, costCenterWatch, userTouchedCostCenter, form]);
 
   const onSubmit = (data: CreateFormData) => {
     createMutation.mutate(data);
@@ -315,7 +327,10 @@ export default function CostCenterManagement() {
             open={isCreateOpen}
             onOpenChange={(open) => {
               setIsCreateOpen(open);
-              if (open) form.reset({ district: "", costCenter: "" });
+              if (open) {
+                form.reset({ district: "", costCenter: "" });
+                setUserTouchedCostCenter(false);
+              }
             }}
           >
             <DialogTrigger asChild>
@@ -341,11 +356,6 @@ export default function CostCenterManagement() {
                             placeholder="e.g. 4766 or 0004766"
                             data-testid="input-district"
                             {...field}
-                            onBlur={(e) => {
-                              field.onBlur();
-                              onDistrictBlur();
-                              e.preventDefault();
-                            }}
                           />
                         </FormControl>
                         <FormMessage />
@@ -367,6 +377,10 @@ export default function CostCenterManagement() {
                             maxLength={5}
                             data-testid="input-cost-center"
                             {...field}
+                            onChange={(e) => {
+                              setUserTouchedCostCenter(true);
+                              field.onChange(e);
+                            }}
                           />
                         </FormControl>
                         <FormMessage />
