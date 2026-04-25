@@ -203,7 +203,8 @@ Audit row per request: `actorUserId, vendor, entityId, fieldsRequested, granted/
 | 2A.1 | UniversalVehiclePanel skeleton (kickoff) | DONE |
 | 2A.2 | Anchor migration: TruckDetailPanel → 6-tab UVP; FS Dashboard, TodaysQueue, VRM ActiveRentals, Assets drilldown wired; old panel deleted | DONE |
 | 2A.3 | Inventory + Assignments tabs (WMS + TPMS) + remaining slideout absorptions (#3–#7) | PENDING |
-| 2A.3.note | **WMS swagger has redacted operationIds for inventory-count POST and inventory-schedule GET (gateway-redacted). Adapter MUST call by path + method, never by generated operationId.** Endpoints: `POST /wms-engine/v1/trucks/{truckId}/inventory-count`, `GET /wms-engine/v1/trucks/{truckId}/inventory-schedule`. | NOTE |
+| 2A.3.note1 | **WMS swagger has redacted operationIds for inventory-count POST and inventory-schedule GET (gateway-redacted). Adapter MUST call by path + method, never by generated operationId.** Endpoints: `POST /wms-engine/v1/trucks/{truckId}/inventory-count`, `GET /wms-engine/v1/trucks/{truckId}/inventory-schedule`. | NOTE |
+| 2A.3.note2 | **WMS swagger uses inconsistent use-case param naming.** `useCaseId` on `/trucks`, `/trucks/{id}`, `/trucks/assignments`, `/trucks/assignments/{techId}`, `/trucks/{id}/inventory-schedule`; but `useCase` (no `Id` suffix) on `/trucks/{id}/receive-tasks` and `/trucks/{id}/return-tasks`. Adapter must normalize: callers pass one canonical name; adapter maps to whichever spelling each endpoint expects. **Verify `WMS_ENGINE_USE_CASE_ID="Nexus"` is accepted by both spellings before cutover.** | NOTE |
 | 2A.4 | Inline page drawers absorbed (#8–#9) | PENDING |
 | 2B.1 | `fs_trucks` → VIEW + sidecar | PENDING |
 | 2B.2 | `vrm_repair_tracker` → child FK | PENDING |
