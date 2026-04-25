@@ -350,6 +350,133 @@ The doc currently calls for a ~1-day pause after 2B.1.c for live verification be
 
 **Recommendation:** D-γ. Re-runs are cheap, gates are deterministic.
 
+#### 2B.1.c PAUSE — Decision: D-γ (Kirk, 2026-04-25)
+
+**T0 = 2026-04-25T22:50:06Z** (`2B.1.c PAUSE START`)
+
+**Schedule:**
+- Snapshot 1: T0+6h  = **2026-04-26T04:50:06Z**
+- Snapshot 2: T0+12h = **2026-04-26T10:50:06Z**
+- Snapshot 3: T0+18h = **2026-04-26T16:50:06Z**
+- **Cutover:**  T0+24h = **2026-04-26T22:50:06Z** — re-run full copy + 8-gate; if all pass → proceed to 2B.1.d.
+
+**Snapshot definition (per Kirk):** row-count delta (fs_trucks vs fs_truck_state) + 50-row random-sample checksum on canonical cols (NOT a full re-run). Logged in the table below.
+
+**Anomaly rule:** if any snapshot shows row-count delta >5% OR unexplained sample checksum mismatch (i.e. not attributable to a normal UPDATE captured in audit log), pause and post structured question before cutover instead of auto-proceeding.
+
+**Live writers continue targeting fs_trucks during the pause.** No write-freeze. Drift expected; gate at cutover catches it.
+
+##### 2B.1 drift telemetry
+
+| When (UTC) | fs_trucks count | fs_truck_state count | Δ count (%) | 50-row sample mismatches | Verdict |
+|---|---|---|---|---|---|
+| T0 (2026-04-25T22:50:06Z) — baseline | 333 | 333 | 0 (0.0%) | 0 | ✅ baseline |
+| T0+6h  (2026-04-26T04:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| T0+12h (2026-04-26T10:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| T0+18h (2026-04-26T16:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| T0+24h cutover (2026-04-26T22:50:06Z) | _pending_ | _pending_ | _pending_ | full 8-gate re-run | _pending_ |
+
+Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to append above).
+
+#### 2B.1.d — Writer migration plan (drafted 2026-04-25 during pause)
+
+**Scope (every direct fs_trucks writer in the codebase):**
+
+| # | Callsite | Today | After 2B.1.d |
+|---|---|---|---|
+| 1 | `fleetScopeStorage.createTruck` (fleet-scope-storage.ts:222) | INSERT into fs_trucks with truckNumber/mainStatus/subStatus | (a) lookup vehicles by canonical truck_number → if missing, INSERT vehicles row; (b) INSERT fs_truck_state with vehicle_id, status, mainStatus, subStatus, shsOwner. Returns Truck-shaped row via JOIN projection. |
+| 2 | `fleetScopeStorage.updateTruck` (fleet-scope-storage.ts:240) | UPDATE fs_trucks .set(finalUpdates) | Split `finalUpdates`: identity fields (`vin`, `licensePlate`, `holmanVehicleRef`) → UPDATE vehicles WHERE id = state.vehicle_id; everything else → UPDATE fs_truck_state. Status-event side-effects unchanged. |
+| 3 | `fleetScopeStorage.deleteTruck` (fleet-scope-storage.ts:305) | DELETE actions WHERE truck_id; DELETE trucks WHERE id | DELETE actions WHERE truck_id; DELETE fs_truck_state WHERE id. (vehicles row is NOT deleted — Core Nexus retains identity for cross-system audit.) |
+| 4 | `fleetScopeStorage.bulkSyncTrucks` (fleet-scope-storage.ts:310) | calls createTruck/deleteTruck | unchanged externally — calls migrated createTruck/deleteTruck. |
+| 5 | `fleetScopeStorage.consolidateTrucks` (fleet-scope-storage.ts:1426) | calls createTruck for new trucks; updates dateInRepair on fs_trucks | calls migrated createTruck; dateInRepair (state field) → UPDATE fs_truck_state. |
+| 6 | `holman-vehicle-sync-service.ts:662` (only direct write outside storage interface) | `fsDb.update(trucks).set({holmanRegExpiry, holmanVehicleRef, lastUpdatedAt, lastUpdatedBy})` | Replace with `await fleetScopeStorage.updateTruck(fsTruck.id, { holmanRegExpiry, holmanVehicleRef, lastUpdatedBy: 'HolmanSync' })`. Migrated updateTruck handles the identity-vs-state split internally. |
+
+**Read sites in storage interface (need to project Truck shape from JOIN):**
+
+| # | Method | Today | After 2B.1.d |
+|---|---|---|---|
+| R1 | `getAllTrucks` (line 209) | `select * from fs_trucks order by createdAt desc` | `SELECT s.*, v.vehicle_number AS truck_number, v.vin, v.license_plate, v.holman_vehicle_ref FROM fs_truck_state s JOIN vehicles v ON v.id = s.vehicle_id ORDER BY s.created_at DESC` |
+| R2 | `getTruck` (line 213) | `select * from fs_trucks where id` | same JOIN, WHERE s.id = $id |
+| R3 | `getTruckByNumber` (line 218) | `select * from fs_trucks where truckNumber` | same JOIN, WHERE LPAD(v.vehicle_number,6,'0') = LPAD($n,6,'0') |
+
+**Frontend impact: ZERO.** All FS frontend (Dashboard, EditTruck, TruckDetail, Registration, HolmanResearch, BatchCaller, ActionTracker, UVP, all tabs) reads through the API → storage interface. As long as the API still returns the 92-column Truck shape, no client changes needed. (Verified by gate #4: simulated VIEW shape = 92 cols = today's fs_trucks shape.)
+
+**Order of operations within 2B.1.d (single PR):**
+1. Add a private `splitTruckFields(updates)` helper in DatabaseStorage that returns `{ vehiclesUpdates, stateUpdates }` based on the 4 identity fields (truckNumber/vin/licensePlate/holmanVehicleRef).
+2. Add a private `projectTruckShape(stateRow, vehiclesRow)` helper that reconstructs the Truck type from the join.
+3. Rewrite read methods (R1–R3) using JOIN.
+4. Rewrite write methods (1–5) using the split helper.
+5. Migrate site #6 to use storage.updateTruck.
+6. Run app boot + smoke test (FS Dashboard load, single truck edit via EditTruck, HolmanSync trigger, bulkSyncTrucks via existing endpoint).
+7. Run a checksum re-verification (the same as gate #7) post-migration to confirm nothing drifted unexpectedly.
+
+**Risks (medium):**
+- A. `getAllTrucks().orderBy(desc(trucks.createdAt))` — `created_at` lives in fs_truck_state; ORDER BY translates cleanly. ✅
+- B. `getTruckByNumber(truckNumber)` callers may pass non-canonical numbers (e.g. without leading zeros). The `LPAD(_,6,'0')` join makes the lookup canonical-safe; document this in the helper. Check if any code does exact-string `truckNumber === input` comparison after the lookup.
+- C. The `.returning()` semantics differ between split inserts/updates vs. single-table; ensure projectTruckShape() called after the `vehicles` and `fs_truck_state` writes commit.
+- D. `actions.truck_id` FK still points at fs_truck_state.id (preserved by gate #2). No FK rewrite needed in 2B.1.d — that comes in 2B.1.f when fs_trucks → VIEW.
+
+**Estimated effort: ~0.5d** for 2B.1.d. 2B.1.e and 2B.1.f stay sequenced after live verification of 2B.1.d.
+
+#### 2A.5 — UVP Operations tab (drafted 2026-04-25 during pause)
+
+**Pause-safe?** ✅ Yes — every AMS endpoint keys off `vin`, never touches fs_trucks/fs_truck_state.
+
+**Source to migrate from:** `client/src/pages/fleet-management.tsx` lines 2399–2890 (the inline vehicle drawer — page's primary AMS ops/write console).
+
+**Existing UVP tabs:** Overview · Telematics · Service · Assignments · Inventory · History (6). Operations becomes the 7th. Tab grid `grid-cols-6` → `grid-cols-7` in UniversalVehiclePanel.tsx:184.
+
+**Surfaces to port (from 2A.4.note1):**
+
+| Surface | Source line | Endpoint | Notes |
+|---|---|---|---|
+| Resync Assignments | fleet-management.tsx:389 | POST `/api/fleet-vehicles/resync-assignments` | Mutation. Move trigger to UVP panel header (not tab body) per 2A.4.note1 (c). |
+| Sync to Holman | fleet-management.tsx:410 | POST `/api/holman/assignments/update` | Mutation. Operations tab body. |
+| Add AMS comment | fleet-management.tsx:937 | POST `/api/ams/vehicles/{vin}/comments` | Comment composer + list. |
+| AMS user-update | fleet-management.tsx:953 | POST `/api/ams/vehicles/{vin}/user-updates` | Status/condition/notes write surface. |
+| AMS repair disposition / updates | fleet-management.tsx:1024 | POST `/api/ams/vehicles/{vin}/repair-disposition` OR `/repair-updates` | Two-mode mutation. |
+| Trigger: Assign | fleet-management.tsx:2527 | `openModal("assign")` | Modal lives outside UVP — UVP raises an event/callback. |
+| Trigger: Unassign | fleet-management.tsx:2530 | `openModal("unassign")` | Disabled when no current tech assigned. |
+| Trigger: PO History | fleet-management.tsx:2533 | `openModal("poHistory")` | |
+| Trigger: Ops Review | (line 266 state) | `openModal("opsReview")` | Tech-near-vehicle search. |
+| Trigger: AMS Edit | fleet-management.tsx:2824 | `openModal("amsEdit")` | |
+| Trigger: AMS Repair | fleet-management.tsx:2842 | `openModal("amsRepair")` | |
+| AMS field display block | fleet-management.tsx:~2600–2890 | read-only | Ownership / Description / Condition / Location ~30 fields. |
+
+**Modal-trigger contract:** UVP itself will NOT host modals (modals stay page-level — both fleet-management.tsx and Vehicle Roster use them). UVP Operations tab raises a callback prop `onOpenModal: (modalKey: FleetModal, vehicle: Truck) => void`. Caller decides whether to open one. Fleet-management.tsx wires it up; pages without these modals (FS Dashboard etc.) pass undefined and the buttons hide.
+
+**Build steps (single PR for 2A.5):**
+1. Create `client/src/components/vehicle/tabs/OperationsTab.tsx`. Props: `{ truck: Truck, onOpenModal?: ModalCallback }`.
+2. Add `"operations"` to TabKey union and TAB_DEFS in UniversalVehiclePanel.tsx; bump grid-cols-6 → grid-cols-7.
+3. Add `onOpenModal?: ModalCallback` to UniversalVehiclePanelProps; thread through to OperationsTab.
+4. Move Resync Assignments mutation into the panel header (per 2A.4.note1 (c)); requires `vehicleNumber`+`enterpriseId`.
+5. Inside OperationsTab: extract the 7 mutations + 30-field AMS read block from fleet-management.tsx. Use vin as key.
+6. Update fleet-management.tsx to pass `onOpenModal` when opening UVP, and remove the redundant inline drawer (#8 in matrix gets DONE). Verify no other caller of fleet-management drawer breaks.
+7. Smoke test: open a vehicle from fleet-management → Operations tab → each button works → Resync from header works.
+
+**Estimated effort: ~1.5d** (largest single 2A item — 7 mutations + 30 read fields + modal-callback contract).
+
+#### Pause-window work plan (2026-04-25 → 2026-04-26 22:50 UTC)
+
+Ranked by effort/risk during the 24h drift window. All listed items are pause-safe (do NOT touch fs_trucks/fs_truck_state writes):
+
+| # | Item | Pause-safe rationale | Effort | Status |
+|---|---|---|---|---|
+| 0 | T0 marker + drift telemetry script | read-only | done | ✅ DONE |
+| 0a | 2B.1.d design doc | doc only | done | ✅ DONE |
+| 0b | 2A.5 design doc | doc only | done | ✅ DONE |
+| 1 | T0+6h drift snapshot | read-only | 1 min | ⏳ scheduled |
+| 2 | T0+12h drift snapshot | read-only | 1 min | ⏳ scheduled |
+| 3 | T0+18h drift snapshot | read-only | 1 min | ⏳ scheduled |
+| 4 | 2A.5 implementation (UVP Operations tab) | AMS endpoints key off vin | ~1.5d | candidate during pause |
+| 5 | 2B.2 design (vrm_repair_tracker → child FK) | VRM tables, not FS | ~0.25d | candidate during pause |
+| 6 | 2B.3 design (vrm_techs → VIEW) | VRM tables | ~0.25d | candidate during pause |
+| 7 | 2C scripts (archive + comment scrub) | non-FS files | ~0.5d | candidate during pause |
+| 8 | 3A.1–3A.4 design memos | green-field design only | ~1d | candidate during pause |
+| 9 | T0+24h cutover: full copy + 8-gate re-run | scheduled cutover | ~3 min | ⏳ pending |
+
+**Snapshot invocation:** `npx tsx scripts/2b1-drift-snapshot.ts --label "T0+6h"` (etc). Script exits 0 = OK, exits 2 = anomaly.
+
 #### Resequencing decision (2026-04-25, Kirk) — Option C
 
 **Trigger:** 2B.1.a verification revealed `vehicles` is empty (0 rows) while `fs_trucks` has 333 rows. The original D2 backfill plan would have inserted 256+ rows that violate `vehicles` NOT NULL constraints on `vin`, `model_year`, `make_name`, `model_name` (fs_trucks has `vin` for only 77 of 333 trucks and has no `model_year`/`make_name`/`model_name` columns at all).
