@@ -30,6 +30,14 @@ let lastAmsPollTime: number | null = null; // External AMS watermark poll
 let lastTpmsStaleSweepTime: number | null = null; // Stale TPMS cache validation sweep
 let lastDistrictCostCenterSeedTime: number | null = null; // Last successful auto-seed of district cost center table
 let lastDistrictCostCenterSeedAttemptTime: number | null = null; // Last attempt (success or failure) — used for short-term retry backoff
+// Most recent unacknowledged auto-seed batch that inserted >0 new districts.
+// Drives the in-app banner on the District Cost Centers page so admins know
+// they should review/assign cost centers for newly added rows.
+let pendingDistrictCostCenterNotification: {
+  districts: string[];
+  at: Date;
+  source: string;
+} | null = null;
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 let separationPollIntervalId: NodeJS.Timeout | null = null;
@@ -243,7 +251,7 @@ const DISTRICT_COST_CENTER_RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
 async function runDistrictCostCenterSeed(
   source: string,
   options: { force?: boolean } = {},
-): Promise<{ ran: boolean; inserted: number; existing: number }> {
+): Promise<{ ran: boolean; inserted: number; existing: number; insertedDistricts: string[] }> {
   const now = Date.now();
   if (!options.force) {
     // Throttle by last successful run (24h) — but if we've never succeeded,
@@ -253,13 +261,13 @@ async function runDistrictCostCenterSeed(
       lastDistrictCostCenterSeedTime !== null &&
       (now - lastDistrictCostCenterSeedTime) < DISTRICT_COST_CENTER_SEED_INTERVAL_MS
     ) {
-      return { ran: false, inserted: 0, existing: 0 };
+      return { ran: false, inserted: 0, existing: 0, insertedDistricts: [] };
     }
     if (
       lastDistrictCostCenterSeedAttemptTime !== null &&
       (now - lastDistrictCostCenterSeedAttemptTime) < DISTRICT_COST_CENTER_RETRY_AFTER_FAILURE_MS
     ) {
-      return { ran: false, inserted: 0, existing: 0 };
+      return { ran: false, inserted: 0, existing: 0, insertedDistricts: [] };
     }
   }
   lastDistrictCostCenterSeedAttemptTime = now;
@@ -271,7 +279,59 @@ async function runDistrictCostCenterSeed(
       `${result.inserted} new districts added (${result.existing} already present)`,
     );
   }
-  return { ran: true, inserted: result.inserted, existing: result.existing };
+  // Surface a notification (banner + activity log) when the auto-seed
+  // actually adds new districts. Skip when a manual init/trigger ran with no
+  // inserts to avoid noisy "0 new" notifications.
+  if (result.inserted > 0 && result.insertedDistricts.length > 0) {
+    const at = new Date(now);
+    // Merge with any pending unacknowledged batch so consecutive runs in the
+    // same window don't drop earlier districts. Dedupe to keep list tidy.
+    const merged = new Set<string>(pendingDistrictCostCenterNotification?.districts ?? []);
+    for (const d of result.insertedDistricts) merged.add(d);
+    pendingDistrictCostCenterNotification = {
+      districts: Array.from(merged).sort(),
+      at,
+      source,
+    };
+    const sample = result.insertedDistricts.slice(0, 10).join(', ');
+    const more = result.insertedDistricts.length > 10 ? ` (+${result.insertedDistricts.length - 10} more)` : '';
+    console.log(
+      `[Scheduler] District cost-center auto-seed admin notification queued: ` +
+      `${result.insertedDistricts.length} new district${result.insertedDistricts.length === 1 ? '' : 's'} → ${sample}${more}`,
+    );
+  }
+  return {
+    ran: true,
+    inserted: result.inserted,
+    existing: result.existing,
+    insertedDistricts: result.insertedDistricts,
+  };
+}
+
+/**
+ * Returns the most recent unacknowledged auto-seed insertion batch (or null
+ * when there is nothing new to surface). Consumed by the District Cost
+ * Centers page to render a "newly added — please review" banner.
+ */
+export function getPendingDistrictCostCenterNotification(): {
+  districts: string[];
+  at: string;
+  source: string;
+} | null {
+  if (!pendingDistrictCostCenterNotification) return null;
+  return {
+    districts: [...pendingDistrictCostCenterNotification.districts],
+    at: pendingDistrictCostCenterNotification.at.toISOString(),
+    source: pendingDistrictCostCenterNotification.source,
+  };
+}
+
+/**
+ * Clears the pending notification — called after an admin reviews/dismisses
+ * the in-app banner on the District Cost Centers page.
+ */
+export function clearPendingDistrictCostCenterNotification(): void {
+  pendingDistrictCostCenterNotification = null;
 }
 
 async function checkAndRunDistrictCostCenterSeed(): Promise<void> {
@@ -1148,9 +1208,9 @@ export function getSchedulerStatus(): {
  */
 export async function triggerDistrictCostCenterSeed(
   updatedBy: string,
-): Promise<{ inserted: number; existing: number }> {
-  const { inserted, existing } = await runDistrictCostCenterSeed(updatedBy, { force: true });
-  return { inserted, existing };
+): Promise<{ inserted: number; existing: number; insertedDistricts: string[] }> {
+  const { inserted, existing, insertedDistricts } = await runDistrictCostCenterSeed(updatedBy, { force: true });
+  return { inserted, existing, insertedDistricts };
 }
 
 // Sprint 0: Manual trigger for separation poll (for testing)

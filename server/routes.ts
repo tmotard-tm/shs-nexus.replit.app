@@ -7624,6 +7624,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/cost-centers/auto-seed-status - last successful auto-seed timestamp
+  // and the most recent unacknowledged batch of newly-inserted districts (used
+  // to drive the in-app admin notification banner on the management page).
   app.get("/api/cost-centers/auto-seed-status", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
@@ -7631,15 +7633,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
       }
 
-      const { getSchedulerStatus } = await import("./sync-scheduler");
+      const { getSchedulerStatus, getPendingDistrictCostCenterNotification } = await import("./sync-scheduler");
       const status = getSchedulerStatus();
+      const pending = getPendingDistrictCostCenterNotification();
       res.json({
         lastAutoSeed: status.lastDistrictCostCenterSeed,
         intervalMs: status.districtCostCenterSeedIntervalMs,
+        newDistricts: pending,
       });
     } catch (error) {
       console.error("Error fetching auto-seed status:", error);
       res.status(500).json({ message: "Failed to fetch auto-seed status" });
+    }
+  });
+
+  // POST /api/cost-centers/dismiss-new-districts - clear the in-app banner
+  // after an admin has reviewed the most recent auto-seed batch.
+  app.post("/api/cost-centers/dismiss-new-districts", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      }
+
+      const { clearPendingDistrictCostCenterNotification } = await import("./sync-scheduler");
+      clearPendingDistrictCostCenterNotification();
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error dismissing new-districts notification:", error);
+      res.status(500).json({ message: "Failed to dismiss notification" });
     }
   });
 
@@ -7668,6 +7690,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({
         inserted: result.inserted,
         existing: result.existing,
+        insertedDistricts: result.insertedDistricts,
         lastAutoSeed: status.lastDistrictCostCenterSeed,
       });
     } catch (error) {

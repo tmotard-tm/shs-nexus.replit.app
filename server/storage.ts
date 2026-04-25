@@ -480,7 +480,7 @@ export interface IStorage {
   getDistrictCostCenter(district: string): Promise<DistrictCostCenter | undefined>;
   upsertDistrictCostCenter(record: InsertDistrictCostCenter): Promise<DistrictCostCenter>;
   deleteDistrictCostCenter(district: string): Promise<boolean>;
-  seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }>;
+  seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number; insertedDistricts: string[] }>;
   bulkUpsertDistrictCostCenters(
     records: InsertDistrictCostCenter[],
     updatedBy: string,
@@ -3582,8 +3582,8 @@ export class MemStorage implements IStorage {
   async deleteDistrictCostCenter(_district: string): Promise<boolean> {
     return false;
   }
-  async seedDefaultDistrictCostCenters(_updatedBy: string): Promise<{ inserted: number; existing: number }> {
-    return { inserted: 0, existing: 0 };
+  async seedDefaultDistrictCostCenters(_updatedBy: string): Promise<{ inserted: number; existing: number; insertedDistricts: string[] }> {
+    return { inserted: 0, existing: 0, insertedDistricts: [] };
   }
   async bulkUpsertDistrictCostCenters(
     _records: InsertDistrictCostCenter[],
@@ -6693,7 +6693,7 @@ export class DatabaseStorage implements IStorage {
     return { inserted, updated, unchanged };
   }
 
-  async seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }> {
+  async seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number; insertedDistricts: string[] }> {
     // Collect distinct districts from live sources
     const sources = await Promise.all([
       db.selectDistinct({ d: truckInventory.district }).from(truckInventory),
@@ -6728,7 +6728,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (seen.size === 0) {
-      return { inserted: 0, existing: 0 };
+      return { inserted: 0, existing: 0, insertedDistricts: [] };
     }
 
     const districts = Array.from(seen);
@@ -6746,19 +6746,21 @@ export class DatabaseStorage implements IStorage {
         updatedAt: new Date(),
       }));
 
-    let actuallyInserted = 0;
+    let insertedDistricts: string[] = [];
     if (toInsert.length > 0) {
       const insertedRows = await db
         .insert(districtCostCenters)
         .values(toInsert)
         .onConflictDoNothing()
         .returning({ district: districtCostCenters.district });
-      actuallyInserted = insertedRows.length;
+      insertedDistricts = insertedRows.map(r => r.district);
     }
 
+    const actuallyInserted = insertedDistricts.length;
     return {
       inserted: actuallyInserted,
       existing: existingSet.size + (toInsert.length - actuallyInserted),
+      insertedDistricts,
     };
   }
 }

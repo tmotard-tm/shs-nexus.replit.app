@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Papa from "papaparse";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -40,6 +40,8 @@ import {
   AlertCircle,
   RefreshCw,
   Clock,
+  Bell,
+  Eye,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useForm } from "react-hook-form";
@@ -48,7 +50,7 @@ import { z } from "zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -270,6 +272,18 @@ function classifyBulkRows(
   });
 }
 
+type AutoSeedNewDistricts = {
+  districts: string[];
+  at: string;
+  source: string;
+};
+
+type AutoSeedStatus = {
+  lastAutoSeed: string | null;
+  intervalMs: number;
+  newDistricts: AutoSeedNewDistricts | null;
+};
+
 export default function CostCenterManagement() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -298,13 +312,79 @@ export default function CostCenterManagement() {
   const COST_CENTER_KEY = ["/api/cost-centers"] as const;
   const AUTO_SEED_STATUS_KEY = ["/api/cost-centers/auto-seed-status"] as const;
 
-  const { data: autoSeedStatus } = useQuery<{
-    lastAutoSeed: string | null;
-    intervalMs: number;
-  }>({
+  const { data: autoSeedStatus } = useQuery<AutoSeedStatus>({
     queryKey: AUTO_SEED_STATUS_KEY,
     refetchInterval: 60_000,
   });
+
+  // When the daily auto-seed inserts >0 districts, the server returns the
+  // batch in `autoSeedStatus.newDistricts`. We render an in-app banner so
+  // admins know to review the auto-defaulted cost centers, plus a one-click
+  // filter that narrows the table to just those rows.
+  const newDistrictNumbers = useMemo(
+    () => autoSeedStatus?.newDistricts?.districts ?? [],
+    [autoSeedStatus?.newDistricts?.districts],
+  );
+  const hasNewDistrictsNotification = newDistrictNumbers.length > 0;
+
+  // Deep-linkable filter: persisted in the URL so notification recipients
+  // (email, activity log, etc.) can land directly on the filtered view.
+  // Accepts either ?newDistricts=all or a comma-separated district list,
+  // e.g. ?newDistricts=0004766,0005012.
+  const NEW_DISTRICTS_QUERY_PARAM = "newDistricts";
+  const search = useSearch();
+  const [pathname] = useLocation();
+  const newDistrictsFilterParam = useMemo<"all" | string[] | null>(() => {
+    const params = new URLSearchParams(search);
+    const raw = params.get(NEW_DISTRICTS_QUERY_PARAM);
+    if (!raw) return null;
+    if (raw === "all") return "all";
+    return raw
+      .split(",")
+      .map((d) => d.trim())
+      .filter(Boolean);
+  }, [search]);
+  const newDistrictsFilterActive = newDistrictsFilterParam !== null;
+
+  const setNewDistrictsFilterActive = useCallback(
+    (next: boolean) => {
+      const params = new URLSearchParams(search);
+      if (next) {
+        params.set(NEW_DISTRICTS_QUERY_PARAM, "all");
+      } else {
+        params.delete(NEW_DISTRICTS_QUERY_PARAM);
+      }
+      const qs = params.toString();
+      setLocation(qs ? `${pathname}?${qs}` : pathname, { replace: true });
+    },
+    [search, pathname, setLocation],
+  );
+
+  // The filter narrows the table to either the explicit list passed in the
+  // URL (deep-link from a notification) or — when ?newDistricts=all — to
+  // whatever the current pending notification is reporting.
+  const newDistrictsSet = useMemo(() => {
+    if (newDistrictsFilterParam === null) return new Set<string>();
+    if (newDistrictsFilterParam === "all") return new Set(newDistrictNumbers);
+    return new Set(newDistrictsFilterParam);
+  }, [newDistrictsFilterParam, newDistrictNumbers]);
+
+  // Auto-clear the "all" filter when the underlying notification is cleared
+  // so the table doesn't get stuck showing an empty "newly added" view.
+  // Explicit district lists are kept so a stale deep-link still shows
+  // whichever districts were referenced.
+  useEffect(() => {
+    if (
+      newDistrictsFilterParam === "all" &&
+      !hasNewDistrictsNotification
+    ) {
+      setNewDistrictsFilterActive(false);
+    }
+  }, [
+    hasNewDistrictsNotification,
+    newDistrictsFilterParam,
+    setNewDistrictsFilterActive,
+  ]);
 
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
@@ -453,6 +533,30 @@ export default function CostCenterManagement() {
     },
     onError: (error: Error) => {
       toast({ title: "Auto-seed failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const dismissNewDistrictsMutation = useMutation({
+    mutationFn: async () => {
+      await apiRequest("POST", "/api/cost-centers/dismiss-new-districts");
+    },
+    onMutate: async () => {
+      await queryClient.cancelQueries({ queryKey: AUTO_SEED_STATUS_KEY });
+      const previous = queryClient.getQueryData<AutoSeedStatus>(AUTO_SEED_STATUS_KEY);
+      queryClient.setQueryData<AutoSeedStatus>(AUTO_SEED_STATUS_KEY, (old) =>
+        old ? { ...old, newDistricts: null } : old,
+      );
+      return { previous };
+    },
+    onError: (error: Error, _vars, ctx) => {
+      if (ctx?.previous) queryClient.setQueryData(AUTO_SEED_STATUS_KEY, ctx.previous);
+      toast({ title: "Could not dismiss notification", description: error.message, variant: "destructive" });
+    },
+    onSuccess: () => {
+      setNewDistrictsFilterActive(false);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: AUTO_SEED_STATUS_KEY });
     },
   });
 
@@ -605,6 +709,7 @@ export default function CostCenterManagement() {
   const filteredSorted = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const filtered = items.filter((it) => {
+      if (newDistrictsFilterActive && !newDistrictsSet.has(it.district)) return false;
       if (!q) return true;
       return (
         it.district.toLowerCase().includes(q) ||
@@ -618,7 +723,19 @@ export default function CostCenterManagement() {
       return sortDir === "asc" ? cmp : -cmp;
     });
     return sorted;
-  }, [items, searchQuery, sortField, sortDir]);
+  }, [items, searchQuery, sortField, sortDir, newDistrictsFilterActive, newDistrictsSet]);
+
+  const newDistrictsBatchAt = useMemo(() => {
+    const ts = autoSeedStatus?.newDistricts?.at;
+    if (!ts) return null;
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return null;
+    void nowTick;
+    return {
+      relative: formatDistanceToNow(d, { addSuffix: true }),
+      absolute: d.toLocaleString(),
+    };
+  }, [autoSeedStatus?.newDistricts?.at, nowTick]);
 
   const stats = {
     total: items.length,
@@ -997,6 +1114,78 @@ export default function CostCenterManagement() {
         </div>
       </div>
 
+      {hasNewDistrictsNotification && (
+        <Card
+          className="border-amber-300 bg-amber-50 dark:border-amber-900/60 dark:bg-amber-950/30"
+          data-testid="banner-new-districts"
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <Bell className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5" />
+                <div>
+                  <CardTitle className="text-base text-amber-900 dark:text-amber-100">
+                    {newDistrictNumbers.length} new district
+                    {newDistrictNumbers.length === 1 ? "" : "s"} added by the daily auto-seed
+                  </CardTitle>
+                  <CardDescription
+                    className="text-amber-800/90 dark:text-amber-200/90 mt-1"
+                    title={newDistrictsBatchAt?.absolute ?? undefined}
+                  >
+                    Each new district is using the auto-defaulted "0 + last 4 digits" cost center.
+                    Please review and assign the correct cost center{newDistrictsBatchAt
+                      ? ` (added ${newDistrictsBatchAt.relative})`
+                      : ""}
+                    .
+                  </CardDescription>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={newDistrictsFilterActive ? "secondary" : "default"}
+                  onClick={() => setNewDistrictsFilterActive(!newDistrictsFilterActive)}
+                  data-testid="button-review-new-districts"
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  {newDistrictsFilterActive ? "Showing newly added" : "Review newly added"}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => dismissNewDistrictsMutation.mutate()}
+                  disabled={dismissNewDistrictsMutation.isPending}
+                  data-testid="button-dismiss-new-districts"
+                >
+                  <X className="mr-1 h-4 w-4" />
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap gap-1.5" data-testid="list-new-districts">
+              {newDistrictNumbers.slice(0, 30).map((d) => (
+                <Badge
+                  key={d}
+                  variant="outline"
+                  className="font-mono text-xs border-amber-400 text-amber-900 dark:border-amber-700 dark:text-amber-100"
+                >
+                  {d}
+                </Badge>
+              ))}
+              {newDistrictNumbers.length > 30 && (
+                <Badge variant="outline" className="text-xs">
+                  +{newDistrictNumbers.length - 30} more
+                </Badge>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -1043,15 +1232,36 @@ export default function CostCenterManagement() {
           <CardDescription>
             Search by district or cost center. Click a cost center to edit it inline.
           </CardDescription>
-          <div className="relative w-full md:w-80 mt-2">
-            <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder="Search district or cost center..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-8"
-              data-testid="input-search"
-            />
+          <div className="flex flex-wrap items-center gap-2 mt-2">
+            <div className="relative w-full md:w-80">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search district or cost center..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-8"
+                data-testid="input-search"
+              />
+            </div>
+            {newDistrictsFilterActive && (
+              <Badge
+                variant="secondary"
+                className="flex items-center gap-1.5 py-1.5 pl-2 pr-1"
+                data-testid="badge-newly-added-filter"
+              >
+                <Bell className="h-3 w-3" />
+                Showing {newDistrictsSet.size} newly added
+                <button
+                  type="button"
+                  className="ml-1 rounded-full p-0.5 hover:bg-background/60"
+                  onClick={() => setNewDistrictsFilterActive(false)}
+                  aria-label="Clear newly-added filter"
+                  data-testid="button-clear-newly-added-filter"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
           </div>
         </CardHeader>
         <CardContent>
