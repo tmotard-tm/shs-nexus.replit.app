@@ -38,7 +38,10 @@ import {
   Upload,
   FileUp,
   AlertCircle,
+  RefreshCw,
+  Clock,
 } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -293,6 +296,36 @@ export default function CostCenterManagement() {
   });
 
   const COST_CENTER_KEY = ["/api/cost-centers"] as const;
+  const AUTO_SEED_STATUS_KEY = ["/api/cost-centers/auto-seed-status"] as const;
+
+  const { data: autoSeedStatus } = useQuery<{
+    lastAutoSeed: string | null;
+    intervalMs: number;
+  }>({
+    queryKey: AUTO_SEED_STATUS_KEY,
+    refetchInterval: 60_000,
+  });
+
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const lastAutoSeedRelative = useMemo(() => {
+    if (!autoSeedStatus?.lastAutoSeed) return null;
+    const d = new Date(autoSeedStatus.lastAutoSeed);
+    if (isNaN(d.getTime())) return null;
+    void nowTick;
+    return formatDistanceToNow(d, { addSuffix: true });
+  }, [autoSeedStatus?.lastAutoSeed, nowTick]);
+
+  const lastAutoSeedAbsolute = useMemo(() => {
+    if (!autoSeedStatus?.lastAutoSeed) return null;
+    const d = new Date(autoSeedStatus.lastAutoSeed);
+    if (isNaN(d.getTime())) return null;
+    return d.toLocaleString();
+  }, [autoSeedStatus?.lastAutoSeed]);
 
   const createMutation = useMutation({
     mutationFn: (data: CreateFormData) => apiRequest("POST", "/api/cost-centers", data),
@@ -388,6 +421,7 @@ export default function CostCenterManagement() {
     },
     onSuccess: ({ inserted, existing }) => {
       queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
+      queryClient.invalidateQueries({ queryKey: AUTO_SEED_STATUS_KEY });
       toast({
         title: "Defaults initialized",
         description: `${inserted} new district${inserted === 1 ? "" : "s"} added (${existing} already existed).`,
@@ -395,6 +429,30 @@ export default function CostCenterManagement() {
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const triggerAutoSeedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/cost-centers/trigger-auto-seed");
+      return (await res.json()) as {
+        inserted: number;
+        existing: number;
+        lastAutoSeed: string | null;
+      };
+    },
+    onSuccess: ({ inserted, existing }) => {
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
+      queryClient.invalidateQueries({ queryKey: AUTO_SEED_STATUS_KEY });
+      toast({
+        title: "Auto-seed complete",
+        description:
+          `${inserted} new district${inserted === 1 ? "" : "s"} added; ` +
+          `${existing} already present.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Auto-seed failed", description: error.message, variant: "destructive" });
     },
   });
 
@@ -586,9 +644,34 @@ export default function CostCenterManagement() {
             <p className="text-muted-foreground">
               Map every district to its accounting cost center.
             </p>
+            <p
+              className="text-xs text-muted-foreground mt-1 flex items-center gap-1"
+              data-testid="text-last-auto-seed"
+              title={lastAutoSeedAbsolute ?? undefined}
+            >
+              <Clock className="h-3 w-3" />
+              <span>
+                Last auto-refreshed:{" "}
+                <span className="font-medium">
+                  {lastAutoSeedRelative ?? "never (will run on next scheduler tick)"}
+                </span>
+              </span>
+            </p>
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => triggerAutoSeedMutation.mutate()}
+            disabled={triggerAutoSeedMutation.isPending}
+            data-testid="button-trigger-auto-seed"
+            title="Run the same daily auto-seed job now"
+          >
+            <RefreshCw
+              className={`mr-2 h-4 w-4 ${triggerAutoSeedMutation.isPending ? "animate-spin" : ""}`}
+            />
+            {triggerAutoSeedMutation.isPending ? "Running..." : "Run auto-seed now"}
+          </Button>
           <Button
             variant="outline"
             onClick={() => seedMutation.mutate()}

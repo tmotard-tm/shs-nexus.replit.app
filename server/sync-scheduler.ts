@@ -233,26 +233,50 @@ async function checkAndRunOffboardingTasks(): Promise<void> {
  * the success timestamp is left untouched so the next scheduler tick (~60s)
  * can retry promptly. A separate `lastAttempt` tracker prevents tight retry
  * loops if the seed throws repeatedly.
+ *
+ * When `force` is true (manual admin trigger via API), throttle checks are
+ * skipped but timestamps are still updated so subsequent scheduled runs honor
+ * the manual run and the management UI reflects it.
  */
-async function checkAndRunDistrictCostCenterSeed(): Promise<void> {
+const DISTRICT_COST_CENTER_RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
+
+async function runDistrictCostCenterSeed(
+  source: string,
+  options: { force?: boolean } = {},
+): Promise<{ ran: boolean; inserted: number; existing: number }> {
   const now = Date.now();
-  // Throttle by last successful run (24h) — but if we've never succeeded,
-  // fall back to throttling by last attempt (5 min) to avoid hammering on
-  // persistent failures while still allowing reasonably quick retry.
-  const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
-  if (lastDistrictCostCenterSeedTime !== null && (now - lastDistrictCostCenterSeedTime) < DISTRICT_COST_CENTER_SEED_INTERVAL_MS) {
-    return;
-  }
-  if (lastDistrictCostCenterSeedAttemptTime !== null && (now - lastDistrictCostCenterSeedAttemptTime) < RETRY_AFTER_FAILURE_MS) {
-    return;
+  if (!options.force) {
+    // Throttle by last successful run (24h) — but if we've never succeeded,
+    // fall back to throttling by last attempt (5 min) to avoid hammering on
+    // persistent failures while still allowing reasonably quick retry.
+    if (
+      lastDistrictCostCenterSeedTime !== null &&
+      (now - lastDistrictCostCenterSeedTime) < DISTRICT_COST_CENTER_SEED_INTERVAL_MS
+    ) {
+      return { ran: false, inserted: 0, existing: 0 };
+    }
+    if (
+      lastDistrictCostCenterSeedAttemptTime !== null &&
+      (now - lastDistrictCostCenterSeedAttemptTime) < DISTRICT_COST_CENTER_RETRY_AFTER_FAILURE_MS
+    ) {
+      return { ran: false, inserted: 0, existing: 0 };
+    }
   }
   lastDistrictCostCenterSeedAttemptTime = now;
+  const result = await storage.seedDefaultDistrictCostCenters(source);
+  lastDistrictCostCenterSeedTime = now;
+  if (result.inserted > 0 || options.force) {
+    console.log(
+      `[Scheduler] District cost-center seed (${source}${options.force ? ', forced' : ''}): ` +
+      `${result.inserted} new districts added (${result.existing} already present)`,
+    );
+  }
+  return { ran: true, inserted: result.inserted, existing: result.existing };
+}
+
+async function checkAndRunDistrictCostCenterSeed(): Promise<void> {
   try {
-    const result = await storage.seedDefaultDistrictCostCenters('scheduler');
-    lastDistrictCostCenterSeedTime = now;
-    if (result.inserted > 0) {
-      console.log(`[Scheduler] District cost-center auto-seed: ${result.inserted} new districts added (${result.existing} already present)`);
-    }
+    await runDistrictCostCenterSeed('scheduler');
   } catch (error: any) {
     console.error('[Scheduler] Error during district cost-center auto-seed:', error?.message);
   }
@@ -1113,6 +1137,20 @@ export function getSchedulerStatus(): {
     lastDistrictCostCenterSeed: lastDistrictCostCenterSeedTime ? new Date(lastDistrictCostCenterSeedTime).toISOString() : null,
     districtCostCenterSeedIntervalMs: DISTRICT_COST_CENTER_SEED_INTERVAL_MS,
   };
+}
+
+/**
+ * Manual trigger for the district cost-center auto-seed. Calls the same
+ * `runDistrictCostCenterSeed` helper the daily scheduler uses, but with
+ * `force: true` so the 24h throttle is skipped. Updates the scheduler's
+ * `lastDistrictCostCenterSeed*` timestamps so the next scheduled run honors
+ * this run and the management UI reflects "just now" afterwards.
+ */
+export async function triggerDistrictCostCenterSeed(
+  updatedBy: string,
+): Promise<{ inserted: number; existing: number }> {
+  const { inserted, existing } = await runDistrictCostCenterSeed(updatedBy, { force: true });
+  return { inserted, existing };
 }
 
 // Sprint 0: Manual trigger for separation poll (for testing)

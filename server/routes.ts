@@ -7623,6 +7623,59 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/cost-centers/auto-seed-status - last successful auto-seed timestamp
+  app.get("/api/cost-centers/auto-seed-status", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      }
+
+      const { getSchedulerStatus } = await import("./sync-scheduler");
+      const status = getSchedulerStatus();
+      res.json({
+        lastAutoSeed: status.lastDistrictCostCenterSeed,
+        intervalMs: status.districtCostCenterSeedIntervalMs,
+      });
+    } catch (error) {
+      console.error("Error fetching auto-seed status:", error);
+      res.status(500).json({ message: "Failed to fetch auto-seed status" });
+    }
+  });
+
+  // POST /api/cost-centers/trigger-auto-seed - manually run the same seeder
+  // the scheduler runs daily; bypasses the 24h throttle but updates the
+  // scheduler's last-run timestamp so the UI and next scheduled run reflect it.
+  app.post("/api/cost-centers/trigger-auto-seed", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      }
+
+      const { triggerDistrictCostCenterSeed, getSchedulerStatus } = await import("./sync-scheduler");
+      const result = await triggerDistrictCostCenterSeed(currentUser!.username);
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_auto_seed_manual",
+        entityType: "district_cost_center",
+        entityId: "*",
+        details: `Manual auto-seed: ${result.inserted} inserted, ${result.existing} already present`,
+      });
+
+      const status = getSchedulerStatus();
+      res.json({
+        inserted: result.inserted,
+        existing: result.existing,
+        lastAutoSeed: status.lastDistrictCostCenterSeed,
+      });
+    } catch (error) {
+      console.error("Error triggering district cost-center auto-seed:", error);
+      res.status(500).json({ message: "Failed to trigger auto-seed" });
+    }
+  });
+
   // Role Permissions API Routes
   console.log("Registering Role Permissions API routes...");
 
