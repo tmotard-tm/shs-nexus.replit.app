@@ -481,6 +481,10 @@ export interface IStorage {
   upsertDistrictCostCenter(record: InsertDistrictCostCenter): Promise<DistrictCostCenter>;
   deleteDistrictCostCenter(district: string): Promise<boolean>;
   seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }>;
+  bulkUpsertDistrictCostCenters(
+    records: InsertDistrictCostCenter[],
+    updatedBy: string,
+  ): Promise<{ inserted: number; updated: number; unchanged: number }>;
 }
 
 export class MemStorage implements IStorage {
@@ -3581,6 +3585,12 @@ export class MemStorage implements IStorage {
   async seedDefaultDistrictCostCenters(_updatedBy: string): Promise<{ inserted: number; existing: number }> {
     return { inserted: 0, existing: 0 };
   }
+  async bulkUpsertDistrictCostCenters(
+    _records: InsertDistrictCostCenter[],
+    _updatedBy: string,
+  ): Promise<{ inserted: number; updated: number; unchanged: number }> {
+    throw new Error("MemStorage does not support district cost centers. Use DatabaseStorage.");
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6609,6 +6619,78 @@ export class DatabaseStorage implements IStorage {
       .where(eq(districtCostCenters.district, padded))
       .returning({ district: districtCostCenters.district });
     return result.length > 0;
+  }
+
+  async bulkUpsertDistrictCostCenters(
+    records: InsertDistrictCostCenter[],
+    updatedBy: string,
+  ): Promise<{ inserted: number; updated: number; unchanged: number }> {
+    if (records.length === 0) {
+      return { inserted: 0, updated: 0, unchanged: 0 };
+    }
+
+    // Normalize and de-duplicate by district (last write wins)
+    const dedup = new Map<string, { district: string; costCenter: string }>();
+    for (const r of records) {
+      const padded = padDistrict(r.district);
+      if (!padded) continue;
+      dedup.set(padded, { district: padded, costCenter: r.costCenter });
+    }
+    const normalized = Array.from(dedup.values());
+    if (normalized.length === 0) {
+      return { inserted: 0, updated: 0, unchanged: 0 };
+    }
+
+    const districts = normalized.map((r) => r.district);
+    const existingRows = await db
+      .select({
+        district: districtCostCenters.district,
+        costCenter: districtCostCenters.costCenter,
+      })
+      .from(districtCostCenters)
+      .where(inArray(districtCostCenters.district, districts));
+    const existingMap = new Map(existingRows.map((r) => [r.district, r.costCenter]));
+
+    let inserted = 0;
+    let updated = 0;
+    let unchanged = 0;
+    const toWrite: { district: string; costCenter: string }[] = [];
+
+    for (const r of normalized) {
+      const prev = existingMap.get(r.district);
+      if (prev === undefined) {
+        inserted += 1;
+        toWrite.push(r);
+      } else if (prev !== r.costCenter) {
+        updated += 1;
+        toWrite.push(r);
+      } else {
+        unchanged += 1;
+      }
+    }
+
+    if (toWrite.length > 0) {
+      const now = new Date();
+      const values = toWrite.map((r) => ({
+        district: r.district,
+        costCenter: r.costCenter,
+        updatedBy,
+        updatedAt: now,
+      }));
+      await db
+        .insert(districtCostCenters)
+        .values(values)
+        .onConflictDoUpdate({
+          target: districtCostCenters.district,
+          set: {
+            costCenter: sql`excluded.cost_center`,
+            updatedBy: sql`excluded.updated_by`,
+            updatedAt: sql`excluded.updated_at`,
+          },
+        });
+    }
+
+    return { inserted, updated, unchanged };
   }
 
   async seedDefaultDistrictCostCenters(updatedBy: string): Promise<{ inserted: number; existing: number }> {

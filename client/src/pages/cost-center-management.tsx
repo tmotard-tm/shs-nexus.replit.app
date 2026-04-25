@@ -1,8 +1,12 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import Papa from "papaparse";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -31,6 +35,9 @@ import {
   Pencil,
   Check,
   X,
+  Upload,
+  FileUp,
+  AlertCircle,
 } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -88,6 +95,178 @@ function formatTimestamp(value: string | Date | null | undefined): string {
 type SortField = "district" | "costCenter";
 type SortDir = "asc" | "desc";
 
+type BulkRowStatus = "new" | "update" | "unchanged" | "error";
+
+interface BulkRow {
+  rowNumber: number;
+  rawDistrict: string;
+  rawCostCenter: string;
+  district: string;
+  costCenter: string;
+  status: BulkRowStatus;
+  message?: string;
+  previousCostCenter?: string;
+}
+
+interface BulkImportResult {
+  inserted: number;
+  updated: number;
+  unchanged: number;
+  skipped: number;
+  submitted: number;
+  errors: { row: number; district: string; costCenter: string; message: string }[];
+}
+
+function pickField(row: Record<string, any>, candidates: string[]): string {
+  for (const key of Object.keys(row)) {
+    const norm = key.trim().toLowerCase().replace(/[\s_-]+/g, "");
+    if (candidates.includes(norm)) {
+      const v = row[key];
+      return v == null ? "" : String(v);
+    }
+  }
+  return "";
+}
+
+function parseCsvText(text: string): { rawDistrict: string; rawCostCenter: string }[] {
+  const trimmed = text.trim();
+  if (!trimmed) return [];
+
+  // Try header-based parse first
+  const headerParse = Papa.parse<Record<string, any>>(trimmed, {
+    header: true,
+    skipEmptyLines: true,
+    transformHeader: (h) => h.trim(),
+  });
+
+  const districtKeys = ["district", "districtno", "districtnumber", "dist"];
+  const costCenterKeys = ["costcenter", "cc", "costcentre", "centercost"];
+
+  const headerFields = (headerParse.meta?.fields ?? []).map((f) =>
+    f.trim().toLowerCase().replace(/[\s_-]+/g, ""),
+  );
+  const hasDistrictHeader = headerFields.some((f) => districtKeys.includes(f));
+  const hasCostCenterHeader = headerFields.some((f) => costCenterKeys.includes(f));
+
+  if (hasDistrictHeader && hasCostCenterHeader && headerParse.data.length > 0) {
+    return headerParse.data.map((row) => ({
+      rawDistrict: pickField(row, districtKeys),
+      rawCostCenter: pickField(row, costCenterKeys),
+    }));
+  }
+
+  // Fall back to header-less two-column parse
+  const flatParse = Papa.parse<string[]>(trimmed, {
+    header: false,
+    skipEmptyLines: true,
+  });
+  return flatParse.data
+    .map((cols) => ({
+      rawDistrict: String(cols?.[0] ?? "").trim(),
+      rawCostCenter: String(cols?.[1] ?? "").trim(),
+    }))
+    .filter((r) => r.rawDistrict || r.rawCostCenter);
+}
+
+function classifyBulkRows(
+  raw: { rawDistrict: string; rawCostCenter: string }[],
+  existing: DistrictCostCenter[],
+): BulkRow[] {
+  const existingMap = new Map(existing.map((e) => [e.district, e.costCenter]));
+  const seenInBatch = new Map<string, number>();
+
+  return raw.map((r, idx) => {
+    const rowNumber = idx + 1;
+    const rawDistrict = (r.rawDistrict ?? "").trim();
+    const rawCostCenter = (r.rawCostCenter ?? "").trim();
+
+    if (!rawDistrict && !rawCostCenter) {
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district: "",
+        costCenter: rawCostCenter,
+        status: "error" as const,
+        message: "Empty row",
+      };
+    }
+
+    if (!districtRegex.test(rawDistrict)) {
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district: rawDistrict,
+        costCenter: rawCostCenter,
+        status: "error" as const,
+        message: "District must be 4 to 7 digits",
+      };
+    }
+
+    const district = padDistrict(rawDistrict);
+
+    if (!costCenterRegex.test(rawCostCenter)) {
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district,
+        costCenter: rawCostCenter,
+        status: "error" as const,
+        message: "Cost Center must be exactly 5 alphanumeric characters",
+      };
+    }
+
+    const previousInBatch = seenInBatch.get(district);
+    if (previousInBatch !== undefined) {
+      seenInBatch.set(district, rowNumber);
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district,
+        costCenter: rawCostCenter,
+        status: "error" as const,
+        message: `Duplicate of row ${previousInBatch} in this batch`,
+      };
+    }
+    seenInBatch.set(district, rowNumber);
+
+    const prev = existingMap.get(district);
+    if (prev === undefined) {
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district,
+        costCenter: rawCostCenter,
+        status: "new" as const,
+      };
+    }
+    if (prev === rawCostCenter) {
+      return {
+        rowNumber,
+        rawDistrict,
+        rawCostCenter,
+        district,
+        costCenter: rawCostCenter,
+        status: "unchanged" as const,
+        previousCostCenter: prev,
+      };
+    }
+    return {
+      rowNumber,
+      rawDistrict,
+      rawCostCenter,
+      district,
+      costCenter: rawCostCenter,
+      status: "update" as const,
+      previousCostCenter: prev,
+    };
+  });
+}
+
 export default function CostCenterManagement() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -101,6 +280,13 @@ export default function CostCenterManagement() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortField, setSortField] = useState<SortField>("district");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkRows, setBulkRows] = useState<BulkRow[] | null>(null);
+  const [bulkResult, setBulkResult] = useState<BulkImportResult | null>(null);
+  const [bulkFileName, setBulkFileName] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const { data: items = [], isLoading } = useQuery<DistrictCostCenter[]>({
     queryKey: ["/api/cost-centers"],
@@ -211,6 +397,95 @@ export default function CostCenterManagement() {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const bulkMutation = useMutation({
+    mutationFn: async (records: { district: string; costCenter: string }[]) => {
+      const res = await apiRequest("POST", "/api/cost-centers/bulk", { records });
+      return (await res.json()) as BulkImportResult;
+    },
+    onSuccess: (result) => {
+      setBulkResult(result);
+      queryClient.invalidateQueries({ queryKey: COST_CENTER_KEY });
+      toast({
+        title: "Bulk import complete",
+        description: `${result.inserted} added, ${result.updated} updated, ${result.unchanged} unchanged, ${result.skipped} skipped.`,
+      });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Bulk import failed", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const resetBulk = () => {
+    setBulkText("");
+    setBulkRows(null);
+    setBulkResult(null);
+    setBulkFileName(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleBulkPreview = () => {
+    const parsed = parseCsvText(bulkText);
+    if (parsed.length === 0) {
+      toast({
+        title: "Nothing to preview",
+        description: "Paste CSV data or upload a file first.",
+        variant: "destructive",
+      });
+      return;
+    }
+    const classified = classifyBulkRows(parsed, items);
+    setBulkRows(classified);
+    setBulkResult(null);
+  };
+
+  const handleBulkFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = String(e.target?.result ?? "");
+      setBulkText(text);
+      setBulkFileName(file.name);
+      const parsed = parseCsvText(text);
+      const classified = classifyBulkRows(parsed, items);
+      setBulkRows(classified);
+      setBulkResult(null);
+    };
+    reader.onerror = () => {
+      toast({
+        title: "Could not read file",
+        description: "Please try a different CSV file.",
+        variant: "destructive",
+      });
+    };
+    reader.readAsText(file);
+  };
+
+  const handleBulkApply = () => {
+    if (!bulkRows) return;
+    const toApply = bulkRows
+      .filter((r) => r.status === "new" || r.status === "update")
+      .map((r) => ({ district: r.district, costCenter: r.costCenter }));
+    if (toApply.length === 0) {
+      toast({
+        title: "Nothing to apply",
+        description: "There are no rows that would change anything.",
+        variant: "destructive",
+      });
+      return;
+    }
+    bulkMutation.mutate(toApply);
+  };
+
+  const bulkSummary = useMemo(() => {
+    if (!bulkRows) return null;
+    return {
+      total: bulkRows.length,
+      newCount: bulkRows.filter((r) => r.status === "new").length,
+      updateCount: bulkRows.filter((r) => r.status === "update").length,
+      unchangedCount: bulkRows.filter((r) => r.status === "unchanged").length,
+      errorCount: bulkRows.filter((r) => r.status === "error").length,
+    };
+  }, [bulkRows]);
 
   const form = useForm<CreateFormData>({
     resolver: zodResolver(createSchema),
@@ -323,6 +598,229 @@ export default function CostCenterManagement() {
             <Sparkles className="mr-2 h-4 w-4" />
             {seedMutation.isPending ? "Initializing..." : "Initialize Defaults"}
           </Button>
+          <Dialog
+            open={isBulkOpen}
+            onOpenChange={(open) => {
+              setIsBulkOpen(open);
+              if (!open) resetBulk();
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="outline" data-testid="button-open-bulk-import">
+                <Upload className="mr-2 h-4 w-4" />
+                Bulk Import
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[820px] max-h-[90vh] overflow-hidden flex flex-col">
+              <DialogHeader>
+                <DialogTitle>Bulk Import Cost Centers</DialogTitle>
+                <DialogDescription>
+                  Paste CSV data or upload a file with two columns: <code>district</code> and{" "}
+                  <code>cost_center</code>. We'll show a preview before anything is saved.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="flex-1 overflow-y-auto space-y-4 pr-1">
+                <div className="grid grid-cols-1 gap-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".csv,text/csv,text/plain"
+                      className="hidden"
+                      data-testid="input-bulk-file"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleBulkFile(file);
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      data-testid="button-bulk-upload"
+                    >
+                      <FileUp className="mr-2 h-4 w-4" />
+                      Upload CSV
+                    </Button>
+                    {bulkFileName && (
+                      <span className="text-xs text-muted-foreground">
+                        {bulkFileName}
+                      </span>
+                    )}
+                    <span className="text-xs text-muted-foreground">
+                      or paste below — header row optional
+                    </span>
+                  </div>
+                  <Textarea
+                    value={bulkText}
+                    onChange={(e) => {
+                      setBulkText(e.target.value);
+                      setBulkRows(null);
+                      setBulkResult(null);
+                    }}
+                    placeholder={"district,cost_center\n4766,04766\n5012,05012"}
+                    className="font-mono text-xs min-h-[140px]"
+                    data-testid="textarea-bulk-csv"
+                  />
+                  <div className="flex justify-between items-center">
+                    <p className="text-xs text-muted-foreground">
+                      Districts will be padded to 7 digits. Cost center must be exactly 5
+                      alphanumeric characters.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={handleBulkPreview}
+                      data-testid="button-bulk-preview"
+                    >
+                      Preview
+                    </Button>
+                  </div>
+                </div>
+
+                {bulkSummary && (
+                  <div className="flex flex-wrap gap-2 text-xs" data-testid="bulk-summary">
+                    <Badge variant="secondary">Total: {bulkSummary.total}</Badge>
+                    <Badge className="bg-green-600 hover:bg-green-700">
+                      New: {bulkSummary.newCount}
+                    </Badge>
+                    <Badge className="bg-blue-600 hover:bg-blue-700">
+                      Update: {bulkSummary.updateCount}
+                    </Badge>
+                    <Badge variant="outline">Unchanged: {bulkSummary.unchangedCount}</Badge>
+                    <Badge variant="destructive">Errors: {bulkSummary.errorCount}</Badge>
+                  </div>
+                )}
+
+                {bulkResult && (
+                  <div className="rounded-md border bg-muted/30 p-3 text-sm space-y-1" data-testid="bulk-result">
+                    <p className="font-medium">Import complete</p>
+                    <p className="text-muted-foreground">
+                      {bulkResult.inserted} inserted, {bulkResult.updated} updated,{" "}
+                      {bulkResult.unchanged} unchanged, {bulkResult.skipped} skipped (out of{" "}
+                      {bulkResult.submitted} submitted).
+                    </p>
+                    {bulkResult.errors.length > 0 && (
+                      <p className="text-xs text-destructive flex items-center gap-1">
+                        <AlertCircle className="h-3 w-3" />
+                        Some rows were skipped. See the preview below for details.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {bulkRows && bulkRows.length > 0 && (
+                  <div className="border rounded-md overflow-hidden">
+                    <div className="max-h-[320px] overflow-y-auto">
+                      <Table>
+                        <TableHeader className="sticky top-0 bg-background z-10">
+                          <TableRow>
+                            <TableHead className="w-12">#</TableHead>
+                            <TableHead>District</TableHead>
+                            <TableHead>Cost Center</TableHead>
+                            <TableHead>Change</TableHead>
+                            <TableHead>Status</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {bulkRows.map((row) => (
+                            <TableRow
+                              key={`${row.rowNumber}-${row.district || row.rawDistrict}`}
+                              data-testid={`bulk-row-${row.rowNumber}`}
+                            >
+                              <TableCell className="text-xs text-muted-foreground">
+                                {row.rowNumber}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">
+                                {row.district || row.rawDistrict || "—"}
+                              </TableCell>
+                              <TableCell className="font-mono text-xs">
+                                {row.costCenter || row.rawCostCenter || "—"}
+                              </TableCell>
+                              <TableCell className="text-xs">
+                                {row.status === "update" && row.previousCostCenter ? (
+                                  <span className="font-mono">
+                                    <span className="line-through text-muted-foreground">
+                                      {row.previousCostCenter}
+                                    </span>{" "}
+                                    → <span className="text-blue-600 dark:text-blue-400">
+                                      {row.costCenter}
+                                    </span>
+                                  </span>
+                                ) : row.status === "new" ? (
+                                  <span className="text-green-600 dark:text-green-400">
+                                    new mapping
+                                  </span>
+                                ) : row.status === "unchanged" ? (
+                                  <span className="text-muted-foreground">no change</span>
+                                ) : (
+                                  <span className="text-destructive">{row.message}</span>
+                                )}
+                              </TableCell>
+                              <TableCell>
+                                {row.status === "new" && (
+                                  <Badge className="bg-green-600 hover:bg-green-700">New</Badge>
+                                )}
+                                {row.status === "update" && (
+                                  <Badge className="bg-blue-600 hover:bg-blue-700">Update</Badge>
+                                )}
+                                {row.status === "unchanged" && (
+                                  <Badge variant="outline">Unchanged</Badge>
+                                )}
+                                {row.status === "error" && (
+                                  <Badge variant="destructive">Error</Badge>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <DialogFooter className="border-t pt-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={resetBulk}
+                  disabled={bulkMutation.isPending}
+                  data-testid="button-bulk-reset"
+                >
+                  Clear
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => setIsBulkOpen(false)}
+                  disabled={bulkMutation.isPending}
+                  data-testid="button-bulk-close"
+                >
+                  Close
+                </Button>
+                <Button
+                  type="button"
+                  onClick={handleBulkApply}
+                  disabled={
+                    bulkMutation.isPending ||
+                    !bulkSummary ||
+                    bulkSummary.newCount + bulkSummary.updateCount === 0
+                  }
+                  data-testid="button-bulk-apply"
+                >
+                  {bulkMutation.isPending
+                    ? "Applying..."
+                    : bulkSummary
+                      ? `Apply ${bulkSummary.newCount + bulkSummary.updateCount} change${bulkSummary.newCount + bulkSummary.updateCount === 1 ? "" : "s"}`
+                      : "Apply"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
           <Dialog
             open={isCreateOpen}
             onOpenChange={(open) => {

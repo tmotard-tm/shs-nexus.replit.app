@@ -7520,6 +7520,84 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/cost-centers/bulk - bulk import many districts at once
+  const costCenterBulkSchema = z.object({
+    records: z
+      .array(
+        z.object({
+          district: z.string(),
+          costCenter: z.string(),
+        }),
+      )
+      .min(1, "Provide at least one row")
+      .max(10000, "Too many rows in a single import"),
+  });
+
+  app.post("/api/cost-centers/bulk", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      }
+
+      const { records } = costCenterBulkSchema.parse(req.body);
+
+      // Per-row validate using existing schema; skip rows that fail
+      const valid: { district: string; costCenter: string }[] = [];
+      const errors: { row: number; district: string; costCenter: string; message: string }[] = [];
+      records.forEach((r, idx) => {
+        const result = costCenterCreateSchema.safeParse(r);
+        if (!result.success) {
+          errors.push({
+            row: idx + 1,
+            district: r.district ?? "",
+            costCenter: r.costCenter ?? "",
+            message: result.error.errors.map((e) => e.message).join("; "),
+          });
+        } else {
+          valid.push({
+            district: padDistrictForApi(result.data.district),
+            costCenter: result.data.costCenter,
+          });
+        }
+      });
+
+      const summary = await storage.bulkUpsertDistrictCostCenters(
+        valid.map((r) => ({
+          district: r.district,
+          costCenter: r.costCenter,
+          updatedBy: currentUser!.username,
+        })),
+        currentUser!.username,
+      );
+
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "cost_center_bulk_import",
+        entityType: "district_cost_center",
+        entityId: "*",
+        details:
+          `Bulk import: ${summary.inserted} inserted, ${summary.updated} updated, ` +
+          `${summary.unchanged} unchanged, ${errors.length} skipped (${records.length} submitted)`,
+      });
+
+      res.json({
+        inserted: summary.inserted,
+        updated: summary.updated,
+        unchanged: summary.unchanged,
+        skipped: errors.length,
+        submitted: records.length,
+        errors,
+      });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid bulk import payload", errors: error.errors });
+      }
+      console.error("Error bulk importing cost centers:", error);
+      res.status(500).json({ message: "Failed to bulk import cost centers" });
+    }
+  });
+
   // POST /api/cost-centers/init-defaults - seed defaults from live district sources
   app.post("/api/cost-centers/init-defaults", requireAuth, async (req: any, res) => {
     try {
