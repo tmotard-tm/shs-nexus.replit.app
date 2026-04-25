@@ -378,6 +378,8 @@ The doc currently calls for a ~1-day pause after 2B.1.c for live verification be
 
 Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to append above).
 
+**In-process cron (Kirk D-γ):** `server/2b1-drift-cron.ts` (loaded from `server/index.ts` `server.listen` callback) schedules the 3 snapshots at exact UTC fire times (`50 4 26 4 *`, `50 10 26 4 *`, `50 16 26 4 *`) and auto-replaces the matching `_pending_` row above. On script exit code 2 (anomaly), `haltAllJobs()` stops every remaining task and prints a structured banner; cutover at T0+24h is then blocked pending analyst review. Past-fire-time jobs are skipped on workflow restart (so the cron is restart-safe within the pause window). Call `removeDriftCron()` from the cutover script after a successful T0+24h cutover to unschedule any leftover task. **Verified scheduled 2026-04-25T23:10Z (3/3 jobs, fires in 5.67h / 11.67h / 17.67h).**
+
 #### 2B.1.d — Writer migration plan (drafted 2026-04-25 during pause)
 
 **Scope (every direct fs_trucks writer in the codebase):**
@@ -456,6 +458,18 @@ Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to a
 
 **Estimated effort: ~1.5d** (largest single 2A item — 7 mutations + 30 read fields + modal-callback contract).
 
+##### 2A.5 progress (2026-04-25 during pause)
+
+- **Step 1 DONE.** `client/src/components/vehicle/tabs/OperationsTab.tsx` written. Self-fetches AMS vehicle, AMS comments, ops logs, AMS lookups (truck-status, vehicle-runs, vehicle-looks, colors, branding, interior), Nexus tracking, vehicle POs, and Holman fleet-vehicle (for assignment summary). Mutations included: addComment, saveNexusData, resyncAssignments. Add Comment dialog lives inside the tab (tightly coupled to the comment list).
+- **Step 2 DONE.** `UniversalVehiclePanel.tsx` TabKey union extended to `"operations"`, TAB_DEFS gains `Settings` icon, `TabsList` bumped from `grid-cols-6` to `grid-cols-7`.
+- **Step 3 DONE.** `onOpenOperationsModal?: (kind, ctx) => void` prop added to `UniversalVehiclePanelProps`; threaded to OperationsTab as `onOpenModal`. UVP itself stays modal-agnostic.
+- **Step 4 DESIGN-REFINEMENT.** Resync Assignments was originally specced for the panel header (2A.4.note1 (c)) but the mutation needs `enterpriseId` (= `holmanTechAssigned`), which is on the FleetVehicle shape — not on `TruckPanelData`. Moved Resync into the Operations tab body, beside the Assignment Summary cards (it fetches the FleetVehicle inside the tab via the cached `/api/holman/fleet-vehicles` query). Header stays uncluttered.
+- **Step 5 DONE.** Read block (Ownership / Description / Condition / Location / Last-update line), Comments collapsible + Add dialog, Nexus form, Op Log — all ported. AMS Edit / Repair are emitted via `onOpenModal("amsEdit"|"amsRepair", ctx)` with prefill computed via lookup-matching inside the tab; the actual edit/repair modals stay outside UVP.
+- **Step 6 DEFERRED (post-pause).** fleet-management.tsx still owns its inline drawer + 7 modals; migrating it to use UVP requires moving (or leaving in place) the modal renderers and replacing `selectedVehicle` (FleetVehicle shape) with `vehicleId` (fs_trucks.id) — non-trivial state plumbing that touches state shared with multiple tabs. Pause-safe choice: ship UVP+OperationsTab additively now; flip fleet-management to use UVP after T0+24h cutover.
+- **Step 7 PARTIAL.** Server boots clean with cron scheduled; TypeScript clean (190 baseline → 190; introduced cron `ScheduledTask` type fix). Smoke test of OperationsTab via existing UVP entry points (e.g., truck-detail link from other pages) is pending — UVP is currently invoked without `onOpenOperationsModal` everywhere, so the new tab renders read-only by design until a caller wires the contract.
+
+**Pause-safe checkpoint reached (2026-04-25T23:10Z, T0+0.3h).** Server compiles + boots; cron live; OperationsTab additive; no fs_trucks/fs_truck_state writes anywhere in the new code; cutover-priority preserved. Next iteration during pause will wire fleet-management.tsx (Step 6) — that work itself touches no fs_trucks writes (it's pure UI state plumbing) so it remains pause-safe; if cutover starts mid-edit at T0+24h, the in-flight changes will be reverted/parked for resume after cutover.
+
 #### Pause-window work plan (2026-04-25 → 2026-04-26 22:50 UTC)
 
 Ranked by effort/risk during the 24h drift window. All listed items are pause-safe (do NOT touch fs_trucks/fs_truck_state writes):
@@ -465,10 +479,11 @@ Ranked by effort/risk during the 24h drift window. All listed items are pause-sa
 | 0 | T0 marker + drift telemetry script | read-only | done | ✅ DONE |
 | 0a | 2B.1.d design doc | doc only | done | ✅ DONE |
 | 0b | 2A.5 design doc | doc only | done | ✅ DONE |
-| 1 | T0+6h drift snapshot | read-only | 1 min | ⏳ scheduled |
-| 2 | T0+12h drift snapshot | read-only | 1 min | ⏳ scheduled |
-| 3 | T0+18h drift snapshot | read-only | 1 min | ⏳ scheduled |
-| 4 | 2A.5 implementation (UVP Operations tab) | AMS endpoints key off vin | ~1.5d | candidate during pause |
+| 0c | In-process drift cron (`server/2b1-drift-cron.ts`) wired in `server/index.ts` listen callback | read-only; spawns child process; appends to doc | 0.5h | ✅ DONE (verified 23:10Z, 3/3 scheduled) |
+| 1 | T0+6h drift snapshot | read-only | 1 min | ⏳ scheduled (auto-fires via cron) |
+| 2 | T0+12h drift snapshot | read-only | 1 min | ⏳ scheduled (auto-fires via cron) |
+| 3 | T0+18h drift snapshot | read-only | 1 min | ⏳ scheduled (auto-fires via cron) |
+| 4 | 2A.5 implementation (UVP Operations tab) | AMS endpoints key off vin | ~1.5d | 🟡 IN PROGRESS — Steps 1–5 DONE (see 2A.5 progress section); Step 6 (fleet-management caller migration) deferred to post-cutover |
 | 5 | 2B.2 design (vrm_repair_tracker → child FK) | VRM tables, not FS | ~0.25d | candidate during pause |
 | 6 | 2B.3 design (vrm_techs → VIEW) | VRM tables | ~0.25d | candidate during pause |
 | 7 | 2C scripts (archive + comment scrub) | non-FS files | ~0.5d | candidate during pause |

@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   Truck as TruckIcon, MapPin, Wrench, UserCog, Package, History,
-  ExternalLink, FileText, Building2,
+  ExternalLink, FileText, Building2, Settings,
 } from "lucide-react";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { determineOwner, ownerColors, type TruckPanelData } from "./_helpers";
@@ -20,6 +20,11 @@ import { ServiceTab } from "./tabs/ServiceTab";
 import { AssignmentsTab } from "./tabs/AssignmentsTab";
 import { InventoryTab } from "./tabs/InventoryTab";
 import { HistoryTab } from "./tabs/HistoryTab";
+import {
+  OperationsTab,
+  type OperationsModalKind,
+  type OperationsModalContext,
+} from "./tabs/OperationsTab";
 
 /**
  * UniversalVehiclePanel — single slideout that supersedes the nine
@@ -52,6 +57,11 @@ export interface UniversalVehiclePanelProps {
   amsOpen?: boolean;
   /** "from" page used for back-link breadcrumbs on the full-detail page. */
   fromPage?: string;
+  /** Modal-trigger contract for the Operations tab. When omitted, Operations
+   *  tab is read-only (action buttons hidden). UVP itself stays modal-agnostic;
+   *  the caller renders the Assign / Unassign / POHistory / AMS Edit / AMS
+   *  Repair / OpsReview / History modals using the supplied context. */
+  onOpenOperationsModal?: (kind: OperationsModalKind, ctx: OperationsModalContext) => void;
 }
 
 interface VehicleInfo {
@@ -60,7 +70,7 @@ interface VehicleInfo {
   licensePlate: string | null;
 }
 
-type TabKey = "overview" | "telematics" | "service" | "assignments" | "inventory" | "history";
+type TabKey = "overview" | "telematics" | "service" | "assignments" | "inventory" | "operations" | "history";
 
 const TAB_DEFS: Array<{ key: TabKey; label: string; icon: typeof TruckIcon }> = [
   { key: "overview",    label: "Overview",    icon: TruckIcon },
@@ -68,6 +78,7 @@ const TAB_DEFS: Array<{ key: TabKey; label: string; icon: typeof TruckIcon }> = 
   { key: "service",     label: "Service",     icon: Wrench },
   { key: "assignments", label: "Assignments", icon: UserCog },
   { key: "inventory",   label: "Inventory",   icon: Package },
+  { key: "operations",  label: "Operations",  icon: Settings },
   { key: "history",     label: "History",     icon: History },
 ];
 
@@ -80,6 +91,7 @@ export function UniversalVehiclePanel({
   onUpdateAms,
   amsOpen,
   fromPage = "dashboard",
+  onOpenOperationsModal,
 }: UniversalVehiclePanelProps) {
   const idQuery = useQuery<TruckPanelData>({
     queryKey: ["/api/fs/trucks", vehicleId],
@@ -181,7 +193,7 @@ export function UniversalVehiclePanel({
             </SheetHeader>
 
             <Tabs defaultValue={defaultTab} className="flex-1 flex flex-col overflow-hidden">
-              <TabsList className="mx-6 mt-3 grid grid-cols-6 h-9 shrink-0">
+              <TabsList className="mx-6 mt-3 grid grid-cols-7 h-9 shrink-0">
                 {TAB_DEFS.map(({ key, label, icon: Icon }) => (
                   <TabsTrigger
                     key={key}
@@ -211,6 +223,14 @@ export function UniversalVehiclePanel({
                   </TabsContent>
                   <TabsContent value="inventory" className="m-0">
                     <InventoryTab truck={truck} />
+                  </TabsContent>
+                  <TabsContent value="operations" className="m-0">
+                    <OperationsTab
+                      truck={truck}
+                      vin={vehicleInfo?.vin || null}
+                      vehicleNumber={truck.truckNumber ? String(truck.truckNumber) : null}
+                      onOpenModal={onOpenOperationsModal}
+                    />
                   </TabsContent>
                   <TabsContent value="history" className="m-0">
                     <HistoryTab truck={truck} />

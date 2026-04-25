@@ -404,6 +404,16 @@ async function patchStoredRolePermissions() {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+
+    // 2B.1.c PAUSE — schedule drift telemetry cron (Kirk D-γ).
+    // Reads only; appends results to docs/end-to-end-review.md.
+    // Auto-halts on anomaly. No-op past T0+24h cutover.
+    import("./2b1-drift-cron")
+      .then((m) => m.startDriftCron())
+      .catch((e: unknown) => {
+        console.warn("[2B.1 drift cron] failed to load (non-fatal):", e instanceof Error ? e.message : e);
+      });
+
     // Guardrail G4 — fire post-deploy integrity check non-blocking.
     // Compares current row counts against the latest G2 snapshot in object
     // storage. Fails open (no-baseline / network errors) so it can never
