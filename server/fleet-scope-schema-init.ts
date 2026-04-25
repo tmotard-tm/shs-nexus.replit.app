@@ -703,6 +703,133 @@ CREATE TABLE IF NOT EXISTS "fs_decomm_messages" (
   "media_type" text
 );
 
+-- 2B.1.a (additive): sidecar table for Fleet-Scope operational state.
+-- Identity fields (truck_number, vin, license_plate, holman_vehicle_ref) live
+-- in the canonical "vehicles" table; this sidecar holds the ~80 FS-only
+-- workflow columns. The "id" PK preserves the original "fs_trucks.id" UUID
+-- value during 2B.1.c copy so existing FK rows in fs_actions /
+-- fs_tracking_records / fs_truck_status_events keep working without rewrite.
+-- "vehicle_id" is the canonical FK to vehicles.id going forward; left
+-- nullable here (2B.1.a is additive only) and made NOT NULL in 2B.1.e.
+CREATE TABLE IF NOT EXISTS "fs_truck_state" (
+  "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "vehicle_id" varchar REFERENCES "vehicles"("id") ON DELETE CASCADE,
+  "status" text NOT NULL DEFAULT 'unknown',
+  "main_status" text,
+  "sub_status" text,
+  "main_status_changed_at" timestamp,
+  "shs_owner" text,
+  "date_last_marked_as_owned" text,
+  "registration_sticker_valid" text,
+  "registration_expiry_date" text,
+  "registration_last_update" text,
+  "registration_in_progress" boolean DEFAULT false,
+  "holman_reg_expiry" text,
+  "repair_or_sale_decision" text,
+  "van_inventoried" boolean DEFAULT false,
+  "sale_price" text,
+  "date_put_for_sale" text,
+  "date_sold" text,
+  "date_put_in_repair" text,
+  "bill_paid_date" text,
+  "repair_completed" boolean DEFAULT false,
+  "in_ams" boolean DEFAULT false,
+  "repair_address" text,
+  "repair_phone" text,
+  "contact_name" text,
+  "confirmed_set_of_expired_tags" boolean DEFAULT false,
+  "confirmed_declined_repair" text,
+  "tags_in_office" boolean DEFAULT false,
+  "tags_sent_to_tech" boolean DEFAULT false,
+  "renewal_process_started" boolean DEFAULT false,
+  "awaiting_tech_documents" boolean DEFAULT false,
+  "documents_sent_to_holman" boolean DEFAULT false,
+  "holman_processing_complete" boolean DEFAULT false,
+  "inspection_location" text,
+  "van_brought_for_inspection" boolean DEFAULT false,
+  "inspection_complete" boolean DEFAULT false,
+  "snowflake_assigned" boolean,
+  "offboarding_flagged" boolean DEFAULT false,
+  "tech_name" text,
+  "tech_phone" text,
+  "tech_lead_name" text,
+  "tech_lead_phone" text,
+  "tech_state" text,
+  "tech_state_source" text,
+  "pick_up_slot_booked" boolean DEFAULT false,
+  "time_blocked_to_pick_up_van" text,
+  "reg_test_slot_booked" boolean DEFAULT false,
+  "reg_test_slot_details" text,
+  "rental_returned" boolean DEFAULT false,
+  "van_picked_up" boolean DEFAULT false,
+  "comments" text,
+  "notes" text,
+  "virtual_comments" text,
+  "gave_holman" text,
+  "gave_holman_updated_at" timestamp,
+  "last_date_called" text,
+  "call_status" text,
+  "eta" text,
+  "rental_start_date" text,
+  "expected_return_date" text,
+  "rental_status" text,
+  "rental_reason" text,
+  "associated_vehicle_id" text,
+  "rental_notes" text,
+  "process_owner" text,
+  "current_renewal_step" text,
+  "repair_priority" text,
+  "expected_completion" text,
+  "estimated_cost" text,
+  "actual_cost" text,
+  "ready_for_pickup" boolean DEFAULT false,
+  "date_returned_to_service" text,
+  "new_truck_assigned" boolean DEFAULT false,
+  "registration_renewal_in_process" boolean DEFAULT false,
+  "spare_van_assignment_in_process" boolean DEFAULT false,
+  "spare_van_in_process_to_ship" boolean DEFAULT false,
+  "last_call_date" timestamp,
+  "last_call_summary" text,
+  "last_call_status" text,
+  "last_call_conversation_id" text,
+  "last_tech_call_date" timestamp,
+  "last_tech_call_summary" text,
+  "last_tech_call_status" text,
+  "last_tech_call_conversation_id" text,
+  "enterprise_id" text,
+  "last_updated_at" timestamp DEFAULT now(),
+  "last_updated_by" text DEFAULT 'System',
+  "created_at" timestamp DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "fs_truck_state_vehicle_id_idx" ON "fs_truck_state"("vehicle_id");
+
+-- 2B.1.a (additive): backfill bridge column on fs_trucks. Populated in 2B.1.b.
+-- Made NOT NULL with FK in 2B.1.e once backfill is verified.
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'vehicle_id'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "vehicle_id" varchar;
+  END IF;
+END $$;
+
+-- 2B.1.b audit log: orphan-row backfill provenance (per Kirk's directive).
+-- Records every vehicles row created during 2B.1.b for post-migration review.
+CREATE TABLE IF NOT EXISTS "fs_2b1_orphan_backfill_audit" (
+  "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+  "fs_truck_id" varchar NOT NULL,
+  "truck_number" text NOT NULL,
+  "created_vehicle_id" varchar NOT NULL,
+  "vin" varchar(20),
+  "license_plate" varchar(30),
+  "provenance" text NOT NULL DEFAULT '2B.1.b orphan reconcile',
+  "backfilled_at" timestamp NOT NULL DEFAULT now(),
+  "backfilled_by" text NOT NULL DEFAULT 'system'
+);
+CREATE INDEX IF NOT EXISTS "fs_2b1_orphan_audit_truck_number_idx"
+  ON "fs_2b1_orphan_backfill_audit"("truck_number");
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_url') THEN
     ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_url" text;

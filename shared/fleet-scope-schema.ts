@@ -560,11 +560,168 @@ export const trucks = pgTable("fs_trucks", {
   vin: varchar("vin", { length: 20 }), // Vehicle VIN
   licensePlate: varchar("license_plate", { length: 30 }), // License plate from Holman
 
+  // 2B.1.a: backfill bridge column. Populated in 2B.1.b, made NOT NULL in
+  // 2B.1.e. References vehicles.id (Core Nexus identity SoR).
+  vehicleId: varchar("vehicle_id"),
+
   // Timestamps
   lastUpdatedAt: timestamp("last_updated_at").default(sql`now()`),
   lastUpdatedBy: text("last_updated_by").default("System"),
   createdAt: timestamp("created_at").default(sql`now()`),
 });
+
+// 2B.1.a: sidecar table for Fleet-Scope operational state. Created additively
+// in this phase. Backfill in 2B.1.b–c, abstraction layer rewrite in 2B.1.d,
+// destructive drops + VIEW in 2B.1.e–f. See docs/end-to-end-review.md.
+export const fsTruckState = pgTable("fs_truck_state", {
+  // Preserves the original fs_trucks.id UUID during 2B.1.c so existing FK
+  // rows in fs_actions / fs_tracking_records / fs_truck_status_events keep
+  // working without a rewrite.
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  // Canonical join key going forward. Nullable in 2B.1.a, NOT NULL in 2B.1.e.
+  // FK to vehicles.id is declared in fleet-scope-schema-init.ts (cross-table
+  // FK; both tables live in the same Postgres database per locked plan).
+  vehicleId: varchar("vehicle_id"),
+
+  // FS combined status (semantically distinct from vehicles.status — see
+  // 2B.1 design D1).
+  status: text("status").notNull().default("unknown"),
+  mainStatus: text("main_status"),
+  subStatus: text("sub_status"),
+  mainStatusChangedAt: timestamp("main_status_changed_at"),
+
+  // SHS Owner
+  shsOwner: text("shs_owner"),
+  dateLastMarkedAsOwned: text("date_last_marked_as_owned"),
+
+  // Van Status
+  registrationStickerValid: text("registration_sticker_valid"),
+  registrationExpiryDate: text("registration_expiry_date"),
+  registrationLastUpdate: text("registration_last_update"),
+  registrationInProgress: boolean("registration_in_progress").default(false),
+  holmanRegExpiry: text("holman_reg_expiry"),
+  repairOrSaleDecision: text("repair_or_sale_decision"),
+
+  // Sales Status
+  vanInventoried: boolean("van_inventoried").default(false),
+  salePrice: text("sale_price"),
+  datePutForSale: text("date_put_for_sale"),
+  dateSold: text("date_sold"),
+
+  // Repair Status
+  datePutInRepair: text("date_put_in_repair"),
+  billPaidDate: text("bill_paid_date"),
+  repairCompleted: boolean("repair_completed").default(false),
+  inAms: boolean("in_ams").default(false),
+  repairAddress: text("repair_address"),
+  repairPhone: text("repair_phone"),
+  contactName: text("contact_name"),
+  confirmedSetOfExpiredTags: boolean("confirmed_set_of_expired_tags").default(false),
+  confirmedDeclinedRepair: text("confirmed_declined_repair"),
+
+  // Registration & Tags Workflow - Expired Tags Path
+  tagsInOffice: boolean("tags_in_office").default(false),
+  tagsSentToTech: boolean("tags_sent_to_tech").default(false),
+  renewalProcessStarted: boolean("renewal_process_started").default(false),
+  awaitingTechDocuments: boolean("awaiting_tech_documents").default(false),
+  documentsSentToHolman: boolean("documents_sent_to_holman").default(false),
+  holmanProcessingComplete: boolean("holman_processing_complete").default(false),
+
+  // Registration & Tags Workflow - Vehicle Inspection Path
+  inspectionLocation: text("inspection_location"),
+  vanBroughtForInspection: boolean("van_brought_for_inspection").default(false),
+  inspectionComplete: boolean("inspection_complete").default(false),
+
+  // Snowflake TPMS Assignment Status
+  snowflakeAssigned: boolean("snowflake_assigned"),
+
+  // Offboarding match
+  offboardingFlagged: boolean("offboarding_flagged").default(false),
+
+  // Pick Up Information
+  techName: text("tech_name"),
+  techPhone: text("tech_phone"),
+  techLeadName: text("tech_lead_name"),
+  techLeadPhone: text("tech_lead_phone"),
+  techState: text("tech_state"),
+  techStateSource: text("tech_state_source"),
+  pickUpSlotBooked: boolean("pick_up_slot_booked").default(false),
+  timeBlockedToPickUpVan: text("time_blocked_to_pick_up_van"),
+  regTestSlotBooked: boolean("reg_test_slot_booked").default(false),
+  regTestSlotDetails: text("reg_test_slot_details"),
+  rentalReturned: boolean("rental_returned").default(false),
+  vanPickedUp: boolean("van_picked_up").default(false),
+
+  // Comments
+  comments: text("comments"),
+  notes: text("notes"),
+  virtualComments: text("virtual_comments"),
+
+  // Gave Holman tracking
+  gaveHolman: text("gave_holman"),
+  gaveHolmanUpdatedAt: timestamp("gave_holman_updated_at"),
+  lastDateCalled: text("last_date_called"),
+  callStatus: text("call_status"),
+  eta: text("eta"),
+
+  // Rental tracking
+  rentalStartDate: text("rental_start_date"),
+  expectedReturnDate: text("expected_return_date"),
+  rentalStatus: text("rental_status"),
+  rentalReason: text("rental_reason"),
+  associatedVehicleId: text("associated_vehicle_id"),
+  rentalNotes: text("rental_notes"),
+
+  // Process tracking
+  processOwner: text("process_owner"),
+  currentRenewalStep: text("current_renewal_step"),
+  repairPriority: text("repair_priority"),
+  expectedCompletion: text("expected_completion"),
+  estimatedCost: text("estimated_cost"),
+  actualCost: text("actual_cost"),
+  readyForPickup: boolean("ready_for_pickup").default(false),
+  dateReturnedToService: text("date_returned_to_service"),
+  newTruckAssigned: boolean("new_truck_assigned").default(false),
+  registrationRenewalInProcess: boolean("registration_renewal_in_process").default(false),
+  spareVanAssignmentInProcess: boolean("spare_van_assignment_in_process").default(false),
+  spareVanInProcessToShip: boolean("spare_van_in_process_to_ship").default(false),
+
+  // Call logs
+  lastCallDate: timestamp("last_call_date"),
+  lastCallSummary: text("last_call_summary"),
+  lastCallStatus: text("last_call_status"),
+  lastCallConversationId: text("last_call_conversation_id"),
+  lastTechCallDate: timestamp("last_tech_call_date"),
+  lastTechCallSummary: text("last_tech_call_summary"),
+  lastTechCallStatus: text("last_tech_call_status"),
+  lastTechCallConversationId: text("last_tech_call_conversation_id"),
+
+  // Misc
+  enterpriseId: text("enterprise_id"),
+
+  // Audit
+  lastUpdatedAt: timestamp("last_updated_at").default(sql`now()`),
+  lastUpdatedBy: text("last_updated_by").default("System"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+
+export type FsTruckState = typeof fsTruckState.$inferSelect;
+export type InsertFsTruckState = typeof fsTruckState.$inferInsert;
+
+// 2B.1.b orphan-backfill audit log (per Kirk's directive).
+export const fs2b1OrphanBackfillAudit = pgTable("fs_2b1_orphan_backfill_audit", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  fsTruckId: varchar("fs_truck_id").notNull(),
+  truckNumber: text("truck_number").notNull(),
+  createdVehicleId: varchar("created_vehicle_id").notNull(),
+  vin: varchar("vin", { length: 20 }),
+  licensePlate: varchar("license_plate", { length: 30 }),
+  provenance: text("provenance").notNull().default("2B.1.b orphan reconcile"),
+  backfilledAt: timestamp("backfilled_at").notNull().default(sql`now()`),
+  backfilledBy: text("backfilled_by").notNull().default("system"),
+});
+
+export type Fs2b1OrphanBackfillAudit = typeof fs2b1OrphanBackfillAudit.$inferSelect;
 
 export const actions = pgTable("fs_actions", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

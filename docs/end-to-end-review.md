@@ -311,6 +311,18 @@ Each sub-step ships independently and the system stays green between them.
 
 (Recommendation: **3B** — the irreversible drops in 2B.1.e–f deserve a live verification gate.)
 
+#### Decisions locked (2026-04-25, Kirk)
+- **D1 — status semantics:** APPROVED — keep both `vehicles.status` and `fs_truck_state.status`; VIEW projects sidecar's status as `status`.
+- **D2 — orphan-row policy:** APPROVED — backfill missing `vehicles` rows in 2B.1.b. **Audit-log every backfill** with `provenance="2B.1.b orphan reconcile"` for post-review.
+- **D3 — sequencing:** APPROVED — 3B (gated). Pause after 2B.1.c.
+
+#### 2B.1.c verification gate (Kirk's required checks)
+Before proceeding to 2B.1.d–f (irreversible drops), verify ALL of:
+1. **Row-count parity:** `COUNT(fs_trucks)` == `COUNT(fs_truck_state JOIN vehicles)` — every fs_trucks row maps to exactly one sidecar row joined to a vehicles row.
+2. **FK integrity:** every `fs_actions.truck_id`, `fs_tracking_records.truck_id`, and `fs_truck_status_events.truck_id` value still exists in `fs_truck_state.id` (since sidecar preserves the original `fs_trucks.id` UUIDs).
+3. **Status projection sample diff:** ~50-row sample comparing `fs_trucks.status` vs `fs_truck_state.status` — must be byte-identical post-copy.
+4. **Smoke test (2+ FS callers reading through the future VIEW shape):** at minimum `fleet-scope/Dashboard.tsx` and `fleet-scope/EditTruck.tsx`. (At 2B.1.c the VIEW doesn't exist yet, so smoke = simulating the VIEW SELECT shape directly against `fs_truck_state JOIN vehicles` and confirming row shape matches today's `SELECT * FROM fs_trucks`.)
+
 ### Phase 3 — Sync architecture (~14.5d)
 
 #### 3A — Foundation (~5d)
