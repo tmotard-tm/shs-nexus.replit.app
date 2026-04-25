@@ -1045,7 +1045,27 @@ export function registerVrmRoutes(): Router {
         } catch (err: any) {
           console.error("[VRM] no-data name lookup failed:", err.message);
         }
+
+        // Detect new-hire-in-training: techs with no Snowflake financials/DCR
+        // but who are actively clocking in with "NEW HIRE TRAINING" punch
+        // labels are trainees, not unknown. Surface them as such so staff
+        // know why there's no data to score against (no auto-action; the
+        // staffer still chooses Approve/Deny).
+        const trainingLdaps = new Set<string>();
+        try {
+          const punchRows = await fetchTechPunchHistory(missing, 7);
+          for (const p of punchRows) {
+            const label = (p.latestRawPunchLabel ?? "").toUpperCase();
+            if (label.includes("NEW HIRE TRAINING")) {
+              trainingLdaps.add(p.ldap.toUpperCase());
+            }
+          }
+        } catch (err: any) {
+          console.error("[VRM] new-hire training probe failed:", err.message);
+        }
+
         for (const ldap of missing) {
+          const isTrainee = trainingLdaps.has(ldap);
           rows.push({
             tech_ldap: ldap,
             tech_name: nameLookup.get(ldap) ?? null,
@@ -1065,7 +1085,7 @@ export function registerVrmRoutes(): Router {
             daily_net_before_rental: 0,
             daily_net_with_rental: 0,
             daily_ppt_profit: 0,
-            recommendation: "No Data",
+            recommendation: isTrainee ? "New Hire — Training" : "No Data",
             new_hire_exempt: false,
             scorecard_exempt: false,
           } as any);

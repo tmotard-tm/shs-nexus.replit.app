@@ -242,7 +242,7 @@ interface ProfitRow {
   daily_net_before_rental: number;
   daily_net_with_rental: number;
   daily_ppt_profit: number;
-  recommendation: "Approve" | "Deny" | "No Data";
+  recommendation: "Approve" | "Deny" | "No Data" | "New Hire — Training";
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
 }
@@ -300,6 +300,7 @@ function RecPill({ rec }: { rec: string }) {
     Approve: { fg: colors.green, bg: colors.greenLight },
     Deny: { fg: colors.red, bg: colors.redLight },
     "No Data": { fg: colors.inkMuted, bg: colors.surface },
+    "New Hire — Training": { fg: colors.blue, bg: colors.blueLight },
     approved: { fg: colors.green, bg: colors.greenLight },
     denied: { fg: colors.red, bg: colors.redLight },
   };
@@ -910,7 +911,7 @@ export default function NewRentals() {
   // ── Breakeven helper ───────────────────────────────────────────────────────
 
   const breakeven = (row: ProfitRow) => {
-    if (row.recommendation === "No Data") return null;
+    if (row.recommendation === "No Data" || row.recommendation === "New Hire — Training") return null;
     if (row.daily_net_with_rental >= 0) return null;
     const gap = 78 - row.daily_net_before_rental;
     if (gap <= 0) return null;
@@ -1148,7 +1149,7 @@ export default function NewRentals() {
               <tbody>
                 {evaluatedRows.map((row) => {
                   const be = breakeven(row);
-                  const isNoData = row.recommendation === "No Data";
+                  const isNoData = row.recommendation === "No Data" || row.recommendation === "New Hire — Training";
                   return (
                     <ReactFragment key={row.tech_ldap}>
                       <tr
