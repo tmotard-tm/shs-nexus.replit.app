@@ -1025,6 +1025,53 @@ export function registerVrmRoutes(): Router {
       const cleaned = ldaps.map((l: string) => (l || "").trim().toUpperCase()).filter(Boolean);
       const rows = await fetchProfitabilityCheck(cleaned);
 
+      // Surface a "No Data" placeholder for any requested LDAP that returned
+      // zero rows from Snowflake. Without this the evaluator silently returns
+      // {rows: []} for off-truck or new techs, which looks like a bug.
+      const returnedLdaps = new Set(rows.map((r: any) => String(r.tech_ldap || "").toUpperCase()));
+      const missing = cleaned.filter((l) => !returnedLdaps.has(l));
+      if (missing.length > 0) {
+        const nameLookup = new Map<string, string>();
+        try {
+          const nameRows = await db.execute(sql`
+            SELECT UPPER(tech_racfid) AS ldap,
+                   COALESCE(NULLIF(TRIM(first_name || ' ' || last_name), ''), tech_racfid) AS name
+            FROM all_techs
+            WHERE UPPER(tech_racfid) IN (${sql.join(missing.map((l) => sql`${l}`), sql`, `)})
+          `);
+          for (const r of (nameRows.rows ?? []) as any[]) {
+            if (r.ldap) nameLookup.set(String(r.ldap).toUpperCase(), r.name ?? null);
+          }
+        } catch (err: any) {
+          console.error("[VRM] no-data name lookup failed:", err.message);
+        }
+        for (const ldap of missing) {
+          rows.push({
+            tech_ldap: ldap,
+            tech_name: nameLookup.get(ldap) ?? null,
+            tenure_months: null,
+            scorecard_score: null,
+            completes: 0,
+            total_sos: 0,
+            total_revenue: 0,
+            labor_direct: 0,
+            labor_benefits: 0,
+            parts_cogs: 0,
+            parts_shipping: 0,
+            fuel_est: 0,
+            lookback_days: 90,
+            daily_revenue: 0,
+            daily_costs: 0,
+            daily_net_before_rental: 0,
+            daily_net_with_rental: 0,
+            daily_ppt_profit: 0,
+            recommendation: "No Data",
+            new_hire_exempt: false,
+            scorecard_exempt: false,
+          } as any);
+        }
+      }
+
       // Auto-save every evaluated tech with the date
       const checkRecords = rows.map((r: any) => ({
         techLdap: r.tech_ldap,
