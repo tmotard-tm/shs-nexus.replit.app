@@ -4796,6 +4796,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // GET single truck by truck number — used by UniversalVehiclePanel when the
+  // caller only has a vehicle number (e.g., Fleet Alignment mismatch rows).
+  // Tries raw param, then padded/unpadded canonical forms via storage helper.
+  app.get("/trucks/by-number/:truckNumber", async (req, res) => {
+    try {
+      const raw = String(req.params.truckNumber ?? "").trim();
+      const stripped = raw.replace(/^0+/, "");
+      const padded = stripped.padStart(6, "0");
+      const truck =
+        (await fleetScopeStorage.getTruckByNumber(raw)) ||
+        (await fleetScopeStorage.getTruckByNumber(padded)) ||
+        (await fleetScopeStorage.getTruckByNumber(stripped));
+      if (!truck) {
+        return res.status(404).json({ message: "Truck not found" });
+      }
+      res.json(truck);
+    } catch (error: any) {
+      console.error("[fs/trucks/by-number] error:", error);
+      res.status(500).json({ message: "Failed to fetch truck" });
+    }
+  });
+
   // GET single truck by ID
   app.get("/trucks/:id", async (req, res) => {
     try {

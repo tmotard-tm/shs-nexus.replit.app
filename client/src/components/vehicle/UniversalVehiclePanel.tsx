@@ -39,6 +39,13 @@ export interface UniversalVehiclePanelProps {
   vehicleId: string | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Alternative entry path: when the caller only knows the truck number
+   *  (e.g., Fleet Alignment mismatch rows), pass `vehicleNumber` and leave
+   *  `vehicleId` null. The panel resolves it to a fs_trucks row internally. */
+  vehicleNumber?: string | null;
+  /** Optional initial tab. Defaults to "overview". Useful for entry points
+   *  that surface a specific concern (e.g., Alignment → Assignments). */
+  defaultTab?: TabKey;
   /** Caller invoked when the user clicks "Update AMS". Optional — header button hides when omitted. */
   onUpdateAms?: (truckNumber: string, vin?: string) => void;
   /** True when the AMS panel is open elsewhere; suppresses outside-click + escape close. */
@@ -66,20 +73,28 @@ const TAB_DEFS: Array<{ key: TabKey; label: string; icon: typeof TruckIcon }> = 
 
 export function UniversalVehiclePanel({
   vehicleId,
+  vehicleNumber,
+  defaultTab = "overview",
   open,
   onOpenChange,
   onUpdateAms,
   amsOpen,
   fromPage = "dashboard",
 }: UniversalVehiclePanelProps) {
-  const { data: truck, isLoading: truckLoading } = useQuery<TruckPanelData>({
+  const idQuery = useQuery<TruckPanelData>({
     queryKey: ["/api/fs/trucks", vehicleId],
     enabled: !!vehicleId && open,
   });
+  const numQuery = useQuery<TruckPanelData>({
+    queryKey: ["/api/fs/trucks/by-number", vehicleNumber],
+    enabled: !vehicleId && !!vehicleNumber && open,
+  });
+  const truck = idQuery.data ?? numQuery.data;
+  const truckLoading = (!!vehicleId && idQuery.isLoading) || (!vehicleId && !!vehicleNumber && numQuery.isLoading);
 
   const { data: allVehiclesData } = useQuery<{ vehicles: VehicleInfo[] }>({
     queryKey: ["/api/fs/all-vehicles"],
-    enabled: !!vehicleId && open,
+    enabled: !!(vehicleId || vehicleNumber) && open,
   });
 
   const vehicleInfo = (() => {
@@ -165,7 +180,7 @@ export function UniversalVehiclePanel({
               </SheetDescription>
             </SheetHeader>
 
-            <Tabs defaultValue="overview" className="flex-1 flex flex-col overflow-hidden">
+            <Tabs defaultValue={defaultTab} className="flex-1 flex flex-col overflow-hidden">
               <TabsList className="mx-6 mt-3 grid grid-cols-6 h-9 shrink-0">
                 {TAB_DEFS.map(({ key, label, icon: Icon }) => (
                   <TabsTrigger
