@@ -547,6 +547,7 @@ export const PAGES: PageDefinition[] = [
     icon: Database,
     category: "management",
     permissionKey: "wmsEngine",
+    hideFromNav: true,
   },
   {
     key: "tpmsModule",

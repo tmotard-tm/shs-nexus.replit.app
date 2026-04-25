@@ -59,6 +59,7 @@ export default function Integrations() {
   const [samsaraEnabled, setSamsaraEnabled] = useState(true);
   const [parqEnabled, setParqEnabled] = useState(true);
   const [segnoEnabled, setSegnoEnabled] = useState(true);
+  const [wmsEnabled, setWmsEnabled] = useState(true);
   
   // Employee Roster state
   const [rosterSearch, setRosterSearch] = useState("");
@@ -97,6 +98,10 @@ export default function Integrations() {
 
   const { data: samsaraStatus, isLoading: samsaraStatusLoading } = useQuery<{ snowflake: boolean; liveApi: boolean; message: string }>({
     queryKey: ["/api/samsara/status"],
+  });
+
+  const { data: wmsStatus, isLoading: wmsStatusLoading } = useQuery<{ configured: boolean; message: string }>({
+    queryKey: ["/api/wms/status"],
   });
 
   // Employee Roster queries
@@ -469,10 +474,10 @@ export default function Integrations() {
   };
 
   const integrationStats = {
-    total: 7,
-    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled, samsaraEnabled].filter(Boolean).length,
-    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured, samsaraStatus?.snowflake].filter(Boolean).length,
-    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured, !samsaraStatus?.snowflake].filter(Boolean).length,
+    total: 8,
+    active: [holmanEnabled, amsEnabled, snowflakeEnabled, tpmsEnabled, parqEnabled, segnoEnabled, samsaraEnabled, wmsEnabled].filter(Boolean).length,
+    healthy: [true, amsStatus?.configured, snowflakeStatus?.configured, tpmsStatus?.configured, parqStatus?.configured, segnoStatus?.configured, samsaraStatus?.snowflake, wmsStatus?.configured].filter(Boolean).length,
+    errors: [false, !amsStatus?.configured, !snowflakeStatus?.configured, !tpmsStatus?.configured, !parqStatus?.configured, !segnoStatus?.configured, !samsaraStatus?.snowflake, !wmsStatus?.configured].filter(Boolean).length,
   };
 
   return (
@@ -1330,6 +1335,59 @@ export default function Integrations() {
                 <Switch
                   checked={segnoEnabled}
                   onCheckedChange={setSegnoEnabled}
+                />
+              </div>
+            </div>
+            {/* NetSuite WMS Engine Integration */}
+            <div className="flex items-center justify-between p-4 rounded-lg border border-border hover:bg-accent/50 transition-all">
+              <Link href="/wms-engine" data-testid="link-wms-engine-integration" className="flex items-center gap-4 flex-1 cursor-pointer group">
+                <div className="w-12 h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center">
+                  <Database className="h-6 w-6 text-emerald-500" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-lg group-hover:text-emerald-500 transition-colors">
+                      NetSuite WMS Engine
+                    </h3>
+                    {wmsStatusLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : wmsStatus?.configured ? (
+                      <Badge variant="default" className="flex items-center gap-1 text-xs">
+                        <CheckCircle className="h-3 w-3" />
+                        Connected
+                      </Badge>
+                    ) : (
+                      <Badge variant="destructive" className="flex items-center gap-1 text-xs">
+                        <XCircle className="h-3 w-3" />
+                        Not Configured
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Warehouse Management System — NetSuite truck locations and tech-to-truck assignments
+                  </p>
+                </div>
+              </Link>
+              <div className="flex items-center gap-4" onClick={(e) => e.stopPropagation()}>
+                <span className={`text-sm font-medium ${wmsStatus?.configured ? 'text-green-500' : 'text-muted-foreground'}`}>
+                  {wmsStatus?.configured ? 'healthy' : 'not configured'}
+                </span>
+                <Badge variant={wmsEnabled ? "default" : "secondary"} className="text-xs">
+                  {wmsEnabled ? "Active" : "Inactive"}
+                </Badge>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => toast({ title: "WMS Engine Test", description: "Use the WMS Engine page to test endpoints and verify connectivity" })}
+                  data-testid="button-test-wms"
+                >
+                  <TestTube className="h-4 w-4 mr-1" />
+                  Test
+                </Button>
+                <Switch
+                  checked={wmsEnabled}
+                  onCheckedChange={setWmsEnabled}
+                  data-testid="switch-wms-enabled"
                 />
               </div>
             </div>

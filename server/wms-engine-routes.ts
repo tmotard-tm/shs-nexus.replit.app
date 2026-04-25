@@ -103,6 +103,20 @@ export function registerWmsRoutes(requireAuth: any): Router {
 
   router.use(requireAuth);
 
+  router.get("/status", (_req, res) => {
+    try {
+      const configured = wmsEngineService.isConfigured();
+      res.json({
+        configured,
+        message: configured
+          ? "WMS Engine is configured"
+          : "WMS Engine is not configured. Set WMS_ENGINE_BASE_URL, WMS_ENGINE_AUTH_ENDPOINT, and WMS_ENGINE_AUTHORIZATION.",
+      });
+    } catch (err: any) {
+      res.json({ configured: false, message: err.message || "WMS Engine status check failed" });
+    }
+  });
+
   router.post("/trucks", async (req, res) => {
     try {
       const data = truckRequestSchema.parse(req.body);
