@@ -7636,9 +7636,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { getSchedulerStatus, getPendingDistrictCostCenterNotification } = await import("./sync-scheduler");
       const status = getSchedulerStatus();
       const pending = getPendingDistrictCostCenterNotification();
+      // Compute the next scheduled auto-seed time. The scheduler ticks roughly
+      // every 60s and runs the seed once the throttle (intervalMs since the last
+      // successful run) has elapsed. If we've never run, the next tick will
+      // pick it up — surface that as `null` so the UI can render "within the
+      // next minute".
+      const nextAutoSeed = status.lastDistrictCostCenterSeed
+        ? new Date(
+            new Date(status.lastDistrictCostCenterSeed).getTime() +
+              status.districtCostCenterSeedIntervalMs,
+          ).toISOString()
+        : null;
       res.json({
         lastAutoSeed: status.lastDistrictCostCenterSeed,
         intervalMs: status.districtCostCenterSeedIntervalMs,
+        nextAutoSeed,
         newDistricts: pending,
       });
     } catch (error) {
