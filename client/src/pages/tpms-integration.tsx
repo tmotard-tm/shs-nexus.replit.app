@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { MainContent } from "@/components/layout/main-content";
 import { useAuth } from "@/hooks/use-auth";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import {
   CheckCircle, XCircle, Loader2, RefreshCw, Search,
   Database, Users, Truck, Activity, Server, Hash,
@@ -61,6 +62,7 @@ export default function TpmsIntegration() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const { lookupCostCenter } = useCostCenters();
   const [activeTab, setActiveTab] = useState("overview");
   const [lookupInput, setLookupInput] = useState("");
   const [lookupResult, setLookupResult] = useState<any>(null);
@@ -456,7 +458,14 @@ export default function TpmsIntegration() {
                                 </div>
                                 <div className="flex justify-between py-1 border-b">
                                   <span className="text-muted-foreground">District</span>
-                                  <span className="font-medium">{lookupResult.techInfo?.districtNo || lookupResult.data?.districtNo || "N/A"}</span>
+                                  <span className="font-medium">
+                                    {lookupResult.techInfo?.districtNo || lookupResult.data?.districtNo || "N/A"}
+                                    {(() => {
+                                      const d = lookupResult.techInfo?.districtNo || lookupResult.data?.districtNo;
+                                      const cc = d ? lookupCostCenter(d) : undefined;
+                                      return cc ? <span className="text-muted-foreground"> · CC {cc}</span> : null;
+                                    })()}
+                                  </span>
                                 </div>
                                 <div className="flex justify-between py-1">
                                   <span className="text-muted-foreground">Phone</span>

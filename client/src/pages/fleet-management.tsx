@@ -31,6 +31,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, fetchZipCoords, haversineDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
@@ -206,6 +207,7 @@ export default function FleetManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'developer' || user?.role === 'admin';
+  const { lookupCostCenter } = useCostCenters();
   
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -2283,7 +2285,12 @@ export default function FleetManagement() {
                                 <span>Location</span>
                               </div>
                               <p className="font-medium">{vehicle.city}, {vehicle.state}</p>
-                              <p className="text-muted-foreground">{vehicle.region} / {vehicle.district}</p>
+                              <p className="text-muted-foreground">
+                                {vehicle.region} / {vehicle.district}
+                                {lookupCostCenter(vehicle.district) && (
+                                  <span className="ml-1">· CC {lookupCostCenter(vehicle.district)}</span>
+                                )}
+                              </p>
                               {distanceInfo && typeof distanceScore === 'number' && Number.isFinite(distanceScore) && (
                                 <p className={`text-xs font-medium ${distanceInfo.color}`}>
                                   {Math.round(distanceScore).toLocaleString()} mi · ~{formatDriveTime(distanceScore)}
@@ -2433,7 +2440,12 @@ export default function FleetManagement() {
                     </div>
                     <div>
                       <Label className="text-xs text-muted-foreground">Region / District</Label>
-                      <p>{selectedVehicle.region} / {selectedVehicle.district}</p>
+                      <p>
+                        {selectedVehicle.region} / {selectedVehicle.district}
+                        {lookupCostCenter(selectedVehicle.district) && (
+                          <span className="text-muted-foreground"> · CC {lookupCostCenter(selectedVehicle.district)}</span>
+                        )}
+                      </p>
                     </div>
                     <div>
                       <Label className="text-xs text-muted-foreground">Odometer</Label>
@@ -3290,7 +3302,7 @@ export default function FleetManagement() {
                             onMouseDown={e => { e.preventDefault(); selectTechSuggestion(tech); }}
                           >
                             <span className="font-medium">{tech.techName || `${tech.firstName ?? ""} ${tech.lastName ?? ""}`.trim()}</span>
-                            <span className="text-xs text-muted-foreground font-mono shrink-0">{(tech.techRacfid || tech.racfId || "").toUpperCase()}{tech.districtNo ? ` · D${tech.districtNo}` : ""}</span>
+                            <span className="text-xs text-muted-foreground font-mono shrink-0">{(tech.techRacfid || tech.racfId || "").toUpperCase()}{tech.districtNo ? ` · D${tech.districtNo}` : ""}{tech.districtNo && lookupCostCenter(tech.districtNo) ? ` · CC ${lookupCostCenter(tech.districtNo)}` : ""}</span>
                           </button>
                         ))}
                       </div>
@@ -4307,7 +4319,10 @@ export default function FleetManagement() {
                               <Badge className="bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950 dark:text-purple-300 text-xs h-5 border">Unassigned</Badge>
                             )}
                             {'districtNo' in t && t.districtNo && (
-                              <Badge variant="outline" className="text-xs h-5">District {t.districtNo}</Badge>
+                              <Badge variant="outline" className="text-xs h-5">
+                                District {t.districtNo}
+                                {lookupCostCenter(t.districtNo) && ` · CC ${lookupCostCenter(t.districtNo)}`}
+                              </Badge>
                             )}
                           </div>
                           <div className="flex items-center gap-3 mt-1 flex-wrap">

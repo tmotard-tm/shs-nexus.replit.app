@@ -32,6 +32,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management" component={Dashboard} />
             <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
             <Route path="/vehicle-rental-management/active-rentals" component={ActiveRentalsDashboard} />
+            <Route path="/vehicle-rental-management/tech-population" component={WipPlaceholder} />
             <Route path="/vehicle-rental-management/escalations" component={Escalations} />
             <Route path="/vehicle-rental-management/dca-review" component={DCAReview} />
             <Route path="/vehicle-rental-management/exception-cases" component={ExceptionCases} />

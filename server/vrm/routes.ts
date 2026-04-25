@@ -874,7 +874,6 @@ export function registerVrmRoutes(): Router {
       const digits = rawQ.replace(/\D/g, "");
       const truckNormalized = digits ? (digits.replace(/^0+/, "") || "0") : "";
       const like = `%${qLower}%`;
-
       // Two-source search: TPMS profiles (current truck assignments) + all_techs
       // roster (active employees who may not currently hold a truck in TPMS).
       // TPMS results take priority; roster results fill the gap for active techs

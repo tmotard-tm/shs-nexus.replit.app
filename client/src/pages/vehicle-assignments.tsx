@@ -18,6 +18,7 @@ import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import type { AggregatedVehicleAssignment, AllTech } from "@shared/schema";
 
 interface ServiceStatus {
@@ -31,6 +32,7 @@ interface ServiceStatus {
 
 export default function VehicleAssignments() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [districtFilter, setDistrictFilter] = useState("all");
@@ -409,7 +411,12 @@ export default function VehicleAssignments() {
                                 ? `${assignment.vehicleYear} ${assignment.vehicleMake} ${assignment.vehicleModel}`
                                 : assignment.holmanVehicleNumber || '-'}
                             </td>
-                            <td className="p-3 text-sm">{assignment.districtNo || '-'}</td>
+                            <td className="p-3 text-sm">
+                              {assignment.districtNo || '-'}
+                              {assignment.districtNo && lookupCostCenter(assignment.districtNo) && (
+                                <div className="text-xs text-muted-foreground">CC {lookupCostCenter(assignment.districtNo)}</div>
+                              )}
+                            </td>
                             <td className="p-3">{getStatusBadge(assignment.assignmentStatus)}</td>
                             <td className="p-3"><DataSourceIndicator sources={assignment.dataSources} /></td>
                             <td className="p-3">
@@ -485,7 +492,12 @@ export default function VehicleAssignments() {
                     <p><span className="font-medium">Name:</span> {selectedAssignment.techName || '-'}</p>
                     <p><span className="font-medium">Enterprise ID:</span> {selectedAssignment.techRacfid}</p>
                     <p><span className="font-medium">Employee ID:</span> {selectedAssignment.employeeId || '-'}</p>
-                    <p><span className="font-medium">District:</span> {selectedAssignment.districtNo || '-'}</p>
+                    <p>
+                      <span className="font-medium">District:</span> {selectedAssignment.districtNo || '-'}
+                      {selectedAssignment.districtNo && lookupCostCenter(selectedAssignment.districtNo) && (
+                        <span className="text-muted-foreground"> · CC {lookupCostCenter(selectedAssignment.districtNo)}</span>
+                      )}
+                    </p>
                     <p><span className="font-medium">Employment Status:</span> {selectedAssignment.employmentStatus || '-'}</p>
                   </div>
                 </div>
