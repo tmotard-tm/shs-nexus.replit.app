@@ -814,6 +814,49 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- 3B.4-bootstrap (resequenced before 2B.1.b per Kirk 2026-04-25 Option C):
+-- Coverage audit table. Classifies each fs_trucks.truck_number against the
+-- two upstream identity sources (AMS Snowflake REPLIT_ALL_VEHICLES and
+-- Holman Snowflake HOLMAN_VEHICLES). Drives the 2B.1.b backfill plan.
+-- "coverage" enum: 'ams_only' | 'holman_only' | 'both' | 'ghost'
+-- "model_year_source" enum: 'ams_snowflake' | 'ams_api' | 'holman' | 'none'
+CREATE TABLE IF NOT EXISTS "fs_2b1_coverage_audit" (
+  "truck_number" text PRIMARY KEY,
+  "fs_truck_id" varchar NOT NULL,
+  "coverage" text NOT NULL,
+  "ams_vin" varchar(20),
+  "ams_make_name" text,
+  "ams_model_name" text,
+  "ams_model_year" text,
+  "ams_license_plate" varchar(30),
+  "holman_vin" varchar(20),
+  "holman_license_plate" varchar(30),
+  "holman_vehicle_number" text,
+  "model_year_source" text NOT NULL DEFAULT 'none',
+  "missing_required_fields" text,
+  "audited_at" timestamp NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "fs_2b1_coverage_audit_coverage_idx"
+  ON "fs_2b1_coverage_audit"("coverage");
+
+-- Forward-compat: ghost triage table (empty per 3B.4-bootstrap audit, but
+-- created so future drift detection can populate it without schema change).
+CREATE TABLE IF NOT EXISTS "fs_2b1_ghost_triage" (
+  "truck_number" text PRIMARY KEY,
+  "fs_truck_id" varchar NOT NULL,
+  "last_seen_at" timestamp,
+  "fs_vin" varchar(20),
+  "fs_license_plate" varchar(30),
+  "fs_holman_vehicle_ref" varchar,
+  "fs_last_call_date" timestamp,
+  "fs_last_updated_at" timestamp,
+  "disposition" text NOT NULL DEFAULT 'pending',
+  "disposition_notes" text,
+  "decided_by" text,
+  "decided_at" timestamp,
+  "created_at" timestamp NOT NULL DEFAULT now()
+);
+
 -- 2B.1.b audit log: orphan-row backfill provenance (per Kirk's directive).
 -- Records every vehicles row created during 2B.1.b for post-migration review.
 CREATE TABLE IF NOT EXISTS "fs_2b1_orphan_backfill_audit" (

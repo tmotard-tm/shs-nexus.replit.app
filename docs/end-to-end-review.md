@@ -322,6 +322,47 @@ Before proceeding to 2B.1.d–f (irreversible drops), verify ALL of:
 2. **FK integrity:** every `fs_actions.truck_id`, `fs_tracking_records.truck_id`, and `fs_truck_status_events.truck_id` value still exists in `fs_truck_state.id` (since sidecar preserves the original `fs_trucks.id` UUIDs).
 3. **Status projection sample diff:** ~50-row sample comparing `fs_trucks.status` vs `fs_truck_state.status` — must be byte-identical post-copy.
 4. **Smoke test (2+ FS callers reading through the future VIEW shape):** at minimum `fleet-scope/Dashboard.tsx` and `fleet-scope/EditTruck.tsx`. (At 2B.1.c the VIEW doesn't exist yet, so smoke = simulating the VIEW SELECT shape directly against `fs_truck_state JOIN vehicles` and confirming row shape matches today's `SELECT * FROM fs_trucks`.)
+5. **Vehicles NOT-NULL invariants intact (added 2026-04-25):** `SELECT COUNT(*) FROM vehicles WHERE vin IS NULL OR model_year IS NULL OR make_name IS NULL OR model_name IS NULL` must equal **0**. Phase 3 hydration (see "Resequencing decision" below) is required to satisfy this before 2B.1.b can resume.
+6. **Bijection (added 2026-04-25, post-architect-review):** zero duplicate canonical `vehicle_number` in vehicles; zero duplicate canonical `truck_number` in fs_trucks; every fs_trucks row has exactly 1 matching vehicles row by `LPAD(_,6,'0')` join.
+7. **Full-row checksum parity (added 2026-04-25, post-architect-review):** for the 88 common columns between fs_trucks and fs_truck_state, every fs_trucks row's md5 row-hash equals its fs_truck_state.id-paired row-hash. Drift count must be 0.
+8. **Hydration-source freshness (added 2026-04-25, post-architect-review):** every `holman_vehicles_cache` row used for bootstrap was refreshed within the past hour at hydration time. Recorded for audit; a stale-cache hydration would require re-run after a fresh HolmanSync.
+
+#### 2B.1.c GATE EXECUTION (2026-04-25) — ALL PASSED
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Row-count parity | fs_trucks=333, fs_truck_state⨯vehicles=333 ✅ |
+| 2 | FK integrity (FS child tables) | fs_actions: 730/0 orphans; fs_tracking_records: 0/0; fs_truck_status_events: 75/0 ✅ |
+| 3 | Status sample diff (50 rows) | 0 mismatches ✅ |
+| 4 | Smoke (simulated VIEW shape) | view_cols=92 = trucks_cols=92 (identical projection) ✅ |
+| 5 | vehicles NOT-NULL invariants | violations=0 ✅ |
+| 6 | Bijection | 0 dupes, 333/333 unique 1:1 ✅ |
+| 7 | Full-row checksum parity (88 cols) | 333 matching, 0 drift, 0 missing ✅ |
+| 8 | Hydration-source freshness | all 333 cache entries <6 min old at T0 ✅ |
+
+**Open decision for Kirk before 2B.1.d (architect-flagged HIGH):**
+The doc currently calls for a ~1-day pause after 2B.1.c for live verification before the irreversible drops in 2B.1.e/f. During that pause, writers still target `fs_trucks` (the storage interface migration is 2B.1.d), so `fs_truck_state` will progressively drift from `fs_trucks`. Choose one:
+
+- **D-α (skip pause, proceed immediately to 2B.1.d):** zero drift window. Loses live verification time but the 8-check gate above + transaction-wrapped scripts make verification high-confidence already.
+- **D-β (take pause + write-freeze on fs_trucks):** zero drift, but breaks live FS Dashboard / EditTruck for analysts during the pause.
+- **D-γ (take pause + re-run the copy+gate script immediately before 2B.1.d):** drift caught and re-mirrored at cutover. Simple, reversible, recommended.
+- **D-δ (take pause + install temporary trigger mirroring writes from fs_trucks → fs_truck_state):** most robust but adds code that gets thrown away at 2B.1.f.
+
+**Recommendation:** D-γ. Re-runs are cheap, gates are deterministic.
+
+#### Resequencing decision (2026-04-25, Kirk) — Option C
+
+**Trigger:** 2B.1.a verification revealed `vehicles` is empty (0 rows) while `fs_trucks` has 333 rows. The original D2 backfill plan would have inserted 256+ rows that violate `vehicles` NOT NULL constraints on `vin`, `model_year`, `make_name`, `model_name` (fs_trucks has `vin` for only 77 of 333 trucks and has no `model_year`/`make_name`/`model_name` columns at all).
+
+**Decision:** Pause 2B.1 after 2B.1.a. Pull Phase 3B.4–3B.6 forward (Holman/AMS Snowflake hydration only — webhook/outbox/tiered-read parts stay in Phase 3 proper) to populate `vehicles` authoritatively from upstream sources. Then resume 2B.1.b with a clean SoR.
+
+**New global sequence:** 2B.1.a (DONE) → 3B.4-bootstrap → 3B.5-bootstrap → 3B.6-bootstrap → 2B.1.b → 2B.1.c gate (incl. new check #5) → 2B.1.d–g.
+
+**Constraints (Kirk):**
+1. **Plan doc reflects new sequencing** (this section).
+2. **Ghost subset triage is mandatory.** After 3B.4–3B.6 hydration completes, identify the FS-only "ghost" subset — `fs_trucks` rows with no Holman/AMS match. Do **NOT** auto-create `vehicles` rows for these. Produce a triage list with `truck_number`, `last_seen_at`, and any FS-side identifiers (vin, license_plate, holman_vehicle_ref, last_call_date, last_updated_at). The list goes into a new table `fs_2b1_ghost_triage` for analyst review and is surfaced via a small admin page. Resolution paths per ghost row: (a) analyst supplies missing identity → manual `vehicles` insert; (b) row is decommissioned/invalid → analyst marks `disposition='archive'` and the fs_trucks row is excluded from 2B.1.b backfill (and later from 2B.1.f VIEW via WHERE clause).
+3. **Zero NOT-NULL violations gate.** 2B.1.b cannot start until check #5 above returns 0 *AND* every non-ghost `fs_trucks.truck_number` has a matching `vehicles.vehicle_number` row.
+4. **Preserve in-flight 2B.1.a artifacts** during the pause. `fs_truck_state` table, `fs_2b1_orphan_backfill_audit` table, and `fs_trucks.vehicle_id` bridge column all stay in place untouched.
 
 ### Phase 3 — Sync architecture (~14.5d)
 
@@ -348,8 +389,12 @@ Before proceeding to 2B.1.d–f (irreversible drops), verify ALL of:
 | 3B.2 | Samsara outbound writes + optimistic-event TTL + vendor-wins conflict | 1d |
 | 3B.3 | Forced-refresh endpoint + audit + per-user sub-bucket | 0.5d |
 | 3B.4 | Holman / AMS Snowflake-coverage audit + per-field config | 1d |
+| 3B.4-bootstrap | **(DONE 2026-04-25)** Coverage audit. Snowflake-mirror coverage was insufficient (REPLIT_ALL_VEHICLES has no year column at all; 0/333 rows had model_year). **Local `holman_vehicles_cache` (Holman API mirror, refreshed each HolmanSync run) provides 100% coverage for all NOT NULL fields**: vin 333/333, make 333/333, model 333/333, model_year 333/333, plate 332/333. **0 ghosts**. Audit detail in `fs_2b1_coverage_audit`. | 0.25d → done |
 | 3B.5 | Holman webhook + outbox + opt-in tiered reads | 1.5d |
+| 3B.5-bootstrap | **(revised after 3B.4-bootstrap finding)** Single INSERT from `holman_vehicles_cache` → `vehicles` for the 333 fs_trucks-matched rows. Provenance `'3B.5-bootstrap holman_vehicles_cache'` written to `fs_2b1_orphan_backfill_audit`. AMS Snowflake & AMS API hydration (3B.6-bootstrap) **no longer needed** — Holman cache covers everything. | 0.1d |
 | 3B.6 | AMS webhook + outbox + opt-in tiered reads | 1d |
+| 3B.6-bootstrap | **(SKIPPED — not needed after 3B.4-bootstrap finding.)** | 0d |
+| 3B.6-ghost-triage | **(SKIPPED — 0 ghosts found.)** Empty `fs_2b1_ghost_triage` table created for forward compatibility (in case future drift introduces ghosts). | 0d |
 | 3B.7 | WMS adapter (3-layer) for vehicles/assignments + PMF live-only adapter | 1d |
 
 ### Totals
