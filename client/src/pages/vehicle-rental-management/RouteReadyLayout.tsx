@@ -4,13 +4,13 @@ import { RouteReadyTopbar } from "./components/route-ready-topbar";
 import { WipPlaceholder } from "./components/wip-placeholder";
 import { colors, navItems } from "./lib/constants";
 import Dashboard from "./pages/Dashboard";
-import TechPopulation from "./pages/TechPopulation";
 import Escalations from "./pages/Escalations";
 import DCAReview from "./pages/DCAReview";
 import ExceptionCases from "./pages/ExceptionCases";
 import NewRentals from "./pages/NewRentals";
 import NewRentalFullLog from "./pages/NewRentalFullLog";
 import RentalRepairTracker from "./pages/RentalRepairTracker";
+import ActiveRentalsDashboard from "./pages/ActiveRentalsDashboard";
 
 function getPageTitle(path: string): string {
   if (path === "/vehicle-rental-management" || path === "/vehicle-rental-management/") return "Dashboard";
@@ -31,7 +31,7 @@ export default function RouteReadyLayout() {
           <Switch>
             <Route path="/vehicle-rental-management" component={Dashboard} />
             <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
-            <Route path="/vehicle-rental-management/tech-population" component={TechPopulation} />
+            <Route path="/vehicle-rental-management/active-rentals" component={ActiveRentalsDashboard} />
             <Route path="/vehicle-rental-management/escalations" component={Escalations} />
             <Route path="/vehicle-rental-management/dca-review" component={DCAReview} />
             <Route path="/vehicle-rental-management/exception-cases" component={ExceptionCases} />

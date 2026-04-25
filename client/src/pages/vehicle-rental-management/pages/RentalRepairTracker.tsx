@@ -335,6 +335,9 @@ interface RepairForm {
   rentalReturnDate: string;
   routeCleared: boolean;
   byovEnrolled: boolean;
+  // BYOV type — "" | "Temporary" | "Permanent" | "Declined" | "Accepted" (legacy).
+  // Drives the "Temp BYOV" / "Perm BYOV" pill and the auto-enrolled flag on save.
+  byovStatus: string;
   // Manual Stage override — blank means auto-derivation still wins for this row.
   stageOverride: string;
   stageOverrideSub: string;
@@ -358,6 +361,7 @@ function entryToForm(entry: RepairTrackerEntry): RepairForm {
     rentalReturnDate: entry.rentalReturnDate ?? "",
     routeCleared: entry.routeCleared ?? false,
     byovEnrolled: entry.byovEnrolled ?? false,
+    byovStatus: entry.byovStatus ?? "",
     stageOverride: entry.stageOverride ?? "",
     stageOverrideSub: entry.stageOverrideSub ?? "",
   };
@@ -380,6 +384,7 @@ const EMPTY_FORM: RepairForm = {
   rentalReturnDate: "",
   routeCleared: false,
   byovEnrolled: false,
+  byovStatus: "",
   stageOverride: "",
   stageOverrideSub: "",
 };
@@ -1147,12 +1152,20 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
 
       {!linkMissing && !data.vehicle && (
         // AMS comments loaded, but the per-VIN snapshot call didn't return a
-        // vehicle record — show a compact inline note (no alarming banner) and
-        // link out to Fleet Panel where the full snapshot can be edited.
-        <div style={{ padding: "10px 12px", backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 6, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-            AMS snapshot isn't available for this VIN right now. Comments below are current.
-          </span>
+        // vehicle record. Show the actual AMS diagnostic so we can see WHY —
+        // 404 (record missing), 500 (upstream issue), JSON parse failure,
+        // search-fallback already tried, etc.
+        <div style={{ padding: "10px 12px", backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, flex: 1 }}>
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+              AMS snapshot isn't available for this VIN right now. Comments below are current.
+            </span>
+            {(data as any).snapshotDiag && (
+              <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, wordBreak: "break-word" }}>
+                Diag: {(data as any).snapshotDiag}
+              </span>
+            )}
+          </div>
           {truckNumber && (
             <a
               href={`/fleet-management?openTruck=${encodeURIComponent(truckNumber)}`}
@@ -1170,6 +1183,14 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
             </a>
           )}
         </div>
+      )}
+
+      {!linkMissing && data.vehicle && (data as any).snapshotSource === "search-fallback" && (
+        // Snapshot was recovered via the search fallback — small footnote so
+        // staff know the data path differed from the usual direct lookup.
+        <p style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, margin: "6px 0 0" }}>
+          Snapshot recovered via /vehicles?vin search (direct GET returned an error for this VIN).
+        </p>
       )}
 
       <SectionHeading style={{ marginTop: 24, marginBottom: 10 }}>
@@ -1502,7 +1523,57 @@ function UnifiedPanel({
         fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}`, { credentials: "include" }),
         fetch(`/api/ams/vehicles/${encodeURIComponent(vin)}/comments`, { credentials: "include" }),
       ]);
-      const vehicle = vehicleRes.ok ? await vehicleRes.json().catch(() => null) : null;
+
+      // Capture the actual snapshot diagnostic (status + error body) so we can
+      // surface it in the UI when the snapshot doesn't return JSON.
+      let vehicle: any = null;
+      let snapshotDiag = "";
+      let snapshotSource: "direct" | "search-fallback" | "none" = "none";
+      if (vehicleRes.ok) {
+        vehicle = await vehicleRes.json().catch(() => null);
+        if (vehicle) {
+          snapshotSource = "direct";
+        } else {
+          snapshotDiag = `HTTP ${vehicleRes.status} returned but body did not parse as JSON`;
+        }
+      } else {
+        const body = await vehicleRes.text().catch(() => "");
+        snapshotDiag = `direct GET /vehicles/${vin}: HTTP ${vehicleRes.status}${body ? ` — ${body.slice(0, 200)}` : ""}`;
+      }
+
+      // Snapshot fallback: AMS exposes a SEARCH endpoint at /api/ams/vehicles?vin=X
+      // which hits a different upstream AMS handler than the path-param GET.
+      // When the path-param call returns 404/500 for a VIN, the search call
+      // often still finds it (we've seen this on VINs whose vehicle row appears
+      // to be misindexed but is reachable via search). Try the fallback.
+      if (!vehicle) {
+        try {
+          const fb = await fetch(`/api/ams/vehicles?vin=${encodeURIComponent(vin)}&limit=1`, { credentials: "include" });
+          if (fb.ok) {
+            const fbBody = await fb.json().catch(() => null);
+            const rows: any[] = Array.isArray(fbBody)
+              ? fbBody
+              : (fbBody?.data ?? fbBody?.vehicles ?? fbBody?.results ?? fbBody?.items ?? []);
+            if (rows.length > 0) {
+              // Match on VIN to be safe — search may return adjacent matches.
+              const match = rows.find((r) => String(r?.VIN ?? r?.vin ?? "").toUpperCase() === vin) ?? rows[0];
+              if (match) {
+                vehicle = match;
+                snapshotSource = "search-fallback";
+                snapshotDiag = `recovered via /vehicles?vin=${vin} after direct GET failed`;
+              }
+            } else {
+              snapshotDiag += ` · search /vehicles?vin=${vin} returned 0 rows`;
+            }
+          } else {
+            const fbBody = await fb.text().catch(() => "");
+            snapshotDiag += ` · search /vehicles?vin=${vin}: HTTP ${fb.status}${fbBody ? ` — ${fbBody.slice(0, 120)}` : ""}`;
+          }
+        } catch (e: any) {
+          snapshotDiag += ` · search fallback threw: ${e?.message ?? "unknown"}`;
+        }
+      }
+
       const rawComments = commentsRes.ok ? await commentsRes.json().catch(() => []) : null;
       const comments: any[] = Array.isArray(rawComments)
         ? rawComments
@@ -1512,7 +1583,15 @@ function UnifiedPanel({
       // returned real data — the snapshot and comments are independent, so a
       // partial success is a successful AMS link, just missing one half.
       if (vehicle || rawComments !== null) {
-        return { found: true, linkMissing: false, vin, vehicle, comments };
+        return {
+          found: true,
+          linkMissing: false,
+          vin,
+          vehicle,
+          comments,
+          snapshotSource,
+          snapshotDiag: snapshotDiag || undefined,
+        } as any;
       }
       // Neither came back — truly unreachable for this VIN right now.
       return {
@@ -1521,7 +1600,7 @@ function UnifiedPanel({
         vin,
         vehicle: null,
         comments: [],
-        reason: `VIN ${vin} not reachable in AMS (snapshot: HTTP ${vehicleRes.status}, comments: HTTP ${commentsRes.status})`,
+        reason: `VIN ${vin} not reachable in AMS (snapshot: HTTP ${vehicleRes.status}, comments: HTTP ${commentsRes.status}). ${snapshotDiag}`,
       };
     },
     // Always refetch on mount/open so staff see the latest shop notes from AMS
@@ -1589,22 +1668,6 @@ function UnifiedPanel({
     }
   };
 
-  const quickPatchMutation = useMutation({
-    mutationFn: async (payload: Record<string, unknown>) => {
-      const r = await apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
-      if (!r.ok) throw new Error(await r.text());
-      return r.json();
-    },
-    onSuccess: async () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
-      await refreshCurrentEntry();
-      toast({ title: "Case updated" });
-    },
-    onError: (e: any) => {
-      toast({ title: "Update failed", description: e.message, variant: "destructive" });
-    },
-  });
-
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
@@ -1623,7 +1686,16 @@ function UnifiedPanel({
         rentalReturned: form.rentalReturned || null,
         rentalReturnDate: form.rentalReturned === "Yes" ? (form.rentalReturnDate || null) : null,
         routeCleared: form.routeCleared,
-        byovEnrolled: form.byovEnrolled,
+        // Derive enrolled boolean from the BYOV type so the old column stays
+        // consistent without asking the user to set it separately.
+        byovEnrolled:
+          form.byovStatus === "Temporary" ||
+          form.byovStatus === "Permanent" ||
+          form.byovStatus === "Accepted", // legacy
+        byovStatus: form.byovStatus || null,
+        byovDecisionDate: form.byovStatus ? new Date().toISOString().slice(0, 10) : null,
+        stageOverride: form.stageOverride || null,
+        stageOverrideSub: form.stageOverride && form.stageOverrideSub ? form.stageOverrideSub : null,
       };
       if (isEdit) {
         return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
@@ -1662,17 +1734,11 @@ function UnifiedPanel({
     marginBottom: 6,
   };
 
-  const workflowNextStep = currentEntry ? ({
-    "Needs Tech Call": "Open Tech Outreach and log the first contact.",
-    "BYOV Decision": "Use Tech Outreach to record the BYOV decision.",
-    "Awaiting Rental Return": "Confirm the rental return and stamp the return date.",
-    "Awaiting Route Clear": "Mark Route Cleared once routing confirms the tech is off rental.",
-    "In Repair": "Use Shop Contact to capture the latest status or ETA.",
-    "Ready for Pickup": "Mark Back in Van, then Mark On Road when the tech is working again.",
-    "Complete": "Close the case when the audit trail is finished.",
-  }[currentEntry.stage] ?? "Review the current case state.") : "—";
-
-  const compactActionBtnStyle: React.CSSProperties = {
+  // Case Status card uses a single CTA (Open Tech Outreach). All the other
+  // shortcut buttons (Move to In Progress/Completed, compactWorkflowAction,
+  // Route Turned Back On, workflowNextStep hint) were removed — they either
+  // duplicated the Stage picker (now canonical) or the Tracking toggles.
+  const primaryCtaBtnStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans,
     fontWeight: 600,
     fontSize: 14,
@@ -1681,50 +1747,13 @@ function UnifiedPanel({
     border: "none",
     borderRadius: 8,
     padding: "12px 18px",
-    cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
-    opacity: quickPatchMutation.isPending ? 0.6 : 1,
+    cursor: "pointer",
     width: "100%",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
   };
-
-  const compactWorkflowAction = currentEntry ? (() => {
-    switch (currentEntry.stage) {
-      case "Needs Tech Call":
-        return { label: "Open Tech Outreach", run: () => setPanelTab("tech_outreach") };
-      case "BYOV Decision":
-        return { label: "Record BYOV Decision", run: () => setPanelTab("tech_outreach") };
-      case "Awaiting Rental Return":
-        return {
-          label: "Mark Rental Returned",
-          run: () => quickPatchMutation.mutate({
-            rentalReturned: "Yes",
-            rentalReturnDate: new Date().toISOString().slice(0, 10),
-          }),
-        };
-      case "Awaiting Route Clear":
-        return {
-          label: "Mark Route Cleared",
-          run: () => quickPatchMutation.mutate({
-            routeCleared: true,
-            routeClearedDate: new Date().toISOString().slice(0, 10),
-          }),
-        };
-      case "In Repair":
-        return {
-          label: "Mark Ready for Pickup",
-          run: () => quickPatchMutation.mutate({ mainStatus: "On Road" }),
-        };
-      case "Ready for Pickup":
-        return currentEntry.techStatus === "Back in Van"
-          ? { label: "Mark On Road", run: () => quickPatchMutation.mutate({ techStatus: "On Road" }) }
-          : { label: "Mark Back in Van", run: () => quickPatchMutation.mutate({ techStatus: "Back in Van" }) };
-      default:
-        return null;
-    }
-  })() : null;
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", justifyContent: "flex-end" }}>
@@ -1825,85 +1854,96 @@ function UnifiedPanel({
             />
           ) : (
           <>
-          {isEdit && currentEntry && (
-            <>
-              <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-                Case Status
-              </SectionHeading>
+          <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
+            Case Status
+          </SectionHeading>
 
-              <div style={{ padding: 16, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 18 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                  <div style={labelStyle}>Stage</div>
-                  <StagePill stage={currentEntry.stage} />
+          <div style={{ padding: 16, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 18 }}>
+            {/* Stage picker — manually chosen stage wins over auto-derivation.
+                Grouped by section so the user picks both at once. */}
+            <div style={{ marginBottom: 10 }}>
+              <label style={LABEL_STYLE}>Stage</label>
+              <select
+                value={form.stageOverride}
+                onChange={(e) => {
+                  const newStage = e.target.value;
+                  const allowedSubs = newStage
+                    ? ((() => {
+                        for (const sec of Object.values(MANUAL_STAGES)) {
+                          if (newStage in sec) return sec[newStage] as readonly string[];
+                        }
+                        return [] as readonly string[];
+                      })())
+                    : [];
+                  setForm((f) => ({
+                    ...f,
+                    stageOverride: newStage,
+                    stageOverrideSub: allowedSubs.includes(f.stageOverrideSub) ? f.stageOverrideSub : "",
+                  }));
+                }}
+                style={{ ...INPUT_STYLE, cursor: "pointer" }}
+                data-testid="select-stage-override"
+              >
+                <option value="">— auto-detect —</option>
+                {(Object.keys(MANUAL_STAGES) as Array<keyof typeof MANUAL_STAGES>).map((section) => (
+                  <optgroup key={section} label={section}>
+                    {Object.keys(MANUAL_STAGES[section]).map((stage) => (
+                      <option key={stage} value={stage}>{stage}</option>
+                    ))}
+                  </optgroup>
+                ))}
+              </select>
+            </div>
+            {(() => {
+              const allowedSubs = form.stageOverride
+                ? ((() => {
+                    for (const sec of Object.values(MANUAL_STAGES)) {
+                      if (form.stageOverride in sec) return sec[form.stageOverride] as readonly string[];
+                    }
+                    return [] as readonly string[];
+                  })())
+                : [];
+              if (allowedSubs.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 10 }}>
+                  <label style={LABEL_STYLE}>Sub-status</label>
+                  <select
+                    value={form.stageOverrideSub}
+                    onChange={(e) => set("stageOverrideSub", e.target.value)}
+                    style={{ ...INPUT_STYLE, cursor: "pointer" }}
+                    data-testid="select-stage-override-sub"
+                  >
+                    <option value="">— none —</option>
+                    {allowedSubs.map((s) => <option key={s} value={s}>{s}</option>)}
+                  </select>
                 </div>
-                <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, marginBottom: 14 }}>
-                  {workflowNextStep}
-                </div>
-                {currentEntry.section === "Action Needed" ? (
-                  <button
-                    onClick={() => quickPatchMutation.mutate({ mainStatus: "Repairing", techContacted: true })}
-                    disabled={quickPatchMutation.isPending}
-                    style={compactActionBtnStyle}
-                  >
-                    Move to In Progress <span aria-hidden>→</span>
-                  </button>
-                ) : currentEntry.section === "In Progress" ? (
-                  <button
-                    onClick={() => quickPatchMutation.mutate({ mainStatus: "On Road", techStatus: "On Road" })}
-                    disabled={quickPatchMutation.isPending}
-                    style={compactActionBtnStyle}
-                  >
-                    Move to Completed <span aria-hidden>→</span>
-                  </button>
-                ) : null}
-                {compactWorkflowAction ? (
-                  <button
-                    onClick={compactWorkflowAction.run}
-                    disabled={quickPatchMutation.isPending}
-                    style={{
-                      fontFamily: fonts.dmSans,
-                      fontWeight: 500,
-                      fontSize: 13,
-                      color: colors.ink,
-                      backgroundColor: colors.background,
-                      border: `1px solid ${colors.rule}`,
-                      borderRadius: 8,
-                      padding: "10px 14px",
-                      cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
-                      opacity: quickPatchMutation.isPending ? 0.6 : 1,
-                      width: "100%",
-                      marginTop: 8,
-                    }}
-                    title="Step-by-step alternative to the section move above"
-                  >
-                    {compactWorkflowAction.label}
-                  </button>
-                ) : null}
-                {currentEntry.section === "In Progress" && currentEntry.routeCleared ? (
-                  <button
-                    onClick={() => quickPatchMutation.mutate({ routeCleared: false })}
-                    disabled={quickPatchMutation.isPending}
-                    style={{
-                      fontFamily: fonts.dmSans,
-                      fontWeight: 500,
-                      fontSize: 13,
-                      color: colors.ink,
-                      backgroundColor: colors.background,
-                      border: `1px solid ${colors.rule}`,
-                      borderRadius: 8,
-                      padding: "10px 14px",
-                      cursor: quickPatchMutation.isPending ? "not-allowed" : "pointer",
-                      opacity: quickPatchMutation.isPending ? 0.6 : 1,
-                      width: "100%",
-                      marginTop: 8,
-                    }}
-                  >
-                    Route Turned Back On
-                  </button>
-                ) : null}
+              );
+            })()}
+
+            {isEdit && currentEntry && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, marginBottom: 12, paddingTop: 10, borderTop: `1px dashed ${colors.rule}` }}>
+                <div style={{ ...labelStyle, marginBottom: 0 }}>Currently showing as</div>
+                <StagePill
+                  stage={currentEntry.stage}
+                  sub={currentEntry.stageSub}
+                  source={currentEntry.stageSource}
+                />
               </div>
-            </>
-          )}
+            )}
+
+            {/* Primary CTA — jump to Tech Outreach after picking/adjusting Stage.
+                All other shortcut buttons were removed because they duplicated
+                either this CTA or the Tracking toggles below. */}
+            {isEdit && (
+              <button
+                onClick={() => setPanelTab("tech_outreach")}
+                style={primaryCtaBtnStyle}
+                data-testid="button-open-tech-outreach"
+              >
+                Open Tech Outreach <span aria-hidden>→</span>
+              </button>
+            )}
+          </div>
 
           {/* ── Tech & Vehicle Info ── */}
           <SectionHeading style={{ marginTop: 20, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
@@ -1953,10 +1993,17 @@ function UnifiedPanel({
             <input type="text" value={form.repairShopPhone} onChange={(e) => set("repairShopPhone", e.target.value)} style={INPUT_STYLE} />
           </div>
 
-          {/* ── Status ── */}
+          {/* ── Shop & Van Status ──
+              Underlying shop + van state that feeds auto-detection when the
+              Stage picker is on "auto-detect". Safe to leave on "— select —"
+              once you're driving the case via the Stage picker. */}
           <SectionHeading style={{ marginTop: 8, paddingTop: 14, borderTop: `1px solid ${colors.rule}` }}>
-            Status
+            Shop &amp; Van Status
           </SectionHeading>
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "-8px 0 12px" }}>
+            Only used for auto-detection when Stage is on "auto-detect". When you pick a Stage manually, it wins.
+          </p>
+
           <div style={{ marginBottom: 14 }}>
             <label style={LABEL_STYLE}>Shop Status</label>
             <select value={form.mainStatus} onChange={(e) => set("mainStatus", e.target.value)} style={{ ...INPUT_STYLE, cursor: "pointer" }}>
@@ -2028,15 +2075,45 @@ function UnifiedPanel({
             </div>
           </div>
 
+          {/* BYOV — one picker replaces the old Yes/No Enrolled toggle. The
+              "enrolled" boolean is now derived from the type on save:
+              Temporary / Permanent / Accepted (legacy) → enrolled=true. */}
           <div style={{ marginBottom: 14 }}>
-            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV Enrolled</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              {([true, false] as boolean[]).map((val) => (
-                <button key={String(val)} type="button" onClick={() => set("byovEnrolled", val)} style={toggleBtnStyle(form.byovEnrolled === val)}>
-                  {val ? "Yes" : "No"}
+            <div style={{ ...LABEL_STYLE, marginBottom: 8 }}>BYOV</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(["", "Temporary", "Permanent", "Declined"] as const).map((val) => (
+                <button
+                  key={val || "none"}
+                  type="button"
+                  onClick={() => setForm((f) => ({
+                    ...f,
+                    byovStatus: val,
+                    byovEnrolled: val === "Temporary" || val === "Permanent",
+                  }))}
+                  style={{
+                    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
+                    padding: "5px 12px", borderRadius: 6, cursor: "pointer",
+                    border: `1px solid ${form.byovStatus === val ? colors.accent : colors.rule}`,
+                    backgroundColor: form.byovStatus === val ? colors.accent : "transparent",
+                    color: form.byovStatus === val ? "#FFFFFF" : colors.inkSoft,
+                  }}
+                  data-testid={`tracking-byov-${val.toLowerCase() || "none"}`}
+                  title={
+                    val === "Temporary" ? "Tech drives own van while we still repair theirs — case stays active."
+                    : val === "Permanent" ? "Tech is permanently BYOV. Tech side is complete; van can be reassigned once repaired."
+                    : val === "Declined" ? "Tech refused BYOV."
+                    : "No BYOV set."
+                  }
+                >
+                  {val || "None"}
                 </button>
               ))}
             </div>
+            {form.byovStatus === "Accepted" && (
+              <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "6px 0 0" }}>
+                Legacy "Accepted" — please reclassify as Temporary or Permanent.
+              </p>
+            )}
           </div>
 
           {/* ── Decision Summary (only if sourceDecisionId exists) ── */}
@@ -2131,26 +2208,45 @@ function UnifiedPanel({
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 type SortColumn =
-  | "techName" | "punchStatus" | "truckNumber" | "deniedAt" | "stage"
+  | "techName" | "punchStatus" | "truckNumber" | "district" | "deniedAt" | "stage"
   | "mainStatus" | "techStatus" | "byovEnrolled"
   | "rentalReturned" | "routeCleared";
 
 // ─── Stage pill ───────────────────────────────────────────────────────────────
 
 const STAGE_COLORS: Record<string, { fg: string; bg: string }> = {
+  // Action Needed
   "Needs Tech Call":        TINT.red,
+  "Needs Shop Info":        TINT.red,
+  "Needs Shop Update":      TINT.amber,
   "BYOV Decision":          TINT.amber,
+  "BYOV Decision Pending":  TINT.amber,
   "Awaiting Rental Return": TINT.amber,
   "Awaiting Route Clear":   TINT.amber,
+  // In Progress
   "In Repair":              TINT.blue,
   "Ready for Pickup":       TINT.blue,
+  "Declined Repair":        TINT.red,
+  // Completed
   "Complete":               TINT.green,
+  "On Road":                TINT.green,
+  "BYOV Permanent":         TINT.teal,
+  "Closed / Archived":      TINT.neutral,
 };
 
-function StagePill({ stage }: { stage: string }) {
+function StagePill({ stage, sub, source }: { stage: string; sub?: string | null; source?: "closed" | "manual" | "auto" }) {
   if (!stage) return <span style={{ color: colors.inkMuted, fontFamily: fonts.dmSans, fontSize: 13 }}>—</span>;
   const c = STAGE_COLORS[stage] ?? TINT.neutral;
-  return <TintPill label={stage} fg={c.fg} bg={c.bg} />;
+  const label = sub ? `${stage} · ${sub}` : stage;
+  const title = source === "manual" ? "Manually selected stage" : source === "closed" ? "Closed" : "Auto-derived stage";
+  return (
+    <span title={title} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+      <TintPill label={label} fg={c.fg} bg={c.bg} />
+      {source === "manual" && (
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted }} title="Manually selected — auto-derivation overridden">·M</span>
+      )}
+    </span>
+  );
 }
 
 function FlagIcon({ flags }: { flags: RepairTrackerEntry["flags"] }) {
@@ -2709,6 +2805,9 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, color: entry.truckNumber ? colors.ink : colors.inkMuted, fontWeight: 500 }}>
                     {entry.truckNumber ?? "—"}
                   </td>
+                  <td style={{ ...tdStyle, color: entry.district ? colors.ink : colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 13, whiteSpace: "nowrap" }}>
+                    {entry.district ? (entry.district.replace(/^0+/, "") || "0") : "—"}
+                  </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.deniedAt
                       ? new Date(entry.deniedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -2720,7 +2819,7 @@ export default function RentalRepairTracker() {
                     )}
                   </td>
                   <td style={tdStyle}>
-                    <StagePill stage={entry.stage ?? ""} />
+                    <StagePill stage={entry.stage ?? ""} sub={entry.stageSub} source={entry.stageSource} />
                   </td>
                   <td style={{ ...tdStyle, whiteSpace: "nowrap" }}>
                     <PunchStatusCell
@@ -2912,6 +3011,7 @@ export default function RentalRepairTracker() {
             <tr style={{ backgroundColor: "#F8FAFC" }}>
               <th style={thStyle} onClick={() => handleSort("techName")}>Case{sortIndicator("techName")}</th>
               <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
+              <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
               <th style={thStyle} onClick={() => handleSort("deniedAt")}>Denied{sortIndicator("deniedAt")}</th>
               <th style={thStyle} onClick={() => handleSort("stage")}>Stage{sortIndicator("stage")}</th>
               <th style={thStyle} onClick={() => handleSort("punchStatus")} title="Status is still inferred from first-vs-last punch activity in the current source view. The smaller line shows the latest raw upstream PUNCH_TYP for context.">Punch ⓘ{sortIndicator("punchStatus")}</th>

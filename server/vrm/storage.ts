@@ -90,6 +90,20 @@ export interface ActiveRentalRow {
   ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null;
   liveTruckStatus: string | null;
   liveSource: string | null;
+  // From the latest vrm_rental_checks row keyed by LDAP — populated by the
+  // profitability check endpoint and survives even when vrm_techs is empty.
+  dailyNetWithRental: number | null;
+  dailyNetBeforeRental: number | null;
+  recommendation: string | null;
+  scorecardScore: number | null;
+  rentalCheckTenureMonths: number | null;
+  rentalCheckCompletes: number | null;
+  rentalCheckLookbackDays: number | null;
+  rentalCheckedAt: string | null;
+  /** True when EITHER vrm_techs OR vrm_rental_checks had data. */
+  hasFinancialData: boolean;
+  /** Where the financial fields came from. */
+  financialSource: "vrm_techs" | "vrm_rental_checks" | "none";
 }
 
 type RepairTrackerFleetScopeSyncInput = {
@@ -182,6 +196,19 @@ function normalizeNameForMatch(raw: string | null | undefined): string {
     .trim();
 }
 
+// Token-set form: words sorted alphabetically + single-letter middle initials
+// dropped. Lets "LOPEZ JOSE" match "JOSE LOPEZ" and "JOHN A SMITH" match
+// "JOHN SMITH" — both common variants in our datasets.
+function nameTokenKey(raw: string | null | undefined): string {
+  const norm = normalizeNameForMatch(raw);
+  if (!norm) return "";
+  return norm
+    .split(" ")
+    .filter((tok) => tok.length > 1) // drop middle-initial-only tokens
+    .sort()
+    .join(" ");
+}
+
 function levenshtein(a: string, b: string): number {
   if (a === b) return 0;
   const m = a.length;
@@ -209,63 +236,190 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     techRows.map((tech) => [String(tech.ldap || "").trim().toUpperCase(), tech]),
   );
 
-  // Build a name → ldap lookup so we can recover LDAPs for rentals that arrive
-  // from Fleet Scope without enterprise_id populated. vrm_techs wins over tpms
-  // when the same normalized name appears in both.
-  const nameToLdap = new Map<string, { ldap: string; source: "vrm_techs" | "tpms" }>();
+  // ─── Identity-resolution maps ────────────────────────────────────────────
+  // The user's mental model: "the rental is made under a truck# + a name, the
+  // truck# is associated with a name, the name is associated with an LDAP".
+  // → Truck# is the durable join key; name is a label that varies (Jr, middle
+  //   initial, marriage/maiden, swapped order). So we resolve truck# → LDAP
+  //   first (across every source we can), and only fall back to name matching
+  //   when no truck#-based hit lands.
+
+  // Pull from all three identity tables in parallel.
+  const [tpmsResult, tpmsSnapshotResult, holmanResult, allTechsResult] = await Promise.all([
+    // Current TPMS assignments — most authoritative when populated.
+    db.execute(sql`
+      SELECT enterprise_id, first_name, last_name, truck_no
+      FROM tpms_tech_profiles
+      WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+    `),
+    // TPMS persistent snapshot — survives reassignments. Catches recently-
+    // rotated trucks where the tech moved off the truck but the rental record
+    // still has their name on it.
+    db.execute(sql`
+      SELECT enterprise_id, first_name, last_name, truck_no
+      FROM tpms_last_known_truck_tech
+      WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+    `),
+    // Holman's tech assignment (from clientData2). Independent source.
+    db.execute(sql`
+      SELECT holman_tech_assigned AS "ldap",
+             holman_tech_name     AS "fullName",
+             holman_vehicle_number AS "truckNo"
+      FROM holman_vehicles_cache
+      WHERE holman_tech_assigned IS NOT NULL AND holman_tech_assigned <> ''
+    `),
+    // Master employee roster — ~13K rows. Used only as a wider candidate pool
+    // for fuzzy name matching when truck#→LDAP didn't resolve.
+    db.execute(sql`
+      SELECT tech_racfid AS "ldap", tech_name AS "fullName", first_name, last_name
+      FROM all_techs
+      WHERE tech_racfid IS NOT NULL AND tech_racfid <> ''
+    `),
+  ]);
+  const tpmsRows = (tpmsResult.rows ?? []) as Array<{ enterprise_id: string; first_name: string | null; last_name: string | null; truck_no: string | null }>;
+  const tpmsSnapshotRows = (tpmsSnapshotResult.rows ?? []) as Array<{ enterprise_id: string; first_name: string | null; last_name: string | null; truck_no: string | null }>;
+  const holmanRows = ((holmanResult as any).rows ?? []) as Array<{ ldap: string; fullName: string | null; truckNo: string | null }>;
+  const allTechsRows = ((allTechsResult as any).rows ?? []) as Array<{ ldap: string; fullName: string | null; first_name: string | null; last_name: string | null }>;
+
+  // ─── Name → LDAP map (3 sources, ranked by preference) ──────────────────
+  // vrm_techs (rental population) wins over tpms (current) wins over all_techs
+  // (master roster) when the same normalized/token key appears in multiple.
+  const nameToLdap = new Map<string, { ldap: string; source: "vrm_techs" | "tpms" | "all_techs" }>();
+  const tokenKeyToLdap = new Map<string, { ldap: string; source: "vrm_techs" | "tpms" | "all_techs" }>();
+  const indexName = (name: string | null | undefined, ldap: string, source: "vrm_techs" | "tpms" | "all_techs") => {
+    const ldapU = (ldap || "").trim().toUpperCase();
+    if (!ldapU) return;
+    const norm = normalizeNameForMatch(name);
+    if (norm && !nameToLdap.has(norm)) nameToLdap.set(norm, { ldap: ldapU, source });
+    const tok = nameTokenKey(name);
+    if (tok && !tokenKeyToLdap.has(tok)) tokenKeyToLdap.set(tok, { ldap: ldapU, source });
+  };
+  // Highest-priority source first (so it wins ties via the !has check).
   for (const tech of techRows) {
-    const key = normalizeNameForMatch(tech.name);
-    if (key && !nameToLdap.has(key)) {
-      nameToLdap.set(key, { ldap: String(tech.ldap).trim().toUpperCase(), source: "vrm_techs" });
-    }
+    indexName(tech.name, String(tech.ldap).trim().toUpperCase(), "vrm_techs");
   }
-  const tpmsResult = await db.execute(sql`
-    SELECT enterprise_id, first_name, last_name, truck_no
-    FROM tpms_tech_profiles
-    WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-  `);
-  const tpmsRows = (tpmsResult.rows ?? []) as Array<{
-    enterprise_id: string;
-    first_name: string | null;
-    last_name: string | null;
-    truck_no: string | null;
-  }>;
   for (const raw of tpmsRows) {
-    const key = normalizeNameForMatch(`${raw.first_name ?? ""} ${raw.last_name ?? ""}`);
-    if (key && !nameToLdap.has(key)) {
-      nameToLdap.set(key, { ldap: String(raw.enterprise_id).trim().toUpperCase(), source: "tpms" });
-    }
+    indexName(`${raw.first_name ?? ""} ${raw.last_name ?? ""}`, raw.enterprise_id, "tpms");
+  }
+  for (const raw of allTechsRows) {
+    // Prefer the joined first/last when present; fall back to the FULL_NAME field.
+    const composed = `${raw.first_name ?? ""} ${raw.last_name ?? ""}`.trim();
+    indexName(composed || raw.fullName, raw.ldap, "all_techs");
   }
 
-  // Truck-number → ldap map as a last-resort fallback. Only used when tech_name
-  // is missing on the Fleet Scope row — if a name is present but didn't match,
-  // trust the name over a possibly-stale truck assignment in tpms.
-  const truckToLdap = new Map<string, string>();
-  for (const raw of tpmsRows) {
-    const key = normalizeTruckNumber(raw.truck_no);
-    if (key && !truckToLdap.has(key)) {
-      truckToLdap.set(key, String(raw.enterprise_id).trim().toUpperCase());
-    }
+  // ─── Truck# → LDAP map (3 sources, ranked) ──────────────────────────────
+  // Same priority order as identity sources: current TPMS > TPMS snapshot >
+  // Holman. The first hit wins.
+  const truckToLdap = new Map<string, { ldap: string; source: "tpms_active" | "tpms_snapshot" | "holman" }>();
+  const indexTruck = (rawTruck: string | null | undefined, ldap: string | null | undefined, source: "tpms_active" | "tpms_snapshot" | "holman") => {
+    const key = normalizeTruckNumber(rawTruck);
+    const ldapU = (ldap || "").trim().toUpperCase();
+    if (!key || !ldapU) return;
+    if (!truckToLdap.has(key)) truckToLdap.set(key, { ldap: ldapU, source });
+  };
+  for (const raw of tpmsRows) indexTruck(raw.truck_no, raw.enterprise_id, "tpms_active");
+  for (const raw of tpmsSnapshotRows) indexTruck(raw.truck_no, raw.enterprise_id, "tpms_snapshot");
+  for (const raw of holmanRows) indexTruck(raw.truckNo, raw.ldap, "holman");
+
+  // ─── Latest profitability check by LDAP ─────────────────────────────────
+  // The user explicitly called this out: financial / profile data is keyed on
+  // LDAP, not on truck#. Even when vrm_techs is empty (Gate-1 sync hasn't run
+  // for these techs yet), vrm_rental_checks IS populated every time someone
+  // runs a profitability check via /api/vrm/profitability/check. Pull the
+  // latest row per LDAP so we can surface daily_net / recommendation /
+  // scorecard / tenure even without a vrm_techs profile.
+  const checksResult = await db.execute(sql`
+    SELECT DISTINCT ON (UPPER(tech_ldap))
+      UPPER(tech_ldap)            AS "ldap",
+      tech_name                   AS "techName",
+      daily_net_with_rental       AS "dailyNetWithRental",
+      daily_net_before_rental     AS "dailyNetBeforeRental",
+      recommendation              AS "recommendation",
+      scorecard_score             AS "scorecardScore",
+      tenure_months               AS "tenureMonths",
+      completes                   AS "completes",
+      lookback_days               AS "lookbackDays",
+      checked_at                  AS "checkedAt"
+    FROM vrm_rental_checks
+    WHERE tech_ldap IS NOT NULL AND tech_ldap <> ''
+    ORDER BY UPPER(tech_ldap), checked_at DESC
+  `);
+  const checkByLdap = new Map<string, {
+    techName: string | null;
+    dailyNetWithRental: number | null;
+    dailyNetBeforeRental: number | null;
+    recommendation: string | null;
+    scorecardScore: number | null;
+    tenureMonths: number | null;
+    completes: number | null;
+    lookbackDays: number | null;
+    checkedAt: string | null;
+  }>();
+  for (const r of (((checksResult as any).rows ?? []) as any[])) {
+    checkByLdap.set(String(r.ldap), {
+      techName: r.techName ?? null,
+      dailyNetWithRental: r.dailyNetWithRental != null ? Number(r.dailyNetWithRental) : null,
+      dailyNetBeforeRental: r.dailyNetBeforeRental != null ? Number(r.dailyNetBeforeRental) : null,
+      recommendation: r.recommendation ?? null,
+      scorecardScore: r.scorecardScore != null ? Number(r.scorecardScore) : null,
+      tenureMonths: r.tenureMonths != null ? Number(r.tenureMonths) : null,
+      completes: r.completes != null ? Number(r.completes) : null,
+      lookbackDays: r.lookbackDays != null ? Number(r.lookbackDays) : null,
+      checkedAt: r.checkedAt ? String(r.checkedAt) : null,
+    });
   }
 
   return fleetTrucks.map((row) => {
+    // ─── Resolution chain (truck# first, name second) ────────────────────
+    // The durable identity chain: rental → truck# → tech name → LDAP.
+    // Truck# is the join key; name varies (Jr, middle initial, marriage,
+    // typos), so we resolve via truck# first using all three available
+    // sources, only falling back to name-based lookup when truck# misses.
     let ldap = normalizeLdap(row.enterpriseId);
     let ldapMatchSource: ActiveRentalRow["ldapMatchSource"] = ldap ? "fleet" : null;
 
+    // Tier 1 — Fleet Scope already had enterpriseId on the row (most direct).
+    // Already handled above.
+
+    // Tier 2 — Truck# lookup against the union of TPMS active + TPMS snapshot
+    // + Holman (in that priority order — truckToLdap was built that way).
+    if (!ldap) {
+      const truckKey = normalizeTruckNumber(row.truckNumber);
+      const byTruck = truckKey ? truckToLdap.get(truckKey) : null;
+      if (byTruck) {
+        ldap = byTruck.ldap;
+        ldapMatchSource = "truck_number";
+      }
+    }
+
+    // Tier 3 — Name lookup against the wider pool (vrm_techs ∪ tpms ∪ all_techs).
+    // Only fires when truck# couldn't resolve. Three name strategies:
+    //   (a) exact normalized (suffixes/punctuation stripped)
+    //   (b) token-set (word-order agnostic, no middle initial)
+    //   (c) Levenshtein with length-aware tolerance
     if (!ldap && row.techName) {
       const key = normalizeNameForMatch(row.techName);
+      const tokKey = nameTokenKey(row.techName);
       if (key) {
         const exact = nameToLdap.get(key);
         if (exact) {
           ldap = exact.ldap;
           ldapMatchSource = "exact_name";
-        } else {
+        }
+        if (!ldap && tokKey) {
+          const tokHit = tokenKeyToLdap.get(tokKey);
+          if (tokHit) {
+            ldap = tokHit.ldap;
+            ldapMatchSource = "fuzzy_name";
+          }
+        }
+        if (!ldap) {
+          const tol = key.length >= 14 ? 3 : key.length >= 8 ? 2 : 1;
           let best: { key: string; dist: number } | null = null;
-          const candidates = Array.from(nameToLdap.keys());
-          for (const candKey of candidates) {
-            if (Math.abs(candKey.length - key.length) > 1) continue;
+          for (const candKey of Array.from(nameToLdap.keys())) {
+            if (Math.abs(candKey.length - key.length) > tol) continue;
             const d = levenshtein(candKey, key);
-            if (d <= 1 && (!best || d < best.dist)) {
+            if (d <= tol && (!best || d < best.dist)) {
               best = { key: candKey, dist: d };
               if (d === 0) break;
             }
@@ -278,33 +432,42 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       }
     }
 
-    // Truck-number fallback: only when tech_name was missing on the Fleet Scope row.
-    if (!ldap && !(row.techName ?? "").trim()) {
-      const truckKey = normalizeTruckNumber(row.truckNumber);
-      const byTruck = truckKey ? truckToLdap.get(truckKey) : null;
-      if (byTruck) {
-        ldap = byTruck;
-        ldapMatchSource = "truck_number";
-      }
-    }
-
     const tech = ldap ? techByLdap.get(ldap) ?? null : null;
+    const check = ldap ? checkByLdap.get(ldap) ?? null : null;
+
+    // Both lookups are LDAP-keyed. The user emphasized this: financial data is
+    // tied to LDAP, not truck#. So once we have an LDAP, we pull from BOTH
+    // vrm_techs (if present) AND vrm_rental_checks (latest profitability check).
+    // contextStatus reflects whether ANY profile data was found.
     const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
       ? "no_ldap"
-      : tech
+      : (tech || check)
       ? "matched"
       : "no_vrm_match";
+
+    // Derive Gate-1 adjusted net + classification from the latest rental check
+    // when vrm_techs hasn't been populated yet. Formula matches the original
+    // gate-1 thresholds (underwater <0, marginal 0-5000, profitable >5000)
+    // applied to (daily_net_with_rental × lookback_days).
+    let derivedAdjustedNet: string | null = null;
+    let derivedClassification: string | null = null;
+    if (!tech && check?.dailyNetWithRental != null && check.lookbackDays) {
+      const adj = check.dailyNetWithRental * check.lookbackDays;
+      derivedAdjustedNet = adj.toFixed(2);
+      derivedClassification = adj < 0 ? "underwater" : adj <= 5000 ? "marginal" : "profitable";
+    }
 
     return {
       id: tech?.id ?? null,
       truckNumber: row.truckNumber ?? null,
       ldap,
-      name: row.techName || tech?.name || ldap || row.truckNumber || "Unknown Active Rental",
+      name: row.techName || tech?.name || check?.techName || ldap || row.truckNumber || "Unknown Active Rental",
       market: tech?.market ?? null,
       primaryZip: tech?.primaryZip ?? null,
-      tenureMonths: tech?.tenureMonths ?? null,
+      // Tenure: prefer vrm_techs, fall back to rental_checks
+      tenureMonths: tech?.tenureMonths ?? check?.tenureMonths ?? null,
       gate1DaysInRental: tech?.gate1DaysInRental ?? null,
-      gate1Completes: tech?.gate1Completes ?? null,
+      gate1Completes: tech?.gate1Completes ?? check?.completes ?? null,
       gate1TotalRevenue: tech?.gate1TotalRevenue ?? null,
       gate1LaborDirect: tech?.gate1LaborDirect ?? null,
       gate1LaborBenefits: tech?.gate1LaborBenefits ?? null,
@@ -314,11 +477,12 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       gate1PptProfit: tech?.gate1PptProfit ?? null,
       gate1FuelEst: tech?.gate1FuelEst ?? null,
       gate1RentalCost: tech?.gate1RentalCost ?? null,
-      gate1AdjustedNet: tech?.gate1AdjustedNet ?? null,
+      // Adjusted net + classification: prefer vrm_techs, derive from check otherwise.
+      gate1AdjustedNet: tech?.gate1AdjustedNet ?? derivedAdjustedNet,
       gate1PayrollCost: tech?.gate1PayrollCost ?? null,
-      gate1Classification: tech?.gate1Classification ?? null,
+      gate1Classification: tech?.gate1Classification ?? derivedClassification,
       gate2Exempt: tech?.gate2Exempt ?? false,
-      gate2WeightedScore: tech?.gate2WeightedScore ?? null,
+      gate2WeightedScore: tech?.gate2WeightedScore ?? (check?.scorecardScore != null ? String(check.scorecardScore) : null),
       newHireExempt: tech?.newHireExempt ?? false,
       dcaReviewOutcome: tech?.dcaReviewOutcome ?? null,
       currentStatus: tech?.currentStatus ?? "in_rental",
@@ -328,11 +492,22 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       returnedRental: row.rentalReturned ?? tech?.returnedRental ?? false,
       escalationPath: tech?.escalationPath ?? null,
       smsSentAt: tech?.smsSentAt ?? null,
-      hasVrmContext: !!tech,
+      hasVrmContext: !!(tech || check),
       contextStatus,
       ldapMatchSource,
       liveTruckStatus: row.status ?? null,
       liveSource: "fs_trucks",
+      // Direct rental-check fields (raw, not derived).
+      dailyNetWithRental: check?.dailyNetWithRental ?? null,
+      dailyNetBeforeRental: check?.dailyNetBeforeRental ?? null,
+      recommendation: check?.recommendation ?? null,
+      scorecardScore: check?.scorecardScore ?? null,
+      rentalCheckTenureMonths: check?.tenureMonths ?? null,
+      rentalCheckCompletes: check?.completes ?? null,
+      rentalCheckLookbackDays: check?.lookbackDays ?? null,
+      rentalCheckedAt: check?.checkedAt ?? null,
+      hasFinancialData: !!(tech || check),
+      financialSource: tech ? "vrm_techs" : check ? "vrm_rental_checks" : "none",
     };
   });
 }

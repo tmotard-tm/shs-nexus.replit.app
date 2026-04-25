@@ -1,8 +1,201 @@
-import { useState, useRef, useCallback, Fragment as ReactFragment } from "react";
+import { useState, useRef, useCallback, useEffect, Fragment as ReactFragment } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+
+// ─── Tech search autocomplete ─────────────────────────────────────────────────
+// Unified fuzzy search against tpms_tech_profiles — one combo-box that matches
+// LDAP (case-insensitive), name, or truck # (with/without leading zero).
+// Staff can type whatever identifier they remember first and pick the correct
+// person from the dropdown.
+
+interface TechSearchRow {
+  ldap: string;
+  firstName: string | null;
+  lastName: string | null;
+  displayName: string;
+  truckNo: string | null;
+  district: string | null;
+  mobilePhone: string | null;
+}
+
+function TechSearchInput({
+  value,
+  onChange,
+  onSelect,
+  onSubmit,
+  disabled,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onSelect: (ldap: string) => void;
+  onSubmit: () => void;
+  disabled?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [debounced, setDebounced] = useState("");
+  const [activeIdx, setActiveIdx] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Debounce the query so we don't hit /tech-search on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value.trim()), 180);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  const { data, isFetching, error } = useQuery<{ rows: TechSearchRow[] }>({
+    queryKey: ["/api/vrm/tech-search", debounced],
+    queryFn: async () => {
+      if (debounced.length < 1) return { rows: [] };
+      const res = await fetch(`/api/vrm/tech-search?q=${encodeURIComponent(debounced)}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`search failed (HTTP ${res.status})`);
+      return res.json();
+    },
+    enabled: debounced.length >= 1,
+    staleTime: 30_000,
+  });
+
+  const rows = data?.rows ?? [];
+
+  // Close on outside click.
+  useEffect(() => {
+    if (!open) return;
+    const onDocClick = (ev: MouseEvent) => {
+      if (!containerRef.current?.contains(ev.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
+  // Reset active row when results change.
+  useEffect(() => {
+    setActiveIdx(0);
+  }, [rows.length, debounced]);
+
+  const choose = (row: TechSearchRow) => {
+    setOpen(false);
+    onSelect(row.ldap);
+  };
+
+  return (
+    <div ref={containerRef} style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 480 }}>
+      <Search
+        size={16}
+        style={{ position: "absolute", left: 10, top: 14, color: colors.inkMuted, pointerEvents: "none" }}
+      />
+      <input
+        type="text"
+        placeholder="LDAP, name, or truck # (with or without leading zero)"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setOpen(true);
+            setActiveIdx((i) => Math.min(i + 1, Math.max(rows.length - 1, 0)));
+          } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActiveIdx((i) => Math.max(i - 1, 0));
+          } else if (e.key === "Enter") {
+            e.preventDefault();
+            if (open && rows.length > 0 && activeIdx >= 0 && activeIdx < rows.length) {
+              choose(rows[activeIdx]);
+            } else {
+              onSubmit();
+            }
+          } else if (e.key === "Escape") {
+            setOpen(false);
+          }
+        }}
+        disabled={disabled}
+        style={{
+          width: "100%",
+          fontFamily: fonts.jetbrains,
+          fontSize: 13,
+          padding: "8px 10px 8px 32px",
+          border: `1px solid ${colors.rule}`,
+          borderRadius: 8,
+          backgroundColor: colors.surface,
+          outline: "none",
+        }}
+        data-testid="input-tech-search"
+      />
+      {open && debounced.length >= 1 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            left: 0,
+            right: 0,
+            zIndex: 50,
+            maxHeight: 320,
+            overflowY: "auto",
+            backgroundColor: colors.surface,
+            border: `1px solid ${colors.rule}`,
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
+          }}
+          role="listbox"
+        >
+          {error && (
+            <div style={{ padding: 10, fontFamily: fonts.dmSans, fontSize: 12, color: "#B91C1C" }}>
+              Search failed: {(error as Error).message}
+            </div>
+          )}
+          {!error && isFetching && rows.length === 0 && (
+            <div style={{ padding: 10, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+              Searching for "{debounced}"…
+            </div>
+          )}
+          {!error && !isFetching && rows.length === 0 && (
+            <div style={{ padding: 10, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+              No matches for "{debounced}". TPMS directory only contains active techs.
+            </div>
+          )}
+          {rows.map((r, idx) => (
+            <button
+              key={r.ldap}
+              type="button"
+              onClick={() => choose(r)}
+              onMouseEnter={() => setActiveIdx(idx)}
+              role="option"
+              aria-selected={idx === activeIdx}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                width: "100%",
+                padding: "8px 10px",
+                backgroundColor: idx === activeIdx ? "#F1F5F9" : "transparent",
+                border: "none",
+                borderBottom: idx === rows.length - 1 ? "none" : `1px solid ${colors.rule}`,
+                cursor: "pointer",
+                textAlign: "left",
+              }}
+              data-testid={`option-tech-${r.ldap}`}
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
+                  {r.displayName}
+                </span>
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+                  {r.ldap}
+                  {r.truckNo ? ` · Truck ${r.truckNo.replace(/^0+/, '') || r.truckNo}` : ""}
+                  {r.district ? ` · Dist ${r.district.replace(/^0+/, '') || r.district}` : ""}
+                </span>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -589,11 +782,32 @@ export default function NewRentals() {
     },
   });
 
-  const handleSingleEvaluate = useCallback(() => {
-    const trimmed = ldapInput.trim().toUpperCase();
-    if (!trimmed) return;
-    const ldaps = trimmed.split(/[\s,;]+/).filter(Boolean);
-    evaluateMut.mutate(ldaps);
+  const handleSingleEvaluate = useCallback(async () => {
+    const raw = ldapInput.trim();
+    if (!raw) return;
+    // If the input looks like one or more LDAPs (all caps/digits, no whitespace
+    // within tokens), run evaluate directly. Otherwise resolve via /tech-search
+    // so a name or truck number still works even without picking from the
+    // dropdown.
+    const tokens = raw.split(/[\s,;]+/).filter(Boolean);
+    const looksLikeLdap = (t: string) => /^[A-Z0-9]{3,}$/i.test(t);
+    if (tokens.every(looksLikeLdap)) {
+      evaluateMut.mutate(tokens.map((t) => t.toUpperCase()));
+      return;
+    }
+    // Free-form → try to resolve via /tech-search, taking the top match.
+    try {
+      const res = await fetch(`/api/vrm/tech-search?q=${encodeURIComponent(raw)}`, { credentials: "include" });
+      if (!res.ok) throw new Error("search failed");
+      const body = await res.json() as { rows: TechSearchRow[] };
+      const top = body.rows?.[0];
+      if (top?.ldap) {
+        evaluateMut.mutate([top.ldap.toUpperCase()]);
+      }
+    } catch {
+      // Fall back to raw (uppercased) token — evaluate endpoint will surface the error.
+      evaluateMut.mutate([raw.toUpperCase()]);
+    }
   }, [ldapInput, evaluateMut]);
 
   const handleBatchUpload = useCallback(
@@ -780,29 +994,16 @@ export default function NewRentals() {
           flexWrap: "wrap",
         }}
       >
-        <div style={{ position: "relative", flex: 1, minWidth: 240, maxWidth: 480 }}>
-          <Search
-            size={16}
-            style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", color: colors.inkMuted }}
-          />
-          <input
-            type="text"
-            placeholder="Enter LDAP(s) — comma or space separated"
-            value={ldapInput}
-            onChange={(e) => setLdapInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleSingleEvaluate()}
-            style={{
-              width: "100%",
-              fontFamily: fonts.jetbrains,
-              fontSize: 13,
-              padding: "8px 10px 8px 32px",
-              border: `1px solid ${colors.rule}`,
-              borderRadius: 8,
-              backgroundColor: colors.surface,
-              outline: "none",
-            }}
-          />
-        </div>
+        <TechSearchInput
+          value={ldapInput}
+          onChange={setLdapInput}
+          onSelect={(ldap) => {
+            setLdapInput(ldap);
+            evaluateMut.mutate([ldap.toUpperCase()]);
+          }}
+          onSubmit={handleSingleEvaluate}
+          disabled={evaluateMut.isPending}
+        />
 
         <button
           onClick={handleSingleEvaluate}

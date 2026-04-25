@@ -102,9 +102,6 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
   const svc = getSnowflakeService();
 
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
-  // #region agent log
-  fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'snowflake-queries.ts:fetchAdjustedNet-entry',message:'fetchAdjustedNet called',data:{ldapCount:ldaps.length,ldapSample:ldaps.slice(0,5),includesJMUDGET:ldaps.includes('JMUDGET'),includesRRUSYN1:ldaps.includes('RRUSYN1')},timestamp:Date.now(),hypothesisId:'H-A'})}).catch(()=>{});
-  // #endregion
   const rows = await svc.executeQuery(`
     WITH nexus_deduped AS (
       SELECT
@@ -204,12 +201,6 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
     ORDER BY 13 ASC NULLS LAST
   `) as AdjustedNetRow[];
 
-  // #region agent log
-  const debugTechs = (rows as AdjustedNetRow[]).filter(r => r.tech_ldap === 'JMUDGET' || r.tech_ldap === 'RRUSYN1');
-  if (debugTechs.length > 0) {
-    fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'snowflake-queries.ts:fetchAdjustedNet-result',message:'AdjustedNet result rows for debug techs',data:debugTechs,timestamp:Date.now(),hypothesisId:'H-A-H-B-H-C'})}).catch(()=>{});
-  }
-  // #endregion
   return rows;
 }
 

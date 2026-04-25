@@ -331,11 +331,6 @@ export function registerVrmRoutes(): Router {
         if (newHireExempt) currentStatus = "exempt_new_hire";
         else if (gate2Exempt) currentStatus = "exempt_scorecard";
 
-        // #region agent log
-        if (ldap === 'JMUDGET' || ldap === 'RRUSYN1') {
-          fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:sync-roster',message:'Roster row for debug tech',data:{ldap,RENTAL_START_DATE:row.RENTAL_START_DATE,DAYS_OPEN:row.DAYS_OPEN,rentalStart,rentalCostWouldBe:(row.DAYS_OPEN||0)*78},timestamp:Date.now(),hypothesisId:'H-A-H-B'})}).catch(()=>{});
-        }
-        // #endregion
         await upsertTech({
           ldap,
           name: row.RENTER_NAME || ldap,
@@ -377,13 +372,6 @@ export function registerVrmRoutes(): Router {
       const netRows = await fetchAdjustedNet(ldaps);
       let updated = 0;
 
-      // #region agent log
-      if (netRows.length > 0) {
-        const sample = netRows[0];
-        fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:305',message:'sync/adjusted-net first row',data:{ldap:sample.tech_ldap,completes:sample.completes,total_revenue:sample.total_revenue,labor_direct:sample.labor_direct,labor_benefits:sample.labor_benefits,fuel_est:sample.fuel_est,rental_cost:sample.rental_cost,adj_net:sample.adj_net,days_in_rental:sample.days_in_rental},timestamp:Date.now(),runId:'run1',hypothesisId:'H-A'})}).catch(()=>{});
-      }
-      // #endregion
-
       for (const nr of netRows) {
         const ldap = (nr.tech_ldap || "").trim();
         if (!ldap) continue;
@@ -414,11 +402,6 @@ export function registerVrmRoutes(): Router {
           gate1Classification: classification as any,
           dcaReviewOutcome: classification && classification !== "profitable" ? "pending" : tech.dcaReviewOutcome,
         });
-        // #region agent log
-        if (updated === 0) {
-          fetch('http://localhost:7928/ingest/95e0cf8e-970b-4a1f-96b0-bb15011416df',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'6f1a97'},body:JSON.stringify({sessionId:'6f1a97',location:'routes.ts:340',message:'first upsertTech completed',data:{ldap:nr.tech_ldap,completes_stored:nr.completes,revenue_stored:nr.total_revenue},timestamp:Date.now(),runId:'run1',hypothesisId:'H-D'})}).catch(()=>{});
-        }
-        // #endregion
         updated++;
       }
 
@@ -550,6 +533,410 @@ export function registerVrmRoutes(): Router {
       if (!detail) return res.status(404).json({ error: "Tech not found" });
       res.json(detail);
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Active Rentals Dashboard (mirror of Fleet Scope's rental dashboard) ───
+  // Replicates /api/fs/rentals/summary read-only against the same data source
+  // (fleetScopeStorage.getAllTrucks) and enriches with TPMS (for enterprise_id
+  // + name) and vrm_rental_checks (for profit info). Fleet Scope itself is
+  // untouched.
+
+  /**
+   * GET /api/vrm/active-rentals-dashboard/summary
+   * Returns the same KPI payload Fleet Scope computes — plus enrichment counts
+   * and a profit snapshot joined via TPMS → enterprise_id → vrm_rental_checks.
+   */
+  router.get("/active-rentals-dashboard/summary", async (_req, res) => {
+    try {
+      const { fleetScopeStorage } = await import("../fleet-scope-storage");
+      const { vrmRentalChecks } = await import("../../shared/vrm-schema");
+
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+      const rentalTrucks = allTrucks.filter(t => t.mainStatus === "NLWC - Return Rental");
+
+      const now = new Date();
+      const oneWeekAgo = new Date();
+      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
+
+      // ── Fleet Scope-parity KPIs (formulas copied verbatim from
+      //    server/fleet-scope-routes.ts /rentals/summary) ──
+      let totalDurationDays = 0;
+      let durationsCount = 0;
+      let overdueCount = 0;
+      let returnedThisWeek = 0;
+      const byRegion: Record<string, number> = {};
+
+      for (const t of allTrucks) {
+        if (t.datePutInRepair) {
+          const start = new Date(t.datePutInRepair);
+          if (!isNaN(start.getTime())) {
+            totalDurationDays += Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+            durationsCount++;
+          }
+        }
+        const region = t.techState || "Unknown";
+        byRegion[region] = (byRegion[region] || 0) + 1;
+      }
+      for (const t of rentalTrucks) {
+        if (t.expectedReturnDate) {
+          const expected = new Date(t.expectedReturnDate);
+          if (!isNaN(expected.getTime()) && expected < now && t.rentalStatus !== "Returned") {
+            overdueCount++;
+          }
+        }
+        if (t.rentalStatus === "Returned" && t.lastUpdatedAt) {
+          const updatedAt = new Date(t.lastUpdatedAt);
+          if (updatedAt >= oneWeekAgo) returnedThisWeek++;
+        }
+      }
+
+      // ── TPMS enrichment — truck_no → enterprise_id + name ──
+      const truckNumbers = rentalTrucks
+        .map(t => (t.truckNumber ?? "").replace(/^0+/, ""))
+        .filter(Boolean);
+      const tpmsByNormTruck = new Map<string, { ldap: string; name: string }>();
+      if (truckNumbers.length > 0) {
+        const tpmsResult = await db.execute(sql`
+          SELECT enterprise_id, first_name, last_name,
+                 LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
+          FROM tpms_tech_profiles
+          WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+            AND LTRIM(COALESCE(truck_no, ''), '0') = ANY(${truckNumbers})
+        `);
+        for (const r of ((tpmsResult as any).rows ?? [])) {
+          const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
+          if (r.normTruck) {
+            tpmsByNormTruck.set(String(r.normTruck), {
+              ldap: String(r.enterprise_id).toUpperCase(),
+              name: name || String(r.enterprise_id),
+            });
+          }
+        }
+      }
+
+      // ── Profit enrichment — latest check per ldap ──
+      const ldaps = Array.from(new Set(Array.from(tpmsByNormTruck.values()).map(v => v.ldap)));
+      const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null }>();
+      if (ldaps.length > 0) {
+        const checksResult = await db.execute(sql`
+          SELECT DISTINCT ON (UPPER(tech_ldap))
+                 UPPER(tech_ldap) AS "ldap",
+                 daily_net_with_rental, recommendation, scorecard_score
+          FROM vrm_rental_checks
+          WHERE UPPER(tech_ldap) = ANY(${ldaps})
+          ORDER BY UPPER(tech_ldap), checked_at DESC
+        `);
+        for (const r of ((checksResult as any).rows ?? [])) {
+          latestCheckByLdap.set(String(r.ldap), {
+            dailyNet: r.daily_net_with_rental != null ? Number(r.daily_net_with_rental) : null,
+            rec: r.recommendation ?? null,
+            score: r.scorecard_score != null ? Number(r.scorecard_score) : null,
+          });
+        }
+      }
+
+      // ── Enrichment counters + profit averages ──
+      let matchedToLdap = 0;
+      let missingLdap = 0;
+      let profitSum = 0;
+      let profitCount = 0;
+      const recCounts: Record<string, number> = { Approve: 0, Deny: 0, "Manual Review": 0, Other: 0 };
+      for (const t of rentalTrucks) {
+        const normTruck = (t.truckNumber ?? "").replace(/^0+/, "");
+        const tpms = normTruck ? tpmsByNormTruck.get(normTruck) : undefined;
+        if (tpms) {
+          matchedToLdap++;
+          const check = latestCheckByLdap.get(tpms.ldap);
+          if (check?.dailyNet != null) {
+            profitSum += check.dailyNet;
+            profitCount++;
+          }
+          const rec = check?.rec;
+          if (rec && rec in recCounts) recCounts[rec]++;
+          else if (rec) recCounts.Other++;
+        } else {
+          missingLdap++;
+        }
+      }
+
+      res.json({
+        totalActive: rentalTrucks.filter(t => t.rentalStatus !== "Returned").length,
+        totalRentals: allTrucks.length,
+        averageDurationDays: durationsCount > 0 ? Math.round(totalDurationDays / durationsCount) : 0,
+        overdueCount,
+        returnedThisWeek,
+        byRegion,
+        // Enrichment KPIs (new — not in Fleet Scope's version)
+        enrichment: {
+          matchedToLdap,
+          missingLdap,
+          avgDailyNetWithRental: profitCount > 0 ? Math.round((profitSum / profitCount) * 100) / 100 : null,
+          profitSampleSize: profitCount,
+          recommendationCounts: recCounts,
+        },
+      });
+    } catch (error: any) {
+      console.error("[VRM active-rentals-dashboard/summary] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/active-rentals-dashboard/enrichment
+   * Returns a compact per-truck map for client-side merging with /api/fs/trucks.
+   * Shape: { [truckNumber]: { enterpriseId, district, techName, dailyNetWithRental,
+   *                          recommendation, scorecardScore, profitCheckedAt } }
+   * Truck # is normalized (leading zeros stripped) on both sides of the join.
+   */
+  router.get("/active-rentals-dashboard/enrichment", async (_req, res) => {
+    try {
+      const tpmsResult = await db.execute(sql`
+        SELECT enterprise_id, first_name, last_name, mobile_phone, district_no,
+               LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
+        FROM tpms_tech_profiles
+        WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+          AND truck_no IS NOT NULL AND truck_no <> ''
+      `);
+      const byTruck = new Map<string, { ldap: string; name: string; phone: string | null; district: string | null }>();
+      const ldaps: string[] = [];
+      for (const r of ((tpmsResult as any).rows ?? [])) {
+        const norm = String(r.normTruck ?? "");
+        if (!norm) continue;
+        const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
+        const ldap = String(r.enterprise_id).toUpperCase();
+        byTruck.set(norm, {
+          ldap,
+          name: name || ldap,
+          phone: r.mobile_phone ?? null,
+          district: r.district_no ?? null,
+        });
+        ldaps.push(ldap);
+      }
+
+      const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null; checkedAt: string | null }>();
+      if (ldaps.length > 0) {
+        const uniqueLdaps = Array.from(new Set(ldaps));
+        const checksResult = await db.execute(sql`
+          SELECT DISTINCT ON (UPPER(tech_ldap))
+                 UPPER(tech_ldap) AS "ldap",
+                 daily_net_with_rental, recommendation, scorecard_score, checked_at
+          FROM vrm_rental_checks
+          WHERE UPPER(tech_ldap) = ANY(${uniqueLdaps})
+          ORDER BY UPPER(tech_ldap), checked_at DESC
+        `);
+        for (const r of ((checksResult as any).rows ?? [])) {
+          latestCheckByLdap.set(String(r.ldap), {
+            dailyNet: r.daily_net_with_rental != null ? Number(r.daily_net_with_rental) : null,
+            rec: r.recommendation ?? null,
+            score: r.scorecard_score != null ? Number(r.scorecard_score) : null,
+            checkedAt: r.checked_at ? String(r.checked_at) : null,
+          });
+        }
+      }
+
+      const map: Record<string, any> = {};
+      for (const [normTruck, info] of Array.from(byTruck.entries())) {
+        const check = latestCheckByLdap.get(info.ldap);
+        map[normTruck] = {
+          enterpriseId: info.ldap,
+          techName: info.name,
+          techPhone: info.phone,
+          district: info.district,
+          dailyNetWithRental: check?.dailyNet ?? null,
+          recommendation: check?.rec ?? null,
+          scorecardScore: check?.score ?? null,
+          profitCheckedAt: check?.checkedAt ?? null,
+        };
+      }
+      res.json({ byNormalizedTruckNumber: map });
+    } catch (error: any) {
+      console.error("[VRM active-rentals-dashboard/enrichment] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/active-rentals-dashboard/rows
+   * Full fleet list (mirrors Fleet Scope's rental dashboard — shows all trucks,
+   * caller filters client-side). TPMS enrichment + latest profit check attached.
+   */
+  router.get("/active-rentals-dashboard/rows", async (_req, res) => {
+    try {
+      const { fleetScopeStorage } = await import("../fleet-scope-storage");
+
+      // Use all trucks (same as Fleet Scope's /api/fs/trucks) rather than
+      // pre-filtering to a single main_status. The UI adds filters on top.
+      const allTrucks = await fleetScopeStorage.getAllTrucks();
+
+      const truckNumbers = allTrucks
+        .map(t => (t.truckNumber ?? "").replace(/^0+/, ""))
+        .filter(Boolean);
+
+      const tpmsByNormTruck = new Map<string, { ldap: string; name: string; phone: string | null; district: string | null }>();
+      if (truckNumbers.length > 0) {
+        const tpmsResult = await db.execute(sql`
+          SELECT enterprise_id, first_name, last_name, mobile_phone, district_no,
+                 LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
+          FROM tpms_tech_profiles
+          WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
+            AND LTRIM(COALESCE(truck_no, ''), '0') = ANY(${truckNumbers})
+        `);
+        for (const r of ((tpmsResult as any).rows ?? [])) {
+          const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
+          if (r.normTruck) {
+            tpmsByNormTruck.set(String(r.normTruck), {
+              ldap: String(r.enterprise_id).toUpperCase(),
+              name: name || String(r.enterprise_id),
+              phone: r.mobile_phone ?? null,
+              district: r.district_no ?? null,
+            });
+          }
+        }
+      }
+
+      const ldaps = Array.from(new Set(Array.from(tpmsByNormTruck.values()).map(v => v.ldap)));
+      const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null; checkedAt: string | null }>();
+      if (ldaps.length > 0) {
+        const checksResult = await db.execute(sql`
+          SELECT DISTINCT ON (UPPER(tech_ldap))
+                 UPPER(tech_ldap) AS "ldap",
+                 daily_net_with_rental, recommendation, scorecard_score, checked_at
+          FROM vrm_rental_checks
+          WHERE UPPER(tech_ldap) = ANY(${ldaps})
+          ORDER BY UPPER(tech_ldap), checked_at DESC
+        `);
+        for (const r of ((checksResult as any).rows ?? [])) {
+          latestCheckByLdap.set(String(r.ldap), {
+            dailyNet: r.daily_net_with_rental != null ? Number(r.daily_net_with_rental) : null,
+            rec: r.recommendation ?? null,
+            score: r.scorecard_score != null ? Number(r.scorecard_score) : null,
+            checkedAt: r.checked_at ? String(r.checked_at) : null,
+          });
+        }
+      }
+
+      const rows = allTrucks.map(t => {
+        const normTruck = (t.truckNumber ?? "").replace(/^0+/, "");
+        const tpms = normTruck ? tpmsByNormTruck.get(normTruck) : undefined;
+        const check = tpms ? latestCheckByLdap.get(tpms.ldap) : undefined;
+        const now = new Date();
+        const daysInRepair = t.datePutInRepair
+          ? Math.floor((now.getTime() - new Date(t.datePutInRepair).getTime()) / (1000 * 60 * 60 * 24))
+          : null;
+        const isOverdue = !!(
+          t.expectedReturnDate &&
+          t.rentalStatus !== "Returned" &&
+          new Date(t.expectedReturnDate) < now
+        );
+        return {
+          truckNumber: t.truckNumber ?? null,
+          enterpriseId: tpms?.ldap ?? null,
+          techName: t.techName || tpms?.name || null,
+          techPhone: tpms?.phone ?? null,
+          district: tpms?.district ?? null,
+          mainStatus: t.mainStatus ?? null,
+          subStatus: t.subStatus ?? null,
+          rentalStatus: t.rentalStatus ?? null,
+          rentalReturned: t.rentalReturned ?? null,
+          rentalStartDate: t.rentalStartDate ?? null,
+          expectedReturnDate: t.expectedReturnDate ?? null,
+          datePutInRepair: t.datePutInRepair ?? null,
+          daysInRepair,
+          isOverdue,
+          techState: t.techState ?? null,
+          shsOwner: t.shsOwner ?? null,
+          dailyNetWithRental: check?.dailyNet ?? null,
+          recommendation: check?.rec ?? null,
+          scorecardScore: check?.score ?? null,
+          profitCheckedAt: check?.checkedAt ?? null,
+        };
+      });
+      res.json({ total: rows.length, rows });
+    } catch (error: any) {
+      console.error("[VRM active-rentals-dashboard/rows] error:", error.message);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // ─── Tech search (LDAP / name / truck #) ────────────────────────────────────
+  // Backs the "Evaluate" autocomplete on the New Rentals page. The input box
+  // accepts whichever identifier the user remembers first: uppercase LDAP,
+  // lowercase-or-any-case name fragment, or a 5-digit truck number (with or
+  // without leading zero). Returns top 10 matches.
+  router.get("/tech-search", async (req, res) => {
+    try {
+      const rawQ = String(req.query.q ?? "").trim();
+      if (!rawQ) return res.json({ rows: [], debug: "empty query" });
+      const qUpper = rawQ.toUpperCase();
+      const qLower = rawQ.toLowerCase();
+      const digits = rawQ.replace(/\D/g, "");
+      const truckNormalized = digits ? (digits.replace(/^0+/, "") || "0") : "";
+      const like = `%${qLower}%`;
+      // Build the SQL in two passes to avoid binding SQL NULL into IS NOT NULL
+      // comparisons — some drivers choke on that. When there are no digits in
+      // the query we just drop the truck-# branch entirely.
+      const result = truckNormalized
+        ? await db.execute(sql`
+            SELECT
+              tp.enterprise_id AS "ldap",
+              tp.first_name    AS "firstName",
+              tp.last_name     AS "lastName",
+              tp.truck_no      AS "truckNo",
+              tp.district_no   AS "district",
+              tp.mobile_phone  AS "mobilePhone",
+              CASE
+                WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
+                WHEN LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized} THEN 1
+                WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
+                ELSE 3
+              END AS "rank"
+            FROM tpms_tech_profiles tp
+            WHERE
+              UPPER(tp.enterprise_id) = ${qUpper}
+              OR LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized}
+              OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
+              OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
+              OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
+            ORDER BY "rank" ASC, tp.last_name ASC, tp.first_name ASC
+            LIMIT 10
+          `)
+        : await db.execute(sql`
+            SELECT
+              tp.enterprise_id AS "ldap",
+              tp.first_name    AS "firstName",
+              tp.last_name     AS "lastName",
+              tp.truck_no      AS "truckNo",
+              tp.district_no   AS "district",
+              tp.mobile_phone  AS "mobilePhone",
+              CASE
+                WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
+                WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
+                ELSE 3
+              END AS "rank"
+            FROM tpms_tech_profiles tp
+            WHERE
+              UPPER(tp.enterprise_id) = ${qUpper}
+              OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
+              OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
+              OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
+            ORDER BY "rank" ASC, tp.last_name ASC, tp.first_name ASC
+            LIMIT 10
+          `);
+      const rows = ((result as any).rows ?? []);
+      const out = rows.map((r: any) => ({
+        ldap: r.ldap,
+        firstName: r.firstName,
+        lastName: r.lastName,
+        displayName: [r.firstName, r.lastName].filter(Boolean).join(" ").trim() || r.ldap,
+        truckNo: r.truckNo,
+        district: r.district,
+        mobilePhone: r.mobilePhone,
+      }));
+      res.json({ rows: out });
+    } catch (e: any) {
+      console.error("[VRM] tech-search error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
