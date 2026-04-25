@@ -198,14 +198,24 @@ Audit row per request: `actorUserId, vendor, entityId, fieldsRequested, granted/
 
 ### Phase 2 — Consolidation (~8–10d)
 
-| # | Task |
-|---|---|
-| 2A.1 | UniversalVehiclePanel skeleton (kickoff) |
-| 2A.2–2A.4 | Progressive slideout collapse (9 → 1) — see migration matrix below |
-| 2B.1 | `fs_trucks` → VIEW + sidecar |
-| 2B.2 | `vrm_repair_tracker` → child FK |
-| 2B.3 | `vrm_techs` → VIEW; drop Levenshtein matcher |
-| 2C   | Archive migration scripts; scrub `server/fleet-scope-db.ts` comments |
+| # | Task | Status |
+|---|---|---|
+| 2A.1 | UniversalVehiclePanel skeleton (kickoff) | DONE |
+| 2A.2 | Anchor migration: TruckDetailPanel → 6-tab UVP; FS Dashboard, TodaysQueue, VRM ActiveRentals, Assets drilldown wired; old panel deleted | DONE |
+| 2A.3 | Inventory + Assignments tabs (WMS + TPMS) + remaining slideout absorptions (#3–#7) | PENDING |
+| 2A.4 | Inline page drawers absorbed (#8–#9) | PENDING |
+| 2B.1 | `fs_trucks` → VIEW + sidecar | PENDING |
+| 2B.2 | `vrm_repair_tracker` → child FK | PENDING |
+| 2B.3 | `vrm_techs` → VIEW; drop Levenshtein matcher | PENDING |
+| 2C   | Archive migration scripts; scrub `server/fleet-scope-db.ts` comments | PENDING |
+
+**2A.2 anchor — verification notes (post code review):**
+- AC-1 (panel owns data, callers pass IDs only): PASS at all 4 entry points.
+- AC-2 (no dual-living UI): PASS — `TruckDetailPanel.tsx` deleted in same change.
+- AC-3 (data-testid preservation): legacy `panel-truck-detail` restored on the new SheetContent root after architect flagged it.
+- Telematics field duplication (Samsara Location / Last Samsara Signal) removed from Service tab — telematics data lives only in Telematics tab now.
+- AssetsTaskDetailView surface itself is preserved (it is a task-management UI, not a vehicle slideout); the matrix item only added a vehicle-detail drilldown button.
+- Tier-aware adapters, FieldProvenanceBadge surfacing, header refresh button, and unified vehicle id remain deferred per locked plan (3A.5 / 3B.1 / 3B.3 / 2B).
 
 #### 2A Slideout Migration Matrix
 

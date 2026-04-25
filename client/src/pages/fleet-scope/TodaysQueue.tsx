@@ -6,7 +6,7 @@ import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRig
 import { cn } from "@/lib/utils";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
+import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
 
 interface QueueItem {
   step: number;
@@ -536,8 +536,8 @@ export default function TodaysQueue() {
         )}
       </div>
 
-      <TruckDetailPanel
-        truckId={selectedTruckId}
+      <UniversalVehiclePanel
+        vehicleId={selectedTruckId}
         open={detailPanelOpen}
         onOpenChange={(open) => setDetailPanelOpen(open)}
         fromPage="queue"
