@@ -228,7 +228,9 @@ export class SnowflakeSyncService {
           t.LAST_DATE_WORKED,
           t.PLANNING_AREA,
           t.TECH_SPECIALTY,
-          t.DISTRICT_NO,
+          -- DISTRICT_NO is not exposed by ORA_TECH_TERM_ROSTER_VW_VIEW;
+          -- the all-techs sync (DRIVELINE_ALL_TECHS) populates districtNo separately.
+          dat.DISTRICT_NO,
           c.SNSTV_HOME_ADDR1,
           c.SNSTV_HOME_ADDR2,
           c.SNSTV_HOME_CITY,
@@ -243,6 +245,8 @@ export class SnowflakeSyncService {
         FROM PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_TERM_ROSTER_VW_VIEW t
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
           ON t.EMPLID = c.EMPLID
+        LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS dat
+          ON UPPER(t.ENTERPRISE_ID) = UPPER(dat.ENTERPRISE_ID)
         LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
           ON UPPER(t.ENTERPRISE_ID) = UPPER(tpms.ENTERPRISE_ID)
         WHERE t.LAST_DATE_WORKED >= '2026-01-01'

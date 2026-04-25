@@ -603,7 +603,7 @@ export function registerVrmRoutes(): Router {
                  LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
           FROM tpms_tech_profiles
           WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-            AND LTRIM(COALESCE(truck_no, ''), '0') = ANY(${truckNumbers})
+            AND LTRIM(COALESCE(truck_no, ''), '0') IN (${sql.join(truckNumbers.map(v => sql`${v}`), sql`, `)})
         `);
         for (const r of ((tpmsResult as any).rows ?? [])) {
           const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
@@ -625,7 +625,7 @@ export function registerVrmRoutes(): Router {
                  UPPER(tech_ldap) AS "ldap",
                  daily_net_with_rental, recommendation, scorecard_score
           FROM vrm_rental_checks
-          WHERE UPPER(tech_ldap) = ANY(${ldaps})
+          WHERE UPPER(tech_ldap) IN (${sql.join(ldaps.map(v => sql`${v}`), sql`, `)})
           ORDER BY UPPER(tech_ldap), checked_at DESC
         `);
         for (const r of ((checksResult as any).rows ?? [])) {
@@ -723,7 +723,7 @@ export function registerVrmRoutes(): Router {
                  UPPER(tech_ldap) AS "ldap",
                  daily_net_with_rental, recommendation, scorecard_score, checked_at
           FROM vrm_rental_checks
-          WHERE UPPER(tech_ldap) = ANY(${uniqueLdaps})
+          WHERE UPPER(tech_ldap) IN (${sql.join(uniqueLdaps.map(v => sql`${v}`), sql`, `)})
           ORDER BY UPPER(tech_ldap), checked_at DESC
         `);
         for (const r of ((checksResult as any).rows ?? [])) {
@@ -781,7 +781,7 @@ export function registerVrmRoutes(): Router {
                  LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
           FROM tpms_tech_profiles
           WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-            AND LTRIM(COALESCE(truck_no, ''), '0') = ANY(${truckNumbers})
+            AND LTRIM(COALESCE(truck_no, ''), '0') IN (${sql.join(truckNumbers.map(v => sql`${v}`), sql`, `)})
         `);
         for (const r of ((tpmsResult as any).rows ?? [])) {
           const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
@@ -804,7 +804,7 @@ export function registerVrmRoutes(): Router {
                  UPPER(tech_ldap) AS "ldap",
                  daily_net_with_rental, recommendation, scorecard_score, checked_at
           FROM vrm_rental_checks
-          WHERE UPPER(tech_ldap) = ANY(${ldaps})
+          WHERE UPPER(tech_ldap) IN (${sql.join(ldaps.map(v => sql`${v}`), sql`, `)})
           ORDER BY UPPER(tech_ldap), checked_at DESC
         `);
         for (const r of ((checksResult as any).rows ?? [])) {
