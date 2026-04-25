@@ -17,6 +17,7 @@ const OP_EVENTS_RETRY_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for operation 
 const OFFBOARDING_TASKS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for offboarding gap-check
 const EXTERNAL_WATERMARK_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for TPMS/AMS external change detection
 const TPMS_STALE_SWEEP_INTERVAL_MS = 4 * 60 * 60 * 1000;   // 4 hours — validates cached assignments against live TPMS
+const DISTRICT_COST_CENTER_SEED_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-seed any new districts that appeared in fleet data
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
@@ -27,6 +28,8 @@ let lastOffboardingTasksTime: number | null = null;
 let lastTpmsPollTime: number | null = null; // External TPMS watermark poll
 let lastAmsPollTime: number | null = null; // External AMS watermark poll
 let lastTpmsStaleSweepTime: number | null = null; // Stale TPMS cache validation sweep
+let lastDistrictCostCenterSeedTime: number | null = null; // Last successful auto-seed of district cost center table
+let lastDistrictCostCenterSeedAttemptTime: number | null = null; // Last attempt (success or failure) — used for short-term retry backoff
 let schedulerRunning = false;
 let intervalId: NodeJS.Timeout | null = null;
 let separationPollIntervalId: NodeJS.Timeout | null = null;
@@ -87,6 +90,17 @@ async function checkAndRunSync(): Promise<void> {
           console.error('[Scheduler] Rental Ops → Fleet Scope sync failed (non-fatal):', rentalErr?.message);
         }
 
+        // Auto-seed district cost-center table so any newly synced districts
+        // appear on the management page same-day. Force the run by clearing
+        // both throttle timestamps first.
+        try {
+          lastDistrictCostCenterSeedTime = null;
+          lastDistrictCostCenterSeedAttemptTime = null;
+          await checkAndRunDistrictCostCenterSeed();
+        } catch (seedErr: any) {
+          console.error('[Scheduler] District cost-center seed (post-daily-sync) failed (non-fatal):', seedErr?.message);
+        }
+
         lastSyncDate = currentDateStr;
         console.log(`[Scheduler] Scheduled sync completed successfully for ${currentDateStr}`);
       }
@@ -102,6 +116,7 @@ async function checkAndRunSync(): Promise<void> {
   await checkAndRunTpmsPoll();
   await checkAndRunAmsPoll();
   await checkAndRunTpmsStaleSweep();
+  await checkAndRunDistrictCostCenterSeed();
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -206,6 +221,40 @@ async function checkAndRunOffboardingTasks(): Promise<void> {
     console.log(`[Scheduler] Offboarding gap-check complete: ${result.techsProcessed} techs, ${result.tasksCreated} tasks created, ${result.tasksSkipped} skipped`);
   } catch (error: any) {
     console.error('[Scheduler] Error during offboarding gap-check:', error?.message);
+  }
+}
+
+/**
+ * Auto-seed the district_cost_centers table with any districts that have appeared
+ * in fleet/TPMS/AMS data since the last seed. Existing rows (including manual
+ * overrides) are preserved — the underlying storage method uses
+ * onConflictDoNothing so only brand-new districts get inserted with their
+ * default cost centers. Runs at most once per 24 hours on success; on failure
+ * the success timestamp is left untouched so the next scheduler tick (~60s)
+ * can retry promptly. A separate `lastAttempt` tracker prevents tight retry
+ * loops if the seed throws repeatedly.
+ */
+async function checkAndRunDistrictCostCenterSeed(): Promise<void> {
+  const now = Date.now();
+  // Throttle by last successful run (24h) — but if we've never succeeded,
+  // fall back to throttling by last attempt (5 min) to avoid hammering on
+  // persistent failures while still allowing reasonably quick retry.
+  const RETRY_AFTER_FAILURE_MS = 5 * 60 * 1000;
+  if (lastDistrictCostCenterSeedTime !== null && (now - lastDistrictCostCenterSeedTime) < DISTRICT_COST_CENTER_SEED_INTERVAL_MS) {
+    return;
+  }
+  if (lastDistrictCostCenterSeedAttemptTime !== null && (now - lastDistrictCostCenterSeedAttemptTime) < RETRY_AFTER_FAILURE_MS) {
+    return;
+  }
+  lastDistrictCostCenterSeedAttemptTime = now;
+  try {
+    const result = await storage.seedDefaultDistrictCostCenters('scheduler');
+    lastDistrictCostCenterSeedTime = now;
+    if (result.inserted > 0) {
+      console.log(`[Scheduler] District cost-center auto-seed: ${result.inserted} new districts added (${result.existing} already present)`);
+    }
+  } catch (error: any) {
+    console.error('[Scheduler] Error during district cost-center auto-seed:', error?.message);
   }
 }
 
@@ -963,6 +1012,12 @@ export function startSyncScheduler(): void {
         console.error('[Scheduler] Production startup offboarding catch-up error:', err?.message)
       );
     }, 25000);
+
+    setTimeout(() => {
+      checkAndRunDistrictCostCenterSeed().catch(err =>
+        console.error('[Scheduler] Production startup district cost-center seed error:', err?.message)
+      );
+    }, 35000);
   }
 
   // Separation poll and notification backfill run independently on every boot
@@ -1034,6 +1089,8 @@ export function getSchedulerStatus(): {
   notificationBackfillIntervalMs: number;
   lastOpEventsRetry: string | null;
   opEventsRetryIntervalMs: number;
+  lastDistrictCostCenterSeed: string | null;
+  districtCostCenterSeedIntervalMs: number;
 } {
   const estNow = getESTDate();
   const nextSync = new Date(estNow);
@@ -1053,6 +1110,8 @@ export function getSchedulerStatus(): {
     notificationBackfillIntervalMs: NOTIFICATION_BACKFILL_INTERVAL_MS,
     lastOpEventsRetry: lastOpEventsRetryTime ? new Date(lastOpEventsRetryTime).toISOString() : null,
     opEventsRetryIntervalMs: OP_EVENTS_RETRY_INTERVAL_MS,
+    lastDistrictCostCenterSeed: lastDistrictCostCenterSeedTime ? new Date(lastDistrictCostCenterSeedTime).toISOString() : null,
+    districtCostCenterSeedIntervalMs: DISTRICT_COST_CENTER_SEED_INTERVAL_MS,
   };
 }
 
