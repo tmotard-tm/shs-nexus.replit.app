@@ -874,54 +874,122 @@ export function registerVrmRoutes(): Router {
       const digits = rawQ.replace(/\D/g, "");
       const truckNormalized = digits ? (digits.replace(/^0+/, "") || "0") : "";
       const like = `%${qLower}%`;
-      // Build the SQL in two passes to avoid binding SQL NULL into IS NOT NULL
-      // comparisons — some drivers choke on that. When there are no digits in
-      // the query we just drop the truck-# branch entirely.
+
+      // Two-source search: TPMS profiles (current truck assignments) + all_techs
+      // roster (active employees who may not currently hold a truck in TPMS).
+      // TPMS results take priority; roster results fill the gap for active techs
+      // who are evaluation candidates but don't appear in the current TPMS extract.
+      // Truck-# matching is intentionally TPMS-only — it identifies the *current*
+      // occupant of a truck, not the last-known one.
       const result = truckNormalized
         ? await db.execute(sql`
-            SELECT
-              tp.enterprise_id AS "ldap",
-              tp.first_name    AS "firstName",
-              tp.last_name     AS "lastName",
-              tp.truck_no      AS "truckNo",
-              tp.district_no   AS "district",
-              tp.mobile_phone  AS "mobilePhone",
-              CASE
-                WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
-                WHEN LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized} THEN 1
-                WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
-                ELSE 3
-              END AS "rank"
-            FROM tpms_tech_profiles tp
-            WHERE
-              UPPER(tp.enterprise_id) = ${qUpper}
-              OR LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized}
-              OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
-              OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
-              OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
-            ORDER BY "rank" ASC, tp.last_name ASC, tp.first_name ASC
+            SELECT * FROM (
+              SELECT
+                UPPER(tp.enterprise_id) AS "ldap",
+                tp.first_name    AS "firstName",
+                tp.last_name     AS "lastName",
+                tp.truck_no      AS "truckNo",
+                tp.district_no   AS "district",
+                tp.mobile_phone  AS "mobilePhone",
+                'tpms'::text     AS "source",
+                NULL::text       AS "employmentStatus",
+                0                AS "sourceRank",
+                CASE
+                  WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
+                  WHEN LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized} THEN 1
+                  WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
+                  ELSE 3
+                END AS "rank"
+              FROM tpms_tech_profiles tp
+              WHERE
+                UPPER(tp.enterprise_id) = ${qUpper}
+                OR LTRIM(COALESCE(tp.truck_no, ''), '0') = ${truckNormalized}
+                OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
+                OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
+                OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
+              UNION ALL
+              SELECT
+                UPPER(at.tech_racfid) AS "ldap",
+                at.first_name    AS "firstName",
+                at.last_name     AS "lastName",
+                NULL::text       AS "truckNo",
+                at.district_no   AS "district",
+                at.cell_phone    AS "mobilePhone",
+                'roster'::text   AS "source",
+                at.employment_status AS "employmentStatus",
+                1                AS "sourceRank",
+                CASE
+                  WHEN UPPER(at.tech_racfid) = ${qUpper} THEN 0
+                  WHEN LOWER(COALESCE(at.first_name, '') || ' ' || COALESCE(at.last_name, '')) ILIKE ${like} THEN 2
+                  ELSE 3
+                END AS "rank"
+              FROM all_techs at
+              WHERE at.employment_status = 'A'
+                AND UPPER(at.tech_racfid) NOT IN (
+                  SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+                )
+                AND (
+                  UPPER(at.tech_racfid) = ${qUpper}
+                  OR LOWER(COALESCE(at.first_name, '')) ILIKE ${like}
+                  OR LOWER(COALESCE(at.last_name, ''))  ILIKE ${like}
+                  OR LOWER(COALESCE(at.first_name, '') || ' ' || COALESCE(at.last_name, '')) ILIKE ${like}
+                )
+            ) merged
+            ORDER BY "sourceRank" ASC, "rank" ASC, "lastName" ASC, "firstName" ASC
             LIMIT 10
           `)
         : await db.execute(sql`
-            SELECT
-              tp.enterprise_id AS "ldap",
-              tp.first_name    AS "firstName",
-              tp.last_name     AS "lastName",
-              tp.truck_no      AS "truckNo",
-              tp.district_no   AS "district",
-              tp.mobile_phone  AS "mobilePhone",
-              CASE
-                WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
-                WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
-                ELSE 3
-              END AS "rank"
-            FROM tpms_tech_profiles tp
-            WHERE
-              UPPER(tp.enterprise_id) = ${qUpper}
-              OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
-              OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
-              OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
-            ORDER BY "rank" ASC, tp.last_name ASC, tp.first_name ASC
+            SELECT * FROM (
+              SELECT
+                UPPER(tp.enterprise_id) AS "ldap",
+                tp.first_name    AS "firstName",
+                tp.last_name     AS "lastName",
+                tp.truck_no      AS "truckNo",
+                tp.district_no   AS "district",
+                tp.mobile_phone  AS "mobilePhone",
+                'tpms'::text     AS "source",
+                NULL::text       AS "employmentStatus",
+                0                AS "sourceRank",
+                CASE
+                  WHEN UPPER(tp.enterprise_id) = ${qUpper} THEN 0
+                  WHEN LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like} THEN 2
+                  ELSE 3
+                END AS "rank"
+              FROM tpms_tech_profiles tp
+              WHERE
+                UPPER(tp.enterprise_id) = ${qUpper}
+                OR LOWER(COALESCE(tp.first_name, '')) ILIKE ${like}
+                OR LOWER(COALESCE(tp.last_name, ''))  ILIKE ${like}
+                OR LOWER(COALESCE(tp.first_name, '') || ' ' || COALESCE(tp.last_name, '')) ILIKE ${like}
+              UNION ALL
+              SELECT
+                UPPER(at.tech_racfid) AS "ldap",
+                at.first_name    AS "firstName",
+                at.last_name     AS "lastName",
+                NULL::text       AS "truckNo",
+                at.district_no   AS "district",
+                at.cell_phone    AS "mobilePhone",
+                'roster'::text   AS "source",
+                at.employment_status AS "employmentStatus",
+                1                AS "sourceRank",
+                CASE
+                  WHEN UPPER(at.tech_racfid) = ${qUpper} THEN 0
+                  WHEN LOWER(COALESCE(at.first_name, '') || ' ' || COALESCE(at.last_name, '')) ILIKE ${like} THEN 2
+                  ELSE 3
+                END AS "rank"
+              FROM all_techs at
+              WHERE at.employment_status = 'A'
+                AND UPPER(at.tech_racfid) NOT IN (
+                  SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+                )
+                AND (
+                  UPPER(at.tech_racfid) = ${qUpper}
+                  OR LOWER(COALESCE(at.first_name, '')) ILIKE ${like}
+                  OR LOWER(COALESCE(at.last_name, ''))  ILIKE ${like}
+                  OR LOWER(COALESCE(at.first_name, '') || ' ' || COALESCE(at.last_name, '')) ILIKE ${like}
+                )
+            ) merged
+            ORDER BY "sourceRank" ASC, "rank" ASC, "lastName" ASC, "firstName" ASC
             LIMIT 10
           `);
       const rows = ((result as any).rows ?? []);
@@ -933,6 +1001,8 @@ export function registerVrmRoutes(): Router {
         truckNo: r.truckNo,
         district: r.district,
         mobilePhone: r.mobilePhone,
+        source: r.source as 'tpms' | 'roster',
+        employmentStatus: r.employmentStatus as string | null,
       }));
       res.json({ rows: out });
     } catch (e: any) {

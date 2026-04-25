@@ -18,6 +18,8 @@ interface TechSearchRow {
   truckNo: string | null;
   district: string | null;
   mobilePhone: string | null;
+  source?: 'tpms' | 'roster';
+  employmentStatus?: string | null;
 }
 
 function TechSearchInput({
@@ -154,43 +156,65 @@ function TechSearchInput({
           )}
           {!error && !isFetching && rows.length === 0 && (
             <div style={{ padding: 10, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-              No matches for "{debounced}". TPMS directory only contains active techs.
+              No matches for "{debounced}". Searched current TPMS truck assignments and active employee roster.
             </div>
           )}
-          {rows.map((r, idx) => (
-            <button
-              key={r.ldap}
-              type="button"
-              onClick={() => choose(r)}
-              onMouseEnter={() => setActiveIdx(idx)}
-              role="option"
-              aria-selected={idx === activeIdx}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                width: "100%",
-                padding: "8px 10px",
-                backgroundColor: idx === activeIdx ? "#F1F5F9" : "transparent",
-                border: "none",
-                borderBottom: idx === rows.length - 1 ? "none" : `1px solid ${colors.rule}`,
-                cursor: "pointer",
-                textAlign: "left",
-              }}
-              data-testid={`option-tech-${r.ldap}`}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
-                  {r.displayName}
-                </span>
-                <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
-                  {r.ldap}
-                  {r.truckNo ? ` · Truck ${r.truckNo.replace(/^0+/, '') || r.truckNo}` : ""}
-                  {r.district ? ` · Dist ${r.district.replace(/^0+/, '') || r.district}` : ""}
-                </span>
-              </div>
-            </button>
-          ))}
+          {rows.map((r, idx) => {
+            const isRoster = r.source === 'roster';
+            return (
+              <button
+                key={r.ldap}
+                type="button"
+                onClick={() => choose(r)}
+                onMouseEnter={() => setActiveIdx(idx)}
+                role="option"
+                aria-selected={idx === activeIdx}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  width: "100%",
+                  padding: "8px 10px",
+                  backgroundColor: idx === activeIdx ? "#F1F5F9" : "transparent",
+                  border: "none",
+                  borderBottom: idx === rows.length - 1 ? "none" : `1px solid ${colors.rule}`,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+                data-testid={`option-tech-${r.ldap}`}
+              >
+                <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
+                    {r.displayName}
+                  </span>
+                  <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+                    {r.ldap}
+                    {r.truckNo ? ` · Truck ${r.truckNo.replace(/^0+/, '') || r.truckNo}` : ""}
+                    {r.district ? ` · Dist ${r.district.replace(/^0+/, '') || r.district}` : ""}
+                  </span>
+                </div>
+                {isRoster && (
+                  <span
+                    title="Active employee with no current truck in TPMS"
+                    style={{
+                      fontFamily: fonts.dmSans,
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "#92400E",
+                      backgroundColor: "#FEF3C7",
+                      border: "1px solid #FDE68A",
+                      borderRadius: 4,
+                      padding: "2px 6px",
+                      whiteSpace: "nowrap",
+                      marginLeft: 8,
+                    }}
+                  >
+                    No current truck
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>
