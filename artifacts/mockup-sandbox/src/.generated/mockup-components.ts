@@ -10,10 +10,10 @@ export const modules: ModuleMap = {
   "./components/mockups/home-redesign/FullscreenTiles.tsx": () => import("../components/mockups/home-redesign/FullscreenTiles.tsx"),
   "./components/mockups/home-redesign/LeftGlassPanel.tsx": () => import("../components/mockups/home-redesign/LeftGlassPanel.tsx"),
   "./components/mockups/home-redesign/SidebarConcept.tsx": () => import("../components/mockups/home-redesign/SidebarConcept.tsx"),
-  "./components/mockups/nexus-integration/FleetScopeLanding.tsx": () => import("../components/mockups/nexus-integration/FleetScopeLanding.tsx"),
-  "./components/mockups/nexus-integration/LandingPage.tsx": () => import("../components/mockups/nexus-integration/LandingPage.tsx"),
-  "./components/mockups/nexus-integration/SidebarMenu.tsx": () => import("../components/mockups/nexus-integration/SidebarMenu.tsx"),
   "./components/mockups/uvp-edit/ActionCards.tsx": () => import("../components/mockups/uvp-edit/ActionCards.tsx"),
   "./components/mockups/uvp-edit/InlineForm.tsx": () => import("../components/mockups/uvp-edit/InlineForm.tsx"),
-  "./components/mockups/uvp-edit/SplitView.tsx": () => import("../components/mockups/uvp-edit/SplitView.tsx")
+  "./components/mockups/uvp-edit/SplitView.tsx": () => import("../components/mockups/uvp-edit/SplitView.tsx"),
+  "./components/mockups/nexus-integration/FleetScopeLanding.tsx": () => import("../components/mockups/nexus-integration/FleetScopeLanding.tsx"),
+  "./components/mockups/nexus-integration/LandingPage.tsx": () => import("../components/mockups/nexus-integration/LandingPage.tsx"),
+  "./components/mockups/nexus-integration/SidebarMenu.tsx": () => import("../components/mockups/nexus-integration/SidebarMenu.tsx")
 };
