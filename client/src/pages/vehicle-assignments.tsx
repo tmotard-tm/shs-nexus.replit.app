@@ -12,12 +12,9 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, RefreshCw, AlertCircle, 
-  CheckCircle, XCircle, Database, Loader2, Eye, UserX, Link2, History, Package
+  CheckCircle, XCircle, Database, Loader2, Eye, UserX, Link2, History
 } from "lucide-react";
-// Phase 2A.5 caller-cleanup (2026-04-25): legacy ViewInventoryButton replaced
-// with UVP focused on Inventory tab. Component file kept until last caller is
-// gone (post-cutover deletion per user direction).
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -43,9 +40,6 @@ export default function VehicleAssignments() {
   const [techLookup, setTechLookup] = useState("");
   const [truckLookup, setTruckLookup] = useState("");
   const [selectedAssignment, setSelectedAssignment] = useState<AggregatedVehicleAssignment | null>(null);
-  // Phase 2A.5 caller-cleanup: drives the UVP slideout opened by the row-level
-  // "Inventory" buttons (replaces the legacy <ViewInventoryButton> popovers).
-  const [uvpVehicleNumber, setUvpVehicleNumber] = useState<string | null>(null);
   const [unassignDialog, setUnassignDialog] = useState<{ open: boolean; techRacfid: string; techName: string }>({ open: false, techRacfid: '', techName: '' });
   const [unassignNotes, setUnassignNotes] = useState("");
   const [historyDialog, setHistoryDialog] = useState<{ open: boolean; techRacfid: string; techName: string }>({ open: false, techRacfid: '', techName: '' });
@@ -409,18 +403,7 @@ export default function VehicleAssignments() {
                             <td className="p-3">
                               <div className="flex items-center gap-2">
                                 <span className="font-mono text-sm font-semibold">{assignment.truckNo || '-'}</span>
-                                {assignment.truckNo && (
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    className="h-6 px-2 text-xs"
-                                    onClick={(e) => { e.stopPropagation(); setUvpVehicleNumber(assignment.truckNo!); }}
-                                    data-testid={`button-inventory-${assignment.truckNo}`}
-                                  >
-                                    <Package className="h-3 w-3 mr-1" />
-                                    Inventory
-                                  </Button>
-                                )}
+                                {assignment.truckNo && <ViewInventoryButton vehicleNumber={assignment.truckNo} size="sm" variant="ghost" className="h-6 px-2 text-xs" />}
                               </div>
                             </td>
                             <td className="p-3 text-sm">
@@ -532,17 +515,7 @@ export default function VehicleAssignments() {
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <h4 className="font-semibold text-sm text-muted-foreground">Vehicle Info (Holman)</h4>
-                    {selectedAssignment.truckNo && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setUvpVehicleNumber(selectedAssignment.truckNo!)}
-                        data-testid="button-inventory-detail"
-                      >
-                        <Package className="h-3.5 w-3.5 mr-1.5" />
-                        Inventory
-                      </Button>
-                    )}
+                    {selectedAssignment.truckNo && <ViewInventoryButton vehicleNumber={selectedAssignment.truckNo} size="sm" />}
                   </div>
                   <div className="space-y-1">
                     <p><span className="font-medium">Truck #:</span> {selectedAssignment.truckNo || '-'}</p>
@@ -662,18 +635,6 @@ export default function VehicleAssignments() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Phase 2A.5 caller-cleanup: UVP slideout opened by row-level Inventory
-          buttons. Defaults to the Inventory tab so the user lands on the same
-          surface the legacy <ViewInventoryButton> used to show. */}
-      <UniversalVehiclePanel
-        vehicleId={null}
-        vehicleNumber={uvpVehicleNumber}
-        open={!!uvpVehicleNumber}
-        onOpenChange={(open) => { if (!open) setUvpVehicleNumber(null); }}
-        defaultTab="inventory"
-        fromPage="vehicle-assignments"
-      />
     </MainContent>
   );
 }

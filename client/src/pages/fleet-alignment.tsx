@@ -22,7 +22,6 @@ import {
   Search, Filter,
 } from "lucide-react";
 import { Link } from "wouter";
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
 
 type RootCause =
   | "pending"
@@ -420,9 +419,6 @@ export default function FleetAlignment() {
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [showProgress, setShowProgress] = useState(false);
   const [pendingVehicles, setPendingVehicles] = useState<AlignmentRecord[]>([]);
-  // 2A.4 (matrix #9): UVP drilldown from a mismatch row. Opens focused on the
-  // Assignments tab so the analyst lands directly on TPMS-vs-WMS context.
-  const [drilldownTruckNumber, setDrilldownTruckNumber] = useState<string | null>(null);
 
   // Load alignment data — fetches all pages and merges them into a single list
   const { data: alignmentData, isLoading, refetch, isFetching } = useQuery<{ data: AlignmentRecord[]; total: number }>({
@@ -943,18 +939,10 @@ export default function FleetAlignment() {
                           />
                         </div>
 
-                        {/* Truck number + UVP drilldown + link to full page */}
+                        {/* Truck number + link */}
                         <div className="shrink-0 min-w-[80px]">
                           <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              className="font-mono font-semibold text-sm text-primary hover:underline cursor-pointer"
-                              onClick={(e) => { e.stopPropagation(); setDrilldownTruckNumber(record.truckNumber); }}
-                              data-testid={`button-drilldown-${record.truckNumber}`}
-                              title="Open vehicle assignments drilldown"
-                            >
-                              #{record.truckNumber}
-                            </button>
+                            <span className="font-mono font-semibold text-sm">#{record.truckNumber}</span>
                             <Link href={`/fleet-scope/trucks/${record.truckNumber}`}>
                               <ExternalLink className="h-3 w-3 text-muted-foreground hover:text-foreground cursor-pointer" />
                             </Link>
@@ -1072,18 +1060,6 @@ export default function FleetAlignment() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* 2A.4 (matrix #9): UVP drilldown — opens focused on the Assignments
-          tab so the analyst lands directly on TPMS-vs-WMS context for the
-          selected mismatch. */}
-      <UniversalVehiclePanel
-        vehicleId={null}
-        vehicleNumber={drilldownTruckNumber}
-        defaultTab="assignments"
-        open={!!drilldownTruckNumber}
-        onOpenChange={(open) => { if (!open) setDrilldownTruckNumber(null); }}
-        fromPage="alignment"
-      />
 
       {/* Progress dialog */}
       {showProgress && activeRunId && (

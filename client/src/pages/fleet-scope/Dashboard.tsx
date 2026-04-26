@@ -69,7 +69,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
 import Papa from "papaparse";
 import { Badge } from "@/components/ui/badge";
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
+import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 
 type OwnerType = "Oscar S" | "John C" | "Mandy R" | "Rob A" | "Bob B" | "Jenn D." | "Samantha W" | "Cheryl" | "Final Actioned";
 
@@ -4158,8 +4158,8 @@ export default function Dashboard() {
         </Card>
       </main>
 
-      <UniversalVehiclePanel
-        vehicleId={selectedTruckId}
+      <TruckDetailPanel
+        truckId={selectedTruckId}
         open={detailPanelOpen}
         onOpenChange={(open) => {
           setDetailPanelOpen(open);

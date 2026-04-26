@@ -1,6 +1,4 @@
-import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { 
@@ -16,13 +14,9 @@ import {
   Building,
   Hash,
   Tag,
-  FileText,
-  Package
+  FileText
 } from "lucide-react";
-// Phase 2A.5 caller-cleanup (2026-04-25): legacy ViewInventoryButton replaced
-// with UVP focused on Inventory tab. Component file kept until last caller is
-// gone (post-cutover deletion per user direction).
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
+import { ViewInventoryButton } from "@/components/view-inventory-button";
 
 interface QueueItemDataTemplateProps {
   data: string | null;
@@ -197,9 +191,6 @@ const DataField: React.FC<{ fieldKey: string; value: any; level?: number }> = ({
 };
 
 export function QueueItemDataTemplate({ data }: QueueItemDataTemplateProps) {
-  // Phase 2A.5 caller-cleanup: drives the UVP slideout opened by the per-section
-  // "Inventory" header button (replaces the legacy <ViewInventoryButton>).
-  const [uvpVehicleNumber, setUvpVehicleNumber] = useState<string | null>(null);
   if (!data) {
     return (
       <div className="text-sm text-muted-foreground italic" data-testid="no-additional-data">
@@ -297,15 +288,7 @@ export function QueueItemDataTemplate({ data }: QueueItemDataTemplateProps) {
                 {section.title}
               </CardTitle>
               {section.showInventory && vehicleNumber && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setUvpVehicleNumber(vehicleNumber)}
-                  data-testid={`button-inventory-${vehicleNumber}`}
-                >
-                  <Package className="h-3.5 w-3.5 mr-1.5" />
-                  Inventory
-                </Button>
+                <ViewInventoryButton vehicleNumber={vehicleNumber} size="sm" />
               )}
             </div>
           </CardHeader>
@@ -323,18 +306,6 @@ export function QueueItemDataTemplate({ data }: QueueItemDataTemplateProps) {
           {sectionIndex < sections.length - 1 && <Separator className="mt-4" />}
         </Card>
       ))}
-
-      {/* Phase 2A.5 caller-cleanup: UVP slideout opened by per-section Inventory
-          buttons. Defaults to the Inventory tab so the user lands on the same
-          surface the legacy <ViewInventoryButton> used to show. */}
-      <UniversalVehiclePanel
-        vehicleId={null}
-        vehicleNumber={uvpVehicleNumber}
-        open={!!uvpVehicleNumber}
-        onOpenChange={(open) => { if (!open) setUvpVehicleNumber(null); }}
-        defaultTab="inventory"
-        fromPage="queue-item"
-      />
     </div>
   );
 }

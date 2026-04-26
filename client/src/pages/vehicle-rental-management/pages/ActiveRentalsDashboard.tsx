@@ -22,7 +22,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogFooter,
   DialogHeader, DialogTitle, DialogTrigger,
 } from "@/components/ui/dialog";
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
+import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
 import { ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
@@ -1005,10 +1005,12 @@ export default function ActiveRentalsDashboard() {
         </Card>
 
         {/* Shared detail panel — exact same component Fleet Scope opens */}
-        <UniversalVehiclePanel
-          vehicleId={detailTruckId}
+        <TruckDetailPanel
+          truckId={detailTruckId}
           open={detailOpen}
           onOpenChange={setDetailOpen}
+          onUpdateAms={undefined as any}
+          amsOpen={false}
         />
 
         {inlineEditMutation.isPending && (

@@ -20,11 +20,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { QueueItem, User, AutomationDetail } from "@shared/schema";
-import type { Truck as FsTruck } from "@shared/fleet-scope-schema";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
-import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
 import {
   type DataSource,
   type ContactInfo,
@@ -518,44 +516,6 @@ export function AssetsTaskDetailView({
     save({ carrier: value || null });
   };
 
-  // Drilldown into UniversalVehiclePanel — resolves truckNumber → fs_trucks.id
-  // on click via the existing /api/fs/trucks list (cached, dedupes with FS pages).
-  const [vehiclePanelOpen, setVehiclePanelOpen] = useState(false);
-  const [resolvedTruckId, setResolvedTruckId] = useState<string | null>(null);
-  const [resolvingVehicle, setResolvingVehicle] = useState(false);
-
-  const handleOpenVehiclePanel = async () => {
-    if (!truckNumber || truckNumber === "Unknown") return;
-    setResolvingVehicle(true);
-    try {
-      const trucks = await queryClient.fetchQuery<FsTruck[]>({
-        queryKey: ["/api/fs/trucks"],
-      });
-      const target = String(truckNumber).padStart(6, "0");
-      const match = trucks.find(
-        (t) => String(t.truckNumber || "").padStart(6, "0") === target
-      );
-      if (match) {
-        setResolvedTruckId(match.id);
-        setVehiclePanelOpen(true);
-      } else {
-        toast({
-          title: "Not in Repair Tracker",
-          description: `Truck ${truckNumber} has no Fleet Scope repair record.`,
-          variant: "destructive",
-        });
-      }
-    } catch (err: any) {
-      toast({
-        title: "Lookup failed",
-        description: err?.message || "Could not load truck list",
-        variant: "destructive",
-      });
-    } finally {
-      setResolvingVehicle(false);
-    }
-  };
-
   const formatAddress = (addr: ContactInfo['homeAddress'] | undefined) => {
     if (!addr) return null;
     const parts = [addr.line1, addr.line2, addr.city, addr.state, addr.postal].filter(Boolean);
@@ -614,33 +574,8 @@ export function AssetsTaskDetailView({
             <Badge className="bg-green-100 text-green-800 border-green-200">BYOV</Badge>
           )}
           <Badge variant="outline">Truck: {truckNumber || 'N/A'}</Badge>
-          {truckNumber && truckNumber !== 'Unknown' && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={handleOpenVehiclePanel}
-              disabled={resolvingVehicle}
-              data-testid="button-open-vehicle-panel"
-              title="Open vehicle detail in Repair Tracker"
-            >
-              {resolvingVehicle ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <ExternalLink className="h-3 w-3" />
-              )}
-              Vehicle Detail
-            </Button>
-          )}
         </div>
       </div>
-
-      <UniversalVehiclePanel
-        vehicleId={resolvedTruckId}
-        open={vehiclePanelOpen}
-        onOpenChange={setVehiclePanelOpen}
-        fromPage="assets-queue"
-      />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Column 1: Contact & Disposition */}
