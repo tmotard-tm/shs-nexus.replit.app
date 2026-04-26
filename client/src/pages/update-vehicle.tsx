@@ -14,12 +14,15 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database, CreditCard } from "lucide-react";
+import { Car, Search, MapPin, Calendar, Filter, ChevronDown, ChevronUp, X, CheckCircle, XCircle, User, AlertCircle, Loader2, RefreshCw, Truck, AlertTriangle, Database, CreditCard, Package } from "lucide-react";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
-import { ViewInventoryButton } from "@/components/view-inventory-button";
+// Phase 2A.5 caller-cleanup (2026-04-25): legacy ViewInventoryButton replaced
+// with UVP focused on Inventory tab. Component file kept until last caller is
+// gone (post-cutover deletion per user direction).
+import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
 // FleetVehicle type for Holman API data
 interface FleetVehicle {
   vin: string;
@@ -140,6 +143,9 @@ export default function UpdateVehicle() {
   const [interiorFilter, setInteriorFilter] = useState("all");
   const [tuneStatusFilter, setTuneStatusFilter] = useState("all");
   const [makeFilter, setMakeFilter] = useState("all");
+  // Phase 2A.5 caller-cleanup: drives the UVP slideout opened by the row-level
+  // "Inventory" buttons (replaces the legacy <ViewInventoryButton> popovers).
+  const [uvpVehicleNumber, setUvpVehicleNumber] = useState<string | null>(null);
   const [modelFilter, setModelFilter] = useState("all");
   const [colorFilter, setColorFilter] = useState("all");
   const [stateFilter, setStateFilter] = useState("all");
@@ -1191,7 +1197,15 @@ export default function UpdateVehicle() {
                           <p className="text-xs text-muted-foreground">Division: {vehicle.division || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">District: {vehicle.district || 'N/A'}</p>
                           <div className="mt-2" onClick={(e) => e.stopPropagation()}>
-                            <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" />
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setUvpVehicleNumber(vehicle.vehicleNumber)}
+                              data-testid={`button-inventory-${vehicle.vehicleNumber}`}
+                            >
+                              <Package className="h-3.5 w-3.5 mr-1.5" />
+                              Inventory
+                            </Button>
                           </div>
                         </div>
                       </div>
@@ -1265,7 +1279,15 @@ export default function UpdateVehicle() {
                           VIN: {selectedVehicle.vin} | Vehicle #: {selectedVehicle.vehicleNumber}
                         </p>
                       </div>
-                      <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setUvpVehicleNumber(selectedVehicle.vehicleNumber)}
+                        data-testid="button-inventory-selected"
+                      >
+                        <Package className="h-3.5 w-3.5 mr-1.5" />
+                        Inventory
+                      </Button>
                     </div>
                   </div>
                   
@@ -1687,6 +1709,18 @@ export default function UpdateVehicle() {
           </Dialog>
         </div>
       </main>
+
+      {/* Phase 2A.5 caller-cleanup: UVP slideout opened by row-level Inventory
+          buttons. Defaults to the Inventory tab so the user lands on the same
+          surface the legacy <ViewInventoryButton> used to show. */}
+      <UniversalVehiclePanel
+        vehicleId={null}
+        vehicleNumber={uvpVehicleNumber}
+        open={!!uvpVehicleNumber}
+        onOpenChange={(open) => { if (!open) setUvpVehicleNumber(null); }}
+        defaultTab="inventory"
+        fromPage="update-vehicle"
+      />
     </MainContent>
   );
 }

@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { determineOwner, ownerColors, type TruckPanelData } from "./_helpers";
 import { OverviewTab } from "./tabs/OverviewTab";
 import { TelematicsTab } from "./tabs/TelematicsTab";
+import { OnTruckInventory } from "./tabs/InventoryTab";
 import { ServiceTab } from "./tabs/ServiceTab";
 import { AssignmentsTab } from "./tabs/AssignmentsTab";
 import { InventoryTab } from "./tabs/InventoryTab";
@@ -135,7 +136,16 @@ export function UniversalVehiclePanel({
             <Skeleton className="h-40 w-full" />
           </div>
         ) : !truck ? (
-          <div className="p-6 space-y-4" data-testid="panel-truck-not-found">
+          // Architect Med-2 fix (2026-04-25): wrap not-found branch in
+          // overflow-y-auto so the inline OnTruckInventory + TelematicsTab
+          // sections (added in High 1 fix above) stay reachable on shorter
+          // viewports. SheetContent itself is `flex flex-col` with no
+          // intrinsic scroll, so without this the bottom of the telematics
+          // panel could clip.
+          <div
+            className="p-6 space-y-4 flex-1 overflow-y-auto"
+            data-testid="panel-truck-not-found"
+          >
             <SheetHeader className="space-y-1.5">
               <SheetTitle className="flex items-center gap-2">
                 Truck <span className="font-mono">{vehicleNumber || "—"}</span>
@@ -171,6 +181,21 @@ export function UniversalVehiclePanel({
                     {kind === "opsReview" && "Ops Review"}
                   </Button>
                 ))}
+              </div>
+            )}
+            {/* Architect High 1 fix (2026-04-25, 2A.5 caller-cleanup architect
+                round 2): the legacy ViewInventoryButton + TelematicsButton
+                hit /api/truck-inventory/summary/:n and /api/samsara/telematics/:n
+                directly — neither requires an fs_trucks row. Now that all 5
+                callers route through UVP, ghost-row vehicles (rental /
+                decommissioned) would lose access to those surfaces. We render
+                the same two read-only sections inline here. WMS receive/return
+                tasks still require fs_trucks.id and stay gated to the happy
+                path's InventoryTab. */}
+            {vehicleNumber && (
+              <div className="space-y-6 pt-4 border-t">
+                <OnTruckInventory truckNumber={vehicleNumber} />
+                <TelematicsTab truckNumber={vehicleNumber} />
               </div>
             )}
           </div>
@@ -249,7 +274,7 @@ export function UniversalVehiclePanel({
                     <OverviewTab truck={truck} />
                   </TabsContent>
                   <TabsContent value="telematics" className="m-0">
-                    <TelematicsTab truck={truck} />
+                    <TelematicsTab truckNumber={truck.truckNumber || null} />
                   </TabsContent>
                   <TabsContent value="service" className="m-0">
                     <ServiceTab truck={truck} />

@@ -57,7 +57,11 @@ function formatDate(dateStr: string | null) {
   return dateStr;
 }
 
-function OnTruckInventory({ truckNumber }: { truckNumber: string }) {
+// Phase 2A.5 caller-cleanup (2026-04-25): exported so UVP's ghost-row
+// fallback (no fs_trucks row) can render the on-truck inventory section
+// directly from a vehicle number — preserving the legacy ViewInventoryButton
+// surface for rental / decommissioned vehicles.
+export function OnTruckInventory({ truckNumber }: { truckNumber: string }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
 

@@ -480,6 +480,38 @@ Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to a
 - **Architect review (round 2) — PASS.** All three fixes verified effective; no new blocker-level regressions; `OperationsModalContext.truck` optional safe across all callers; pause-safety preserved (still zero new write paths to fs_trucks/fs_truck_state).
 - **Pause-safe checkpoint re-reached (2026-04-25T23:30Z, T0+0.7h).** Step 6 of 2A.5 complete; T+22h budget unused. Recommended QA pass (post-pause): exercise ghost-row fallback (a Holman vehicle known to lack an fs_trucks row → click row → confirm fallback panel renders → exercise the 5 buttons).
 
+##### 2A.5 caller-cleanup pass (2026-04-26T00:00Z, T0+1.2h, Option A + opportunistic D-fold)
+
+Goal: now that UVP fully absorbs the Inventory + Telematics surfaces, retire all **non-fleet-management** callers of the legacy `<ViewInventoryButton>` (5 surfaces) and the legacy `<TelematicsButton>` (2 row-card surfaces inside fleet-management). Per Kirk direction, the legacy component files (`view-inventory-button.tsx`, `telematics-button.tsx`) stay on disk for post-cutover deletion — only the imports/usages are removed in this pass.
+
+**Files migrated (5 active call sites + 1 page row-card cleanup):**
+
+| File | Before | After |
+|---|---|---|
+| `client/src/pages/vehicle-assignments.tsx` | 2× `<ViewInventoryButton>` (table row + selected-assignment header) | 2× `<Button><Package/>Inventory</Button>` → `setUvpVehicleNumber(...)`; single shared `<UniversalVehiclePanel defaultTab="inventory" fromPage="vehicle-assignments">` |
+| `client/src/pages/update-vehicle.tsx` | 2× `<ViewInventoryButton>` | same pattern, `fromPage="update-vehicle"` |
+| `client/src/pages/active-vehicles.tsx` | 1× `<ViewInventoryButton showSummary>` | `<Button>Inventory</Button>` (UX downgrade: lost inline summary chip — user explicitly accepts) + UVP, `fromPage="active-vehicles"` |
+| `client/src/components/queue-item-data-template.tsx` | 1× per-section `<ViewInventoryButton>` | per-section `<Button>` + per-instance UVP, `fromPage="queue-item"`. Multiple QueueItemDataTemplate instances per page each carry their own UVP — only one open at a time per user click; acceptable pattern. |
+| `client/src/pages/fleet-management.tsx` (D-fold) | 2× row-card action-bar buttons (`<ViewInventoryButton>` + `<TelematicsButton>`) | new `<Button><Package/>Inventory</Button>` + `<Button><Activity/>Telematics</Button>` that set `selectedVehicle` + new `uvpQuickJumpTab` state in one click. Existing UVP gets `defaultTab={uvpQuickJumpTab \|\| "overview"}` and `key={\`uvp-${vehicleNumber}-${tab}\`}` so re-clicking a different quick-jump for the same vehicle force-remounts UVP (Radix Tabs holds its own state otherwise). Quick-jump cleared on UVP close. Legacy imports dropped. |
+
+**Architect review (round 1) — 1 High, fixed in same patch:**
+- **High 1 (ghost-row Inventory/Telematics regression).** Legacy `ViewInventoryButton` hit `/api/truck-inventory/summary/:n` and `TelematicsButton` hit `/api/samsara/telematics/:n` directly — neither needed an `fs_trucks` row. Routing all 5 callers through UVP meant ghost-row vehicles (rental / decommissioned, no `fs_trucks` row) would lose access to those two surfaces — UVP's not-found branch only showed Operations buttons. **Fix:**
+  - Exported `OnTruckInventory` from `client/src/components/vehicle/tabs/InventoryTab.tsx` (it was already a self-contained sub-component taking only `truckNumber: string`).
+  - Refactored `TelematicsTab` prop signature from `{ truck: TruckPanelData }` to `{ truckNumber: string \| null }` — single caller (UVP happy path) updated in lockstep. Removes implicit fs_trucks dependency.
+  - UVP not-found branch (`UniversalVehiclePanel.tsx:189-194`) now renders `<OnTruckInventory truckNumber={vehicleNumber}/>` and `<TelematicsTab truckNumber={vehicleNumber}/>` inline below the operations-fallback buttons. Ghost-row UVP now shows: header + operations fallback + on-truck inventory + telematics. WMS receive/return tasks remain gated to the happy-path `InventoryTab` (require `fs_trucks.id`) — matches legacy behavior (neither legacy button showed WMS).
+
+**Architect review (round 2) — PASS with 1 Medium UX fix, applied:**
+- **Medium 1 (not-found scroll).** Not-found branch was a plain `<div>` inside `SheetContent` with no scroll wrapper, so the inline telematics section could clip on shorter viewports. **Fix:** added `flex-1 overflow-y-auto` to the not-found container (`UniversalVehiclePanel.tsx:148-151`).
+
+**Net effect of caller-cleanup pass:**
+- 5 active legacy `<ViewInventoryButton>` call sites + 2 legacy `<TelematicsButton>` row-card call sites: ZERO remaining non-test usages.
+- Legacy `view-inventory-button.tsx` + `telematics-button.tsx` files still on disk; queued for post-cutover deletion (per user direction) since their absence would break fleet-management's prior `import` line if any cherry-pick rolled back.
+- TypeScript baseline: 190 → 190 (same 2 pre-existing `Set<string>` iteration errors at fleet-management.tsx:702, 1476 — unchanged).
+- Server compiles + boots; cron unchanged + still LIVE (3/3 drift snapshots scheduled).
+- Pause-safety preserved: zero new write paths to `fs_trucks`/`fs_truck_state`; all changes are client-side caller rewiring + 2 read-only inline UVP sections.
+
+**Pause-safe checkpoint re-reached (2026-04-26T00:00Z, T0+1.2h).** Caller cleanup complete; T+~21h budget remains. Cutover (2026-04-26T22:50:06Z) unblocked; no High blockers from this pass.
+
 #### Pause-window work plan (2026-04-25 → 2026-04-26 22:50 UTC)
 
 Ranked by effort/risk during the 24h drift window. All listed items are pause-safe (do NOT touch fs_trucks/fs_truck_state writes):

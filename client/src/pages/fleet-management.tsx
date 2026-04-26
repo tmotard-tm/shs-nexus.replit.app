@@ -27,8 +27,10 @@ import {
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
 import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
-import { ViewInventoryButton } from "@/components/view-inventory-button";
-import { TelematicsButton } from "@/components/telematics-button";
+// Phase 2A.5 caller-cleanup (2026-04-25): legacy ViewInventoryButton +
+// TelematicsButton replaced by UVP quick-jump (Inventory / Telematics tabs).
+// Component files kept until last caller is gone (post-cutover deletion).
+// (Activity + Package icons are already imported via the lucide-react block above.)
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -287,6 +289,12 @@ export default function FleetManagement() {
   
   // Selected vehicle for detail view
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
+  // Phase 2A.5 caller-cleanup: row-card quick-jump buttons (Inventory /
+  // Telematics) set this alongside selectedVehicle so the UVP opens focused
+  // on the requested tab. UVP receives `defaultTab` + a `key` derived from
+  // (vehicleNumber, tab) so a fresh mount picks up the new defaultTab even
+  // when reopening for a vehicle that was just closed. Cleared on close.
+  const [uvpQuickJumpTab, setUvpQuickJumpTab] = useState<"inventory" | "telematics" | null>(null);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
 
   // Capture ?openTruck= param once at mount (lazy useState so it runs once, before any URL cleaning)
@@ -2347,21 +2355,42 @@ export default function FleetManagement() {
                             )}
                           </div>
 
-                          {/* Action bar */}
+                          {/* Action bar (Phase 2A.5 caller-cleanup):
+                              row-card quick-jumps now open the same UVP drawer
+                              the row click opens, focused on the requested tab.
+                              We set selectedVehicle + uvpQuickJumpTab in one
+                              click; the UVP `key` includes the tab so a fresh
+                              mount picks up the new defaultTab. */}
                           <div className="flex items-center justify-end pt-2 border-t">
                             <div className="flex items-center gap-1">
-                              <ViewInventoryButton 
-                                vehicleNumber={vehicle.vehicleNumber} 
-                                size="sm" 
-                                variant="ghost" 
-                                className="h-7 text-xs"
-                              />
-                              <TelematicsButton
-                                vehicleNumber={vehicle.vehicleNumber}
-                                size="sm"
+                              <Button
                                 variant="ghost"
+                                size="sm"
                                 className="h-7 text-xs"
-                              />
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setUvpQuickJumpTab("inventory");
+                                  setSelectedVehicle(vehicle);
+                                }}
+                                data-testid={`button-row-inventory-${vehicle.vehicleNumber}`}
+                              >
+                                <Package className="h-3 w-3 mr-1" />
+                                Inventory
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 text-xs"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setUvpQuickJumpTab("telematics");
+                                  setSelectedVehicle(vehicle);
+                                }}
+                                data-testid={`button-row-telematics-${vehicle.vehicleNumber}`}
+                              >
+                                <Activity className="h-3 w-3 mr-1" />
+                                Telematics
+                              </Button>
                             </div>
                           </div>
                         </CardContent>
@@ -2406,8 +2435,15 @@ export default function FleetManagement() {
             (FleetVehicle shape) is still the source of truth for the modals' parent
             state (district, address prefill, applyPatch after assignment, etc). */}
         <UniversalVehiclePanel
+          // Phase 2A.5 caller-cleanup: `key` derived from (vehicleNumber, tab)
+          // forces a fresh mount when the user reopens UVP for the same
+          // vehicle on a different tab via a row-card quick-jump. Without
+          // this, Tabs holds its own internal state and ignores defaultTab
+          // updates after first mount.
+          key={`uvp-${selectedVehicle?.vehicleNumber || "none"}-${uvpQuickJumpTab || "overview"}`}
           vehicleId={null}
           vehicleNumber={selectedVehicle?.vehicleNumber || null}
+          defaultTab={uvpQuickJumpTab || "overview"}
           open={!!selectedVehicle}
           onOpenChange={(open) => {
             if (open) return;
@@ -2420,6 +2456,7 @@ export default function FleetManagement() {
             // outside-click + escape are suppressed while a child is open.
             if (activeModal !== null || showOpsReview || showHistoryDialog) return;
             setSelectedVehicle(null);
+            setUvpQuickJumpTab(null);
           }}
           fromPage="fleet-management"
           amsOpen={activeModal !== null || showOpsReview || showHistoryDialog}

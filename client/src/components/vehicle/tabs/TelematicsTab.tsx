@@ -7,7 +7,10 @@ import {
   Fuel, Wifi, WifiOff, Clock, AlertTriangle, CheckCircle,
 } from "lucide-react";
 import { toCanonical } from "@shared/vehicle-number-utils";
-import type { TruckPanelData } from "@/components/vehicle/_helpers";
+// Phase 2A.5 caller-cleanup (2026-04-25): TelematicsTab only ever read
+// truck.truckNumber. Switching the prop to a plain truckNumber lets the
+// UVP ghost-row fallback (no fs_trucks row) render this tab without
+// fabricating a synthetic Truck. Single caller (UVP) updated in lockstep.
 
 /**
  * Telematics tab — Phase 2A.3 absorbs the full TelematicsButton dialog
@@ -122,10 +125,10 @@ function Row({
   );
 }
 
-export function TelematicsTab({ truck }: { truck: TruckPanelData }) {
+export function TelematicsTab({ truckNumber }: { truckNumber: string | null }) {
   // Samsara identifies vehicles by the unpadded truck number — the canonical
   // form. Use the shared helper rather than ad-hoc regex stripping.
-  const samsaraVehicleName = toCanonical(truck.truckNumber);
+  const samsaraVehicleName = toCanonical(truckNumber);
 
   const { data, isLoading, error } = useQuery<TelematicsData>({
     queryKey: ["/api/samsara/telematics", samsaraVehicleName],
