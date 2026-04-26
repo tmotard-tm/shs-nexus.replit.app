@@ -12,6 +12,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { UniversalVehiclePanel } from "@/components/vehicle/UniversalVehiclePanel";
+import type { OperationsModalKind, OperationsModalContext } from "@/components/vehicle/tabs/OperationsTab";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
@@ -2396,698 +2398,80 @@ export default function FleetManagement() {
         </div>
       </main>
 
-      {/* Vehicle Detail Drawer */}
-      <Sheet open={!!selectedVehicle} onOpenChange={(open) => !open && setSelectedVehicle(null)}>
-        <SheetContent className="w-[500px] sm:max-w-[500px] overflow-y-auto" data-testid="sheet-vehicle-detail">
-          {selectedVehicle && (
-            <>
-              <SheetHeader>
-                <SheetTitle className="flex items-center gap-2">
-                  <Truck className="h-5 w-5" />
-                  Vehicle #{selectedVehicle.vehicleNumber}
-                </SheetTitle>
-                <SheetDescription>
-                  {selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}
-                </SheetDescription>
-              </SheetHeader>
-              
-              <div className="mt-6 space-y-6">
-                {/* Status Badge */}
-                <div className="flex items-center gap-2">
-                  <Badge className={getAssignmentStatus(selectedVehicle).color}>
-                    {getAssignmentStatus(selectedVehicle).label}
-                  </Badge>
-                  <Badge variant="outline">{getVehicleOwnership(selectedVehicle.vehicleNumber).type}</Badge>
-                </div>
-
-                <Separator />
-
-                {/* Vehicle Details */}
-                <div className="space-y-4">
-                  <h4 className="font-medium text-sm text-muted-foreground">Vehicle Information</h4>
-                  <div className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                      <Label className="text-xs text-muted-foreground">VIN</Label>
-                      <p className="font-mono text-xs">{selectedVehicle.vin}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">License Plate</Label>
-                      <p>{selectedVehicle.licensePlate} ({selectedVehicle.licenseState})</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Location</Label>
-                      <p>{selectedVehicle.city}, {selectedVehicle.state} {selectedVehicle.zip}</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Region / District</Label>
-                      <p>
-                        {selectedVehicle.region} / {selectedVehicle.district}
-                        {lookupCostCenter(selectedVehicle.district) && (
-                          <span className="text-muted-foreground"> · CC {lookupCostCenter(selectedVehicle.district)}</span>
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Odometer</Label>
-                      <p>{selectedVehicle.odometer?.toLocaleString() || 'N/A'} miles</p>
-                    </div>
-                    <div>
-                      <Label className="text-xs text-muted-foreground">Color</Label>
-                      <p>{selectedVehicle.color || 'N/A'}</p>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Assignment Info */}
-                <div className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h4 className="font-medium text-sm text-muted-foreground">Assignment Details</h4>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2 text-xs"
-                      disabled={resyncAssignmentsMutation.isPending}
-                      onClick={() => resyncAssignmentsMutation.mutate({
-                        vehicleNumber: selectedVehicle.vehicleNumber,
-                        enterpriseId: selectedVehicle.holmanTechAssigned,
-                      })}
-                      data-testid="button-resync-assignments"
-                    >
-                      {resyncAssignmentsMutation.isPending
-                        ? <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                        : <RefreshCw className="h-3 w-3 mr-1" />}
-                      {resyncAssignmentsMutation.isPending ? "Resyncing…" : "Resync"}
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Card className="p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Link2 className="h-4 w-4 text-blue-600" />
-                        <Label className="text-xs font-medium">TPMS</Label>
-                      </div>
-                      {selectedVehicle.tpmsAssignedTechId ? (
-                        <>
-                          <p className="font-mono text-sm">{selectedVehicle.tpmsAssignedTechId}</p>
-                          {selectedVehicle.tpmsAssignedTechName && (
-                            <p className="text-xs text-muted-foreground mt-1">{selectedVehicle.tpmsAssignedTechName}</p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">Unassigned</p>
-                      )}
-                    </Card>
-                    <Card className="p-3">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Truck className="h-4 w-4 text-green-600" />
-                        <Label className="text-xs font-medium">Holman</Label>
-                      </div>
-                      {selectedVehicle.holmanTechAssigned ? (
-                        <>
-                          <p className="font-mono text-sm">{selectedVehicle.holmanTechAssigned}</p>
-                          {selectedVehicle.holmanTechName && (
-                            <p className="text-xs text-muted-foreground mt-1">{selectedVehicle.holmanTechName}</p>
-                          )}
-                        </>
-                      ) : (
-                        <p className="text-muted-foreground text-sm">Unassigned</p>
-                      )}
-                    </Card>
-                  </div>
-
-                </div>
-
-                <Separator />
-
-                {/* Operations */}
-                <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-muted-foreground">Operations</h4>
-                  <div className="grid grid-cols-2 gap-2">
-                    <Button size="sm" className="w-full" onClick={() => openModal("assign")} data-testid="button-fleet-assign">
-                      <UserPlus className="h-4 w-4 mr-1.5" />Assign Tech
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("unassign")} disabled={!selectedVehicle.tpmsAssignedTechId?.trim() && !selectedVehicle.holmanTechAssigned?.trim()} data-testid="button-fleet-unassign">
-                      <UserX className="h-4 w-4 mr-1.5" />Unassign Tech
-                    </Button>
-                    <Button size="sm" variant="outline" className="w-full" onClick={() => openModal("poHistory")} data-testid="button-po-history">
-                      <FileText className="h-4 w-4 mr-1.5" />
-                      PO History{vehiclePOs && vehiclePOs.length > 0 ? ` (${vehiclePOs.length})` : ""}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => setShowHistoryDialog(true)}
-                      disabled={!selectedVehicle.tpmsAssignedTechId}
-                      data-testid="button-view-history"
-                    >
-                      <History className="h-4 w-4 mr-1.5" />History
-                    </Button>
-                  </div>
-                  <ViewInventoryButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
-                  <TelematicsButton vehicleNumber={selectedVehicle.vehicleNumber} className="w-full" size="sm" />
-                  {!selectedVehicle.tpmsAssignedTechId?.trim() && !selectedVehicle.holmanTechAssigned?.trim() && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="w-full text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-300 dark:border-purple-700 dark:hover:bg-purple-950"
-                      onClick={() => {
-                        setOpsReviewVehicle(selectedVehicle);
-                        setOpsRefZip(selectedVehicle.zip || targetZipcode);
-                        setShowOpsReview(true);
-                      }}
-                    >
-                      <Users className="h-4 w-4 mr-1.5" />Ops Review
-                    </Button>
-                  )}
-                </div>
-
-                <Separator />
-
-                {/* AMS Information */}
-                <div className="space-y-3">
-                  <h4 className="font-medium text-sm text-muted-foreground">AMS Information</h4>
-                  {amsLoading ? (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading AMS data...</div>
-                  ) : !amsVehicle ? (
-                    <p className="text-xs text-muted-foreground">AMS data not available for this vehicle.</p>
-                  ) : (
-                    <div className="space-y-4">
-
-                      {/* Ownership / Management Hierarchy */}
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Ownership</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                          {amsVehicle.Tech && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">AMS Tech</Label>
-                              <p className="font-mono text-xs">{amsVehicle.Tech}</p>
-                              {amsVehicle.TechName && <p className="text-xs text-muted-foreground">{amsVehicle.TechName}</p>}
-                            </div>
-                          )}
-                          {(amsVehicle.TFD || amsVehicle.TFDName) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">TFD</Label>
-                              <p className="text-xs font-mono">{amsVehicle.TFD || "—"}</p>
-                              {amsVehicle.TFDName && <p className="text-xs text-muted-foreground">{amsVehicle.TFDName}</p>}
-                            </div>
-                          )}
-                          {(amsVehicle.DSM || amsVehicle.DSMName) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">DSM</Label>
-                              <p className="text-xs font-mono">{amsVehicle.DSM || "—"}</p>
-                              {amsVehicle.DSMName && <p className="text-xs text-muted-foreground">{amsVehicle.DSMName}</p>}
-                            </div>
-                          )}
-                          {(amsVehicle.TM || amsVehicle.TMName) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">TM</Label>
-                              <p className="text-xs font-mono">{amsVehicle.TM || "—"}</p>
-                              {amsVehicle.TMName && <p className="text-xs text-muted-foreground">{amsVehicle.TMName}</p>}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Description */}
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Description</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                          {amsVehicle.ColorName && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Color</Label>
-                              <p>{amsVehicle.ColorName}</p>
-                            </div>
-                          )}
-                          {amsVehicle.BrandingName && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Branding</Label>
-                              <p>{amsVehicle.BrandingName}</p>
-                            </div>
-                          )}
-                          {amsVehicle.InteriorName && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Interior</Label>
-                              <p>{amsVehicle.InteriorName}</p>
-                            </div>
-                          )}
-                          {amsVehicle.CurOdometer != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">AMS Odometer</Label>
-                              <p>{amsVehicle.CurOdometer.toLocaleString()} mi</p>
-                              {amsVehicle.CurOdometerDate && <p className="text-xs text-muted-foreground">{amsVehicle.CurOdometerDate.slice(0, 10)}</p>}
-                            </div>
-                          )}
-                          {amsVehicle.RemBookValue != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Book Value</Label>
-                              <p>${Number(amsVehicle.RemBookValue).toLocaleString()}</p>
-                            </div>
-                          )}
-                          {amsVehicle.LeaseEndDate && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Lease End</Label>
-                              <p>{amsVehicle.LeaseEndDate}</p>
-                            </div>
-                          )}
-                          {amsVehicle.OutofSvcDate && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Out of Service</Label>
-                              <p>{amsVehicle.OutofSvcDate}</p>
-                            </div>
-                          )}
-                          {amsVehicle.SaleDate && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Sale Date</Label>
-                              <p>{amsVehicle.SaleDate}</p>
-                            </div>
-                          )}
-                          {amsVehicle.RegRenewalDate && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Reg Renewal</Label>
-                              <p>{amsVehicle.RegRenewalDate}</p>
-                            </div>
-                          )}
-                          {amsVehicle.LifeTimeMaintenanceCost != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Lifetime Maint.</Label>
-                              <p>${Number(amsVehicle.LifeTimeMaintenanceCost).toLocaleString()}</p>
-                            </div>
-                          )}
-                          {amsVehicle.StorageCost != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Storage Cost</Label>
-                              <p>${Number(amsVehicle.StorageCost).toLocaleString()}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Condition */}
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Condition</p>
-                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Road Ready</Label>
-                            <div className="mt-0.5">
-                              {amsVehicle.RoadReady === "Y" || amsVehicle.RoadReady === "Yes" ? (
-                                <Badge className="bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300 border-none text-xs">Ready</Badge>
-                              ) : amsVehicle.RoadReady ? (
-                                <Badge className="bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300 border-none text-xs">{amsVehicle.RoadReady}</Badge>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">N/A</span>
-                              )}
-                            </div>
-                          </div>
-                          <div>
-                            <Label className="text-xs text-muted-foreground">Grade</Label>
-                            <p>{amsVehicle.Grade || "N/A"}</p>
-                            {amsVehicle.GradeDescription && <p className="text-xs text-muted-foreground">{amsVehicle.GradeDescription}</p>}
-                            {amsVehicle.GradeVerified && <p className="text-xs text-muted-foreground">Verified: {amsVehicle.GradeVerified}</p>}
-                          </div>
-                          {amsVehicle.TruckStatus != null && (() => {
-                            const match = Array.isArray(truckStatusLookup) ? truckStatusLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.TruckStatus)) : undefined;
-                            return (
-                              <div>
-                                <Label className="text-xs text-muted-foreground">Truck Status</Label>
-                                <p>{match ? getAmsLookupLabel(match) : String(amsVehicle.TruckStatus)}</p>
-                              </div>
-                            );
-                          })()}
-                          {amsVehicle.TheftVerified != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Theft Verified</Label>
-                              <p>{amsVehicle.TheftVerified === "Y" || amsVehicle.TheftVerified === true ? "Yes" : "No"}</p>
-                            </div>
-                          )}
-                          {amsVehicle.VehicleRuns != null && (() => {
-                            const match = Array.isArray(vehicleRunsLookup) ? vehicleRunsLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleRuns)) : undefined;
-                            return (
-                              <div className="col-span-2">
-                                <Label className="text-xs text-muted-foreground">How Vehicle Runs</Label>
-                                <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleRuns)}</p>
-                              </div>
-                            );
-                          })()}
-                          {amsVehicle.VehicleLooks != null && (() => {
-                            const match = Array.isArray(vehicleLooksLookup) ? vehicleLooksLookup.find((item: any) => String(item.UniqueID) === String(amsVehicle.VehicleLooks)) : undefined;
-                            return (
-                              <div className="col-span-2">
-                                <Label className="text-xs text-muted-foreground">How Vehicle Looks</Label>
-                                <p className="text-xs">{match ? getAmsLookupLabel(match) : String(amsVehicle.VehicleLooks)}</p>
-                              </div>
-                            );
-                          })()}
-                          {amsVehicle.InRepair != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">In Repair</Label>
-                              <p>{amsVehicle.InRepair === true || amsVehicle.InRepair === "Y" ? "Yes" : "No"}</p>
-                            </div>
-                          )}
-                          {amsVehicle.DaysInRepair != null && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Days In Repair</Label>
-                              <p>{amsVehicle.DaysInRepair}</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Location */}
-                      <div>
-                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Location</p>
-                        <div className="space-y-1.5 text-sm">
-                          {(amsVehicle.CurLocAddress || amsVehicle.CurLocCity) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Current Location</Label>
-                              <p className="text-xs">
-                                {[amsVehicle.CurLocAddress, amsVehicle.CurLocCity, amsVehicle.CurLocState].filter(Boolean).join(", ")}
-                                {amsVehicle.CurLocZip ? ` ${amsVehicle.CurLocZip}` : ""}
-                              </p>
-                              {amsVehicle.UpdateDate && <p className="text-xs text-muted-foreground">Updated: {amsVehicle.UpdateDate}</p>}
-                            </div>
-                          )}
-                          {(amsVehicle.DeliveryDate || amsVehicle.Address) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Delivery Location</Label>
-                              <p className="text-xs">
-                                {[amsVehicle.Address, amsVehicle.City, amsVehicle.State].filter(Boolean).join(", ")}
-                                {amsVehicle.Zip ? ` ${amsVehicle.Zip}` : ""}
-                              </p>
-                              {amsVehicle.DeliveryDate && <p className="text-xs text-muted-foreground">Delivered: {amsVehicle.DeliveryDate}</p>}
-                            </div>
-                          )}
-                          {((amsVehicle.KeyAddress || amsVehicle.keyAddress) || (amsVehicle.KeyZip || amsVehicle.keyZip)) && (
-                            <div>
-                              <Label className="text-xs text-muted-foreground">Key Location</Label>
-                              <p className="text-xs">
-                                {[(amsVehicle.KeyAddress || amsVehicle.keyAddress)].filter(Boolean).join(", ")}
-                                {(amsVehicle.KeyZip || amsVehicle.keyZip) ? ` ${amsVehicle.KeyZip || amsVehicle.keyZip}` : ""}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {(amsVehicle.LastUpdate || amsVehicle.LastUpdateUser) && (
-                        <p className="text-xs text-muted-foreground">
-                          AMS last updated: {amsVehicle.LastUpdate || "N/A"}{amsVehicle.LastUpdateUser ? ` by ${amsVehicle.LastUpdateUser}` : ""}
-                        </p>
-                      )}
-
-                      {/* Action buttons */}
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" className="flex-1" onClick={() => {
-                          // Match a raw AMS value (text label or numeric ID) to a lookup UniqueID
-                          const matchLookup = (lookup: any[] | undefined, raw: any): string => {
-                            if (raw == null || !lookup?.length) return "";
-                            const s = String(raw);
-                            const byId = lookup.find(item => String(item.UniqueID) === s);
-                            if (byId) return s;
-                            const byLabel = lookup.find(item => getAmsLookupLabel(item).toLowerCase() === s.toLowerCase());
-                            return byLabel ? String(byLabel.UniqueID) : "";
-                          };
-                          setAmsEditColor(matchLookup(colorLookup, amsVehicle?.Color));
-                          setAmsEditBranding(matchLookup(brandingLookup, amsVehicle?.Branding));
-                          setAmsEditInterior(matchLookup(interiorLookup, amsVehicle?.Interior));
-                          setAmsEditAddress(amsVehicle?.CurLocAddress || "");
-                          setAmsEditAddressZip(amsVehicle?.CurLocZip || "");
-                          setAmsEditTruckStatus(matchLookup(truckStatusLookup, amsVehicle?.TruckStatus));
-                          const tv = amsVehicle?.TheftVerified;
-                          setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
-                          setAmsEditKeyAddress(amsVehicle?.KeyLocAddress || amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
-                          setAmsEditKeyZip(amsVehicle?.KeyLocZip || amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
-                          setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
-                          setAmsEditVehicleRuns(matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns));
-                          setAmsEditVehicleLooks(matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks));
-                          openModal("amsEdit");
-                        }} data-testid="button-ams-edit">
-                          <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
-                        </Button>
-                        <Button size="sm" variant="outline" className="flex-1" onClick={() => {
-                          setAmsRepairInRepair(!!amsVehicle?.InRepair);
-                          setAmsRepairDate("");
-                          setAmsRepairReason("");
-                          setAmsRepairVendor("");
-                          setAmsRepairETA("");
-                          setAmsRepairStatus("");
-                          setAmsRepairEstimate("");
-                          setAmsRepairRentalCar("");
-                          setAmsRepairRentalStart("");
-                          setAmsRepairRentalEnd("");
-                          setAmsRepairFinalDisposition("");
-                          setAmsRepairDispositionReason("");
-                          setAmsRepairFinalDate("");
-                          openModal("amsRepair");
-                        }} data-testid="button-ams-repair">
-                          <Wrench className="h-4 w-4 mr-1.5" />Repair
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* AMS Comments / History — collapsible inline */}
-                <div className="space-y-2">
-                  {/* Header row: title + collapse toggle + Add Comment button */}
-                  <div className="flex items-center justify-between gap-2">
-                    <button
-                      type="button"
-                      className="flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => setAmsCommentsCollapsed(v => !v)}
-                    >
-                      <MessageSquare className="h-4 w-4" />
-                      AMS Comments / History
-                      {amsCommentsLoading ? (
-                        <Loader2 className="h-3 w-3 animate-spin ml-1" />
-                      ) : amsComments && amsComments.length > 0 ? (
-                        <span className="text-xs text-muted-foreground">({amsComments.length})</span>
-                      ) : null}
-                      {amsCommentsCollapsed ? <ChevronDown className="h-3.5 w-3.5 ml-0.5" /> : <ChevronUp className="h-3.5 w-3.5 ml-0.5" />}
-                    </button>
-                    {selectedVehicle?.vin && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-7 px-2.5 text-xs gap-1.5"
-                        onClick={() => setCommentDialogOpen(true)}
-                        data-testid="button-open-add-comment"
-                      >
-                        <Send className="h-3 w-3" />
-                        Add Comment
-                      </Button>
-                    )}
-                  </div>
-
-                  {/* Collapsible comment list */}
-                  {!amsCommentsCollapsed && (
-                    !selectedVehicle?.vin ? (
-                      <p className="text-xs text-muted-foreground">No VIN available.</p>
-                    ) : amsCommentsLoading ? (
-                      <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading comments...</div>
-                    ) : !amsComments || amsComments.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">No AMS comments for this vehicle.</p>
-                    ) : (
-                      <div className="overflow-y-auto max-h-[600px] space-y-1.5 pr-1">
-                        {[...amsComments]
-                          .sort((a, b) => {
-                            const da = new Date(a.Date || a.CommentDate || a.CreatedAt || a.UpdateDate || a.commentDate || a.createdAt || a.date || 0).getTime();
-                            const db = new Date(b.Date || b.CommentDate || b.CreatedAt || b.UpdateDate || b.commentDate || b.createdAt || b.date || 0).getTime();
-                            return db - da;
-                          })
-                          .map((comment: any, i: number) => (
-                            <div key={i} className="p-2.5 bg-muted/40 rounded-lg space-y-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-xs font-medium">{comment.User || comment.Author || comment.author || comment.CreatedBy || comment.UpdatedBy || comment.user || "Unknown"}</span>
-                                <span className="text-xs text-muted-foreground">{comment.Date || comment.CommentDate || comment.CreatedAt || comment.UpdateDate || comment.commentDate || comment.createdAt || comment.date || ""}</span>
-                              </div>
-                              <p className="text-xs leading-relaxed">{comment.Comment || comment.CommentText || comment.Note || comment.Text || comment.comment || comment.note || comment.text || "—"}</p>
-                            </div>
-                          ))
-                        }
-                      </div>
-                    )
-                  )}
-                </div>
-
-                {/* Add Comment popup dialog */}
-                <Dialog open={commentDialogOpen} onOpenChange={(open) => { setCommentDialogOpen(open); if (!open) setNewComment(""); }}>
-                  <DialogContent className="sm:max-w-md">
-                    <DialogHeader>
-                      <DialogTitle className="flex items-center gap-2">
-                        <MessageSquare className="h-4 w-4" />
-                        Add AMS Comment
-                      </DialogTitle>
-                      <DialogDescription>
-                        Add a comment to vehicle {selectedVehicle?.vin} in AMS.
-                      </DialogDescription>
-                    </DialogHeader>
-                    <div className="space-y-3 py-2">
-                      <Textarea
-                        placeholder="Add an AMS comment..."
-                        value={newComment}
-                        onChange={(e) => setNewComment(e.target.value)}
-                        rows={5}
-                        className="resize-none"
-                        disabled={addCommentMutation.isPending}
-                        data-testid="textarea-ams-comment"
-                        autoFocus
-                      />
-                    </div>
-                    <DialogFooter>
-                      <Button variant="outline" onClick={() => { setCommentDialogOpen(false); setNewComment(""); }} disabled={addCommentMutation.isPending}>
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={() => newComment.trim() && addCommentMutation.mutate(newComment.trim())}
-                        disabled={!newComment.trim() || addCommentMutation.isPending}
-                        data-testid="button-add-ams-comment"
-                      >
-                        {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                        Add Comment
-                      </Button>
-                    </DialogFooter>
-                  </DialogContent>
-                </Dialog>
-
-                <Separator />
-
-                {/* Nexus Tracking Data */}
-                <div className="space-y-4">
-                  <h4 className="font-medium text-sm text-muted-foreground">Nexus Tracking</h4>
-                  
-                  {nexusDataLoading ? (
-                    <div className="space-y-3">
-                      <Skeleton className="h-9 w-full" />
-                      <Skeleton className="h-9 w-full" />
-                      <Skeleton className="h-9 w-full" />
-                      <Skeleton className="h-20 w-full" />
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Post-Offboarded Status</Label>
-                        <Select value={nexusStatus} onValueChange={setNexusStatus}>
-                          <SelectTrigger className="mt-1" data-testid="select-nexus-status">
-                            <SelectValue placeholder="Select status..." />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="reserved_for_new_hire">Reserved for new hire</SelectItem>
-                            <SelectItem value="in_repair">In repair</SelectItem>
-                            <SelectItem value="declined_repair">Declined repair</SelectItem>
-                            <SelectItem value="available_for_rental_pmf">Available to assign for rental / send to PMF</SelectItem>
-                            <SelectItem value="sent_to_pmf">Sent to PMF</SelectItem>
-                            <SelectItem value="assigned_to_tech_in_rental">Assigned to tech in rental</SelectItem>
-                            <SelectItem value="not_found">Not found</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground">New Location</Label>
-                        <Input
-                          value={nexusLocation}
-                          onChange={(e) => setNexusLocation(e.target.value)}
-                          placeholder="Address or location description..."
-                          className="mt-1"
-                          data-testid="input-nexus-location"
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground">New Location Contact</Label>
-                        <Input
-                          value={nexusContact}
-                          onChange={(e) => setNexusContact(e.target.value)}
-                          placeholder="Phone number or contact info..."
-                          className="mt-1"
-                          data-testid="input-nexus-contact"
-                        />
-                      </div>
-
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Comments</Label>
-                        <Textarea
-                          value={nexusComments}
-                          onChange={(e) => setNexusComments(e.target.value.slice(0, 400))}
-                          placeholder="Additional notes (max 400 characters)..."
-                          className="mt-1 resize-none"
-                          rows={3}
-                          maxLength={400}
-                          data-testid="textarea-nexus-comments"
-                        />
-                        <p className="text-xs text-muted-foreground text-right mt-1">{nexusComments.length}/400</p>
-                      </div>
-
-                      <Button
-                        onClick={() => saveNexusDataMutation.mutate({
-                          vehicleNumber: selectedVehicle.vehicleNumber,
-                          postOffboardedStatus: nexusStatus || null,
-                          nexusNewLocation: nexusLocation || null,
-                          nexusNewLocationContact: nexusContact || null,
-                          comments: nexusComments || null,
-                        })}
-                        disabled={saveNexusDataMutation.isPending}
-                        className="w-full"
-                        data-testid="button-save-nexus-data"
-                      >
-                        {saveNexusDataMutation.isPending ? (
-                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                        ) : (
-                          <CheckCircle className="h-4 w-4 mr-2" />
-                        )}
-                        Save Tracking Data
-                      </Button>
-                    </div>
-                  )}
-                </div>
-
-
-                <Separator />
-
-                {/* Operation Log */}
-                <div className="space-y-2">
-                  <h4 className="font-medium text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Activity className="h-4 w-4" />Operation Log
-                  </h4>
-                  {logsLoading ? (
-                    <div className="text-xs text-muted-foreground flex items-center gap-1.5"><Loader2 className="h-3 w-3 animate-spin" />Loading logs...</div>
-                  ) : !vehicleOpLogs || vehicleOpLogs.length === 0 ? (
-                    <p className="text-xs text-muted-foreground">No operations logged for this vehicle.</p>
-                  ) : (
-                    <div className="space-y-1.5">
-                      {vehicleOpLogs.slice(0, 5).map((log: any, i: number) => (
-                        <div key={i} className="p-2 bg-muted/40 rounded text-xs space-y-1">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="font-medium capitalize">{log.operationType?.replace(/_/g, " ")}</span>
-                            <span className="text-muted-foreground">{log.createdAt ? new Date(log.createdAt).toLocaleDateString() : "—"}</span>
-                          </div>
-                          {(log.fromLdap || log.toLdap) && (
-                            <div className="text-muted-foreground">{log.fromLdap || "—"} → {log.toLdap || "—"}</div>
-                          )}
-                          <div className="flex gap-1.5 flex-wrap">
-                            {["tpms", "holman", "ams"].map(sys => {
-                              const st = log[`${sys}Status`];
-                              if (!st) return null;
-                              return (
-                                <span key={sys} className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium ${st === "success" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" : st === "failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" : "bg-muted text-muted-foreground"}`}>
-                                  {sys.toUpperCase()}: {st}
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-
-              </div>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+      {/* Vehicle Detail Drawer (2A.5 Step 6 — migrated to UVP).
+            UVP keys off vehicleNumber → resolves the fs_trucks row internally
+            (/api/fs/trucks/by-number/:n). Modals (assign / unassign / poHistory /
+            amsEdit / amsRepair / opsReview / history) stay page-level — UVP
+            calls back via onOpenOperationsModal with a typed context. selectedVehicle
+            (FleetVehicle shape) is still the source of truth for the modals' parent
+            state (district, address prefill, applyPatch after assignment, etc). */}
+        <UniversalVehiclePanel
+          vehicleId={null}
+          vehicleNumber={selectedVehicle?.vehicleNumber || null}
+          open={!!selectedVehicle}
+          onOpenChange={(open) => {
+            if (open) return;
+            // High 1 fix (architect 2026-04-25): refuse to clear selectedVehicle
+            // while ANY vehicle-scoped modal is open, otherwise the modal bodies
+            // (which still read selectedVehicle for vehicleNumber / vin / district
+            // / address / applyPatch) would lose context mid-operation. The
+            // history dialog is conditionally MOUNTED on selectedVehicle and
+            // would unmount immediately. UVP also gets amsOpen={…same…} so
+            // outside-click + escape are suppressed while a child is open.
+            if (activeModal !== null || showOpsReview || showHistoryDialog) return;
+            setSelectedVehicle(null);
+          }}
+          fromPage="fleet-management"
+          amsOpen={activeModal !== null || showOpsReview || showHistoryDialog}
+          onOpenOperationsModal={(kind: OperationsModalKind, ctx: OperationsModalContext) => {
+            if (kind === "assign") {
+              openModal("assign");
+            } else if (kind === "unassign") {
+              openModal("unassign");
+            } else if (kind === "poHistory") {
+              openModal("poHistory");
+            } else if (kind === "history") {
+              setShowHistoryDialog(true);
+            } else if (kind === "opsReview") {
+              setOpsReviewVehicle(selectedVehicle);
+              // Medium fix (architect 2026-04-25): preserve prior fallback chain
+              // so distance sort doesn't start from a stale leftover ZIP.
+              setOpsRefZip(ctx.opsReviewRefZip || selectedVehicle?.zip || targetZipcode || "");
+              setShowOpsReview(true);
+            } else if (kind === "amsEdit") {
+              const p = ctx.amsEditPrefill || {};
+              setAmsEditColor(p.color || "");
+              setAmsEditBranding(p.branding || "");
+              setAmsEditInterior(p.interior || "");
+              setAmsEditAddress(p.address || "");
+              setAmsEditAddressZip(p.addressZip || "");
+              setAmsEditTruckStatus(p.truckStatus || "");
+              setAmsEditTheftVerified(p.theftVerified || "");
+              setAmsEditKeyAddress(p.keyAddress || "");
+              setAmsEditKeyZip(p.keyZip || "");
+              setAmsEditStorageCost(p.storageCost || "");
+              setAmsEditVehicleRuns(p.vehicleRuns || "");
+              setAmsEditVehicleLooks(p.vehicleLooks || "");
+              openModal("amsEdit");
+            } else if (kind === "amsRepair") {
+              setAmsRepairInRepair(!!ctx.amsRepairPrefill?.inRepair);
+              setAmsRepairDate("");
+              setAmsRepairReason("");
+              setAmsRepairVendor("");
+              setAmsRepairETA("");
+              setAmsRepairStatus("");
+              setAmsRepairEstimate("");
+              setAmsRepairRentalCar("");
+              setAmsRepairRentalStart("");
+              setAmsRepairRentalEnd("");
+              setAmsRepairFinalDisposition("");
+              setAmsRepairDispositionReason("");
+              setAmsRepairFinalDate("");
+              openModal("amsRepair");
+            }
+            // viewInventory / telematics not used in fleet-management drawer.
+          }}
+        />
 
       {/* Fleet Operations Modals */}
       {/* Assign Tech Modal */}

@@ -135,8 +135,44 @@ export function UniversalVehiclePanel({
             <Skeleton className="h-40 w-full" />
           </div>
         ) : !truck ? (
-          <div className="p-6 text-center text-muted-foreground" data-testid="panel-truck-not-found">
-            Truck not found
+          <div className="p-6 space-y-4" data-testid="panel-truck-not-found">
+            <SheetHeader className="space-y-1.5">
+              <SheetTitle className="flex items-center gap-2">
+                Truck <span className="font-mono">{vehicleNumber || "—"}</span>
+              </SheetTitle>
+              <SheetDescription className="text-xs">
+                No fs_trucks row found for this vehicle (rental / decommissioned /
+                ghost). Operations actions are still available below — they target
+                the page-level systems (AMS / Holman / TPMS) directly.
+              </SheetDescription>
+            </SheetHeader>
+            {/* High 2 fix (architect 2026-04-25): ghost-row fallback so the
+                page-level modal triggers stay reachable when /trucks/by-number
+                misses. Emits onOpenOperationsModal with synthetic context
+                (truck undefined; vin null — caller must rely on its own page
+                state). amsEdit/amsRepair are intentionally excluded here: they
+                require AMS-side lookup data that only OperationsTab fetches,
+                and the parent's pre-existing AMS queries already populate
+                those modals when the user opens them via the page header. */}
+            {vehicleNumber && onOpenOperationsModal && (
+              <div className="grid grid-cols-2 gap-2 pt-2">
+                {(["assign", "unassign", "poHistory", "history", "opsReview"] as OperationsModalKind[]).map((kind) => (
+                  <Button
+                    key={kind}
+                    variant="outline"
+                    size="sm"
+                    data-testid={`button-fallback-${kind}`}
+                    onClick={() => onOpenOperationsModal(kind, { vin: null, vehicleNumber })}
+                  >
+                    {kind === "assign" && "Assign Tech"}
+                    {kind === "unassign" && "Unassign"}
+                    {kind === "poHistory" && "PO History"}
+                    {kind === "history" && "Vehicle History"}
+                    {kind === "opsReview" && "Ops Review"}
+                  </Button>
+                ))}
+              </div>
+            )}
           </div>
         ) : (
           <>

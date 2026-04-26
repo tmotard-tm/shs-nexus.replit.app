@@ -211,7 +211,7 @@ Audit row per request: `actorUserId, vendor, entityId, fieldsRequested, granted/
 | 2B.1.design | **Detailed plan for `fs_trucks` → VIEW + sidecar.** See section "Phase 2B.1 — Design" below. Status: PROPOSED — pending Kirk go-ahead on three open decisions (orphan-row policy, VIEW writability strategy, execution sequencing). | PROPOSED |
 | 2A.4.note2 | **Matrix item #9 reclassified as additive, not absorption.** `client/src/pages/fleet-alignment.tsx` has no per-vehicle drawer — the page is a bulk-fix tabular workflow (RunProgressDialog + ConfirmUnassign Dialog only, both non-vehicle). The original matrix description was incorrect. **Decision (Kirk):** treat #9 as additive — implement a row-level drilldown that opens UVP focused on the Assignments tab. Truck number badge in each mismatch row is now a clickable button → `<UniversalVehiclePanel vehicleNumber={record.truckNumber} defaultTab="assignments" fromPage="alignment" />`. UVP gained two new props (`vehicleNumber`, `defaultTab`) and the Fleet-Scope router gained `GET /api/fs/trucks/by-number/:truckNumber` to support callers that only know a vehicle number. | NOTE |
 | 2A.4 | Inline page drawers absorbed: #9 additive UVP drilldown DONE; #8 deferred to 2A.5 | DONE |
-| 2A.5 | UVP **Operations tab** — AMS write surface + ops triggers (unblocks #8) | PENDING |
+| 2A.5 | UVP **Operations tab** — AMS write surface + ops triggers (unblocks #8) | DONE |
 | 2B.1 | `fs_trucks` → VIEW + sidecar (design locked, see 2B.1.design) | PENDING |
 | 2B.2 | `vrm_repair_tracker` → child FK | PENDING |
 | 2B.3 | `vrm_techs` → VIEW; drop Levenshtein matcher | PENDING |
@@ -470,6 +470,16 @@ Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to a
 
 **Pause-safe checkpoint reached (2026-04-25T23:10Z, T0+0.3h).** Server compiles + boots; cron live; OperationsTab additive; no fs_trucks/fs_truck_state writes anywhere in the new code; cutover-priority preserved. Next iteration during pause will wire fleet-management.tsx (Step 6) — that work itself touches no fs_trucks writes (it's pure UI state plumbing) so it remains pause-safe; if cutover starts mid-edit at T0+24h, the in-flight changes will be reverted/parked for resume after cutover.
 
+##### 2A.5 progress (2026-04-25T23:30Z update — Step 6 LANDED)
+
+- **Step 6 DONE.** `client/src/pages/fleet-management.tsx`: replaced the inline ~690-LOC `<Sheet>` drawer (was lines 2399–3092) with `<UniversalVehiclePanel vehicleNumber={selectedVehicle?.vehicleNumber} … onOpenOperationsModal={…}/>`. The 7 page-level modals (assign / unassign / poHistory / amsEdit / amsRepair / opsReview / history) stay in fleet-management; UVP raises a typed callback into them. Net –691 lines on the page; TypeScript baseline preserved (190 errors, all pre-existing — diff = 0). Server compiles + boots; cron unchanged + still LIVE.
+- **Architect review (round 1) — 3 findings, all addressed in the same patch:**
+  - **High 1 (modal orphan).** Closing UVP could clear `selectedVehicle` while a non-AMS modal was open (history dialog unmounts; assign/unassign submit with missing context). **Fix:** UVP `onOpenChange` now refuses `setSelectedVehicle(null)` whenever `activeModal !== null || showOpsReview || showHistoryDialog`; same condition wired to `amsOpen` so overlay outside-click + escape are also suppressed (`fleet-management.tsx:2415-2428`).
+  - **High 2 (ghost-row regression).** When `/api/fs/trucks/by-number` 404s for a Holman vehicle that has no `fs_trucks` row (rental / decommissioned / ghost subset), UVP rendered "Truck not found" and OperationsTab never mounted — the 7 modal triggers became unreachable. **Fix:** UVP not-found branch now renders a fallback panel with a 5-button grid for assign / unassign / poHistory / history / opsReview that emits `onOpenOperationsModal(kind, { vin: null, vehicleNumber })` with synthetic context (`UniversalVehiclePanel.tsx:140-179`); `OperationsModalContext.truck` made optional to support this path (`OperationsTab.tsx:48`). amsEdit/amsRepair are intentionally omitted from the fallback — they require AMS-side lookup data only OperationsTab fetches; parent's existing in-page AMS queries via `selectedVehicle?.vin` continue to populate those modals when reached via other paths.
+  - **Medium (Ops Review ZIP fallback).** New handler dropped `selectedVehicle.zip || targetZipcode` fallback chain; stale leftover ZIP could leak between opens. **Fix:** `setOpsRefZip(ctx.opsReviewRefZip || selectedVehicle?.zip || targetZipcode || "")` (`fleet-management.tsx:2442`).
+- **Architect review (round 2) — PASS.** All three fixes verified effective; no new blocker-level regressions; `OperationsModalContext.truck` optional safe across all callers; pause-safety preserved (still zero new write paths to fs_trucks/fs_truck_state).
+- **Pause-safe checkpoint re-reached (2026-04-25T23:30Z, T0+0.7h).** Step 6 of 2A.5 complete; T+22h budget unused. Recommended QA pass (post-pause): exercise ghost-row fallback (a Holman vehicle known to lack an fs_trucks row → click row → confirm fallback panel renders → exercise the 5 buttons).
+
 #### Pause-window work plan (2026-04-25 → 2026-04-26 22:50 UTC)
 
 Ranked by effort/risk during the 24h drift window. All listed items are pause-safe (do NOT touch fs_trucks/fs_truck_state writes):
@@ -563,6 +573,14 @@ Existing comment-only references in `server/fleet-scope-db.ts` (lines 13, 15) to
 - **WMS team ask:** add `modifiedSince` filter to `GET /wms-engine/v1/trucks`. Single biggest future efficiency win for Layer 1. Non-blocking — current 12h cadence + client-diff is sufficient.
 - **Drift dashboard** once `field_provenance.source_tier` is populated (% reads served from T1 / T2 / T3 per vendor).
 - **NetSuite / PMF Snowflake mirror status:** N/A for plan. PMF confirmed live-only; NetSuite bypassed entirely via WMS.
+
+## Security Backlog (post-cutover triage)
+
+Pre-existing security findings surfaced during reviews. Not blocking the D-γ pause / cutover — log here so they are not lost.
+
+| # | Finding | Source | Severity | File / Locus | Status |
+|---|---|---|---|---|---|
+| SEC-1 | SQL injection risk via interpolated `vehicleNumber` in raw SQL on `GET /api/holman/pos/:vehicleNumber`. The OperationsTab now (correctly) calls this endpoint, so a fix here also protects the new code path. Fix: parameterize the query (use bind params instead of string interpolation). | Architect review of 2A.5 / 2B.1.c checkpoint (2026-04-25) | High | `server/routes.ts:16185-16213` (route handler around line 16196-16213) | OPEN — triage post-cutover |
 
 ## References
 

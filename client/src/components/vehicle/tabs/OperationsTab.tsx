@@ -39,7 +39,10 @@ export type OperationsModalKind =
   | "opsReview" | "amsEdit" | "amsRepair" | "viewInventory" | "telematics";
 
 export interface OperationsModalContext {
-  truck: TruckPanelData;
+  /** May be undefined when emitted from the no-fs_trucks ghost-row fallback
+   *  surface (UVP's Truck-not-found branch). Callers that depend on truck
+   *  fields should fall back to their own page-level vehicle context. */
+  truck?: TruckPanelData;
   vin: string | null;
   vehicleNumber: string | null;
   /** AMS-side prefill for amsEdit (computed via lookup matching). */
