@@ -371,9 +371,9 @@ The doc currently calls for a ~1-day pause after 2B.1.c for live verification be
 | When (UTC) | fs_trucks count | fs_truck_state count | Δ count (%) | 50-row sample mismatches | Verdict |
 |---|---|---|---|---|---|
 | T0 (2026-04-25T22:50:06Z) — baseline | 333 | 333 | 0 (0.0%) | 0 | ✅ baseline |
-| T0+6h  (2026-04-26T04:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
-| T0+12h (2026-04-26T10:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
-| T0+18h (2026-04-26T16:50:06Z) | _pending_ | _pending_ | _pending_ | _pending_ | _pending_ |
+| T0+6h (2026-04-26T04:50:06.278Z) | 333 | 333 | 0 (0.00%) | 0 | ✅ within tolerance |
+| T0+12h (2026-04-26T10:50:00.637Z) | 333 | 333 | 0 (0.00%) | 0 | ✅ within tolerance |
+| T0+18h (2026-04-26T16:50:00.837Z) | 333 | 333 | 0 (0.00%) | 0 | ✅ within tolerance |
 | T0+24h cutover (2026-04-26T22:50:06Z) | _pending_ | _pending_ | _pending_ | full 8-gate re-run | _pending_ |
 
 Snapshot script: `scripts/2b1-drift-snapshot.ts` (read-only, prints the row to append above).
