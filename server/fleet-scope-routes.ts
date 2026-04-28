@@ -16332,6 +16332,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       ));
       const { contacts: managerLookup } = await lookupTpmsContactsByLdap(batchLdaps);
 
+      // DB fallback: if Snowflake TPMS_EXTRACT is transiently unreachable, we still want
+      // to suppress self-CC for any LDAP that appears as ANY decommissioning row's
+      // managerEntId. This is also trusted server-side data (we own this table) and
+      // closes the edge case where TPMS lookup fails AND the operator left the contact
+      // type at 'tech' for what is in fact a manager LDAP.
+      const dbManagerLdapRows = await getDb()
+        .select({ entId: decommissioningVehicles.managerEntId })
+        .from(decommissioningVehicles);
+      const dbManagerLdapSet = new Set(
+        dbManagerLdapRows
+          .map(r => (r.entId || '').trim().toUpperCase())
+          .filter(s => s.length > 0),
+      );
+
       for (const r of recipients) {
         if (!r.contactPhone) {
           results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'skipped', error: 'No phone number' });
@@ -16418,7 +16432,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const tpmsForRecipient = recipientLdap ? managerLookup.get(recipientLdap) : undefined;
         const recipientIsManager =
           !!tpmsForRecipient?.isManager ||
-          contactType === 'manager';
+          contactType === 'manager' ||
+          (recipientLdap.length > 0 && dbManagerLdapSet.has(recipientLdap));
         const wantsCc = !!ccManager && r.ccEnabled !== false && !recipientIsManager;
 
         if (wantsCc && techSent) {
