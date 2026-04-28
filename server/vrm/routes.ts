@@ -716,6 +716,7 @@ export function registerVrmRoutes(): Router {
       }
 
       const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null; checkedAt: string | null }>();
+      const gate1ByLdap = new Map<string, { adjustedNet: string | null; classification: string | null }>();
       if (ldaps.length > 0) {
         const uniqueLdaps = Array.from(new Set(ldaps));
         const checksResult = await db.execute(sql`
@@ -734,11 +735,26 @@ export function registerVrmRoutes(): Router {
             checkedAt: r.checked_at ? String(r.checked_at) : null,
           });
         }
+
+        // Pull Gate-1 Adjusted Net + classification from vrm_techs (populated by
+        // the Snowflake IHR_UNIT_ECONOMICS sync). One row per LDAP.
+        const gate1Result = await db.execute(sql`
+          SELECT UPPER(ldap) AS "ldap", gate1_adjusted_net, gate1_classification
+          FROM vrm_techs
+          WHERE UPPER(ldap) IN (${sql.join(uniqueLdaps.map(v => sql`${v}`), sql`, `)})
+        `);
+        for (const r of ((gate1Result as any).rows ?? [])) {
+          gate1ByLdap.set(String(r.ldap), {
+            adjustedNet: r.gate1_adjusted_net != null ? String(r.gate1_adjusted_net) : null,
+            classification: r.gate1_classification ?? null,
+          });
+        }
       }
 
       const map: Record<string, any> = {};
       for (const [normTruck, info] of Array.from(byTruck.entries())) {
         const check = latestCheckByLdap.get(info.ldap);
+        const gate1 = gate1ByLdap.get(info.ldap);
         map[normTruck] = {
           enterpriseId: info.ldap,
           techName: info.name,
@@ -748,6 +764,8 @@ export function registerVrmRoutes(): Router {
           recommendation: check?.rec ?? null,
           scorecardScore: check?.score ?? null,
           profitCheckedAt: check?.checkedAt ?? null,
+          gate1AdjustedNet: gate1?.adjustedNet ?? null,
+          gate1Classification: gate1?.classification ?? null,
         };
       }
       res.json({ byNormalizedTruckNumber: map });

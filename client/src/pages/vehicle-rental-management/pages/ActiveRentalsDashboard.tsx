@@ -82,6 +82,8 @@ interface EnrichmentRow {
   recommendation: string | null;
   scorecardScore: number | null;
   profitCheckedAt: string | null;
+  gate1AdjustedNet: string | null;
+  gate1Classification: string | null;
 }
 
 interface SummaryResponse {
@@ -801,6 +803,7 @@ export default function ActiveRentalsDashboard() {
                       <th className="px-3 py-2 whitespace-nowrap">Van Picked Up</th>
                       <th className="px-3 py-2 whitespace-nowrap">Holman Status</th>
                       <th className="px-3 py-2 whitespace-nowrap text-right">Daily Net w/ Rental</th>
+                      <th className="px-3 py-2 whitespace-nowrap text-right">Adj. Net</th>
                       <th className="px-3 py-2 whitespace-nowrap text-right">Scorecard</th>
                       <th className="px-3 py-2 whitespace-nowrap">
                         {anyColumnFilterActive && (
@@ -963,6 +966,18 @@ export default function ActiveRentalsDashboard() {
                           }`} onClick={(e) => e.stopPropagation()}>
                             {enr?.dailyNetWithRental == null ? "—" : fmtDollars(enr.dailyNetWithRental)}
                           </td>
+                          <td className={`px-3 py-2 text-right font-mono ${
+                            enr?.gate1AdjustedNet == null ? "text-muted-foreground"
+                            : enr.gate1Classification === "underwater" ? "text-red-600 font-semibold"
+                            : enr.gate1Classification === "marginal" ? "text-amber-600 font-semibold"
+                            : "text-green-600 font-semibold"
+                          }`} onClick={(e) => e.stopPropagation()}>
+                            {(() => {
+                              const n = enr?.gate1AdjustedNet != null ? Number(enr.gate1AdjustedNet) : null;
+                              if (n == null || !Number.isFinite(n)) return "—";
+                              return `${n < 0 ? "−" : "+"}$${Math.abs(n).toLocaleString()}`;
+                            })()}
+                          </td>
                           <td className="px-3 py-2 text-right font-mono" onClick={(e) => e.stopPropagation()}>
                             {enr?.scorecardScore == null ? "—" : enr.scorecardScore.toFixed(2)}
                           </td>
@@ -1106,18 +1121,23 @@ function exportToCsv(
   const headers = [
     "Truck #", "Tech Name", "Enterprise ID", "District", "Main Status", "Sub-Status",
     "Assigned To", "Date In Repair", "Reg. Expiry", "Repaired", "AMS", "Pick Slot",
-    "Rental Returned", "Van Picked Up", "Daily Net w/ Rental", "Scorecard",
+    "Rental Returned", "Van Picked Up", "Daily Net w/ Rental", "Adj. Net", "Scorecard",
   ];
   const lines = [headers.join(",")];
   for (const t of trucks) {
     const norm = (t.truckNumber ?? "").replace(/^0+/, "");
     const enr = enrichmentMap[norm];
+    const adjNetRaw = enr?.gate1AdjustedNet != null ? Number(enr.gate1AdjustedNet) : null;
+    const adjNetStr = adjNetRaw != null && Number.isFinite(adjNetRaw)
+      ? `${adjNetRaw < 0 ? "-" : "+"}${Math.abs(adjNetRaw)}`
+      : "";
     const cells = [
       t.truckNumber, t.techName ?? enr?.techName ?? "", enr?.enterpriseId ?? "",
       enr?.district ?? "", t.mainStatus ?? "", t.subStatus ?? "", t.shsOwner ?? "",
       t.datePutInRepair ?? "", t.holmanRegExpiry ?? "",
       yn(t.repairCompleted), yn(t.inAms), yn(t.pickUpSlotBooked), yn(t.rentalReturned), yn(t.vanPickedUp),
       enr?.dailyNetWithRental != null ? String(enr.dailyNetWithRental) : "",
+      adjNetStr,
       enr?.scorecardScore != null ? String(enr.scorecardScore) : "",
     ];
     lines.push(cells.map(csvEscape).join(","));
