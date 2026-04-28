@@ -80,6 +80,22 @@ async function checkAndRunSync(): Promise<void> {
         const allTechsResult = await syncService.syncAllTechs('scheduler');
         console.log(`[Scheduler] All techs sync complete: ${allTechsResult.recordsProcessed} processed`);
 
+        // Task #221: refresh the in-process TPMS snapshot right after the
+        // nightly TPMS sync so daytime callers (decomm batch SMS, rental
+        // enrichment, manager-phone hydration, etc.) read the same fresh
+        // dataset Snowflake just delivered. Non-fatal — failures keep the
+        // previous snapshot in place.
+        try {
+          const { refreshSnapshot } = await import('./fleet-scope-tpms-snapshot');
+          const snapResult = await refreshSnapshot('scheduler');
+          console.log(
+            `[Scheduler] TPMS snapshot refresh complete: ok=${snapResult.ok}, ` +
+              `${snapResult.count} LDAPs in ${snapResult.durationMs}ms`,
+          );
+        } catch (snapErr: any) {
+          console.error('[Scheduler] TPMS snapshot refresh failed (non-fatal):', snapErr?.message);
+        }
+
         console.log('[Scheduler] Starting vehicle odometer enrichment...');
         try {
           const odoResult = await syncService.enrichVehicleOdometerData();

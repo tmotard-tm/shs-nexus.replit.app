@@ -8806,9 +8806,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const syncService = getSnowflakeSyncService();
       const result = await syncService.syncTPMSFromSnowflake('manual');
+      // Task #221: refresh the in-process snapshot too so the manual sync
+      // button matches what the nightly scheduler does. Non-fatal — we still
+      // return the upstream sync result even if the snapshot reload fails.
+      try {
+        const { refreshSnapshot } = await import("./fleet-scope-tpms-snapshot");
+        await refreshSnapshot('manual_tpms_sync');
+      } catch (snapErr: any) {
+        console.error("[TPMS] Snapshot refresh after manual sync failed (non-fatal):", snapErr?.message);
+      }
       res.json(result);
     } catch (error: any) {
       console.error("Error syncing TPMS from Snowflake:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Task #221: in-process TPMS_EXTRACT snapshot — read current state.
+  // Anyone authenticated may inspect; the snapshot itself contains no secrets.
+  app.get("/api/admin/tpms-snapshot", requireAuth, async (_req: any, res) => {
+    try {
+      const { getSnapshotMeta } = await import("./fleet-scope-tpms-snapshot");
+      res.json(getSnapshotMeta());
+    } catch (error: any) {
+      console.error("Error reading TPMS snapshot meta:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Task #221: force-refresh the in-process TPMS_EXTRACT snapshot. Used by the
+  // rare "I need fresh phone numbers right now" admin case between nightly syncs.
+  app.post("/api/admin/tpms-snapshot/refresh", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer or admin users can force-refresh the TPMS snapshot" });
+      }
+      const { refreshSnapshot, getSnapshotMeta } = await import("./fleet-scope-tpms-snapshot");
+      const result = await refreshSnapshot(`manual:${currentUser.username}`);
+      res.json({ ...result, meta: getSnapshotMeta() });
+    } catch (error: any) {
+      console.error("Error force-refreshing TPMS snapshot:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
@@ -14633,29 +14671,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   //   'name_full_unique'  — unique match after adding first name
   //   'name_ambiguous'    — multiple TPMS techs share the name, cannot resolve
   //   'not_found'         — no TPMS tech has that last name
-  async function rentalEnrichEnterpriseIds(sf: any, rows: any[]): Promise<void> {
+  async function rentalEnrichEnterpriseIds(_sf: any, rows: any[]): Promise<void> {
     const toEnrich = rows.filter(r => r.source === 'enterprise' && !r.enterpriseId);
     if (!toEnrich.length) return;
     try {
-      // Fetch all TPMS tech records — no LIMIT so no silent misses.
-      const tpmsRows = await sf.executeQuery(
-        `SELECT ENTERPRISE_ID, FULL_NAME FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT WHERE ENTERPRISE_ID IS NOT NULL`
-      ) as any[];
+      // As of Task #221 we read from the in-process TPMS snapshot rather than
+      // re-issuing a full TPMS_EXTRACT scan on every rental import. The snapshot
+      // is already deduplicated per ENTERPRISE_ID so we don't need the seenEntIds
+      // pass we used to do here — we just iterate the snapshot values.
+      const { ensureSnapshotLoaded, getSnapshot } = await import('./fleet-scope-tpms-snapshot');
+      await ensureSnapshotLoaded();
+      const snapshot = getSnapshot();
 
-      // Deduplicate by Enterprise ID first.  A tech appears once per truck in
-      // TPMS_EXTRACT; without dedup the same person would create multiple
-      // candidates for their last name and cause false name_ambiguous outcomes.
-      const seenEntIds = new Set<string>();
       const lastNameMap = new Map<string, Array<{ enterpriseId: string; firstName: string }>>();
-      for (const t of tpmsRows) {
-        if (!t.ENTERPRISE_ID || !t.FULL_NAME) continue;
-        const entId = String(t.ENTERPRISE_ID).trim();
-        if (seenEntIds.has(entId)) continue;
-        seenEntIds.add(entId);
-        const { first, last } = rentalNameParse(String(t.FULL_NAME));
+      for (const entry of snapshot.values()) {
+        if (!entry.fullName) continue;
+        const { first, last } = rentalNameParse(String(entry.fullName));
         if (!last) continue;
         if (!lastNameMap.has(last)) lastNameMap.set(last, []);
-        lastNameMap.get(last)!.push({ enterpriseId: entId, firstName: first });
+        lastNameMap.get(last)!.push({ enterpriseId: entry.enterpriseId, firstName: first });
       }
       for (const row of toEnrich) {
         const { first, last } = rentalNameParse(row.renterName || '');

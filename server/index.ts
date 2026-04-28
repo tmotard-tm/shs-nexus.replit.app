@@ -377,6 +377,28 @@ async function patchStoredRolePermissions() {
     console.error("⚠️ All-techs startup sync check failed:", error);
   }
 
+  // Task #221: prime the in-process TPMS snapshot in the background so the
+  // first decommissioning batch SMS / rental-enrichment / manager-phone caller
+  // doesn't pay the full Snowflake scan latency. Non-blocking: failures are
+  // logged but never prevent server start.
+  try {
+    const { isSnowflakeConfigured } = await import("./snowflake-service");
+    if (isSnowflakeConfigured()) {
+      const { refreshSnapshot } = await import("./fleet-scope-tpms-snapshot");
+      refreshSnapshot('startup').then(r => {
+        if (r.ok) {
+          log(`✅ TPMS snapshot primed: ${r.count} LDAPs in ${r.durationMs}ms`);
+        } else {
+          log(`⚠️ TPMS snapshot startup refresh did not load any data`);
+        }
+      }).catch(err => {
+        console.error("❌ TPMS snapshot startup refresh error:", err?.message || err);
+      });
+    }
+  } catch (error) {
+    console.error("⚠️ TPMS snapshot startup priming failed:", error);
+  }
+
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

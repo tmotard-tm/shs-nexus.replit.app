@@ -373,6 +373,34 @@ export default function Integrations() {
     },
   });
 
+  const tpmsSnapshotRefreshMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/admin/tpms-snapshot/refresh");
+      return response.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.ok) {
+        toast({
+          title: "TPMS Snapshot Refreshed",
+          description: `${data.count} LDAPs loaded in ${data.durationMs}ms.`,
+        });
+      } else {
+        toast({
+          title: "TPMS Snapshot Refresh Failed",
+          description: data?.message || "Snapshot refresh did not complete",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "TPMS Snapshot Refresh Failed",
+        description: error.message || "Failed to refresh in-process TPMS snapshot",
+        variant: "destructive",
+      });
+    },
+  });
+
   const tpmsRefreshMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/tpms/refresh-mismatches");
@@ -952,6 +980,40 @@ export default function Integrations() {
                   <CardContent>
                     <p className="text-sm text-muted-foreground">
                       Click "Sync from Snowflake" to load the latest TPMS assignments from the daily snapshot. This populates the cache used by Fleet Management for accurate vehicle assignment counts.
+                    </p>
+                  </CardContent>
+                </Card>
+
+                {/* TPMS In-Process Snapshot (Task #221) */}
+                <Card>
+                  <CardHeader className="pb-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base flex items-center gap-2">
+                          <RefreshCw className="h-4 w-4" />
+                          TPMS Contact Snapshot
+                        </CardTitle>
+                        <CardDescription>
+                          Shared in-process map of LDAP → contact info used by decommissioning batch SMS, manager-phone hydration, and rental enrichment. Refreshed automatically by the nightly TPMS sync.
+                        </CardDescription>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Button
+                          onClick={() => tpmsSnapshotRefreshMutation.mutate()}
+                          disabled={tpmsSnapshotRefreshMutation.isPending || !snowflakeStatus?.configured}
+                          variant="outline"
+                          size="sm"
+                          data-testid="button-refresh-tpms-snapshot"
+                        >
+                          <RefreshCw className={`h-3 w-3 mr-1 ${tpmsSnapshotRefreshMutation.isPending ? 'animate-spin' : ''}`} />
+                          {tpmsSnapshotRefreshMutation.isPending ? 'Refreshing…' : 'Force Refresh Snapshot'}
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-muted-foreground">
+                      Use this only for the rare urgent case where a phone number was just updated in TPMS and you need it picked up before the next nightly sync at 5am EST.
                     </p>
                   </CardContent>
                 </Card>

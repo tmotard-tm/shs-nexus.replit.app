@@ -54,18 +54,20 @@ export function closeConnection(): void {
 }
 
 /**
- * Batched LDAP -> contact lookup against PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT.
+ * Batched LDAP -> contact lookup.
  *
- * Used by the Decommissioning batch SMS feature (Task #219) and by any other
- * caller that needs the live (not cached) phone number for a set of Enterprise IDs.
+ * As of Task #221 this is a thin adapter over the in-process TPMS snapshot
+ * (server/fleet-scope-tpms-snapshot.ts) — there is no per-call Snowflake
+ * round-trip. The snapshot is loaded at boot and refreshed on the nightly
+ * sync schedule. If the snapshot has not yet been loaded for any reason,
+ * we lazily kick off a refresh so the very first caller still gets data.
  *
- * - Input LDAPs are trimmed and uppercased; duplicates are removed.
- * - Returns a Map keyed by the normalized LDAP. Keys missing from the map mean
- *   that LDAP was not present in TPMS_EXTRACT.
- * - On Snowflake errors the function returns an empty map and logs (does NOT
- *   throw), so callers can fall back to cached data instead of failing the
- *   whole request. Callers that need to know whether the lookup actually ran
- *   should check the second value of the returned tuple.
+ * Return shape kept stable for backwards compatibility with the Task #219
+ * call sites:
+ *   - `contacts` maps normalized (UPPER+TRIM) LDAP -> { mobilePhone, fullName, isManager }
+ *   - `ok` is true unless the snapshot is completely unavailable (Snowflake
+ *     unconfigured AND no prior load), so existing callers that branch on
+ *     `ok` to surface a "TPMS lookup failed" reason still behave correctly.
  */
 export async function lookupTpmsContactsByLdap(
   ldaps: string[],
@@ -88,39 +90,28 @@ export async function lookupTpmsContactsByLdap(
   if (normalized.length === 0) {
     return { contacts, ok: true };
   }
-  try {
-    const placeholders = normalized.map(() => '?').join(',');
-    // IS_MANAGER comes from the same TPMS_EXTRACT table — an Enterprise ID is treated as
-    // a manager iff it appears as somebody else's MANAGER_ENT_ID. This is the
-    // server-of-record source we use instead of trusting any client/cached flag.
-    const sql = `
-      SELECT UPPER(TRIM(t.ENTERPRISE_ID)) AS ENT_ID,
-             t.MOBILEPHONENUMBER,
-             t.FULL_NAME,
-             CASE WHEN EXISTS (
-               SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT m
-               WHERE UPPER(TRIM(m.MANAGER_ENT_ID)) = UPPER(TRIM(t.ENTERPRISE_ID))
-             ) THEN 1 ELSE 0 END AS IS_MANAGER
-      FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT t
-      WHERE UPPER(TRIM(t.ENTERPRISE_ID)) IN (${placeholders})
-    `;
-    const rows = await executeQuery<{
-      ENT_ID: string | null;
-      MOBILEPHONENUMBER: string | number | null;
-      FULL_NAME: string | null;
-      IS_MANAGER: number | string | boolean | null;
-    }>(sql, normalized);
-    for (const row of rows) {
-      if (!row.ENT_ID) continue;
-      contacts.set(row.ENT_ID, {
-        mobilePhone: row.MOBILEPHONENUMBER != null ? String(row.MOBILEPHONENUMBER).trim() : null,
-        fullName: row.FULL_NAME ? String(row.FULL_NAME).trim() : null,
-        isManager: row.IS_MANAGER === 1 || row.IS_MANAGER === '1' || row.IS_MANAGER === true,
-      });
-    }
-    return { contacts, ok: true };
-  } catch (err: any) {
-    console.error('[Fleet-Scope Snowflake] lookupTpmsContactsByLdap failed:', err?.message || err);
+
+  // Defer the imports so the snapshot module's module-load side effects
+  // (none today) never run before the rest of the server is up.
+  const { ensureSnapshotLoaded, getSnapshotMeta, lookupTpmsByLdaps } =
+    await import('./fleet-scope-tpms-snapshot');
+  await ensureSnapshotLoaded();
+
+  const meta = getSnapshotMeta();
+  if (!meta.loaded) {
+    // Could not load the snapshot at all (e.g. Snowflake misconfigured).
+    // Mirrors the prior "Snowflake errored, return empty map + ok=false"
+    // contract so the Task #219 unresolved-reason paths keep working.
     return { contacts, ok: false };
   }
+
+  const hits = lookupTpmsByLdaps(normalized);
+  for (const [key, entry] of hits) {
+    contacts.set(key, {
+      mobilePhone: entry.mobilePhone,
+      fullName: entry.fullName,
+      isManager: entry.isManager,
+    });
+  }
+  return { contacts, ok: true };
 }
