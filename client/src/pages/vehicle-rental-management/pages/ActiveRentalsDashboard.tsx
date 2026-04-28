@@ -970,7 +970,8 @@ export default function ActiveRentalsDashboard() {
                             enr?.gate1AdjustedNet == null ? "text-muted-foreground"
                             : enr.gate1Classification === "underwater" ? "text-red-600 font-semibold"
                             : enr.gate1Classification === "marginal" ? "text-amber-600 font-semibold"
-                            : "text-green-600 font-semibold"
+                            : enr.gate1Classification === "profitable" ? "text-green-600 font-semibold"
+                            : "text-muted-foreground"
                           }`} onClick={(e) => e.stopPropagation()}>
                             {(() => {
                               const n = enr?.gate1AdjustedNet != null ? Number(enr.gate1AdjustedNet) : null;
@@ -996,7 +997,7 @@ export default function ActiveRentalsDashboard() {
                       );
                     })}
                     {pageRows.length === 0 && (
-                      <tr><td colSpan={19} className="text-center text-muted-foreground py-8">No trucks match the current filter.</td></tr>
+                      <tr><td colSpan={20} className="text-center text-muted-foreground py-8">No trucks match the current filter.</td></tr>
                     )}
                   </tbody>
                 </table>
