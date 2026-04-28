@@ -70,10 +70,16 @@ export function closeConnection(): void {
 export async function lookupTpmsContactsByLdap(
   ldaps: string[],
 ): Promise<{
-  contacts: Map<string, { mobilePhone: string | null; fullName: string | null }>;
+  contacts: Map<
+    string,
+    { mobilePhone: string | null; fullName: string | null; isManager: boolean }
+  >;
   ok: boolean;
 }> {
-  const contacts = new Map<string, { mobilePhone: string | null; fullName: string | null }>();
+  const contacts = new Map<
+    string,
+    { mobilePhone: string | null; fullName: string | null; isManager: boolean }
+  >();
   const normalized = Array.from(new Set(
     (ldaps || [])
       .map(l => String(l ?? '').trim().toUpperCase())
@@ -84,23 +90,32 @@ export async function lookupTpmsContactsByLdap(
   }
   try {
     const placeholders = normalized.map(() => '?').join(',');
+    // IS_MANAGER comes from the same TPMS_EXTRACT table — an Enterprise ID is treated as
+    // a manager iff it appears as somebody else's MANAGER_ENT_ID. This is the
+    // server-of-record source we use instead of trusting any client/cached flag.
     const sql = `
-      SELECT UPPER(TRIM(ENTERPRISE_ID)) AS ENT_ID,
-             MOBILEPHONENUMBER,
-             FULL_NAME
-      FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-      WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${placeholders})
+      SELECT UPPER(TRIM(t.ENTERPRISE_ID)) AS ENT_ID,
+             t.MOBILEPHONENUMBER,
+             t.FULL_NAME,
+             CASE WHEN EXISTS (
+               SELECT 1 FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT m
+               WHERE UPPER(TRIM(m.MANAGER_ENT_ID)) = UPPER(TRIM(t.ENTERPRISE_ID))
+             ) THEN 1 ELSE 0 END AS IS_MANAGER
+      FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT t
+      WHERE UPPER(TRIM(t.ENTERPRISE_ID)) IN (${placeholders})
     `;
     const rows = await executeQuery<{
       ENT_ID: string | null;
       MOBILEPHONENUMBER: string | number | null;
       FULL_NAME: string | null;
+      IS_MANAGER: number | string | boolean | null;
     }>(sql, normalized);
     for (const row of rows) {
       if (!row.ENT_ID) continue;
       contacts.set(row.ENT_ID, {
         mobilePhone: row.MOBILEPHONENUMBER != null ? String(row.MOBILEPHONENUMBER).trim() : null,
         fullName: row.FULL_NAME ? String(row.FULL_NAME).trim() : null,
+        isManager: row.IS_MANAGER === 1 || row.IS_MANAGER === '1' || row.IS_MANAGER === true,
       });
     }
     return { contacts, ok: true };

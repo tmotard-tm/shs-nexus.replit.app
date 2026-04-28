@@ -16218,10 +16218,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           continue;
         }
 
-        // Recipient is themselves a manager when the column-A LDAP matched on the
-        // managerEntId side, when the operator picked the "Manager" contact type,
-        // or when this enterpriseId is flagged as a manager elsewhere in TPMS.
-        const recipientIsManager = matchedVia === 'manager' || ct === 'manager' || !!vehicle.isManager;
+        // Recipient is themselves a manager when:
+        //   (a) TPMS_EXTRACT itself says so — they appear as someone else's MANAGER_ENT_ID
+        //       (authoritative; comes from the live tpms?.isManager field on the helper);
+        //   (b) the column-A LDAP matched on the managerEntId side of a decommissioning row;
+        //   (c) the operator explicitly picked the "Manager" contact type;
+        //   (d) the cached vehicle.isManager flag is set (last-resort, may be stale).
+        const recipientIsManager =
+          !!tpms?.isManager ||
+          matchedVia === 'manager' ||
+          ct === 'manager' ||
+          !!vehicle.isManager;
 
         // CC-manager metadata: only populated when ccManager flag is set.
         let ccStatus:
@@ -16312,6 +16319,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const seenTechKeys = new Set<string>();
       const seenCcKeys = new Set<string>();
 
+      // Server-side authoritative manager check (Task #219): re-derive recipientIsManager
+      // from TPMS_EXTRACT instead of trusting any client-supplied recipient flag. We do a
+      // single batched lookup over every distinct LDAP in the request, then in the per-row
+      // loop we OR that with the trusted server-side context (operator-selected
+      // contactType === 'manager'). This makes it impossible for a crafted payload to
+      // un-suppress the self-manager CC by toggling client fields.
+      const batchLdaps = Array.from(new Set(
+        (recipients as any[])
+          .map(r => String(r?.ldap ?? r?.enterpriseId ?? '').trim().toUpperCase())
+          .filter(l => l.length > 0),
+      ));
+      const { contacts: managerLookup } = await lookupTpmsContactsByLdap(batchLdaps);
+
       for (const r of recipients) {
         if (!r.contactPhone) {
           results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'skipped', error: 'No phone number' });
@@ -16381,18 +16401,24 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // Manager CC — independent of tech result *only* when the tech send succeeded.
         // Spec: per-row try/catch keeps the two failures isolated, but we don't CC if the
         // tech text itself never went out (keeps manager noise down on hard Twilio errors).
-        // Server-side guard (Task #219): if the recipient IS a manager (matched on
-        // managerEntId, picked Manager contact type, or flagged isManager in TPMS), do
-        // NOT CC — a manager should never receive a CC of a message they themselves got.
-        // This is enforced regardless of the client-supplied ccEnabled flag so a crafted
-        // payload can't bypass the suppression.
+        //
+        // Server-side guard (Task #219): if the recipient IS a manager, do NOT CC — a
+        // manager should never receive a CC of a message they themselves got. Authority
+        // for "is the recipient a manager" comes ONLY from server-side trusted sources:
+        //   1. The live TPMS_EXTRACT lookup we did above (managerLookup), which marks an
+        //      Enterprise ID as a manager iff it appears as somebody else's MANAGER_ENT_ID;
+        //   2. The operator-selected contactType === 'manager' (server-side request param,
+        //      narrowed from per-row to top-level since that one was set in the UI).
+        // We deliberately do NOT trust r.cc_skipped_self_manager / r.isManager /
+        // r.matchedVia from the request body — those are client-controlled and a crafted
+        // payload could otherwise un-suppress the self-CC.
         let ccOutcome: CcOutcome | null = null;
         let ccError: string | undefined;
+        const recipientLdap = String(r?.ldap ?? r?.enterpriseId ?? '').trim().toUpperCase();
+        const tpmsForRecipient = recipientLdap ? managerLookup.get(recipientLdap) : undefined;
         const recipientIsManager =
-          !!r.cc_skipped_self_manager ||
-          !!r.isManager ||
-          r.matchedVia === 'manager' ||
-          (r.contactType || contactType) === 'manager';
+          !!tpmsForRecipient?.isManager ||
+          contactType === 'manager';
         const wantsCc = !!ccManager && r.ccEnabled !== false && !recipientIsManager;
 
         if (wantsCc && techSent) {
