@@ -1,12 +1,15 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, SlidersHorizontal, X, RefreshCw, Database, Loader2, PlayCircle, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
+import { MoreHorizontal, SlidersHorizontal, X, RefreshCw, Database, Loader2, PlayCircle, ArrowUp, ArrowDown, ArrowUpDown, FileDown } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { StatusPill } from "../components/status-pill";
 import { TechRecordPanel } from "../components/tech-record-panel";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import ExcelJS from "exceljs";
+import { addJsonWorksheet, downloadExcelWorkbook } from "@/lib/xlsx-utils";
+import { format as formatDate } from "date-fns";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -436,6 +439,65 @@ export default function Dashboard() {
     monthlyCostAvoided: stats?.monthlyCostAvoided ?? 0,
   };
 
+  // ── Excel export ─────────────────────────────────────────────────────────
+  // Exports all rows that match the current filters (not just the visible page)
+  // so the file always reflects what the table header says ("X of Y").
+  const [exportPending, setExportPending] = useState(false);
+
+  const handleExportExcel = async () => {
+    if (filteredRows.length === 0 || exportPending) return;
+    setExportPending(true);
+    try {
+      const worksheetData = filteredRows.map((r) => {
+        const net = r.gate1AdjustedNet != null ? Number(r.gate1AdjustedNet) : null;
+        const netFormatted = net != null && Number.isFinite(net)
+          ? `${net < 0 ? "-" : "+"}$${Math.abs(net).toLocaleString()}`
+          : "";
+        const gateLabel =
+          r.gate1Classification === "underwater" ? "Underwater"
+          : r.gate1Classification === "marginal" ? "Marginal"
+          : r.gate1Classification === "profitable" ? "Profitable"
+          : "";
+        return {
+          "Name":           r.name,
+          "LDAP":           r.ldap ?? "",
+          "Truck #":        r.truckNumber ?? "",
+          "Market":         r.market ?? "",
+          "Status":         statusLabel(r.currentStatus),
+          "Tenure (mo)":    r.tenureMonths ?? "",
+          "Adjusted Net":   netFormatted,
+          "Adj Net (raw)":  net ?? "",
+          "Gate Class":     gateLabel,
+          "DCA Review":     r.dcaReviewOutcome ?? "",
+        };
+      });
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = addJsonWorksheet(workbook, worksheetData, "VRM Dashboard");
+
+      // Header row styling
+      const headerRow = worksheet.getRow(1);
+      headerRow.eachCell((cell) => {
+        cell.font = { bold: true, size: 11 };
+        cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE8EAF6" } };
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+      });
+      headerRow.height = 22;
+
+      // Column widths
+      [28, 14, 10, 16, 24, 12, 16, 14, 14, 18].forEach((w, i) => {
+        worksheet.getColumn(i + 1).width = w;
+      });
+
+      await downloadExcelWorkbook(workbook, `vrm-dashboard-${formatDate(new Date(), "yyyy-MM-dd")}.xlsx`);
+      toast({ title: "Export complete", description: `${filteredRows.length} technician${filteredRows.length === 1 ? "" : "s"} exported.` });
+    } catch (e: any) {
+      toast({ title: "Export failed", description: e.message, variant: "destructive" });
+    } finally {
+      setExportPending(false);
+    }
+  };
+
   return (
     <div>
       {/* Tech Record Panel */}
@@ -558,6 +620,26 @@ export default function Dashboard() {
           >
             <RefreshCw className="h-3.5 w-3.5" />
             Refresh
+          </button>
+          <button
+            onClick={handleExportExcel}
+            disabled={exportPending || filteredRows.length === 0}
+            title={filteredRows.length === 0 ? "No rows to export" : `Export ${filteredRows.length} filtered technician${filteredRows.length === 1 ? "" : "s"} to Excel`}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md hover:bg-[#F7F8FA] transition-colors"
+            style={{
+              fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13,
+              color: filteredRows.length === 0 ? colors.inkMuted : colors.ink,
+              border: `1px solid ${colors.rule}`,
+              backgroundColor: colors.background,
+              cursor: exportPending || filteredRows.length === 0 ? "not-allowed" : "pointer",
+              opacity: exportPending || filteredRows.length === 0 ? 0.5 : 1,
+            }}
+            data-testid="button-export-excel"
+          >
+            {exportPending
+              ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              : <FileDown className="h-3.5 w-3.5" />}
+            {exportPending ? "Exporting…" : "Export Excel"}
           </button>
         </div>
       </div>
