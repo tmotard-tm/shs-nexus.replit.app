@@ -299,6 +299,7 @@ class HolmanVehicleSyncService {
           target: holmanVehiclesCache.holmanVehicleNumber,
           set: {
             ...cacheData,
+            district: sql`${holmanVehiclesCache.district}`,
             updatedAt: now,
           },
         });
@@ -606,6 +607,7 @@ class HolmanVehicleSyncService {
           target: holmanVehiclesCache.holmanVehicleNumber,
           set: {
             ...cacheData,
+            district: sql`${holmanVehiclesCache.district}`,
             updatedAt: now,
           },
         });

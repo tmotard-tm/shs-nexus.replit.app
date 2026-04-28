@@ -1521,7 +1521,6 @@ export const holmanVehiclesCache = pgTable("holman_vehicles_cache", {
   region: text("region"), // clientData3 from Holman (e.g., "890")
   division: text("division"), // prefix/division from Holman (e.g., "01")
   district: text("district"),
-  districtOverride: text("district_override"), // manual override — survives Holman syncs
   inServiceDate: text("in_service_date"),
   outOfServiceDate: text("out_of_service_date"),
   odometer: integer("odometer"),
