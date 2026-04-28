@@ -12,7 +12,7 @@ import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
 import { z } from "zod";
-import { testConnection, executeQuery, getTableData, getTableSchema } from "./fleet-scope-snowflake";
+import { testConnection, executeQuery, getTableData, getTableSchema, lookupTpmsContactsByLdap } from "./fleet-scope-snowflake";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
@@ -16111,48 +16111,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const allVehicles = await getDb().select().from(decommissioningVehicles);
 
-      // Step 1: Build the deduped set of normalized LDAPs for a batched TPMS_EXTRACT lookup.
-      // Source of truth for phone numbers — replaces the legacy reliance on cached
-      // vehicle.mobilePhone / nearestTechPhone fields (Task #219).
-      const normalizedLdaps = Array.from(new Set(
-        (ldaps as any[])
-          .map(l => String(l ?? '').trim().toUpperCase())
-          .filter(l => l.length > 0)
-      ));
-
-      const tpmsLookup = new Map<string, { phone: string | null; fullName: string | null }>();
-      let tpmsLookupOk = true;
-      if (normalizedLdaps.length > 0) {
-        try {
-          const placeholders = normalizedLdaps.map(() => '?').join(',');
-          const tpmsSql = `
-            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS ENT_ID,
-                   MOBILEPHONENUMBER,
-                   FULL_NAME
-            FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-            WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${placeholders})
-          `;
-          const tpmsRows = await executeQuery<{
-            ENT_ID: string | null;
-            MOBILEPHONENUMBER: string | number | null;
-            FULL_NAME: string | null;
-          }>(tpmsSql, normalizedLdaps);
-          for (const row of tpmsRows) {
-            if (!row.ENT_ID) continue;
-            tpmsLookup.set(row.ENT_ID, {
-              phone: row.MOBILEPHONENUMBER != null ? String(row.MOBILEPHONENUMBER).trim() : null,
-              fullName: row.FULL_NAME ? String(row.FULL_NAME).trim() : null,
-            });
-          }
-          console.log(`[DecommBatch] TPMS_EXTRACT lookup: ${tpmsLookup.size}/${normalizedLdaps.length} LDAPs found`);
-        } catch (err: any) {
-          // Snowflake transient errors must not break the resolve flow — fall back to cache,
-          // but remember the lookup didn't actually run so we don't mislabel unresolved rows
-          // as "not_in_tpms_extract" when really it was a Snowflake outage.
-          tpmsLookupOk = false;
-          console.error("[DecommBatch] TPMS_EXTRACT lookup failed (falling back to cached phones):", err.message);
-        }
-      }
+      // Step 1: Batched TPMS_EXTRACT lookup — source of truth for phone numbers
+      // (Task #219). Replaces the legacy reliance on cached vehicle.mobilePhone /
+      // nearestTechPhone fields. Helper lives in server/fleet-scope-snowflake.ts
+      // so other consumers can reuse it.
+      const { contacts: tpmsLookup, ok: tpmsLookupOk } = await lookupTpmsContactsByLdap(ldaps);
+      console.log(
+        `[DecommBatch] TPMS_EXTRACT lookup: ${tpmsLookup.size} LDAPs found (ok=${tpmsLookupOk})`,
+      );
 
       const resolved: any[] = [];
       const unresolved: { ldap: string; reason: string }[] = [];
@@ -16162,13 +16128,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const ldap = String(rawLdap ?? '').trim().toUpperCase();
         if (!ldap) continue;
 
-        // Step 2: match the LDAP against either a tech (enterpriseId) OR a manager
-        // (managerEntId), and as a last resort treat numeric values as a padded truck #.
+        // Step 2: match the LDAP against any of the three Enterprise IDs we track on
+        // a decommissioning row — the assigned tech, the nearest tech, or the manager —
+        // and as a last resort treat numeric values as a padded truck #. Precedence:
+        // tech (assigned) > manager > nearest tech > truck pad.
         let vehicle = allVehicles.find(v => v.enterpriseId?.toUpperCase() === ldap);
-        let matchedVia: 'tech' | 'manager' | 'truck' | null = vehicle ? 'tech' : null;
+        let matchedVia: 'tech' | 'manager' | 'nearest_tech' | 'truck' | null = vehicle ? 'tech' : null;
         if (!vehicle) {
           vehicle = allVehicles.find(v => v.managerEntId?.toUpperCase() === ldap);
           if (vehicle) matchedVia = 'manager';
+        }
+        if (!vehicle) {
+          vehicle = allVehicles.find(v => v.nearestTechEnterpriseId?.toUpperCase() === ldap);
+          if (vehicle) matchedVia = 'nearest_tech';
         }
         if (!vehicle) {
           vehicle = allVehicles.find(v => v.truckNumber === ldap.padStart(6, '0'));
@@ -16176,6 +16148,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         }
 
         const tpms = tpmsLookup.get(ldap);
+        const tpmsPhone = tpms?.mobilePhone || null;
+        const tpmsName = tpms?.fullName || null;
 
         if (!vehicle && !tpms) {
           // Distinguish "TPMS lookup failed entirely" from "this LDAP truly isn't there".
@@ -16201,21 +16175,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         let contactName: string | null = null;
         let phone_source: 'tpms_live' | 'cache_fallback' | 'unresolved' = 'unresolved';
 
-        if (tpms?.phone) {
-          phone = tpms.phone;
-          phone_source = 'tpms_live';
+        if (tpms) {
+          // TPMS_EXTRACT is the source of truth — even when MOBILEPHONENUMBER is null
+          // we honor that answer (we do NOT fall back to a possibly-stale cached phone)
+          // and let the no-phone handler below push the LDAP into the unresolved bucket.
+          phone = tpmsPhone;
+          phone_source = tpmsPhone ? 'tpms_live' : 'unresolved';
           if (matchedVia === 'manager' || ct === 'manager') {
-            contactName = vehicle.managerName || tpms.fullName || null;
-          } else if (ct === 'nearest_tech') {
-            contactName = vehicle.nearestTechName || tpms.fullName || null;
+            contactName = vehicle.managerName || tpmsName || null;
+          } else if (matchedVia === 'nearest_tech' || ct === 'nearest_tech') {
+            contactName = vehicle.nearestTechName || tpmsName || null;
           } else {
-            contactName = tpms.fullName || vehicle.fullName || null;
+            contactName = tpmsName || vehicle.fullName || null;
           }
         } else {
+          // Snowflake had no row for this LDAP at all — fall back to the cached phone
+          // for the resolved contact role (manager LDAP -> managerPhone, nearest-tech
+          // LDAP -> nearestTechPhone, otherwise mobilePhone). This branch is also where
+          // we land when the Snowflake lookup itself failed (tpmsLookupOk=false), in
+          // which case the unresolved-reason below will say so.
           if (matchedVia === 'manager' || ct === 'manager') {
             phone = vehicle.managerPhone || null;
             contactName = vehicle.managerName || null;
-          } else if (ct === 'nearest_tech') {
+          } else if (matchedVia === 'nearest_tech' || ct === 'nearest_tech') {
             phone = vehicle.nearestTechPhone || null;
             contactName = vehicle.nearestTechName || null;
           } else {
@@ -16223,6 +16205,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             contactName = vehicle.fullName || null;
           }
           phone_source = phone ? 'cache_fallback' : 'unresolved';
+        }
+
+        // If we still couldn't find a phone for this matched vehicle row, surface it in
+        // the unresolved bucket with a clear reason rather than leaving it as a "matched
+        // but unsendable" recipient the operator might miss.
+        if (!phone) {
+          unresolved.push({
+            ldap,
+            reason: tpmsLookupOk ? 'no_phone_for_contact_type' : 'tpms_lookup_failed',
+          });
+          continue;
         }
 
         // Recipient is themselves a manager when the column-A LDAP matched on the

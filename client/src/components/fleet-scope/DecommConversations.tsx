@@ -154,8 +154,9 @@ interface BatchRecipient {
   // 'unresolved'     — no phone available from either source
   phone_source?: 'tpms_live' | 'cache_fallback' | 'unresolved';
   // Why the LDAP matched in fs_decommissioning_vehicles. 'manager' means the column-A
-  // LDAP was matched on managerEntId (so the recipient is a manager, not the tech).
-  matchedVia?: 'tech' | 'manager' | 'truck' | null;
+  // LDAP was matched on managerEntId (so the recipient is a manager, not the tech);
+  // 'nearest_tech' means it was matched on nearestTechEnterpriseId.
+  matchedVia?: 'tech' | 'manager' | 'nearest_tech' | 'truck' | null;
   // Manager-CC was suppressed because the recipient is themselves a manager.
   cc_skipped_self_manager?: boolean;
 }
@@ -1315,7 +1316,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                             ? '— not found in TPMS_EXTRACT'
                             : u.reason === 'no_vehicle_match'
                               ? '— in TPMS_EXTRACT but no decommissioning vehicle references this LDAP'
-                              : `— ${u.reason}`}
+                              : u.reason === 'no_phone_for_contact_type'
+                                ? '— matched a vehicle, but no phone number available for the selected contact type'
+                                : u.reason === 'tpms_lookup_failed'
+                                  ? '— Snowflake TPMS_EXTRACT lookup failed; please retry'
+                                  : `— ${u.reason}`}
                         </span>
                       </li>
                     ))}
