@@ -13,6 +13,14 @@ import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./f
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
 import { z } from "zod";
 import { testConnection, executeQuery, getTableData, getTableSchema, lookupTpmsContactsByLdap } from "./fleet-scope-snowflake";
+import {
+  getTpmsContact,
+  getTpmsManagerEntIds,
+  getTpmsSnapshot,
+  getTpmsSnapshotInfo,
+  isTpmsSnapshotLoaded,
+  refreshTpmsExtractSnapshot,
+} from "./tpms-extract-snapshot";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
@@ -992,6 +1000,12 @@ function isValidStateAbbreviation(state: string | null | undefined): boolean {
 async function refreshTechnicianCache(): Promise<void> {
   try {
     console.log("[TechCache] Refreshing technician data cache from Snowflake...");
+    // The TRUCK_LU-keyed query stays — it pulls per-truck address fields
+    // (PRIMARYADDR1/2/CITY/STATE/ZIP) and TECH_NO that aren't part of the
+    // ENTERPRISE_ID-keyed snapshot. Manager phone, however, is now derived
+    // from the shared snapshot (Task #221) so manager numbers are
+    // identical across every screen and we don't double-pay for the
+    // ENTERPRISE_ID -> phone map this code used to build inline.
     const techSql = `
       SELECT TRUCK_LU, FULL_NAME, TECH_NO, MOBILEPHONENUMBER, MANAGER_NAME, MANAGER_ENT_ID, ENTERPRISE_ID,
              PRIMARYADDR1, PRIMARYADDR2, PRIMARYCITY, PRIMARYSTATE, PRIMARYZIP
@@ -1011,28 +1025,18 @@ async function refreshTechnicianCache(): Promise<void> {
       PRIMARYSTATE: string | null;
       PRIMARYZIP: string | null;
     }>(techSql);
-    
-    // First pass: Build lookup of ENTERPRISE_ID -> phone number for manager phone lookup
-    const enterpriseIdToPhone = new Map<string, string>();
-    for (const tech of techData) {
-      if (tech.ENTERPRISE_ID && tech.MOBILEPHONENUMBER) {
-        const entId = String(tech.ENTERPRISE_ID).trim();
-        enterpriseIdToPhone.set(entId, String(tech.MOBILEPHONENUMBER));
-      }
-    }
-    
-    // Second pass: Build main cache with manager info
-    const newCache = new Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string; enterpriseId: string }>();
+
+    const newCache = new Map<string, { fullName: string; techNo: string; mobilePhone: string; managerName: string; managerPhone: string; enterpriseId: string; fullAddress: string }>();
     for (const tech of techData) {
       if (tech.TRUCK_LU) {
         const vehicleNum = normalizeFleetIdForCache(tech.TRUCK_LU);
-        
-        let managerPhone = '';
-        if (tech.MANAGER_ENT_ID) {
-          const managerEntId = String(tech.MANAGER_ENT_ID).trim();
-          managerPhone = enterpriseIdToPhone.get(managerEntId) || '';
-        }
-        
+
+        // Resolve manager phone from the shared snapshot so it stays in
+        // lockstep with the decommissioning batch SMS / decom-sync paths.
+        const managerPhone = tech.MANAGER_ENT_ID
+          ? (getTpmsContact(String(tech.MANAGER_ENT_ID))?.mobilePhone ?? '')
+          : '';
+
         const addressParts = [
           tech.PRIMARYADDR1?.trim(),
           tech.PRIMARYADDR2?.trim(),
@@ -11150,7 +11154,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   
   async function scheduledTechDataRefresh() {
     console.log(`[Tech Data Scheduler] Starting Snowflake tech data refresh at ${new Date().toISOString()}`);
-    
+
+    // Refresh the in-process TPMS_EXTRACT snapshot first so the rest of this
+    // run (and subsequent decommissioning sync, manager-phone enrichment,
+    // tech-cache rebuild) all see the same nightly truth (Task #221).
+    try {
+      const snap = await refreshTpmsExtractSnapshot();
+      console.log(`[Tech Data Scheduler] TPMS snapshot refresh: ok=${snap.ok}, rows=${snap.rowCount}, managers=${snap.managerCount}, ${snap.durationMs}ms`);
+    } catch (snapErr: any) {
+      console.error('[Tech Data Scheduler] TPMS snapshot refresh failed (continuing):', snapErr?.message || snapErr);
+    }
+
     try {
       // Get all trucks from our database
       const allTrucks = await fleetScopeStorage.getAllTrucks();
@@ -11841,10 +11855,33 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // Then schedule for 7:30 AM ET daily (30 sec after assigned sync)
     scheduleNextTechDataRefresh();
   }, 10000); // Start 2 seconds after Assigned scheduler
-  
-  // Populate technician cache on startup, then refresh every 30 minutes
+
+  // Bootstrap the in-process TPMS_EXTRACT snapshot ASAP so consumers
+  // (decom-batch-resolve, manager-phone enrichment, tech cache) have it
+  // available before any user request lands. The 7:30 AM ET nightly run
+  // re-loads it; the admin endpoint can force a refresh.
+  setTimeout(async () => {
+    try {
+      console.log('[TPMS Snapshot] Bootstrap refresh on startup...');
+      const snap = await refreshTpmsExtractSnapshot();
+      console.log(`[TPMS Snapshot] Bootstrap: ok=${snap.ok}, rows=${snap.rowCount}, managers=${snap.managerCount}, ${snap.durationMs}ms${snap.error ? ', error=' + snap.error : ''}`);
+    } catch (err: any) {
+      console.error('[TPMS Snapshot] Bootstrap refresh failed:', err?.message || err);
+    }
+  }, 8000);
+
+  // Populate technician cache on startup, then refresh every 30 minutes.
+  // Awaits the TPMS snapshot first so manager-phone derivation in the
+  // tech cache reads from the same nightly truth as everything else.
   setTimeout(async () => {
     console.log(`[TechCache] Initializing technician data cache...`);
+    if (!isTpmsSnapshotLoaded()) {
+      try {
+        await refreshTpmsExtractSnapshot();
+      } catch (err: any) {
+        console.warn('[TechCache] Pre-cache snapshot load failed (continuing):', err?.message || err);
+      }
+    }
     await refreshTechnicianCache();
     setInterval(async () => {
       console.log(`[TechCache] Running scheduled 30-minute refresh...`);
@@ -14071,6 +14108,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       return { synced: 0, preserved: 0, total: 0 };
     }
 
+    // Guarantee the in-process TPMS_EXTRACT snapshot (Task #221) is loaded
+    // before we derive anything manager-related (manager-flag pool, manager
+    // phone+ZIP enrichment, ZIP-fallback nearest-manager / nearest-tech
+    // pools). Ad-hoc / manual invocations of this function (e.g. the
+    // /decommissioning/sync-tech-data POST or /old-declines import) can
+    // arrive before the startup bootstrap has finished, so we best-effort
+    // the snapshot here and log if it is still empty afterward.
+    if (!isTpmsSnapshotLoaded()) {
+      console.warn('[Decommissioning Tech Sync] TPMS snapshot not yet loaded — refreshing before sync.');
+      try {
+        const snap = await refreshTpmsExtractSnapshot();
+        if (!snap.ok) {
+          console.warn(`[Decommissioning Tech Sync] Pre-sync snapshot refresh did not succeed (ok=false, error=${snap.error || 'unknown'}). Manager-derived fields may be incomplete.`);
+        }
+      } catch (snapErr: any) {
+        console.warn('[Decommissioning Tech Sync] Pre-sync snapshot refresh threw (continuing with whatever is cached):', snapErr?.message || snapErr);
+      }
+    }
+
     // Backfill: for any vehicle missing a zipCode but whose address contains
     // a 5-digit ZIP at the end (e.g. "...CINCINNATI, OH, 45238"), populate
     // zipCode from the address. Lets the manager/tech ZIP fallback below
@@ -14123,28 +14179,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
     const techData = await executeQuery<TechRow>(sql);
 
-    // Build a global set of every enterprise ID that appears as MANAGER_ENT_ID
-    // for any tech in TPMS_EXTRACT. We use this to flag is_manager on each
-    // decommissioning vehicle so the UI can warn when a recipient is themselves
-    // a manager (Task #204 - CC manager on batch texts).
-    const globalManagerEntIdSet = new Set<string>();
-    try {
-      const allManagersSql = `
-        SELECT DISTINCT MANAGER_ENT_ID
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE MANAGER_ENT_ID IS NOT NULL AND MANAGER_ENT_ID != ''
-      `;
-      interface AllManagerRow { MANAGER_ENT_ID: string; }
-      const allManagerRows = await executeQuery<AllManagerRow>(allManagersSql);
-      for (const row of allManagerRows) {
-        if (row.MANAGER_ENT_ID) {
-          globalManagerEntIdSet.add(row.MANAGER_ENT_ID.toString().trim());
-        }
-      }
-      console.log(`[Decommissioning Tech Sync] Loaded ${globalManagerEntIdSet.size} distinct manager enterprise IDs (for is_manager flag)`);
-    } catch (mgrErr: any) {
-      console.warn(`[Decommissioning Tech Sync] Global manager set query failed (non-fatal): ${mgrErr.message}`);
-    }
+    // Set of every enterprise ID that appears as MANAGER_ENT_ID for any tech
+    // in TPMS_EXTRACT. Sourced from the shared snapshot (Task #221) instead of
+    // a dedicated SELECT DISTINCT query, so every screen's is_manager flag
+    // (used by the CC-manager batch-SMS warning, Task #204) reads from the
+    // same nightly truth. Snapshot keys are already UPPER(TRIM(...)).
+    const globalManagerEntIdSet = getTpmsManagerEntIds();
+    console.log(`[Decommissioning Tech Sync] Manager-flag pool: ${globalManagerEntIdSet.size} distinct enterprise IDs (from TPMS snapshot)`);
 
     // Query VIN from HOLMAN_VEHICLES - HOLMAN_VEHICLE_NUMBER is 5 digits (remove first leading zero from our 6-digit format)
     const holmanTruckNumbers = vehicles.map(v => {
@@ -14179,40 +14220,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
     }
 
-    // Also get manager zip codes by querying their ENTERPRISE_ID
-    const managerEntIds = new Set<string>();
-    for (const row of techData) {
-      if (row.MANAGER_ENT_ID) {
-        managerEntIds.add(row.MANAGER_ENT_ID.toString().trim());
-      }
-    }
-
-    // Lookup manager PRIMARYZIP and MOBILEPHONENUMBER using ENTERPRISE_ID
+    // Manager PRIMARYZIP and MOBILEPHONENUMBER come from the shared
+    // TPMS_EXTRACT snapshot (Task #221) — no per-call Snowflake query for
+    // these. Snapshot keys are UPPER(TRIM(ENTERPRISE_ID)) so we normalize
+    // the manager ID before lookup.
     const managerZipLookup = new Map<string, string>();
     const managerPhoneLookup = new Map<string, string>();
-    if (managerEntIds.size > 0) {
-      const managerIds = Array.from(managerEntIds).map(id => `'${id}'`).join(', ');
-      const managerSql = `
-        SELECT ENTERPRISE_ID, PRIMARYZIP, MOBILEPHONENUMBER
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE ENTERPRISE_ID IN (${managerIds})
-      `;
-      interface ManagerRow {
-        ENTERPRISE_ID: string;
-        PRIMARYZIP: string | null;
-        MOBILEPHONENUMBER: string | null;
-      }
-      const managerData = await executeQuery<ManagerRow>(managerSql);
-      for (const row of managerData) {
-        const entId = row.ENTERPRISE_ID?.toString().trim();
-        if (!entId) continue;
-        if (row.PRIMARYZIP) {
-          managerZipLookup.set(entId, row.PRIMARYZIP);
-        }
-        if (row.MOBILEPHONENUMBER) {
-          managerPhoneLookup.set(entId, row.MOBILEPHONENUMBER.toString().trim());
-        }
-      }
+    for (const row of techData) {
+      const rawMgr = row.MANAGER_ENT_ID?.toString().trim();
+      if (!rawMgr) continue;
+      if (managerZipLookup.has(rawMgr) || managerPhoneLookup.has(rawMgr)) continue;
+      const mgr = getTpmsContact(rawMgr);
+      if (!mgr) continue;
+      if (mgr.primaryZip) managerZipLookup.set(rawMgr, mgr.primaryZip);
+      if (mgr.mobilePhone) managerPhoneLookup.set(rawMgr, mgr.mobilePhone);
     }
 
     // Build lookup map by truck number (padded to 6 digits for matching)
@@ -14307,7 +14328,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           managerZip: snowflakeData.managerZip || null,
           techMatchSource: 'truck', // Direct truck number match
           isAssigned: true, // Truck found in TPMS_EXTRACT
-          isManager: !!techEntId && globalManagerEntIdSet.has(techEntId),
+          isManager: !!techEntId && globalManagerEntIdSet.has(techEntId.toUpperCase()),
           techDataSyncedAt: new Date(),
         });
         synced++;
@@ -14334,59 +14355,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     
     if (unmatchedWithZip.length > 0) {
       console.log(`[Decommissioning Tech Sync] Attempting ZIP fallback for ${unmatchedWithZip.length} vehicles - finding nearest managers`);
-      
-      // Step 1: Get all unique MANAGER_ENT_IDs and their names from TPMS_EXTRACT
-      const managersSql = `
-        SELECT DISTINCT
-          MANAGER_ENT_ID,
-          MANAGER_NAME
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE MANAGER_ENT_ID IS NOT NULL AND MANAGER_ENT_ID != ''
-      `;
-      
-      interface ManagerRow {
-        MANAGER_ENT_ID: string;
-        MANAGER_NAME: string | null;
-      }
-      
-      const allManagers = await executeQuery<ManagerRow>(managersSql);
-      console.log(`[Decommissioning Tech Sync] Found ${allManagers.length} unique managers`);
-      
-      // Step 2: Get each manager's PRIMARY_ZIP by matching MANAGER_ENT_ID to ENTERPRISE_ID
-      const managerEntIds = allManagers.map(m => m.MANAGER_ENT_ID?.toString().trim()).filter(Boolean);
-      
-      interface ManagerWithZipRow {
-        ENTERPRISE_ID: string;
-        FULL_NAME: string | null;
-        MOBILEPHONENUMBER: string | null;
-        PRIMARYZIP: string | null;
-      }
-      
-      const managerZipLookup = new Map<string, ManagerWithZipRow>();
-      
-      if (managerEntIds.length > 0) {
-        const mgrIds = managerEntIds.map(id => `'${id}'`).join(', ');
-        const mgrZipSql = `
-          SELECT DISTINCT
-            ENTERPRISE_ID,
-            FULL_NAME,
-            MOBILEPHONENUMBER,
-            PRIMARYZIP
-          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-          WHERE ENTERPRISE_ID IN (${mgrIds}) AND PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
-        `;
-        
-        const mgrZipData = await executeQuery<ManagerWithZipRow>(mgrZipSql);
-        console.log(`[Decommissioning Tech Sync] Found ${mgrZipData.length} managers with ZIP codes`);
-        
-        for (const row of mgrZipData) {
-          if (row.ENTERPRISE_ID && row.PRIMARYZIP) {
-            managerZipLookup.set(row.ENTERPRISE_ID.toString().trim(), row);
-          }
-        }
-      }
-      
-      // Build a list of managers with their ZIP codes for distance comparison
+
+      // Build the nearest-manager and nearest-tech pools entirely from the
+      // shared TPMS_EXTRACT snapshot (Task #221). Eliminates three previous
+      // Snowflake queries (DISTINCT managers, manager ZIPs, all techs with
+      // ZIPs) — all of that is one in-memory pass over the snapshot now.
       interface ManagerInfo {
         managerEntId: string;
         managerName: string;
@@ -14395,44 +14368,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         fullName: string;
         mobilePhone: string;
       }
-      
-      const managersWithZip: ManagerInfo[] = [];
-      for (const mgr of allManagers) {
-        const mgrEntId = mgr.MANAGER_ENT_ID?.toString().trim();
-        if (!mgrEntId) continue;
-        
-        const mgrDetails = managerZipLookup.get(mgrEntId);
-        if (mgrDetails && mgrDetails.PRIMARYZIP) {
-          managersWithZip.push({
-            managerEntId: mgrEntId,
-            managerName: mgr.MANAGER_NAME?.toString().trim() || '',
-            managerZip: mgrDetails.PRIMARYZIP.toString().trim(),
-            enterpriseId: mgrDetails.ENTERPRISE_ID?.toString().trim() || '',
-            fullName: mgrDetails.FULL_NAME?.toString().trim() || '',
-            mobilePhone: mgrDetails.MOBILEPHONENUMBER?.toString().trim() || '',
-          });
-        }
-      }
-      
-      console.log(`[Decommissioning Tech Sync] ${managersWithZip.length} managers available for ZIP-based matching`);
-      
-      // Helper function to calculate ZIP code distance (simple numeric difference)
-      const getZipDistance = (zip1: string, zip2: string): number => {
-        const num1 = parseInt(zip1.replace(/\D/g, '').substring(0, 5), 10);
-        const num2 = parseInt(zip2.replace(/\D/g, '').substring(0, 5), 10);
-        if (isNaN(num1) || isNaN(num2)) return Infinity;
-        return Math.abs(num1 - num2);
-      };
-
-      // Build a set of manager enterprise IDs to exclude from nearest-tech pool
-      const managerEntIdSet = new Set<string>();
-      for (const mgr of allManagers) {
-        if (mgr.MANAGER_ENT_ID) {
-          managerEntIdSet.add(mgr.MANAGER_ENT_ID.toString().trim());
-        }
-      }
-
-      // Step 3: Get all techs with ZIP codes for nearest-tech lookup (excluding managers)
       interface TechInfo {
         enterpriseId: string;
         fullName: string;
@@ -14440,43 +14375,46 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         primaryZip: string;
       }
 
+      const managerEntIdSet = getTpmsManagerEntIds();
+      const snapshot = getTpmsSnapshot();
+      const managersWithZip: ManagerInfo[] = [];
       const techsWithZip: TechInfo[] = [];
-      try {
-        const techZipSql = `
-          SELECT DISTINCT
-            ENTERPRISE_ID,
-            FULL_NAME,
-            MOBILEPHONENUMBER,
-            PRIMARYZIP
-          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-          WHERE PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
-            AND ENTERPRISE_ID IS NOT NULL AND ENTERPRISE_ID != ''
-            AND FULL_NAME IS NOT NULL
-        `;
-        interface TechZipRow {
-          ENTERPRISE_ID: string;
-          FULL_NAME: string | null;
-          MOBILEPHONENUMBER: string | null;
-          PRIMARYZIP: string | null;
-        }
-        const techZipData = await executeQuery<TechZipRow>(techZipSql);
-        console.log(`[Decommissioning Tech Sync] Found ${techZipData.length} techs with ZIP codes for nearest-tech matching`);
-        for (const row of techZipData) {
-          if (row.ENTERPRISE_ID && row.PRIMARYZIP) {
-            const entId = row.ENTERPRISE_ID.toString().trim();
-            if (managerEntIdSet.has(entId)) continue;
+      for (const [entId, row] of snapshot) {
+        if (managerEntIdSet.has(entId)) {
+          if (row.primaryZip) {
+            managersWithZip.push({
+              managerEntId: entId,
+              // The manager's own FULL_NAME is the canonical display name —
+              // identical to the MANAGER_NAME column the previous query
+              // pulled from subordinate rows (same HR feed).
+              managerName: row.fullName ?? '',
+              managerZip: row.primaryZip,
+              enterpriseId: entId,
+              fullName: row.fullName ?? '',
+              mobilePhone: row.mobilePhone ?? '',
+            });
+          }
+        } else {
+          if (row.primaryZip && row.fullName) {
             techsWithZip.push({
               enterpriseId: entId,
-              fullName: row.FULL_NAME?.toString().trim() || '',
-              mobilePhone: row.MOBILEPHONENUMBER?.toString().trim() || '',
-              primaryZip: row.PRIMARYZIP.toString().trim(),
+              fullName: row.fullName,
+              mobilePhone: row.mobilePhone ?? '',
+              primaryZip: row.primaryZip,
             });
           }
         }
-        console.log(`[Decommissioning Tech Sync] After excluding ${managerEntIdSet.size} managers: ${techsWithZip.length} field techs available for nearest-tech matching`);
-      } catch (techErr) {
-        console.error("[Decommissioning Tech Sync] Nearest tech lookup failed (non-fatal):", techErr);
       }
+      console.log(`[Decommissioning Tech Sync] ${managersWithZip.length} managers available for ZIP-based matching`);
+      console.log(`[Decommissioning Tech Sync] After excluding ${managerEntIdSet.size} managers: ${techsWithZip.length} field techs available for nearest-tech matching`);
+
+      // Helper function to calculate ZIP code distance (simple numeric difference)
+      const getZipDistance = (zip1: string, zip2: string): number => {
+        const num1 = parseInt(zip1.replace(/\D/g, '').substring(0, 5), 10);
+        const num2 = parseInt(zip2.replace(/\D/g, '').substring(0, 5), 10);
+        if (isNaN(num1) || isNaN(num2)) return Infinity;
+        return Math.abs(num1 - num2);
+      };
       
       // For each unmatched vehicle, find the nearest MANAGER and nearest TECH by ZIP
       for (const vehicle of unmatchedWithZip) {
@@ -14605,63 +14543,32 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       return { updated: 0, total: 0 };
     }
 
-    // Build a set of MANAGER_ENT_IDs so we can exclude managers from the
-    // nearest-tech candidate pool (managers shouldn't be surfaced as "nearest tech").
-    const managerEntIdSet = new Set<string>();
-    try {
-      const managerSql = `
-        SELECT DISTINCT MANAGER_ENT_ID
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE MANAGER_ENT_ID IS NOT NULL AND MANAGER_ENT_ID != ''
-      `;
-      interface MgrRow { MANAGER_ENT_ID: string; }
-      const mgrRows = await executeQuery<MgrRow>(managerSql);
-      for (const r of mgrRows) {
-        if (r.MANAGER_ENT_ID) managerEntIdSet.add(r.MANAGER_ENT_ID.toString().trim());
-      }
-    } catch (err: any) {
-      console.warn(`[Nearest Tech Pass] Manager set query failed (continuing without filter): ${err?.message || err}`);
-    }
-
-    // Load all techs that have a primary ZIP, excluding managers.
+    // Build the nearest-tech candidate pool from the shared TPMS_EXTRACT
+    // snapshot (Task #221) — replaces the two per-call Snowflake queries
+    // (DISTINCT MANAGER_ENT_ID + DISTINCT tech rows w/ ZIP) this used to run.
     interface TechInfo {
       enterpriseId: string;
       fullName: string;
       mobilePhone: string;
       primaryZip: string;
     }
-    const techsWithZip: TechInfo[] = [];
-    try {
-      const techSql = `
-        SELECT DISTINCT ENTERPRISE_ID, FULL_NAME, MOBILEPHONENUMBER, PRIMARYZIP
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE PRIMARYZIP IS NOT NULL AND PRIMARYZIP != ''
-          AND ENTERPRISE_ID IS NOT NULL AND ENTERPRISE_ID != ''
-          AND FULL_NAME IS NOT NULL
-      `;
-      interface TechRow {
-        ENTERPRISE_ID: string;
-        FULL_NAME: string | null;
-        MOBILEPHONENUMBER: string | null;
-        PRIMARYZIP: string | null;
-      }
-      const rows = await executeQuery<TechRow>(techSql);
-      for (const r of rows) {
-        const entId = r.ENTERPRISE_ID?.toString().trim();
-        if (!entId || managerEntIdSet.has(entId)) continue;
-        if (!r.PRIMARYZIP) continue;
-        techsWithZip.push({
-          enterpriseId: entId,
-          fullName: r.FULL_NAME?.toString().trim() || '',
-          mobilePhone: r.MOBILEPHONENUMBER?.toString().trim() || '',
-          primaryZip: r.PRIMARYZIP.toString().trim(),
-        });
-      }
-      console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers excluded)`);
-    } catch (err: any) {
-      console.error(`[Nearest Tech Pass] Tech pool query failed: ${err?.message || err}`);
+    if (!isTpmsSnapshotLoaded()) {
+      console.warn('[Nearest Tech Pass] TPMS snapshot not loaded; skipping pass.');
       return { updated: 0, total: candidates.length };
     }
+    const managerEntIdSet = getTpmsManagerEntIds();
+    const techsWithZip: TechInfo[] = [];
+    for (const [entId, row] of getTpmsSnapshot()) {
+      if (managerEntIdSet.has(entId)) continue;
+      if (!row.primaryZip || !row.fullName) continue;
+      techsWithZip.push({
+        enterpriseId: entId,
+        fullName: row.fullName,
+        mobilePhone: row.mobilePhone ?? '',
+        primaryZip: row.primaryZip,
+      });
+    }
+    console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers excluded)`);
 
     if (techsWithZip.length === 0) return { updated: 0, total: candidates.length };
 
@@ -14716,6 +14623,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     console.log(`[Nearest Tech Pass] Updated ${updated} of ${candidates.length} vehicles`);
     return { updated, total: candidates.length };
   }
+
+  // Admin: force a refresh of the in-process TPMS_EXTRACT snapshot
+  // (Task #221). Useful when an HR change needs to be picked up before the
+  // next 7:30 AM ET nightly run. Returns the snapshot's freshness info.
+  app.post("/tpms-extract-snapshot/refresh", async (_req, res) => {
+    try {
+      const snap = await refreshTpmsExtractSnapshot();
+      res.status(snap.ok ? 200 : 500).json({
+        ok: snap.ok,
+        rowCount: snap.rowCount,
+        managerCount: snap.managerCount,
+        durationMs: snap.durationMs,
+        refreshedAt: snap.refreshedAt,
+        error: snap.error,
+        info: getTpmsSnapshotInfo(),
+      });
+    } catch (err: any) {
+      console.error('[TPMS Snapshot] Manual refresh failed:', err?.message || err);
+      res.status(500).json({
+        ok: false,
+        message: err?.message || 'TPMS snapshot refresh failed',
+        info: getTpmsSnapshotInfo(),
+      });
+    }
+  });
+
+  // Admin: report the in-process TPMS_EXTRACT snapshot's freshness without
+  // forcing a refresh. Handy for diagnostics.
+  app.get("/tpms-extract-snapshot/status", (_req, res) => {
+    res.json({ ok: true, info: getTpmsSnapshotInfo() });
+  });
 
   // Sync tech data from Snowflake to decommissioning vehicles (manual trigger or daily auto)
   app.post("/decommissioning/sync-tech-data", async (req, res) => {
@@ -15024,6 +14962,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // Run initial sync on startup and schedule daily
   setTimeout(async () => {
     console.log("[Decommissioning Scheduler] Running initial tech data sync on startup...");
+    // The decom sync now reads its manager-flag pool, manager phone/zip, and
+    // ZIP-fallback pools from the in-process TPMS snapshot (Task #221), so we
+    // ensure the snapshot is loaded before this initial run. Otherwise the
+    // first post-startup sync would build with an empty manager set.
+    if (!isTpmsSnapshotLoaded()) {
+      try {
+        await refreshTpmsExtractSnapshot();
+      } catch (err: any) {
+        console.warn("[Decommissioning Scheduler] Pre-sync snapshot load failed (continuing):", err?.message || err);
+      }
+    }
     try {
       const result = await syncDecommissioningTechData();
       console.log(`[Decommissioning Scheduler] Initial sync complete: ${result.synced} synced, ${result.preserved} preserved`);

@@ -1,4 +1,9 @@
 import { getSnowflakeService, isSnowflakeConfigured } from './snowflake-service';
+import {
+  getTpmsContact,
+  isTpmsManager,
+  isTpmsSnapshotLoaded,
+} from './tpms-extract-snapshot';
 
 export function getSnowflakeConfig() {
   const service = getSnowflakeService();
@@ -54,20 +59,18 @@ export function closeConnection(): void {
 }
 
 /**
- * Batched LDAP -> contact lookup.
+ * Batched LDAP -> contact lookup, served from the in-process TPMS_EXTRACT
+ * snapshot (Task #221). Replaces the per-call Snowflake query the
+ * decommissioning batch SMS feature (Task #219) used to issue.
  *
- * As of Task #221 this is a thin adapter over the in-process TPMS snapshot
- * (server/fleet-scope-tpms-snapshot.ts) — there is no per-call Snowflake
- * round-trip. The snapshot is loaded at boot and refreshed on the nightly
- * sync schedule. If the snapshot has not yet been loaded for any reason,
- * we lazily kick off a refresh so the very first caller still gets data.
- *
- * Return shape kept stable for backwards compatibility with the Task #219
- * call sites:
- *   - `contacts` maps normalized (UPPER+TRIM) LDAP -> { mobilePhone, fullName, isManager }
- *   - `ok` is true unless the snapshot is completely unavailable (Snowflake
- *     unconfigured AND no prior load), so existing callers that branch on
- *     `ok` to surface a "TPMS lookup failed" reason still behave correctly.
+ * - Input LDAPs are trimmed and uppercased; duplicates are removed.
+ * - Returns a Map keyed by the normalized LDAP. Keys missing from the map
+ *   mean that LDAP was not present in TPMS_EXTRACT at the last snapshot
+ *   refresh.
+ * - When the snapshot has never been loaded successfully (e.g. Snowflake was
+ *   down at startup) the call returns an empty map with ok=false so callers
+ *   can fall back to cached data and surface the right unresolved-reason
+ *   instead of treating "no row" as authoritative.
  */
 export async function lookupTpmsContactsByLdap(
   ldaps: string[],
@@ -90,27 +93,16 @@ export async function lookupTpmsContactsByLdap(
   if (normalized.length === 0) {
     return { contacts, ok: true };
   }
-
-  // Defer the imports so the snapshot module's module-load side effects
-  // (none today) never run before the rest of the server is up.
-  const { ensureSnapshotLoaded, getSnapshotMeta, lookupTpmsByLdaps } =
-    await import('./fleet-scope-tpms-snapshot');
-  await ensureSnapshotLoaded();
-
-  const meta = getSnapshotMeta();
-  if (!meta.loaded) {
-    // Could not load the snapshot at all (e.g. Snowflake misconfigured).
-    // Mirrors the prior "Snowflake errored, return empty map + ok=false"
-    // contract so the Task #219 unresolved-reason paths keep working.
+  if (!isTpmsSnapshotLoaded()) {
     return { contacts, ok: false };
   }
-
-  const hits = lookupTpmsByLdaps(normalized);
-  for (const [key, entry] of hits) {
-    contacts.set(key, {
-      mobilePhone: entry.mobilePhone,
-      fullName: entry.fullName,
-      isManager: entry.isManager,
+  for (const ldap of normalized) {
+    const row = getTpmsContact(ldap);
+    if (!row) continue;
+    contacts.set(ldap, {
+      mobilePhone: row.mobilePhone,
+      fullName: row.fullName,
+      isManager: isTpmsManager(ldap),
     });
   }
   return { contacts, ok: true };
