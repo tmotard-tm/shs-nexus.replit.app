@@ -15680,7 +15680,7 @@ export const activeVehicles: FleetVehicle[] = [
     interior: "Utility Without Ref Racks",
     tuneStatus: "NA",
     region: "0000890",
-    district: "0007088",
+    district: "0007108",
     odometerDelivery: 159601,
     deliveryAddress: "3706 Maple Pl",
     city: "SAN DIEGO",
