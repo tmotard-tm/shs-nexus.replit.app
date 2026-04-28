@@ -16106,53 +16106,147 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: "ldaps array is required" });
       }
 
+      const ct: 'tech' | 'nearest_tech' | 'manager' =
+        contactType === 'manager' || contactType === 'nearest_tech' ? contactType : 'tech';
+
       const allVehicles = await getDb().select().from(decommissioningVehicles);
 
+      // Step 1: Build the deduped set of normalized LDAPs for a batched TPMS_EXTRACT lookup.
+      // Source of truth for phone numbers — replaces the legacy reliance on cached
+      // vehicle.mobilePhone / nearestTechPhone fields (Task #219).
+      const normalizedLdaps = Array.from(new Set(
+        (ldaps as any[])
+          .map(l => String(l ?? '').trim().toUpperCase())
+          .filter(l => l.length > 0)
+      ));
+
+      const tpmsLookup = new Map<string, { phone: string | null; fullName: string | null }>();
+      let tpmsLookupOk = true;
+      if (normalizedLdaps.length > 0) {
+        try {
+          const placeholders = normalizedLdaps.map(() => '?').join(',');
+          const tpmsSql = `
+            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS ENT_ID,
+                   MOBILEPHONENUMBER,
+                   FULL_NAME
+            FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+            WHERE UPPER(TRIM(ENTERPRISE_ID)) IN (${placeholders})
+          `;
+          const tpmsRows = await executeQuery<{
+            ENT_ID: string | null;
+            MOBILEPHONENUMBER: string | number | null;
+            FULL_NAME: string | null;
+          }>(tpmsSql, normalizedLdaps);
+          for (const row of tpmsRows) {
+            if (!row.ENT_ID) continue;
+            tpmsLookup.set(row.ENT_ID, {
+              phone: row.MOBILEPHONENUMBER != null ? String(row.MOBILEPHONENUMBER).trim() : null,
+              fullName: row.FULL_NAME ? String(row.FULL_NAME).trim() : null,
+            });
+          }
+          console.log(`[DecommBatch] TPMS_EXTRACT lookup: ${tpmsLookup.size}/${normalizedLdaps.length} LDAPs found`);
+        } catch (err: any) {
+          // Snowflake transient errors must not break the resolve flow — fall back to cache,
+          // but remember the lookup didn't actually run so we don't mislabel unresolved rows
+          // as "not_in_tpms_extract" when really it was a Snowflake outage.
+          tpmsLookupOk = false;
+          console.error("[DecommBatch] TPMS_EXTRACT lookup failed (falling back to cached phones):", err.message);
+        }
+      }
+
       const resolved: any[] = [];
-      const unresolvedSet = new Set<string>();
+      const unresolved: { ldap: string; reason: string }[] = [];
       const digitsOnly = (s: string | null | undefined) => (s || '').replace(/\D/g, '').slice(-10);
 
       for (const rawLdap of ldaps) {
-        const ldap = String(rawLdap).trim().toUpperCase();
+        const ldap = String(rawLdap ?? '').trim().toUpperCase();
         if (!ldap) continue;
 
-        const vehicle = allVehicles.find(v =>
-          v.enterpriseId?.toUpperCase() === ldap ||
-          v.truckNumber === ldap.padStart(6, '0')
-        );
+        // Step 2: match the LDAP against either a tech (enterpriseId) OR a manager
+        // (managerEntId), and as a last resort treat numeric values as a padded truck #.
+        let vehicle = allVehicles.find(v => v.enterpriseId?.toUpperCase() === ldap);
+        let matchedVia: 'tech' | 'manager' | 'truck' | null = vehicle ? 'tech' : null;
         if (!vehicle) {
-          unresolvedSet.add(ldap);
+          vehicle = allVehicles.find(v => v.managerEntId?.toUpperCase() === ldap);
+          if (vehicle) matchedVia = 'manager';
+        }
+        if (!vehicle) {
+          vehicle = allVehicles.find(v => v.truckNumber === ldap.padStart(6, '0'));
+          if (vehicle) matchedVia = 'truck';
+        }
+
+        const tpms = tpmsLookup.get(ldap);
+
+        if (!vehicle && !tpms) {
+          // Distinguish "TPMS lookup failed entirely" from "this LDAP truly isn't there".
+          unresolved.push({
+            ldap,
+            reason: tpmsLookupOk ? 'not_in_tpms_extract' : 'tpms_lookup_failed',
+          });
+          continue;
+        }
+        if (!vehicle) {
+          // LDAP exists in TPMS_EXTRACT but no decommissioning row references it.
+          unresolved.push({ ldap, reason: 'no_vehicle_match' });
           continue;
         }
 
+        // Step 3: Phone resolution — TPMS_EXTRACT is the source of truth. Cached
+        // mobilePhone / nearestTechPhone / managerPhone is only used as a fallback when
+        // Snowflake returns no row for this LDAP. Cache fallback is driven by what the
+        // LDAP actually matched (matchedVia), NOT by the operator-selected contactType,
+        // because a manager LDAP uploaded with default 'tech' contactType should still
+        // fall back to managerPhone, not to some other tech's mobilePhone.
         let phone: string | null = null;
         let contactName: string | null = null;
-        const ct = contactType || 'tech';
-        if (ct === 'tech') {
-          phone = vehicle.mobilePhone;
-          contactName = vehicle.fullName;
-        } else if (ct === 'nearest_tech') {
-          phone = vehicle.nearestTechPhone;
-          contactName = vehicle.nearestTechName;
+        let phone_source: 'tpms_live' | 'cache_fallback' | 'unresolved' = 'unresolved';
+
+        if (tpms?.phone) {
+          phone = tpms.phone;
+          phone_source = 'tpms_live';
+          if (matchedVia === 'manager' || ct === 'manager') {
+            contactName = vehicle.managerName || tpms.fullName || null;
+          } else if (ct === 'nearest_tech') {
+            contactName = vehicle.nearestTechName || tpms.fullName || null;
+          } else {
+            contactName = tpms.fullName || vehicle.fullName || null;
+          }
+        } else {
+          if (matchedVia === 'manager' || ct === 'manager') {
+            phone = vehicle.managerPhone || null;
+            contactName = vehicle.managerName || null;
+          } else if (ct === 'nearest_tech') {
+            phone = vehicle.nearestTechPhone || null;
+            contactName = vehicle.nearestTechName || null;
+          } else {
+            phone = vehicle.mobilePhone || null;
+            contactName = vehicle.fullName || null;
+          }
+          phone_source = phone ? 'cache_fallback' : 'unresolved';
         }
 
+        // Recipient is themselves a manager when the column-A LDAP matched on the
+        // managerEntId side, when the operator picked the "Manager" contact type,
+        // or when this enterpriseId is flagged as a manager elsewhere in TPMS.
+        const recipientIsManager = matchedVia === 'manager' || ct === 'manager' || !!vehicle.isManager;
+
         // CC-manager metadata: only populated when ccManager flag is set.
-        // ccStatus values:
-        //   'ready'             - manager phone is present, tech phone is present, and the two differ
-        //   'no_manager_phone'  - vehicle row has no managerPhone on file
-        //   'same_as_tech'      - managerPhone digits match the tech contactPhone digits
-        //   'no_tech_phone'     - tech contact phone is missing, so there is no tech message to CC
         let ccStatus:
           | 'ready'
           | 'no_manager_phone'
           | 'same_as_tech'
           | 'no_tech_phone'
           | null = null;
+        let cc_skipped_self_manager = false;
+
         if (ccManager) {
-          if (!vehicle.managerPhone) {
+          if (recipientIsManager) {
+            // No manager-CC's-themself: when the recipient IS the manager,
+            // suppress CC entirely and surface a flag the UI can show.
+            cc_skipped_self_manager = true;
+          } else if (!vehicle.managerPhone) {
             ccStatus = 'no_manager_phone';
           } else if (!phone) {
-            // Tech message will be skipped — do not fire a CC on its own.
             ccStatus = 'no_tech_phone';
           } else if (digitsOnly(vehicle.managerPhone) === digitsOnly(phone)) {
             ccStatus = 'same_as_tech';
@@ -16172,16 +16266,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           contactPhone: phone,
           contactName,
           contactType: ct,
-          // Manager / is_manager surfacing for the CC-manager UI (Task #204).
+          phone_source,
+          matchedVia,
           managerPhone: vehicle.managerPhone || null,
           managerName: vehicle.managerName || null,
           managerEntId: vehicle.managerEntId || null,
-          isManager: !!vehicle.isManager,
+          isManager: recipientIsManager,
           ccStatus,
+          cc_skipped_self_manager,
         });
       }
 
-      res.json({ resolved, unresolved: Array.from(unresolvedSet) });
+      res.json({ resolved, unresolved });
     } catch (error: any) {
       console.error("[DecommBatch] Error resolving LDAPs:", error);
       res.status(500).json({ message: error.message });
@@ -16292,9 +16388,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // Manager CC — independent of tech result *only* when the tech send succeeded.
         // Spec: per-row try/catch keeps the two failures isolated, but we don't CC if the
         // tech text itself never went out (keeps manager noise down on hard Twilio errors).
+        // Server-side guard (Task #219): if the recipient IS a manager (matched on
+        // managerEntId, picked Manager contact type, or flagged isManager in TPMS), do
+        // NOT CC — a manager should never receive a CC of a message they themselves got.
+        // This is enforced regardless of the client-supplied ccEnabled flag so a crafted
+        // payload can't bypass the suppression.
         let ccOutcome: CcOutcome | null = null;
         let ccError: string | undefined;
-        const wantsCc = !!ccManager && r.ccEnabled !== false;
+        const recipientIsManager =
+          !!r.cc_skipped_self_manager ||
+          !!r.isManager ||
+          r.matchedVia === 'manager' ||
+          (r.contactType || contactType) === 'manager';
+        const wantsCc = !!ccManager && r.ccEnabled !== false && !recipientIsManager;
 
         if (wantsCc && techSent) {
           if (!r.managerPhone) {

@@ -148,6 +148,21 @@ interface BatchRecipient {
   ccStatus?: 'ready' | 'no_manager_phone' | 'same_as_tech' | 'no_tech_phone' | null;
   // Per-row toggle: when ccManager is on, user can opt-out a single row.
   ccEnabled?: boolean;
+  // Task #219: phone source telemetry from /decomm-batch-resolve.
+  // 'tpms_live'      — phone came fresh from Snowflake TPMS_EXTRACT
+  // 'cache_fallback' — Snowflake had no row; we used vehicle.mobilePhone (may be stale)
+  // 'unresolved'     — no phone available from either source
+  phone_source?: 'tpms_live' | 'cache_fallback' | 'unresolved';
+  // Why the LDAP matched in fs_decommissioning_vehicles. 'manager' means the column-A
+  // LDAP was matched on managerEntId (so the recipient is a manager, not the tech).
+  matchedVia?: 'tech' | 'manager' | 'truck' | null;
+  // Manager-CC was suppressed because the recipient is themselves a manager.
+  cc_skipped_self_manager?: boolean;
+}
+
+interface BatchUnresolved {
+  ldap: string;
+  reason: string;
 }
 
 interface BatchResult {
@@ -182,7 +197,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [batchContactType, setBatchContactType] = useState<string>("tech");
   const [batchCcManager, setBatchCcManager] = useState<boolean>(false);
   const [batchRecipients, setBatchRecipients] = useState<BatchRecipient[]>([]);
-  const [batchUnresolved, setBatchUnresolved] = useState<string[]>([]);
+  const [batchUnresolved, setBatchUnresolved] = useState<BatchUnresolved[]>([]);
   const [batchTemplate, setBatchTemplate] = useState("");
   const [batchResults, setBatchResults] = useState<BatchResult[]>([]);
   const [batchResolving, setBatchResolving] = useState(false);
@@ -512,7 +527,13 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         return { ...r, customVars: importRow?.customVars || {}, ccEnabled: ccEnabledDefault };
       });
       setBatchRecipients(resolved);
-      setBatchUnresolved(data.unresolved || []);
+      // Backend now returns Array<{ldap, reason}>; older shape returned string[].
+      // Normalize so the UI can always rely on the object form.
+      const rawUnresolved = data.unresolved || [];
+      const normalizedUnresolved: BatchUnresolved[] = rawUnresolved.map((u: any) =>
+        typeof u === 'string' ? { ldap: u, reason: 'not_in_tpms_extract' } : u
+      );
+      setBatchUnresolved(normalizedUnresolved);
       setBatchStep("compose");
     } catch (err: any) {
       toast({ title: "Error", description: err.message, variant: "destructive" });
@@ -1227,33 +1248,43 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
               <div>
                 <label className="text-sm font-medium mb-1.5 block">Send to</label>
-                <Select value={batchContactType} onValueChange={setBatchContactType}>
+                <Select
+                  value={batchContactType}
+                  onValueChange={(v) => {
+                    setBatchContactType(v);
+                    // Manager recipients can't CC themselves — auto-disable CC toggle.
+                    if (v === 'manager') setBatchCcManager(false);
+                  }}
+                >
                   <SelectTrigger className="w-48" data-testid="batch-contact-type">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="tech">Tech (Mobile Phone)</SelectItem>
+                    <SelectItem value="manager">Manager</SelectItem>
                     <SelectItem value="nearest_tech">Nearest Tech</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
 
-              <div className="flex items-start gap-2 rounded-md border p-3 bg-muted/30">
-                <Checkbox
-                  id="batch-cc-manager"
-                  checked={batchCcManager}
-                  onCheckedChange={(checked) => setBatchCcManager(checked === true)}
-                  data-testid="batch-cc-manager-toggle"
-                />
-                <div className="text-sm leading-tight">
-                  <label htmlFor="batch-cc-manager" className="font-medium cursor-pointer">
-                    Also CC each tech's manager
-                  </label>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Sends a separate text to the manager with the same message body, prefixed by the tech's LDAP in brackets (e.g. <code className="font-mono">[jsmith42] ...</code>). One CC per tech.
-                  </p>
+              {batchContactType !== 'manager' && (
+                <div className="flex items-start gap-2 rounded-md border p-3 bg-muted/30">
+                  <Checkbox
+                    id="batch-cc-manager"
+                    checked={batchCcManager}
+                    onCheckedChange={(checked) => setBatchCcManager(checked === true)}
+                    data-testid="batch-cc-manager-toggle"
+                  />
+                  <div className="text-sm leading-tight">
+                    <label htmlFor="batch-cc-manager" className="font-medium cursor-pointer">
+                      Also CC each tech's manager
+                    </label>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Sends a separate text to the manager with the same message body, prefixed by the tech's LDAP in brackets (e.g. <code className="font-mono">[jsmith42] ...</code>). One CC per tech.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setBatchOpen(false)}>Cancel</Button>
@@ -1273,11 +1304,22 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               {batchUnresolved.length > 0 && (
                 <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950/30 dark:border-amber-700 p-3">
                   <p className="text-sm font-medium text-amber-800 dark:text-amber-300 mb-1">
-                    {batchUnresolved.length} LDAP(s) not found in decommissioning list:
+                    {batchUnresolved.length} LDAP(s) could not be resolved:
                   </p>
-                  <p className="text-xs text-amber-700 dark:text-amber-400 font-mono">
-                    {batchUnresolved.join(", ")}
-                  </p>
+                  <ul className="text-xs text-amber-700 dark:text-amber-400 space-y-0.5">
+                    {batchUnresolved.map((u, i) => (
+                      <li key={`${u.ldap}-${i}`} className="font-mono">
+                        {u.ldap}
+                        <span className="ml-2 font-sans italic text-[11px]">
+                          {u.reason === 'not_in_tpms_extract'
+                            ? '— not found in TPMS_EXTRACT'
+                            : u.reason === 'no_vehicle_match'
+                              ? '— in TPMS_EXTRACT but no decommissioning vehicle references this LDAP'
+                              : `— ${u.reason}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
 
@@ -1330,7 +1372,20 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                           </td>
                           <td className="p-1.5 font-mono">{r.truckNumber.replace(/^0+/, "")}</td>
                           <td className="p-1.5">{r.contactName || r.fullName || "-"}</td>
-                          <td className="p-1.5 font-mono">{r.contactPhone || <span className="text-amber-600">No phone</span>}</td>
+                          <td className="p-1.5 font-mono">
+                            {r.contactPhone ? (
+                              <div className="space-y-0.5">
+                                <div>{r.contactPhone}</div>
+                                {r.phone_source === 'cache_fallback' && (
+                                  <div className="text-[10px] font-sans italic text-amber-700 dark:text-amber-400">
+                                    from cache — not in TPMS_EXTRACT today
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span className="text-amber-600">No phone</span>
+                            )}
+                          </td>
                           {batchCcManager && (
                             <>
                               <td className="p-1.5">
@@ -1346,7 +1401,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                                 />
                               </td>
                               <td className="p-1.5">
-                                {r.managerPhone ? (
+                                {r.cc_skipped_self_manager ? (
+                                  <span className="text-[10px] text-blue-700 dark:text-blue-300">
+                                    Recipient is a manager — CC skipped
+                                  </span>
+                                ) : r.managerPhone ? (
                                   <div className="space-y-0.5">
                                     <div className="text-[11px]">{r.managerName || "-"}</div>
                                     <div className="font-mono text-[11px] text-muted-foreground">{r.managerPhone}</div>
