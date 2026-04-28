@@ -128,37 +128,37 @@ interface DecommConversationsProps {
   initialTruckNumber?: string;
 }
 
+// Task #228: Batch Text always sends to BOTH the tech and the manager. The
+// recipient row therefore carries two independent send targets, each with
+// its own status, name, phone, source, and per-row checkbox.
+type BatchTechStatus = 'ready' | 'no_phone';
+type BatchManagerStatus =
+  | 'ready'
+  | 'no_phone'
+  | 'no_manager_ent_id'
+  | 'self_managed'
+  | 'same_as_tech';
+
+interface BatchTarget<S extends string> {
+  name: string | null;
+  phone: string | null;
+  status: S;
+  source: 'snapshot' | 'tpms_live' | null;
+  enabled: boolean;
+}
+
 interface BatchRecipient {
   ldap: string;
   truckNumber: string;
   vin: string;
   address: string;
   zipCode: string;
-  phone: string;
   fullName: string;
-  contactPhone: string | null;
-  contactName: string | null;
-  contactType: string;
   customVars: Record<string, string>;
-  // CC-manager metadata returned by /decomm-batch-resolve when ccManager flag is on.
-  managerPhone?: string | null;
-  managerName?: string | null;
-  managerEntId?: string | null;
-  isManager?: boolean;
-  ccStatus?: 'ready' | 'no_manager_phone' | 'same_as_tech' | 'no_tech_phone' | null;
-  // Per-row toggle: when ccManager is on, user can opt-out a single row.
-  ccEnabled?: boolean;
-  // Task #219: phone source telemetry from /decomm-batch-resolve.
-  // 'tpms_live'      — phone came fresh from Snowflake TPMS_EXTRACT
-  // 'cache_fallback' — Snowflake had no row; we used vehicle.mobilePhone (may be stale)
-  // 'unresolved'     — no phone available from either source
-  phone_source?: 'tpms_live' | 'cache_fallback' | 'unresolved';
-  // Why the LDAP matched in fs_decommissioning_vehicles. 'manager' means the column-A
-  // LDAP was matched on managerEntId (so the recipient is a manager, not the tech);
-  // 'nearest_tech' means it was matched on nearestTechEnterpriseId.
   matchedVia?: 'tech' | 'manager' | 'nearest_tech' | 'truck' | null;
-  // Manager-CC was suppressed because the recipient is themselves a manager.
-  cc_skipped_self_manager?: boolean;
+  isManager?: boolean;
+  tech: BatchTarget<BatchTechStatus>;
+  manager: BatchTarget<BatchManagerStatus> & { entId: string | null };
 }
 
 interface BatchUnresolved {
@@ -166,16 +166,21 @@ interface BatchUnresolved {
   reason: string;
 }
 
+type BatchSendOutcome =
+  | 'sent'
+  | 'failed'
+  | 'duplicate'
+  | 'no_phone'
+  | 'same_as_tech'
+  | 'self_managed'
+  | 'no_manager_ent_id'
+  | 'disabled';
+
 interface BatchResult {
   truckNumber: string;
   ldap?: string;
-  status: string;
-  error?: string;
-  manager?: {
-    status: 'sent' | 'failed' | 'skipped' | 'duplicate' | 'same_as_tech' | 'no_manager_phone' | 'disabled';
-    error?: string;
-    managerPhone?: string;
-  };
+  tech: { status: BatchSendOutcome; error?: string; phone?: string };
+  manager: { status: BatchSendOutcome; error?: string; phone?: string };
 }
 
 interface BatchImportRow {
@@ -195,8 +200,6 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
-  const [batchContactType, setBatchContactType] = useState<string>("tech");
-  const [batchCcManager, setBatchCcManager] = useState<boolean>(false);
   const [batchRecipients, setBatchRecipients] = useState<BatchRecipient[]>([]);
   const [batchUnresolved, setBatchUnresolved] = useState<BatchUnresolved[]>([]);
   const [batchTemplate, setBatchTemplate] = useState("");
@@ -456,7 +459,6 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     setBatchUnresolved([]);
     setBatchTemplate("");
     setBatchResults([]);
-    setBatchCcManager(false);
     if (batchFileRef.current) batchFileRef.current.value = "";
   };
 
@@ -503,11 +505,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
     setBatchResolving(true);
     try {
-      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", {
-        ldaps,
-        contactType: batchContactType,
-        ccManager: batchCcManager,
-      });
+      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", { ldaps });
       const data = await resp.json();
       const resolvedRaw: any[] = data.resolved || [];
       const importByLdap = new Map<string, BatchImportRow[]>();
@@ -517,19 +515,45 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         importByLdap.get(key)!.push(ir);
       });
       const ldapCounters = new Map<string, number>();
+      // Task #228: each resolved row carries `tech` and `manager` sub-objects from
+      // the server. Default both .enabled to true so the operator's first action
+      // (Send) covers both — the user can opt out of either side per-row.
       const resolved: BatchRecipient[] = resolvedRaw.map((r: any) => {
-        const key = r.ldap.toUpperCase();
+        const key = String(r.ldap || '').toUpperCase();
         const idx = ldapCounters.get(key) || 0;
         ldapCounters.set(key, idx + 1);
         const rows = importByLdap.get(key) || [];
         const importRow = rows[idx] || rows[0];
-        // Default ccEnabled to true only when the row is actually CC-eligible.
-        const ccEnabledDefault = batchCcManager && r.ccStatus === 'ready';
-        return { ...r, customVars: importRow?.customVars || {}, ccEnabled: ccEnabledDefault };
+        const tech = r.tech || { name: null, phone: null, status: 'no_phone', source: null };
+        const manager = r.manager || { name: null, phone: null, entId: null, status: 'no_phone', source: null };
+        return {
+          ldap: r.ldap,
+          truckNumber: r.truckNumber,
+          vin: r.vin || '',
+          address: r.address || '',
+          zipCode: r.zipCode || '',
+          fullName: r.fullName || '',
+          customVars: importRow?.customVars || {},
+          matchedVia: r.matchedVia ?? null,
+          isManager: !!r.isManager,
+          tech: {
+            name: tech.name ?? null,
+            phone: tech.phone ?? null,
+            status: tech.status === 'ready' ? 'ready' : 'no_phone',
+            source: tech.source ?? null,
+            enabled: tech.status === 'ready',
+          },
+          manager: {
+            name: manager.name ?? null,
+            phone: manager.phone ?? null,
+            entId: manager.entId ?? null,
+            status: (manager.status as BatchManagerStatus) ?? 'no_phone',
+            source: manager.source ?? null,
+            enabled: manager.status === 'ready',
+          },
+        };
       });
       setBatchRecipients(resolved);
-      // Backend now returns Array<{ldap, reason}>; older shape returned string[].
-      // Normalize so the UI can always rely on the object form.
       const rawUnresolved = data.unresolved || [];
       const normalizedUnresolved: BatchUnresolved[] = rawUnresolved.map((u: any) =>
         typeof u === 'string' ? { ldap: u, reason: 'not_in_tpms_extract' } : u
@@ -572,9 +596,14 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   };
 
   const handleBatchSend = async () => {
-    const validRecipients = batchRecipients.filter(r => r.contactPhone);
+    // Task #228: a row is sendable if EITHER its tech or manager target is
+    // checked AND has a phone number. Rows with neither side ready are dropped.
+    const validRecipients = batchRecipients.filter(r =>
+      (r.tech.enabled && r.tech.phone) ||
+      (r.manager.enabled && r.manager.phone && r.manager.status === 'ready'),
+    );
     if (validRecipients.length === 0) {
-      toast({ title: "No recipients with phone numbers", variant: "destructive" });
+      toast({ title: "No recipients ready to send", variant: "destructive" });
       return;
     }
 
@@ -583,20 +612,14 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       const resp = await apiRequest("POST", "/api/fs/decomm-batch-text", {
         recipients: validRecipients,
         messageTemplate: batchTemplate,
-        contactType: batchContactType,
-        ccManager: batchCcManager,
       });
       const data = await resp.json();
       setBatchResults(data.results || []);
       setBatchStep("results");
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
-      const ccSummary = batchCcManager
-        ? `; CC ${data.managerSent || 0} sent, ${data.managerFailed || 0} failed, ${data.managerSkipped || 0} skipped`
-        : "";
-      const skippedSegment = data.skipped ? `, ${data.skipped} skipped` : "";
       toast({
         title: "Batch text complete",
-        description: `${data.sent} sent, ${data.failed} failed${skippedSegment} out of ${data.total}${ccSummary}`,
+        description: `Tech: ${data.techSent || 0} sent / ${data.techFailed || 0} failed / ${data.techSkipped || 0} skipped · Manager: ${data.managerSent || 0} sent / ${data.managerFailed || 0} failed / ${data.managerSkipped || 0} skipped`,
       });
     } catch (err: any) {
       toast({ title: "Batch send failed", description: err.message, variant: "destructive" });
@@ -1247,45 +1270,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 </div>
               )}
 
-              <div>
-                <label className="text-sm font-medium mb-1.5 block">Send to</label>
-                <Select
-                  value={batchContactType}
-                  onValueChange={(v) => {
-                    setBatchContactType(v);
-                    // Manager recipients can't CC themselves — auto-disable CC toggle.
-                    if (v === 'manager') setBatchCcManager(false);
-                  }}
-                >
-                  <SelectTrigger className="w-48" data-testid="batch-contact-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="tech">Tech (Mobile Phone)</SelectItem>
-                    <SelectItem value="manager">Manager</SelectItem>
-                    <SelectItem value="nearest_tech">Nearest Tech</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="rounded-md border p-3 bg-muted/30 text-xs leading-relaxed">
+                Each row will text <span className="font-medium">both the tech and their manager</span> automatically.
+                Phone numbers come from the decommissioning snapshot (mobile phone, manager phone) and fall back to a live TPMS lookup.
+                You can opt out of either side per-row on the next step.
               </div>
-
-              {batchContactType !== 'manager' && (
-                <div className="flex items-start gap-2 rounded-md border p-3 bg-muted/30">
-                  <Checkbox
-                    id="batch-cc-manager"
-                    checked={batchCcManager}
-                    onCheckedChange={(checked) => setBatchCcManager(checked === true)}
-                    data-testid="batch-cc-manager-toggle"
-                  />
-                  <div className="text-sm leading-tight">
-                    <label htmlFor="batch-cc-manager" className="font-medium cursor-pointer">
-                      Also CC each tech's manager
-                    </label>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Sends a separate text to the manager with the same message body, prefixed by the tech's LDAP in brackets (e.g. <code className="font-mono">[jsmith42] ...</code>). One CC per tech.
-                    </p>
-                  </div>
-                </div>
-              )}
 
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setBatchOpen(false)}>Cancel</Button>
@@ -1331,104 +1320,122 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               <div>
                 <p className="text-sm font-medium mb-1">
                   {batchRecipients.length} recipient{batchRecipients.length !== 1 ? "s" : ""} matched
-                  {batchRecipients.filter(r => !r.contactPhone).length > 0 && (
-                    <span className="text-amber-600 text-xs ml-2">
-                      ({batchRecipients.filter(r => !r.contactPhone).length} missing phone)
-                    </span>
-                  )}
-                  {batchCcManager && (
-                    <span className="text-blue-700 dark:text-blue-300 text-xs ml-2">
-                      · CC eligible: {batchRecipients.filter(r => r.ccStatus === 'ready').length}
-                    </span>
-                  )}
+                  <span className="text-xs text-muted-foreground ml-2">
+                    · Tech ready: {batchRecipients.filter(r => r.tech.status === 'ready').length}
+                    · Manager ready: {batchRecipients.filter(r => r.manager.status === 'ready').length}
+                  </span>
                 </p>
-                <div className="max-h-48 overflow-y-auto border rounded-md text-xs">
+                <div className="max-h-72 overflow-y-auto border rounded-md text-xs">
                   <table className="w-full">
                     <thead className="bg-muted/50 sticky top-0">
                       <tr>
                         <th className="text-left p-1.5 font-medium">LDAP</th>
                         <th className="text-left p-1.5 font-medium">Truck #</th>
-                        <th className="text-left p-1.5 font-medium">Tech</th>
-                        <th className="text-left p-1.5 font-medium">Phone</th>
-                        {batchCcManager && (
-                          <>
-                            <th className="text-left p-1.5 font-medium">CC</th>
-                            <th className="text-left p-1.5 font-medium">Manager</th>
-                          </>
-                        )}
+                        <th className="text-left p-1.5 font-medium w-12">Tech</th>
+                        <th className="text-left p-1.5 font-medium">Tech contact</th>
+                        <th className="text-left p-1.5 font-medium w-12">Mgr</th>
+                        <th className="text-left p-1.5 font-medium">Manager contact</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {batchRecipients.map((r, i) => (
-                        <tr key={i} className={`border-t ${!r.contactPhone ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
-                          <td className="p-1.5 font-mono whitespace-nowrap">
-                            <span className="inline-flex items-center gap-1">
-                              {r.ldap}
-                              {r.isManager && (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700"
-                                  title="This recipient is themselves a manager (their enterprise ID appears as MANAGER_ENT_ID for at least one other tech)."
-                                >
-                                  Is manager
-                                </Badge>
+                      {batchRecipients.map((r, i) => {
+                        const techMissing = r.tech.status !== 'ready';
+                        const mgrMissing = r.manager.status !== 'ready';
+                        const rowDimmed = techMissing && mgrMissing;
+                        return (
+                          <tr key={i} className={`border-t ${rowDimmed ? "bg-amber-50 dark:bg-amber-950/20" : ""}`}>
+                            <td className="p-1.5 font-mono whitespace-nowrap align-top">
+                              <span className="inline-flex items-center gap-1">
+                                {r.ldap}
+                                {r.isManager && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700"
+                                    title="This recipient is themselves a manager (their enterprise ID appears as MANAGER_ENT_ID for at least one other tech)."
+                                  >
+                                    Is manager
+                                  </Badge>
+                                )}
+                              </span>
+                            </td>
+                            <td className="p-1.5 font-mono align-top">{r.truckNumber.replace(/^0+/, "")}</td>
+
+                            {/* Tech checkbox */}
+                            <td className="p-1.5 align-top">
+                              <Checkbox
+                                checked={r.tech.enabled}
+                                disabled={r.tech.status !== 'ready'}
+                                onCheckedChange={(checked) => {
+                                  setBatchRecipients(prev => prev.map((row, idx) =>
+                                    idx === i ? { ...row, tech: { ...row.tech, enabled: checked === true } } : row,
+                                  ));
+                                }}
+                                data-testid={`batch-tech-row-toggle-${i}`}
+                              />
+                            </td>
+                            {/* Tech contact */}
+                            <td className="p-1.5 align-top">
+                              {r.tech.phone ? (
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px]">{r.tech.name || r.fullName || "-"}</div>
+                                  <div className="font-mono text-[11px] text-muted-foreground">{r.tech.phone}</div>
+                                  {r.tech.source === 'tpms_live' && (
+                                    <div className="text-[10px] italic text-blue-700 dark:text-blue-300">
+                                      live TPMS lookup
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-amber-600 text-[11px]">No phone</span>
                               )}
-                            </span>
-                          </td>
-                          <td className="p-1.5 font-mono">{r.truckNumber.replace(/^0+/, "")}</td>
-                          <td className="p-1.5">{r.contactName || r.fullName || "-"}</td>
-                          <td className="p-1.5 font-mono">
-                            {r.contactPhone ? (
-                              <div className="space-y-0.5">
-                                <div>{r.contactPhone}</div>
-                                {r.phone_source === 'cache_fallback' && (
-                                  <div className="text-[10px] font-sans italic text-amber-700 dark:text-amber-400">
-                                    from cache — not in TPMS_EXTRACT today
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              <span className="text-amber-600">No phone</span>
-                            )}
-                          </td>
-                          {batchCcManager && (
-                            <>
-                              <td className="p-1.5">
-                                <Checkbox
-                                  checked={r.ccEnabled === true}
-                                  disabled={r.ccStatus !== 'ready'}
-                                  onCheckedChange={(checked) => {
-                                    setBatchRecipients(prev => prev.map((row, idx) =>
-                                      idx === i ? { ...row, ccEnabled: checked === true } : row,
-                                    ));
-                                  }}
-                                  data-testid={`batch-cc-row-toggle-${i}`}
-                                />
-                              </td>
-                              <td className="p-1.5">
-                                {r.cc_skipped_self_manager ? (
-                                  <span className="text-[10px] text-blue-700 dark:text-blue-300">
-                                    Recipient is a manager — CC skipped
-                                  </span>
-                                ) : r.managerPhone ? (
-                                  <div className="space-y-0.5">
-                                    <div className="text-[11px]">{r.managerName || "-"}</div>
-                                    <div className="font-mono text-[11px] text-muted-foreground">{r.managerPhone}</div>
-                                    {r.ccStatus === 'same_as_tech' && (
-                                      <div className="text-[10px] text-amber-700 dark:text-amber-400">Same # as tech</div>
-                                    )}
-                                    {r.ccStatus === 'no_tech_phone' && (
-                                      <div className="text-[10px] text-amber-700 dark:text-amber-400">No tech phone — CC disabled</div>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-[10px] text-amber-700 dark:text-amber-400">No manager phone</span>
-                                )}
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
+                            </td>
+
+                            {/* Manager checkbox */}
+                            <td className="p-1.5 align-top">
+                              <Checkbox
+                                checked={r.manager.enabled}
+                                disabled={r.manager.status !== 'ready'}
+                                onCheckedChange={(checked) => {
+                                  setBatchRecipients(prev => prev.map((row, idx) =>
+                                    idx === i ? { ...row, manager: { ...row.manager, enabled: checked === true } } : row,
+                                  ));
+                                }}
+                                data-testid={`batch-mgr-row-toggle-${i}`}
+                              />
+                            </td>
+                            {/* Manager contact */}
+                            <td className="p-1.5 align-top">
+                              {r.manager.status === 'self_managed' ? (
+                                <span className="text-[10px] text-blue-700 dark:text-blue-300">
+                                  Recipient is a manager — skipped
+                                </span>
+                              ) : r.manager.status === 'no_manager_ent_id' ? (
+                                <span className="text-[10px] text-amber-700 dark:text-amber-400">
+                                  No manager on record
+                                </span>
+                              ) : r.manager.status === 'same_as_tech' ? (
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px]">{r.manager.name || "-"}</div>
+                                  <div className="font-mono text-[11px] text-muted-foreground">{r.manager.phone}</div>
+                                  <div className="text-[10px] text-amber-700 dark:text-amber-400">Same # as tech — skipped</div>
+                                </div>
+                              ) : r.manager.phone ? (
+                                <div className="space-y-0.5">
+                                  <div className="text-[11px]">{r.manager.name || "-"}</div>
+                                  <div className="font-mono text-[11px] text-muted-foreground">{r.manager.phone}</div>
+                                  {r.manager.source === 'tpms_live' && (
+                                    <div className="text-[10px] italic text-blue-700 dark:text-blue-300">
+                                      live TPMS lookup
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-[10px] text-amber-700 dark:text-amber-400">No manager phone</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1471,7 +1478,13 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 <Button variant="outline" onClick={() => setBatchStep("import")}>Back</Button>
                 <Button
                   onClick={() => setBatchStep("preview")}
-                  disabled={!batchTemplate.trim() || batchRecipients.filter(r => r.contactPhone).length === 0}
+                  disabled={
+                    !batchTemplate.trim()
+                    || batchRecipients.filter(r =>
+                        (r.tech.enabled && r.tech.phone)
+                        || (r.manager.enabled && r.manager.phone && r.manager.status === 'ready'),
+                      ).length === 0
+                  }
                   data-testid="batch-preview-btn"
                 >
                   Preview Messages
@@ -1481,53 +1494,62 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           )}
 
           {batchStep === "preview" && (() => {
-            const valid = batchRecipients.filter(r => r.contactPhone);
-            const ccCount = batchCcManager ? valid.filter(r => r.ccEnabled && r.ccStatus === 'ready').length : 0;
-            const total = valid.length + ccCount;
+            // Task #228: each row contributes UP TO TWO sends (tech + manager).
+            // Only show preview cards for sides that are checked AND ready.
+            const previewable = batchRecipients
+              .map(r => ({
+                r,
+                techWillSend: r.tech.enabled && !!r.tech.phone,
+                mgrWillSend: r.manager.enabled && !!r.manager.phone && r.manager.status === 'ready',
+              }))
+              .filter(p => p.techWillSend || p.mgrWillSend);
+            const techCount = previewable.filter(p => p.techWillSend).length;
+            const mgrCount = previewable.filter(p => p.mgrWillSend).length;
+            const total = techCount + mgrCount;
             return (
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-medium mb-2">
                     Preview — {total} message{total !== 1 ? "s" : ""} will be sent
-                    {batchCcManager && (
-                      <span className="text-xs text-muted-foreground ml-1">
-                        ({valid.length} tech + {ccCount} manager CC)
-                      </span>
-                    )}
+                    <span className="text-xs text-muted-foreground ml-1">
+                      ({techCount} tech + {mgrCount} manager)
+                    </span>
                   </p>
                   <div className="max-h-72 overflow-y-auto space-y-2">
-                    {valid.map((r, i) => {
+                    {previewable.map(({ r, techWillSend, mgrWillSend }, i) => {
                       const techBody = renderPreview(batchTemplate, r);
-                      const willCc = batchCcManager && r.ccEnabled && r.ccStatus === 'ready' && r.managerPhone;
-                      const ccBody = `[${r.ldap}] ${techBody}`;
+                      const mgrBody = `[${r.ldap}] ${techBody}`;
                       return (
                         <div key={i} className="border rounded-md p-2.5 text-sm space-y-2">
-                          <div>
-                            <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground flex-wrap">
-                              <Badge variant="outline" className={`text-[10px] px-1 py-0 ${CONTACT_TYPE_COLORS[r.contactType] || CONTACT_TYPE_COLORS.tech}`}>
-                                {CONTACT_TYPE_LABELS[r.contactType] || "Tech"}
-                              </Badge>
-                              <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
-                              <span>{r.contactName || r.fullName}</span>
-                              <span className="font-mono">{r.contactPhone}</span>
-                              {r.isManager && (
-                                <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700">
-                                  Is manager
+                          {techWillSend && (
+                            <div>
+                              <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground flex-wrap">
+                                <Badge variant="outline" className={`text-[10px] px-1 py-0 ${CONTACT_TYPE_COLORS.tech}`}>
+                                  Tech
                                 </Badge>
-                              )}
+                                <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
+                                <span>{r.tech.name || r.fullName}</span>
+                                <span className="font-mono">{r.tech.phone}</span>
+                                {r.isManager && (
+                                  <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-blue-400 text-blue-700 dark:text-blue-300 dark:border-blue-700">
+                                    Is manager
+                                  </Badge>
+                                )}
+                              </div>
+                              <p className="whitespace-pre-wrap text-sm bg-muted/30 rounded p-2">{techBody}</p>
                             </div>
-                            <p className="whitespace-pre-wrap text-sm bg-muted/30 rounded p-2">{techBody}</p>
-                          </div>
-                          {willCc && (
+                          )}
+                          {mgrWillSend && (
                             <div className="border-l-2 border-blue-300 dark:border-blue-700 pl-2">
                               <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground flex-wrap">
                                 <Badge variant="outline" className={`text-[10px] px-1 py-0 ${CONTACT_TYPE_COLORS.manager}`}>
-                                  Manager CC
+                                  Manager
                                 </Badge>
-                                <span>{r.managerName || "-"}</span>
-                                <span className="font-mono">{r.managerPhone}</span>
+                                <span className="font-mono font-semibold">#{r.truckNumber.replace(/^0+/, "")}</span>
+                                <span>{r.manager.name || "-"}</span>
+                                <span className="font-mono">{r.manager.phone}</span>
                               </div>
-                              <p className="whitespace-pre-wrap text-sm bg-blue-50 dark:bg-blue-950/30 rounded p-2">{ccBody}</p>
+                              <p className="whitespace-pre-wrap text-sm bg-blue-50 dark:bg-blue-950/30 rounded p-2">{mgrBody}</p>
                             </div>
                           )}
                         </div>
@@ -1556,16 +1578,19 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           })()}
 
           {batchStep === "results" && (() => {
-            const techSent = batchResults.filter(r => r.status === "sent").length;
-            const techFailed = batchResults.filter(r => r.status === "failed").length;
-            const techSkipped = batchResults.filter(r => r.status === "skipped" || r.status === "duplicate").length;
-            const ccResults = batchResults.map(r => r.manager).filter((m): m is NonNullable<typeof m> => !!m);
-            const mgrSent = ccResults.filter(m => m.status === "sent").length;
-            const mgrFailed = ccResults.filter(m => m.status === "failed").length;
-            const mgrSkipped = ccResults.filter(m => ["skipped","duplicate","same_as_tech","no_manager_phone","disabled"].includes(m.status)).length;
-            const showCc = batchCcManager && ccResults.length > 0;
+            // Task #228: results are now per-row with separate tech/manager outcomes.
+            const techSent = batchResults.filter(r => r.tech.status === "sent").length;
+            const techFailed = batchResults.filter(r => r.tech.status === "failed").length;
+            const techSkipped = batchResults.filter(r =>
+              !["sent", "failed"].includes(r.tech.status),
+            ).length;
+            const mgrSent = batchResults.filter(r => r.manager.status === "sent").length;
+            const mgrFailed = batchResults.filter(r => r.manager.status === "failed").length;
+            const mgrSkipped = batchResults.filter(r =>
+              !["sent", "failed"].includes(r.manager.status),
+            ).length;
             const problemRows = batchResults.filter(r =>
-              r.status !== "sent" || (r.manager && r.manager.status === "failed"),
+              r.tech.status === "failed" || r.manager.status === "failed",
             );
             return (
               <div className="space-y-4">
@@ -1587,25 +1612,23 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                   </div>
                 </div>
 
-                {showCc && (
-                  <div>
-                    <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Manager CC</p>
-                    <div className="grid grid-cols-3 gap-3">
-                      <div className="rounded-md border p-3 text-center">
-                        <p className="text-2xl font-bold text-green-600">{mgrSent}</p>
-                        <p className="text-xs text-muted-foreground">Sent</p>
-                      </div>
-                      <div className="rounded-md border p-3 text-center">
-                        <p className="text-2xl font-bold text-red-600">{mgrFailed}</p>
-                        <p className="text-xs text-muted-foreground">Failed</p>
-                      </div>
-                      <div className="rounded-md border p-3 text-center">
-                        <p className="text-2xl font-bold text-amber-600">{mgrSkipped}</p>
-                        <p className="text-xs text-muted-foreground">Skipped</p>
-                      </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Manager</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-green-600">{mgrSent}</p>
+                      <p className="text-xs text-muted-foreground">Sent</p>
+                    </div>
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-red-600">{mgrFailed}</p>
+                      <p className="text-xs text-muted-foreground">Failed</p>
+                    </div>
+                    <div className="rounded-md border p-3 text-center">
+                      <p className="text-2xl font-bold text-amber-600">{mgrSkipped}</p>
+                      <p className="text-xs text-muted-foreground">Skipped</p>
                     </div>
                   </div>
-                )}
+                </div>
 
                 {problemRows.length > 0 && (
                   <div className="max-h-48 overflow-y-auto border rounded-md text-xs">
@@ -1613,8 +1636,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                       <thead className="bg-muted/50 sticky top-0">
                         <tr>
                           <th className="text-left p-1.5 font-medium">Truck #</th>
+                          <th className="text-left p-1.5 font-medium">LDAP</th>
                           <th className="text-left p-1.5 font-medium">Tech</th>
-                          {showCc && <th className="text-left p-1.5 font-medium">Manager CC</th>}
+                          <th className="text-left p-1.5 font-medium">Manager</th>
                           <th className="text-left p-1.5 font-medium">Detail</th>
                         </tr>
                       </thead>
@@ -1622,24 +1646,25 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                         {problemRows.map((r, i) => (
                           <tr key={i} className="border-t">
                             <td className="p-1.5 font-mono">{r.truckNumber}</td>
+                            <td className="p-1.5 font-mono">{r.ldap || "-"}</td>
                             <td className="p-1.5">
-                              <Badge variant={r.status === "failed" ? "destructive" : r.status === "sent" ? "secondary" : "secondary"} className="text-[10px]">
-                                {r.status}
+                              <Badge
+                                variant={r.tech.status === "failed" ? "destructive" : r.tech.status === "sent" ? "default" : "secondary"}
+                                className="text-[10px]"
+                              >
+                                {r.tech.status}
                               </Badge>
                             </td>
-                            {showCc && (
-                              <td className="p-1.5">
-                                {r.manager ? (
-                                  <Badge variant={r.manager.status === "failed" ? "destructive" : r.manager.status === "sent" ? "default" : "secondary"} className="text-[10px]">
-                                    {r.manager.status}
-                                  </Badge>
-                                ) : (
-                                  <span className="text-muted-foreground">-</span>
-                                )}
-                              </td>
-                            )}
+                            <td className="p-1.5">
+                              <Badge
+                                variant={r.manager.status === "failed" ? "destructive" : r.manager.status === "sent" ? "default" : "secondary"}
+                                className="text-[10px]"
+                              >
+                                {r.manager.status}
+                              </Badge>
+                            </td>
                             <td className="p-1.5 text-muted-foreground">
-                              {r.error || r.manager?.error || "-"}
+                              {r.tech.error || r.manager.error || "-"}
                             </td>
                           </tr>
                         ))}

@@ -16101,37 +16101,83 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-batch-resolve", async (req, res) => {
     try {
-      const { ldaps, contactType, ccManager } = req.body;
+      const { ldaps } = req.body;
       if (!ldaps || !Array.isArray(ldaps) || ldaps.length === 0) {
         return res.status(400).json({ message: "ldaps array is required" });
       }
 
-      const ct: 'tech' | 'nearest_tech' | 'manager' =
-        contactType === 'manager' || contactType === 'nearest_tech' ? contactType : 'tech';
-
       const allVehicles = await getDb().select().from(decommissioningVehicles);
 
-      // Step 1: Batched TPMS_EXTRACT lookup — source of truth for phone numbers
-      // (Task #219). Replaces the legacy reliance on cached vehicle.mobilePhone /
-      // nearestTechPhone fields. Helper lives in server/fleet-scope-snowflake.ts
-      // so other consumers can reuse it.
-      const { contacts: tpmsLookup, ok: tpmsLookupOk } = await lookupTpmsContactsByLdap(ldaps);
+      // Task #228 — Always send to BOTH the tech AND the manager. There is no
+      // operator-selected contact type and no opt-in CC checkbox anymore. For
+      // every input LDAP we resolve two phone targets:
+      //   1. tech    = ENTERPRISE_ID=LDAP    -> MOBILEPHONENUMBER
+      //   2. manager = MANAGER_ENT_ID -> ENTERPRISE_ID -> MOBILEPHONENUMBER
+      // We prefer the snapshot fields on fs_decommissioning_vehicles
+      // (mobile_phone, manager_phone) and fall back to a live TPMS_EXTRACT
+      // lookup, backfilling the snapshot when the live lookup fills a blank.
+      //
+      // We do TWO snapshot lookups: first for the input LDAPs (tech side),
+      // then a second pass for any MANAGER_ENT_IDs we discover (manager side).
+      // The second pass is needed because lookupTpmsContactsByLdap() only
+      // returns rows whose ENTERPRISE_ID is one of the input keys — it does
+      // NOT chase the MANAGER_ENT_ID -> ENTERPRISE_ID join for us.
+      const { ensureSnapshotLoaded, getSnapshotMeta, lookupTpmsByLdaps } =
+        await import('./fleet-scope-tpms-snapshot');
+      await ensureSnapshotLoaded();
+      const tpmsMeta = getSnapshotMeta();
+      const tpmsLookupOk = tpmsMeta.loaded;
+
+      // First pass: pull the snapshot rows for the input LDAPs.
+      const normalizedInputLdaps = Array.from(new Set(
+        (ldaps as any[])
+          .map(l => String(l ?? '').trim().toUpperCase())
+          .filter(l => l.length > 0),
+      ));
+      const techTpmsHits = tpmsLookupOk
+        ? lookupTpmsByLdaps(normalizedInputLdaps)
+        : new Map<string, any>();
       console.log(
-        `[DecommBatch] TPMS_EXTRACT lookup: ${tpmsLookup.size} LDAPs found (ok=${tpmsLookupOk})`,
+        `[DecommBatch] TPMS first-pass: ${techTpmsHits.size}/${normalizedInputLdaps.length} input LDAPs found in snapshot (ok=${tpmsLookupOk})`,
+      );
+
+      // Second pass: collect every distinct manager LDAP (from snapshot rows
+      // and from the first-pass TPMS hits) and look those up in TPMS too.
+      const managerLdapsToLookup = new Set<string>();
+      const collectMgrLdap = (entId: string | null | undefined) => {
+        if (!entId) return;
+        const k = String(entId).trim().toUpperCase();
+        if (k && !techTpmsHits.has(k)) managerLdapsToLookup.add(k);
+      };
+      for (const ldap of normalizedInputLdaps) {
+        // From the first-pass TPMS row.
+        const t = techTpmsHits.get(ldap);
+        if (t) collectMgrLdap(t.managerEntId);
+        // From any decommissioning row that references this LDAP.
+        for (const v of allVehicles) {
+          if (v.enterpriseId?.toUpperCase() === ldap) collectMgrLdap(v.managerEntId);
+        }
+      }
+      const mgrTpmsHits = (tpmsLookupOk && managerLdapsToLookup.size > 0)
+        ? lookupTpmsByLdaps(Array.from(managerLdapsToLookup))
+        : new Map<string, any>();
+      console.log(
+        `[DecommBatch] TPMS second-pass: ${mgrTpmsHits.size}/${managerLdapsToLookup.size} manager LDAPs found in snapshot`,
       );
 
       const resolved: any[] = [];
       const unresolved: { ldap: string; reason: string }[] = [];
       const digitsOnly = (s: string | null | undefined) => (s || '').replace(/\D/g, '').slice(-10);
+      // Backfill queue — applied after the loop so the resolve response is not
+      // delayed by per-row UPDATEs.
+      const backfillQueue: { id: number; updates: Record<string, string> }[] = [];
 
       for (const rawLdap of ldaps) {
         const ldap = String(rawLdap ?? '').trim().toUpperCase();
         if (!ldap) continue;
 
-        // Step 2: match the LDAP against any of the three Enterprise IDs we track on
-        // a decommissioning row — the assigned tech, the nearest tech, or the manager —
-        // and as a last resort treat numeric values as a padded truck #. Precedence:
-        // tech (assigned) > manager > nearest tech > truck pad.
+        // Match the LDAP against the same Enterprise-ID columns we always
+        // matched against. Precedence: tech (assigned) > manager > nearest tech > truck pad.
         let vehicle = allVehicles.find(v => v.enterpriseId?.toUpperCase() === ldap);
         let matchedVia: 'tech' | 'manager' | 'nearest_tech' | 'truck' | null = vehicle ? 'tech' : null;
         if (!vehicle) {
@@ -16147,12 +16193,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           if (vehicle) matchedVia = 'truck';
         }
 
-        const tpms = tpmsLookup.get(ldap);
-        const tpmsPhone = tpms?.mobilePhone || null;
-        const tpmsName = tpms?.fullName || null;
+        const techTpms = techTpmsHits.get(ldap);
 
-        if (!vehicle && !tpms) {
-          // Distinguish "TPMS lookup failed entirely" from "this LDAP truly isn't there".
+        if (!vehicle && !techTpms) {
           unresolved.push({
             ldap,
             reason: tpmsLookupOk ? 'not_in_tpms_extract' : 'tpms_lookup_failed',
@@ -16160,98 +16203,151 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           continue;
         }
         if (!vehicle) {
-          // LDAP exists in TPMS_EXTRACT but no decommissioning row references it.
           unresolved.push({ ldap, reason: 'no_vehicle_match' });
           continue;
         }
 
-        // Step 3: Phone resolution — TPMS_EXTRACT is the source of truth. Cached
-        // mobilePhone / nearestTechPhone / managerPhone is only used as a fallback when
-        // Snowflake returns no row for this LDAP. Cache fallback is driven by what the
-        // LDAP actually matched (matchedVia), NOT by the operator-selected contactType,
-        // because a manager LDAP uploaded with default 'tech' contactType should still
-        // fall back to managerPhone, not to some other tech's mobilePhone.
-        let phone: string | null = null;
-        let contactName: string | null = null;
-        let phone_source: 'tpms_live' | 'cache_fallback' | 'unresolved' = 'unresolved';
+        // ---------- Tech (the LDAP itself) ----------
+        // The "tech" target is whoever the column-A LDAP refers to. When the
+        // LDAP matches the assigned tech we use mobile_phone / fullName; when
+        // it matches a manager or nearest-tech column we use the appropriate
+        // snapshot fields. Snapshot first, then live TPMS for a fallback.
+        let techName: string | null = null;
+        let techPhone: string | null = null;
+        let techSource: 'snapshot' | 'tpms_live' | null = null;
 
-        if (tpms) {
-          // TPMS_EXTRACT is the source of truth — even when MOBILEPHONENUMBER is null
-          // we honor that answer (we do NOT fall back to a possibly-stale cached phone)
-          // and let the no-phone handler below push the LDAP into the unresolved bucket.
-          phone = tpmsPhone;
-          phone_source = tpmsPhone ? 'tpms_live' : 'unresolved';
-          if (matchedVia === 'manager' || ct === 'manager') {
-            contactName = vehicle.managerName || tpmsName || null;
-          } else if (matchedVia === 'nearest_tech' || ct === 'nearest_tech') {
-            contactName = vehicle.nearestTechName || tpmsName || null;
-          } else {
-            contactName = tpmsName || vehicle.fullName || null;
+        if (matchedVia === 'manager') {
+          techName = vehicle.managerName || techTpms?.fullName || null;
+          if (vehicle.managerPhone) {
+            techPhone = vehicle.managerPhone;
+            techSource = 'snapshot';
+          } else if (techTpms?.mobilePhone) {
+            techPhone = techTpms.mobilePhone;
+            techSource = 'tpms_live';
+          }
+        } else if (matchedVia === 'nearest_tech') {
+          techName = vehicle.nearestTechName || techTpms?.fullName || null;
+          if (vehicle.nearestTechPhone) {
+            techPhone = vehicle.nearestTechPhone;
+            techSource = 'snapshot';
+          } else if (techTpms?.mobilePhone) {
+            techPhone = techTpms.mobilePhone;
+            techSource = 'tpms_live';
           }
         } else {
-          // Snowflake had no row for this LDAP at all — fall back to the cached phone
-          // for the resolved contact role (manager LDAP -> managerPhone, nearest-tech
-          // LDAP -> nearestTechPhone, otherwise mobilePhone). This branch is also where
-          // we land when the Snowflake lookup itself failed (tpmsLookupOk=false), in
-          // which case the unresolved-reason below will say so.
-          if (matchedVia === 'manager' || ct === 'manager') {
-            phone = vehicle.managerPhone || null;
-            contactName = vehicle.managerName || null;
-          } else if (matchedVia === 'nearest_tech' || ct === 'nearest_tech') {
-            phone = vehicle.nearestTechPhone || null;
-            contactName = vehicle.nearestTechName || null;
-          } else {
-            phone = vehicle.mobilePhone || null;
-            contactName = vehicle.fullName || null;
+          // 'tech' or 'truck' match — the assigned tech.
+          techName = vehicle.fullName || techTpms?.fullName || null;
+          if (vehicle.mobilePhone) {
+            techPhone = vehicle.mobilePhone;
+            techSource = 'snapshot';
+          } else if (techTpms?.mobilePhone) {
+            techPhone = techTpms.mobilePhone;
+            techSource = 'tpms_live';
           }
-          phone_source = phone ? 'cache_fallback' : 'unresolved';
         }
+        const techStatus: 'ready' | 'no_phone' = techPhone ? 'ready' : 'no_phone';
 
-        // If we still couldn't find a phone for this matched vehicle row, surface it in
-        // the unresolved bucket with a clear reason rather than leaving it as a "matched
-        // but unsendable" recipient the operator might miss.
-        if (!phone) {
-          unresolved.push({
-            ldap,
-            reason: tpmsLookupOk ? 'no_phone_for_contact_type' : 'tpms_lookup_failed',
-          });
-          continue;
-        }
-
-        // Recipient is themselves a manager when:
-        //   (a) TPMS_EXTRACT itself says so — they appear as someone else's MANAGER_ENT_ID
-        //       (authoritative; comes from the live tpms?.isManager field on the helper);
-        //   (b) the column-A LDAP matched on the managerEntId side of a decommissioning row;
-        //   (c) the operator explicitly picked the "Manager" contact type;
-        //   (d) the cached vehicle.isManager flag is set (last-resort, may be stale).
+        // ---------- Manager (chase LDAP -> MANAGER_ENT_ID -> phone) ----------
+        // Recipient is themselves a manager when TPMS marks them as such, when
+        // the column-A LDAP matched on the managerEntId side of a row, or when
+        // a previous snapshot run flagged them.
         const recipientIsManager =
-          !!tpms?.isManager ||
+          !!techTpms?.isManager ||
           matchedVia === 'manager' ||
-          ct === 'manager' ||
           !!vehicle.isManager;
 
-        // CC-manager metadata: only populated when ccManager flag is set.
-        let ccStatus:
-          | 'ready'
-          | 'no_manager_phone'
-          | 'same_as_tech'
-          | 'no_tech_phone'
-          | null = null;
-        let cc_skipped_self_manager = false;
+        // Manager-EntId precedence:
+        //   1. The uploaded LDAP's OWN TPMS row (techTpms.managerEntId) — this
+        //      is the authoritative chase MANAGER_ENT_ID -> ENTERPRISE_ID for
+        //      the LDAP we were actually asked about.
+        //   2. The snapshot row's managerEntId, BUT only when matchedVia is
+        //      'tech' or 'truck' (i.e., the snapshot row is FOR the uploaded
+        //      LDAP). For matchedVia 'manager' the snapshot's managerEntId is
+        //      meaningless (the recipient IS the manager), and for
+        //      'nearest_tech' the snapshot's managerEntId is the assigned
+        //      tech's manager, not the uploaded LDAP's manager.
+        const snapshotMgrEntIdApplies = matchedVia === 'tech' || matchedVia === 'truck';
+        const managerEntId =
+          (techTpms?.managerEntId)
+          || (snapshotMgrEntIdApplies ? (vehicle.managerEntId || null) : null);
+        const managerNameFromSources =
+          (techTpms?.managerName)
+          || (snapshotMgrEntIdApplies ? (vehicle.managerName || null) : null);
 
-        if (ccManager) {
-          if (recipientIsManager) {
-            // No manager-CC's-themself: when the recipient IS the manager,
-            // suppress CC entirely and surface a flag the UI can show.
-            cc_skipped_self_manager = true;
-          } else if (!vehicle.managerPhone) {
-            ccStatus = 'no_manager_phone';
-          } else if (!phone) {
-            ccStatus = 'no_tech_phone';
-          } else if (digitsOnly(vehicle.managerPhone) === digitsOnly(phone)) {
-            ccStatus = 'same_as_tech';
+        let managerPhone: string | null = null;
+        let managerName: string | null = managerNameFromSources;
+        let managerSource: 'snapshot' | 'tpms_live' | null = null;
+        let managerStatus:
+          | 'ready'
+          | 'no_phone'
+          | 'no_manager_ent_id'
+          | 'self_managed'
+          | 'same_as_tech';
+
+        if (recipientIsManager) {
+          // Don't CC a manager themselves a copy of their own message.
+          managerStatus = 'self_managed';
+        } else if (!managerEntId) {
+          // No way to chase a manager — the recipient has no MANAGER_ENT_ID
+          // in either the snapshot row (when applicable) or live TPMS_EXTRACT.
+          managerStatus = 'no_manager_ent_id';
+        } else {
+          // Snapshot first — but ONLY trust the snapshot's manager_phone when
+          // the snapshot row is for the uploaded LDAP (matchedVia tech/truck).
+          // For nearest_tech matches, the snapshot's manager_phone belongs to
+          // the assigned tech's manager, not the uploaded LDAP's manager — we
+          // must chase MANAGER_ENT_ID -> live TPMS instead.
+          if (snapshotMgrEntIdApplies && vehicle.managerPhone) {
+            managerPhone = vehicle.managerPhone;
+            managerSource = 'snapshot';
           } else {
-            ccStatus = 'ready';
+            // Fall back to live TPMS lookup of MANAGER_ENT_ID -> ENTERPRISE_ID.
+            const mgrLive = mgrTpmsHits.get(managerEntId.toUpperCase())
+              || techTpmsHits.get(managerEntId.toUpperCase());
+            if (mgrLive?.mobilePhone) {
+              managerPhone = mgrLive.mobilePhone;
+              managerSource = 'tpms_live';
+              if (!managerName && mgrLive.fullName) managerName = mgrLive.fullName;
+            }
+          }
+          if (!managerPhone) {
+            managerStatus = 'no_phone';
+          } else if (techPhone && digitsOnly(managerPhone) === digitsOnly(techPhone)) {
+            // The manager's phone is the same number as the tech's — one
+            // text covers both, no need to send twice.
+            managerStatus = 'same_as_tech';
+          } else {
+            managerStatus = 'ready';
+          }
+        }
+
+        // ---------- Snapshot backfill ----------
+        // When the live TPMS lookup filled in a blank on the snapshot row,
+        // persist that back to fs_decommissioning_vehicles so the next batch
+        // hits the snapshot path immediately and the operator sees the
+        // resolved phone in the Decommissioning grid. We only backfill
+        // manager fields onto the snapshot row when the snapshot row is for
+        // the uploaded LDAP itself (matchedVia tech/truck) — otherwise we'd
+        // overwrite a row that belongs to a different person.
+        if (vehicle.id) {
+          const updates: Record<string, string> = {};
+          if (!vehicle.mobilePhone && techSource === 'tpms_live'
+              && techPhone && snapshotMgrEntIdApplies) {
+            updates.mobile_phone = techPhone;
+          }
+          if (snapshotMgrEntIdApplies) {
+            if (!vehicle.managerPhone && managerSource === 'tpms_live' && managerPhone) {
+              updates.manager_phone = managerPhone;
+            }
+            if (!vehicle.managerEntId && managerEntId) {
+              updates.manager_ent_id = managerEntId;
+            }
+            if (!vehicle.managerName && managerName) {
+              updates.manager_name = managerName;
+            }
+          }
+          if (Object.keys(updates).length > 0) {
+            backfillQueue.push({ id: vehicle.id, updates });
           }
         }
 
@@ -16261,20 +16357,45 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           vin: vehicle.vin || '',
           address: vehicle.address || '',
           zipCode: vehicle.zipCode || '',
-          phone: vehicle.mobilePhone || vehicle.phone || '',
           fullName: vehicle.fullName || '',
-          contactPhone: phone,
-          contactName,
-          contactType: ct,
-          phone_source,
           matchedVia,
-          managerPhone: vehicle.managerPhone || null,
-          managerName: vehicle.managerName || null,
-          managerEntId: vehicle.managerEntId || null,
           isManager: recipientIsManager,
-          ccStatus,
-          cc_skipped_self_manager,
+          tech: {
+            name: techName,
+            phone: techPhone,
+            status: techStatus,
+            source: techSource,
+          },
+          manager: {
+            name: managerName,
+            phone: managerPhone,
+            entId: managerEntId,
+            status: managerStatus,
+            source: managerSource,
+          },
         });
+      }
+
+      // Apply backfills (best-effort; a single row failure should not poison
+      // the response). Uses the parameterized Drizzle update builder so the
+      // values can never be string-interpolated into the SQL.
+      if (backfillQueue.length > 0) {
+        console.log(`[DecommBatch] Backfilling ${backfillQueue.length} snapshot row(s) from live TPMS lookup`);
+        for (const b of backfillQueue) {
+          try {
+            const setObj: Partial<typeof decommissioningVehicles.$inferInsert> = { updatedAt: new Date() };
+            if (b.updates.mobile_phone)    setObj.mobilePhone    = b.updates.mobile_phone;
+            if (b.updates.manager_phone)   setObj.managerPhone   = b.updates.manager_phone;
+            if (b.updates.manager_ent_id)  setObj.managerEntId   = b.updates.manager_ent_id;
+            if (b.updates.manager_name)    setObj.managerName    = b.updates.manager_name;
+            await getDb()
+              .update(decommissioningVehicles)
+              .set(setObj)
+              .where(eq(decommissioningVehicles.id, b.id));
+          } catch (e: any) {
+            console.warn(`[DecommBatch] Snapshot backfill failed for vehicle id=${b.id}:`, e.message);
+          }
+        }
       }
 
       res.json({ resolved, unresolved });
@@ -16286,24 +16407,34 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-batch-text", async (req, res) => {
     try {
-      const { recipients, messageTemplate, contactType, sentBy, senderName, ccManager } = req.body;
+      const { recipients, messageTemplate, sentBy, senderName } = req.body;
       if (!recipients || !Array.isArray(recipients) || recipients.length === 0 || !messageTemplate) {
         return res.status(400).json({ message: "recipients array and messageTemplate are required" });
       }
 
-      // Per-row outcome captures BOTH the tech send and (when applicable) the manager-CC send,
-      // so the UI can show two pills per recipient and explain failures independently.
-      type CcOutcome = 'sent' | 'failed' | 'skipped' | 'duplicate' | 'same_as_tech' | 'no_manager_phone' | 'disabled';
-      const results: {
+      // Task #228 — Each recipient row carries TWO independent send targets,
+      // tech and manager, both pre-checked. The server attempts both per row
+      // (subject to the per-row .enabled toggles and to server-side guards).
+      // Per-row outcome captures both so the UI can show two pills per row.
+      type SendOutcome =
+        | 'sent'
+        | 'failed'
+        | 'duplicate'
+        | 'no_phone'
+        | 'same_as_tech'
+        | 'self_managed'
+        | 'no_manager_ent_id'
+        | 'disabled';
+      type RowResult = {
         truckNumber: string;
         ldap?: string;
-        status: string;
-        error?: string;
-        manager?: { status: CcOutcome; error?: string; managerPhone?: string };
-      }[] = [];
-      let sent = 0;
-      let failed = 0;
-      let skipped = 0;
+        tech: { status: SendOutcome; error?: string; phone?: string };
+        manager: { status: SendOutcome; error?: string; phone?: string };
+      };
+      const results: RowResult[] = [];
+      let techSent = 0;
+      let techFailed = 0;
+      let techSkipped = 0;
       let managerSent = 0;
       let managerFailed = 0;
       let managerSkipped = 0;
@@ -16312,31 +16443,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         p.replace(/\D/g, '').replace(/^(\d{10})$/, '+1$1').replace(/^1(\d{10})$/, '+1$1');
       const digitsOnly = (s: string | null | undefined) => (s || '').replace(/\D/g, '').slice(-10);
 
-      // Dedupe true duplicates only:
-      //  - Tech: same (truckNumber, contactPhone) appearing twice in the batch is sent once.
-      //  - Manager CC: same (managerPhone, techLdap) is sent once. Two different techs sharing
-      //    the same manager BOTH cause a CC (one per tech) — that is intentional.
+      // Dedupe within the batch:
+      //  - Tech: same (truckNumber, phone) sent once.
+      //  - Manager: same (managerPhone, techLdap) sent once. Two different techs
+      //    sharing the same manager BOTH cause a manager send (one per tech) —
+      //    intentional, mirrors the prior CC behavior.
       const seenTechKeys = new Set<string>();
-      const seenCcKeys = new Set<string>();
+      const seenManagerKeys = new Set<string>();
 
-      // Server-side authoritative manager check (Task #219): re-derive recipientIsManager
-      // from TPMS_EXTRACT instead of trusting any client-supplied recipient flag. We do a
-      // single batched lookup over every distinct LDAP in the request, then in the per-row
-      // loop we OR that with the trusted server-side context (operator-selected
-      // contactType === 'manager'). This makes it impossible for a crafted payload to
-      // un-suppress the self-manager CC by toggling client fields.
+      // Server-side authoritative "is this recipient themselves a manager?" check
+      // (preserved from the legacy CC path so a crafted payload cannot trick us
+      // into texting a manager their own message). Authority comes from:
+      //   1. The live TPMS_EXTRACT snapshot (isManager flag).
+      //   2. The fs_decommissioning_vehicles.manager_ent_id column — if any
+      //      decommissioning row lists this LDAP as a manager, it IS a manager.
+      // We deliberately do NOT trust the client-supplied r.isManager / r.matchedVia
+      // from the request body.
       const batchLdaps = Array.from(new Set(
         (recipients as any[])
           .map(r => String(r?.ldap ?? r?.enterpriseId ?? '').trim().toUpperCase())
           .filter(l => l.length > 0),
       ));
       const { contacts: managerLookup } = await lookupTpmsContactsByLdap(batchLdaps);
-
-      // DB fallback: if Snowflake TPMS_EXTRACT is transiently unreachable, we still want
-      // to suppress self-CC for any LDAP that appears as ANY decommissioning row's
-      // managerEntId. This is also trusted server-side data (we own this table) and
-      // closes the edge case where TPMS lookup fails AND the operator left the contact
-      // type at 'tech' for what is in fact a manager LDAP.
       const dbManagerLdapRows = await getDb()
         .select({ entId: decommissioningVehicles.managerEntId })
         .from(decommissioningVehicles);
@@ -16346,22 +16474,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           .filter(s => s.length > 0),
       );
 
-      for (const r of recipients) {
-        if (!r.contactPhone) {
-          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'skipped', error: 'No phone number' });
-          skipped++;
-          continue;
-        }
+      for (let i = 0; i < recipients.length; i++) {
+        const r = recipients[i];
+        const techLdap = String(r?.ldap ?? r?.enterpriseId ?? '').trim();
+        const techLdapUpper = techLdap.toUpperCase();
+        const truckNumber: string = r.truckNumber || '';
+        const normalized = truckNumber.padStart(6, '0');
 
-        const techDigits = digitsOnly(r.contactPhone);
-        const techKey = `${r.truckNumber}::${techDigits}`;
-        if (seenTechKeys.has(techKey)) {
-          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'duplicate', error: 'Duplicate (truck + phone)' });
-          skipped++;
-          continue;
-        }
-        seenTechKeys.add(techKey);
+        const techPhoneRaw: string | null = r?.tech?.phone ?? null;
+        const techEnabled: boolean = r?.tech?.enabled !== false;
+        const techName: string | null = r?.tech?.name ?? null;
+        const managerPhoneRaw: string | null = r?.manager?.phone ?? null;
+        const managerEnabled: boolean = r?.manager?.enabled !== false;
+        const managerName: string | null = r?.manager?.name ?? null;
+        const managerStatusFromClient: string | null = r?.manager?.status ?? null;
 
+        // Render the message body (same body to both tech and manager).
         let body = messageTemplate;
         if (r.customVars && typeof r.customVars === 'object') {
           for (const [key, val] of Object.entries(r.customVars)) {
@@ -16370,166 +16498,153 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           }
         }
 
-        const normalized = r.truckNumber.padStart(6, '0');
-        const formattedPhone = formatPhoneE164(r.contactPhone);
-        const techLdap = (r.ldap || r.enterpriseId || '').toString().trim();
+        const rowResult: RowResult = {
+          truckNumber,
+          ldap: techLdap || undefined,
+          tech: { status: 'disabled' },
+          manager: { status: 'disabled' },
+        };
 
-        let techSent = false;
-
-        try {
-          const sid = await sendTwilioMessage(formattedPhone, body);
-
-          const [msg] = await getDb().insert(decommMessages).values({
-            truckNumber: normalized,
-            contactType: r.contactType || contactType || 'tech',
-            contactName: r.contactName || null,
-            contactPhone: formattedPhone,
-            direction: 'outbound',
-            body,
-            status: 'sent',
-            twilioSid: sid,
-            sentBy: sentBy || null,
-            senderName: senderName || null,
-          }).returning();
-
-          broadcastMessage(normalized, { message: msg, source: 'decomm' });
-          techSent = true;
-          sent++;
-        } catch (err: any) {
-          console.error(`[DecommBatch] Failed to send to ${r.truckNumber}:`, err.message);
-          await getDb().insert(decommMessages).values({
-            truckNumber: normalized,
-            contactType: r.contactType || contactType || 'tech',
-            contactName: r.contactName || null,
-            contactPhone: formattedPhone,
-            direction: 'outbound',
-            body,
-            status: 'failed',
-            sentBy: sentBy || null,
-            senderName: senderName || null,
-          });
-          results.push({ truckNumber: r.truckNumber, ldap: r.ldap, status: 'failed', error: err.message });
-          failed++;
+        // ---------- Tech send ----------
+        if (!techEnabled) {
+          rowResult.tech = { status: 'disabled' };
+          techSkipped++;
+        } else if (!techPhoneRaw) {
+          rowResult.tech = { status: 'no_phone' };
+          techSkipped++;
+        } else {
+          const techDigits = digitsOnly(techPhoneRaw);
+          const techKey = `${truckNumber}::${techDigits}`;
+          if (seenTechKeys.has(techKey)) {
+            rowResult.tech = { status: 'duplicate', phone: techPhoneRaw };
+            techSkipped++;
+          } else {
+            seenTechKeys.add(techKey);
+            const formattedTech = formatPhoneE164(techPhoneRaw);
+            try {
+              const sid = await sendTwilioMessage(formattedTech, body);
+              const [msg] = await getDb().insert(decommMessages).values({
+                truckNumber: normalized,
+                contactType: 'tech',
+                contactName: techName,
+                contactPhone: formattedTech,
+                direction: 'outbound',
+                body,
+                status: 'sent',
+                twilioSid: sid,
+                sentBy: sentBy || null,
+                senderName: senderName || null,
+              }).returning();
+              broadcastMessage(normalized, { message: msg, source: 'decomm' });
+              rowResult.tech = { status: 'sent', phone: formattedTech };
+              techSent++;
+            } catch (err: any) {
+              console.error(`[DecommBatch] Tech send failed for ${truckNumber} (${techLdap}):`, err.message);
+              await getDb().insert(decommMessages).values({
+                truckNumber: normalized,
+                contactType: 'tech',
+                contactName: techName,
+                contactPhone: formattedTech,
+                direction: 'outbound',
+                body,
+                status: 'failed',
+                sentBy: sentBy || null,
+                senderName: senderName || null,
+              });
+              rowResult.tech = { status: 'failed', error: err.message, phone: formattedTech };
+              techFailed++;
+            }
+          }
         }
 
-        // Manager CC — independent of tech result *only* when the tech send succeeded.
-        // Spec: per-row try/catch keeps the two failures isolated, but we don't CC if the
-        // tech text itself never went out (keeps manager noise down on hard Twilio errors).
-        //
-        // Server-side guard (Task #219): if the recipient IS a manager, do NOT CC — a
-        // manager should never receive a CC of a message they themselves got. Authority
-        // for "is the recipient a manager" comes ONLY from server-side trusted sources:
-        //   1. The live TPMS_EXTRACT lookup we did above (managerLookup), which marks an
-        //      Enterprise ID as a manager iff it appears as somebody else's MANAGER_ENT_ID;
-        //   2. The operator-selected contactType === 'manager' (server-side request param,
-        //      narrowed from per-row to top-level since that one was set in the UI).
-        // We deliberately do NOT trust r.cc_skipped_self_manager / r.isManager /
-        // r.matchedVia from the request body — those are client-controlled and a crafted
-        // payload could otherwise un-suppress the self-CC.
-        let ccOutcome: CcOutcome | null = null;
-        let ccError: string | undefined;
-        const recipientLdap = String(r?.ldap ?? r?.enterpriseId ?? '').trim().toUpperCase();
-        const tpmsForRecipient = recipientLdap ? managerLookup.get(recipientLdap) : undefined;
+        // ---------- Manager send ----------
+        // Server-side authoritative manager check — never CC a manager themselves.
+        const tpmsForRecipient = techLdapUpper ? managerLookup.get(techLdapUpper) : undefined;
         const recipientIsManager =
           !!tpmsForRecipient?.isManager ||
-          contactType === 'manager' ||
-          (recipientLdap.length > 0 && dbManagerLdapSet.has(recipientLdap));
-        const wantsCc = !!ccManager && r.ccEnabled !== false && !recipientIsManager;
+          (techLdapUpper.length > 0 && dbManagerLdapSet.has(techLdapUpper));
 
-        if (wantsCc && techSent) {
-          if (!r.managerPhone) {
-            ccOutcome = 'no_manager_phone';
+        if (!managerEnabled) {
+          rowResult.manager = { status: 'disabled' };
+          managerSkipped++;
+        } else if (recipientIsManager || managerStatusFromClient === 'self_managed') {
+          rowResult.manager = { status: 'self_managed' };
+          managerSkipped++;
+        } else if (!managerPhoneRaw) {
+          rowResult.manager = {
+            status: managerStatusFromClient === 'no_manager_ent_id' ? 'no_manager_ent_id' : 'no_phone',
+          };
+          managerSkipped++;
+        } else {
+          const mgrDigits = digitsOnly(managerPhoneRaw);
+          const techDigitsForCompare = digitsOnly(techPhoneRaw);
+          if (techDigitsForCompare && mgrDigits === techDigitsForCompare) {
+            rowResult.manager = { status: 'same_as_tech', phone: managerPhoneRaw };
             managerSkipped++;
           } else {
-            const mgrDigits = digitsOnly(r.managerPhone);
-            if (mgrDigits === techDigits) {
-              ccOutcome = 'same_as_tech';
+            const mgrKey = `${mgrDigits}::${techLdapUpper}`;
+            if (seenManagerKeys.has(mgrKey)) {
+              rowResult.manager = { status: 'duplicate', phone: managerPhoneRaw };
               managerSkipped++;
             } else {
-              const ccKey = `${mgrDigits}::${techLdap.toUpperCase()}`;
-              if (seenCcKeys.has(ccKey)) {
-                ccOutcome = 'duplicate';
-                managerSkipped++;
-              } else {
-                seenCcKeys.add(ccKey);
-                const formattedMgr = formatPhoneE164(r.managerPhone);
-                const ccBody = `[${techLdap || (r.contactName || 'tech')}] ${body}`;
-                try {
-                  const ccSid = await sendTwilioMessage(formattedMgr, ccBody);
-                  const [ccMsg] = await getDb().insert(decommMessages).values({
-                    truckNumber: normalized,
-                    contactType: 'manager',
-                    contactName: r.managerName || null,
-                    contactPhone: formattedMgr,
-                    direction: 'outbound',
-                    body: ccBody,
-                    status: 'sent',
-                    twilioSid: ccSid,
-                    sentBy: sentBy || null,
-                    senderName: senderName || null,
-                    ccForLdap: techLdap || null,
-                  }).returning();
-                  broadcastMessage(normalized, { message: ccMsg, source: 'decomm' });
-                  ccOutcome = 'sent';
-                  managerSent++;
-                } catch (ccErr: any) {
-                  console.error(`[DecommBatch] Failed manager CC for ${r.truckNumber} (${techLdap}):`, ccErr.message);
-                  await getDb().insert(decommMessages).values({
-                    truckNumber: normalized,
-                    contactType: 'manager',
-                    contactName: r.managerName || null,
-                    contactPhone: formattedMgr,
-                    direction: 'outbound',
-                    body: ccBody,
-                    status: 'failed',
-                    sentBy: sentBy || null,
-                    senderName: senderName || null,
-                    ccForLdap: techLdap || null,
-                  });
-                  ccOutcome = 'failed';
-                  ccError = ccErr.message;
-                  managerFailed++;
-                }
+              seenManagerKeys.add(mgrKey);
+              const formattedMgr = formatPhoneE164(managerPhoneRaw);
+              // Prefix with [LDAP] so the manager has context about which tech
+              // the message is about — they may receive several of these in a row.
+              const mgrBody = `[${techLdap || (techName || 'tech')}] ${body}`;
+              try {
+                const mgrSid = await sendTwilioMessage(formattedMgr, mgrBody);
+                const [mgrMsg] = await getDb().insert(decommMessages).values({
+                  truckNumber: normalized,
+                  contactType: 'manager',
+                  contactName: managerName,
+                  contactPhone: formattedMgr,
+                  direction: 'outbound',
+                  body: mgrBody,
+                  status: 'sent',
+                  twilioSid: mgrSid,
+                  sentBy: sentBy || null,
+                  senderName: senderName || null,
+                  ccForLdap: techLdap || null,
+                }).returning();
+                broadcastMessage(normalized, { message: mgrMsg, source: 'decomm' });
+                rowResult.manager = { status: 'sent', phone: formattedMgr };
+                managerSent++;
+              } catch (mgrErr: any) {
+                console.error(`[DecommBatch] Manager send failed for ${truckNumber} (${techLdap}):`, mgrErr.message);
+                await getDb().insert(decommMessages).values({
+                  truckNumber: normalized,
+                  contactType: 'manager',
+                  contactName: managerName,
+                  contactPhone: formattedMgr,
+                  direction: 'outbound',
+                  body: mgrBody,
+                  status: 'failed',
+                  sentBy: sentBy || null,
+                  senderName: senderName || null,
+                  ccForLdap: techLdap || null,
+                });
+                rowResult.manager = { status: 'failed', error: mgrErr.message, phone: formattedMgr };
+                managerFailed++;
               }
             }
           }
-        } else if (wantsCc && !techSent) {
-          ccOutcome = 'skipped';
-          managerSkipped++;
-          ccError = 'Tech send failed';
-        } else if (!ccManager) {
-          ccOutcome = null; // CC not requested at all
-        } else {
-          ccOutcome = 'disabled'; // user un-checked CC for this row
         }
 
-        if (techSent) {
-          results.push({
-            truckNumber: r.truckNumber,
-            ldap: r.ldap,
-            status: 'sent',
-            manager: ccOutcome ? { status: ccOutcome, error: ccError, managerPhone: r.managerPhone || undefined } : undefined,
-          });
-        } else {
-          // Failure result was already pushed in the catch above; attach manager
-          // outcome onto the most-recent result so the UI shows both columns.
-          const last = results[results.length - 1];
-          if (last && last.truckNumber === r.truckNumber && ccOutcome) {
-            last.manager = { status: ccOutcome, error: ccError, managerPhone: r.managerPhone || undefined };
-          }
-        }
-
-        if (recipients.indexOf(r) < recipients.length - 1) {
+        results.push(rowResult);
+        if (i < recipients.length - 1) {
           await new Promise(resolve => setTimeout(resolve, 200));
         }
       }
 
-      console.log(`[DecommBatch] Complete: ${sent} sent, ${failed} failed, ${skipped} skipped out of ${recipients.length}; manager CC: ${managerSent} sent, ${managerFailed} failed, ${managerSkipped} skipped`);
+      console.log(
+        `[DecommBatch] Complete (${recipients.length} rows): tech ${techSent} sent / ${techFailed} failed / ${techSkipped} skipped; manager ${managerSent} sent / ${managerFailed} failed / ${managerSkipped} skipped`,
+      );
       res.json({
-        sent,
-        failed,
-        skipped,
-        total: recipients.length,
+        totalRows: recipients.length,
+        techSent,
+        techFailed,
+        techSkipped,
         managerSent,
         managerFailed,
         managerSkipped,
