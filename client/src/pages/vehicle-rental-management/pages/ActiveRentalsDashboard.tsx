@@ -142,6 +142,8 @@ export default function ActiveRentalsDashboard() {
   // Sort directions on date columns (mirrors FS's per-column sort buttons)
   const [dateInRepairSort, setDateInRepairSort] = useState<SortDir>(null);
   const [regExpirySort, setRegExpirySort] = useState<SortDir>(null);
+  const [dailyNetSort, setDailyNetSort] = useState<SortDir>(null);
+  const [adjNetSort, setAdjNetSort] = useState<SortDir>(null);
 
   // Detail panel
   const [detailTruckId, setDetailTruckId] = useState<string | null>(null);
@@ -403,10 +405,33 @@ export default function ActiveRentalsDashboard() {
       const bv = b ? new Date(b).getTime() : 0;
       return (av - bv) * (dir === "asc" ? 1 : -1);
     };
+    const cmpNum = (a: number | null | undefined, b: number | null | undefined, dir: SortDir) => {
+      if (!dir) return 0;
+      const aNull = a == null || !Number.isFinite(a);
+      const bNull = b == null || !Number.isFinite(b);
+      if (aNull && bNull) return 0;
+      if (aNull) return 1;
+      if (bNull) return -1;
+      return ((a as number) - (b as number)) * (dir === "asc" ? 1 : -1);
+    };
     if (dateInRepairSort) {
       result.sort((a, b) => cmpDate(a.datePutInRepair, b.datePutInRepair, dateInRepairSort));
     } else if (regExpirySort) {
       result.sort((a, b) => cmpDate(a.holmanRegExpiry, b.holmanRegExpiry, regExpirySort));
+    } else if (dailyNetSort) {
+      result.sort((a, b) => {
+        const ae = enrichmentMap[(a.truckNumber ?? "").replace(/^0+/, "")];
+        const be = enrichmentMap[(b.truckNumber ?? "").replace(/^0+/, "")];
+        return cmpNum(ae?.dailyNetWithRental ?? null, be?.dailyNetWithRental ?? null, dailyNetSort);
+      });
+    } else if (adjNetSort) {
+      result.sort((a, b) => {
+        const ae = enrichmentMap[(a.truckNumber ?? "").replace(/^0+/, "")];
+        const be = enrichmentMap[(b.truckNumber ?? "").replace(/^0+/, "")];
+        const av = ae?.gate1AdjustedNet != null ? Number(ae.gate1AdjustedNet) : null;
+        const bv = be?.gate1AdjustedNet != null ? Number(be.gate1AdjustedNet) : null;
+        return cmpNum(av, bv, adjNetSort);
+      });
     }
     return result;
   }, [
@@ -414,6 +439,7 @@ export default function ActiveRentalsDashboard() {
     truckNumberFilter, stateFilter, regionFilter, byovFilter, mainStatusMulti, ownerFilter,
     tpmsFilter, repairedFilter, amsFilter, pickSlotFilter, rentalReturnedFilter,
     vanPickedUpFilter, regExpiryFilter, holmanStatusFilter, dateInRepairSort, regExpirySort,
+    dailyNetSort, adjNetSort,
   ]);
 
   const cycleSort = (cur: SortDir): SortDir => cur === null ? "asc" : cur === "asc" ? "desc" : null;
@@ -427,6 +453,7 @@ export default function ActiveRentalsDashboard() {
     setMainStatusMulti([]); setOwnerFilter([]); setTpmsFilter([]); setRepairedFilter([]);
     setAmsFilter([]); setPickSlotFilter([]); setRentalReturnedFilter([]); setVanPickedUpFilter([]);
     setHolmanStatusFilter([]); setRegExpiryFilter([]); setDateInRepairSort(null); setRegExpirySort(null);
+    setDailyNetSort(null); setAdjNetSort(null);
   };
   const anyColumnFilterActive =
     !!truckNumberFilter || stateFilter.length > 0 || regionFilter.length > 0 || byovFilter.length > 0 ||
@@ -434,7 +461,7 @@ export default function ActiveRentalsDashboard() {
     repairedFilter.length > 0 || amsFilter.length > 0 || pickSlotFilter.length > 0 ||
     rentalReturnedFilter.length > 0 || vanPickedUpFilter.length > 0 ||
     holmanStatusFilter.length > 0 || regExpiryFilter.length > 0 ||
-    dateInRepairSort !== null || regExpirySort !== null;
+    dateInRepairSort !== null || regExpirySort !== null || dailyNetSort !== null || adjNetSort !== null;
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
   const safePage = Math.min(page, totalPages);
@@ -781,7 +808,7 @@ export default function ActiveRentalsDashboard() {
                       <th className="px-3 py-2 whitespace-nowrap">
                         <button
                           className="inline-flex items-center gap-1 hover:text-foreground"
-                          onClick={() => { setDateInRepairSort(cycleSort(dateInRepairSort)); setRegExpirySort(null); }}
+                          onClick={() => { setDateInRepairSort(cycleSort(dateInRepairSort)); setRegExpirySort(null); setDailyNetSort(null); setAdjNetSort(null); }}
                           data-testid="sort-date-in-repair"
                         >
                           Date In Repair <SortIcon dir={dateInRepairSort} />
@@ -790,7 +817,7 @@ export default function ActiveRentalsDashboard() {
                       <th className="px-3 py-2 whitespace-nowrap">
                         <button
                           className="inline-flex items-center gap-1 hover:text-foreground"
-                          onClick={() => { setRegExpirySort(cycleSort(regExpirySort)); setDateInRepairSort(null); }}
+                          onClick={() => { setRegExpirySort(cycleSort(regExpirySort)); setDateInRepairSort(null); setDailyNetSort(null); setAdjNetSort(null); }}
                           data-testid="sort-reg-expiry"
                         >
                           Reg. Expiry <SortIcon dir={regExpirySort} />
@@ -802,8 +829,24 @@ export default function ActiveRentalsDashboard() {
                       <th className="px-3 py-2 whitespace-nowrap">Rental Returned</th>
                       <th className="px-3 py-2 whitespace-nowrap">Van Picked Up</th>
                       <th className="px-3 py-2 whitespace-nowrap">Holman Status</th>
-                      <th className="px-3 py-2 whitespace-nowrap text-right">Daily Net w/ Rental</th>
-                      <th className="px-3 py-2 whitespace-nowrap text-right">Adj. Net</th>
+                      <th className="px-3 py-2 whitespace-nowrap text-right">
+                        <button
+                          className="inline-flex items-center gap-1 hover:text-foreground"
+                          onClick={() => { setDailyNetSort(cycleSort(dailyNetSort)); setDateInRepairSort(null); setRegExpirySort(null); setAdjNetSort(null); }}
+                          data-testid="sort-daily-net"
+                        >
+                          Daily Net w/ Rental <SortIcon dir={dailyNetSort} />
+                        </button>
+                      </th>
+                      <th className="px-3 py-2 whitespace-nowrap text-right">
+                        <button
+                          className={`inline-flex items-center gap-1 hover:text-foreground ${adjNetSort === "asc" ? "text-red-600 font-semibold" : adjNetSort === "desc" ? "text-green-600 font-semibold" : ""}`}
+                          onClick={() => { setAdjNetSort(cycleSort(adjNetSort)); setDateInRepairSort(null); setRegExpirySort(null); setDailyNetSort(null); }}
+                          data-testid="sort-adj-net"
+                        >
+                          Adj. Net <SortIcon dir={adjNetSort} />
+                        </button>
+                      </th>
                       <th className="px-3 py-2 whitespace-nowrap text-right">Scorecard</th>
                       <th className="px-3 py-2 whitespace-nowrap">
                         {anyColumnFilterActive && (
