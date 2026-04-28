@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, SlidersHorizontal, X, RefreshCw, Database, Loader2, PlayCircle } from "lucide-react";
+import { MoreHorizontal, SlidersHorizontal, X, RefreshCw, Database, Loader2, PlayCircle, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { StatusPill } from "../components/status-pill";
 import { TechRecordPanel } from "../components/tech-record-panel";
@@ -91,6 +91,88 @@ const gateOptions = [
   { value: "profitable", label: "Profitable" },
 ];
 
+// ─── Sorting ──────────────────────────────────────────────────────────────────
+
+type SortDir = "asc" | "desc" | null;
+type SortKey = "tech" | "market" | "status" | "tenure" | "adjustedNet" | "dcaReview" | "gateClass";
+
+const cycleSort = (cur: SortDir): SortDir =>
+  cur === null ? "asc" : cur === "asc" ? "desc" : null;
+
+// Lookup for the human-readable Status label so sorting matches what the user
+// sees in the column rather than the raw enum key (e.g. "escalated_carl").
+const statusLabel = (value: string): string =>
+  statusOptions.find((o) => o.value === value)?.label ?? value;
+
+// Severity order for Gate Class — Underwater is the most-urgent (smallest)
+// so ascending sort surfaces underwater rows first.
+const gateSeverity = (value: string | null): number => {
+  switch (value) {
+    case "underwater": return 0;
+    case "marginal":   return 1;
+    case "profitable": return 2;
+    default:           return Number.POSITIVE_INFINITY;
+  }
+};
+
+// Adjusted Net is stored as a string like "-1234.56" or "$1,234.56" depending
+// on source. Strip non-numeric characters (other than `-` and `.`) and parse;
+// return null when the result isn't a finite number so the row sorts to the
+// bottom regardless of direction.
+const parseAdjustedNet = (raw: string | null): number | null => {
+  if (raw == null) return null;
+  const cleaned = String(raw).replace(/[^0-9.\-]/g, "");
+  if (cleaned === "" || cleaned === "-" || cleaned === ".") return null;
+  const n = Number(cleaned);
+  return Number.isFinite(n) ? n : null;
+};
+
+const isMissingString = (v: string | null | undefined): boolean =>
+  v == null || String(v).trim() === "";
+
+const cmpString = (a: string | null | undefined, b: string | null | undefined, dir: "asc" | "desc"): number => {
+  const aMissing = isMissingString(a);
+  const bMissing = isMissingString(b);
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;   // missing always last
+  if (bMissing) return -1;
+  const cmp = String(a).toLowerCase().localeCompare(String(b).toLowerCase());
+  return dir === "asc" ? cmp : -cmp;
+};
+
+const cmpNumber = (a: number | null | undefined, b: number | null | undefined, dir: "asc" | "desc"): number => {
+  const aMissing = a == null || !Number.isFinite(a);
+  const bMissing = b == null || !Number.isFinite(b);
+  if (aMissing && bMissing) return 0;
+  if (aMissing) return 1;
+  if (bMissing) return -1;
+  const cmp = (a as number) - (b as number);
+  return dir === "asc" ? cmp : -cmp;
+};
+
+function compareRows(a: ActiveRentalRow, b: ActiveRentalRow, key: SortKey, dir: "asc" | "desc"): number {
+  switch (key) {
+    case "tech":        return cmpString(a.name, b.name, dir);
+    case "market":      return cmpString(a.market, b.market, dir);
+    case "status":      return cmpString(statusLabel(a.currentStatus), statusLabel(b.currentStatus), dir);
+    case "tenure":      return cmpNumber(a.tenureMonths, b.tenureMonths, dir);
+    case "adjustedNet": return cmpNumber(parseAdjustedNet(a.gate1AdjustedNet), parseAdjustedNet(b.gate1AdjustedNet), dir);
+    case "dcaReview":   return cmpString(a.dcaReviewOutcome, b.dcaReviewOutcome, dir);
+    case "gateClass": {
+      const av = gateSeverity(a.gate1Classification);
+      const bv = gateSeverity(b.gate1Classification);
+      // Missing is already +Infinity, so it lands at the bottom in both directions.
+      const aMissing = !Number.isFinite(av);
+      const bMissing = !Number.isFinite(bv);
+      if (aMissing && bMissing) return 0;
+      if (aMissing) return 1;
+      if (bMissing) return -1;
+      const cmp = av - bv;
+      return dir === "asc" ? cmp : -cmp;
+    }
+  }
+}
+
 // ─── Action menu ──────────────────────────────────────────────────────────────
 
 function ActionMenu({ techId, onViewRecord }: { techId: string; onViewRecord: () => void }) {
@@ -148,7 +230,28 @@ export default function Dashboard() {
   const [gateFilter, setGateFilter] = useState("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<SortKey | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>(null);
   const PAGE_SIZE = 25;
+
+  // Cycle the clicked column through asc → desc → off. Switching to a
+  // different column starts a fresh asc cycle. Always reset to page 1 so the
+  // user immediately sees the new top of the list.
+  const handleSort = (key: SortKey) => {
+    setPage(1);
+    if (sortKey !== key) {
+      setSortKey(key);
+      setSortDir("asc");
+      return;
+    }
+    const next = cycleSort(sortDir);
+    if (next === null) {
+      setSortKey(null);
+      setSortDir(null);
+    } else {
+      setSortDir(next);
+    }
+  };
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
@@ -245,10 +348,13 @@ export default function Dashboard() {
   const allRows = activeRentalsData?.rows ?? [];
   const totalActiveRentals = activeRentalsData?.total ?? 0;
 
-  // Apply Dashboard's filters client-side against the active-rentals set.
+  // Apply Dashboard's filters client-side against the active-rentals set,
+  // then apply the active column sort. Sorting runs after filtering and
+  // before pagination so the order is stable across pages and the "X of Y"
+  // count stays correct.
   const filteredRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return allRows.filter((r) => {
+    const filtered = allRows.filter((r) => {
       if (statusFilter !== "all" && r.currentStatus !== statusFilter) return false;
       if (marketFilter !== "all" && (r.market ?? "") !== marketFilter) return false;
       if (gateFilter !== "all" && (r.gate1Classification ?? "") !== gateFilter) return false;
@@ -259,7 +365,14 @@ export default function Dashboard() {
         (r.truckNumber ?? "").toLowerCase().includes(q)
       );
     });
-  }, [allRows, statusFilter, marketFilter, gateFilter, search]);
+    if (sortKey && sortDir) {
+      // Copy first so we don't mutate the upstream React Query cache array.
+      const dir = sortDir;
+      const key = sortKey;
+      return [...filtered].sort((a, b) => compareRows(a, b, key, dir));
+    }
+    return filtered;
+  }, [allRows, statusFilter, marketFilter, gateFilter, search, sortKey, sortDir]);
 
   const total = filteredRows.length;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -480,20 +593,89 @@ export default function Dashboard() {
         <table className="w-full" style={{ borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ backgroundColor: colors.surface }}>
-              {["Tech", "Market", "Status", "Tenure", "Adjusted Net", "DCA Review", "Gate Class", ""].map((header, i) => (
-                <th
-                  key={i}
-                  className="text-left"
-                  style={{
-                    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-                    color: colors.inkMuted, padding: "10px 16px",
-                    borderBottom: `1px solid ${colors.rule}`,
-                    letterSpacing: "0.03em", textTransform: "uppercase", whiteSpace: "nowrap",
-                  }}
-                >
-                  {header}
-                </th>
-              ))}
+              {([
+                { label: "Tech",         key: "tech"         as SortKey },
+                { label: "Market",       key: "market"       as SortKey },
+                { label: "Status",       key: "status"       as SortKey },
+                { label: "Tenure",       key: "tenure"       as SortKey },
+                { label: "Adjusted Net", key: "adjustedNet"  as SortKey },
+                { label: "DCA Review",   key: "dcaReview"    as SortKey },
+                { label: "Gate Class",   key: "gateClass"    as SortKey },
+                { label: "",             key: null },
+              ]).map((col, i) => {
+                const isActive = col.key !== null && sortKey === col.key && sortDir !== null;
+                const Icon = !col.key
+                  ? null
+                  : isActive
+                    ? (sortDir === "asc" ? ArrowUp : ArrowDown)
+                    : ArrowUpDown;
+                return (
+                  <th
+                    key={i}
+                    className="text-left"
+                    style={{
+                      padding: 0,
+                      borderBottom: `1px solid ${colors.rule}`,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {col.key ? (
+                      <button
+                        type="button"
+                        onClick={() => handleSort(col.key as SortKey)}
+                        data-testid={`sort-${col.key}`}
+                        title={
+                          isActive
+                            ? `Sorted ${sortDir === "asc" ? "ascending" : "descending"} — click to ${sortDir === "asc" ? "reverse" : "clear"}`
+                            : `Sort by ${col.label}`
+                        }
+                        className="hover:bg-[#EEF0F4] transition-colors w-full text-left"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: 6,
+                          width: "100%",
+                          padding: "10px 16px",
+                          background: "transparent",
+                          border: "none",
+                          cursor: "pointer",
+                          fontFamily: fonts.dmSans,
+                          fontWeight: 500,
+                          fontSize: 11,
+                          color: isActive ? colors.ink : colors.inkMuted,
+                          letterSpacing: "0.03em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        <span>{col.label}</span>
+                        {Icon && (
+                          <Icon
+                            className="h-3 w-3 shrink-0"
+                            style={{
+                              color: isActive ? colors.ink : colors.inkMuted,
+                              opacity: isActive ? 1 : 0.45,
+                            }}
+                          />
+                        )}
+                      </button>
+                    ) : (
+                      <div
+                        style={{
+                          padding: "10px 16px",
+                          fontFamily: fonts.dmSans,
+                          fontWeight: 500,
+                          fontSize: 11,
+                          color: colors.inkMuted,
+                          letterSpacing: "0.03em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {col.label}
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
