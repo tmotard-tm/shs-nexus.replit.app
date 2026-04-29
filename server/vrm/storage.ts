@@ -86,8 +86,12 @@ export interface ActiveRentalRow {
   escalationPath: string | null;
   smsSentAt: Date | string | null;
   hasVrmContext: boolean;
-  contextStatus: "matched" | "no_ldap" | "no_vrm_match";
+  contextStatus: "matched" | "no_ldap" | "no_vrm_match" | "ambiguous_ldap" | "unresolved_ldap";
   ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null;
+  /** The original fs_trucks.tech_name — carried as a secondary label when the
+   *  TPMS-resolved name differs (stale assignment) or as the display name when
+   *  LDAP resolution failed.  Never used as the authoritative primary name. */
+  staleAssignmentName: string | null;
   liveTruckStatus: string | null;
   liveSource: string | null;
   // From the latest vrm_rental_checks row keyed by LDAP — populated by the
@@ -268,18 +272,59 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       FROM holman_vehicles_cache
       WHERE holman_tech_assigned IS NOT NULL AND holman_tech_assigned <> ''
     `),
-    // Master employee roster — ~13K rows. Used only as a wider candidate pool
-    // for fuzzy name matching when truck#→LDAP didn't resolve.
+    // Master employee roster — ~13K rows. Used for name-matching fallback and
+    // as the market (planning_area_name) source for LDAPs not in vrm_techs.
+    // DISTINCT ON gives one deterministic row per LDAP: rows with a
+    // planning_area_name are ordered before nulls so the map is maximally full.
     db.execute(sql`
-      SELECT tech_racfid AS "ldap", tech_name AS "fullName", first_name, last_name
+      SELECT DISTINCT ON (UPPER(tech_racfid))
+        UPPER(tech_racfid)   AS "ldap",
+        tech_name            AS "fullName",
+        first_name,
+        last_name,
+        planning_area_name   AS "planningAreaName"
       FROM all_techs
       WHERE tech_racfid IS NOT NULL AND tech_racfid <> ''
+      ORDER BY UPPER(tech_racfid), planning_area_name NULLS LAST
     `),
   ]);
   const tpmsRows = (tpmsResult.rows ?? []) as Array<{ enterprise_id: string; first_name: string | null; last_name: string | null; truck_no: string | null }>;
   const tpmsSnapshotRows = (tpmsSnapshotResult.rows ?? []) as Array<{ enterprise_id: string; first_name: string | null; last_name: string | null; truck_no: string | null }>;
   const holmanRows = ((holmanResult as any).rows ?? []) as Array<{ ldap: string; fullName: string | null; truckNo: string | null }>;
-  const allTechsRows = ((allTechsResult as any).rows ?? []) as Array<{ ldap: string; fullName: string | null; first_name: string | null; last_name: string | null }>;
+  const allTechsRows = ((allTechsResult as any).rows ?? []) as Array<{ ldap: string; fullName: string | null; first_name: string | null; last_name: string | null; planningAreaName: string | null }>;
+
+  // ─── TPMS LDAP → name (first + last from tpms_tech_profiles) ────────────
+  // This is the authoritative display name for resolved rows: truck → LDAP →
+  // TPMS name.  Built here (alongside tpmsRows) so it's available in the
+  // per-row return block without an extra lookup.
+  const tpmsLdapToName = new Map<string, string>();
+  for (const raw of tpmsRows) {
+    const ldapU = (raw.enterprise_id || "").trim().toUpperCase();
+    if (!ldapU) continue;
+    const composed = `${raw.first_name ?? ""} ${raw.last_name ?? ""}`.trim();
+    if (composed) tpmsLdapToName.set(ldapU, composed);
+  }
+
+  // ─── LDAP → market (planning_area_name from all_techs) ──────────────────
+  // Secondary market fallback for LDAPs where vrm_techs.market is null.
+  // DISTINCT ON in the query guarantees one row per LDAP.
+  const ldapToMarket = new Map<string, string>();
+  for (const raw of allTechsRows) {
+    const ldapU = (raw.ldap || "").trim().toUpperCase();
+    if (ldapU && raw.planningAreaName) ldapToMarket.set(ldapU, raw.planningAreaName);
+  }
+
+  // ─── Truck# → set of TPMS LDAPs (for ambiguous-assignment detection) ────
+  // When two different LDAPs in tpms_tech_profiles share the same truck_no,
+  // we cannot auto-pick: contextStatus → "ambiguous_ldap".
+  const truckToTpmsLdaps = new Map<string, Set<string>>();
+  for (const raw of tpmsRows) {
+    const key = normalizeTruckNumber(raw.truck_no);
+    const ldapU = (raw.enterprise_id || "").trim().toUpperCase();
+    if (!key || !ldapU) continue;
+    if (!truckToTpmsLdaps.has(key)) truckToTpmsLdaps.set(key, new Set());
+    truckToTpmsLdaps.get(key)!.add(ldapU);
+  }
 
   // ─── Name → LDAP map (3 sources, ranked by preference) ──────────────────
   // vrm_techs (rental population) wins over tpms (current) wins over all_techs
@@ -392,55 +437,35 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       }
     }
 
-    // Tier 3 — Name lookup against the wider pool (vrm_techs ∪ tpms ∪ all_techs).
-    // Only fires when truck# couldn't resolve. Three name strategies:
-    //   (a) exact normalized (suffixes/punctuation stripped)
-    //   (b) token-set (word-order agnostic, no middle initial)
-    //   (c) Levenshtein with length-aware tolerance
-    if (!ldap && row.techName) {
-      const key = normalizeNameForMatch(row.techName);
-      const tokKey = nameTokenKey(row.techName);
-      if (key) {
-        const exact = nameToLdap.get(key);
-        if (exact) {
-          ldap = exact.ldap;
-          ldapMatchSource = "exact_name";
-        }
-        if (!ldap && tokKey) {
-          const tokHit = tokenKeyToLdap.get(tokKey);
-          if (tokHit) {
-            ldap = tokHit.ldap;
-            ldapMatchSource = "fuzzy_name";
-          }
-        }
-        if (!ldap) {
-          const tol = key.length >= 14 ? 3 : key.length >= 8 ? 2 : 1;
-          let best: { key: string; dist: number } | null = null;
-          for (const candKey of Array.from(nameToLdap.keys())) {
-            if (Math.abs(candKey.length - key.length) > tol) continue;
-            const d = levenshtein(candKey, key);
-            if (d <= tol && (!best || d < best.dist)) {
-              best = { key: candKey, dist: d };
-              if (d === 0) break;
-            }
-          }
-          if (best) {
-            ldap = nameToLdap.get(best.key)!.ldap;
-            ldapMatchSource = "fuzzy_name";
-          }
-        }
-      }
-    }
+    // Tier 3 (name-based fuzzy matching) is intentionally suppressed.
+    // Name strings in fs_trucks are stale and can produce cross-person
+    // mismatches (e.g. DOMINEK shown for a truck TPMS assigns to SIMANOVSKY).
+    // Rows that reach this point with no LDAP are flagged "unresolved_ldap"
+    // (have a name but it cannot be verified) or "no_ldap" (no name either).
+    // Managers must confirm identity manually for these rows.
+
+    // ─── Ambiguous TPMS detection ────────────────────────────────────────
+    // If the truck's normalized number maps to 2+ distinct LDAPs in the live
+    // TPMS table we cannot safely auto-pick.  The LDAP that Tier 2 picked
+    // (first hit, via truckToLdap) is retained in `ldap` but contextStatus
+    // signals to the UI that a human must confirm.
+    const truckKey = normalizeTruckNumber(row.truckNumber);
+    const tpmsLdapSet = truckKey ? truckToTpmsLdaps.get(truckKey) : null;
+    const isAmbiguousTpms = tpmsLdapSet != null && tpmsLdapSet.size > 1;
 
     const tech = ldap ? techByLdap.get(ldap) ?? null : null;
     const check = ldap ? checkByLdap.get(ldap) ?? null : null;
 
-    // Both lookups are LDAP-keyed. The user emphasized this: financial data is
-    // tied to LDAP, not truck#. So once we have an LDAP, we pull from BOTH
-    // vrm_techs (if present) AND vrm_rental_checks (latest profitability check).
-    // contextStatus reflects whether ANY profile data was found.
-    const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
-      ? "no_ldap"
+    // contextStatus priority:
+    //   ambiguous_ldap  — truck has 2+ TPMS LDAPs; auto-pick is unsafe
+    //   no_ldap         — no truck# hit AND no tech name to fall back on
+    //   unresolved_ldap — no truck# hit but fs_trucks has a name (stale, unverified)
+    //   matched         — LDAP resolved AND at least one profile exists
+    //   no_vrm_match    — LDAP resolved but neither vrm_techs nor rental_check found
+    const contextStatus: ActiveRentalRow["contextStatus"] = isAmbiguousTpms
+      ? "ambiguous_ldap"
+      : !ldap
+      ? (row.techName ? "unresolved_ldap" : "no_ldap")
       : (tech || check)
       ? "matched"
       : "no_vrm_match";
@@ -461,8 +486,26 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       id: tech?.id ?? null,
       truckNumber: row.truckNumber ?? null,
       ldap,
-      name: row.techName || tech?.name || check?.techName || ldap || row.truckNumber || "Unknown Active Rental",
-      market: tech?.market ?? null,
+      // Name priority:
+      //   1. TPMS first+last for the resolved LDAP (authoritative, live)
+      //   2. vrm_techs.name (Snowflake-synced full name, keyed by LDAP)
+      //   3. fs_trucks.tech_name (stale — carried as staleAssignmentName too)
+      //   4. vrm_rental_checks.tech_name, then bare LDAP, then truck#
+      name: (ldap ? tpmsLdapToName.get(ldap) : null)
+        || tech?.name
+        || row.techName
+        || check?.techName
+        || ldap
+        || row.truckNumber
+        || "Unknown Active Rental",
+      // Always carry the original fs_trucks name so the UI can surface it as
+      // a "Previously: …" label when it differs from the resolved TPMS name.
+      staleAssignmentName: row.techName ?? null,
+      // Market priority:
+      //   1. vrm_techs.market (pre-resolved during Snowflake roster sync)
+      //   2. all_techs.planning_area_name for the resolved LDAP (fallback)
+      //   3. null — rendered as "District Unknown" by the UI
+      market: tech?.market ?? (ldap ? ldapToMarket.get(ldap) ?? null : null),
       primaryZip: tech?.primaryZip ?? null,
       // Tenure: prefer vrm_techs, fall back to rental_checks
       tenureMonths: tech?.tenureMonths ?? check?.tenureMonths ?? null,
