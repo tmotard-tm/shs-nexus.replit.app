@@ -372,7 +372,13 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         f.TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
         COUNT(*)                                                         AS total_sos,
-        COUNT(DISTINCT f.SO_STS_DT)                                     AS working_days,
+        -- Count only distinct WEEKDAY dates (Mon–Fri, ISO 1–5) where the tech had SOs.
+        -- This ensures the denominator reflects actual business workdays, not weekends
+        -- or every calendar day a status was recorded.
+        COUNT(DISTINCT CASE
+          WHEN DAYOFWEEKISO(f.SO_STS_DT) BETWEEN 1 AND 5
+          THEN f.SO_STS_DT
+        END)                                                             AS working_days,
         SUM(f.TOTAL_REVENUE)                                            AS total_revenue,
         SUM(f.LABOR_DIRECT_EXPENSE)                                     AS labor_direct,
         SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
