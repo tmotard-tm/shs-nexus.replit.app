@@ -7623,6 +7623,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // GET /api/cost-centers/activity - recent activity log entries for district cost centers
+  app.get("/api/cost-centers/activity", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageCostCenters(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      }
+
+      const rawDistrict = typeof req.query.district === "string" ? req.query.district.trim() : "";
+      const district = rawDistrict ? padDistrictForApi(rawDistrict) : undefined;
+      const limit = 200;
+
+      const logs = await storage.getActivityLogsByEntityType("district_cost_center", district, limit);
+
+      // Resolve userId → username for display; cache per unique userId in this request
+      const userCache = new Map<string, string>();
+      const resolveActor = async (userId: string): Promise<string> => {
+        if (userId === "system") return "system";
+        if (userCache.has(userId)) return userCache.get(userId)!;
+        const user = await storage.getUser(userId);
+        const name = user?.username ?? userId;
+        userCache.set(userId, name);
+        return name;
+      };
+
+      const enriched = await Promise.all(
+        logs.map(async (log) => ({
+          id: log.id,
+          action: log.action,
+          entityId: log.entityId,
+          details: log.details,
+          createdAt: log.createdAt,
+          actor: await resolveActor(log.userId),
+        }))
+      );
+
+      res.json(enriched);
+    } catch (error) {
+      console.error("Error fetching cost center activity:", error);
+      res.status(500).json({ message: "Failed to fetch cost center activity" });
+    }
+  });
+
   // GET /api/cost-centers/auto-seed-status - last successful auto-seed timestamp
   // and the most recent unacknowledged batch of newly-inserted districts (used
   // to drive the in-app admin notification banner on the management page).

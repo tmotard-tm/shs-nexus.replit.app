@@ -167,6 +167,7 @@ export interface IStorage {
   // Activity Logs
   getActivityLogs(): Promise<ActivityLog[]>;
   getActivityLogsByUser(userId: string): Promise<ActivityLog[]>;
+  getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
   
   // Dashboard Stats
@@ -1610,6 +1611,15 @@ export class MemStorage implements IStorage {
     return Array.from(this.activityLogs.values())
       .filter(log => log.userId === userId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }
+
+  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]> {
+    let results = Array.from(this.activityLogs.values())
+      .filter(log => log.entityType === entityType)
+      .filter(log => !entityId || log.entityId === entityId)
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    if (limit) results = results.slice(0, limit);
+    return results;
   }
 
   async createActivityLog(insertLog: InsertActivityLog): Promise<ActivityLog> {
@@ -4347,6 +4357,14 @@ export class DatabaseStorage implements IStorage {
 
   async getActivityLogsByUser(userId: string): Promise<ActivityLog[]> {
     return await db.select().from(activityLogs).where(eq(activityLogs.userId, userId)).orderBy(desc(activityLogs.createdAt));
+  }
+
+  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]> {
+    const conditions = [eq(activityLogs.entityType, entityType)];
+    if (entityId) conditions.push(eq(activityLogs.entityId, entityId));
+    const query = db.select().from(activityLogs).where(and(...conditions)).orderBy(desc(activityLogs.createdAt));
+    if (limit) return await query.limit(limit);
+    return await query;
   }
 
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {

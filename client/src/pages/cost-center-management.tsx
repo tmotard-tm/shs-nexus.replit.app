@@ -43,7 +43,15 @@ import {
   Bell,
   Eye,
   Download,
+  History,
 } from "lucide-react";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { formatDistanceToNow } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -307,12 +315,43 @@ export default function CostCenterManagement() {
   const [bulkFileName, setBulkFileName] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [historyDistrict, setHistoryDistrict] = useState<string | null>(null);
+
   const { data: items = [], isLoading } = useQuery<DistrictCostCenter[]>({
     queryKey: ["/api/cost-centers"],
   });
 
   const COST_CENTER_KEY = ["/api/cost-centers"] as const;
   const AUTO_SEED_STATUS_KEY = ["/api/cost-centers/auto-seed-status"] as const;
+
+  interface ActivityEntry {
+    id: string;
+    action: string;
+    entityId: string | null;
+    details: string | null;
+    createdAt: string;
+    actor: string;
+  }
+
+  const historyQueryKey = useMemo(
+    () => ["/api/cost-centers/activity", historyDistrict ?? "all"] as const,
+    [historyDistrict],
+  );
+
+  const { data: historyEntries = [], isLoading: historyLoading } = useQuery<ActivityEntry[]>({
+    queryKey: historyQueryKey,
+    queryFn: async () => {
+      const url = historyDistrict
+        ? `/api/cost-centers/activity?district=${encodeURIComponent(historyDistrict)}`
+        : "/api/cost-centers/activity";
+      const res = await fetch(url, { credentials: "include" });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+    enabled: isHistoryOpen,
+    staleTime: 30_000,
+  });
 
   const { data: autoSeedStatus } = useQuery<AutoSeedStatus>({
     queryKey: AUTO_SEED_STATUS_KEY,
@@ -827,6 +866,14 @@ export default function CostCenterManagement() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { setHistoryDistrict(null); setIsHistoryOpen(true); }}
+            data-testid="button-open-history"
+          >
+            <History className="mr-2 h-4 w-4" />
+            Change History
+          </Button>
           <Button
             variant="outline"
             onClick={() => triggerAutoSeedMutation.mutate()}
@@ -1467,15 +1514,27 @@ export default function CostCenterManagement() {
                           </div>
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            type="button"
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => setDeleting(row)}
-                            data-testid={`button-delete-${row.district}`}
-                          >
-                            <Trash2 className="h-4 w-4 text-destructive" />
-                          </Button>
+                          <div className="flex items-center justify-end gap-1">
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              title={`View history for district ${displayDistrict}`}
+                              onClick={() => { setHistoryDistrict(row.district); setIsHistoryOpen(true); }}
+                              data-testid={`button-history-${row.district}`}
+                            >
+                              <History className="h-4 w-4 text-muted-foreground" />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => setDeleting(row)}
+                              data-testid={`button-delete-${row.district}`}
+                            >
+                              <Trash2 className="h-4 w-4 text-destructive" />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );
@@ -1521,6 +1580,91 @@ export default function CostCenterManagement() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Sheet open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
+        <SheetContent className="w-full sm:max-w-xl flex flex-col" data-testid="history-sheet">
+          <SheetHeader>
+            <SheetTitle className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              Cost Center Change History
+            </SheetTitle>
+            <SheetDescription>
+              {historyDistrict ? (
+                <span>
+                  Showing changes for district{" "}
+                  <span className="font-mono font-semibold">{historyDistrict}</span>.{" "}
+                  <button
+                    type="button"
+                    className="underline text-foreground hover:no-underline"
+                    onClick={() => setHistoryDistrict(null)}
+                  >
+                    Show all districts
+                  </button>
+                </span>
+              ) : (
+                "All recent cost center changes. Click the history icon on a row to filter by district."
+              )}
+            </SheetDescription>
+          </SheetHeader>
+
+          <div className="flex-1 overflow-y-auto mt-4 space-y-3 pr-1">
+            {historyLoading ? (
+              <div className="space-y-2">
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <Skeleton key={i} className="h-16 w-full" />
+                ))}
+              </div>
+            ) : historyEntries.length === 0 ? (
+              <div className="py-10 text-center text-muted-foreground">
+                No history found{historyDistrict ? ` for district ${historyDistrict}` : ""}.
+              </div>
+            ) : (
+              historyEntries.map((entry) => (
+                <div
+                  key={entry.id}
+                  className="border rounded-md p-3 space-y-1"
+                  data-testid={`history-entry-${entry.id}`}
+                >
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <Badge variant="secondary" className="font-mono text-xs">
+                      {(
+                        {
+                          cost_center_created: "created",
+                          cost_center_updated: "updated",
+                          cost_center_deleted: "deleted",
+                          cost_center_bulk_import: "bulk import",
+                          cost_center_seed_defaults: "seed defaults",
+                          cost_center_auto_seed_manual: "auto-seed (manual)",
+                        } as Record<string, string>
+                      )[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " ")}
+                    </Badge>
+                    {entry.entityId && entry.entityId !== "*" && (
+                      <button
+                        type="button"
+                        className="font-mono text-xs text-muted-foreground hover:underline"
+                        title={`Filter to district ${entry.entityId}`}
+                        onClick={() => setHistoryDistrict(entry.entityId!)}
+                      >
+                        {entry.entityId}
+                      </button>
+                    )}
+                  </div>
+                  {entry.details && (
+                    <p className="text-sm">{entry.details}</p>
+                  )}
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                    <span title={new Date(entry.createdAt).toLocaleString()}>
+                      {formatDistanceToNow(new Date(entry.createdAt), { addSuffix: true })}
+                    </span>
+                    <span>·</span>
+                    <span>by {entry.actor}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
