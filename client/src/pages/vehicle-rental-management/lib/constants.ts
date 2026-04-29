@@ -87,9 +87,9 @@ export const gateClassColors: Record<
   GateClassification,
   { fg: string; bg: string }
 > = {
-  underwater: { fg: "#DC2626", bg: "#FEF2F2" },
-  marginal: { fg: "#B45309", bg: "#FFFBEB" },
-  profitable: { fg: "#0D9668", bg: "#ECFDF5" },
+  underwater: { fg: colors.red, bg: colors.redLight },
+  marginal: { fg: colors.amber, bg: colors.amberLight },
+  profitable: { fg: colors.green, bg: colors.greenLight },
 };
 
 export interface NavItem {
