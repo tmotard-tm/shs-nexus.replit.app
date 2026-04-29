@@ -1143,7 +1143,7 @@ export default function NewRentals() {
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
-                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ 90 days (avg daily PPT profit, last 90 days)">Daily PPT</th>
+                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)">Daily PPT</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
                 </tr>
