@@ -20,6 +20,7 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { useToast } from "@/hooks/use-toast";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 // FleetVehicle type for Holman API data
 interface FleetVehicle {
   vin: string;
@@ -134,6 +135,7 @@ const getHolmanStatusInfo = (status: string | undefined): { label: string; color
 
 export default function UpdateVehicle() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [location] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [brandingFilter, setBrandingFilter] = useState("all");
@@ -1190,6 +1192,9 @@ export default function UpdateVehicle() {
                           <p className="text-xs text-muted-foreground">Region: {vehicle.region || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">Division: {vehicle.division || 'N/A'}</p>
                           <p className="text-xs text-muted-foreground">District: {vehicle.district || 'N/A'}</p>
+                          {vehicle.district && lookupCostCenter(vehicle.district) && (
+                            <p className="text-xs text-muted-foreground">{lookupCostCenter(vehicle.district)}</p>
+                          )}
                           <div className="mt-2" onClick={(e) => e.stopPropagation()}>
                             <ViewInventoryButton vehicleNumber={vehicle.vehicleNumber} size="sm" />
                           </div>

@@ -17,6 +17,7 @@ import { MainContent } from "@/components/layout/main-content";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 
 export default function InventoryQueuePage() {
   const [viewQueueItem, setViewQueueItem] = useState<QueueItem | null>(null);
@@ -25,6 +26,7 @@ export default function InventoryQueuePage() {
   const [workModuleItem, setWorkModuleItem] = useState<QueueItem | null>(null);
   const [isWorkModuleOpen, setIsWorkModuleOpen] = useState(false);
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
 
   // Fetch Inventory Control queue items only
   const { data: queueItems = [], isLoading } = useQuery<QueueItem[]>({
@@ -246,7 +248,12 @@ export default function InventoryQueuePage() {
                       <TableCell className="font-medium">#{itemNumber}</TableCell>
                       <TableCell>{new Date(item.createdAt).toLocaleDateString()} {new Date(item.createdAt).toLocaleTimeString()}</TableCell>
                       <TableCell>{details.techId}</TableCell>
-                      <TableCell>{details.district}</TableCell>
+                      <TableCell>
+                        <div>{details.district}</div>
+                        {details.district && lookupCostCenter(details.district) && (
+                          <div className="text-xs text-muted-foreground">{lookupCostCenter(details.district)}</div>
+                        )}
+                      </TableCell>
                       <TableCell>{details.serviceOrder}</TableCell>
                       <TableCell>{details.amount}</TableCell>
                       <TableCell>
