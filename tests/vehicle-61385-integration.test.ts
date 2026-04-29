@@ -21,6 +21,7 @@ import {
   techVehicleAssignments,
   techVehicleAssignmentHistory,
   holmanVehiclesCache,
+  amsVehiclesCache,
   fleetOperationLog,
 } from "../shared/schema.js";
 import { writeThroughCaches } from "../server/fleet-operations-service.js";
@@ -237,6 +238,80 @@ test("Holman cache is centrally upserted via cachePayload from writeThroughCache
 
   // Cleanup.
   await db.delete(holmanVehiclesCache).where(eq(holmanVehiclesCache.holmanVehicleNumber, TRUCK_NUM));
+});
+
+test("AMS cache is centrally upserted via cachePayload from writeThroughCaches", async () => {
+  const AMS_VIN = "_t184_ams_vin_v1";
+  // Clean any leftover row from a prior run.
+  await db.delete(amsVehiclesCache).where(eq(amsVehiclesCache.vin, AMS_VIN));
+
+  // ── Assign path: status "success" with AMS cachePayload ──────────────────
+  await writeThroughCaches({
+    action: "assign",
+    params: { ldapId: NEW_TECH, truckNumber: TRUCK, techName: "J Casti", requestedBy: "test" },
+    tpms: { status: "skipped", message: "" },
+    holman: { status: "skipped", message: "" },
+    ams: {
+      status: "success",
+      message: "Assigned",
+      cachePayload: {
+        system: "ams",
+        vin: AMS_VIN,
+        ldap: NEW_TECH,
+        rawResponse: { Tech: NEW_TECH, VIN: AMS_VIN },
+      },
+    },
+  });
+
+  const row = await db.select().from(amsVehiclesCache)
+    .where(eq(amsVehiclesCache.vin, AMS_VIN));
+  assert.equal(row.length, 1, "ams cache row must be inserted by centralized helper");
+  assert.equal(row[0].amsAssignedLdap, NEW_TECH, "ams cache must record the assigned ldap");
+  assert.ok(row[0].lastAmsSyncAt instanceof Date, "lastAmsSyncAt must be set");
+  assert.equal(row[0].lastAmsError, null, "lastAmsError must be cleared on success");
+  assert.deepEqual(row[0].rawResponse, { Tech: NEW_TECH, VIN: AMS_VIN }, "rawResponse must be stored");
+
+  // ── Upsert path: re-run with unassign payload — must update in place ──────
+  await writeThroughCaches({
+    action: "unassign",
+    params: { ldapId: NEW_TECH, truckNumber: TRUCK, requestedBy: "test" },
+    tpms: { status: "skipped", message: "" },
+    holman: { status: "skipped", message: "" },
+    ams: {
+      status: "success",
+      message: "Unassigned",
+      cachePayload: {
+        system: "ams",
+        vin: AMS_VIN,
+        ldap: null,
+        rawResponse: { Tech: "", VIN: AMS_VIN },
+      },
+    },
+  });
+
+  const row2 = await db.select().from(amsVehiclesCache)
+    .where(eq(amsVehiclesCache.vin, AMS_VIN));
+  assert.equal(row2.length, 1, "upsert must not create a duplicate row");
+  assert.equal(row2[0].amsAssignedLdap, null, "ldap must be cleared after unassign upsert");
+  assert.equal(row2[0].lastAmsError, null, "lastAmsError must remain null after successful unassign");
+
+  // ── Skipped-status path: cache must NOT be touched when AMS is skipped ────
+  await writeThroughCaches({
+    action: "assign",
+    params: { ldapId: NEW_TECH, truckNumber: TRUCK, techName: "J Casti", requestedBy: "test" },
+    tpms: { status: "skipped", message: "" },
+    holman: { status: "skipped", message: "" },
+    ams: { status: "skipped", message: "AMS skipped" },
+  });
+
+  const row3 = await db.select().from(amsVehiclesCache)
+    .where(eq(amsVehiclesCache.vin, AMS_VIN));
+  assert.equal(row3[0].amsAssignedLdap, null, "skipped AMS status must not mutate cache — ldap must remain null");
+
+  // Cleanup.
+  await db.delete(amsVehiclesCache).where(eq(amsVehiclesCache.vin, AMS_VIN));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, NEW_TECH));
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, NEW_TECH));
 });
 
 test("unassign uses TPMS effectiveLdap for cleanup, not request author's ldapId", async () => {
