@@ -2776,8 +2776,8 @@ export default function RentalRepairTracker() {
 
         const renderRow = (entry: RepairTrackerEntry) => {
           const tint = flagBg(entry);
-          const baseBg = tint === "transparent" ? "#FCFDFE" : tint;
-          const hoverBg = tint === "transparent" ? "#F8FAFC" : tint;
+          const baseBg = tint === "transparent" ? colors.background : tint;
+          const hoverBg = tint === "transparent" ? colors.surface : tint;
           const sectionAccent = sectionMeta[entry.section]?.color ?? colors.accent;
           const flagTooltip =
             entry.flags?.red?.active ? entry.flags.red.tooltip :
