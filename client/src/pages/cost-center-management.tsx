@@ -76,6 +76,15 @@ import type { DistrictCostCenter } from "@shared/schema";
 const districtRegex = /^\d{4,7}$/;
 const costCenterRegex = /^[A-Za-z0-9]{5}$/;
 
+const ACTION_LABELS: Record<string, string> = {
+  cost_center_created: "created",
+  cost_center_updated: "updated",
+  cost_center_deleted: "deleted",
+  cost_center_bulk_import: "bulk import",
+  cost_center_seed_defaults: "seed defaults",
+  cost_center_auto_seed_manual: "auto-seed (manual)",
+};
+
 const createSchema = z.object({
   district: z.string().trim().regex(districtRegex, "District must be 4 to 7 digits"),
   costCenter: z.string().trim().regex(costCenterRegex, "Cost Center must be exactly 5 alphanumeric characters"),
@@ -368,6 +377,30 @@ export default function CostCenterManagement() {
     () => historyPages?.pages.flatMap((p) => p.entries) ?? [],
     [historyPages],
   );
+
+  const handleDownloadHistoryCsv = useCallback(() => {
+    if (!historyEntries.length) return;
+    const header = ["timestamp", "district", "action", "details", "actor"];
+    const rows = historyEntries.map((entry) => [
+      new Date(entry.createdAt).toISOString(),
+      entry.entityId && entry.entityId !== "*" ? entry.entityId : "",
+      ACTION_LABELS[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " "),
+      entry.details ?? "",
+      entry.actor,
+    ]);
+    const csv = Papa.unparse({ fields: header, data: rows });
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.style.display = "none";
+    const suffix = historyDistrict ? `-district-${historyDistrict}` : "";
+    a.download = `cost-center-history${suffix}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [historyEntries, historyDistrict]);
 
   const { data: autoSeedStatus } = useQuery<AutoSeedStatus>({
     queryKey: AUTO_SEED_STATUS_KEY,
@@ -1603,10 +1636,23 @@ export default function CostCenterManagement() {
       <Sheet open={isHistoryOpen} onOpenChange={setIsHistoryOpen}>
         <SheetContent className="w-full sm:max-w-xl flex flex-col" data-testid="history-sheet">
           <SheetHeader>
-            <SheetTitle className="flex items-center gap-2">
-              <History className="h-5 w-5" />
-              Cost Center Change History
-            </SheetTitle>
+            <div className="flex items-center justify-between gap-2">
+              <SheetTitle className="flex items-center gap-2">
+                <History className="h-5 w-5" />
+                Cost Center Change History
+              </SheetTitle>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleDownloadHistoryCsv}
+                disabled={historyLoading || historyEntries.length === 0}
+                data-testid="button-download-history-csv"
+              >
+                <Download className="mr-2 h-4 w-4" />
+                Download CSV
+              </Button>
+            </div>
             <SheetDescription>
               {historyDistrict ? (
                 <span>
@@ -1647,16 +1693,7 @@ export default function CostCenterManagement() {
                   >
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <Badge variant="secondary" className="font-mono text-xs">
-                        {(
-                          {
-                            cost_center_created: "created",
-                            cost_center_updated: "updated",
-                            cost_center_deleted: "deleted",
-                            cost_center_bulk_import: "bulk import",
-                            cost_center_seed_defaults: "seed defaults",
-                            cost_center_auto_seed_manual: "auto-seed (manual)",
-                          } as Record<string, string>
-                        )[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " ")}
+                        {ACTION_LABELS[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " ")}
                       </Badge>
                       {entry.entityId && entry.entityId !== "*" && (
                         <button
