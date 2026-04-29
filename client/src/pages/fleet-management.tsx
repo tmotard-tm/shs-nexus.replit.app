@@ -2084,7 +2084,7 @@ export default function FleetManagement() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All districts</SelectItem>
-                            {filterOptions.districts.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
+                            {filterOptions.districts.map(o => { const cc = lookupCostCenter(o); return <SelectItem key={o} value={o}>{cc ? `${o} · CC ${cc}` : o}</SelectItem>; })}
                           </SelectContent>
                         </Select>
                       </div>

@@ -16,6 +16,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getHolmanStatus, getVehicleOwnership } from "@/lib/vehicle-utils";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 
 interface SyncStatus {
   dataMode: 'live' | 'cached' | 'empty';
@@ -42,6 +43,7 @@ interface FleetVehiclesResponse {
 
 export default function ActiveVehicles() {
   const [location] = useLocation();
+  const { lookupCostCenter } = useCostCenters();
   const [searchQuery, setSearchQuery] = useState("");
   const [brandingFilter, setBrandingFilter] = useState("all");
   const [interiorFilter, setInteriorFilter] = useState("all");
@@ -567,9 +569,7 @@ export default function ActiveVehicles() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All districts</SelectItem>
-                                  {filterOptions.districts.map(option => (
-                                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                                  ))}
+                                  {filterOptions.districts.map(option => { const cc = lookupCostCenter(option); return <SelectItem key={option} value={option}>{cc ? `${option} · CC ${cc}` : option}</SelectItem>; })}
                                 </SelectContent>
                               </Select>
                             </div>

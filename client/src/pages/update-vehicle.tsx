@@ -740,9 +740,7 @@ export default function UpdateVehicle() {
                                 </SelectTrigger>
                                 <SelectContent>
                                   <SelectItem value="all">All districts</SelectItem>
-                                  {filterOptions.districts.map(option => (
-                                    <SelectItem key={option} value={option}>{option}</SelectItem>
-                                  ))}
+                                  {filterOptions.districts.map(option => { const cc = lookupCostCenter(option); return <SelectItem key={option} value={option}>{cc ? `${option} · CC ${cc}` : option}</SelectItem>; })}
                                 </SelectContent>
                               </Select>
                             </div>

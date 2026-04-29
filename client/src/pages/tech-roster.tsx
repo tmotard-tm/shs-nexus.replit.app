@@ -14,6 +14,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import type { AllTech } from "@shared/schema";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 
 function formatPhoneNumber(phone: string | null | undefined): string {
   if (!phone) return '-';
@@ -32,13 +33,15 @@ function MultiSelectFilter({
   options, 
   selected, 
   onChange,
-  testId
+  testId,
+  optionLabels,
 }: { 
   label: string; 
   options: string[]; 
   selected: string[]; 
   onChange: (values: string[]) => void;
   testId?: string;
+  optionLabels?: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -108,7 +111,7 @@ function MultiSelectFilter({
                 <div className={`flex h-4 w-4 items-center justify-center rounded border ${selected.includes(option) ? 'bg-primary border-primary' : 'border-muted-foreground/30'}`}>
                   {selected.includes(option) && <Check className="h-3 w-3 text-primary-foreground" />}
                 </div>
-                <span>{option}</span>
+                <span>{optionLabels?.[option] ?? option}</span>
               </div>
             ))
           )}
@@ -122,6 +125,7 @@ const PAGE_SIZE_OPTIONS = [25, 50, 100, 200];
 
 export default function TechRoster() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [districtFilter, setDistrictFilter] = useState<string[]>([]);
@@ -181,6 +185,15 @@ export default function TechRoster() {
   const uniqueDistricts = useMemo(() => 
     Array.from(new Set(techs.map(t => t.districtNo).filter(Boolean))).sort() as string[]
   , [techs]);
+
+  const districtOptionLabels = useMemo(() => {
+    const labels: Record<string, string> = {};
+    for (const d of uniqueDistricts) {
+      const cc = lookupCostCenter(d);
+      if (cc) labels[d] = `${d} · CC ${cc}`;
+    }
+    return labels;
+  }, [uniqueDistricts, lookupCostCenter]);
   
   const uniqueStatuses = useMemo(() => 
     Array.from(new Set(techs.map(t => t.employmentStatus).filter(Boolean))).sort() as string[]
@@ -391,6 +404,7 @@ export default function TechRoster() {
                           selected={districtFilter}
                           onChange={handleFilterChange(setDistrictFilter)}
                           testId="select-district-filter"
+                          optionLabels={districtOptionLabels}
                         />
                       </div>
                       <div className="col-span-2 flex items-end gap-2">

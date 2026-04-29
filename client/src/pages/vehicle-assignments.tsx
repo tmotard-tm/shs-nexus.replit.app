@@ -333,9 +333,7 @@ export default function VehicleAssignments() {
                           </SelectTrigger>
                           <SelectContent>
                             <SelectItem value="all">All Districts</SelectItem>
-                            {uniqueDistricts.map(district => (
-                              <SelectItem key={district} value={district!}>{district}</SelectItem>
-                            ))}
+                            {uniqueDistricts.map(district => { const cc = lookupCostCenter(district); return <SelectItem key={district} value={district!}>{cc ? `${district} · CC ${cc}` : district}</SelectItem>; })}
                           </SelectContent>
                         </Select>
                       </div>
