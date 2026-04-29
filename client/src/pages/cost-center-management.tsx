@@ -791,7 +791,7 @@ export default function CostCenterManagement() {
     const now = new Date();
     const pad = (n: number) => String(n).padStart(2, "0");
     const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const filename = `district-cost-centers-${date}.csv`;
+    const filename = isFiltered ? `district-cost-centers-filtered-${date}.csv` : `district-cost-centers-${date}.csv`;
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -801,7 +801,7 @@ export default function CostCenterManagement() {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 100);
-  }, [filteredSorted]);
+  }, [filteredSorted, isFiltered]);
 
   const newDistrictsBatchAt = useMemo(() => {
     const ts = autoSeedStatus?.newDistricts?.at;
