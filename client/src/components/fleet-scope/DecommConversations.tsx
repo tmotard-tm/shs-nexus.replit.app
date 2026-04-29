@@ -186,6 +186,7 @@ interface BatchResult {
 interface BatchImportRow {
   ldap: string;
   customVars: Record<string, string>;
+  truckNumber?: string;
 }
 
 export function DecommConversations({ vehicleData, initialTruckNumber }: DecommConversationsProps) {
@@ -480,18 +481,39 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       const ldapHeader = headers[0];
       const dynamicHeaders = headers.slice(1);
 
+      // Detect a "Truck #" column (case-insensitive, trimmed) among the
+      // dynamic columns.  Its value will be passed to the resolve endpoint to
+      // pin the exact vehicle row when a tech appears on multiple trucks.
+      const truckColHeader = dynamicHeaders.find(
+        h => h.trim().toLowerCase() === "truck #",
+      );
+
       const importRows: BatchImportRow[] = rows
         .filter(row => row[ldapHeader] && String(row[ldapHeader]).trim())
         .map(row => {
+          const ldap = String(row[ldapHeader]).trim();
           const customVars: Record<string, string> = {};
+          // Always inject the Column A value under its own header name so
+          // operators can use {LDAP} (or whatever the column is called) in the
+          // message template.
+          customVars[ldapHeader] = ldap;
           dynamicHeaders.forEach(h => {
             customVars[h] = row[h] != null ? String(row[h]) : "";
           });
-          return { ldap: String(row[ldapHeader]).trim(), customVars };
+          // Extract and normalise the truck number (pad to 6 digits) so the
+          // resolve call can narrow to the correct vehicle row.
+          let truckNumber: string | undefined;
+          if (truckColHeader) {
+            const raw = String(row[truckColHeader] ?? "").trim();
+            if (raw) truckNumber = raw.replace(/\D/g, "").padStart(6, "0");
+          }
+          return { ldap, customVars, truckNumber };
         });
 
       setBatchImportRows(importRows);
-      setBatchDynamicHeaders(dynamicHeaders);
+      // Include ldapHeader as the first insertable variable so operators can
+      // use {LDAP} (or whatever Column A is named) in the message template.
+      setBatchDynamicHeaders([ldapHeader, ...dynamicHeaders]);
       setBatchFileName(file.name);
       toast({ title: "File imported", description: `${importRows.length} rows with ${dynamicHeaders.length} variable column${dynamicHeaders.length !== 1 ? "s" : ""} detected.` });
     } catch (err: any) {
@@ -501,28 +523,44 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
 
   const handleBatchResolve = async () => {
     if (batchImportRows.length === 0) return;
-    const ldaps = batchImportRows.map(r => r.ldap);
 
     setBatchResolving(true);
     try {
-      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", { ldaps });
+      // Send the new `rows` format so the server can narrow by truck number
+      // when the XLSX included a "Truck #" column.
+      const resp = await apiRequest("POST", "/api/fs/decomm-batch-resolve", {
+        rows: batchImportRows.map(r => ({
+          ldap: r.ldap,
+          truckNumber: r.truckNumber,
+        })),
+      });
       const data = await resp.json();
       const resolvedRaw: any[] = data.resolved || [];
-      const importByLdap = new Map<string, BatchImportRow[]>();
+
+      // Build a lookup from LDAP+truckNumber (or LDAP alone) to import row so
+      // we can restore customVars after the server resolves each row.
+      const importByKey = new Map<string, BatchImportRow[]>();
       batchImportRows.forEach(ir => {
-        const key = ir.ldap.toUpperCase();
-        if (!importByLdap.has(key)) importByLdap.set(key, []);
-        importByLdap.get(key)!.push(ir);
+        const keys: string[] = [];
+        if (ir.truckNumber) keys.push(`${ir.ldap.toUpperCase()}:${ir.truckNumber}`);
+        keys.push(ir.ldap.toUpperCase());
+        keys.forEach(k => {
+          if (!importByKey.has(k)) importByKey.set(k, []);
+          importByKey.get(k)!.push(ir);
+        });
       });
-      const ldapCounters = new Map<string, number>();
+      const keyCounters = new Map<string, number>();
       // Task #228: each resolved row carries `tech` and `manager` sub-objects from
       // the server. Default both .enabled to true so the operator's first action
       // (Send) covers both — the user can opt out of either side per-row.
       const resolved: BatchRecipient[] = resolvedRaw.map((r: any) => {
-        const key = String(r.ldap || '').toUpperCase();
-        const idx = ldapCounters.get(key) || 0;
-        ldapCounters.set(key, idx + 1);
-        const rows = importByLdap.get(key) || [];
+        const ldapKey = String(r.ldap || '').toUpperCase();
+        const truckKey = r.truckNumber ? `${ldapKey}:${r.truckNumber}` : ldapKey;
+        // Prefer the precise ldap+truck key; fall back to ldap-only.
+        const lookupKey = (importByKey.has(truckKey) ? truckKey : ldapKey);
+        const idx = keyCounters.get(lookupKey) || 0;
+        keyCounters.set(lookupKey, idx + 1);
+        const rows = importByKey.get(lookupKey) || [];
         const importRow = rows[idx] || rows[0];
         const tech = r.tech || { name: null, phone: null, status: 'no_phone', source: null };
         const manager = r.manager || { name: null, phone: null, entId: null, status: 'no_phone', source: null };
@@ -654,6 +692,112 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       false
     );
   }).slice(0, 30);
+
+  // Reusable message bubble — used in both single-column and split-column views.
+  const renderMessageBubble = (msg: DecommMessage) => (
+    <div
+      key={msg.id}
+      className={`flex ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}
+      data-testid={`decomm-message-${msg.id}`}
+    >
+      <div
+        className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
+          msg.direction === "outbound"
+            ? "bg-primary text-primary-foreground"
+            : "bg-muted text-foreground"
+        }`}
+      >
+        <div className="flex items-center gap-1.5 mb-1">
+          {msg.direction === "outbound" && msg.senderName && (
+            <span className="text-xs opacity-70">{msg.senderName}</span>
+          )}
+          <Badge variant="outline" className={`text-[10px] px-1 py-0 ${
+            msg.direction === "outbound"
+              ? "border-primary-foreground/30 text-primary-foreground/80"
+              : CONTACT_TYPE_COLORS[msg.contactType] || ""
+          }`}>
+            {msg.contactType === "manager" && msg.ccForLdap
+              ? `Manager CC (${msg.ccForLdap})`
+              : (CONTACT_TYPE_LABELS[msg.contactType] || msg.contactType)}
+          </Badge>
+        </div>
+        {msg.mediaUrl && msg.mediaType?.startsWith('image/') && (
+          <div className="mb-1.5">
+            <a href={`/api/fs/mms-media/${msg.mediaUrl}`} target="_blank" rel="noopener noreferrer">
+              <img
+                src={`/api/fs/mms-media/${msg.mediaUrl}`}
+                alt="MMS attachment"
+                className="rounded max-w-full max-h-60 cursor-pointer hover:opacity-90 transition-opacity"
+              />
+            </a>
+            <a
+              href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+              className={`inline-flex items-center gap-1 text-xs mt-1 hover:underline ${
+                msg.direction === "outbound" ? "text-primary-foreground/80" : "text-muted-foreground"
+              }`}
+            >
+              <Download className="h-3 w-3" />
+              Download
+            </a>
+          </div>
+        )}
+        {msg.mediaUrl && !msg.mediaType?.startsWith('image/') && (
+          <a
+            href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+            className={`inline-flex items-center gap-1.5 text-xs mb-1 px-2 py-1 rounded border hover:underline ${
+              msg.direction === "outbound"
+                ? "border-primary-foreground/30 text-primary-foreground/80"
+                : "border-border text-muted-foreground"
+            }`}
+          >
+            <Download className="h-3 w-3" />
+            Download attachment ({msg.mediaType?.split('/')[1] || 'file'})
+          </a>
+        )}
+        {!msg.mediaUrl && msg.status === 'media_failed' && (
+          <div className={`flex flex-col gap-1 mb-1 px-2 py-1 rounded border italic ${
+            msg.direction === "outbound"
+              ? "border-primary-foreground/30 text-primary-foreground/80"
+              : "border-amber-300 bg-amber-50 text-amber-800"
+          }`}>
+            <span className="text-xs">📷 Photo attached but didn't save — try retry, otherwise ask sender to resend</span>
+            {msg.direction === "inbound" && (
+              <button
+                type="button"
+                onClick={() => retryMediaMutation.mutate(msg.id)}
+                disabled={retryMediaMutation.isPending && retryMediaMutation.variables === msg.id}
+                className="self-start inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-amber-400 bg-white hover:bg-amber-100 not-italic disabled:opacity-50"
+                data-testid={`button-retry-media-${msg.id}`}
+              >
+                {retryMediaMutation.isPending && retryMediaMutation.variables === msg.id ? (
+                  <>
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                    Retrying…
+                  </>
+                ) : (
+                  <>
+                    <Download className="h-3 w-3" />
+                    Retry download
+                  </>
+                )}
+              </button>
+            )}
+          </div>
+        )}
+        {msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
+        <div className={`flex items-center gap-1 mt-1 ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
+          <span className="text-xs opacity-60">
+            {formatTime(msg.sentAt)}
+          </span>
+          {msg.direction === "outbound" && (
+            <span className="text-xs opacity-60">
+              {msg.status === "failed" ? "· Failed" : msg.status === "delivered" ? "· Delivered" : ""}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="flex h-[calc(100vh-180px)] gap-0 border rounded-lg overflow-hidden">
@@ -833,119 +977,50 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
               </Button>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {messages.length === 0 ? (
-                <div className="text-center text-sm text-muted-foreground py-8">
-                  No messages yet. Select a contact below and send the first message.
-                </div>
-              ) : (
-                messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}
-                    data-testid={`decomm-message-${msg.id}`}
-                  >
-                    <div
-                      className={`max-w-[75%] rounded-lg px-3 py-2 text-sm ${
-                        msg.direction === "outbound"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-foreground"
-                      }`}
-                    >
-                      <div className="flex items-center gap-1.5 mb-1">
-                        {msg.direction === "outbound" && msg.senderName && (
-                          <span className="text-xs opacity-70">{msg.senderName}</span>
-                        )}
-                        <Badge variant="outline" className={`text-[10px] px-1 py-0 ${
-                          msg.direction === "outbound"
-                            ? "border-primary-foreground/30 text-primary-foreground/80"
-                            : CONTACT_TYPE_COLORS[msg.contactType] || ""
-                        }`}>
-                          {msg.contactType === "manager" && msg.ccForLdap
-                            ? `Manager CC (${msg.ccForLdap})`
-                            : (CONTACT_TYPE_LABELS[msg.contactType] || msg.contactType)}
-                        </Badge>
+            {(() => {
+              const techMsgs = messages.filter(m => m.contactType === 'tech' || m.contactType === 'nearest_tech');
+              const mgrMsgs = messages.filter(m => m.contactType === 'manager');
+              const hasBothColumns = techMsgs.length > 0 && mgrMsgs.length > 0;
+              if (hasBothColumns) {
+                const techContactName = techMsgs.find(m => m.contactName)?.contactName || selectedVehicle?.fullName || 'Tech';
+                const mgrContactName = mgrMsgs.find(m => m.contactName)?.contactName || selectedVehicle?.managerName || 'Manager';
+                return (
+                  <div className="flex-1 flex overflow-hidden">
+                    <div className="flex-1 flex flex-col min-w-0 border-r">
+                      <div className="px-3 py-2 border-b bg-muted/10 flex items-center gap-1.5 flex-shrink-0">
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${CONTACT_TYPE_COLORS.tech}`}>Tech</Badge>
+                        <span className="text-xs font-medium truncate">{techContactName}</span>
                       </div>
-                      {msg.mediaUrl && msg.mediaType?.startsWith('image/') && (
-                        <div className="mb-1.5">
-                          <a href={`/api/fs/mms-media/${msg.mediaUrl}`} target="_blank" rel="noopener noreferrer">
-                            <img
-                              src={`/api/fs/mms-media/${msg.mediaUrl}`}
-                              alt="MMS attachment"
-                              className="rounded max-w-full max-h-60 cursor-pointer hover:opacity-90 transition-opacity"
-                            />
-                          </a>
-                          <a
-                            href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
-                            className={`inline-flex items-center gap-1 text-xs mt-1 hover:underline ${
-                              msg.direction === "outbound" ? "text-primary-foreground/80" : "text-muted-foreground"
-                            }`}
-                          >
-                            <Download className="h-3 w-3" />
-                            Download
-                          </a>
-                        </div>
-                      )}
-                      {msg.mediaUrl && !msg.mediaType?.startsWith('image/') && (
-                        <a
-                          href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
-                          className={`inline-flex items-center gap-1.5 text-xs mb-1 px-2 py-1 rounded border hover:underline ${
-                            msg.direction === "outbound"
-                              ? "border-primary-foreground/30 text-primary-foreground/80"
-                              : "border-border text-muted-foreground"
-                          }`}
-                        >
-                          <Download className="h-3 w-3" />
-                          Download attachment ({msg.mediaType?.split('/')[1] || 'file'})
-                        </a>
-                      )}
-                      {!msg.mediaUrl && msg.status === 'media_failed' && (
-                        <div className={`flex flex-col gap-1 mb-1 px-2 py-1 rounded border italic ${
-                          msg.direction === "outbound"
-                            ? "border-primary-foreground/30 text-primary-foreground/80"
-                            : "border-amber-300 bg-amber-50 text-amber-800"
-                        }`}>
-                          <span className="text-xs">📷 Photo attached but didn't save — try retry, otherwise ask sender to resend</span>
-                          {msg.direction === "inbound" && (
-                            <button
-                              type="button"
-                              onClick={() => retryMediaMutation.mutate(msg.id)}
-                              disabled={retryMediaMutation.isPending && retryMediaMutation.variables === msg.id}
-                              className="self-start inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-amber-400 bg-white hover:bg-amber-100 not-italic disabled:opacity-50"
-                              data-testid={`button-retry-media-${msg.id}`}
-                            >
-                              {retryMediaMutation.isPending && retryMediaMutation.variables === msg.id ? (
-                                <>
-                                  <Loader2 className="h-3 w-3 animate-spin" />
-                                  Retrying…
-                                </>
-                              ) : (
-                                <>
-                                  <Download className="h-3 w-3" />
-                                  Retry download
-                                </>
-                              )}
-                            </button>
-                          )}
-                        </div>
-                      )}
-                      {msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
-                      <div className={`flex items-center gap-1 mt-1 ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
-                        <span className="text-xs opacity-60">
-                          {formatTime(msg.sentAt)}
-                        </span>
-                        {msg.direction === "outbound" && (
-                          <span className="text-xs opacity-60">
-                            {msg.status === "failed" ? "· Failed" : msg.status === "delivered" ? "· Delivered" : ""}
-                          </span>
-                        )}
+                      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                        {techMsgs.map(renderMessageBubble)}
+                        <div ref={messagesEndRef} />
+                      </div>
+                    </div>
+                    <div className="flex-1 flex flex-col min-w-0">
+                      <div className="px-3 py-2 border-b bg-muted/10 flex items-center gap-1.5 flex-shrink-0">
+                        <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${CONTACT_TYPE_COLORS.manager}`}>Manager</Badge>
+                        <span className="text-xs font-medium truncate">{mgrContactName}</span>
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                        {mgrMsgs.map(renderMessageBubble)}
                       </div>
                     </div>
                   </div>
-                ))
-              )}
-              <div ref={messagesEndRef} />
-            </div>
+                );
+              }
+              return (
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                  {messages.length === 0 ? (
+                    <div className="text-center text-sm text-muted-foreground py-8">
+                      No messages yet. Select a contact below and send the first message.
+                    </div>
+                  ) : (
+                    messages.map(renderMessageBubble)
+                  )}
+                  <div ref={messagesEndRef} />
+                </div>
+              );
+            })()}
 
             {contactOptions.length === 0 ? (
               <div className="px-3 py-2 bg-muted/40 border-t text-xs text-muted-foreground text-center">
@@ -1305,11 +1380,13 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                             ? '— not found in TPMS_EXTRACT'
                             : u.reason === 'no_vehicle_match'
                               ? '— in TPMS_EXTRACT but no decommissioning vehicle references this LDAP'
-                              : u.reason === 'no_phone_for_contact_type'
-                                ? '— matched a vehicle, but no phone number available for the selected contact type'
-                                : u.reason === 'tpms_lookup_failed'
-                                  ? '— Snowflake TPMS_EXTRACT lookup failed; please retry'
-                                  : `— ${u.reason}`}
+                              : u.reason === 'no_vehicle_for_truck'
+                                ? '— LDAP matched other vehicles but not the truck number in this row'
+                                : u.reason === 'no_phone_for_contact_type'
+                                  ? '— matched a vehicle, but no phone number available for the selected contact type'
+                                  : u.reason === 'tpms_lookup_failed'
+                                    ? '— Snowflake TPMS_EXTRACT lookup failed; please retry'
+                                    : `— ${u.reason}`}
                         </span>
                       </li>
                     ))}

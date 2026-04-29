@@ -16050,10 +16050,36 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.post("/decomm-batch-resolve", async (req, res) => {
     try {
-      const { ldaps } = req.body;
-      if (!ldaps || !Array.isArray(ldaps) || ldaps.length === 0) {
-        return res.status(400).json({ message: "ldaps array is required" });
+      // Accept either the legacy { ldaps: string[] } format or the new
+      // { rows: Array<{ ldap: string, truckNumber?: string }> } format.
+      // The new format lets callers pin a specific truck number so that when
+      // a tech appears on multiple vehicles in the decommissioning table the
+      // correct row is selected (e.g. IEMMANU has 5 trucks — the XLSX "Truck #"
+      // column disambiguates which one to file the conversation under).
+      let inputRows: Array<{ ldap: string; truckNumber?: string }>;
+      if (Array.isArray(req.body.rows)) {
+        inputRows = req.body.rows.map((r: any) => ({
+          ldap: String(r.ldap ?? '').trim(),
+          truckNumber: r.truckNumber ? String(r.truckNumber).trim() : undefined,
+        }));
+      } else if (Array.isArray(req.body.ldaps)) {
+        inputRows = req.body.ldaps.map((l: any) => ({ ldap: String(l ?? '').trim() }));
+      } else {
+        return res.status(400).json({ message: "rows or ldaps array is required" });
       }
+      if (inputRows.length === 0) {
+        return res.status(400).json({ message: "rows or ldaps array is required" });
+      }
+      // Normalise truck numbers to 6-digit zero-padded format so they match
+      // the fs_decommissioning_vehicles.truck_number column (always 6 digits).
+      inputRows = inputRows.map(r => ({
+        ...r,
+        truckNumber: r.truckNumber
+          ? r.truckNumber.replace(/\D/g, '').padStart(6, '0')
+          : undefined,
+      }));
+      // The ldaps array (deduped) drives the TPMS snapshot lookups.
+      const ldaps = inputRows.map(r => r.ldap);
 
       const allVehicles = await getDb().select().from(decommissioningVehicles);
 
@@ -16121,12 +16147,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // delayed by per-row UPDATEs.
       const backfillQueue: { id: number; updates: Record<string, string> }[] = [];
 
-      for (const rawLdap of ldaps) {
-        const ldap = String(rawLdap ?? '').trim().toUpperCase();
+      for (const inputRow of inputRows) {
+        const ldap = inputRow.ldap.toUpperCase();
         if (!ldap) continue;
+        const pinTruck = inputRow.truckNumber; // already zero-padded or undefined
 
         // Match the LDAP against the same Enterprise-ID columns we always
         // matched against. Precedence: tech (assigned) > manager > nearest tech > truck pad.
+        //
+        // When the caller supplies a pinTruck number, we FIRST try to find a
+        // vehicle matching BOTH the LDAP and the truck number.  If the LDAP
+        // matches other vehicles but the truck number doesn't match any of them
+        // we push to unresolved with reason 'no_vehicle_for_truck' so the
+        // operator knows the XLSX pairing is wrong.
         let vehicle = allVehicles.find(v => v.enterpriseId?.toUpperCase() === ldap);
         let matchedVia: 'tech' | 'manager' | 'nearest_tech' | 'truck' | null = vehicle ? 'tech' : null;
         if (!vehicle) {
@@ -16140,6 +16173,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (!vehicle) {
           vehicle = allVehicles.find(v => v.truckNumber === ldap.padStart(6, '0'));
           if (vehicle) matchedVia = 'truck';
+        }
+
+        // If a truck number was supplied, narrow the match to the specific vehicle.
+        if (pinTruck && vehicle) {
+          if (vehicle.truckNumber !== pinTruck) {
+            // The first-match vehicle is for a different truck.  Try to find
+            // the right one by LDAP + truck number.
+            const narrowed = allVehicles.find(
+              v => v.enterpriseId?.toUpperCase() === ldap && v.truckNumber === pinTruck,
+            );
+            if (narrowed) {
+              vehicle = narrowed;
+              matchedVia = 'tech';
+            } else {
+              // LDAP matches but not for this truck — flag it clearly.
+              unresolved.push({ ldap: inputRow.ldap, reason: 'no_vehicle_for_truck' });
+              continue;
+            }
+          }
+          // else: the first match already has the correct truck number — keep it.
         }
 
         const techTpms = techTpmsHits.get(ldap);
