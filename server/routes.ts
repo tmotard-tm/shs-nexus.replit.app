@@ -16453,6 +16453,46 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Return the most recent fleet operation log entry for a given truck number,
+  // so the frontend can display per-system sync status without waiting for a mutation.
+  app.get("/api/fleet-ops/recent-op/:truckNumber", requireAuth, async (req, res) => {
+    try {
+      const { truckNumber } = req.params;
+      const { toHolmanRef, toDisplayNumber, toCanonical } = await import("./vehicle-number-utils");
+      const candidates = Array.from(new Set([
+        truckNumber.trim(),
+        toHolmanRef(truckNumber),
+        toDisplayNumber(truckNumber),
+        toCanonical(truckNumber),
+      ])).filter(Boolean);
+
+      const { fleetOperationLog: fol } = await import("@shared/schema");
+      const { or, eq, desc } = await import("drizzle-orm");
+      const orClauses = candidates.map(c => eq(fol.truckNumber, c));
+      const rows = await db.select({
+        id: fol.id,
+        operationType: fol.operationType,
+        tpmsStatus: fol.tpmsStatus,
+        tpmsMessage: fol.tpmsMessage,
+        holmanStatus: fol.holmanStatus,
+        holmanMessage: fol.holmanMessage,
+        amsStatus: fol.amsStatus,
+        amsMessage: fol.amsMessage,
+        toLdap: fol.toLdap,
+        toTechName: fol.toTechName,
+        requestedBy: fol.requestedBy,
+        createdAt: fol.createdAt,
+      }).from(fol).where(or(...orClauses)).orderBy(desc(fol.createdAt)).limit(1);
+
+      if (!rows[0]) {
+        return res.status(404).json({ message: "No operation log found for this vehicle" });
+      }
+      res.json(rows[0]);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   // ─── Cross-System Alignment Endpoints ───────────────────────────────────────
 
   // Role guard helper for fleet admin operations

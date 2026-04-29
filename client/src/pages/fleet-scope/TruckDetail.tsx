@@ -58,6 +58,7 @@ import { ArrowLeft, Save, Search, FileCheck, Wrench, Tags, Calendar, Truck as Tr
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
+import { SystemSyncBadges } from "@/components/fleet-scope/SystemSyncBadges";
 
 interface FleetOpsSystemResult {
   status: "success" | "failed" | "skipped" | "pending";
@@ -65,12 +66,44 @@ interface FleetOpsSystemResult {
 }
 
 interface FleetOpsResult {
+  log?: { id: number };
   tpms: FleetOpsSystemResult;
   holman: FleetOpsSystemResult;
   ams: FleetOpsSystemResult;
   overallSuccess: boolean;
   partialSuccess: boolean;
   message?: string;
+}
+
+interface RecentOpLog {
+  id: number;
+  operationType: string;
+  tpmsStatus: string | null;
+  tpmsMessage: string | null;
+  holmanStatus: string | null;
+  holmanMessage: string | null;
+  amsStatus: string | null;
+  amsMessage: string | null;
+  toLdap: string | null;
+  toTechName: string | null;
+  requestedBy: string | null;
+  createdAt: string;
+}
+
+interface FleetOpLogEntry {
+  id: number;
+  operationType: string;
+  tpmsStatus: string | null;
+  tpmsMessage: string | null;
+  holmanStatus: string | null;
+  holmanMessage: string | null;
+  amsStatus: string | null;
+  amsMessage: string | null;
+  fromLdap: string | null;
+  toLdap: string | null;
+  toTechName: string | null;
+  requestedBy: string | null;
+  createdAt: string;
 }
 
 type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
@@ -256,6 +289,35 @@ export default function TruckDetail() {
     enabled: !!techSearchQuery,
   });
 
+  // Last fleet operation result for this truck (inline system sync badges)
+  const [lastOpResult, setLastOpResult] = useState<FleetOpsResult | null>(null);
+  const [opDetailDialogOpen, setOpDetailDialogOpen] = useState(false);
+
+  // Most recent op log for this truck — persists status across page reloads
+  const { data: recentOpLog } = useQuery<RecentOpLog | null>({
+    queryKey: ["/api/fleet-ops/recent-op", truckNumberForSpecialty],
+    queryFn: async () => {
+      if (!truckNumberForSpecialty) return null;
+      const res = await fetch(`/api/fleet-ops/recent-op/${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!truckNumberForSpecialty,
+  });
+
+  // All op logs for this truck — fetched only when the detail dialog is open
+  const { data: opDetailLogs } = useQuery<FleetOpLogEntry[]>({
+    queryKey: ["/api/fleet-ops/logs", truckNumberForSpecialty],
+    queryFn: async () => {
+      const res = await fetch(`/api/fleet-ops/logs?truckNumber=${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return [];
+      const json = await res.json();
+      return Array.isArray(json) ? json : (json.data || []);
+    },
+    enabled: opDetailDialogOpen && !!truckNumberForSpecialty,
+    staleTime: 0,
+  });
+
   const assignTechMutation = useMutation({
     mutationFn: async ({ enterpriseId, districtNo, techName: tName }: { enterpriseId: string; districtNo: string; techName?: string }): Promise<FleetOpsResult> => {
       const statusCd = vehicleStatus?.holmanAssignedStatusCd;
@@ -271,6 +333,7 @@ export default function TruckDetail() {
       return res.json() as Promise<FleetOpsResult>;
     },
     onSuccess: (result: FleetOpsResult) => {
+      setLastOpResult(result);
       if (result.overallSuccess) {
         toast({ title: "Technician Assigned", description: "Tech assigned to vehicle in all systems." });
       } else if (result.partialSuccess) {
@@ -295,6 +358,7 @@ export default function TruckDetail() {
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
       queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/vehicle-status", truckNumberForSpecialty] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/recent-op", truckNumberForSpecialty] });
     },
     onError: (err: any) => {
       if (err.status === 409 || (typeof err.message === 'string' && err.message.includes('being updated'))) {
@@ -1989,6 +2053,11 @@ export default function TruckDetail() {
                         const currentEnterprise = info?.ldapId || techProfile?.enterpriseId || techSpecialtyData?.enterpriseId;
                         
                         if (!hasAnyData) {
+                          const emptyStateSrc = lastOpResult
+                            ? { tpmsStatus: lastOpResult.tpms?.status, tpmsMessage: lastOpResult.tpms?.message, holmanStatus: lastOpResult.holman?.status, holmanMessage: lastOpResult.holman?.message, amsStatus: lastOpResult.ams?.status, amsMessage: lastOpResult.ams?.message, logId: lastOpResult.log?.id ?? recentOpLog?.id, timestamp: undefined as string | undefined }
+                            : recentOpLog
+                            ? { tpmsStatus: recentOpLog.tpmsStatus ?? undefined, tpmsMessage: recentOpLog.tpmsMessage ?? undefined, holmanStatus: recentOpLog.holmanStatus ?? undefined, holmanMessage: recentOpLog.holmanMessage ?? undefined, amsStatus: recentOpLog.amsStatus ?? undefined, amsMessage: recentOpLog.amsMessage ?? undefined, logId: recentOpLog.id, timestamp: recentOpLog.createdAt }
+                            : null;
                           return (
                             <div className="text-center py-6 space-y-3">
                               <Package className="w-8 h-8 mx-auto text-muted-foreground/40 mb-2" />
@@ -1996,6 +2065,22 @@ export default function TruckDetail() {
                               <p className="text-xs text-muted-foreground mt-1">
                                 The vehicle may not be registered in TPMS or the service is unavailable.
                               </p>
+                              {emptyStateSrc && (
+                                <div className="flex items-center gap-1.5 justify-center text-xs text-muted-foreground">
+                                  <span className="shrink-0">Last sync:</span>
+                                  <SystemSyncBadges
+                                    tpmsStatus={emptyStateSrc.tpmsStatus}
+                                    tpmsMessage={emptyStateSrc.tpmsMessage}
+                                    holmanStatus={emptyStateSrc.holmanStatus}
+                                    holmanMessage={emptyStateSrc.holmanMessage}
+                                    amsStatus={emptyStateSrc.amsStatus}
+                                    amsMessage={emptyStateSrc.amsMessage}
+                                    logId={emptyStateSrc.logId}
+                                    timestamp={emptyStateSrc.timestamp}
+                                    onOpenDetail={() => setOpDetailDialogOpen(true)}
+                                  />
+                                </div>
+                              )}
                               <Button
                                 type="button"
                                 variant="outline"
@@ -2166,6 +2251,50 @@ export default function TruckDetail() {
                               </div>
                             )}
 
+                            {/* System sync status badges — shown after any assign/unassign op */}
+                            {(() => {
+                              const src = lastOpResult
+                                ? {
+                                    tpmsStatus: lastOpResult.tpms?.status,
+                                    tpmsMessage: lastOpResult.tpms?.message,
+                                    holmanStatus: lastOpResult.holman?.status,
+                                    holmanMessage: lastOpResult.holman?.message,
+                                    amsStatus: lastOpResult.ams?.status,
+                                    amsMessage: lastOpResult.ams?.message,
+                                    logId: lastOpResult.log?.id ?? recentOpLog?.id,
+                                    timestamp: undefined as string | undefined,
+                                  }
+                                : recentOpLog
+                                ? {
+                                    tpmsStatus: recentOpLog.tpmsStatus ?? undefined,
+                                    tpmsMessage: recentOpLog.tpmsMessage ?? undefined,
+                                    holmanStatus: recentOpLog.holmanStatus ?? undefined,
+                                    holmanMessage: recentOpLog.holmanMessage ?? undefined,
+                                    amsStatus: recentOpLog.amsStatus ?? undefined,
+                                    amsMessage: recentOpLog.amsMessage ?? undefined,
+                                    logId: recentOpLog.id,
+                                    timestamp: recentOpLog.createdAt,
+                                  }
+                                : null;
+                              if (!src) return null;
+                              return (
+                                <div className="flex items-center gap-1.5 justify-between text-xs text-muted-foreground">
+                                  <span className="shrink-0">Last sync:</span>
+                                  <SystemSyncBadges
+                                    tpmsStatus={src.tpmsStatus}
+                                    tpmsMessage={src.tpmsMessage}
+                                    holmanStatus={src.holmanStatus}
+                                    holmanMessage={src.holmanMessage}
+                                    amsStatus={src.amsStatus}
+                                    amsMessage={src.amsMessage}
+                                    logId={src.logId}
+                                    timestamp={src.timestamp}
+                                    onOpenDetail={() => setOpDetailDialogOpen(true)}
+                                  />
+                                </div>
+                              );
+                            })()}
+
                             <div className="flex items-center gap-2 justify-end flex-wrap">
                               <Button
                                 type="button"
@@ -2191,6 +2320,7 @@ export default function TruckDetail() {
                                     try {
                                       const res = await apiRequest("POST", `/api/fleet-ops/unassign`, { truckNumber: truckNumberForSpecialty, ldapId: currentEnterprise });
                                       const result = await res.json() as FleetOpsResult;
+                                      setLastOpResult(result);
                                       if (result.overallSuccess) {
                                         toast({ title: "Unassigned", description: "Technician unassigned from vehicle in all systems." });
                                       } else if (result.partialSuccess) {
@@ -2207,6 +2337,7 @@ export default function TruckDetail() {
                                       }
                                       queryClient.invalidateQueries({ queryKey: ["/api/tpms/lookup/truck", truckNumberForSpecialty] });
                                       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
+                                      queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/recent-op", truckNumberForSpecialty] });
                                     } catch (err: unknown) {
                                       toast({ title: "Unassign failed", description: err instanceof Error ? err.message : "Unknown error", variant: "destructive" });
                                     }
@@ -2727,6 +2858,74 @@ export default function TruckDetail() {
             <Button type="button" variant="ghost" onClick={() => setShowAssignTechModal(false)}>
               Cancel
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Operation History Detail Dialog */}
+      <Dialog open={opDetailDialogOpen} onOpenChange={setOpDetailDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Operation History — Truck #{truckNumberForSpecialty}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+            {!opDetailLogs ? (
+              <div className="space-y-2">
+                <Skeleton className="h-16 w-full" />
+                <Skeleton className="h-16 w-full" />
+              </div>
+            ) : opDetailLogs.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-6">No operations logged for this vehicle.</p>
+            ) : (
+              opDetailLogs.slice(0, 10).map((log: FleetOpLogEntry, i: number) => {
+                const systems: Array<{ key: string; label: string; status: string | null; message: string | null }> = [
+                  { key: "tpms", label: "TPMS", status: log.tpmsStatus, message: log.tpmsMessage },
+                  { key: "holman", label: "Holman", status: log.holmanStatus, message: log.holmanMessage },
+                  { key: "ams", label: "AMS", status: log.amsStatus, message: log.amsMessage },
+                ];
+                const statusColor = (s: string) =>
+                  s === "success" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300"
+                  : s === "failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+                  : s === "pending" ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300"
+                  : "bg-muted text-muted-foreground";
+                return (
+                  <div key={i} className="rounded-md border p-3 space-y-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-medium capitalize">{log.operationType?.replace(/_/g, " ")}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {log.createdAt ? new Date(log.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}
+                      </span>
+                    </div>
+                    {(log.fromLdap || log.toLdap) && (
+                      <div className="text-xs text-muted-foreground">
+                        {log.fromLdap && <span>{log.fromLdap} → </span>}
+                        {log.toLdap && <span className="font-medium text-foreground">{log.toLdap}{log.toTechName ? ` (${log.toTechName})` : ""}</span>}
+                      </div>
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {systems.map(({ key, label, status, message }) => (
+                        status ? (
+                          <span
+                            key={key}
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-xs font-medium ${statusColor(status)}`}
+                            title={message || undefined}
+                          >
+                            <span className="font-mono">{label}</span>
+                            <span>{status}</span>
+                          </span>
+                        ) : null
+                      ))}
+                    </div>
+                    {log.requestedBy && (
+                      <div className="text-xs text-muted-foreground">by {log.requestedBy}</div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="ghost" onClick={() => setOpDetailDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
