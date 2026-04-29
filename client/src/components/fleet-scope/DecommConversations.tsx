@@ -207,6 +207,30 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const prevTechMsgCount = useRef(0);
   const prevMgrMsgCount = useRef(0);
   const prevHasBothColumns = useRef(false);
+  const perTruckCounts = useRef<Map<string, { tech: number; mgr: number }>>(
+    (() => {
+      try {
+        const raw = sessionStorage.getItem("decomm_badge_counts");
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            const entries = Object.entries(parsed).filter(
+              ([k, v]) =>
+                typeof k === "string" &&
+                v !== null &&
+                typeof v === "object" &&
+                typeof (v as any).tech === "number" &&
+                typeof (v as any).mgr === "number"
+            ) as [string, { tech: number; mgr: number }][];
+            return new Map(entries);
+          }
+        }
+      } catch {}
+      return new Map();
+    })()
+  );
+  const prevSelectedTruckRef = useRef<string | null>(null);
+  const justSwitchedTruck = useRef(false);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
@@ -441,6 +465,21 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     const mgrMsgs = messages.filter(m => m.contactType === 'manager');
     const hasBothColumns = techMsgs.length > 0 && mgrMsgs.length > 0;
 
+    if (justSwitchedTruck.current) {
+      prevTechMsgCount.current = hasBothColumns ? techMsgs.length : messages.length;
+      prevMgrMsgCount.current = hasBothColumns ? mgrMsgs.length : 0;
+      prevHasBothColumns.current = hasBothColumns;
+      // Keep the flag active until real messages arrive so that the first
+      // non-empty load (which may change hasBothColumns from false → true)
+      // does not hit the layout-change reset branch and wipe restored counts.
+      if (messages.length > 0) {
+        justSwitchedTruck.current = false;
+      }
+      techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+
     if (hasBothColumns !== prevHasBothColumns.current) {
       prevTechMsgCount.current = hasBothColumns ? techMsgs.length : messages.length;
       prevMgrMsgCount.current = hasBothColumns ? mgrMsgs.length : 0;
@@ -486,14 +525,44 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   }, [messages]);
 
   useEffect(() => {
+    if (prevSelectedTruckRef.current) {
+      perTruckCounts.current.set(prevSelectedTruckRef.current, {
+        tech: techNewCount,
+        mgr: mgrNewCount,
+      });
+      try {
+        sessionStorage.setItem(
+          "decomm_badge_counts",
+          JSON.stringify(Object.fromEntries(perTruckCounts.current))
+        );
+      } catch {}
+    }
+    prevSelectedTruckRef.current = selectedTruck;
+
     if (selectedTruck) {
       markReadMutation.mutate(selectedTruck);
+      const saved = perTruckCounts.current.get(selectedTruck);
+      setTechNewCount(saved?.tech ?? 0);
+      setMgrNewCount(saved?.mgr ?? 0);
+    } else {
+      setTechNewCount(0);
+      setMgrNewCount(0);
     }
-    setTechNewCount(0);
-    setMgrNewCount(0);
+    justSwitchedTruck.current = true;
     prevTechMsgCount.current = 0;
     prevMgrMsgCount.current = 0;
-  }, [selectedTruck]);
+  }, [selectedTruck]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!selectedTruck) return;
+    perTruckCounts.current.set(selectedTruck, { tech: techNewCount, mgr: mgrNewCount });
+    try {
+      sessionStorage.setItem(
+        "decomm_badge_counts",
+        JSON.stringify(Object.fromEntries(perTruckCounts.current))
+      );
+    } catch {}
+  }, [techNewCount, mgrNewCount, selectedTruck]);
 
   const handleTechScroll = useCallback(() => {
     if (isAtBottom(techScrollRef.current)) setTechNewCount(0);
