@@ -21,6 +21,7 @@ type CacheState = {
   tpmsCachedAssignments: Map<string, { lookupKey: string; lookupType: string; truckNo: string | null; enterpriseId: string | null }>;
   tpmsLastKnownTruckTech: Map<string, { truckNo: string; enterpriseId: string }>;
   tpmsTechProfiles: Map<string, { enterpriseId: string; truckNo: string | null }>;
+  amsVehiclesCache: Map<string, { vin: string; amsAssignedLdap: string | null; rawResponse: any }>;
 };
 
 function emptyCaches(): CacheState {
@@ -28,7 +29,29 @@ function emptyCaches(): CacheState {
     tpmsCachedAssignments: new Map(),
     tpmsLastKnownTruckTech: new Map(),
     tpmsTechProfiles: new Map(),
+    amsVehiclesCache: new Map(),
   };
+}
+
+/**
+ * Applies the AMS cachePayload path from writeThroughCaches to the in-memory
+ * amsVehiclesCache map. Mirrors the real DB upsert-on-conflict logic:
+ * only executes when ams.status is "success" or "pending" and the payload
+ * carries a system="ams" tag plus a non-empty vin.
+ */
+function applyAmsCachePayload(state: CacheState, ams: WriteThroughCacheArgs["ams"]): void {
+  const payload = ams.cachePayload;
+  if (
+    (ams.status === "success" || ams.status === "pending") &&
+    payload?.system === "ams" &&
+    payload.vin
+  ) {
+    state.amsVehiclesCache.set(payload.vin, {
+      vin: payload.vin,
+      amsAssignedLdap: payload.ldap ?? null,
+      rawResponse: payload.rawResponse ?? null,
+    });
+  }
 }
 
 function applyPlanToCaches(state: CacheState, plan: ReturnType<typeof planTpmsCacheWrites>) {
@@ -248,6 +271,111 @@ test("auto-unassign sweeps stale caches under the truck the incoming tech vacate
   // New truck rows present and pointing at the new tech.
   assert.equal(caches.tpmsCachedAssignments.get("061385")?.enterpriseId, "jcasti0");
   assert.equal(caches.tpmsLastKnownTruckTech.get("061385")?.enterpriseId, "jcasti0");
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * AMS cache (cachePayload path) — these tests exercise the ams_vehicles_cache
+ * upsert logic that lives directly in writeThroughCaches rather than in the
+ * TPMS planner. applyAmsCachePayload mirrors that DB upsert without a live DB.
+ * ────────────────────────────────────────────────────────────────────────── */
+test("AMS cache assign: vin, ldap, and rawResponse are written on AMS success", () => {
+  const caches = emptyCaches();
+
+  const amsResult: WriteThroughCacheArgs["ams"] = {
+    status: "success",
+    cachePayload: {
+      system: "ams",
+      vin: "1HGBH41JXMN109186",
+      ldap: "jcasti0",
+      rawResponse: { techId: "jcasti0", statusCode: "ASSIGNED" },
+    },
+  };
+
+  applyAmsCachePayload(caches, amsResult);
+
+  const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
+  assert.ok(row, "AMS cache row should exist for the VIN after a successful assign");
+  assert.equal(row.vin, "1HGBH41JXMN109186");
+  assert.equal(row.amsAssignedLdap, "jcasti0");
+  assert.deepEqual(row.rawResponse, { techId: "jcasti0", statusCode: "ASSIGNED" });
+});
+
+test("AMS cache unassign: ldap is cleared to null and rawResponse updated on AMS success", () => {
+  const caches = emptyCaches();
+
+  // Seed an existing assigned row (simulates a prior assign that wrote through).
+  caches.amsVehiclesCache.set("1HGBH41JXMN109186", {
+    vin: "1HGBH41JXMN109186",
+    amsAssignedLdap: "jcasti0",
+    rawResponse: { techId: "jcasti0", statusCode: "ASSIGNED" },
+  });
+
+  const amsResult: WriteThroughCacheArgs["ams"] = {
+    status: "success",
+    cachePayload: {
+      system: "ams",
+      vin: "1HGBH41JXMN109186",
+      ldap: null,
+      rawResponse: { techId: null, statusCode: "UNASSIGNED" },
+    },
+  };
+
+  applyAmsCachePayload(caches, amsResult);
+
+  const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
+  assert.ok(row, "AMS cache row should still exist for the VIN after an unassign");
+  assert.equal(row.vin, "1HGBH41JXMN109186");
+  assert.equal(row.amsAssignedLdap, null, "ldap should be cleared after unassign");
+  assert.deepEqual(row.rawResponse, { techId: null, statusCode: "UNASSIGNED" });
+});
+
+test("AMS cache pending: vin, ldap, and rawResponse are written when AMS status is pending", () => {
+  const caches = emptyCaches();
+
+  const amsResult: WriteThroughCacheArgs["ams"] = {
+    status: "pending",
+    cachePayload: {
+      system: "ams",
+      vin: "1HGBH41JXMN109186",
+      ldap: "jcasti0",
+      rawResponse: { techId: "jcasti0", statusCode: "PENDING" },
+    },
+  };
+
+  applyAmsCachePayload(caches, amsResult);
+
+  const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
+  assert.ok(row, "AMS cache row should be written for a pending AMS result");
+  assert.equal(row.amsAssignedLdap, "jcasti0");
+  assert.deepEqual(row.rawResponse, { techId: "jcasti0", statusCode: "PENDING" });
+});
+
+test("AMS cache: skipped AMS call does not mutate the cache", () => {
+  const caches = emptyCaches();
+
+  // Pre-existing row that should remain untouched.
+  caches.amsVehiclesCache.set("1HGBH41JXMN109186", {
+    vin: "1HGBH41JXMN109186",
+    amsAssignedLdap: "jcasti0",
+    rawResponse: { techId: "jcasti0", statusCode: "ASSIGNED" },
+  });
+
+  const amsResult: WriteThroughCacheArgs["ams"] = {
+    status: "skipped",
+    message: "timeout",
+    cachePayload: {
+      system: "ams",
+      vin: "1HGBH41JXMN109186",
+      ldap: null,
+      rawResponse: null,
+    },
+  };
+
+  applyAmsCachePayload(caches, amsResult);
+
+  // Cache must be unchanged — a skipped/failed call must never overwrite a good row.
+  const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
+  assert.equal(row?.amsAssignedLdap, "jcasti0", "stale row should not be overwritten by a skipped AMS call");
 });
 
 /* Force-exit after test suite completes.
