@@ -440,7 +440,8 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       ROUND(DIV0(COALESCE(fin.ppt_profit, 0),
                  COALESCE(fin.working_days, 0)), 2)                      AS "daily_ppt_profit",
       CASE
-        WHEN fin.TECH_LDAP IS NULL AND sc.LDAP_ID IS NULL THEN 'No Data'
+        -- No financials at all → cannot evaluate; always No Data regardless of DCR
+        WHEN fin.TECH_LDAP IS NULL THEN 'No Data'
         WHEN DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
           - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
           - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
@@ -450,9 +451,10 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         WHEN sc.scorecard_score >= 4.0                                     THEN 'Approve'
         ELSE 'Deny'
       END                                                                  AS "recommendation",
-      -- New hire exempt: tenure < 6 months, financially negative, has at least DCR data
+      -- New hire exempt: tenure < 6 months, financially negative, has financials + DCR data
       CASE
         WHEN sc.tenure_months < 6
+          AND fin.TECH_LDAP IS NOT NULL
           AND sc.LDAP_ID IS NOT NULL
           AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
@@ -460,10 +462,11 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
                COALESCE(fin.working_days, 0)) - 78 < 0
         THEN TRUE ELSE FALSE
       END                                                                  AS "new_hire_exempt",
-      -- Scorecard exempt: score >= 4.0, not a new hire, financially negative, has DCR data
+      -- Scorecard exempt: score >= 4.0, not a new hire, financially negative, has financials + DCR data
       CASE
         WHEN sc.scorecard_score >= 4.0
           AND COALESCE(sc.tenure_months, 99) >= 6
+          AND fin.TECH_LDAP IS NOT NULL
           AND sc.LDAP_ID IS NOT NULL
           AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
