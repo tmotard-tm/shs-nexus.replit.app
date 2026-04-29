@@ -44,6 +44,7 @@ import {
   Eye,
   Download,
   History,
+  Mail,
 } from "lucide-react";
 import {
   Sheet,
@@ -326,6 +327,8 @@ export default function CostCenterManagement() {
 
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [historyDistrict, setHistoryDistrict] = useState<string | null>(null);
+  const [isEmailCsvOpen, setIsEmailCsvOpen] = useState(false);
+  const [emailCsvInput, setEmailCsvInput] = useState("");
 
   const { data: items = [], isLoading } = useQuery<DistrictCostCenter[]>({
     queryKey: ["/api/cost-centers"],
@@ -401,6 +404,52 @@ export default function CostCenterManagement() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }, [historyEntries, historyDistrict]);
+
+  const emailCsvMutation = useMutation({
+    mutationFn: async (recipients: string[]) => {
+      const header = ["timestamp", "district", "action", "details", "actor"];
+      const rows = historyEntries.map((entry) => [
+        new Date(entry.createdAt).toISOString(),
+        entry.entityId && entry.entityId !== "*" ? entry.entityId : "",
+        ACTION_LABELS[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " "),
+        entry.details ?? "",
+        entry.actor,
+      ]);
+      const csvContent = Papa.unparse({ fields: header, data: rows });
+      const res = await apiRequest("POST", "/api/cost-centers/email-history-csv", {
+        recipients,
+        csvContent,
+        districtFilter: historyDistrict ?? null,
+      });
+      const body: { message: string } = await res.json();
+      return { status: res.status, message: body.message };
+    },
+    onSuccess: ({ status, message }) => {
+      if (status === 207) {
+        toast({
+          title: "Partially sent",
+          description: message,
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "CSV sent", description: "The history CSV has been emailed successfully." });
+        setIsEmailCsvOpen(false);
+        setEmailCsvInput("");
+      }
+    },
+    onError: (err: any) => {
+      toast({ title: "Failed to send", description: err?.message ?? "Could not send the email.", variant: "destructive" });
+    },
+  });
+
+  const handleEmailCsvSubmit = useCallback(() => {
+    const recipients = emailCsvInput
+      .split(/[,;\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!recipients.length) return;
+    emailCsvMutation.mutate(recipients);
+  }, [emailCsvInput, emailCsvMutation]);
 
   const { data: autoSeedStatus } = useQuery<AutoSeedStatus>({
     queryKey: AUTO_SEED_STATUS_KEY,
@@ -1641,18 +1690,68 @@ export default function CostCenterManagement() {
                 <History className="h-5 w-5" />
                 Cost Center Change History
               </SheetTitle>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={handleDownloadHistoryCsv}
-                disabled={historyLoading || historyEntries.length === 0}
-                data-testid="button-download-history-csv"
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Download CSV
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={handleDownloadHistoryCsv}
+                  disabled={historyLoading || historyEntries.length === 0}
+                  data-testid="button-download-history-csv"
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  Download CSV
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => { setEmailCsvInput(""); setIsEmailCsvOpen(true); }}
+                  disabled={historyLoading || historyEntries.length === 0}
+                  data-testid="button-email-history-csv"
+                >
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email CSV
+                </Button>
+              </div>
             </div>
+
+            <Dialog open={isEmailCsvOpen} onOpenChange={setIsEmailCsvOpen}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Email History CSV</DialogTitle>
+                  <DialogDescription>
+                    Enter one or more email addresses (comma-separated) to send the current history CSV as an attachment.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-3 py-2">
+                  <Input
+                    placeholder="finance@example.com, compliance@example.com"
+                    value={emailCsvInput}
+                    onChange={(e) => setEmailCsvInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") handleEmailCsvSubmit(); }}
+                    disabled={emailCsvMutation.isPending}
+                  />
+                </div>
+                <DialogFooter>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setIsEmailCsvOpen(false)}
+                    disabled={emailCsvMutation.isPending}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    onClick={handleEmailCsvSubmit}
+                    disabled={emailCsvMutation.isPending || !emailCsvInput.trim()}
+                  >
+                    {emailCsvMutation.isPending ? "Sending…" : "Send"}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
             <SheetDescription>
               {historyDistrict ? (
                 <span>

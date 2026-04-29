@@ -7762,6 +7762,80 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // POST /api/cost-centers/email-history-csv - send the history CSV as an email attachment
+  app.post("/api/cost-centers/email-history-csv", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ message: "Access denied. Admin or Developer role required." });
+      }
+
+      const schema = z.object({
+        recipients: z.array(z.string().email({ message: "Each recipient must be a valid email address." })).min(1, "At least one recipient is required."),
+        csvContent: z.string().min(1, "CSV content is required."),
+        districtFilter: z.string().nullable().optional(),
+      });
+
+      const parsed = schema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.issues.map((i) => i.message).join("; ") });
+      }
+
+      const { recipients, csvContent, districtFilter } = parsed.data;
+      const filename = districtFilter
+        ? `cost-center-history-district-${districtFilter}.csv`
+        : "cost-center-history.csv";
+
+      const districtLabel = districtFilter ? ` for district ${districtFilter}` : "";
+      const subject = districtFilter
+        ? `Cost Center Change History — District ${districtFilter}`
+        : "Cost Center Change History";
+
+      const htmlBody = `
+<html><body style="font-family:Arial,sans-serif;color:#333;">
+  <p>Please find the cost center change history${districtLabel} attached as a CSV file.</p>
+  <p style="font-size:12px;color:#888;margin-top:24px;">
+    Sent by ${currentUser.fullName || currentUser.username} via the Cost Center Management panel.
+  </p>
+</body></html>`;
+
+      const csvBase64 = Buffer.from(csvContent, "utf-8").toString("base64");
+
+      const errors: string[] = [];
+      for (const recipient of recipients) {
+        const result = await sendEmail({
+          to: recipient,
+          from: process.env.SENDGRID_EMAIL || "",
+          subject,
+          html: htmlBody,
+          attachments: [
+            {
+              content: csvBase64,
+              filename,
+              type: "text/csv",
+              disposition: "attachment",
+            },
+          ],
+        });
+        if (!result.success) {
+          errors.push(`${recipient}: ${result.error}`);
+        }
+      }
+
+      if (errors.length === recipients.length) {
+        return res.status(500).json({ message: `Failed to send to all recipients: ${errors.join("; ")}` });
+      }
+      if (errors.length > 0) {
+        return res.status(207).json({ message: `Sent to some recipients. Failures: ${errors.join("; ")}` });
+      }
+
+      res.json({ message: `CSV sent to ${recipients.join(", ")}` });
+    } catch (error) {
+      console.error("Error sending history CSV email:", error);
+      res.status(500).json({ message: "Failed to send email" });
+    }
+  });
+
   // Role Permissions API Routes
   console.log("Registering Role Permissions API routes...");
 

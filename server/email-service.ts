@@ -19,6 +19,13 @@ if (DEFAULT_FROM_EMAIL) {
   console.warn('SENDGRID_EMAIL secret not set — outgoing emails will be blocked until this is configured.');
 }
 
+interface Attachment {
+  content: string;
+  filename: string;
+  type: string;
+  disposition: 'attachment' | 'inline';
+}
+
 interface EmailParams {
   to: string;
   cc?: string | string[];
@@ -26,6 +33,7 @@ interface EmailParams {
   subject: string;
   text?: string;
   html?: string;
+  attachments?: Attachment[];
 }
 
 export interface EmailResult {
@@ -41,6 +49,7 @@ interface MailPayload {
   text: string;
   html: string;
   cc?: string | string[];
+  attachments?: Attachment[];
 }
 
 export async function sendEmail(params: EmailParams): Promise<EmailResult> {
@@ -62,6 +71,7 @@ export async function sendEmail(params: EmailParams): Promise<EmailResult> {
     text: textContent,
     html: htmlContent,
     ...(params.cc ? { cc: params.cc } : {}),
+    ...(params.attachments ? { attachments: params.attachments } : {}),
   };
 
   if (!apiKey) {
