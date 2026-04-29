@@ -454,7 +454,7 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
     queryKey: ["/api/vrm/settings/rates"],
   });
   const panelRateMap = Object.fromEntries((ratesData ?? []).map((r) => [r.key, Number(r.value)]));
-  const rentalPerDay = panelRateMap["rental_per_day"] ?? 78;
+  const rentalPerDay = Number.isFinite(panelRateMap["rental_per_day"]) ? panelRateMap["rental_per_day"] : 78;
 
   const { data: actionsData } = useQuery<{ rows: DecisionAction[] }>({
     queryKey: ["/api/vrm/profitability/log", decision.id, "actions"],
@@ -883,8 +883,8 @@ export default function NewRentals() {
     queryKey: ["/api/vrm/settings/rates"],
   });
   const rateMap = Object.fromEntries((ratesQuery.data ?? []).map((r) => [r.key, Number(r.value)]));
-  const rentalPerDay = rateMap["rental_per_day"] ?? 78;
-  const fuelPerComplete = rateMap["fuel_per_complete"] ?? 10;
+  const rentalPerDay = Number.isFinite(rateMap["rental_per_day"]) ? rateMap["rental_per_day"] : 78;
+  const fuelPerComplete = Number.isFinite(rateMap["fuel_per_complete"]) ? rateMap["fuel_per_complete"] : 10;
 
   // ── Decision log query ─────────────────────────────────────────────────────
 
