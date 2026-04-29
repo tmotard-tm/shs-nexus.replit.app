@@ -42,3 +42,9 @@ id = "Qk-7SN8i6Aimuv0nWTGOT"
 uri = "file://attached_assets/profitability_export.csv"
 type = "table"
 title = "Profitability Export — All 262 Techs"
+
+[[outputs]]
+id = "7_eZwWMax54m89KX4J-Cb"
+uri = "file://attached_assets/profitability_group2_export.csv"
+type = "table"
+title = "Profitability Export — 27-Tech Group"
