@@ -197,7 +197,8 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [newConvOpen, setNewConvOpen] = useState(false);
   const [newConvSearch, setNewConvSearch] = useState("");
   const [contactType, setContactType] = useState<string>("tech");
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const techEndRef = useRef<HTMLDivElement>(null);
+  const managerEndRef = useRef<HTMLDivElement>(null);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
@@ -423,7 +424,8 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
@@ -998,7 +1000,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 space-y-3">
                         {techMsgs.map(renderMessageBubble)}
-                        <div ref={messagesEndRef} />
+                        <div ref={techEndRef} />
                       </div>
                     </div>
                     <div className="flex-1 flex flex-col min-w-0">
@@ -1008,6 +1010,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                       </div>
                       <div className="flex-1 overflow-y-auto p-3 space-y-3">
                         {mgrMsgs.map(renderMessageBubble)}
+                        <div ref={managerEndRef} />
                       </div>
                     </div>
                   </div>
@@ -1022,7 +1025,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                   ) : (
                     messages.map(renderMessageBubble)
                   )}
-                  <div ref={messagesEndRef} />
+                  <div ref={techEndRef} />
                 </div>
               );
             })()}
