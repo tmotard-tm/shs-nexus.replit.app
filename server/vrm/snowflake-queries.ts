@@ -330,6 +330,7 @@ export interface ProfitabilityRow {
   parts_shipping: number;
   fuel_est: number;
   lookback_days: number;
+  working_days: number;
   daily_revenue: number;
   daily_costs: number;
   daily_net_before_rental: number;
@@ -357,6 +358,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         f.TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
         COUNT(*)                                                         AS total_sos,
+        COUNT(DISTINCT f.SO_STS_DT)                                     AS working_days,
         SUM(f.TOTAL_REVENUE)                                            AS total_revenue,
         SUM(f.LABOR_DIRECT_EXPENSE)                                     AS labor_direct,
         SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
@@ -417,24 +419,32 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       ROUND(COALESCE(fin.parts_shipping, 0), 2)                         AS "parts_shipping",
       COALESCE(fin.completes, 0) * 10                                    AS "fuel_est",
       90                                                                  AS "lookback_days",
-      ROUND(COALESCE(fin.total_revenue, 0) / 90.0, 2)                  AS "daily_revenue",
-      ROUND((COALESCE(fin.labor_direct,0) + COALESCE(fin.labor_benefits,0)
+      -- working_days = distinct SO dates in the 90-day window (actual days the tech worked).
+      -- Used as the divisor for all daily rate calculations so non-working days don't dilute
+      -- the per-day figures. DIV0 returns 0 when a tech has no SOs in the window.
+      COALESCE(fin.working_days, 0)                                      AS "working_days",
+      ROUND(DIV0(COALESCE(fin.total_revenue, 0),
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_revenue",
+      ROUND(DIV0(COALESCE(fin.labor_direct,0) + COALESCE(fin.labor_benefits,0)
         + COALESCE(fin.parts_cogs,0) + COALESCE(fin.parts_shipping,0)
-        + COALESCE(fin.completes,0)*10) / 90.0, 2)                      AS "daily_costs",
-      ROUND((COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+        + COALESCE(fin.completes,0)*10,
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_costs",
+      ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
         - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0, 2)
-                                                                          AS "daily_net_before_rental",
-      ROUND((COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_net_before_rental",
+      ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
         - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78, 2)
-                                                                          AS "daily_net_with_rental",
-      ROUND(COALESCE(fin.ppt_profit, 0) / 90.0, 2)                       AS "daily_ppt_profit",
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+                 COALESCE(fin.working_days, 0)) - 78, 2)                AS "daily_net_with_rental",
+      ROUND(DIV0(COALESCE(fin.ppt_profit, 0),
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_ppt_profit",
       CASE
         WHEN fin.TECH_LDAP IS NULL AND sc.LDAP_ID IS NULL THEN 'No Data'
-        WHEN (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+        WHEN DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
           - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-          - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 >= 0
+          - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+               COALESCE(fin.working_days, 0)) - 78 >= 0
           THEN 'Approve'
         WHEN sc.tenure_months < 6                                          THEN 'Approve'
         WHEN sc.scorecard_score >= 4.0                                     THEN 'Approve'
@@ -444,9 +454,10 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       CASE
         WHEN sc.tenure_months < 6
           AND sc.LDAP_ID IS NOT NULL
-          AND (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+          AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 < 0
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+               COALESCE(fin.working_days, 0)) - 78 < 0
         THEN TRUE ELSE FALSE
       END                                                                  AS "new_hire_exempt",
       -- Scorecard exempt: score >= 4.0, not a new hire, financially negative, has DCR data
@@ -454,9 +465,10 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         WHEN sc.scorecard_score >= 4.0
           AND COALESCE(sc.tenure_months, 99) >= 6
           AND sc.LDAP_ID IS NOT NULL
-          AND (COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+          AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10) / 90.0 - 78 < 0
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+               COALESCE(fin.working_days, 0)) - 78 < 0
         THEN TRUE ELSE FALSE
       END                                                                  AS "scorecard_exempt"
     FROM financials fin

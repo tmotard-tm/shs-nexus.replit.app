@@ -237,6 +237,7 @@ interface ProfitRow {
   parts_shipping: number;
   fuel_est: number;
   lookback_days: number;
+  working_days: number;
   daily_revenue: number;
   daily_costs: number;
   daily_net_before_rental: number;
@@ -897,9 +898,9 @@ export default function NewRentals() {
 
   const handleExport = () => {
     if (!evaluatedRows.length) return;
-    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", "Daily Net (w/ $78)", "Daily PPT Profit", "Recommendation"];
+    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Working Days", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", "Daily Net (w/ $78)", "Daily PPT Profit", "Recommendation"];
     const lines = evaluatedRows.map((r) =>
-      [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
+      [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.working_days, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
     );
     const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
@@ -1124,7 +1125,8 @@ export default function NewRentals() {
               Evaluation Results
             </h2>
             <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-              {evaluatedRows.length} tech{evaluatedRows.length !== 1 ? "s" : ""} evaluated · 90-day lookback · $78/day rental
+              {evaluatedRows.length} tech{evaluatedRows.length !== 1 ? "s" : ""} evaluated · 90-day lookback ·{" "}
+              {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · $78/day rental
             </span>
           </div>
 
