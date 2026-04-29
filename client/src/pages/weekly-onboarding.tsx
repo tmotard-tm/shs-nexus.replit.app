@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,6 +63,7 @@ function getOwnerFromDistrict(district: string | null | undefined): string {
 
 export default function WeeklyOnboarding() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [searchQuery, setSearchQuery] = useState("");
   const [showAssignedOnly, setShowAssignedOnly] = useState(false);
   const [showUnassignedOnly, setShowUnassignedOnly] = useState(false);
@@ -704,7 +706,12 @@ export default function WeeklyOnboarding() {
                             </TableCell>
                             <TableCell>{hire.assignedTruckNo || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>
-                            <TableCell>{hire.district || '-'}</TableCell>
+                            <TableCell>
+                              {hire.district || '-'}
+                              {hire.district && lookupCostCenter(hire.district) && (
+                                <div className="text-xs text-muted-foreground">CC {lookupCostCenter(hire.district)}</div>
+                              )}
+                            </TableCell>
                             <TableCell className="text-sm">{getOwnerFromDistrict(hire.district)}</TableCell>
                             <TableCell className="text-sm">{hire.locationCity || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.planningAreaName || '-'}</TableCell>

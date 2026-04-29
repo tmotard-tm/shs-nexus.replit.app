@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock, Download, AlertTriangle } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -2395,6 +2396,7 @@ function PunchStatusCell({ ldap, status, section }: { ldap: string | null; statu
 export default function RentalRepairTracker() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { lookupCostCenter } = useCostCenters();
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [collapsed, setCollapsed] = useState<{ [k: string]: boolean }>({ "Completed": true });
@@ -2807,6 +2809,9 @@ export default function RentalRepairTracker() {
                   </td>
                   <td style={{ ...tdStyle, color: entry.district ? colors.ink : colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 13, whiteSpace: "nowrap" }}>
                     {entry.district ? (entry.district.replace(/^0+/, "") || "0") : "—"}
+                    {entry.district && lookupCostCenter(entry.district) && (
+                      <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}>CC {lookupCostCenter(entry.district)}</div>
+                    )}
                   </td>
                   <td style={{ ...tdStyle, color: colors.inkSoft, whiteSpace: "nowrap" }}>
                     {entry.deniedAt

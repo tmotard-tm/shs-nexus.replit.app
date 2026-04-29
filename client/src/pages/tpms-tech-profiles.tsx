@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,7 @@ type Tech = {
 };
 
 export default function TpmsTechProfiles() {
+  const { lookupCostCenter } = useCostCenters();
   const [filters, setFilters] = useState({
     district: "",
     lastName: "",
@@ -157,7 +159,12 @@ export default function TpmsTechProfiles() {
                       </div>
                     </div>
                     {tech.districtNo && (
-                      <Badge variant="secondary" className="text-xs">Dist {tech.districtNo}</Badge>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <Badge variant="secondary" className="text-xs">Dist {tech.districtNo}</Badge>
+                        {lookupCostCenter(tech.districtNo) && (
+                          <span className="text-xs text-muted-foreground">CC {lookupCostCenter(tech.districtNo)}</span>
+                        )}
+                      </div>
                     )}
                   </div>
                   <div className="space-y-1.5 text-xs">

@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -404,6 +405,7 @@ type SortDir = "asc" | "desc";
 
 export default function FleetAlignment() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const { user } = useAuth();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [rootCauseFilter, setRootCauseFilter] = useState<string>("all");
@@ -948,7 +950,10 @@ export default function FleetAlignment() {
                             </Link>
                           </div>
                           {record.districtNo && (
-                            <p className="text-[10px] text-muted-foreground">District {record.districtNo}</p>
+                            <p className="text-[10px] text-muted-foreground">
+                              District {record.districtNo}
+                              {lookupCostCenter(record.districtNo) && ` · CC ${lookupCostCenter(record.districtNo)}`}
+                            </p>
                           )}
                           <div className="mt-1.5">
                             <PatternBadge

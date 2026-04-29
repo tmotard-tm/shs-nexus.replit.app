@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect, Fragment as ReactFragment } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -35,6 +36,7 @@ function TechSearchInput({
   onSubmit: () => void;
   disabled?: boolean;
 }) {
+  const { lookupCostCenter } = useCostCenters();
   const [open, setOpen] = useState(false);
   const [debounced, setDebounced] = useState("");
   const [activeIdx, setActiveIdx] = useState(0);
@@ -190,7 +192,7 @@ function TechSearchInput({
                   <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
                     {r.ldap}
                     {r.truckNo ? ` · Truck ${r.truckNo.replace(/^0+/, '') || r.truckNo}` : ""}
-                    {r.district ? ` · Dist ${r.district.replace(/^0+/, '') || r.district}` : ""}
+                    {r.district ? ` · Dist ${r.district.replace(/^0+/, '') || r.district}${lookupCostCenter(r.district) ? ` · CC ${lookupCostCenter(r.district)}` : ""}` : ""}
                   </span>
                 </div>
                 {isRoster && (

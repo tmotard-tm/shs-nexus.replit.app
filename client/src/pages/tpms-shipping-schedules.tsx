@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +38,7 @@ const DAY_LABELS: { key: keyof DaySchedule; label: string }[] = [
 
 export default function TpmsShippingSchedules() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [step, setStep] = useState<"find" | "change" | "confirm">("find");
   const [filters, setFilters] = useState({ district: "", pdc: "", techId: "", deMinimis: "ALL", shippingDay: "ALL" });
   const [doSearch, setDoSearch] = useState(false);
@@ -224,7 +226,7 @@ export default function TpmsShippingSchedules() {
                       <Checkbox checked={!!tech.selected} className="mt-0.5" />
                       <div>
                         <p className="font-medium text-sm">{tech.firstName} {tech.lastName}</p>
-                        <p className="text-xs text-muted-foreground">{tech.enterpriseId} · Truck #{tech.truckNo} · Dist {tech.districtNo}</p>
+                        <p className="text-xs text-muted-foreground">{tech.enterpriseId} · Truck #{tech.truckNo} · Dist {tech.districtNo}{tech.districtNo && lookupCostCenter(tech.districtNo) ? ` · CC ${lookupCostCenter(tech.districtNo)}` : ""}</p>
                         {tech.shippingSchedule && (
                           <p className="text-xs text-muted-foreground mt-1">
                             Schedule: {Object.entries(tech.shippingSchedule).filter(([, v]) => v).map(([k]) => k).join(", ") || "None"}

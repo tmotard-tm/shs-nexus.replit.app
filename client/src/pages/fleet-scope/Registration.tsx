@@ -1,4 +1,5 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -182,6 +183,7 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
   const [search, setSearch] = useState("");
   const [lookupLoading, setLookupLoading] = useState<string | null>(null);
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
 
   const unassigned = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -288,7 +290,12 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
                 <TableRow key={truck.truckNumber}>
                   <TableCell className="font-mono font-medium">{truck.truckNumber}</TableCell>
                   <TableCell className="text-sm">{truck.tagState || '-'}</TableCell>
-                  <TableCell className="text-sm">{truck.district || '-'}</TableCell>
+                  <TableCell className="text-sm">
+                    {truck.district || '-'}
+                    {truck.district && lookupCostCenter(truck.district) && (
+                      <div className="text-xs text-muted-foreground">CC {lookupCostCenter(truck.district)}</div>
+                    )}
+                  </TableCell>
                   <TableCell className="text-sm">{truck.regExpDate || '-'}</TableCell>
                   <TableCell className="text-sm">{truck.holmanCaseStatus || '-'}</TableCell>
                   <TableCell className="text-sm whitespace-normal">{truck.holmanPendingTasks || '-'}</TableCell>

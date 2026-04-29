@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -145,6 +146,7 @@ export default function TruckDetail() {
   const { id } = useParams();
   const { toast } = useToast();
   const { currentUser } = useUser();
+  const { lookupCostCenter } = useCostCenters();
   const [, setLocation] = useLocation();
   const searchString = useSearch();
   
@@ -2038,6 +2040,9 @@ export default function TruckDetail() {
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground mb-1">District</p>
                                 <p className="text-sm font-medium">{info?.districtNo || techProfile?.districtNo || "—"}</p>
+                                {(info?.districtNo || techProfile?.districtNo) && lookupCostCenter(info?.districtNo || techProfile?.districtNo) && (
+                                  <p className="text-xs text-muted-foreground">CC {lookupCostCenter(info?.districtNo || techProfile?.districtNo)}</p>
+                                )}
                               </div>
                               <div>
                                 <p className="text-xs font-medium text-muted-foreground mb-1">Tech ID</p>
@@ -2610,7 +2615,7 @@ export default function TruckDetail() {
                                   {tech.firstName} {tech.lastName}
                                 </p>
                                 <p className="text-xs text-muted-foreground">
-                                  {tech.enterpriseId} · District {tech.districtNo || "—"}
+                                  {tech.enterpriseId} · District {tech.districtNo || "—"}{tech.districtNo && lookupCostCenter(tech.districtNo) ? ` · CC ${lookupCostCenter(tech.districtNo)}` : ""}
                                 </p>
                               </div>
                               <Button type="button" size="sm" variant="outline" disabled={assignTechMutation.isPending}>

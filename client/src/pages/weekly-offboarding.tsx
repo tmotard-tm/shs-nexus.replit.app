@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { toCanonical } from "@shared/vehicle-number-utils";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -76,6 +77,7 @@ interface LoaTechEntry {
 
 export default function WeeklyOffboarding() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [exportLoading, setExportLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [weekFilter, setWeekFilter] = useState<string>("all");
@@ -1234,7 +1236,12 @@ export default function WeeklyOffboarding() {
                                 <span className="text-muted-foreground text-sm">No</span>
                               )}
                             </TableCell>
-                            <TableCell className="text-sm">{e.district || '-'}</TableCell>
+                            <TableCell className="text-sm">
+                              {e.district || '-'}
+                              {e.district && lookupCostCenter(e.district) && (
+                                <div className="text-xs text-muted-foreground">CC {lookupCostCenter(e.district)}</div>
+                              )}
+                            </TableCell>
                             <TableCell>
                               <Badge variant={e.status === 'approved' ? 'default' : 'secondary'} className="text-xs capitalize">
                                 {e.status}
@@ -1404,7 +1411,12 @@ export default function WeeklyOffboarding() {
                               ) : <span className="text-muted-foreground">-</span>}
                             </TableCell>
                             <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
-                            <TableCell className="text-sm">{e.district || '-'}</TableCell>
+                            <TableCell className="text-sm">
+                              {e.district || '-'}
+                              {e.district && lookupCostCenter(e.district) && (
+                                <div className="text-xs text-muted-foreground">CC {lookupCostCenter(e.district)}</div>
+                              )}
+                            </TableCell>
                             <TableCell className="text-sm whitespace-nowrap font-mono">
                               {e.tpmsPhone || <span className="text-muted-foreground">-</span>}
                             </TableCell>

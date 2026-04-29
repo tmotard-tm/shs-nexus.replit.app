@@ -1,4 +1,5 @@
 import { useMemo, useState, useRef, useEffect } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -127,6 +128,7 @@ const ROWS_PER_PAGE = 50;
 export default function ActiveRentalsDashboard() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
 
   // Filters — top bar
   const [search, setSearch] = useState("");
@@ -1000,7 +1002,12 @@ export default function ActiveRentalsDashboard() {
                           </td>
 
                           <td className="px-3 py-2 font-mono text-xs" onClick={(e) => e.stopPropagation()}>{enr?.enterpriseId ?? "—"}</td>
-                          <td className="px-3 py-2 font-mono text-xs" onClick={(e) => e.stopPropagation()}>{enr?.district ? (enr.district.replace(/^0+/, "") || "0") : "—"}</td>
+                          <td className="px-3 py-2 font-mono text-xs" onClick={(e) => e.stopPropagation()}>
+                            {enr?.district ? (enr.district.replace(/^0+/, "") || "0") : "—"}
+                            {enr?.district && lookupCostCenter(enr.district) && (
+                              <div className="text-xs text-muted-foreground font-sans">CC {lookupCostCenter(enr.district)}</div>
+                            )}
+                          </td>
 
                           <BoolCell truck={t} field="snowflakeAssigned" saveField={saveField} />
                           <td className="px-3 py-2 whitespace-nowrap" onClick={(e) => e.stopPropagation()}>{fmtDate(t.datePutInRepair)}</td>

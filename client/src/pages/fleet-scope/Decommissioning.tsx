@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -85,6 +86,7 @@ interface DecommissioningVehicle {
 
 export default function Decommissioning() {
   const { toast } = useToast();
+  const { lookupCostCenter } = useCostCenters();
   const [, navigate] = useLocation();
   const [searchTerm, setSearchTerm] = useState("");
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -1086,6 +1088,9 @@ export default function Decommissioning() {
                       </TableCell>
                       <TableCell className="font-mono text-xs" data-testid={`cell-district-${vehicle.id}`}>
                         {vehicle.district ? vehicle.district.replace(/^0+/, "") || "-" : "-"}
+                        {vehicle.district && lookupCostCenter(vehicle.district) && (
+                          <div className="text-xs text-muted-foreground font-sans">CC {lookupCostCenter(vehicle.district)}</div>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs" data-testid={`cell-ams-status-${vehicle.id}`}>
                         {vehicle.amsStatus || "-"}
