@@ -58,6 +58,8 @@ interface FilterPrefs {
   vanPickedUpFilter: string[];
   holmanStatusFilter: string[];
   regExpiryFilter: string[];
+  mainStatusFilter: string;
+  subStatusFilter: string;
 }
 const DEFAULT_FILTER_PREFS: FilterPrefs = {
   truckNumberFilter: "",
@@ -74,6 +76,8 @@ const DEFAULT_FILTER_PREFS: FilterPrefs = {
   vanPickedUpFilter: [],
   holmanStatusFilter: [],
   regExpiryFilter: [],
+  mainStatusFilter: "all",
+  subStatusFilter: "all",
 };
 function readFilterPrefs(): FilterPrefs {
   try {
@@ -171,15 +175,15 @@ export default function ActiveRentalsDashboard() {
   const { toast } = useToast();
   const { lookupCostCenter } = useCostCenters();
 
-  // Filters — top bar
-  const [search, setSearch] = useState("");
-  const [mainStatusFilter, setMainStatusFilter] = useState<string>("all");
-  const [subStatusFilter, setSubStatusFilter] = useState<string>("all");
-  const [page, setPage] = useState(1);
-
   // Per-column header filters (mirror Fleet Scope's table-header MultiSelectFilters).
   // Initialized from localStorage so they survive navigation and refresh.
   const _initFilterPrefs = readFilterPrefs();
+
+  // Filters — top bar
+  const [search, setSearch] = useState("");
+  const [mainStatusFilter, setMainStatusFilter] = useState<string>(_initFilterPrefs.mainStatusFilter);
+  const [subStatusFilter, setSubStatusFilter] = useState<string>(_initFilterPrefs.subStatusFilter);
+  const [page, setPage] = useState(1);
   const [truckNumberFilter, setTruckNumberFilter] = useState(_initFilterPrefs.truckNumberFilter);
   const [stateFilter, setStateFilter] = useState<string[]>(_initFilterPrefs.stateFilter);
   const [regionFilter, setRegionFilter] = useState<string[]>(_initFilterPrefs.regionFilter);
@@ -205,17 +209,21 @@ export default function ActiveRentalsDashboard() {
     localStorage.setItem(SORT_PREFS_KEY, JSON.stringify({ dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort }));
   }, [dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort]);
   useEffect(() => {
-    localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify({
+    const prefs: Record<string, unknown> = {
       truckNumberFilter, stateFilter, regionFilter, byovFilter,
       mainStatusMulti, ownerFilter, tpmsFilter, repairedFilter,
       amsFilter, pickSlotFilter, rentalReturnedFilter, vanPickedUpFilter,
       holmanStatusFilter, regExpiryFilter,
-    }));
+    };
+    if (mainStatusFilter !== "all") prefs.mainStatusFilter = mainStatusFilter;
+    if (subStatusFilter !== "all") prefs.subStatusFilter = subStatusFilter;
+    localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify(prefs));
   }, [
     truckNumberFilter, stateFilter, regionFilter, byovFilter,
     mainStatusMulti, ownerFilter, tpmsFilter, repairedFilter,
     amsFilter, pickSlotFilter, rentalReturnedFilter, vanPickedUpFilter,
     holmanStatusFilter, regExpiryFilter,
+    mainStatusFilter, subStatusFilter,
   ]);
 
   // Detail panel
