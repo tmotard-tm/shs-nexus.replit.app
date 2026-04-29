@@ -25,6 +25,8 @@ import {
   Users, PhoneCall, ClipboardList
 } from "lucide-react";
 import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
+import { VehicleRowSyncBadges } from "@/components/fleet-scope/VehicleRowSyncBadges";
+import { FleetOpLogPanel } from "@/components/fleet-scope/FleetOpLogPanel";
 import { ViewInventoryButton } from "@/components/view-inventory-button";
 import { TelematicsButton } from "@/components/telematics-button";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -286,6 +288,7 @@ export default function FleetManagement() {
   // Selected vehicle for detail view
   const [selectedVehicle, setSelectedVehicle] = useState<FleetVehicle | null>(null);
   const [showHistoryDialog, setShowHistoryDialog] = useState(false);
+  const [opLogDialogTruck, setOpLogDialogTruck] = useState<string | null>(null);
 
   // Capture ?openTruck= param once at mount (lazy useState so it runs once, before any URL cleaning)
   const [pendingOpenTruck] = useState<string | null>(() => {
@@ -2347,6 +2350,12 @@ export default function FleetManagement() {
                             )}
                           </div>
 
+                          {/* Last sync status badges */}
+                          <VehicleRowSyncBadges
+                            truckNumber={vehicle.vehicleNumber}
+                            onOpenHistory={() => setOpLogDialogTruck(vehicle.vehicleNumber)}
+                          />
+
                           {/* Action bar */}
                           <div className="flex items-center justify-end pt-2 border-t">
                             <div className="flex items-center gap-1">
@@ -3503,6 +3512,22 @@ export default function FleetManagement() {
           mode="vehicle"
         />
       )}
+
+      {/* Fleet Op Log Dialog — opened from sync status badges on vehicle cards */}
+      <Dialog open={!!opLogDialogTruck} onOpenChange={(o) => { if (!o) setOpLogDialogTruck(null); }}>
+        <DialogContent className="max-w-lg max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Operation History — Vehicle #{opLogDialogTruck}
+            </DialogTitle>
+            <DialogDescription>
+              Most recent sync operations for this vehicle across TPMS, Holman, and AMS.
+            </DialogDescription>
+          </DialogHeader>
+          <FleetOpLogPanel truckNumber={opLogDialogTruck} />
+        </DialogContent>
+      </Dialog>
 
       {/* PO History Modal */}
       <Dialog
