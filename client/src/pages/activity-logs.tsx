@@ -431,11 +431,12 @@ export default function ActivityLogs() {
         ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(","))
       ].join("\n");
 
+      const isFiltered = searchQuery.trim() !== "" || entityTypeFilter !== "all" || actionTypeFilter !== "all" || userFilter !== "all" || !!fromDate || !!toDate;
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
       link.setAttribute("href", url);
-      link.setAttribute("download", `activity-logs-${format(new Date(), "yyyy-MM-dd")}.csv`);
+      link.setAttribute("download", isFiltered ? `activity-logs-filtered-${format(new Date(), "yyyy-MM-dd")}.csv` : `activity-logs-${format(new Date(), "yyyy-MM-dd")}.csv`);
       link.style.visibility = "hidden";
       document.body.appendChild(link);
       link.click();
@@ -499,8 +500,9 @@ export default function ActivityLogs() {
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
+      const isFilteredXlsx = searchQuery.trim() !== "" || entityTypeFilter !== "all" || actionTypeFilter !== "all" || userFilter !== "all" || !!fromDate || !!toDate;
       link.setAttribute("href", url);
-      link.setAttribute("download", `activity-logs-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
+      link.setAttribute("download", isFilteredXlsx ? `activity-logs-filtered-${format(new Date(), "yyyy-MM-dd")}.xlsx` : `activity-logs-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
       link.style.visibility = "hidden";
       document.body.appendChild(link);
       link.click();
@@ -588,8 +590,9 @@ export default function ActivityLogs() {
       const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
+      const isFilteredSub = subStatusFilter !== "all" || subActionFilter !== "all" || subVehicleSearch.trim() !== "" || !!subFromDate || !!subToDate;
       link.setAttribute("href", url);
-      link.setAttribute("download", `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.csv`);
+      link.setAttribute("download", isFilteredSub ? `holman-submissions-filtered-${format(new Date(), "yyyy-MM-dd")}.csv` : `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.csv`);
       link.style.visibility = "hidden";
       document.body.appendChild(link);
       link.click();
@@ -653,8 +656,9 @@ export default function ActivityLogs() {
       const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
       const link = document.createElement("a");
       const url = URL.createObjectURL(blob);
+      const isFilteredSubXlsx = subStatusFilter !== "all" || subActionFilter !== "all" || subVehicleSearch.trim() !== "" || !!subFromDate || !!subToDate;
       link.setAttribute("href", url);
-      link.setAttribute("download", `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
+      link.setAttribute("download", isFilteredSubXlsx ? `holman-submissions-filtered-${format(new Date(), "yyyy-MM-dd")}.xlsx` : `holman-submissions-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
       link.style.visibility = "hidden";
       document.body.appendChild(link);
       link.click();

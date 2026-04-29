@@ -586,7 +586,10 @@ export default function ActiveRentalsDashboard() {
             Sync Rentals
           </Button>
 
-          <Button variant="outline" size="sm" onClick={() => exportToCsv(filtered, enrichmentMap)} data-testid="button-export">
+          <Button variant="outline" size="sm" onClick={() => {
+            const isFiltered = search.trim() !== "" || mainStatusFilter !== "all" || subStatusFilter !== "all" || truckNumberFilter !== "" || stateFilter.length > 0 || regionFilter.length > 0 || byovFilter.length > 0 || (mainStatusMulti ?? []).length > 0 || ownerFilter.length > 0 || tpmsFilter.length > 0 || repairedFilter.length > 0 || amsFilter.length > 0 || pickSlotFilter.length > 0 || rentalReturnedFilter.length > 0 || vanPickedUpFilter.length > 0 || holmanStatusFilter.length > 0 || regExpiryFilter.length > 0;
+            exportToCsv(filtered, enrichmentMap, isFiltered);
+          }} data-testid="button-export">
             <Download className="w-3 h-3 mr-1" /> Export
           </Button>
 
@@ -1241,6 +1244,7 @@ function parseConsolidateText(text: string): Array<{ truckNumber: string; dateIn
 function exportToCsv(
   trucks: FSTruck[],
   enrichmentMap: Record<string, EnrichmentRow>,
+  isFiltered = false,
 ) {
   const headers = [
     "Truck #", "Tech Name", "Enterprise ID", "District", "Main Status", "Sub-Status",
@@ -1269,7 +1273,7 @@ function exportToCsv(
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = `active-rentals-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = isFiltered ? `active-rentals-filtered-${new Date().toISOString().slice(0, 10)}.csv` : `active-rentals-${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 }
 

@@ -637,16 +637,24 @@ export default function AllVehicles() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <a href="/api/fleet-vehicles/export.csv" download>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  data-testid="button-export-csv"
-                >
-                  <Download className="w-4 h-4 mr-1" />
-                  Export CSV
-                </Button>
-              </a>
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="button-export-csv"
+                onClick={() => {
+                  const date = new Date().toISOString().slice(0, 10);
+                  const isFiltered = !!categoryFilter;
+                  const a = document.createElement("a");
+                  a.href = "/api/fleet-vehicles/export.csv";
+                  a.download = isFiltered ? `fleet-vehicles-filtered-${date}.csv` : `fleet-vehicles-${date}.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                }}
+              >
+                <Download className="w-4 h-4 mr-1" />
+                Export CSV
+              </Button>
               <Button 
                 variant="outline" 
                 size="sm"

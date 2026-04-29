@@ -273,7 +273,8 @@ export default function TechRoster() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `employee-roster-${format(new Date(), 'yyyy-MM-dd')}.csv`;
+    const isFiltered = searchQuery.trim() !== "" || statusFilter.length > 0 || districtFilter.length > 0;
+    link.download = isFiltered ? `employee-roster-filtered-${format(new Date(), 'yyyy-MM-dd')}.csv` : `employee-roster-${format(new Date(), 'yyyy-MM-dd')}.csv`;
     link.click();
     URL.revokeObjectURL(url);
     toast({ title: "Export Complete", description: `Exported ${filteredTechs.length} records to CSV` });
@@ -286,7 +287,8 @@ export default function TechRoster() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.download = `employee-roster-${format(new Date(), 'yyyy-MM-dd')}.xls`;
+    const isFiltered = searchQuery.trim() !== "" || statusFilter.length > 0 || districtFilter.length > 0;
+    link.download = isFiltered ? `employee-roster-filtered-${format(new Date(), 'yyyy-MM-dd')}.xls` : `employee-roster-${format(new Date(), 'yyyy-MM-dd')}.xls`;
     link.click();
     URL.revokeObjectURL(url);
     toast({ title: "Export Complete", description: `Exported ${filteredTechs.length} records to Excel` });

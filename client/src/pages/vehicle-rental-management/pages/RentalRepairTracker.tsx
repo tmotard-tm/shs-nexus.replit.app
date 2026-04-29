@@ -2667,7 +2667,8 @@ export default function RentalRepairTracker() {
               const a = document.createElement("a");
               const today = new Date();
               a.href = url;
-              a.download = `rental_repair_tracker_${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}.csv`;
+              const isFiltered = search.trim() !== "" || showArchived;
+              a.download = isFiltered ? `rental_repair_tracker-filtered_${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}.csv` : `rental_repair_tracker_${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}.csv`;
               a.click();
               URL.revokeObjectURL(url);
             }}

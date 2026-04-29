@@ -1801,9 +1801,11 @@ export default function FleetManagement() {
                   <div className="flex items-center gap-2">
                     <Button
                       onClick={() => {
+                        const date = new Date().toISOString().slice(0, 10);
+                        const isFiltered = searchQuery !== "" || makeFilter !== "all" || modelFilter !== "all" || yearFilter !== "all" || colorFilter !== "all" || vehicleProgramFilter !== "all" || brandingFilter !== "all" || interiorFilter !== "all" || tuneStatusFilter !== "all" || assignmentStatusFilter !== "all" || stateFilter !== "all" || cityFilter !== "all" || licenseStateFilter !== "all" || regionFilter !== "all" || divisionFilter !== "all" || districtFilter !== "all" || statCardFilter !== "all" || holmanTechFilter !== "all" || tpmsTechFilter !== "all" || mismatchFilter !== "all" || rentalOpsFilter !== "all" || poRentalFilter !== "all" || poMaintFilter !== "all" || dtcFilter !== "all" || holmanStatusFilter.length > 0 || amsTruckStatusFilter.length > 0 || amsRepairShopFilter.length > 0 || offboardingFilter.length > 0;
                         const a = document.createElement("a");
                         a.href = "/api/fleet-vehicles/export.csv";
-                        a.download = "";
+                        a.download = isFiltered ? `fleet-vehicles-filtered-${date}.csv` : `fleet-vehicles-${date}.csv`;
                         document.body.appendChild(a);
                         a.click();
                         document.body.removeChild(a);

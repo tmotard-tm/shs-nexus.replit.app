@@ -429,7 +429,8 @@ function POPriorityView() {
     const wb = new ExcelJS.Workbook();
     addJsonWorksheet(wb, exportData, 'PO Priority');
     const dateStr = new Date().toISOString().split('T')[0];
-    await downloadExcelWorkbook(wb, `PO_Priority_${dateStr}.xlsx`);
+    const isPrioFiltered = prioSearch.trim() !== "";
+    await downloadExcelWorkbook(wb, isPrioFiltered ? `PO_Priority-filtered_${dateStr}.xlsx` : `PO_Priority_${dateStr}.xlsx`);
   };
 
   if (prioLoading) {
@@ -906,7 +907,8 @@ export default function POs() {
 
     // Generate filename with timestamp
     const timestamp = new Date().toISOString().split('T')[0];
-    const filename = `POs-export-${timestamp}.xlsx`;
+    const isOrdersFiltered = searchQuery.trim() !== "" || robDecisionFilter !== "__all__" || differenceFilter !== "__all__" || finalApprovalFilter !== "__all__" || submittedHolmanFilter !== "__all__" || vehicleNoFilter.trim() !== "" || spareVanFilter !== "__all__";
+    const filename = isOrdersFiltered ? `POs-export-filtered-${timestamp}.xlsx` : `POs-export-${timestamp}.xlsx`;
 
     // Download the file
     await downloadExcelWorkbook(workbook, filename);

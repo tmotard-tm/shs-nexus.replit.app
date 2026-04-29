@@ -551,7 +551,8 @@ export default function Decommissioning() {
     addJsonWorksheet(wb, oldDeclinesVehicles.map(toExportRow), "Old Declines");
 
     const date = new Date().toISOString().split("T")[0];
-    await downloadExcelWorkbook(wb, `Decommissioning_${date}.xlsx`);
+    const isFiltered = searchTerm.trim() !== "" || dateFilter !== "" || techDistanceFilter || managerDistanceFilter || assignedFilter !== "all";
+    await downloadExcelWorkbook(wb, isFiltered ? `Decommissioning-filtered_${date}.xlsx` : `Decommissioning_${date}.xlsx`);
 
     toast({
       title: "Export Complete",
