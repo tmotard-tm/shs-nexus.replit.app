@@ -22,6 +22,7 @@ type CacheState = {
   tpmsLastKnownTruckTech: Map<string, { truckNo: string; enterpriseId: string }>;
   tpmsTechProfiles: Map<string, { enterpriseId: string; truckNo: string | null }>;
   amsVehiclesCache: Map<string, { vin: string; amsAssignedLdap: string | null; rawResponse: any }>;
+  holmanVehiclesCache: Map<string, { holmanVehicleNumber: string; holmanTechAssigned: string | null; holmanTechName: string | null; holmanAssignedStatusCd: string | null }>;
 };
 
 function emptyCaches(): CacheState {
@@ -30,7 +31,31 @@ function emptyCaches(): CacheState {
     tpmsLastKnownTruckTech: new Map(),
     tpmsTechProfiles: new Map(),
     amsVehiclesCache: new Map(),
+    holmanVehiclesCache: new Map(),
   };
+}
+
+/**
+ * Applies the Holman cachePayload path from writeThroughCaches to the
+ * in-memory holmanVehiclesCache map. Mirrors the real DB upsert-on-conflict
+ * logic (lines ~1059–1079 in writeThroughCaches): only executes when
+ * holman.status is "success" or "pending" and the payload carries a
+ * system="holman" tag plus a non-empty holmanVehicleNumber.
+ */
+function applyHolmanCachePayload(state: CacheState, holman: WriteThroughCacheArgs["holman"]): void {
+  const payload = holman.cachePayload;
+  if (
+    (holman.status === "success" || holman.status === "pending") &&
+    payload?.system === "holman" &&
+    payload.holmanVehicleNumber
+  ) {
+    state.holmanVehiclesCache.set(payload.holmanVehicleNumber, {
+      holmanVehicleNumber: payload.holmanVehicleNumber,
+      holmanTechAssigned: payload.ldap ?? null,
+      holmanTechName: payload.techName ?? null,
+      holmanAssignedStatusCd: payload.statusCode ?? null,
+    });
+  }
 }
 
 /**
@@ -376,6 +401,101 @@ test("AMS cache: skipped AMS call does not mutate the cache", () => {
   // Cache must be unchanged — a skipped/failed call must never overwrite a good row.
   const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
   assert.equal(row?.amsAssignedLdap, "jcasti0", "stale row should not be overwritten by a skipped AMS call");
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Holman cache (cachePayload path) — these tests exercise the
+ * holman_vehicles_cache upsert logic that lives directly in writeThroughCaches
+ * (lines ~1059–1079). applyHolmanCachePayload mirrors that DB upsert without
+ * a live DB.
+ * ────────────────────────────────────────────────────────────────────────── */
+test("Holman cache assign: holmanVehicleNumber, holmanTechAssigned, and statusCode are written on Holman success", () => {
+  const caches = emptyCaches();
+
+  const holmanResult: WriteThroughCacheArgs["holman"] = {
+    status: "success",
+    message: "",
+    cachePayload: {
+      system: "holman",
+      holmanVehicleNumber: "061385",
+      ldap: "jcasti0",
+      techName: "J Casti",
+      statusCode: "A",
+    },
+  };
+
+  applyHolmanCachePayload(caches, holmanResult);
+
+  const row = caches.holmanVehiclesCache.get("061385");
+  assert.ok(row, "Holman cache row should exist for the vehicle number after a successful assign");
+  assert.equal(row.holmanVehicleNumber, "061385");
+  assert.equal(row.holmanTechAssigned, "jcasti0");
+  assert.equal(row.holmanTechName, "J Casti");
+  assert.equal(row.holmanAssignedStatusCd, "A");
+});
+
+test("Holman cache unassign: holmanTechAssigned is cleared to null and statusCode updated on Holman success", () => {
+  const caches = emptyCaches();
+
+  // Seed an existing assigned row (simulates a prior assign that wrote through).
+  caches.holmanVehiclesCache.set("061385", {
+    holmanVehicleNumber: "061385",
+    holmanTechAssigned: "jcasti0",
+    holmanTechName: "J Casti",
+    holmanAssignedStatusCd: "A",
+  });
+
+  const holmanResult: WriteThroughCacheArgs["holman"] = {
+    status: "success",
+    message: "",
+    cachePayload: {
+      system: "holman",
+      holmanVehicleNumber: "061385",
+      ldap: null,
+      techName: null,
+      statusCode: "U",
+    },
+  };
+
+  applyHolmanCachePayload(caches, holmanResult);
+
+  const row = caches.holmanVehiclesCache.get("061385");
+  assert.ok(row, "Holman cache row should still exist for the vehicle number after an unassign");
+  assert.equal(row.holmanVehicleNumber, "061385");
+  assert.equal(row.holmanTechAssigned, null, "holmanTechAssigned should be cleared after unassign");
+  assert.equal(row.holmanTechName, null, "holmanTechName should be cleared after unassign");
+  assert.equal(row.holmanAssignedStatusCd, "U");
+});
+
+test("Holman cache: skipped Holman call does not mutate the cache", () => {
+  const caches = emptyCaches();
+
+  // Pre-existing row that should remain untouched.
+  caches.holmanVehiclesCache.set("061385", {
+    holmanVehicleNumber: "061385",
+    holmanTechAssigned: "jcasti0",
+    holmanTechName: "J Casti",
+    holmanAssignedStatusCd: "A",
+  });
+
+  const holmanResult: WriteThroughCacheArgs["holman"] = {
+    status: "skipped",
+    message: "timeout",
+    cachePayload: {
+      system: "holman",
+      holmanVehicleNumber: "061385",
+      ldap: null,
+      techName: null,
+      statusCode: null,
+    },
+  };
+
+  applyHolmanCachePayload(caches, holmanResult);
+
+  // Cache must be unchanged — a skipped/failed call must never overwrite a good row.
+  const row = caches.holmanVehiclesCache.get("061385");
+  assert.equal(row?.holmanTechAssigned, "jcasti0", "stale row should not be overwritten by a skipped Holman call");
+  assert.equal(row?.holmanAssignedStatusCd, "A", "statusCode should not be overwritten by a skipped Holman call");
 });
 
 /* Force-exit after test suite completes.
