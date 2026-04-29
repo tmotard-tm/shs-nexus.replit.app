@@ -19,9 +19,11 @@ import {
   vrmRepairTrackerTechOutreach,
   vrmRepairTrackerShopContact,
   vrmRateConfig,
+  vrmRateConfigHistory,
   type VrmTech,
   type VrmRentalDecision,
   type VrmRateConfig,
+  type VrmRateConfigHistory,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -1739,15 +1741,37 @@ export async function upsertRateConfig(
   value: number,
   updatedBy?: string,
 ): Promise<VrmRateConfig> {
-  const [row] = await db
-    .insert(vrmRateConfig)
-    .values({ key, value: String(value), label: "", updatedAt: new Date(), updatedBy })
-    .onConflictDoUpdate({
-      target: vrmRateConfig.key,
-      set: { value: String(value), updatedAt: new Date(), updatedBy },
-    })
-    .returning();
-  return row;
+  const [existing] = await db
+    .select({ value: vrmRateConfig.value })
+    .from(vrmRateConfig)
+    .where(eq(vrmRateConfig.key, key));
+
+  return db.transaction(async (tx) => {
+    await tx.insert(vrmRateConfigHistory).values({
+      key,
+      previousValue: existing ? existing.value : null,
+      newValue: String(value),
+      changedBy: updatedBy ?? null,
+    });
+
+    const [row] = await tx
+      .insert(vrmRateConfig)
+      .values({ key, value: String(value), label: "", updatedAt: new Date(), updatedBy })
+      .onConflictDoUpdate({
+        target: vrmRateConfig.key,
+        set: { value: String(value), updatedAt: new Date(), updatedBy },
+      })
+      .returning();
+    return row;
+  });
+}
+
+export async function getRateConfigHistory(limit = 50): Promise<VrmRateConfigHistory[]> {
+  return db
+    .select()
+    .from(vrmRateConfigHistory)
+    .orderBy(desc(vrmRateConfigHistory.changedAt))
+    .limit(limit);
 }
 
 // ─── Legacy Notes ─────────────────────────────────────────────────────────────

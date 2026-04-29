@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, Pencil, Check, X } from "lucide-react";
+import { Settings2, Pencil, Check, X, History } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -11,6 +11,20 @@ interface RateConfig {
   updatedAt: string;
   updatedBy: string | null;
 }
+
+interface RateConfigHistory {
+  id: number;
+  key: string;
+  previousValue: string | null;
+  newValue: string;
+  changedBy: string | null;
+  changedAt: string;
+}
+
+const RATE_LABELS: Record<string, string> = {
+  fuel_per_complete: "Fuel per complete",
+  rental_per_day: "Rental per day",
+};
 
 function fmtDate(iso: string) {
   try {
@@ -36,6 +50,7 @@ function RateRow({ row }: { row: RateConfig }) {
       apiRequest("PUT", `/api/vrm/settings/rates/${row.key}`, { value: Number(value) }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["/api/vrm/settings/rates"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/settings/rates/history"] });
       setEditing(false);
     },
   });
@@ -177,6 +192,10 @@ export default function Settings() {
     queryKey: ["/api/vrm/settings/rates"],
   });
 
+  const { data: history = [], isLoading: historyLoading } = useQuery<RateConfigHistory[]>({
+    queryKey: ["/api/vrm/settings/rates/history"],
+  });
+
   const containerStyle: React.CSSProperties = {
     padding: "32px 40px",
     maxWidth: 820,
@@ -275,6 +294,58 @@ export default function Settings() {
       <p style={{ fontSize: 12, color: colors.inkMuted, marginTop: 16 }}>
         These values replace hardcoded constants in the Snowflake profitability query. The fuel rate is applied per completed service order; the rental rate is applied per working day.
       </p>
+
+      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36, display: "flex", alignItems: "center", gap: 8 }}>
+        <History size={16} color={colors.accent} />
+        Change History
+      </h2>
+
+      <div style={cardStyle}>
+        {historyLoading && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
+            Loading history…
+          </div>
+        )}
+        {!historyLoading && history.length === 0 && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
+            No changes recorded yet.
+          </div>
+        )}
+        {!historyLoading && history.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Rate</th>
+                <th style={thStyle}>Previous Value</th>
+                <th style={thStyle}>New Value</th>
+                <th style={thStyle}>Changed By</th>
+                <th style={thStyle}>Changed At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {history.map((row) => (
+                <tr key={row.id}>
+                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, color: colors.ink, fontSize: 14 }}>
+                    {RATE_LABELS[row.key] ?? row.key}
+                  </td>
+                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.jetbrains, color: colors.inkMuted, fontSize: 14 }}>
+                    {row.previousValue != null ? `$${Number(row.previousValue).toFixed(2)}` : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.jetbrains, color: colors.ink, fontSize: 14 }}>
+                    ${Number(row.newValue).toFixed(2)}
+                  </td>
+                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, color: colors.inkMuted, fontSize: 13 }}>
+                    {row.changedBy ?? <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, color: colors.inkMuted, fontSize: 12 }}>
+                    {fmtDate(row.changedAt)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
     </div>
   );
 }

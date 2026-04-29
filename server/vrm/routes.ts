@@ -59,6 +59,7 @@ import {
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
   getRateConfig,
+  getRateConfigHistory,
   upsertRateConfig,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
@@ -1942,6 +1943,17 @@ export function registerVrmRoutes(): Router {
     }
   });
 
+  router.get("/settings/rates/history", async (req, res) => {
+    try {
+      const limit = Math.max(1, Math.min(Number(req.query.limit) || 50, 200));
+      const rows = await getRateConfigHistory(limit);
+      res.json(rows);
+    } catch (e: any) {
+      console.error("[VRM] rate-config-history GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   const ALLOWED_RATE_KEYS = new Set(["fuel_per_complete", "rental_per_day"]);
 
   router.put("/settings/rates/:key", async (req, res) => {
@@ -1950,11 +1962,12 @@ export function registerVrmRoutes(): Router {
       if (!ALLOWED_RATE_KEYS.has(key)) {
         return res.status(400).json({ error: `Unknown rate key '${key}'. Allowed keys: ${[...ALLOWED_RATE_KEYS].join(", ")}` });
       }
-      const { value, updatedBy } = req.body;
+      const { value } = req.body;
       const valueNum = Number(value);
       if (value === undefined || !Number.isFinite(valueNum) || valueNum < 0 || valueNum > 10000) {
         return res.status(400).json({ error: "value must be a non-negative finite number (max 10000)" });
       }
+      const updatedBy = (req as any).user?.username ?? null;
       const row = await upsertRateConfig(key, valueNum, updatedBy);
       res.json(row);
     } catch (e: any) {

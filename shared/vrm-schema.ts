@@ -6,6 +6,7 @@ import {
   timestamp,
   boolean,
   integer,
+  serial,
   decimal,
   date,
   pgEnum,
@@ -601,3 +602,16 @@ export const vrmRateConfig = pgTable("vrm_rate_config", {
 export type VrmRateConfig = typeof vrmRateConfig.$inferSelect;
 export const insertVrmRateConfigSchema = createInsertSchema(vrmRateConfig);
 export type InsertVrmRateConfig = z.infer<typeof insertVrmRateConfigSchema>;
+
+export const vrmRateConfigHistory = pgTable("vrm_rate_config_history", {
+  id: serial("id").primaryKey(),
+  key: varchar("key", { length: 64 }).notNull(),
+  previousValue: decimal("previous_value", { precision: 10, scale: 2 }),
+  newValue: decimal("new_value", { precision: 10, scale: 2 }).notNull(),
+  changedBy: varchar("changed_by", { length: 128 }),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+});
+
+export type VrmRateConfigHistory = typeof vrmRateConfigHistory.$inferSelect;
+export const insertVrmRateConfigHistorySchema = createInsertSchema(vrmRateConfigHistory).omit({ id: true, changedAt: true });
+export type InsertVrmRateConfigHistory = z.infer<typeof insertVrmRateConfigHistorySchema>;

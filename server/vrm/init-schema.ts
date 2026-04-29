@@ -492,5 +492,16 @@ export async function initVrmSchema(): Promise<void> {
     ON CONFLICT (key) DO NOTHING;
   `);
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rate_config_history (
+      id             SERIAL PRIMARY KEY,
+      key            VARCHAR(64) NOT NULL,
+      previous_value DECIMAL(10,2),
+      new_value      DECIMAL(10,2) NOT NULL,
+      changed_by     VARCHAR(128),
+      changed_at     TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
   console.log("[VRM] Schema initialised");
 }
