@@ -25,6 +25,7 @@ import {
   FileSpreadsheet,
   Paperclip,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 import { readExcelFile } from "@/lib/xlsx-utils";
 import {
@@ -199,6 +200,13 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const [contactType, setContactType] = useState<string>("tech");
   const techEndRef = useRef<HTMLDivElement>(null);
   const managerEndRef = useRef<HTMLDivElement>(null);
+  const techScrollRef = useRef<HTMLDivElement>(null);
+  const managerScrollRef = useRef<HTMLDivElement>(null);
+  const [techNewCount, setTechNewCount] = useState(0);
+  const [mgrNewCount, setMgrNewCount] = useState(0);
+  const prevTechMsgCount = useRef(0);
+  const prevMgrMsgCount = useRef(0);
+  const prevHasBothColumns = useRef(false);
 
   const [batchOpen, setBatchOpen] = useState(false);
   const [batchStep, setBatchStep] = useState<"import" | "compose" | "preview" | "results">("import");
@@ -423,16 +431,77 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
     return () => { destroyed = true; wsRef.current?.close(); };
   }, []);
 
+  const isAtBottom = (el: HTMLDivElement | null) => {
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  };
+
   useEffect(() => {
-    techEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const techMsgs = messages.filter(m => m.contactType === 'tech' || m.contactType === 'nearest_tech');
+    const mgrMsgs = messages.filter(m => m.contactType === 'manager');
+    const hasBothColumns = techMsgs.length > 0 && mgrMsgs.length > 0;
+
+    if (hasBothColumns !== prevHasBothColumns.current) {
+      prevTechMsgCount.current = hasBothColumns ? techMsgs.length : messages.length;
+      prevMgrMsgCount.current = hasBothColumns ? mgrMsgs.length : 0;
+      prevHasBothColumns.current = hasBothColumns;
+      setTechNewCount(0);
+      setMgrNewCount(0);
+      techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+
+    if (hasBothColumns) {
+      const newTech = techMsgs.length - prevTechMsgCount.current;
+      const newMgr = mgrMsgs.length - prevMgrMsgCount.current;
+
+      if (isAtBottom(techScrollRef.current)) {
+        techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        setTechNewCount(0);
+      } else if (newTech > 0) {
+        setTechNewCount(c => c + newTech);
+      }
+
+      if (isAtBottom(managerScrollRef.current)) {
+        managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        setMgrNewCount(0);
+      } else if (newMgr > 0) {
+        setMgrNewCount(c => c + newMgr);
+      }
+
+      prevTechMsgCount.current = techMsgs.length;
+      prevMgrMsgCount.current = mgrMsgs.length;
+    } else {
+      const newCount = messages.length - prevTechMsgCount.current;
+      if (isAtBottom(techScrollRef.current)) {
+        techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        setTechNewCount(0);
+      } else if (newCount > 0) {
+        setTechNewCount(c => c + newCount);
+      }
+      prevTechMsgCount.current = messages.length;
+      prevMgrMsgCount.current = 0;
+    }
   }, [messages]);
 
   useEffect(() => {
     if (selectedTruck) {
       markReadMutation.mutate(selectedTruck);
     }
+    setTechNewCount(0);
+    setMgrNewCount(0);
+    prevTechMsgCount.current = 0;
+    prevMgrMsgCount.current = 0;
   }, [selectedTruck]);
+
+  const handleTechScroll = useCallback(() => {
+    if (isAtBottom(techScrollRef.current)) setTechNewCount(0);
+  }, []);
+
+  const handleMgrScroll = useCallback(() => {
+    if (isAtBottom(managerScrollRef.current)) setMgrNewCount(0);
+  }, []);
 
   const handleSelectTruck = (truckNumber: string) => {
     setSelectedTruck(truckNumber);
@@ -993,39 +1062,77 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
                 const mgrContactName = mgrMsgs.find(m => m.contactName)?.contactName || selectedVehicle?.managerName || 'Manager';
                 return (
                   <div className="flex-1 flex overflow-hidden">
-                    <div className="flex-1 flex flex-col min-w-0 border-r">
+                    <div className="flex-1 flex flex-col min-w-0 border-r relative">
                       <div className="px-3 py-2 border-b bg-muted/10 flex items-center gap-1.5 flex-shrink-0">
                         <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${CONTACT_TYPE_COLORS.tech}`}>Tech</Badge>
                         <span className="text-xs font-medium truncate">{techContactName}</span>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                      <div ref={techScrollRef} onScroll={handleTechScroll} className="flex-1 overflow-y-auto p-3 space-y-3">
                         {techMsgs.map(renderMessageBubble)}
                         <div ref={techEndRef} />
                       </div>
+                      {techNewCount > 0 && (
+                        <button
+                          onClick={() => {
+                            techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                            setTechNewCount(0);
+                          }}
+                          className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-md hover:bg-primary/90 transition-colors z-10"
+                        >
+                          {techNewCount === 1 ? "1 new message" : `${techNewCount} new messages`}
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
-                    <div className="flex-1 flex flex-col min-w-0">
+                    <div className="flex-1 flex flex-col min-w-0 relative">
                       <div className="px-3 py-2 border-b bg-muted/10 flex items-center gap-1.5 flex-shrink-0">
                         <Badge variant="outline" className={`text-[10px] px-1.5 py-0 ${CONTACT_TYPE_COLORS.manager}`}>Manager</Badge>
                         <span className="text-xs font-medium truncate">{mgrContactName}</span>
                       </div>
-                      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+                      <div ref={managerScrollRef} onScroll={handleMgrScroll} className="flex-1 overflow-y-auto p-3 space-y-3">
                         {mgrMsgs.map(renderMessageBubble)}
                         <div ref={managerEndRef} />
                       </div>
+                      {mgrNewCount > 0 && (
+                        <button
+                          onClick={() => {
+                            managerEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                            setMgrNewCount(0);
+                          }}
+                          className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-md hover:bg-primary/90 transition-colors z-10"
+                        >
+                          {mgrNewCount === 1 ? "1 new message" : `${mgrNewCount} new messages`}
+                          <ChevronDown className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );
               }
               return (
-                <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                  {messages.length === 0 ? (
-                    <div className="text-center text-sm text-muted-foreground py-8">
-                      No messages yet. Select a contact below and send the first message.
-                    </div>
-                  ) : (
-                    messages.map(renderMessageBubble)
+                <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden">
+                  <div ref={techScrollRef} onScroll={handleTechScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {messages.length === 0 ? (
+                      <div className="text-center text-sm text-muted-foreground py-8">
+                        No messages yet. Select a contact below and send the first message.
+                      </div>
+                    ) : (
+                      messages.map(renderMessageBubble)
+                    )}
+                    <div ref={techEndRef} />
+                  </div>
+                  {techNewCount > 0 && (
+                    <button
+                      onClick={() => {
+                        techEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                        setTechNewCount(0);
+                      }}
+                      className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-md hover:bg-primary/90 transition-colors z-10"
+                    >
+                      {techNewCount === 1 ? "1 new message" : `${techNewCount} new messages`}
+                      <ChevronDown className="w-3 h-3" />
+                    </button>
                   )}
-                  <div ref={techEndRef} />
                 </div>
               );
             })()}
