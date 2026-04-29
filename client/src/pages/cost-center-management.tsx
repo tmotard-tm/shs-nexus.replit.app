@@ -634,26 +634,6 @@ export default function CostCenterManagement() {
     },
   });
 
-  const handleDownloadCsv = useCallback(() => {
-    const csv = Papa.unparse(
-      items.map((r) => ({ district: r.district, cost_center: r.costCenter })),
-      { header: true },
-    );
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-    const filename = `district-cost-centers-${date}.csv`;
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 100);
-  }, [items]);
-
   const resetBulk = () => {
     setBulkText("");
     setBulkRows(null);
@@ -801,6 +781,28 @@ export default function CostCenterManagement() {
     return sorted;
   }, [items, searchQuery, sortField, sortDir, newDistrictsFilterActive, newDistrictsSet]);
 
+  const isFiltered = searchQuery.trim() !== "" || newDistrictsFilterActive;
+
+  const handleDownloadCsv = useCallback(() => {
+    const csv = Papa.unparse(
+      filteredSorted.map((r) => ({ district: r.district, cost_center: r.costCenter })),
+      { header: true },
+    );
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const filename = `district-cost-centers-${date}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }, [filteredSorted]);
+
   const newDistrictsBatchAt = useMemo(() => {
     const ts = autoSeedStatus?.newDistricts?.at;
     if (!ts) return null;
@@ -898,11 +900,12 @@ export default function CostCenterManagement() {
           <Button
             variant="outline"
             onClick={handleDownloadCsv}
-            disabled={items.length === 0}
+            disabled={filteredSorted.length === 0}
+            title={isFiltered ? `Export ${filteredSorted.length} filtered row${filteredSorted.length === 1 ? "" : "s"} as CSV` : `Export all ${items.length} row${items.length === 1 ? "" : "s"} as CSV`}
             data-testid="button-download-csv"
           >
             <Download className="mr-2 h-4 w-4" />
-            Download CSV
+            {isFiltered ? "Download filtered rows" : "Download CSV"}
           </Button>
           <Dialog
             open={isBulkOpen}
