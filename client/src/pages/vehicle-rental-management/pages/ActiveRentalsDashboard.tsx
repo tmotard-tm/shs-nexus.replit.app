@@ -1,4 +1,4 @@
-import { useMemo, useState, useRef } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "wouter";
 import {
@@ -30,6 +30,16 @@ import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scop
 
 type SortDir = "asc" | "desc" | null;
 const NONE_MARKER = "__NONE_SELECTED__";
+
+const SORT_PREFS_KEY = "activeRentals_sortPrefs";
+interface SortPrefs { dateInRepairSort: SortDir; regExpirySort: SortDir; dailyNetSort: SortDir; adjNetSort: SortDir; }
+function readSortPrefs(): SortPrefs {
+  try {
+    const raw = localStorage.getItem(SORT_PREFS_KEY);
+    if (raw) return JSON.parse(raw) as SortPrefs;
+  } catch {}
+  return { dateInRepairSort: null, regExpirySort: null, dailyNetSort: null, adjNetSort: null };
+}
 
 /** True if the row's value passes a multi-select filter. Empty selection = no filter. */
 function passesMulti(selected: string[], value: string | null | undefined): boolean {
@@ -140,10 +150,15 @@ export default function ActiveRentalsDashboard() {
   const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>([]);
   const [regExpiryFilter, setRegExpiryFilter] = useState<string[]>([]);
   // Sort directions on date columns (mirrors FS's per-column sort buttons)
-  const [dateInRepairSort, setDateInRepairSort] = useState<SortDir>(null);
-  const [regExpirySort, setRegExpirySort] = useState<SortDir>(null);
-  const [dailyNetSort, setDailyNetSort] = useState<SortDir>(null);
-  const [adjNetSort, setAdjNetSort] = useState<SortDir>(null);
+  // Initialized from localStorage so they survive navigation and refresh.
+  const _initSortPrefs = readSortPrefs();
+  const [dateInRepairSort, setDateInRepairSort] = useState<SortDir>(_initSortPrefs.dateInRepairSort);
+  const [regExpirySort, setRegExpirySort] = useState<SortDir>(_initSortPrefs.regExpirySort);
+  const [dailyNetSort, setDailyNetSort] = useState<SortDir>(_initSortPrefs.dailyNetSort);
+  const [adjNetSort, setAdjNetSort] = useState<SortDir>(_initSortPrefs.adjNetSort);
+  useEffect(() => {
+    localStorage.setItem(SORT_PREFS_KEY, JSON.stringify({ dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort }));
+  }, [dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort]);
 
   // Detail panel
   const [detailTruckId, setDetailTruckId] = useState<string | null>(null);
