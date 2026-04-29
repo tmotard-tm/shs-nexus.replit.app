@@ -167,7 +167,7 @@ export interface IStorage {
   // Activity Logs
   getActivityLogs(): Promise<ActivityLog[]>;
   getActivityLogsByUser(userId: string): Promise<ActivityLog[]>;
-  getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]>;
+  getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number, offset?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
   
   // Dashboard Stats
@@ -1613,12 +1613,13 @@ export class MemStorage implements IStorage {
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }
 
-  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]> {
+  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number, offset?: number): Promise<ActivityLog[]> {
     let results = Array.from(this.activityLogs.values())
       .filter(log => log.entityType === entityType)
       .filter(log => !entityId || log.entityId === entityId)
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-    if (limit) results = results.slice(0, limit);
+    const start = offset ?? 0;
+    results = results.slice(start, limit ? start + limit : undefined);
     return results;
   }
 
@@ -4359,12 +4360,13 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(activityLogs).where(eq(activityLogs.userId, userId)).orderBy(desc(activityLogs.createdAt));
   }
 
-  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number): Promise<ActivityLog[]> {
+  async getActivityLogsByEntityType(entityType: string, entityId?: string, limit?: number, offset?: number): Promise<ActivityLog[]> {
     const conditions = [eq(activityLogs.entityType, entityType)];
     if (entityId) conditions.push(eq(activityLogs.entityId, entityId));
-    const query = db.select().from(activityLogs).where(and(...conditions)).orderBy(desc(activityLogs.createdAt));
-    if (limit) return await query.limit(limit);
-    return await query;
+    const base = db.select().from(activityLogs).where(and(...conditions)).orderBy(desc(activityLogs.createdAt));
+    const withOffset = offset ? base.offset(offset) : base;
+    const withLimit = limit ? withOffset.limit(limit) : withOffset;
+    return await withLimit;
   }
 
   async createActivityLog(log: InsertActivityLog): Promise<ActivityLog> {

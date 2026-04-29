@@ -56,7 +56,7 @@ import { formatDistanceToNow } from "date-fns";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLocation, useSearch } from "wouter";
@@ -339,19 +339,35 @@ export default function CostCenterManagement() {
     [historyDistrict],
   );
 
-  const { data: historyEntries = [], isLoading: historyLoading } = useQuery<ActivityEntry[]>({
+  const {
+    data: historyPages,
+    isLoading: historyLoading,
+    fetchNextPage: historyFetchNextPage,
+    hasNextPage: historyHasMore,
+    isFetchingNextPage: historyLoadingMore,
+  } = useInfiniteQuery<{ entries: ActivityEntry[]; hasMore: boolean }>({
     queryKey: historyQueryKey,
-    queryFn: async () => {
-      const url = historyDistrict
+    queryFn: async ({ pageParam }) => {
+      const offset = pageParam as number;
+      const base = historyDistrict
         ? `/api/cost-centers/activity?district=${encodeURIComponent(historyDistrict)}`
         : "/api/cost-centers/activity";
+      const url = `${base}${historyDistrict ? "&" : "?"}offset=${offset}`;
       const res = await fetch(url, { credentials: "include" });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) =>
+      lastPage.hasMore ? pages.reduce((sum, p) => sum + p.entries.length, 0) : undefined,
     enabled: isHistoryOpen,
     staleTime: 30_000,
   });
+
+  const historyEntries = useMemo(
+    () => historyPages?.pages.flatMap((p) => p.entries) ?? [],
+    [historyPages],
+  );
 
   const { data: autoSeedStatus } = useQuery<AutoSeedStatus>({
     queryKey: AUTO_SEED_STATUS_KEY,
@@ -1622,48 +1638,70 @@ export default function CostCenterManagement() {
                 No history found{historyDistrict ? ` for district ${historyDistrict}` : ""}.
               </div>
             ) : (
-              historyEntries.map((entry) => (
-                <div
-                  key={entry.id}
-                  className="border rounded-md p-3 space-y-1"
-                  data-testid={`history-entry-${entry.id}`}
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <Badge variant="secondary" className="font-mono text-xs">
-                      {(
-                        {
-                          cost_center_created: "created",
-                          cost_center_updated: "updated",
-                          cost_center_deleted: "deleted",
-                          cost_center_bulk_import: "bulk import",
-                          cost_center_seed_defaults: "seed defaults",
-                          cost_center_auto_seed_manual: "auto-seed (manual)",
-                        } as Record<string, string>
-                      )[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " ")}
-                    </Badge>
-                    {entry.entityId && entry.entityId !== "*" && (
-                      <button
-                        type="button"
-                        className="font-mono text-xs text-muted-foreground hover:underline"
-                        title={`Filter to district ${entry.entityId}`}
-                        onClick={() => setHistoryDistrict(entry.entityId!)}
-                      >
-                        {entry.entityId}
-                      </button>
+              <>
+                {historyEntries.map((entry) => (
+                  <div
+                    key={entry.id}
+                    className="border rounded-md p-3 space-y-1"
+                    data-testid={`history-entry-${entry.id}`}
+                  >
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {(
+                          {
+                            cost_center_created: "created",
+                            cost_center_updated: "updated",
+                            cost_center_deleted: "deleted",
+                            cost_center_bulk_import: "bulk import",
+                            cost_center_seed_defaults: "seed defaults",
+                            cost_center_auto_seed_manual: "auto-seed (manual)",
+                          } as Record<string, string>
+                        )[entry.action] ?? entry.action.replace(/^cost_center_/, "").replace(/_/g, " ")}
+                      </Badge>
+                      {entry.entityId && entry.entityId !== "*" && (
+                        <button
+                          type="button"
+                          className="font-mono text-xs text-muted-foreground hover:underline"
+                          title={`Filter to district ${entry.entityId}`}
+                          onClick={() => setHistoryDistrict(entry.entityId!)}
+                        >
+                          {entry.entityId}
+                        </button>
+                      )}
+                    </div>
+                    {entry.details && (
+                      <p className="text-sm">{entry.details}</p>
                     )}
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                      <span title={new Date(entry.createdAt).toLocaleString()}>
+                        {formatDistanceToNow(new Date(entry.createdAt), { addSuffix: true })}
+                      </span>
+                      <span>·</span>
+                      <span>by {entry.actor}</span>
+                    </div>
                   </div>
-                  {entry.details && (
-                    <p className="text-sm">{entry.details}</p>
-                  )}
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
-                    <span title={new Date(entry.createdAt).toLocaleString()}>
-                      {formatDistanceToNow(new Date(entry.createdAt), { addSuffix: true })}
-                    </span>
-                    <span>·</span>
-                    <span>by {entry.actor}</span>
+                ))}
+                {historyHasMore && (
+                  <div className="pt-2 pb-4 text-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => historyFetchNextPage()}
+                      disabled={historyLoadingMore}
+                      data-testid="button-history-load-more"
+                    >
+                      {historyLoadingMore ? (
+                        <>
+                          <RefreshCw className="mr-2 h-3 w-3 animate-spin" />
+                          Loading…
+                        </>
+                      ) : (
+                        "Load more"
+                      )}
+                    </Button>
                   </div>
-                </div>
-              ))
+                )}
+              </>
             )}
           </div>
         </SheetContent>

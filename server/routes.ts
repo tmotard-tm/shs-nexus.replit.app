@@ -7633,9 +7633,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const rawDistrict = typeof req.query.district === "string" ? req.query.district.trim() : "";
       const district = rawDistrict ? padDistrictForApi(rawDistrict) : undefined;
-      const limit = 200;
 
-      const logs = await storage.getActivityLogsByEntityType("district_cost_center", district, limit);
+      const PAGE_SIZE = 50;
+      const rawLimit = parseInt(String(req.query.limit ?? PAGE_SIZE), 10);
+      const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 200) : PAGE_SIZE;
+      const rawOffset = parseInt(String(req.query.offset ?? 0), 10);
+      const offset = Number.isFinite(rawOffset) && rawOffset >= 0 ? rawOffset : 0;
+
+      // Fetch one extra entry to determine if more pages exist
+      const logs = await storage.getActivityLogsByEntityType("district_cost_center", district, limit + 1, offset);
+      const hasMore = logs.length > limit;
+      const pageLogs = hasMore ? logs.slice(0, limit) : logs;
 
       // Resolve userId → username for display; cache per unique userId in this request
       const userCache = new Map<string, string>();
@@ -7648,8 +7656,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return name;
       };
 
-      const enriched = await Promise.all(
-        logs.map(async (log) => ({
+      const entries = await Promise.all(
+        pageLogs.map(async (log) => ({
           id: log.id,
           action: log.action,
           entityId: log.entityId,
@@ -7659,7 +7667,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }))
       );
 
-      res.json(enriched);
+      res.json({ entries, hasMore });
     } catch (error) {
       console.error("Error fetching cost center activity:", error);
       res.status(500).json({ message: "Failed to fetch cost center activity" });
