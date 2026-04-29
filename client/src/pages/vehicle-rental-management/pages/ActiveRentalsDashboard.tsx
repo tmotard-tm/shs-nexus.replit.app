@@ -42,6 +42,47 @@ function readSortPrefs(): SortPrefs {
   return { dateInRepairSort: null, regExpirySort: null, dailyNetSort: null, adjNetSort: null };
 }
 
+const FILTER_PREFS_KEY = "activeRentals_filterPrefs";
+interface FilterPrefs {
+  truckNumberFilter: string;
+  stateFilter: string[];
+  regionFilter: string[];
+  byovFilter: string[];
+  mainStatusMulti: string[];
+  ownerFilter: string[];
+  tpmsFilter: string[];
+  repairedFilter: string[];
+  amsFilter: string[];
+  pickSlotFilter: string[];
+  rentalReturnedFilter: string[];
+  vanPickedUpFilter: string[];
+  holmanStatusFilter: string[];
+  regExpiryFilter: string[];
+}
+const DEFAULT_FILTER_PREFS: FilterPrefs = {
+  truckNumberFilter: "",
+  stateFilter: [],
+  regionFilter: [],
+  byovFilter: [],
+  mainStatusMulti: [],
+  ownerFilter: [],
+  tpmsFilter: [],
+  repairedFilter: [],
+  amsFilter: [],
+  pickSlotFilter: [],
+  rentalReturnedFilter: [],
+  vanPickedUpFilter: [],
+  holmanStatusFilter: [],
+  regExpiryFilter: [],
+};
+function readFilterPrefs(): FilterPrefs {
+  try {
+    const raw = localStorage.getItem(FILTER_PREFS_KEY);
+    if (raw) return { ...DEFAULT_FILTER_PREFS, ...JSON.parse(raw) } as FilterPrefs;
+  } catch {}
+  return { ...DEFAULT_FILTER_PREFS };
+}
+
 /** True if the row's value passes a multi-select filter. Empty selection = no filter. */
 function passesMulti(selected: string[], value: string | null | undefined): boolean {
   if (!selected || selected.length === 0) return true;
@@ -137,20 +178,22 @@ export default function ActiveRentalsDashboard() {
   const [page, setPage] = useState(1);
 
   // Per-column header filters (mirror Fleet Scope's table-header MultiSelectFilters).
-  const [truckNumberFilter, setTruckNumberFilter] = useState("");
-  const [stateFilter, setStateFilter] = useState<string[]>([]);
-  const [regionFilter, setRegionFilter] = useState<string[]>([]);
-  const [byovFilter, setByovFilter] = useState<string[]>([]);
-  const [mainStatusMulti, setMainStatusMulti] = useState<string[]>([]);
-  const [ownerFilter, setOwnerFilter] = useState<string[]>([]);
-  const [tpmsFilter, setTpmsFilter] = useState<string[]>([]);
-  const [repairedFilter, setRepairedFilter] = useState<string[]>([]);
-  const [amsFilter, setAmsFilter] = useState<string[]>([]);
-  const [pickSlotFilter, setPickSlotFilter] = useState<string[]>([]);
-  const [rentalReturnedFilter, setRentalReturnedFilter] = useState<string[]>([]);
-  const [vanPickedUpFilter, setVanPickedUpFilter] = useState<string[]>([]);
-  const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>([]);
-  const [regExpiryFilter, setRegExpiryFilter] = useState<string[]>([]);
+  // Initialized from localStorage so they survive navigation and refresh.
+  const _initFilterPrefs = readFilterPrefs();
+  const [truckNumberFilter, setTruckNumberFilter] = useState(_initFilterPrefs.truckNumberFilter);
+  const [stateFilter, setStateFilter] = useState<string[]>(_initFilterPrefs.stateFilter);
+  const [regionFilter, setRegionFilter] = useState<string[]>(_initFilterPrefs.regionFilter);
+  const [byovFilter, setByovFilter] = useState<string[]>(_initFilterPrefs.byovFilter);
+  const [mainStatusMulti, setMainStatusMulti] = useState<string[]>(_initFilterPrefs.mainStatusMulti);
+  const [ownerFilter, setOwnerFilter] = useState<string[]>(_initFilterPrefs.ownerFilter);
+  const [tpmsFilter, setTpmsFilter] = useState<string[]>(_initFilterPrefs.tpmsFilter);
+  const [repairedFilter, setRepairedFilter] = useState<string[]>(_initFilterPrefs.repairedFilter);
+  const [amsFilter, setAmsFilter] = useState<string[]>(_initFilterPrefs.amsFilter);
+  const [pickSlotFilter, setPickSlotFilter] = useState<string[]>(_initFilterPrefs.pickSlotFilter);
+  const [rentalReturnedFilter, setRentalReturnedFilter] = useState<string[]>(_initFilterPrefs.rentalReturnedFilter);
+  const [vanPickedUpFilter, setVanPickedUpFilter] = useState<string[]>(_initFilterPrefs.vanPickedUpFilter);
+  const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>(_initFilterPrefs.holmanStatusFilter);
+  const [regExpiryFilter, setRegExpiryFilter] = useState<string[]>(_initFilterPrefs.regExpiryFilter);
   // Sort directions on date columns (mirrors FS's per-column sort buttons)
   // Initialized from localStorage so they survive navigation and refresh.
   const _initSortPrefs = readSortPrefs();
@@ -161,6 +204,19 @@ export default function ActiveRentalsDashboard() {
   useEffect(() => {
     localStorage.setItem(SORT_PREFS_KEY, JSON.stringify({ dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort }));
   }, [dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort]);
+  useEffect(() => {
+    localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify({
+      truckNumberFilter, stateFilter, regionFilter, byovFilter,
+      mainStatusMulti, ownerFilter, tpmsFilter, repairedFilter,
+      amsFilter, pickSlotFilter, rentalReturnedFilter, vanPickedUpFilter,
+      holmanStatusFilter, regExpiryFilter,
+    }));
+  }, [
+    truckNumberFilter, stateFilter, regionFilter, byovFilter,
+    mainStatusMulti, ownerFilter, tpmsFilter, repairedFilter,
+    amsFilter, pickSlotFilter, rentalReturnedFilter, vanPickedUpFilter,
+    holmanStatusFilter, regExpiryFilter,
+  ]);
 
   // Detail panel
   const [detailTruckId, setDetailTruckId] = useState<string | null>(null);
@@ -471,6 +527,8 @@ export default function ActiveRentalsDashboard() {
     setAmsFilter([]); setPickSlotFilter([]); setRentalReturnedFilter([]); setVanPickedUpFilter([]);
     setHolmanStatusFilter([]); setRegExpiryFilter([]); setDateInRepairSort(null); setRegExpirySort(null);
     setDailyNetSort(null); setAdjNetSort(null);
+    localStorage.removeItem(FILTER_PREFS_KEY);
+    localStorage.removeItem(SORT_PREFS_KEY);
   };
   const anyColumnFilterActive =
     !!truckNumberFilter || stateFilter.length > 0 || regionFilter.length > 0 || byovFilter.length > 0 ||
