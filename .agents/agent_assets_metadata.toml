@@ -36,3 +36,9 @@ id = "yf1qiYzvmDQvP_BQtCatk"
 uri = "file://.local/tasks/nexus-architecture-qa.md"
 type = "text"
 title = "Nexus Architecture — Technical Q&A (Q16–Q42)"
+
+[[outputs]]
+id = "Qk-7SN8i6Aimuv0nWTGOT"
+uri = "file://attached_assets/profitability_export.csv"
+type = "table"
+title = "Profitability Export — All 262 Techs"
