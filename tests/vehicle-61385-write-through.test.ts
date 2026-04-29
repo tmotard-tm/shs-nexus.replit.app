@@ -498,6 +498,30 @@ test("Holman cache: skipped Holman call does not mutate the cache", () => {
   assert.equal(row?.holmanAssignedStatusCd, "A", "statusCode should not be overwritten by a skipped Holman call");
 });
 
+test("Holman cache pending: holmanTechAssigned, holmanTechName, and holmanAssignedStatusCd are written when Holman status is pending", () => {
+  const caches = emptyCaches();
+
+  const holmanResult: WriteThroughCacheArgs["holman"] = {
+    status: "pending",
+    message: "Queued — awaiting Holman confirmation",
+    cachePayload: {
+      system: "holman",
+      holmanVehicleNumber: "061385",
+      ldap: "jcasti0",
+      techName: "J Casti",
+      statusCode: "P",
+    },
+  };
+
+  applyHolmanCachePayload(caches, holmanResult);
+
+  const row = caches.holmanVehiclesCache.get("061385");
+  assert.ok(row, "Holman cache row should be written for a pending Holman result");
+  assert.equal(row.holmanTechAssigned, "jcasti0");
+  assert.equal(row.holmanTechName, "J Casti");
+  assert.equal(row.holmanAssignedStatusCd, "P");
+});
+
 /* Force-exit after test suite completes.
  * fleet-operations-service.ts imports db.ts at module scope, which keeps a
  * Postgres connection pool alive and prevents the Node.js process from
