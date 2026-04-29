@@ -587,3 +587,17 @@ export const insertVrmRepairTrackerShopContactSchema = createInsertSchema(vrmRep
 });
 export type VrmRepairTrackerShopContact = typeof vrmRepairTrackerShopContact.$inferSelect;
 export type InsertVrmRepairTrackerShopContact = z.infer<typeof insertVrmRepairTrackerShopContactSchema>;
+
+// ─── Rate Config ──────────────────────────────────────────────────────────────
+
+export const vrmRateConfig = pgTable("vrm_rate_config", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  value: decimal("value", { precision: 10, scale: 2 }).notNull(),
+  label: text("label").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: varchar("updated_by", { length: 128 }),
+});
+
+export type VrmRateConfig = typeof vrmRateConfig.$inferSelect;
+export const insertVrmRateConfigSchema = createInsertSchema(vrmRateConfig);
+export type InsertVrmRateConfig = z.infer<typeof insertVrmRateConfigSchema>;

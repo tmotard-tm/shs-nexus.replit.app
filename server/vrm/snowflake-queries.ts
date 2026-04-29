@@ -3,6 +3,7 @@
  * Uses the existing getSnowflakeService() — no new credentials needed.
  */
 import { getSnowflakeService, isSnowflakeConfigured } from "../snowflake-service";
+import { getRateConfig } from "./storage";
 
 export interface RentalRosterRow {
   ENTERPRISE_ID: string | null;
@@ -351,6 +352,19 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
   if (ldaps.length === 0) return [];
   const svc = getSnowflakeService();
 
+  // Load configurable rates from the database (falls back to defaults if missing).
+  let fuelPerComplete = 10;
+  let rentalPerDay = 78;
+  try {
+    const rateRows = await getRateConfig();
+    for (const r of rateRows) {
+      if (r.key === "fuel_per_complete") fuelPerComplete = Number(r.value);
+      if (r.key === "rental_per_day") rentalPerDay = Number(r.value);
+    }
+  } catch {
+    // Non-fatal: use defaults if the table isn't available yet.
+  }
+
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const rows = await svc.executeQuery(`
     WITH financials AS (
@@ -417,7 +431,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       ROUND(COALESCE(fin.labor_benefits, 0), 2)                         AS "labor_benefits",
       ROUND(COALESCE(fin.parts_cogs, 0), 2)                             AS "parts_cogs",
       ROUND(COALESCE(fin.parts_shipping, 0), 2)                         AS "parts_shipping",
-      COALESCE(fin.completes, 0) * 10                                    AS "fuel_est",
+      COALESCE(fin.completes, 0) * ${fuelPerComplete}                     AS "fuel_est",
       90                                                                  AS "lookback_days",
       -- working_days = distinct SO dates in the 90-day window (actual days the tech worked).
       -- Used as the divisor for all daily rate calculations so non-working days don't dilute
@@ -427,16 +441,16 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
                  COALESCE(fin.working_days, 0)), 2)                      AS "daily_revenue",
       ROUND(DIV0(COALESCE(fin.labor_direct,0) + COALESCE(fin.labor_benefits,0)
         + COALESCE(fin.parts_cogs,0) + COALESCE(fin.parts_shipping,0)
-        + COALESCE(fin.completes,0)*10,
+        + COALESCE(fin.completes,0)*${fuelPerComplete},
                  COALESCE(fin.working_days, 0)), 2)                      AS "daily_costs",
       ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
         - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
                  COALESCE(fin.working_days, 0)), 2)                      AS "daily_net_before_rental",
       ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
         - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
-                 COALESCE(fin.working_days, 0)) - 78, 2)                AS "daily_net_with_rental",
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+                 COALESCE(fin.working_days, 0)) - ${rentalPerDay}, 2)   AS "daily_net_with_rental",
       ROUND(DIV0(COALESCE(fin.ppt_profit, 0),
                  COALESCE(fin.working_days, 0)), 2)                      AS "daily_ppt_profit",
       CASE
@@ -444,8 +458,8 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         WHEN fin.TECH_LDAP IS NULL THEN 'No Data'
         WHEN DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
           - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-          - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
-               COALESCE(fin.working_days, 0)) - 78 >= 0
+          - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} >= 0
           THEN 'Approve'
         WHEN sc.tenure_months < 6                                          THEN 'Approve'
         WHEN sc.scorecard_score >= 4.0                                     THEN 'Approve'
@@ -458,8 +472,8 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
           AND sc.LDAP_ID IS NOT NULL
           AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
-               COALESCE(fin.working_days, 0)) - 78 < 0
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} < 0
         THEN TRUE ELSE FALSE
       END                                                                  AS "new_hire_exempt",
       -- Scorecard exempt: score >= 4.0, not a new hire, financially negative, has financials + DCR data
@@ -470,8 +484,8 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
           AND sc.LDAP_ID IS NOT NULL
           AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
             - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
-            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*10,
-               COALESCE(fin.working_days, 0)) - 78 < 0
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} < 0
         THEN TRUE ELSE FALSE
       END                                                                  AS "scorecard_exempt"
     FROM financials fin

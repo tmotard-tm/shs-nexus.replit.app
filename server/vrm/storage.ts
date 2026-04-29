@@ -18,8 +18,10 @@ import {
   vrmRepairTrackerActions,
   vrmRepairTrackerTechOutreach,
   vrmRepairTrackerShopContact,
+  vrmRateConfig,
   type VrmTech,
   type VrmRentalDecision,
+  type VrmRateConfig,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -1725,6 +1727,30 @@ export async function reviseShopContact(
     .returning();
   return row;
 }
+
+// ─── Rate Config ──────────────────────────────────────────────────────────────
+
+export async function getRateConfig(): Promise<VrmRateConfig[]> {
+  return db.select().from(vrmRateConfig).orderBy(vrmRateConfig.key);
+}
+
+export async function upsertRateConfig(
+  key: string,
+  value: number,
+  updatedBy?: string,
+): Promise<VrmRateConfig> {
+  const [row] = await db
+    .insert(vrmRateConfig)
+    .values({ key, value: String(value), label: "", updatedAt: new Date(), updatedBy })
+    .onConflictDoUpdate({
+      target: vrmRateConfig.key,
+      set: { value: String(value), updatedAt: new Date(), updatedBy },
+    })
+    .returning();
+  return row;
+}
+
+// ─── Legacy Notes ─────────────────────────────────────────────────────────────
 
 /**
  * Returns the legacy notes field IF both timelines are empty.

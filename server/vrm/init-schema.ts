@@ -476,5 +476,21 @@ export async function initVrmSchema(): Promise<void> {
     console.warn("[VRM] G6 dedup-protection install failed (non-fatal):", e?.message);
   }
 
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rate_config (
+      key         VARCHAR(64) PRIMARY KEY,
+      value       DECIMAL(10,2) NOT NULL,
+      label       TEXT NOT NULL,
+      updated_at  TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_by  VARCHAR(128)
+    );
+  `);
+  await db.execute(sql`
+    INSERT INTO vrm_rate_config (key, value, label) VALUES
+      ('fuel_per_complete', 10.00, 'Fuel cost per completed SO ($)'),
+      ('rental_per_day',    78.00, 'Rental truck cost per day ($)')
+    ON CONFLICT (key) DO NOTHING;
+  `);
+
   console.log("[VRM] Schema initialised");
 }

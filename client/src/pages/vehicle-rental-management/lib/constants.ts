@@ -7,6 +7,7 @@ import {
   TrendingUp,
   ClipboardList,
   Wrench,
+  Settings2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -109,4 +110,5 @@ export const navItems: NavItem[] = [
   { label: "Escalations", path: "/vehicle-rental-management/escalations", icon: AlertTriangle },
   { label: "DCA Review", path: "/vehicle-rental-management/dca-review", icon: ClipboardCheck },
   { label: "Exception Cases", path: "/vehicle-rental-management/exception-cases", icon: ShieldAlert },
+  { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];

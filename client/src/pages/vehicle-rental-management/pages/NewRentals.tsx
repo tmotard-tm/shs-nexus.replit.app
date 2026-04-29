@@ -450,6 +450,12 @@ const NR_SELECT_STYLE: React.CSSProperties = {
 function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onClose: () => void }) {
   const qc = useQueryClient();
 
+  const { data: ratesData } = useQuery<Array<{ key: string; value: string }>>({
+    queryKey: ["/api/vrm/settings/rates"],
+  });
+  const panelRateMap = Object.fromEntries((ratesData ?? []).map((r) => [r.key, Number(r.value)]));
+  const rentalPerDay = panelRateMap["rental_per_day"] ?? 78;
+
   const { data: actionsData } = useQuery<{ rows: DecisionAction[] }>({
     queryKey: ["/api/vrm/profitability/log", decision.id, "actions"],
     queryFn: async () => {
@@ -756,7 +762,7 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
             </h3>
           </div>
           <div style={rowStyle}>
-            <div style={labelStyle}>Daily Net (w/ $78)</div>
+            <div style={labelStyle}>Daily Net (w/ ${rentalPerDay})</div>
             <span style={{ fontFamily: fonts.jetbrains, fontWeight: 600, fontSize: 14, color: decision.dailyNetWithRental != null ? (Number(decision.dailyNetWithRental) < 0 ? colors.red : colors.green) : colors.inkMuted }}>
               {decision.dailyNetWithRental != null ? (Number(decision.dailyNetWithRental) < 0 ? `-$${Math.abs(Number(decision.dailyNetWithRental)).toFixed(2)}` : `$${Number(decision.dailyNetWithRental).toFixed(2)}`) : "—"}
             </span>
@@ -871,6 +877,15 @@ export default function NewRentals() {
     },
   });
 
+  // ── Rate config query ──────────────────────────────────────────────────────
+
+  const ratesQuery = useQuery<Array<{ key: string; value: string }>>({
+    queryKey: ["/api/vrm/settings/rates"],
+  });
+  const rateMap = Object.fromEntries((ratesQuery.data ?? []).map((r) => [r.key, Number(r.value)]));
+  const rentalPerDay = rateMap["rental_per_day"] ?? 78;
+  const fuelPerComplete = rateMap["fuel_per_complete"] ?? 10;
+
   // ── Decision log query ─────────────────────────────────────────────────────
 
   const logQuery = useQuery<{ rows: DecisionRow[] }>({
@@ -900,7 +915,7 @@ export default function NewRentals() {
 
   const handleExport = () => {
     if (!evaluatedRows.length) return;
-    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Working Days", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", "Daily Net (w/ $78)", "Daily PPT Profit", "Recommendation"];
+    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Working Days", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", `Daily Net (w/ $${rentalPerDay})`, "Daily PPT Profit", "Recommendation"];
     const lines = evaluatedRows.map((r) =>
       [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.working_days, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
     );
@@ -916,9 +931,9 @@ export default function NewRentals() {
   const breakeven = (row: ProfitRow) => {
     if (row.recommendation === "No Data" || row.recommendation === "New Hire — Training") return null;
     if (row.daily_net_with_rental >= 0) return null;
-    const gap = 78 - row.daily_net_before_rental;
+    const gap = rentalPerDay - row.daily_net_before_rental;
     if (gap <= 0) return null;
-    return Math.ceil(gap / 10);
+    return Math.ceil(gap / fuelPerComplete);
   };
 
   // ── Table columns ──────────────────────────────────────────────────────────
@@ -1128,7 +1143,7 @@ export default function NewRentals() {
             </h2>
             <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
               {evaluatedRows.length} tech{evaluatedRows.length !== 1 ? "s" : ""} evaluated · 90-day lookback ·{" "}
-              {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · $78/day rental
+              {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · ${rentalPerDay}/day rental
             </span>
           </div>
 
@@ -1144,7 +1159,7 @@ export default function NewRentals() {
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Revenue</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
                   <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)">Daily PPT</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
@@ -1389,7 +1404,7 @@ export default function NewRentals() {
                 <tr>
                   <th style={thStyle}>LDAP</th>
                   <th style={thStyle}>Name</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Decision</th>
                   <th style={thStyle}>Decided By</th>
@@ -1495,7 +1510,7 @@ export default function NewRentals() {
                   <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ $78)</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={thStyle}>Checked</th>
                 </tr>

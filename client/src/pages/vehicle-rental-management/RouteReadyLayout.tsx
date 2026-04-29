@@ -11,6 +11,7 @@ import NewRentals from "./pages/NewRentals";
 import NewRentalFullLog from "./pages/NewRentalFullLog";
 import RentalRepairTracker from "./pages/RentalRepairTracker";
 import ActiveRentalsDashboard from "./pages/ActiveRentalsDashboard";
+import Settings from "./pages/Settings";
 
 function getPageTitle(path: string): string {
   if (path === "/vehicle-rental-management" || path === "/vehicle-rental-management/") return "Dashboard";
@@ -38,6 +39,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/exception-cases" component={ExceptionCases} />
             <Route path="/vehicle-rental-management/new-rental-full-log" component={NewRentalFullLog} />
             <Route path="/vehicle-rental-management/rental-repair-tracker" component={RentalRepairTracker} />
+            <Route path="/vehicle-rental-management/settings" component={Settings} />
             <Route>
               <WipPlaceholder moduleName="Page Not Found" />
             </Route>

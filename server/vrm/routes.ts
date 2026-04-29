@@ -58,6 +58,8 @@ import {
   addShopContact,
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
+  getRateConfig,
+  upsertRateConfig,
 } from "./storage";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -1924,6 +1926,39 @@ export function registerVrmRoutes(): Router {
       res.json({ ldap, rows, events, summary: summarizeStatus(rows, { error: snowflakeError, sourceConfigured }), cached: false });
     } catch (e: any) {
       console.error("[VRM] punch-history error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Rate Config ─────────────────────────────────────────────────────────────
+
+  router.get("/settings/rates", async (_req, res) => {
+    try {
+      const rows = await getRateConfig();
+      res.json(rows);
+    } catch (e: any) {
+      console.error("[VRM] rate-config GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  const ALLOWED_RATE_KEYS = new Set(["fuel_per_complete", "rental_per_day"]);
+
+  router.put("/settings/rates/:key", async (req, res) => {
+    try {
+      const { key } = req.params;
+      if (!ALLOWED_RATE_KEYS.has(key)) {
+        return res.status(400).json({ error: `Unknown rate key '${key}'. Allowed keys: ${[...ALLOWED_RATE_KEYS].join(", ")}` });
+      }
+      const { value, updatedBy } = req.body;
+      const valueNum = Number(value);
+      if (value === undefined || !Number.isFinite(valueNum) || valueNum < 0 || valueNum > 10000) {
+        return res.status(400).json({ error: "value must be a non-negative finite number (max 10000)" });
+      }
+      const row = await upsertRateConfig(key, valueNum, updatedBy);
+      res.json(row);
+    } catch (e: any) {
+      console.error("[VRM] rate-config PUT error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
