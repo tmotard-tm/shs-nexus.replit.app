@@ -111,7 +111,10 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
   const [newConvSearch, setNewConvSearch] = useState("");
   const [showTemplates, setShowTemplates] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesScrollRef = useRef<HTMLDivElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
+  const [newMessageCount, setNewMessageCount] = useState(0);
+  const prevMessageCount = useRef(0);
 
   // When a truck is deep-linked from the table, open that conversation
   useEffect(() => {
@@ -229,17 +232,43 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
     };
   }, []);
 
-  // Scroll to bottom when messages change
+  const isAtBottom = (el: HTMLDivElement | null) => {
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+  };
+
+  // Smart scroll: auto-scroll only when already at bottom, otherwise show badge.
+  // prevMessageCount sentinel -1 means "initial load for this conversation" —
+  // bootstrap history is never counted as new messages.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (prevMessageCount.current === -1) {
+      prevMessageCount.current = messages.length;
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      return;
+    }
+    const newCount = messages.length - prevMessageCount.current;
+    if (isAtBottom(messagesScrollRef.current)) {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      setNewMessageCount(0);
+    } else if (newCount > 0) {
+      setNewMessageCount((c) => c + newCount);
+    }
+    prevMessageCount.current = messages.length;
   }, [messages]);
 
-  // Mark messages read when selecting a truck
+  // Mark messages read when selecting a truck, reset badge.
+  // Set sentinel -1 so first message batch is treated as history, not new.
   useEffect(() => {
     if (selectedTruck) {
       markReadMutation.mutate(selectedTruck);
     }
+    setNewMessageCount(0);
+    prevMessageCount.current = -1;
   }, [selectedTruck]);
+
+  const handleMessagesScroll = useCallback(() => {
+    if (isAtBottom(messagesScrollRef.current)) setNewMessageCount(0);
+  }, []);
 
   const handleSelectTruck = (truckNumber: string) => {
     setSelectedTruck(truckNumber);
@@ -466,7 +495,8 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            <div className="flex-1 flex flex-col min-w-0 relative overflow-hidden">
+            <div ref={messagesScrollRef} onScroll={handleMessagesScroll} className="flex-1 overflow-y-auto p-4 space-y-3">
               {messages.length === 0 ? (
                 <div className="text-center text-sm text-muted-foreground py-8">
                   No messages yet. Send the first message below.
@@ -537,6 +567,20 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
                 ))
               )}
               <div ref={messagesEndRef} />
+            </div>
+            {newMessageCount > 0 && (
+              <button
+                onClick={() => {
+                  messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                  setNewMessageCount(0);
+                }}
+                className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 px-2.5 py-1 rounded-full bg-primary text-primary-foreground text-xs font-medium shadow-md hover:bg-primary/90 transition-colors z-10"
+                data-testid="badge-new-messages"
+              >
+                {newMessageCount === 1 ? "1 new message" : `${newMessageCount} new messages`}
+                <ChevronDown className="w-3 h-3" />
+              </button>
+            )}
             </div>
 
             {/* Templates bar */}
