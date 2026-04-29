@@ -403,6 +403,37 @@ test("AMS cache: skipped AMS call does not mutate the cache", () => {
   assert.equal(row?.amsAssignedLdap, "jcasti0", "stale row should not be overwritten by a skipped AMS call");
 });
 
+test("AMS cache: failed AMS call does not mutate the cache", () => {
+  const caches = emptyCaches();
+
+  // Pre-existing row that should remain untouched.
+  caches.amsVehiclesCache.set("1HGBH41JXMN109186", {
+    vin: "1HGBH41JXMN109186",
+    amsAssignedLdap: "jcasti0",
+    rawResponse: { techId: "jcasti0", statusCode: "ASSIGNED" },
+  });
+
+  const amsResult: WriteThroughCacheArgs["ams"] = {
+    status: "failed",
+    message: "AMS assign error (queued for retry): connection refused",
+    cachePayload: {
+      system: "ams",
+      vin: "1HGBH41JXMN109186",
+      ldap: null,
+      rawResponse: null,
+    },
+  };
+
+  applyAmsCachePayload(caches, amsResult);
+
+  // Cache must be unchanged — a failed call must never overwrite a good row.
+  // This test catches any regression that drops the (success || pending) guard
+  // on the AMS cache path (server/fleet-operations-service.ts line ~1088).
+  const row = caches.amsVehiclesCache.get("1HGBH41JXMN109186");
+  assert.equal(row?.amsAssignedLdap, "jcasti0", "stale row should not be overwritten by a failed AMS call");
+  assert.deepEqual(row?.rawResponse, { techId: "jcasti0", statusCode: "ASSIGNED" }, "rawResponse should not be overwritten by a failed AMS call");
+});
+
 /* ──────────────────────────────────────────────────────────────────────────
  * Holman cache (cachePayload path) — these tests exercise the
  * holman_vehicles_cache upsert logic that lives directly in writeThroughCaches
