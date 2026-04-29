@@ -9,6 +9,7 @@ import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { StatusReminder } from "@/components/fleet-scope/StatusReminder";
 import { ActionTimeline } from "@/components/fleet-scope/ActionTimeline";
 import { useUser } from "@/context/FleetScopeUserContext";
+import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -179,6 +180,7 @@ export default function TruckDetail() {
   const { id } = useParams();
   const { toast } = useToast();
   const { currentUser } = useUser();
+  const { user: authUser } = useAuth();
   const { lookupCostCenter } = useCostCenters();
   const [, setLocation] = useLocation();
   const searchString = useSearch();
@@ -316,6 +318,23 @@ export default function TruckDetail() {
     },
     enabled: opDetailDialogOpen && !!truckNumberForSpecialty,
     staleTime: 0,
+  });
+
+  const canRetrySync = authUser?.role === "admin" || authUser?.role === "developer";
+
+  const retrySyncMutation = useMutation({
+    mutationFn: async (logId: number) => {
+      const res = await apiRequest("POST", `/api/operation-events/${logId}/retry`);
+      return res.json();
+    },
+    onSuccess: () => {
+      setLastOpResult(null);
+      queryClient.invalidateQueries({ queryKey: ["/api/fleet-ops/recent-op", truckNumberForSpecialty] });
+      toast({ title: "Sync retry triggered", description: "The failed sync has been queued for retry." });
+    },
+    onError: (err: any) => {
+      toast({ title: "Retry failed", description: err?.message ?? "Could not retry the sync.", variant: "destructive" });
+    },
   });
 
   const assignTechMutation = useMutation({
@@ -2078,6 +2097,9 @@ export default function TruckDetail() {
                                     logId={emptyStateSrc.logId}
                                     timestamp={emptyStateSrc.timestamp}
                                     onOpenDetail={() => setOpDetailDialogOpen(true)}
+                                    onRetry={(logId) => retrySyncMutation.mutate(logId)}
+                                    canRetry={canRetrySync}
+                                    isRetrying={retrySyncMutation.isPending}
                                   />
                                 </div>
                               )}
@@ -2290,6 +2312,9 @@ export default function TruckDetail() {
                                     logId={src.logId}
                                     timestamp={src.timestamp}
                                     onOpenDetail={() => setOpDetailDialogOpen(true)}
+                                    onRetry={(logId) => retrySyncMutation.mutate(logId)}
+                                    canRetry={canRetrySync}
+                                    isRetrying={retrySyncMutation.isPending}
                                   />
                                 </div>
                               );

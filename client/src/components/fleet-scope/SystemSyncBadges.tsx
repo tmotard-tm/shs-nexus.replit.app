@@ -1,4 +1,4 @@
-import { CheckCircle, XCircle, Clock, SkipForward, AlertTriangle, History } from "lucide-react";
+import { CheckCircle, XCircle, Clock, SkipForward, AlertTriangle, History, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -78,6 +78,9 @@ export interface SystemSyncBadgesProps {
   logId?: number;
   timestamp?: string | Date;
   onOpenDetail?: (logId: number) => void;
+  onRetry?: (logId: number) => void;
+  canRetry?: boolean;
+  isRetrying?: boolean;
   className?: string;
 }
 
@@ -91,6 +94,9 @@ export function SystemSyncBadges({
   logId,
   timestamp,
   onOpenDetail,
+  onRetry,
+  canRetry,
+  isRetrying,
   className,
 }: SystemSyncBadgesProps) {
   const hasAnyStatus = tpmsStatus || holmanStatus || amsStatus;
@@ -108,6 +114,11 @@ export function SystemSyncBadges({
       ? new Date(timestamp)
       : timestamp
     : null;
+
+  const hasRetryable =
+    tpmsStatus === "failed" || tpmsStatus === "pending" ||
+    holmanStatus === "failed" || holmanStatus === "pending" ||
+    amsStatus === "failed" || amsStatus === "pending";
 
   return (
     <div className={cn("flex items-center gap-1.5 flex-wrap", className)}>
@@ -129,6 +140,20 @@ export function SystemSyncBadges({
         >
           <History className="h-3 w-3 mr-0.5" />
           Detail
+        </Button>
+      )}
+      {hasRetryable && logId !== undefined && onRetry && (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="h-5 px-1.5 text-xs text-amber-700 hover:text-amber-900 dark:text-amber-400 dark:hover:text-amber-200 disabled:opacity-50"
+          onClick={() => onRetry(logId)}
+          disabled={!canRetry || isRetrying}
+          title={!canRetry ? "Admin or developer role required to retry" : "Retry failed sync"}
+        >
+          <RefreshCw className={cn("h-3 w-3 mr-0.5", isRetrying && "animate-spin")} />
+          Retry
         </Button>
       )}
     </div>
