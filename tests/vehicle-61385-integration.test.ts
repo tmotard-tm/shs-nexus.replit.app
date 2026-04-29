@@ -434,3 +434,9 @@ test("atomicity: when write-through transaction fails, fleet log status does NOT
     .where(eq(techVehicleAssignmentHistory.techRacfid, ATOMIC_TECH));
   assert.equal(hist.length, 0, "tech_vehicle_assignment_history must roll back on tx failure");
 });
+
+/* Force-exit after all tests + cleanup hooks complete.
+ * The Neon/postgres connection pool keeps the event loop alive after tests
+ * finish. We schedule an immediate exit that preserves process.exitCode so a
+ * failing run still exits non-zero and a passing run exits 0. */
+after(() => { setImmediate(() => process.exit(process.exitCode ?? 0)); });

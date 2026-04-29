@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -249,3 +249,11 @@ test("auto-unassign sweeps stale caches under the truck the incoming tech vacate
   assert.equal(caches.tpmsCachedAssignments.get("061385")?.enterpriseId, "jcasti0");
   assert.equal(caches.tpmsLastKnownTruckTech.get("061385")?.enterpriseId, "jcasti0");
 });
+
+/* Force-exit after test suite completes.
+ * fleet-operations-service.ts imports db.ts at module scope, which keeps a
+ * Postgres connection pool alive and prevents the Node.js process from
+ * terminating naturally. We use process.exitCode (set by node:test to 1 on
+ * any failure, left as undefined on full success) so a failing run still
+ * exits non-zero, and a passing run exits 0. */
+after(() => { setImmediate(() => process.exit(process.exitCode ?? 0)); });
