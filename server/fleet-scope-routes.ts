@@ -1711,7 +1711,7 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
 // ===== ELEVENLABS SHARED HELPERS =====
 // These helpers are used by both the webhook handler and the polling/backfill system.
 
-const ELEVENLABS_SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
+const ELEVENLABS_SHOP_AGENT_ID = "agent_5001kqd4w6c8frqv87rmwqxpxwxy";
 const ELEVENLABS_TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
 
 function buildTranscriptText(transcript: any): string {
@@ -4948,7 +4948,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
       const payload = {
-        agent_id: "agent_7901kgj8m0w8ep6ar78fzthzr9jv",
+        agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
         agent_phone_number_id: "phnum_0401khxk7pknfafb4nb08kzfdkr0",
         to_number: toNumber,
         conversation_initiation_client_data: {
@@ -5323,7 +5323,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
                 payload = {
-                  agent_id: "agent_7901kgj8m0w8ep6ar78fzthzr9jv",
+                  agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
                   agent_phone_number_id: "phnum_0401khxk7pknfafb4nb08kzfdkr0",
                   to_number: toNumber,
                   conversation_initiation_client_data: {
