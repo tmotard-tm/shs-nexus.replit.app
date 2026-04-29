@@ -42,6 +42,7 @@ import {
   Clock,
   Bell,
   Eye,
+  Download,
 } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { useForm } from "react-hook-form";
@@ -594,6 +595,26 @@ export default function CostCenterManagement() {
     },
   });
 
+  const handleDownloadCsv = useCallback(() => {
+    const csv = Papa.unparse(
+      items.map((r) => ({ district: r.district, cost_center: r.costCenter })),
+      { header: true },
+    );
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const date = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+    const filename = `district-cost-centers-${date}.csv`;
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  }, [items]);
+
   const resetBulk = () => {
     setBulkText("");
     setBulkRows(null);
@@ -826,6 +847,15 @@ export default function CostCenterManagement() {
           >
             <Sparkles className="mr-2 h-4 w-4" />
             {seedMutation.isPending ? "Initializing..." : "Initialize Defaults"}
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleDownloadCsv}
+            disabled={items.length === 0}
+            data-testid="button-download-csv"
+          >
+            <Download className="mr-2 h-4 w-4" />
+            Download CSV
           </Button>
           <Dialog
             open={isBulkOpen}
