@@ -16072,12 +16072,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       // Normalise truck numbers to 6-digit zero-padded format so they match
       // the fs_decommissioning_vehicles.truck_number column (always 6 digits).
-      inputRows = inputRows.map(r => ({
-        ...r,
-        truckNumber: r.truckNumber
-          ? r.truckNumber.replace(/\D/g, '').padStart(6, '0')
-          : undefined,
-      }));
+      inputRows = inputRows.map(r => {
+        let normalizedTruck: string | undefined;
+        if (r.truckNumber) {
+          const digits = r.truckNumber.replace(/\D/g, '');
+          // Guard: non-numeric values (e.g. "N/A") produce an empty digit
+          // string — treat them as no pin rather than matching truck 000000.
+          if (digits) normalizedTruck = digits.padStart(6, '0');
+        }
+        return { ...r, truckNumber: normalizedTruck };
+      });
       // The ldaps array (deduped) drives the TPMS snapshot lookups.
       const ldaps = inputRows.map(r => r.ldap);
 

@@ -505,7 +505,12 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           let truckNumber: string | undefined;
           if (truckColHeader) {
             const raw = String(row[truckColHeader] ?? "").trim();
-            if (raw) truckNumber = raw.replace(/\D/g, "").padStart(6, "0");
+            if (raw) {
+              const digits = raw.replace(/\D/g, "");
+              // Only set truckNumber when there are actual digits — non-numeric
+              // cells (e.g. "N/A", "---") should not produce a 000000 pin.
+              if (digits) truckNumber = digits.padStart(6, "0");
+            }
           }
           return { ldap, customVars, truckNumber };
         });
