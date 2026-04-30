@@ -177,7 +177,7 @@ function TechSearchInput({
                   justifyContent: "space-between",
                   width: "100%",
                   padding: "8px 10px",
-                  backgroundColor: idx === activeIdx ? "#F1F5F9" : "transparent",
+                  backgroundColor: idx === activeIdx ? colors.rule : "transparent",
                   border: "none",
                   borderBottom: idx === rows.length - 1 ? "none" : `1px solid ${colors.rule}`,
                   cursor: "pointer",
