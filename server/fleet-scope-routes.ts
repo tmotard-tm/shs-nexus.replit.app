@@ -5383,6 +5383,21 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           }
         };
 
+        const CALL_TIMEOUT_MS = 600_000; // 10 minutes per call slot
+        const withTimeout = (truckId: string): Promise<void> =>
+          Promise.race([
+            processCall(truckId),
+            new Promise<void>((_, reject) =>
+              setTimeout(() => reject(new Error("Call slot timeout")), CALL_TIMEOUT_MS)
+            ),
+          ]).catch((err: any) => {
+            console.warn(`[BatchCaller] Slot timeout or error for truck ${truckId}:`, err.message);
+            if (!job.results.find(r => r.truckId === truckId)) {
+              job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
+              job.failed++;
+            }
+          });
+
         await new Promise<void>((resolve) => {
           const next = () => {
             if (queue.length === 0 && active === 0) { resolve(); return; }
@@ -5390,7 +5405,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               const truckId = queue.shift()!;
               active++;
               job.inProgress = active;
-              processCall(truckId).finally(() => {
+              withTimeout(truckId).finally(() => {
                 active--;
                 job.inProgress = active;
                 next();
