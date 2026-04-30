@@ -1194,7 +1194,7 @@ export default function NewRentals() {
                           {row.state ?? "—"}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
-                          {row.district ?? "—"}
+                          {row.district ? String(row.district).replace(/^0+/, "") || row.district : "—"}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           {row.tenure_months != null ? `${Math.round(row.tenure_months)} mo` : "—"}

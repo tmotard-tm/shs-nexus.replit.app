@@ -1152,7 +1152,7 @@ export function registerVrmRoutes(): Router {
         const ds = districtStateMap.get(ldap);
         r.district = ds?.district ?? null;
         r.state = ds?.state ?? null;
-        r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district)) : false)
+        r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district).replace(/^0+/, "") || String(ds.district)) : false)
           || (ds?.state ? String(ds.state).toUpperCase() === "CA" : false);
         if (r.union_exempt && r.recommendation === "Deny") {
           r.recommendation = "Approve";
