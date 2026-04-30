@@ -329,6 +329,8 @@ export const vrmRentalChecks = pgTable("vrm_rental_checks", {
   tenureMonths: integer("tenure_months"),
   completes: integer("completes"),
   lookbackDays: integer("lookback_days"),
+  district: text("district"),
+  state: text("state"),
   checkedAt: timestamp("checked_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_rental_checks_ldap_idx").on(table.techLdap),

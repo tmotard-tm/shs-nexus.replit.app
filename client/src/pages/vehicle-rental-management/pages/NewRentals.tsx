@@ -248,6 +248,9 @@ interface ProfitRow {
   recommendation: "Approve" | "Deny" | "No Data" | "New Hire — Training";
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
+  union_exempt: boolean;
+  district: string | null;
+  state: string | null;
 }
 
 interface DecisionRow {

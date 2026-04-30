@@ -251,6 +251,8 @@ export async function initVrmSchema(): Promise<void> {
       checked_at              TIMESTAMP DEFAULT NOW() NOT NULL
     );
   `);
+  await db.execute(sql`ALTER TABLE vrm_rental_checks ADD COLUMN IF NOT EXISTS district TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_checks ADD COLUMN IF NOT EXISTS state TEXT;`);
 
   // vrm_rental_decisions
   await db.execute(sql`

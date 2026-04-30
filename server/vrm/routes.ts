@@ -1033,6 +1033,9 @@ export function registerVrmRoutes(): Router {
 
   // ─── Profitability check (new rental requests) ─────────────────────────────
 
+  // Districts excluded from denial due to union agreements.
+  const UNION_DISTRICTS = new Set(["6141", "7983", "7323", "8309"]);
+
   /**
    * POST /api/vrm/profitability/check
    * Accepts { ldaps: string[] }, returns 90-day profitability waterfall + scorecard.
@@ -1044,6 +1047,37 @@ export function registerVrmRoutes(): Router {
         return res.status(400).json({ error: "ldaps array required" });
       const cleaned = ldaps.map((l: string) => (l || "").trim().toUpperCase()).filter(Boolean);
       const rows = await fetchProfitabilityCheck(cleaned);
+
+      // Look up district and state for each LDAP from local TPMS/roster tables.
+      const districtStateMap = new Map<string, { district: string | null; state: string | null }>();
+      try {
+        const ldapSql = sql.join(cleaned.map((l) => sql`${l}`), sql`, `);
+        const dsRows = await db.execute(sql`
+          SELECT UPPER(tp.enterprise_id) AS ldap,
+                 tp.district_no          AS district,
+                 at.home_state           AS state
+          FROM tpms_tech_profiles tp
+          LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
+          WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
+          UNION ALL
+          SELECT UPPER(at.tech_racfid) AS ldap,
+                 at.district_no        AS district,
+                 at.home_state         AS state
+          FROM all_techs at
+          WHERE UPPER(at.tech_racfid) IN (${ldapSql})
+            AND UPPER(at.tech_racfid) NOT IN (
+              SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+            )
+        `);
+        for (const r of (dsRows.rows ?? []) as any[]) {
+          if (r.ldap) districtStateMap.set(String(r.ldap).toUpperCase(), {
+            district: r.district ?? null,
+            state: r.state ?? null,
+          });
+        }
+      } catch (err: any) {
+        console.error("[VRM] district/state lookup failed:", err.message);
+      }
 
       // Surface a "No Data" placeholder for any requested LDAP that returned
       // zero rows from Snowflake. Without this the evaluator silently returns
@@ -1112,6 +1146,18 @@ export function registerVrmRoutes(): Router {
         }
       }
 
+      // Attach district/state and apply union district override to each row.
+      for (const r of rows as any[]) {
+        const ldap = String(r.tech_ldap || "").toUpperCase();
+        const ds = districtStateMap.get(ldap);
+        r.district = ds?.district ?? null;
+        r.state = ds?.state ?? null;
+        r.union_exempt = ds?.district ? UNION_DISTRICTS.has(String(ds.district)) : false;
+        if (r.union_exempt && r.recommendation === "Deny") {
+          r.recommendation = "Approve";
+        }
+      }
+
       // Auto-save every evaluated tech with the date
       const checkRecords = rows.map((r: any) => ({
         techLdap: r.tech_ldap,
@@ -1123,6 +1169,8 @@ export function registerVrmRoutes(): Router {
         tenureMonths: r.tenure_months ?? null,
         completes: r.completes ?? null,
         lookbackDays: r.lookback_days ?? null,
+        district: r.district ?? null,
+        state: r.state ?? null,
       }));
       addRentalChecks(checkRecords).catch((err) =>
         console.error("[VRM] failed to save rental checks:", err.message),
