@@ -5234,168 +5234,173 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       };
       batchJobs.set(batchId, job);
 
-      // Process in background
+      // Process in background using a 5-slot concurrency pool.
+      // At most 5 ElevenLabs API requests are in-flight at any instant.
+      // As soon as one slot finishes (success or fail) the next truck is
+      // picked up immediately — no artificial inter-chunk delays.
       (async () => {
-        const BATCH_SIZE = 2;
+        const CONCURRENCY = 5;
         const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+        const queue = [...truckIds];
+        let active = 0;
 
-        for (let i = 0; i < truckIds.length; i += BATCH_SIZE) {
-          if (job.cancelled) break;
-          const batch = truckIds.slice(i, i + BATCH_SIZE);
-          job.inProgress = batch.length;
+        const processCall = async (truckId: string): Promise<void> => {
+          try {
+            const truck = await fleetScopeStorage.getTruck(truckId);
+            if (!truck) {
+              job.results.push({ truckId, truckNumber: "?", status: "failed", error: "Truck not found" });
+              job.failed++;
+              return;
+            }
 
-          const withTimeout = (promise: Promise<void>, ms: number): Promise<void> =>
-            Promise.race([promise, new Promise<void>((_, reject) => setTimeout(() => reject(new Error("Call timeout")), ms))]);
+            const phoneNumber = callType === "tech" ? truck.techPhone : truck.repairPhone;
+            if (!phoneNumber || phoneNumber.trim() === "") {
+              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "No phone number" });
+              job.failed++;
+              return;
+            }
 
-          const promises = batch.map(async (truckId: string) => {
-            try {
-              const truck = await fleetScopeStorage.getTruck(truckId);
-              if (!truck) {
-                job.results.push({ truckId, truckNumber: "?", status: "failed", error: "Truck not found" });
-                job.failed++;
-                return;
-              }
+            const digits = phoneNumber.replace(/\D/g, "");
+            if (digits.length < 10 || digits.length > 11) {
+              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "Invalid phone number length" });
+              job.failed++;
+              return;
+            }
+            const toNumber = digits.length === 11 && digits.startsWith("1") ? `+${digits}` : `+1${digits}`;
+            const vehicleNum = truck.truckNumber?.toString() || "";
 
-              const phoneNumber = callType === "tech" ? truck.techPhone : truck.repairPhone;
-              if (!phoneNumber || phoneNumber.trim() === "") {
-                job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "No phone number" });
-                job.failed++;
-                return;
-              }
-
-              const digits = phoneNumber.replace(/\D/g, "");
-              if (digits.length < 10 || digits.length > 11) {
-                job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "Invalid phone number length" });
-                job.failed++;
-                return;
-              }
-              const toNumber = digits.length === 11 && digits.startsWith("1") ? `+${digits}` : `+1${digits}`;
-              const vehicleNum = truck.truckNumber?.toString() || "";
-
-              let payload: any;
-              if (callType === "tech") {
-                payload = {
-                  agent_id: "agent_9401kk2njc6veajaecs89wtbh840",
-                  agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
-                  to_number: toNumber,
-                  conversation_initiation_client_data: {
-                    dynamic_variables: {
-                      TECH_NAME: truck.techName || "",
-                      VEHICLE_NUMBER: vehicleNum,
-                      SHOP_NAME: (truck.repairAddress || "").split(",")[0].split(" - ").pop()?.trim() || "",
-                      SHOP_ADDRESS: truck.repairAddress || "",
-                      SHOP_PHONE: truck.repairPhone || "",
-                      SCHEDULED_PICKUP_TIME: truck.timeBlockedToPickUpVan || "",
-                    },
+            let payload: any;
+            if (callType === "tech") {
+              payload = {
+                agent_id: "agent_9401kk2njc6veajaecs89wtbh840",
+                agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
+                to_number: toNumber,
+                conversation_initiation_client_data: {
+                  dynamic_variables: {
+                    TECH_NAME: truck.techName || "",
+                    VEHICLE_NUMBER: vehicleNum,
+                    SHOP_NAME: (truck.repairAddress || "").split(",")[0].split(" - ").pop()?.trim() || "",
+                    SHOP_ADDRESS: truck.repairAddress || "",
+                    SHOP_PHONE: truck.repairPhone || "",
+                    SCHEDULED_PICKUP_TIME: truck.timeBlockedToPickUpVan || "",
                   },
-                };
-              } else {
-                // Shop call - fetch vehicle details from Snowflake
-                const paddedVehicleNum = vehicleNum.startsWith("0") ? vehicleNum : `0${vehicleNum}`;
-                let vin = "", make = "", model = "", licensePlate = "";
-                try {
-                  const vehicleQuery = `SELECT VIN, MAKE_NAME, MODEL_NAME FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES WHERE TRIM(VEHICLE_NUMBER) = '${paddedVehicleNum}' LIMIT 1`;
-                  const vehicleData = await executeQuery<{ VIN: string; MAKE_NAME: string; MODEL_NAME: string }>(vehicleQuery);
-                  if (vehicleData.length > 0) {
-                    vin = vehicleData[0].VIN?.toString().trim() || "";
-                    make = vehicleData[0].MAKE_NAME?.toString().trim() || "";
-                    model = vehicleData[0].MODEL_NAME?.toString().trim() || "";
-                  }
-                } catch (e) {}
-
-                if (vin) {
-                  try {
-                    const holmanQuery = `SELECT LICENSE_PLATE FROM PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES WHERE TRIM(VIN) = '${vin}' LIMIT 1`;
-                    const holmanData = await executeQuery<{ LICENSE_PLATE: string | null }>(holmanQuery);
-                    if (holmanData.length > 0) licensePlate = holmanData[0].LICENSE_PLATE?.toString().trim() || "";
-                  } catch (e) {}
+                },
+              };
+            } else {
+              // Shop call - fetch vehicle details from Snowflake
+              const paddedVehicleNum = vehicleNum.startsWith("0") ? vehicleNum : `0${vehicleNum}`;
+              let vin = "", make = "", model = "", licensePlate = "";
+              try {
+                const vehicleQuery = `SELECT VIN, MAKE_NAME, MODEL_NAME FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES WHERE TRIM(VEHICLE_NUMBER) = '${paddedVehicleNum}' LIMIT 1`;
+                const vehicleData = await executeQuery<{ VIN: string; MAKE_NAME: string; MODEL_NAME: string }>(vehicleQuery);
+                if (vehicleData.length > 0) {
+                  vin = vehicleData[0].VIN?.toString().trim() || "";
+                  make = vehicleData[0].MAKE_NAME?.toString().trim() || "";
+                  model = vehicleData[0].MODEL_NAME?.toString().trim() || "";
                 }
+              } catch (e) {}
 
-                // Persist VIN and license plate back to truck record for public API
+              if (vin) {
                 try {
-                  const vinPlateUpdate: Record<string, any> = {};
-                  if (vin && !truck.vin) vinPlateUpdate.vin = vin;
-                  if (licensePlate && !truck.licensePlate) vinPlateUpdate.licensePlate = licensePlate;
-                  if (Object.keys(vinPlateUpdate).length > 0) await fleetScopeStorage.updateTruck(truck.id, vinPlateUpdate);
+                  const holmanQuery = `SELECT LICENSE_PLATE FROM PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES WHERE TRIM(VIN) = '${vin}' LIMIT 1`;
+                  const holmanData = await executeQuery<{ LICENSE_PLATE: string | null }>(holmanQuery);
+                  if (holmanData.length > 0) licensePlate = holmanData[0].LICENSE_PLATE?.toString().trim() || "";
                 } catch (e) {}
+              }
 
-                const last8Vin = vin.length >= 8 ? vin.slice(-8) : vin;
-                const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+              // Persist VIN and license plate back to truck record for public API
+              try {
+                const vinPlateUpdate: Record<string, any> = {};
+                if (vin && !truck.vin) vinPlateUpdate.vin = vin;
+                if (licensePlate && !truck.licensePlate) vinPlateUpdate.licensePlate = licensePlate;
+                if (Object.keys(vinPlateUpdate).length > 0) await fleetScopeStorage.updateTruck(truck.id, vinPlateUpdate);
+              } catch (e) {}
 
-                payload = {
-                  agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
-                  agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
-                  to_number: toNumber,
-                  conversation_initiation_client_data: {
-                    dynamic_variables: {
-                      vin_number: vin, last_8_vin: last8Vin, license_plate: licensePlate,
-                      make, model, tech_name: truck.techName || "",
-                      today_s_date: todaysDate, phone_number: phoneNumber.trim(),
-                    },
+              const last8Vin = vin.length >= 8 ? vin.slice(-8) : vin;
+              const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
+
+              payload = {
+                agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
+                agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
+                to_number: toNumber,
+                conversation_initiation_client_data: {
+                  dynamic_variables: {
+                    vin_number: vin, last_8_vin: last8Vin, license_plate: licensePlate,
+                    make, model, tech_name: truck.techName || "",
+                    today_s_date: todaysDate, phone_number: phoneNumber.trim(),
                   },
-                };
-              }
+                },
+              };
+            }
 
-              console.log(`[BatchCaller] Calling ${toNumber} for truck ${vehicleNum} (${callType})`);
-              const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
-                method: "POST",
-                headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-              });
+            console.log(`[BatchCaller] Calling ${toNumber} for truck ${vehicleNum} (${callType})`);
+            const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
+              method: "POST",
+              headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
 
-              if (!response.ok) {
-                const errText = await response.text();
-                console.error(`[BatchCaller] API error for truck ${vehicleNum}:`, errText);
-
-                await fleetScopeStorage.createCallLog({
-                  truckId, truckNumber: vehicleNum, batchId, callType,
-                  phoneNumber: toNumber, status: "failed", outcome: "CALL_FAILED",
-                  shopNotes: `API error ${response.status}: ${errText}`,
-                });
-
-                if (callType === "tech") {
-                  await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallStatus: "Call Failed", lastTechCallSummary: `Batch call API error` });
-                } else {
-                  await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallStatus: "Call Failed", lastCallSummary: `Batch call API error` });
-                }
-
-                job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: `API ${response.status}` });
-                job.failed++;
-                return;
-              }
-
-              const result = await response.json();
-              const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || null;
+            if (!response.ok) {
+              const errText = await response.text();
+              console.error(`[BatchCaller] API error for truck ${vehicleNum}:`, errText);
 
               await fleetScopeStorage.createCallLog({
                 truckId, truckNumber: vehicleNum, batchId, callType,
-                phoneNumber: toNumber, elevenLabsConversationId: conversationId, status: "in_progress",
+                phoneNumber: toNumber, status: "failed", outcome: "CALL_FAILED",
+                shopNotes: `API error ${response.status}: ${errText}`,
               });
 
               if (callType === "tech") {
-                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
+                await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallStatus: "Call Failed", lastTechCallSummary: `Batch call API error` });
               } else {
-                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
+                await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallStatus: "Call Failed", lastCallSummary: `Batch call API error` });
               }
 
-              job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
-              job.completed++;
-            } catch (err: any) {
-              job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
+              job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: `API ${response.status}` });
               job.failed++;
+              return;
             }
-          });
 
-          await Promise.all(promises.map(p => withTimeout(p, 720000).catch((err) => {
-            console.warn(`[BatchCaller] Call timeout or error in batch:`, err.message);
-          })));
-          job.inProgress = 0;
+            const result = await response.json();
+            const conversationId = result?.conversation_id || result?.conversationId || result?.call_sid || null;
 
-          // Wait 5 seconds between batches to avoid rate limiting
-          if (i + BATCH_SIZE < truckIds.length && !job.cancelled) {
-            await new Promise(r => setTimeout(r, 5000));
+            await fleetScopeStorage.createCallLog({
+              truckId, truckNumber: vehicleNum, batchId, callType,
+              phoneNumber: toNumber, elevenLabsConversationId: conversationId, status: "in_progress",
+            });
+
+            if (callType === "tech") {
+              await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
+            } else {
+              await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
+            }
+
+            job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
+            job.completed++;
+          } catch (err: any) {
+            job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
+            job.failed++;
           }
-        }
+        };
+
+        await new Promise<void>((resolve) => {
+          const next = () => {
+            if (queue.length === 0 && active === 0) { resolve(); return; }
+            while (active < CONCURRENCY && queue.length > 0 && !job.cancelled) {
+              const truckId = queue.shift()!;
+              active++;
+              job.inProgress = active;
+              processCall(truckId).finally(() => {
+                active--;
+                job.inProgress = active;
+                next();
+              });
+            }
+            if (job.cancelled && active === 0) resolve();
+          };
+          next();
+        });
+
         console.log(`[BatchCaller] Batch ${batchId} complete: ${job.completed} called, ${job.failed} failed out of ${job.total}`);
       })();
 
