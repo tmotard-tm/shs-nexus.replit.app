@@ -293,6 +293,13 @@ interface CheckRow {
   checkedAt: string;
 }
 
+interface SnapshotMeta {
+  status: string;
+  syncedAt: string | null;
+  rowCount: number | null;
+  sourceLastAltered: string | null;
+}
+
 // ─── Formatting helpers ───────────────────────────────────────────────────────
 
 const fmt$ = (v: number | null | undefined) =>
@@ -802,6 +809,8 @@ export default function NewRentals() {
   const qc = useQueryClient();
   const [ldapInput, setLdapInput] = useState("");
   const [evaluatedRows, setEvaluatedRows] = useState<ProfitRow[]>([]);
+  const [snapshotMeta, setSnapshotMeta] = useState<SnapshotMeta | null>(null);
+  const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [selectedDecision, setSelectedDecision] = useState<DecisionRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -811,10 +820,16 @@ export default function NewRentals() {
   const evaluateMut = useMutation({
     mutationFn: async (ldaps: string[]) => {
       const res = await apiRequest("POST", "/api/vrm/profitability/check", { ldaps });
-      return res.json();
+      return res.json() as Promise<{ rows?: ProfitRow[]; snapshotMeta?: SnapshotMeta | null; status?: string; retryAfterSeconds?: number; message?: string }>;
     },
     onSuccess: (data) => {
+      if (data.status === "preparing") {
+        setPreparingInfo({ retryAfterSeconds: data.retryAfterSeconds ?? 300 });
+        return;
+      }
+      setPreparingInfo(null);
       setEvaluatedRows(data.rows ?? []);
+      setSnapshotMeta(data.snapshotMeta ?? null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/checks"] });
     },
   });
@@ -1140,7 +1155,7 @@ export default function NewRentals() {
       {/* ── Results table ─────────────────────────────────────────────────────── */}
       {evaluatedRows.length > 0 && (
         <div style={{ marginBottom: 40 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
             <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
               Evaluation Results
             </h2>
@@ -1149,6 +1164,37 @@ export default function NewRentals() {
               {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · ${rentalPerDay}/day rental
             </span>
           </div>
+          {/* Snapshot timestamp label — always shown when snapshotMeta is present */}
+          {snapshotMeta?.syncedAt && (
+            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                Evaluated against snapshot taken{" "}
+                {new Date(snapshotMeta.syncedAt).toLocaleString("en-US", {
+                  month: "short", day: "numeric", year: "numeric",
+                  hour: "numeric", minute: "2-digit", timeZoneName: "short",
+                })}
+              </span>
+              {/* Freshness warning: show amber alert when snapshot is older than 36 hours */}
+              {(() => {
+                const ageHours = (Date.now() - new Date(snapshotMeta.syncedAt).getTime()) / 3_600_000;
+                if (ageHours < 36) return null;
+                return (
+                  <span style={{
+                    fontFamily: fonts.dmSans,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: colors.amber,
+                    backgroundColor: colors.amberLight,
+                    border: `1px solid ${colors.amber}`,
+                    borderRadius: 4,
+                    padding: "2px 8px",
+                  }}>
+                    Snapshot is {Math.round(ageHours)} hours old — values may not reflect latest financials
+                  </span>
+                );
+              })()}
+            </div>
+          )}
 
           <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -1386,8 +1432,31 @@ export default function NewRentals() {
         </div>
       )}
 
+      {/* ── Preparing state (snapshot building) ─────────────────────────────── */}
+      {preparingInfo && evaluatedRows.length === 0 && !evaluateMut.isPending && (
+        <div
+          style={{
+            textAlign: "center",
+            padding: "48px 32px",
+            border: `1px solid ${colors.amber}`,
+            backgroundColor: colors.amberLight,
+            borderRadius: 12,
+            marginBottom: 40,
+          }}
+        >
+          <Loader2 size={32} className="animate-spin" style={{ color: colors.amber, marginBottom: 12 }} />
+          <p style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 6px" }}>
+            Snapshot is being built
+          </p>
+          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
+            The daily profitability snapshot is currently being synced from Snowflake.
+            Please try again in {Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60)} minute{Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60) !== 1 ? "s" : ""}.
+          </p>
+        </div>
+      )}
+
       {/* ── Empty state ───────────────────────────────────────────────────────── */}
-      {evaluatedRows.length === 0 && !evaluateMut.isPending && (
+      {evaluatedRows.length === 0 && !evaluateMut.isPending && !preparingInfo && (
         <div
           style={{
             textAlign: "center",
@@ -1412,7 +1481,7 @@ export default function NewRentals() {
         <div style={{ textAlign: "center", padding: "48px 32px" }}>
           <Loader2 size={32} className="animate-spin" style={{ color: colors.accent, marginBottom: 12 }} />
           <p style={{ fontFamily: fonts.dmSans, fontSize: 14, color: colors.inkMuted }}>
-            Pulling 90-day financials from Snowflake…
+            Looking up profitability data…
           </p>
         </div>
       )}

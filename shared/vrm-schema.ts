@@ -616,4 +616,61 @@ export const vrmRateConfigHistory = pgTable("vrm_rate_config_history", {
 
 export type VrmRateConfigHistory = typeof vrmRateConfigHistory.$inferSelect;
 export const insertVrmRateConfigHistorySchema = createInsertSchema(vrmRateConfigHistory).omit({ id: true, changedAt: true });
+
+// ─── Profitability Snapshot Cache ─────────────────────────────────────────────
+
+/**
+ * One-row control table written by the daily profitability sync job.
+ * status: 'building' while the sync is running, 'ready' on success, 'error' on abort.
+ */
+export const vrmProfitabilityCacheMeta = pgTable("vrm_profitability_cache_meta", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  status: varchar("status", { length: 20 }).notNull().default("building"),
+  sourceSnowflakeLastAltered: timestamp("source_snowflake_last_altered"),
+  lastSyncStartedAt: timestamp("last_sync_started_at"),
+  lastSyncCompletedAt: timestamp("last_sync_completed_at"),
+  rowCount: integer("row_count"),
+  errorMessage: text("error_message"),
+});
+
+export const insertVrmProfitabilityCacheMetaSchema = createInsertSchema(vrmProfitabilityCacheMeta).omit({ id: true });
+export type VrmProfitabilityCacheMeta = typeof vrmProfitabilityCacheMeta.$inferSelect;
+export type InsertVrmProfitabilityCacheMeta = z.infer<typeof insertVrmProfitabilityCacheMetaSchema>;
+
+/**
+ * One row per TECH_LDAP — the settled 90-day profitability aggregate from Snowflake.
+ * TRUNCATED and re-inserted atomically by the daily sync job.
+ */
+export const vrmProfitabilitySnapshot = pgTable("vrm_profitability_snapshot", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  techLdap: varchar("tech_ldap", { length: 50 }).notNull().unique(),
+  techName: varchar("tech_name", { length: 255 }),
+  tenureMonths: integer("tenure_months"),
+  scorecardScore: decimal("scorecard_score", { precision: 8, scale: 3 }),
+  completes: integer("completes"),
+  totalSos: integer("total_sos"),
+  workingDays: integer("working_days"),
+  totalRevenue: decimal("total_revenue", { precision: 14, scale: 2 }),
+  laborDirect: decimal("labor_direct", { precision: 14, scale: 2 }),
+  laborBenefits: decimal("labor_benefits", { precision: 14, scale: 2 }),
+  partsCogs: decimal("parts_cogs", { precision: 14, scale: 2 }),
+  partsShipping: decimal("parts_shipping", { precision: 14, scale: 2 }),
+  fuelEst: decimal("fuel_est", { precision: 14, scale: 2 }),
+  lookbackDays: integer("lookback_days"),
+  dailyRevenue: decimal("daily_revenue", { precision: 12, scale: 2 }),
+  dailyCosts: decimal("daily_costs", { precision: 12, scale: 2 }),
+  dailyNetBeforeRental: decimal("daily_net_before_rental", { precision: 12, scale: 2 }),
+  dailyNetWithRental: decimal("daily_net_with_rental", { precision: 12, scale: 2 }),
+  dailyPptProfit: decimal("daily_ppt_profit", { precision: 12, scale: 2 }),
+  recommendation: varchar("recommendation", { length: 50 }),
+  newHireExempt: boolean("new_hire_exempt").notNull().default(false),
+  scorecardExempt: boolean("scorecard_exempt").notNull().default(false),
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+}, (table) => ({
+  ldapIdx: index("vrm_profitability_snapshot_ldap_idx").on(table.techLdap),
+}));
+
+export const insertVrmProfitabilitySnapshotSchema = createInsertSchema(vrmProfitabilitySnapshot).omit({ id: true, syncedAt: true });
+export type VrmProfitabilitySnapshot = typeof vrmProfitabilitySnapshot.$inferSelect;
+export type InsertVrmProfitabilitySnapshot = z.infer<typeof insertVrmProfitabilitySnapshotSchema>;
 export type InsertVrmRateConfigHistory = z.infer<typeof insertVrmRateConfigHistorySchema>;

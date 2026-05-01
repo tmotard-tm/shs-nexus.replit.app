@@ -20,10 +20,16 @@ import {
   vrmRepairTrackerShopContact,
   vrmRateConfig,
   vrmRateConfigHistory,
+  vrmProfitabilityCacheMeta,
+  vrmProfitabilitySnapshot,
   type VrmTech,
   type VrmRentalDecision,
   type VrmRateConfig,
   type VrmRateConfigHistory,
+  type VrmProfitabilityCacheMeta,
+  type VrmProfitabilitySnapshot,
+  type InsertVrmProfitabilityCacheMeta,
+  type InsertVrmProfitabilitySnapshot,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -1772,6 +1778,70 @@ export async function getRateConfigHistory(limit = 50): Promise<VrmRateConfigHis
     .from(vrmRateConfigHistory)
     .orderBy(desc(vrmRateConfigHistory.changedAt))
     .limit(limit);
+}
+
+// ─── Profitability Snapshot Cache ─────────────────────────────────────────────
+
+/**
+ * Returns the most recent cache-meta row, or null if no sync has ever run.
+ */
+export async function getProfitabilityCacheMeta(): Promise<VrmProfitabilityCacheMeta | null> {
+  const [row] = await db
+    .select()
+    .from(vrmProfitabilityCacheMeta)
+    .orderBy(desc(vrmProfitabilityCacheMeta.lastSyncStartedAt))
+    .limit(1);
+  return row ?? null;
+}
+
+/**
+ * Writes (or overwrites) the single cache-meta control row.
+ * Uses DELETE + INSERT rather than upsert so we never accumulate rows.
+ */
+export async function upsertProfitabilityCacheMeta(
+  data: Partial<InsertVrmProfitabilityCacheMeta>,
+): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx.delete(vrmProfitabilityCacheMeta);
+    await tx.insert(vrmProfitabilityCacheMeta).values({
+      status: data.status ?? "building",
+      sourceSnowflakeLastAltered: data.sourceSnowflakeLastAltered ?? null,
+      lastSyncStartedAt: data.lastSyncStartedAt ?? null,
+      lastSyncCompletedAt: data.lastSyncCompletedAt ?? null,
+      rowCount: data.rowCount ?? null,
+      errorMessage: data.errorMessage ?? null,
+    });
+  });
+}
+
+/**
+ * Atomically replaces the entire snapshot:
+ * TRUNCATES vrm_profitability_snapshot then bulk-INSERTs all rows inside one transaction.
+ * Returns the number of rows written.
+ */
+export async function replaceProfitabilitySnapshot(
+  rows: InsertVrmProfitabilitySnapshot[],
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  await db.transaction(async (tx) => {
+    await tx.delete(vrmProfitabilitySnapshot);
+    await tx.insert(vrmProfitabilitySnapshot).values(rows);
+  });
+  return rows.length;
+}
+
+/**
+ * Returns snapshot rows for the given list of LDAPs (upper-cased).
+ */
+export async function getProfitabilitySnapshotRows(
+  ldaps: string[],
+): Promise<VrmProfitabilitySnapshot[]> {
+  if (ldaps.length === 0) return [];
+  const upper = ldaps.map((l) => l.toUpperCase());
+  return db
+    .select()
+    .from(vrmProfitabilitySnapshot)
+    .where(inArray(vrmProfitabilitySnapshot.techLdap, upper));
 }
 
 // ─── Legacy Notes ─────────────────────────────────────────────────────────────

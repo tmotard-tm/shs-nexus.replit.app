@@ -61,7 +61,10 @@ import {
   getRateConfig,
   getRateConfigHistory,
   upsertRateConfig,
+  getProfitabilityCacheMeta,
+  getProfitabilitySnapshotRows,
 } from "./storage";
+import { runProfitabilitySync } from "./profitability-sync";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
@@ -1038,7 +1041,11 @@ export function registerVrmRoutes(): Router {
 
   /**
    * POST /api/vrm/profitability/check
-   * Accepts { ldaps: string[] }, returns 90-day profitability waterfall + scorecard.
+   * Accepts { ldaps: string[] }.
+   * Reads from the local daily snapshot (vrm_profitability_snapshot) so values are
+   * insulated from mid-rebuild Snowflake data.  Falls back to a live Snowflake call
+   * only when no snapshot exists yet (day-one bootstrap), returning HTTP 202 while the
+   * first sync is still in progress.
    */
   router.post("/profitability/check", async (req, res) => {
     try {
@@ -1046,9 +1053,79 @@ export function registerVrmRoutes(): Router {
       if (!Array.isArray(ldaps) || ldaps.length === 0)
         return res.status(400).json({ error: "ldaps array required" });
       const cleaned = ldaps.map((l: string) => (l || "").trim().toUpperCase()).filter(Boolean);
-      const rows = await fetchProfitabilityCheck(cleaned);
 
-      // Look up district and state for each LDAP from local TPMS/roster tables.
+      // ── Snapshot path ────────────────────────────────────────────────────────
+      const meta = await getProfitabilityCacheMeta();
+
+      // If a sync is in progress (status='building') or errored with no rows,
+      // tell the UI to retry.
+      if (meta && meta.status === "building") {
+        const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
+        const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+        const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
+        return res.status(202).json({
+          status: "preparing",
+          message: "The profitability snapshot is being built. Please try again shortly.",
+          retryAfterSeconds,
+        });
+      }
+
+      const snapshotRows = await getProfitabilitySnapshotRows(cleaned);
+      const snapshotHasData = snapshotRows.length > 0 || (meta?.status === "ready" && (meta.rowCount ?? 0) > 0);
+
+      let rows: any[];
+
+      if (snapshotHasData || (meta?.status === "ready")) {
+        // ── Serve from snapshot ───────────────────────────────────────────────
+        const snapshotMap = new Map(snapshotRows.map((r) => [r.techLdap.toUpperCase(), r]));
+
+        rows = cleaned.map((ldap) => {
+          const s = snapshotMap.get(ldap);
+          if (!s) return null;
+          return {
+            tech_ldap: s.techLdap,
+            tech_name: s.techName ?? null,
+            tenure_months: s.tenureMonths ?? null,
+            scorecard_score: s.scorecardScore != null ? Number(s.scorecardScore) : null,
+            completes: s.completes ?? 0,
+            total_sos: s.totalSos ?? 0,
+            total_revenue: Number(s.totalRevenue ?? 0),
+            labor_direct: Number(s.laborDirect ?? 0),
+            labor_benefits: Number(s.laborBenefits ?? 0),
+            parts_cogs: Number(s.partsCogs ?? 0),
+            parts_shipping: Number(s.partsShipping ?? 0),
+            fuel_est: Number(s.fuelEst ?? 0),
+            lookback_days: s.lookbackDays ?? 90,
+            working_days: s.workingDays ?? 0,
+            daily_revenue: Number(s.dailyRevenue ?? 0),
+            daily_costs: Number(s.dailyCosts ?? 0),
+            daily_net_before_rental: Number(s.dailyNetBeforeRental ?? 0),
+            daily_net_with_rental: Number(s.dailyNetWithRental ?? 0),
+            daily_ppt_profit: Number(s.dailyPptProfit ?? 0),
+            recommendation: s.recommendation ?? "No Data",
+            new_hire_exempt: s.newHireExempt ?? false,
+            scorecard_exempt: s.scorecardExempt ?? false,
+          };
+        }).filter(Boolean);
+
+        // Note if no snapshot exists yet (status=ready but row count is 0 for these LDAPs)
+        // to detect when the initial sync hasn't run.
+      } else {
+        // ── Day-one bootstrap: no snapshot yet ───────────────────────────────
+        // First, check whether a sync is currently building (status='building' was checked
+        // above); if not, we fall back to a live Snowflake call with a warning.
+        if (!isSnowflakeConfigured()) {
+          return res.status(202).json({
+            status: "preparing",
+            message: "Profitability snapshot not yet available and Snowflake is not configured.",
+            retryAfterSeconds: 60,
+          });
+        }
+        console.warn("[VRM] profitability/check: no snapshot — falling back to live Snowflake call (day-one bootstrap).");
+        rows = await fetchProfitabilityCheck(cleaned);
+      }
+
+      // ── District/state lookup (local DB) ─────────────────────────────────────
       const districtStateMap = new Map<string, { district: string | null; state: string | null }>();
       try {
         const ldapSql = sql.join(cleaned.map((l) => sql`${l}`), sql`, `);
@@ -1079,9 +1156,7 @@ export function registerVrmRoutes(): Router {
         console.error("[VRM] district/state lookup failed:", err.message);
       }
 
-      // Surface a "No Data" placeholder for any requested LDAP that returned
-      // zero rows from Snowflake. Without this the evaluator silently returns
-      // {rows: []} for off-truck or new techs, which looks like a bug.
+      // Surface "No Data" placeholder for any requested LDAP missing from snapshot/Snowflake.
       const returnedLdaps = new Set(rows.map((r: any) => String(r.tech_ldap || "").toUpperCase()));
       const missing = cleaned.filter((l) => !returnedLdaps.has(l));
       if (missing.length > 0) {
@@ -1100,11 +1175,6 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] no-data name lookup failed:", err.message);
         }
 
-        // Detect new-hire-in-training: techs with no Snowflake financials/DCR
-        // but who are actively clocking in with "NEW HIRE TRAINING" punch
-        // labels are trainees, not unknown. Surface them as such so staff
-        // know why there's no data to score against (no auto-action; the
-        // staffer still chooses Approve/Deny).
         const trainingLdaps = new Set<string>();
         try {
           const punchRows = await fetchTechPunchHistory(missing, 7);
@@ -1134,6 +1204,7 @@ export function registerVrmRoutes(): Router {
             parts_shipping: 0,
             fuel_est: 0,
             lookback_days: 90,
+            working_days: 0,
             daily_revenue: 0,
             daily_costs: 0,
             daily_net_before_rental: 0,
@@ -1142,11 +1213,11 @@ export function registerVrmRoutes(): Router {
             recommendation: isTrainee ? "New Hire — Training" : "No Data",
             new_hire_exempt: false,
             scorecard_exempt: false,
-          } as any);
+          });
         }
       }
 
-      // Attach district/state and apply union district override to each row.
+      // Attach district/state and apply union district override.
       for (const r of rows as any[]) {
         const ldap = String(r.tech_ldap || "").toUpperCase();
         const ds = districtStateMap.get(ldap);
@@ -1159,7 +1230,7 @@ export function registerVrmRoutes(): Router {
         }
       }
 
-      // Auto-save every evaluated tech with the date
+      // Auto-save check history.
       const checkRecords = rows.map((r: any) => ({
         techLdap: r.tech_ldap,
         techName: r.tech_name ?? null,
@@ -1181,11 +1252,47 @@ export function registerVrmRoutes(): Router {
         ...r,
         daily_ppt_profit: r.daily_ppt_profit != null ? Number(r.daily_ppt_profit) : 0,
       }));
-      res.json({ rows: coerced });
+
+      // Build snapshotMeta for the UI label.
+      const snapshotMeta = meta ? {
+        status: meta.status,
+        syncedAt: meta.lastSyncCompletedAt ?? null,
+        rowCount: meta.rowCount ?? null,
+        sourceLastAltered: meta.sourceSnowflakeLastAltered ?? null,
+      } : null;
+
+      res.json({ rows: coerced, snapshotMeta });
     } catch (e: any) {
       console.error("[VRM] profitability/check error:", e.message);
       res.status(500).json({ error: e.message });
     }
+  });
+
+  /**
+   * GET /api/vrm/profitability/snapshot-meta
+   * Returns the current cache-meta row so the UI can show snapshot freshness info
+   * without needing to POST a check first.
+   */
+  router.get("/profitability/snapshot-meta", async (_req, res) => {
+    try {
+      const meta = await getProfitabilityCacheMeta();
+      res.json({ meta });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/profitability/sync-now
+   * Manually triggers the profitability snapshot sync (admin use only — no auth gate here
+   * since VRM is already behind authentication middleware in the main app).
+   */
+  router.post("/profitability/sync-now", async (_req, res) => {
+    // Respond immediately so the client isn't blocked for the full sync duration.
+    res.json({ message: "Profitability snapshot sync started." });
+    runProfitabilitySync().catch((e: any) =>
+      console.error("[VRM] manual sync-now failed:", e.message),
+    );
   });
 
   /**
@@ -2084,6 +2191,39 @@ export function registerVrmRoutes(): Router {
   scheduleImportAt(7, "7 AM ET");
   scheduleImportAt(13, "1 PM ET");
   console.log("[VRM Scheduler] Denied-import scheduler initialised (7 AM ET + 1 PM ET daily)");
+
+  // ─── Profitability snapshot scheduler (01:00 UTC daily) ─────────────────────
+  // Runs after the IHR_UNIT_ECONOMICS rebuild (which completes ~20:58-20:59 UTC).
+  // The settle gate inside runProfitabilitySync waits for the rebuild to finish.
+
+  function msUntilUTCHour(hourUTC: number): number {
+    const now = new Date();
+    const h = now.getUTCHours();
+    const m = now.getUTCMinutes();
+    const s = now.getUTCSeconds();
+    let minUntil = hourUTC * 60 - (h * 60 + m);
+    if (minUntil <= 0) minUntil += 24 * 60;
+    const ms = (minUntil * 60 - s) * 1000;
+    return ms > 0 && Number.isFinite(ms) ? ms : 24 * 60 * 60 * 1000;
+  }
+
+  function scheduleProfitabilitySync() {
+    const ms = msUntilUTCHour(1);
+    const next = new Date(Date.now() + ms);
+    console.log(`[VRM Scheduler] Profitability snapshot sync scheduled for ${next.toISOString()}`);
+    setTimeout(async () => {
+      console.log("[VRM Scheduler] Running daily profitability snapshot sync.");
+      try {
+        await runProfitabilitySync();
+      } catch (e: any) {
+        console.error("[VRM Scheduler] Profitability snapshot sync failed:", e.message);
+      }
+      scheduleProfitabilitySync();
+    }, ms);
+  }
+
+  scheduleProfitabilitySync();
+  console.log("[VRM Scheduler] Profitability snapshot scheduler initialised (01:00 UTC daily)");
 
   // ─── Tech-Punch sync scheduler (every 15 min, active sections only) ─────────
   const PUNCH_SYNC_INTERVAL_MS = 15 * 60 * 1000;

@@ -502,6 +502,151 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
   return rows;
 }
 
+/**
+ * Bulk version of fetchProfitabilityCheck — returns ALL techs with IHR or DCR data in the
+ * last 90 days, with no LDAP filter.  Used by the daily snapshot sync job only.
+ */
+export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
+  if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
+  const svc = getSnowflakeService();
+
+  let fuelPerComplete = 10;
+  let rentalPerDay = 78;
+  try {
+    const rateRows = await getRateConfig();
+    for (const r of rateRows) {
+      if (r.key === "fuel_per_complete") fuelPerComplete = Number(r.value);
+      if (r.key === "rental_per_day") rentalPerDay = Number(r.value);
+    }
+  } catch {
+    // Non-fatal: use defaults.
+  }
+
+  const rows = await svc.executeQuery(`
+    WITH financials AS (
+      SELECT
+        f.TECH_LDAP,
+        COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
+        COUNT(*)                                                         AS total_sos,
+        COUNT(DISTINCT CASE
+          WHEN DAYOFWEEKISO(f.SO_STS_DT) BETWEEN 1 AND 5
+          THEN f.SO_STS_DT
+        END)                                                             AS working_days,
+        SUM(f.TOTAL_REVENUE)                                            AS total_revenue,
+        SUM(f.LABOR_DIRECT_EXPENSE)                                     AS labor_direct,
+        SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
+        SUM(f.TOTAL_PARTS_COGS_EXPENSE)
+          + SUM(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED)            AS parts_cogs,
+        SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                           AS parts_shipping,
+        SUM(f.PPT_PROFIT)                                               AS ppt_profit
+      FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
+      WHERE f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
+        AND f.SO_STS_DT <= CURRENT_DATE
+        AND f.TECH_LDAP IS NOT NULL AND f.TECH_LDAP != ''
+      GROUP BY f.TECH_LDAP
+    ),
+    dcr AS (
+      SELECT
+        d.LDAP_ID,
+        COALESCE(MAX(d.EMP_FULL_NM), d.LDAP_ID) AS tech_name,
+        ROUND(MAX(d.TENURE_YRS) * 12, 0)         AS tenure_months,
+        DIV0(SUM(d.COMP_PCT_NUM), SUM(d.COMP_PCT_DEN))                 AS completion_pct,
+        DIV0(SUM(d.WAGES), SUM(d.TOTAL_REVENUE))                       AS p2r,
+        DIV0(SUM(d.RECALL_30D_WOM_NUM), SUM(d.RECALL_30D_WOM_DEN))     AS recall_pct,
+        DIV0(SUM(d.CM_CONV_NUM), SUM(d.CM_CONV_DEN))                   AS pm_conv,
+        DIV0(SUM(d.SPHW_ENROLLMENT_SALE_QTY), SUM(d.SPHW_ELIG_ENROL_D2C_COMPLETES)) AS d2c_rate
+      FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new d
+      WHERE d.TIMEWINDOW IN ('ALL-YTD')
+        AND d.BUSUNIT = 'InHomeRepair'
+        AND d.LDAP_ID IS NOT NULL AND d.LDAP_ID != ''
+        AND d.ACCTG_DT >= (
+          SELECT MIN(ACCTG_DT) FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW
+          WHERE ACCTG_YR = (SELECT ACCTG_YR FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW WHERE ACCTG_DT = CURRENT_DATE)
+        )
+      GROUP BY d.LDAP_ID
+    ),
+    scored AS (
+      SELECT
+        LDAP_ID, tech_name, tenure_months,
+        ROUND((
+          (CASE WHEN completion_pct >= 0.715 THEN 5 WHEN completion_pct >= 0.671 THEN 4 WHEN completion_pct >= 0.631 THEN 3 WHEN completion_pct >= 0.583 THEN 2 ELSE 1 END * 25)
+          + (CASE WHEN p2r <= 0.18 THEN 5 WHEN p2r <= 0.24 THEN 4 WHEN p2r <= 0.28 THEN 3 WHEN p2r <= 0.38 THEN 2 ELSE 1 END * 15)
+          + (CASE WHEN recall_pct <= 0.067 THEN 5 WHEN recall_pct <= 0.087 THEN 4 WHEN recall_pct <= 0.107 THEN 3 WHEN recall_pct <= 0.132 THEN 2 ELSE 1 END * 25)
+          + (CASE WHEN pm_conv >= 0.158 THEN 5 WHEN pm_conv >= 0.09 THEN 4 WHEN pm_conv >= 0.042 THEN 3 WHEN pm_conv >= 0.011 THEN 2 ELSE 1 END * 10)
+          + (CASE WHEN d2c_rate >= 4.8 THEN 5 WHEN d2c_rate >= 1.8 THEN 4 WHEN d2c_rate >= 0.7 THEN 3 WHEN d2c_rate >= 0.0 THEN 2 ELSE 1 END * 10)
+        ) / 85.0, 3) AS scorecard_score
+      FROM dcr
+    )
+    SELECT
+      COALESCE(fin.TECH_LDAP, sc.LDAP_ID)                              AS "tech_ldap",
+      sc.tech_name                                                       AS "tech_name",
+      sc.tenure_months                                                   AS "tenure_months",
+      sc.scorecard_score                                                 AS "scorecard_score",
+      COALESCE(fin.completes, 0)                                         AS "completes",
+      COALESCE(fin.total_sos, 0)                                         AS "total_sos",
+      ROUND(COALESCE(fin.total_revenue, 0), 2)                          AS "total_revenue",
+      ROUND(COALESCE(fin.labor_direct, 0), 2)                           AS "labor_direct",
+      ROUND(COALESCE(fin.labor_benefits, 0), 2)                         AS "labor_benefits",
+      ROUND(COALESCE(fin.parts_cogs, 0), 2)                             AS "parts_cogs",
+      ROUND(COALESCE(fin.parts_shipping, 0), 2)                         AS "parts_shipping",
+      COALESCE(fin.completes, 0) * ${fuelPerComplete}                     AS "fuel_est",
+      90                                                                  AS "lookback_days",
+      COALESCE(fin.working_days, 0)                                      AS "working_days",
+      ROUND(DIV0(COALESCE(fin.total_revenue, 0),
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_revenue",
+      ROUND(DIV0(COALESCE(fin.labor_direct,0) + COALESCE(fin.labor_benefits,0)
+        + COALESCE(fin.parts_cogs,0) + COALESCE(fin.parts_shipping,0)
+        + COALESCE(fin.completes,0)*${fuelPerComplete},
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_costs",
+      ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+        - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_net_before_rental",
+      ROUND(DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+        - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+        - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+                 COALESCE(fin.working_days, 0)) - ${rentalPerDay}, 2)   AS "daily_net_with_rental",
+      ROUND(DIV0(COALESCE(fin.ppt_profit, 0),
+                 COALESCE(fin.working_days, 0)), 2)                      AS "daily_ppt_profit",
+      CASE
+        WHEN fin.TECH_LDAP IS NULL THEN 'No Data'
+        WHEN DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+          - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+          - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} >= 0
+          THEN 'Approve'
+        WHEN sc.tenure_months < 6                                          THEN 'Approve'
+        WHEN sc.scorecard_score >= 4.0                                     THEN 'Approve'
+        ELSE 'Deny'
+      END                                                                  AS "recommendation",
+      CASE
+        WHEN sc.tenure_months < 6
+          AND fin.TECH_LDAP IS NOT NULL
+          AND sc.LDAP_ID IS NOT NULL
+          AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+            - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} < 0
+        THEN TRUE ELSE FALSE
+      END                                                                  AS "new_hire_exempt",
+      CASE
+        WHEN sc.scorecard_score >= 4.0
+          AND COALESCE(sc.tenure_months, 99) >= 6
+          AND fin.TECH_LDAP IS NOT NULL
+          AND sc.LDAP_ID IS NOT NULL
+          AND DIV0(COALESCE(fin.total_revenue,0) - COALESCE(fin.labor_direct,0)
+            - COALESCE(fin.labor_benefits,0) - COALESCE(fin.parts_cogs,0)
+            - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
+               COALESCE(fin.working_days, 0)) - ${rentalPerDay} < 0
+        THEN TRUE ELSE FALSE
+      END                                                                  AS "scorecard_exempt"
+    FROM financials fin
+    FULL OUTER JOIN scored sc ON fin.TECH_LDAP = sc.LDAP_ID
+    ORDER BY "daily_net_with_rental" ASC NULLS LAST
+  `) as ProfitabilityRow[];
+
+  return rows;
+}
 
 // ─── Tech Punch Status (TimeHub) ────────────────────────────────────────────
 
