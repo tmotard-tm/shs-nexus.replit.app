@@ -24,6 +24,8 @@ import {
   vrmProfitabilitySnapshot,
   vrmNotifications,
   vrmSupervisorContactOverrides,
+  vrmNotificationTemplates,
+  type VrmNotificationTemplate,
   type VrmTech,
   type VrmRentalDecision,
   type VrmRateConfig,
@@ -1802,6 +1804,32 @@ export async function getRateConfigHistory(limit = 50): Promise<VrmRateConfigHis
     .from(vrmRateConfigHistory)
     .orderBy(desc(vrmRateConfigHistory.changedAt))
     .limit(limit);
+}
+
+// ─── Notification Templates ──────────────────────────────────────────────────
+
+/**
+ * Returns all template rows ordered by key.  Callers (Settings UI + dispatcher)
+ * project this into a {key → body} map.
+ */
+export async function getNotificationTemplates(): Promise<VrmNotificationTemplate[]> {
+  return db.select().from(vrmNotificationTemplates).orderBy(vrmNotificationTemplates.key);
+}
+
+export async function upsertNotificationTemplate(
+  key: string,
+  body: string,
+  updatedBy?: string | null,
+): Promise<VrmNotificationTemplate> {
+  const [row] = await db
+    .insert(vrmNotificationTemplates)
+    .values({ key, body, updatedAt: new Date(), updatedBy: updatedBy ?? null })
+    .onConflictDoUpdate({
+      target: vrmNotificationTemplates.key,
+      set: { body, updatedAt: new Date(), updatedBy: updatedBy ?? null },
+    })
+    .returning();
+  return row;
 }
 
 // ─── Profitability Snapshot Cache ─────────────────────────────────────────────

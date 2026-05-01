@@ -749,3 +749,20 @@ export const vrmSupervisorContactOverrides = pgTable("vrm_supervisor_contact_ove
 export const insertVrmSupervisorContactOverrideSchema = createInsertSchema(vrmSupervisorContactOverrides).omit({ updatedAt: true });
 export type VrmSupervisorContactOverride = typeof vrmSupervisorContactOverrides.$inferSelect;
 export type InsertVrmSupervisorContactOverride = z.infer<typeof insertVrmSupervisorContactOverrideSchema>;
+
+// ─── Notification Templates (Deny SMS + Email subject/body) ──────────────────
+//
+// Single key/value table — three rows: sms_template_deny,
+// email_subject_template_deny, email_body_template_deny.  Bodies use
+// {{token}} placeholders; the dispatcher renders them and falls back to
+// the hard-coded defaults when a row is empty.
+export const vrmNotificationTemplates = pgTable("vrm_notification_templates", {
+  key: varchar("key", { length: 64 }).primaryKey(),
+  body: text("body").notNull().default(""),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: varchar("updated_by", { length: 128 }),
+});
+
+export type VrmNotificationTemplate = typeof vrmNotificationTemplates.$inferSelect;
+export const insertVrmNotificationTemplateSchema = createInsertSchema(vrmNotificationTemplates).omit({ updatedAt: true });
+export type InsertVrmNotificationTemplate = z.infer<typeof insertVrmNotificationTemplateSchema>;

@@ -641,5 +641,25 @@ export async function initVrmSchema(): Promise<void> {
     END $$;
   `);
 
+  // ── Notification Templates (deny SMS + email subject/body) ────────────────
+  // Single key/value table.  Bodies are rendered via simple {{token}} replace
+  // by notification-dispatcher.ts; an empty body falls back to the hard-coded
+  // default copy that shipped before templates were configurable.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_notification_templates (
+      key        VARCHAR(64) PRIMARY KEY,
+      body       TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMP DEFAULT NOW() NOT NULL,
+      updated_by VARCHAR(128)
+    );
+  `);
+  await db.execute(sql`
+    INSERT INTO vrm_notification_templates (key, body) VALUES
+      ('sms_template_deny',           ''),
+      ('email_subject_template_deny', ''),
+      ('email_body_template_deny',    '')
+    ON CONFLICT (key) DO NOTHING;
+  `);
+
   console.log("[VRM] Schema initialised");
 }

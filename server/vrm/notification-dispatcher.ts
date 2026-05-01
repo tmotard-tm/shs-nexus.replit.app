@@ -28,9 +28,17 @@ import {
   markNotificationSent,
   markNotificationFailed,
   markNotificationSkipped,
+  getNotificationTemplates,
 } from "./storage";
 import { sendTwilioMessage } from "../fleet-scope-reg-messaging";
 import { sendEmail } from "../email-service";
+
+/**
+ * BYOV (Bring Your Own Vehicle) program landing page.  Surfaced in the
+ * deny-email body via the {{byov_link}} token; falls back to a plain mention
+ * when the template is empty.  Update if the program URL changes.
+ */
+const BYOV_LINK = "https://shs.com/vrm/byov";
 
 interface SupervisorContact {
   supervisorLdap: string | null;
@@ -93,7 +101,10 @@ export async function enqueueNotificationsForDeny(args: {
   scorecardScore: string | number | null;
   tenureMonths: number | null;
 }): Promise<{ smsQueued: boolean; emailQueued: boolean; skipped: boolean }> {
-  const supervisor = await getSupervisorContact(args.techLdap);
+  const [supervisor, templateMap] = await Promise.all([
+    getSupervisorContact(args.techLdap),
+    loadTemplateMap(),
+  ]);
 
   const ctx: DenyContext = {
     decisionId: args.decisionId,
@@ -115,7 +126,7 @@ export async function enqueueNotificationsForDeny(args: {
       decisionId: args.decisionId,
       channel: "email",
       recipient: "(missing)",
-      payload: buildPayload(ctx, "email"),
+      payload: buildPayload(ctx, "email", templateMap),
       status: "skipped",
       error: "supervisor has no phone and no email on file",
     });
@@ -130,7 +141,7 @@ export async function enqueueNotificationsForDeny(args: {
       decisionId: args.decisionId,
       channel: "sms",
       recipient: phone,
-      payload: buildPayload(ctx, "sms"),
+      payload: buildPayload(ctx, "sms", templateMap),
       status: "queued",
     });
     smsQueued = !!ins;
@@ -140,13 +151,106 @@ export async function enqueueNotificationsForDeny(args: {
       decisionId: args.decisionId,
       channel: "email",
       recipient: email,
-      payload: buildPayload(ctx, "email"),
+      payload: buildPayload(ctx, "email", templateMap),
       status: "queued",
     });
     emailQueued = !!ins;
   }
 
   return { smsQueued, emailQueued, skipped: false };
+}
+
+// ─── Templates ─────────────────────────────────────────────────────────────
+
+type TemplateKey = "sms_template_deny" | "email_subject_template_deny" | "email_body_template_deny";
+type TemplateMap = Record<TemplateKey, string>;
+
+/**
+ * Loads the configurable templates from vrm_notification_templates.  An empty
+ * body or a missing row both yield "" — callers treat that as "use hard-coded
+ * fallback".  Failure is logged and falls back to all-empty so dispatch still
+ * succeeds.
+ */
+async function loadTemplateMap(): Promise<TemplateMap> {
+  try {
+    const rows = await getNotificationTemplates();
+    const out: TemplateMap = {
+      sms_template_deny: "",
+      email_subject_template_deny: "",
+      email_body_template_deny: "",
+    };
+    for (const r of rows) {
+      if (r.key in out) (out as any)[r.key] = r.body ?? "";
+    }
+    return out;
+  } catch (err: any) {
+    console.warn("[VRM Notif] Template lookup failed, falling back to defaults:", err?.message ?? err);
+    return {
+      sms_template_deny: "",
+      email_subject_template_deny: "",
+      email_body_template_deny: "",
+    };
+  }
+}
+
+/**
+ * Renders a template with simple {{token}} replace.  Tokens not present in
+ * `vars` are left literal so the dispatcher render can't accidentally hide
+ * the issue (the routes layer already rejected unknown tokens at save time).
+ */
+function renderTemplate(body: string, vars: Record<string, string>): string {
+  return body.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_m, name) =>
+    Object.prototype.hasOwnProperty.call(vars, name) ? vars[name] : `{{${name}}}`,
+  );
+}
+
+/** Returns the first whitespace-separated token of a name, falling back to ""/raw. */
+function firstName(full: string | null): string {
+  const s = (full ?? "").trim();
+  if (!s) return "";
+  return s.split(/\s+/)[0];
+}
+
+function todayLocalDate(): string {
+  return new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+}
+
+function buildVars(ctx: DenyContext, channel: "sms" | "email"): Record<string, string> {
+  const techFull = ctx.techName ?? ctx.techLdap;
+  const supFull = ctx.supervisor.supervisorName ?? "Supervisor";
+  const vars: Record<string, string> = {
+    supervisor_first_name: firstName(ctx.supervisor.supervisorName) || "Supervisor",
+    supervisor_full_name: supFull,
+    tech_first_name: firstName(ctx.techName) || ctx.techLdap,
+    tech_full_name: techFull,
+    tech_ldap: ctx.techLdap,
+    decision_date: todayLocalDate(),
+  };
+  if (channel === "email") {
+    vars.factors_html = buildFactorsHtml(ctx);
+    vars.byov_link = BYOV_LINK;
+  }
+  return vars;
+}
+
+function buildFactorsHtml(ctx: DenyContext): string {
+  const items: string[] = [];
+  if (ctx.dailyNetWithRental != null) {
+    items.push(`<li>Projected daily net with rental: ${escapeHtml(fmtMoney(ctx.dailyNetWithRental))}</li>`);
+  }
+  if (ctx.scorecardScore != null) {
+    const s = Number(ctx.scorecardScore);
+    if (Number.isFinite(s)) items.push(`<li>Scorecard score: ${s.toFixed(2)}</li>`);
+  }
+  if (ctx.tenureMonths != null) {
+    items.push(`<li>Tenure: ${ctx.tenureMonths} months</li>`);
+  }
+  if (items.length === 0) items.push(`<li>(factor data not available)</li>`);
+  return `<ul>${items.join("")}</ul>`;
+}
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
 // ─── Body templates ────────────────────────────────────────────────────────
@@ -158,21 +262,45 @@ function fmtMoney(v: string | number | null): string {
   return `$${n.toFixed(2)}`;
 }
 
-function buildPayload(ctx: DenyContext, channel: "sms" | "email") {
+function buildPayload(ctx: DenyContext, channel: "sms" | "email", templates: TemplateMap) {
   const techLabel = ctx.techName ? `${ctx.techName} (${ctx.techLdap})` : ctx.techLdap;
   const supName = ctx.supervisor.supervisorName ?? "Supervisor";
+  const vars = buildVars(ctx, channel);
 
   if (channel === "sms") {
-    // Brief, no factor breakdown.
-    return {
-      subject: null,
-      body:
+    const tmpl = templates.sms_template_deny.trim();
+    const body = tmpl
+      ? renderTemplate(tmpl, vars)
+      : // Hard-coded fallback (preserved from the pre-template release).
         `Sears Home Services VRM: A rental vehicle request for ${techLabel} ` +
-        `was denied. Please review with the tech. Detail follows by email.`,
-    };
+        `was denied. Please review with the tech. Detail follows by email.`;
+    return { subject: null as string | null, body, isHtml: false };
   }
 
-  // Email — factor breakdown + BYOV invitation.
+  // Email — subject + body.  When the user supplies a template that contains
+  // {{factors_html}} (HTML) the dispatcher sends it as HTML; otherwise plain
+  // text.  The hard-coded fallback is plain text (preserved as-is).
+  const subjectTmpl = templates.email_subject_template_deny.trim();
+  const bodyTmpl = templates.email_body_template_deny.trim();
+
+  if (subjectTmpl || bodyTmpl) {
+    const subject = subjectTmpl
+      ? renderTemplate(subjectTmpl, vars)
+      : `VRM: Rental request denied for ${techLabel}`;
+    const body = bodyTmpl ? renderTemplate(bodyTmpl, vars) : buildDefaultEmailBody(ctx, supName, techLabel);
+    const isHtml = bodyTmpl.includes("{{factors_html}}") || /<\w+[^>]*>/.test(body);
+    return { subject, body, isHtml };
+  }
+
+  // Both templates empty → original hard-coded plain-text email.
+  return {
+    subject: `VRM: Rental request denied for ${techLabel}`,
+    body: buildDefaultEmailBody(ctx, supName, techLabel),
+    isHtml: false,
+  };
+}
+
+function buildDefaultEmailBody(ctx: DenyContext, supName: string, techLabel: string): string {
   const factors: string[] = [];
   if (ctx.dailyNetWithRental != null) {
     factors.push(`• Projected daily net with rental: ${fmtMoney(ctx.dailyNetWithRental)}`);
@@ -186,22 +314,20 @@ function buildPayload(ctx: DenyContext, channel: "sms" | "email") {
   }
   const factorsBlock = factors.length > 0 ? factors.join("\n") : "• (factor data not available)";
 
-  const subject = `VRM: Rental request denied for ${techLabel}`;
-  const body =
+  return (
     `Hello ${supName},\n\n` +
     `A rental vehicle request for ${techLabel} was denied based on the following profitability factors:\n\n` +
     `${factorsBlock}\n\n` +
     `BYOV (Bring Your Own Vehicle) is available as an alternative — please discuss the option with ${techLabel}.\n\n` +
     `If you believe this decision should be revisited, contact the VRM team.\n\n` +
-    `— Sears Home Services Vehicle Rental Management`;
-
-  return { subject, body };
+    `— Sears Home Services Vehicle Rental Management`
+  );
 }
 
 // ─── Worker ────────────────────────────────────────────────────────────────
 
 async function dispatchOne(n: VrmNotification): Promise<void> {
-  const payload = (n.payload ?? {}) as { subject: string | null; body: string };
+  const payload = (n.payload ?? {}) as { subject: string | null; body: string; isHtml?: boolean };
 
   try {
     if (n.channel === "sms") {
@@ -221,7 +347,7 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
         to: n.recipient,
         from: process.env.SENDGRID_FROM_EMAIL ?? "notifications@shs.com",
         subject: payload.subject ?? "VRM notification",
-        text: payload.body,
+        ...(payload.isHtml ? { html: payload.body } : { text: payload.body }),
       });
       if (result.success) {
         await markNotificationSent(n.id);

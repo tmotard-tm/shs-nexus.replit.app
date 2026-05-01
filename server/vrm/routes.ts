@@ -67,6 +67,8 @@ import {
   getSupervisorsNeedingOverride,
   upsertSupervisorContactOverride,
   getAllSupervisorContactOverrides,
+  getNotificationTemplates,
+  upsertNotificationTemplate,
 } from "./storage";
 import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
 import { fetchProfitabilityCheck } from "./snowflake-queries";
@@ -2388,6 +2390,100 @@ export function registerVrmRoutes(): Router {
       res.json(row);
     } catch (e: any) {
       console.error("[VRM] supervisor-overrides PUT error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Notification Templates (Deny SMS + Email subject/body) ─────────────────
+
+  /**
+   * Allowed {{tokens}} per template — used both for save-time validation here
+   * and for chip rendering on the Settings UI. Email-only tokens
+   * ({{factors_html}}, {{byov_link}}) are not valid in the SMS template.
+   */
+  const NOTIF_TEMPLATE_TOKENS: Record<string, Set<string>> = {
+    sms_template_deny: new Set([
+      "supervisor_first_name", "supervisor_full_name",
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+    ]),
+    email_subject_template_deny: new Set([
+      "supervisor_first_name", "supervisor_full_name",
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+    ]),
+    email_body_template_deny: new Set([
+      "supervisor_first_name", "supervisor_full_name",
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+      "factors_html", "byov_link",
+    ]),
+  };
+  const ALLOWED_NOTIF_TEMPLATE_KEYS = new Set(Object.keys(NOTIF_TEMPLATE_TOKENS));
+
+  /** Returns the list of unknown {{tokens}} found in `body`, or [] if all are allowed. */
+  function findUnknownTokens(body: string, allowed: Set<string>): string[] {
+    const re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+    const unknown = new Set<string>();
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      const tok = m[1];
+      if (!allowed.has(tok)) unknown.add(tok);
+    }
+    const out: string[] = [];
+    unknown.forEach((v) => out.push(v));
+    return out;
+  }
+
+  router.get("/settings/notification-templates", async (_req, res) => {
+    try {
+      const rows = await getNotificationTemplates();
+      // Project to a stable {key → {body, updatedAt, updatedBy}} map and
+      // include the full allowed-token list so the UI can render chips
+      // without duplicating the schema.
+      const templates: Record<string, { body: string; updatedAt: string; updatedBy: string | null }> = {};
+      const tokens: Record<string, string[]> = {};
+      ALLOWED_NOTIF_TEMPLATE_KEYS.forEach((k) => {
+        const r = rows.find((x) => x.key === k);
+        templates[k] = {
+          body: r?.body ?? "",
+          updatedAt: r?.updatedAt ? r.updatedAt.toISOString() : new Date(0).toISOString(),
+          updatedBy: r?.updatedBy ?? null,
+        };
+        const allowed: string[] = [];
+        NOTIF_TEMPLATE_TOKENS[k].forEach((t) => allowed.push(t));
+        tokens[k] = allowed;
+      });
+      res.json({ templates, allowedTokens: tokens });
+    } catch (e: any) {
+      console.error("[VRM] notification-templates GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  router.put("/settings/notification-templates/:key", async (req, res) => {
+    try {
+      const { key } = req.params;
+      if (!ALLOWED_NOTIF_TEMPLATE_KEYS.has(key)) {
+        const allowedList: string[] = [];
+        ALLOWED_NOTIF_TEMPLATE_KEYS.forEach((k) => allowedList.push(k));
+        return res.status(400).json({ error: `Unknown template key '${key}'. Allowed: ${allowedList.join(", ")}` });
+      }
+      const body = typeof req.body?.body === "string" ? req.body.body : "";
+      // Empty body is allowed — that's how the UI clears a template back to
+      // the dispatcher's hard-coded fallback.
+      if (body.length > 4000) {
+        return res.status(400).json({ error: "body exceeds 4000 character limit" });
+      }
+      const unknown = findUnknownTokens(body, NOTIF_TEMPLATE_TOKENS[key]);
+      if (unknown.length > 0) {
+        return res.status(400).json({
+          error: `Unknown template token(s): ${unknown.map((t) => `{{${t}}}`).join(", ")}`,
+          unknownTokens: unknown,
+        });
+      }
+      const updatedBy = (req as any).user?.username ?? null;
+      const row = await upsertNotificationTemplate(key, body, updatedBy);
+      res.json(row);
+    } catch (e: any) {
+      console.error("[VRM] notification-templates PUT error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });

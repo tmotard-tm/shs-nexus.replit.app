@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle } from "lucide-react";
+import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle, MessageSquare, RotateCcw } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -466,6 +466,222 @@ function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
   );
 }
 
+// ─── Deny Notification Templates (configurable copy for SMS + email) ─────────
+
+interface NotificationTemplate {
+  body: string;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+interface NotificationTemplatesResponse {
+  templates: Record<string, NotificationTemplate>;
+  allowedTokens: Record<string, string[]>;
+}
+
+const TEMPLATE_LABELS: Record<string, string> = {
+  sms_template_deny: "SMS body (Deny)",
+  email_subject_template_deny: "Email subject (Deny)",
+  email_body_template_deny: "Email body (Deny)",
+};
+const TEMPLATE_KEYS = ["sms_template_deny", "email_subject_template_deny", "email_body_template_deny"] as const;
+
+const TEMPLATE_DEFAULTS: Record<string, string> = {
+  sms_template_deny:
+    "Sears Home Services VRM: A rental vehicle request for {{tech_full_name}} ({{tech_ldap}}) was denied. Please review with the tech. Detail follows by email.",
+  email_subject_template_deny:
+    "VRM: Rental request denied for {{tech_full_name}} ({{tech_ldap}})",
+  email_body_template_deny:
+    "Hello {{supervisor_first_name}},\n\nA rental vehicle request for {{tech_full_name}} ({{tech_ldap}}) was denied based on the following profitability factors:\n\n{{factors_html}}\n\nBYOV (Bring Your Own Vehicle) is available as an alternative — please discuss the option with {{tech_first_name}} (info: {{byov_link}}).\n\nIf you believe this decision should be revisited, contact the VRM team.\n\n— Sears Home Services Vehicle Rental Management",
+};
+
+/** Returns unknown {{tokens}} present in `body` that are NOT in `allowed`. */
+function findUnknownTemplateTokens(body: string, allowed: string[]): string[] {
+  const allowedSet = new Set(allowed);
+  const unknown = new Set<string>();
+  const re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    if (!allowedSet.has(m[1])) unknown.add(m[1]);
+  }
+  const out: string[] = [];
+  unknown.forEach((v) => out.push(v));
+  return out;
+}
+
+function TemplateEditor({
+  templateKey,
+  initialBody,
+  allowedTokens,
+}: {
+  templateKey: string;
+  initialBody: string;
+  allowedTokens: string[];
+}) {
+  const qc = useQueryClient();
+  const [draft, setDraft] = useState(initialBody);
+  const [savedMsg, setSavedMsg] = useState<string | null>(null);
+  const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const isSms = templateKey === "sms_template_deny";
+  const isEmailBody = templateKey === "email_body_template_deny";
+
+  const dirty = draft !== initialBody;
+  const unknownTokens = useMemo(() => findUnknownTemplateTokens(draft, allowedTokens), [draft, allowedTokens]);
+
+  const charCount = draft.length;
+  const segCount = Math.max(1, Math.ceil(charCount / 160));
+  const smsCountColor = charCount > 459 ? colors.red : charCount > 320 ? "#B45309" : colors.inkMuted;
+
+  const mut = useMutation({
+    mutationFn: (body: string) =>
+      apiRequest("PUT", `/api/vrm/settings/notification-templates/${templateKey}`, { body }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/settings/notification-templates"] });
+      setSavedMsg("Saved");
+      setTimeout(() => setSavedMsg(null), 2000);
+    },
+  });
+
+  function insertToken(token: string) {
+    const ta = taRef.current;
+    const insertion = `{{${token}}}`;
+    if (!ta) {
+      setDraft((d) => d + insertion);
+      return;
+    }
+    const start = ta.selectionStart ?? draft.length;
+    const end = ta.selectionEnd ?? draft.length;
+    const next = draft.slice(0, start) + insertion + draft.slice(end);
+    setDraft(next);
+    // Restore caret after the inserted token.
+    requestAnimationFrame(() => {
+      if (taRef.current) {
+        const pos = start + insertion.length;
+        taRef.current.focus();
+        taRef.current.setSelectionRange(pos, pos);
+      }
+    });
+  }
+
+  const canSave = dirty && unknownTokens.length === 0 && !mut.isPending;
+
+  return (
+    <div style={{ padding: "16px 20px", borderBottom: `1px solid ${colors.rule}` }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+        <label style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 600, color: colors.ink }}>
+          {TEMPLATE_LABELS[templateKey]}
+        </label>
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+          {initialBody === "" ? "Using built-in default" : "Custom template active"}
+        </span>
+      </div>
+
+      {/* Variable chips */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {allowedTokens.map((tok) => (
+          <button
+            key={tok}
+            type="button"
+            onClick={() => insertToken(tok)}
+            style={{
+              fontFamily: fonts.jetbrains,
+              fontSize: 11,
+              padding: "3px 8px",
+              border: `1px solid ${colors.rule}`,
+              background: colors.background,
+              color: colors.ink,
+              borderRadius: 4,
+              cursor: "pointer",
+            }}
+            title={`Insert {{${tok}}} at cursor`}
+          >
+            {`{{${tok}}}`}
+          </button>
+        ))}
+      </div>
+
+      <textarea
+        ref={taRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        rows={isEmailBody ? 10 : isSms ? 4 : 2}
+        placeholder={`Leave blank to use the built-in default. Default:\n${TEMPLATE_DEFAULTS[templateKey]}`}
+        style={{
+          width: "100%",
+          fontFamily: fonts.jetbrains,
+          fontSize: 13,
+          padding: "10px 12px",
+          border: `1px solid ${colors.rule}`,
+          borderRadius: 6,
+          color: colors.ink,
+          background: colors.surface,
+          resize: "vertical",
+          boxSizing: "border-box",
+          lineHeight: 1.5,
+        }}
+      />
+
+      {/* Char/segment count for SMS */}
+      {isSms && (
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: smsCountColor, marginTop: 4 }}>
+          {charCount} chars · {segCount} SMS segment{segCount === 1 ? "" : "s"} (160 GSM-7/segment)
+          {charCount > 459 && " — over 3 segments, consider trimming"}
+          {charCount > 320 && charCount <= 459 && " — over 2 segments"}
+        </div>
+      )}
+
+      {/* Unknown-token warning */}
+      {unknownTokens.length > 0 && (
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 8, display: "flex", alignItems: "center", gap: 6 }}>
+          <AlertTriangle size={12} />
+          Unknown token{unknownTokens.length === 1 ? "" : "s"}: {unknownTokens.map((t) => `{{${t}}}`).join(", ")} — Save is disabled until removed.
+        </div>
+      )}
+      {mut.isError && (
+        <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.red, marginTop: 8 }}>
+          {(mut.error as any)?.message ?? "Save failed"}
+        </div>
+      )}
+
+      <div style={{ display: "flex", gap: 8, marginTop: 12, alignItems: "center" }}>
+        <button
+          type="button"
+          onClick={() => canSave && mut.mutate(draft)}
+          disabled={!canSave}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 6,
+            background: canSave ? colors.accent : colors.rule,
+            color: canSave ? "#fff" : colors.inkMuted,
+            border: "none",
+            fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 600,
+            cursor: canSave ? "pointer" : "not-allowed",
+          }}
+        >
+          <Check size={12} />
+          {mut.isPending ? "Saving…" : "Save"}
+        </button>
+        <button
+          type="button"
+          onClick={() => setDraft("")}
+          style={{
+            display: "inline-flex", alignItems: "center", gap: 6,
+            padding: "6px 12px", borderRadius: 6,
+            background: "transparent", border: `1px solid ${colors.rule}`,
+            color: colors.inkMuted,
+            fontFamily: fonts.dmSans, fontSize: 12,
+            cursor: "pointer",
+          }}
+          title="Clear this template — dispatcher will use the built-in default"
+        >
+          <RotateCcw size={12} />
+          Reset to default
+        </button>
+        {savedMsg && <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent }}>{savedMsg}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { data: rates = [], isLoading, error } = useQuery<RateConfig[]>({
     queryKey: ["/api/vrm/settings/rates"],
@@ -481,6 +697,10 @@ export default function Settings() {
     queryKey: ["/api/vrm/settings/supervisor-overrides"],
   });
   const supervisors = supOverrideEnvelope?.supervisors ?? [];
+
+  const { data: templatesEnvelope, isLoading: templatesLoading } = useQuery<NotificationTemplatesResponse>({
+    queryKey: ["/api/vrm/settings/notification-templates"],
+  });
 
   const containerStyle: React.CSSProperties = {
     padding: "32px 40px",
@@ -632,6 +852,32 @@ export default function Settings() {
             </tbody>
           </table>
         )}
+      </div>
+
+      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36, display: "flex", alignItems: "center", gap: 8 }}>
+        <MessageSquare size={16} color={colors.accent} />
+        Deny Notification Templates
+      </h2>
+      <p style={{ fontSize: 13, color: colors.inkMuted, marginTop: 0, marginBottom: 16 }}>
+        Customize the SMS and email copy supervisors receive when a rental request is denied. Click a chip
+        to insert a variable token at the cursor; tokens are replaced at send time. Leaving a template blank
+        falls back to the built-in default.
+      </p>
+
+      <div style={cardStyle}>
+        {templatesLoading && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
+            Loading templates…
+          </div>
+        )}
+        {!templatesLoading && templatesEnvelope && TEMPLATE_KEYS.map((k) => (
+          <TemplateEditor
+            key={k}
+            templateKey={k}
+            initialBody={templatesEnvelope.templates[k]?.body ?? ""}
+            allowedTokens={templatesEnvelope.allowedTokens[k] ?? []}
+          />
+        ))}
       </div>
 
       <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36, display: "flex", alignItems: "center", gap: 8 }}>

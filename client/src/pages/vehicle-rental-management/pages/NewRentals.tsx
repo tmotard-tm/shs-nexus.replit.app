@@ -1,7 +1,7 @@
-import { useState, useRef, useCallback, useEffect, Fragment as ReactFragment } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, Fragment as ReactFragment } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight, TriangleAlert } from "lucide-react";
+import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight, TriangleAlert, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -831,11 +831,199 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
+// ─── Column-sort plumbing (Evaluation Results + Decision Log) ───────────────
+
+type SortDir = "asc" | "desc" | null;
+interface SortState { col: string | null; dir: SortDir; }
+
+const EVAL_SORT_KEY = "newRentals_evalSort";
+const DECISION_LOG_SORT_KEY = "newRentals_decisionLogSort";
+const CHECK_HISTORY_SORT_KEY = "newRentals_checkHistorySort";
+
+function readSortPref(storageKey: string): SortState {
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && typeof p.col === "string" && (p.dir === "asc" || p.dir === "desc")) {
+        return { col: p.col, dir: p.dir };
+      }
+    }
+  } catch { /* ignore */ }
+  return { col: null, dir: null };
+}
+
+function writeSortPref(storageKey: string, state: SortState) {
+  try {
+    if (state.col == null || state.dir == null) localStorage.removeItem(storageKey);
+    else localStorage.setItem(storageKey, JSON.stringify(state));
+  } catch { /* ignore */ }
+}
+
+/**
+ * asc → desc → unsorted toggle for a single header.  The active column is
+ * highlighted with the up/down caret; all other columns show the dual caret.
+ * Caller passes `style` to keep the existing th alignment (left/center/right).
+ */
+function SortableTh({
+  col, label, title, current, onChange, style,
+}: {
+  col: string;
+  label: React.ReactNode;
+  title?: string;
+  current: SortState;
+  onChange: (next: SortState) => void;
+  style?: React.CSSProperties;
+}) {
+  const isActive = current.col === col && current.dir != null;
+  const Icon = isActive ? (current.dir === "asc" ? ArrowUp : ArrowDown) : ArrowUpDown;
+
+  function handleClick() {
+    if (current.col !== col) {
+      onChange({ col, dir: "asc" });
+    } else if (current.dir === "asc") {
+      onChange({ col, dir: "desc" });
+    } else if (current.dir === "desc") {
+      onChange({ col: null, dir: null });
+    } else {
+      onChange({ col, dir: "asc" });
+    }
+  }
+
+  // Horizontal alignment reuses textAlign from style; flex layout matches it.
+  const align = (style?.textAlign as React.CSSProperties["justifyContent"]) ?? "left";
+  const justify = align === "center" ? "center" : align === "right" ? "flex-end" : "flex-start";
+
+  return (
+    <th style={style} title={title}>
+      <button
+        type="button"
+        onClick={handleClick}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 4,
+          background: "transparent", border: "none", padding: 0,
+          cursor: "pointer", color: "inherit", font: "inherit",
+          width: "100%", justifyContent: justify,
+          textTransform: "inherit", letterSpacing: "inherit",
+        }}
+        data-testid={`sort-header-${col}`}
+      >
+        <span>{label}</span>
+        <Icon size={11} style={{ opacity: isActive ? 1 : 0.45, color: isActive ? colors.accent : "inherit" }} />
+      </button>
+    </th>
+  );
+}
+
+/**
+ * Generic comparator factory.  `accessor` returns a comparable primitive.
+ * Null/undefined/empty-string always sorts last regardless of direction so
+ * "missing" rows don't bury real data.  Numbers are compared numerically;
+ * strings via case-insensitive locale compare; date-like strings via
+ * Date.parse (falling back to string compare on NaN).
+ */
+function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
+  if (dir == null) return null;
+  const sign = dir === "asc" ? 1 : -1;
+  return (a: T, b: T) => {
+    const av = accessor(a);
+    const bv = accessor(b);
+    const aMissing = av == null || av === "";
+    const bMissing = bv == null || bv === "";
+    if (aMissing && bMissing) return 0;
+    if (aMissing) return 1;   // nulls always to bottom
+    if (bMissing) return -1;
+    if (typeof av === "number" && typeof bv === "number") {
+      return (av - bv) * sign;
+    }
+    // Try numeric coerce when both look like numbers.
+    const an = typeof av === "string" ? Number(av) : NaN;
+    const bn = typeof bv === "string" ? Number(bv) : NaN;
+    if (Number.isFinite(an) && Number.isFinite(bn)) {
+      return (an - bn) * sign;
+    }
+    // Date-like strings (ISO timestamps).
+    const ad = typeof av === "string" ? Date.parse(av) : NaN;
+    const bd = typeof bv === "string" ? Date.parse(bv) : NaN;
+    if (Number.isFinite(ad) && Number.isFinite(bd)) {
+      return (ad - bd) * sign;
+    }
+    return String(av).localeCompare(String(bv), undefined, { sensitivity: "base", numeric: true }) * sign;
+  };
+}
+
+/** Accessor for the evaluation results table (ProfitRow). */
+function evalAccessor(col: string): (r: ProfitRow) => unknown {
+  switch (col) {
+    case "ldap":            return (r) => r.tech_ldap;
+    case "name":            return (r) => r.tech_name;
+    case "state":           return (r) => r.state;
+    case "district":        return (r) => r.district;
+    case "tenure":          return (r) => r.tenure_months;
+    case "scorecard":       return (r) => r.scorecard_score;
+    case "completes":       return (r) => r.completes;
+    case "daily_revenue":   return (r) => r.daily_revenue;
+    case "daily_costs":     return (r) => r.daily_costs;
+    case "daily_net_pre":   return (r) => r.daily_net_before_rental;
+    case "daily_net_with":  return (r) => r.daily_net_with_rental;
+    case "daily_ppt":       return (r) => r.daily_ppt_profit;
+    case "recommendation":  return (r) => r.recommendation;
+    default:                return () => null;
+  }
+}
+
+/** Accessor for the decision log table (DecisionRow). */
+function decisionAccessor(col: string): (r: DecisionRow) => unknown {
+  switch (col) {
+    case "ldap":            return (r) => r.techLdap;
+    case "name":            return (r) => r.techName;
+    case "state":           return (r) => r.state;
+    case "district":        return (r) => r.district;
+    case "tenure":          return (r) => r.tenureMonths;
+    case "scorecard":       return (r) => (r.scorecardScore == null ? null : Number(r.scorecardScore));
+    case "completes":       return (r) => r.completes;
+    case "daily_revenue":   return (r) => (r.dailyRevenue == null ? null : Number(r.dailyRevenue));
+    case "daily_costs":     return (r) => (r.dailyCosts == null ? null : Number(r.dailyCosts));
+    case "daily_net_pre":   return (r) => (r.dailyNetBeforeRental == null ? null : Number(r.dailyNetBeforeRental));
+    case "daily_net_with":  return (r) => (r.dailyNetWithRental == null ? null : Number(r.dailyNetWithRental));
+    case "daily_ppt":       return (r) => (r.dailyPptProfit == null ? null : Number(r.dailyPptProfit));
+    case "recommendation":  return (r) => r.recommendation;
+    case "decision":        return (r) => r.decision;
+    case "decided_by":      return (r) => r.decidedByName;
+    case "notes":           return (r) => r.notes;
+    case "date":            return (r) => r.createdAt;
+    default:                return () => null;
+  }
+}
+
+/** Accessor for the check history table (CheckRow). */
+function checkAccessor(col: string): (r: CheckRow) => unknown {
+  switch (col) {
+    case "ldap":           return (r) => r.techLdap;
+    case "name":           return (r) => r.techName;
+    case "tenure":         return (r) => r.tenureMonths;
+    case "scorecard":      return (r) => (r.scorecardScore == null ? null : Number(r.scorecardScore));
+    case "completes":      return (r) => r.completes;
+    case "daily_net_with": return (r) => (r.dailyNetWithRental == null ? null : Number(r.dailyNetWithRental));
+    case "recommendation": return (r) => r.recommendation;
+    case "checked":        return (r) => r.checkedAt;
+    default:               return () => null;
+  }
+}
+
 export default function NewRentals() {
   const qc = useQueryClient();
   const [ldapInput, setLdapInput] = useState("");
   const [evaluatedRows, setEvaluatedRows] = useState<ProfitRow[]>([]);
   const [snapshotMeta, setSnapshotMeta] = useState<SnapshotMeta | null>(null);
+
+  // Per-table sort state, persisted to localStorage on change.
+  const [evalSort, _setEvalSort] = useState<SortState>(() => readSortPref(EVAL_SORT_KEY));
+  const [decisionLogSort, _setDecisionLogSort] = useState<SortState>(() => readSortPref(DECISION_LOG_SORT_KEY));
+  const [checkHistorySort, _setCheckHistorySort] = useState<SortState>(() => readSortPref(CHECK_HISTORY_SORT_KEY));
+  const setEvalSort = useCallback((s: SortState) => { _setEvalSort(s); writeSortPref(EVAL_SORT_KEY, s); }, []);
+  const setDecisionLogSort = useCallback((s: SortState) => { _setDecisionLogSort(s); writeSortPref(DECISION_LOG_SORT_KEY, s); }, []);
+  const setCheckHistorySort = useCallback((s: SortState) => { _setCheckHistorySort(s); writeSortPref(CHECK_HISTORY_SORT_KEY, s); }, []);
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [selectedDecision, setSelectedDecision] = useState<DecisionRow | null>(null);
@@ -947,6 +1135,21 @@ export default function NewRentals() {
 
   const decisionLog = logQuery.data?.rows ?? [];
 
+  // ── Sorted projections (single-column, nulls-to-bottom) ─────────────────────
+  const sortedEvaluatedRows = useMemo(() => {
+    if (!evalSort.col || !evalSort.dir) return evaluatedRows;
+    const cmp = makeSortComparator(evalAccessor(evalSort.col), evalSort.dir);
+    if (!cmp) return evaluatedRows;
+    return [...evaluatedRows].sort(cmp);
+  }, [evaluatedRows, evalSort]);
+
+  const sortedDecisionLog = useMemo(() => {
+    if (!decisionLogSort.col || !decisionLogSort.dir) return decisionLog;
+    const cmp = makeSortComparator(decisionAccessor(decisionLogSort.col), decisionLogSort.dir);
+    if (!cmp) return decisionLog;
+    return [...decisionLog].sort(cmp);
+  }, [decisionLog, decisionLogSort]);
+
   // ── Check history query ────────────────────────────────────────────────────
 
   const checksQuery = useQuery<{ rows: CheckRow[] }>({
@@ -959,12 +1162,20 @@ export default function NewRentals() {
   });
   const checkHistory = checksQuery.data?.rows ?? [];
 
+  const sortedCheckHistory = useMemo(() => {
+    if (!checkHistorySort.col || !checkHistorySort.dir) return checkHistory;
+    const cmp = makeSortComparator(checkAccessor(checkHistorySort.col), checkHistorySort.dir);
+    if (!cmp) return checkHistory;
+    return [...checkHistory].sort(cmp);
+  }, [checkHistory, checkHistorySort]);
+
   // ── CSV export ─────────────────────────────────────────────────────────────
 
   const handleExport = () => {
-    if (!evaluatedRows.length) return;
+    if (!sortedEvaluatedRows.length) return;
     const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Working Days", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", `Daily Net (w/ $${rentalPerDay})`, "Daily PPT Profit", "Recommendation"];
-    const lines = evaluatedRows.map((r) =>
+    // CSV honors the active table sort so the export matches what the user sees.
+    const lines = sortedEvaluatedRows.map((r) =>
       [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.working_days, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
     );
     const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
@@ -1248,24 +1459,24 @@ export default function NewRentals() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th style={thStyle}>LDAP</th>
-                  <th style={thStyle}>Name</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>State</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>District</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Revenue</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
-                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)">Daily PPT</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
+                  <SortableTh col="ldap"           label="LDAP"            current={evalSort} onChange={setEvalSort} style={thStyle} />
+                  <SortableTh col="name"           label="Name"            current={evalSort} onChange={setEvalSort} style={thStyle} />
+                  <SortableTh col="state"          label="State"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="district"       label="District"        current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="tenure"         label="Tenure"          current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="scorecard"      label="Scorecard"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="completes"      label="Completes"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="daily_revenue"  label="Daily Revenue"   current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_costs"    label="Daily Costs"     current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_net_pre"  label="Daily Net (pre-rental)" current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_ppt"      label="Daily PPT"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)" />
+                  <SortableTh col="recommendation" label="Recommendation"  current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {evaluatedRows.map((row) => {
+                {sortedEvaluatedRows.map((row) => {
                   const be = breakeven(row);
                   const isNoData = row.recommendation === "No Data" || row.recommendation === "New Hire — Training";
                   const flags = row.flags;
@@ -1632,27 +1843,27 @@ export default function NewRentals() {
               */}
               <thead>
                 <tr>
-                  <th style={thStyle}>LDAP</th>
-                  <th style={thStyle}>Name</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>State</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>District</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Revenue</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
-                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)">Daily PPT</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Decision</th>
-                  <th style={thStyle}>Decided By</th>
-                  <th style={thStyle}>Notes</th>
-                  <th style={thStyle}>Date</th>
+                  <SortableTh col="ldap"           label="LDAP"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="scorecard"      label="Scorecard"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="completes"      label="Completes"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="daily_revenue"  label="Daily Revenue"   current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_costs"    label="Daily Costs"     current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_net_pre"  label="Daily Net (pre-rental)" current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="daily_ppt"      label="Daily PPT"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)" />
+                  <SortableTh col="recommendation" label="Recommendation"  current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="decision"       label="Decision"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="decided_by"     label="Decided By"      current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <SortableTh col="notes"          label="Notes"           current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <SortableTh col="date"           label="Date"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                 </tr>
               </thead>
               <tbody>
-                {decisionLog.map((d) => {
+                {sortedDecisionLog.map((d) => {
                   const decisionAsRec = d.decision === "approved" ? "Approve" : d.decision === "denied" ? "Deny" : d.decision;
                   const isOverride = decisionAsRec !== d.recommendation && d.recommendation !== "No Data";
                   // Snapshot values may be null on legacy rows; coerce numerics safely.
@@ -1801,18 +2012,18 @@ export default function NewRentals() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th style={thStyle}>LDAP</th>
-                  <th style={thStyle}>Name</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
-                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
-                  <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
-                  <th style={thStyle}>Checked</th>
+                  <SortableTh col="ldap"           label="LDAP"           current={checkHistorySort} onChange={setCheckHistorySort} style={thStyle} />
+                  <SortableTh col="name"           label="Name"           current={checkHistorySort} onChange={setCheckHistorySort} style={thStyle} />
+                  <SortableTh col="tenure"         label="Tenure"         current={checkHistorySort} onChange={setCheckHistorySort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="scorecard"      label="Scorecard"      current={checkHistorySort} onChange={setCheckHistorySort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="completes"      label="Completes"      current={checkHistorySort} onChange={setCheckHistorySort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={checkHistorySort} onChange={setCheckHistorySort} style={{ ...thStyle, textAlign: "right" }} />
+                  <SortableTh col="recommendation" label="Recommendation"  current={checkHistorySort} onChange={setCheckHistorySort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="checked"        label="Checked"        current={checkHistorySort} onChange={setCheckHistorySort} style={thStyle} />
                 </tr>
               </thead>
               <tbody>
-                {checkHistory.map((c) => (
+                {sortedCheckHistory.map((c) => (
                   <tr
                     key={c.id}
                     style={{ transition: "background 100ms" }}
