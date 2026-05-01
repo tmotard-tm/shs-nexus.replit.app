@@ -505,6 +505,51 @@ export async function initVrmSchema(): Promise<void> {
     );
   `);
 
+  // ── Profitability snapshot tables (create-if-missing for fresh DBs) ────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_profitability_cache_meta (
+      id                              VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      status                          VARCHAR(20) NOT NULL DEFAULT 'building',
+      source_snowflake_last_altered   TIMESTAMP,
+      last_sync_started_at            TIMESTAMP,
+      last_sync_completed_at          TIMESTAMP,
+      row_count                       INTEGER,
+      error_message                   TEXT
+    );
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_profitability_snapshot (
+      id                          VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      tech_ldap                   VARCHAR(50) NOT NULL UNIQUE,
+      tech_name                   VARCHAR(255),
+      tenure_months               INTEGER,
+      scorecard_score             DECIMAL(8,3),
+      completes                   INTEGER,
+      total_sos                   INTEGER,
+      working_days                INTEGER,
+      total_revenue               DECIMAL(14,2),
+      labor_direct                DECIMAL(14,2),
+      labor_benefits              DECIMAL(14,2),
+      parts_cogs                  DECIMAL(14,2),
+      parts_shipping              DECIMAL(14,2),
+      fuel_est                    DECIMAL(14,2),
+      lookback_days               INTEGER,
+      daily_revenue               DECIMAL(12,2),
+      daily_costs                 DECIMAL(12,2),
+      daily_net_before_rental     DECIMAL(12,2),
+      daily_net_with_rental       DECIMAL(12,2),
+      daily_ppt_profit            DECIMAL(12,2),
+      recommendation              VARCHAR(50),
+      new_hire_exempt             BOOLEAN NOT NULL DEFAULT FALSE,
+      scorecard_exempt            BOOLEAN NOT NULL DEFAULT FALSE,
+      synced_at                   TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS vrm_profitability_snapshot_ldap_idx
+      ON vrm_profitability_snapshot (tech_ldap);
+  `);
+
   // ── Roster-driven snapshot: new columns added by spec items (1)+(2) ─────────
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS empl_status        VARCHAR(4);`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS last_date_worked   DATE;`);

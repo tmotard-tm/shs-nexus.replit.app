@@ -68,7 +68,7 @@ import {
   upsertSupervisorEmailOverride,
   getAllSupervisorEmailOverrides,
 } from "./storage";
-import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
+import { runProfitabilitySync } from "./profitability-sync";
 import { enqueueNotificationsForDeny } from "./notification-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
