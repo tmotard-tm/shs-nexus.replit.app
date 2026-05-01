@@ -1187,6 +1187,24 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] no-data name lookup failed:", err.message);
         }
 
+        // For the day-one live fallback path (Snowflake already used), also probe
+        // punch history to detect "New Hire — Training" techs.  For the stable
+        // snapshot path, always return "No Data" (no extra Snowflake calls at request time).
+        const trainingLdaps = new Set<string>();
+        if (usedLiveFallback && missing.length > 0) {
+          try {
+            const punchRows = await fetchTechPunchHistory(missing, 7);
+            for (const p of punchRows) {
+              const label = (p.latestRawPunchLabel ?? "").toUpperCase();
+              if (label.includes("NEW HIRE TRAINING")) {
+                trainingLdaps.add(p.ldap.toUpperCase());
+              }
+            }
+          } catch (err: any) {
+            console.error("[VRM] new-hire training probe failed:", err.message);
+          }
+        }
+
         for (const ldap of missing) {
           rows.push({
             tech_ldap: ldap,
@@ -1208,7 +1226,7 @@ export function registerVrmRoutes(): Router {
             daily_net_before_rental: 0,
             daily_net_with_rental: 0,
             daily_ppt_profit: 0,
-            recommendation: "No Data",
+            recommendation: trainingLdaps.has(ldap) ? "New Hire — Training" : "No Data",
             new_hire_exempt: false,
             scorecard_exempt: false,
           });

@@ -138,12 +138,20 @@ export async function runProfitabilitySync(): Promise<void> {
     return;
   }
 
-  // Mark as building.
+  // Capture sync start time and the previous completion timestamp so we can
+  // preserve it through building/error states — the UI freshness label must
+  // always reflect the last SUCCESSFUL snapshot, not the current sync attempt.
+  const syncStartedAt = new Date();
+  const prevMeta = await getProfitabilityCacheMeta();
+  const prevCompletedAt = prevMeta?.lastSyncCompletedAt ?? null;
+  const prevRowCount = prevMeta?.rowCount ?? null;
+
+  // Mark as building — preserve previous completion timestamp.
   await upsertProfitabilityCacheMeta({
     status: "building",
-    lastSyncStartedAt: new Date(),
-    lastSyncCompletedAt: null,
-    rowCount: null,
+    lastSyncStartedAt: syncStartedAt,
+    lastSyncCompletedAt: prevCompletedAt,
+    rowCount: prevRowCount,
     errorMessage: null,
     sourceSnowflakeLastAltered: null,
   });
@@ -153,9 +161,9 @@ export async function runProfitabilitySync(): Promise<void> {
   if (!settled) {
     await upsertProfitabilityCacheMeta({
       status: "error",
-      lastSyncStartedAt: new Date(),
-      lastSyncCompletedAt: new Date(),
-      rowCount: null,
+      lastSyncStartedAt: syncStartedAt,
+      lastSyncCompletedAt: prevCompletedAt, // preserve — no new snapshot was written
+      rowCount: prevRowCount,
       errorMessage: `Settle gate exhausted after ${SETTLE_MAX_RETRIES} retries — IHR table still rebuilding.`,
       sourceSnowflakeLastAltered: lastAltered ?? undefined,
     });
@@ -172,9 +180,9 @@ export async function runProfitabilitySync(): Promise<void> {
     console.error("[ProfitabilitySync] Snowflake fetch failed:", err.message);
     await upsertProfitabilityCacheMeta({
       status: "error",
-      lastSyncStartedAt: new Date(),
-      lastSyncCompletedAt: new Date(),
-      rowCount: null,
+      lastSyncStartedAt: syncStartedAt,
+      lastSyncCompletedAt: prevCompletedAt, // preserve — no new snapshot was written
+      rowCount: prevRowCount,
       errorMessage: `Snowflake fetch failed: ${err.message}`,
       sourceSnowflakeLastAltered: lastAltered ?? undefined,
     });
@@ -185,9 +193,9 @@ export async function runProfitabilitySync(): Promise<void> {
     console.warn("[ProfitabilitySync] Snowflake returned 0 rows — skipping snapshot write to avoid data loss.");
     await upsertProfitabilityCacheMeta({
       status: "error",
-      lastSyncStartedAt: new Date(),
-      lastSyncCompletedAt: new Date(),
-      rowCount: 0,
+      lastSyncStartedAt: syncStartedAt,
+      lastSyncCompletedAt: prevCompletedAt, // preserve — no new snapshot was written
+      rowCount: prevRowCount,
       errorMessage: "Snowflake returned 0 rows — snapshot not updated.",
       sourceSnowflakeLastAltered: lastAltered ?? undefined,
     });
@@ -228,20 +236,21 @@ export async function runProfitabilitySync(): Promise<void> {
     console.error("[ProfitabilitySync] Snapshot write failed:", err.message);
     await upsertProfitabilityCacheMeta({
       status: "error",
-      lastSyncStartedAt: new Date(),
-      lastSyncCompletedAt: new Date(),
-      rowCount: null,
+      lastSyncStartedAt: syncStartedAt,
+      lastSyncCompletedAt: prevCompletedAt, // preserve — no new snapshot was committed
+      rowCount: prevRowCount,
       errorMessage: `Snapshot write failed: ${err.message}`,
       sourceSnowflakeLastAltered: lastAltered ?? undefined,
     });
     return;
   }
 
-  // Mark as ready.
+  // Mark as ready — only here do we stamp a new completion timestamp.
+  const syncCompletedAt = new Date();
   await upsertProfitabilityCacheMeta({
     status: "ready",
-    lastSyncStartedAt: new Date(),
-    lastSyncCompletedAt: new Date(),
+    lastSyncStartedAt: syncStartedAt,
+    lastSyncCompletedAt: syncCompletedAt,
     rowCount: snapshotRows.length,
     errorMessage: null,
     sourceSnowflakeLastAltered: lastAltered ?? undefined,
