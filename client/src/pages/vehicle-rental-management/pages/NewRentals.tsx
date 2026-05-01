@@ -471,12 +471,13 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
 
 const NR_SELECT_STYLE: React.CSSProperties = {
   fontFamily: "var(--font-dm-sans, sans-serif)", fontWeight: 400, fontSize: 13,
-  color: "#1A1D27", backgroundColor: "#FAFAFA",
-  border: "1px solid #E4E7EF", borderRadius: 8,
+  color: colors.ink, backgroundColor: colors.surface,
+  border: `1px solid ${colors.rule}`, borderRadius: 8,
   padding: "6px 28px 6px 10px", height: 34, appearance: "none" as any,
   cursor: "pointer", width: "100%",
   backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238891A4' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
   backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center",
+  colorScheme: "light dark",
 };
 
 // ─── Decision detail panel ────────────────────────────────────────────────────
@@ -565,8 +566,9 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
   const rowStyle: React.CSSProperties = { padding: "14px 0", borderBottom: `1px solid ${colors.rule}` };
   const inputStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
-    backgroundColor: colors.background, border: `1px solid ${colors.rule}`,
+    backgroundColor: colors.surface, border: `1px solid ${colors.rule}`,
     borderRadius: 8, padding: "6px 10px", width: "100%", outline: "none",
+    colorScheme: "light dark",
   };
   const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
     fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
@@ -583,13 +585,13 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
   return (
     <>
       {/* Backdrop */}
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,17,23,0.18)", zIndex: 40 }} />
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,17,23,0.35)", zIndex: 40 }} />
       {/* Panel */}
       <div style={{
         position: "fixed", top: 0, right: 0, bottom: 0, width: 520,
-        backgroundColor: "#FFFFFF", borderLeft: `1px solid ${colors.rule}`,
+        backgroundColor: colors.background, borderLeft: `1px solid ${colors.rule}`,
         zIndex: 50, display: "flex", flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.07)",
+        boxShadow: "-4px 0 24px rgba(0,0,0,0.18)",
       }}>
         {/* Header */}
         <div style={{ padding: "20px 24px", borderBottom: `1px solid ${colors.rule}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
@@ -694,8 +696,8 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
                 onClick={() => setShowAddAction((v) => !v)}
                 style={{
                   fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-                  color: colors.accent, backgroundColor: "#EFF4FF",
-                  border: "1px solid #C7D7F9", borderRadius: 6, padding: "4px 10px",
+                  color: colors.accent, backgroundColor: colors.accentLight,
+                  border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "4px 10px",
                   cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
                 }}
               >
@@ -772,7 +774,7 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: entry.notes ? 6 : 0 }}>
                       <span style={{
                         fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
-                        color: colors.accent, backgroundColor: "#EFF4FF", padding: "2px 8px", borderRadius: 5,
+                        color: colors.accent, backgroundColor: colors.accentLight, padding: "2px 8px", borderRadius: 5,
                       }}>
                         {ACTION_TYPE_LABELS[entry.actionType] ?? entry.actionType}
                       </span>

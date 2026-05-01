@@ -154,7 +154,7 @@ function EpvSection({ rows }: { rows: EscalationRow[] }) {
           <div
             key={row.escalation.id}
             className="flex items-center justify-between p-4 rounded-lg"
-            style={{ border: `1px solid #FCA5A5`, backgroundColor: "#FEF2F2" }}
+            style={{ border: `1px solid ${colors.red}`, backgroundColor: colors.redLight }}
           >
             <div>
               <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{row.tech.name}</div>
@@ -168,7 +168,7 @@ function EpvSection({ rows }: { rows: EscalationRow[] }) {
                 onClick={() => pdfMutation.mutate(row.tech.id)}
                 disabled={pdfMutation.isPending}
                 className="flex items-center gap-2 px-3 py-2 rounded-lg"
-                style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13, color: colors.inkSoft, border: `1px solid ${colors.rule}`, backgroundColor: "#FFFFFF", cursor: "pointer" }}
+                style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13, color: colors.inkSoft, border: `1px solid ${colors.rule}`, backgroundColor: colors.background, cursor: "pointer" }}
               >
                 <Download className="h-4 w-4" />
                 Generate Audit PDF

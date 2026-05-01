@@ -83,6 +83,7 @@ Preferred communication style: Simple, everyday language.
 -   **Radix UI**: Accessible component primitives.
 -   **Tailwind CSS**: Utility-first CSS framework.
 -   **Lucide React**: Icon library.
+-   **VRM theming convention**: All VRM module colors must come from the `colors` palette in `client/src/pages/vehicle-rental-management/lib/constants.ts` (which maps to `--vrm-*` CSS vars in `client/src/index.css` with both `:root` and `.dark` definitions). Do not hardcode hex values for surfaces, borders, or text — they will not switch in dark mode. Layering convention: page/panel = `colors.background`, elevated controls (inputs, cards on top of panel) = `colors.surface`. Native form controls should add `colorScheme: "light dark"` so the browser picks the right widget palette. Status pastels (`accentLight`/`amberLight`/`greenLight`/`redLight`) automatically darken in dark mode.
 
 ## Development & Build Tools
 -   **Vite**: Fast development server and build tool.

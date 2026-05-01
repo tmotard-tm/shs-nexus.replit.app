@@ -529,7 +529,7 @@ function TemplateEditor({
 
   const charCount = draft.length;
   const segCount = Math.max(1, Math.ceil(charCount / 160));
-  const smsCountColor = charCount > 459 ? colors.red : charCount > 320 ? "#B45309" : colors.inkMuted;
+  const smsCountColor = charCount > 459 ? colors.red : charCount > 320 ? colors.amber : colors.inkMuted;
 
   const mut = useMutation({
     mutationFn: (body: string) =>
