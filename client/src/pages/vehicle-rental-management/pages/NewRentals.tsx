@@ -1391,25 +1391,36 @@ export default function NewRentals() {
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
-                          {row.union_exempt && (
-                            <div style={{ marginTop: 4 }}>
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  fontFamily: fonts.dmSans,
-                                  fontSize: 9,
-                                  fontWeight: 600,
-                                  color: "#6D28D9",
-                                  backgroundColor: "#EDE9FE",
-                                  padding: "1px 6px",
-                                  borderRadius: 4,
-                                  letterSpacing: "0.03em",
-                                }}
-                              >
-                                UNION
-                              </span>
-                            </div>
-                          )}
+                          {row.union_exempt && (() => {
+                            // Server (routes.ts ~1106) flags union_exempt true for either:
+                            //   • district in UNION_DISTRICTS [6141, 7983, 7323, 8309], or
+                            //   • state === "CA"
+                            // CA-state techs aren't union, but they're excluded from "Deny"
+                            // for the same reason — so reflect the actual trigger in the badge.
+                            const UNION_DISTRICTS = new Set(["6141", "7983", "7323", "8309"]);
+                            const districtNorm = (row.district ?? "").replace(/^0+/, "") || (row.district ?? "");
+                            const isUnion = !!row.district && UNION_DISTRICTS.has(districtNorm);
+                            const label = isUnion ? "UNION" : "CA — EXEMPT";
+                            return (
+                              <div style={{ marginTop: 4 }}>
+                                <span
+                                  style={{
+                                    display: "inline-block",
+                                    fontFamily: fonts.dmSans,
+                                    fontSize: 9,
+                                    fontWeight: 600,
+                                    color: "#6D28D9",
+                                    backgroundColor: "#EDE9FE",
+                                    padding: "1px 6px",
+                                    borderRadius: 4,
+                                    letterSpacing: "0.03em",
+                                  }}
+                                >
+                                  {label}
+                                </span>
+                              </div>
+                            );
+                          })()}
                           {row.new_hire_exempt && (
                             <div style={{ marginTop: 4 }}>
                               <span
