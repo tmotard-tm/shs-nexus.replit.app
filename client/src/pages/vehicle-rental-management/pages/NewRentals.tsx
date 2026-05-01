@@ -1,9 +1,10 @@
 import { useState, useRef, useCallback, useEffect, Fragment as ReactFragment } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight } from "lucide-react";
+import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight, TriangleAlert } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 
 // ─── Tech search autocomplete ─────────────────────────────────────────────────
 // Unified fuzzy search against tpms_tech_profiles — one combo-box that matches
@@ -1165,16 +1166,18 @@ export default function NewRentals() {
               </h2>
               {/* Snapshot provenance label — inline next to panel title */}
               {(() => {
-                const fmtUtc = (d: Date) =>
-                  d.toLocaleString("en-US", {
-                    timeZone: "UTC",
-                    month: "short",
-                    day: "numeric",
-                    year: "numeric",
-                    hour: "numeric",
-                    minute: "2-digit",
-                    timeZoneName: "short",
-                  });
+                // Produces exactly: "May 1, 2026 at 1:02 AM UTC"
+                const fmtUtc = (d: Date): string => {
+                  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+                  const m = months[d.getUTCMonth()];
+                  const day = d.getUTCDate();
+                  const year = d.getUTCFullYear();
+                  const h = d.getUTCHours();
+                  const min = d.getUTCMinutes().toString().padStart(2, "0");
+                  const ampm = h >= 12 ? "PM" : "AM";
+                  const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+                  return `${m} ${day}, ${year} at ${h12}:${min} ${ampm} UTC`;
+                };
 
                 if (!snapshotMeta || !snapshotMeta.syncedAt) {
                   return (
@@ -1188,20 +1191,16 @@ export default function NewRentals() {
                 const ageHours = (Date.now() - syncedDate.getTime()) / 3_600_000;
 
                 if (ageHours > 36) {
-                  // Stale: amber badge replaces the muted timestamp label.
                   return (
-                    <span style={{
-                      fontFamily: fonts.dmSans,
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: colors.amber,
-                      backgroundColor: colors.amberLight,
-                      border: `1px solid ${colors.amber}`,
-                      borderRadius: 4,
-                      padding: "2px 8px",
-                    }}>
-                      Snapshot is {Math.round(ageHours)} hours old (taken {fmtUtc(syncedDate)}) — today's evaluations may be based on out-of-date data
-                    </span>
+                    <Alert
+                      className="py-1 px-2 border-amber-400 bg-amber-50 text-amber-800 inline-flex items-center gap-1.5"
+                      style={{ fontFamily: fonts.dmSans, fontSize: 11 }}
+                    >
+                      <TriangleAlert size={13} className="text-amber-600 shrink-0" />
+                      <AlertDescription style={{ fontSize: 11 }}>
+                        Snapshot is {Math.round(ageHours)} hours old (taken {fmtUtc(syncedDate)}) — today's evaluations may be based on out-of-date data
+                      </AlertDescription>
+                    </Alert>
                   );
                 }
 
