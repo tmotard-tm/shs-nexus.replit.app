@@ -154,6 +154,54 @@ export function registerVrmRoutes(): Router {
       }
 
       const rows = await listActiveRentalsFromFleetScope();
+
+      // ── District/state enrichment (single batched lookup) ──────────────────
+      // Mirrors the same lookup pattern used by the bulk profitability check
+      // route (~line 1150): tpms_tech_profiles is the primary source, with
+      // all_techs as the fallback for LDAPs that have no TPMS profile.
+      const ldaps = Array.from(new Set(
+        rows.map((r) => (r.ldap ?? "").trim().toUpperCase()).filter(Boolean),
+      ));
+      if (ldaps.length > 0) {
+        try {
+          const ldapSql = sql.join(ldaps.map((l) => sql`${l}`), sql`, `);
+          const dsRows = await db.execute(sql`
+            SELECT UPPER(tp.enterprise_id) AS ldap,
+                   tp.district_no          AS district,
+                   at.home_state           AS state
+            FROM tpms_tech_profiles tp
+            LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
+            WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
+            UNION ALL
+            SELECT UPPER(at.tech_racfid) AS ldap,
+                   at.district_no        AS district,
+                   at.home_state         AS state
+            FROM all_techs at
+            WHERE UPPER(at.tech_racfid) IN (${ldapSql})
+              AND UPPER(at.tech_racfid) NOT IN (
+                SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+              )
+          `);
+          const dsMap = new Map<string, { district: string | null; state: string | null }>();
+          for (const r of (dsRows.rows ?? []) as any[]) {
+            if (r.ldap) dsMap.set(String(r.ldap).toUpperCase(), {
+              district: r.district ?? null,
+              state: r.state ?? null,
+            });
+          }
+          for (const row of rows) {
+            const key = (row.ldap ?? "").trim().toUpperCase();
+            const ds = key ? dsMap.get(key) : undefined;
+            if (ds) {
+              row.district = ds.district;
+              row.state = ds.state;
+            }
+          }
+        } catch (err: any) {
+          console.error("[VRM] active-rentals district/state lookup failed:", err.message);
+        }
+      }
+
       const payload = {
         rows,
         total: rows.length,

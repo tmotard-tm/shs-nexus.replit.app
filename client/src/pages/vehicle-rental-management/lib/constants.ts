@@ -84,6 +84,9 @@ export const statusConfig: Record<
   underwater: { label: "Underwater", fg: colors.red, bg: colors.redLight },
   marginal: { label: "Marginal", fg: colors.amber, bg: colors.amberLight },
   profitable: { label: "Profitable", fg: colors.green, bg: colors.greenLight },
+  // Evaluator recommendations
+  approve: { label: "Approve", fg: colors.green, bg: colors.greenLight },
+  deny: { label: "Deny", fg: colors.red, bg: colors.redLight },
 };
 
 export type GateClassification = "underwater" | "marginal" | "profitable";

@@ -124,6 +124,12 @@ export interface ActiveRentalRow {
   hasFinancialData: boolean;
   /** Where the financial fields came from. */
   financialSource: "vrm_techs" | "vrm_rental_checks" | "none";
+  /** District code (district_no) — populated by the active-rentals endpoint
+   *  via a separate joined lookup against tpms_tech_profiles + all_techs. */
+  district: string | null;
+  /** Home state (2-letter) — populated by the active-rentals endpoint via the
+   *  same district/state lookup. */
+  state: string | null;
 }
 
 type RepairTrackerFleetScopeSyncInput = {
@@ -567,6 +573,10 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       rentalCheckedAt: check?.checkedAt ?? null,
       hasFinancialData: !!(tech || check),
       financialSource: tech ? "vrm_techs" : check ? "vrm_rental_checks" : "none",
+      // District/state default to null here — populated by the active-rentals
+      // route via a single batched lookup keyed by LDAP.
+      district: null,
+      state: null,
     };
   });
 }

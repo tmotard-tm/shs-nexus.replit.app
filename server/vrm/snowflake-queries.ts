@@ -54,42 +54,76 @@ export interface ScorecardRow {
  * count and disclose them; they are excluded from the local vrm_techs upsert
  * inside sync/roster.
  */
+// On the Nexus enrichment view (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS),
+// the truck identifier is stored as TRUCK_NUMBER (the FLEET schema's standard
+// convention used everywhere else: DRIVELINE_ALL_TECHS, SEPARATION_FLEET_DETAILS,
+// HOLMAN_ETL_PO_DETAILS, SAMSARA_CRITICALITY_SCORE).
+// On VW_RENTAL_LIST, the same value is exposed as TRUCK_LISTED_FOR_RENTAL.
+// We LPAD both sides to 6 chars to defuse padded/unpadded join mismatches.
+async function logNexusViewColumnsOnFailure(svc: any, err: any): Promise<void> {
+  // Self-diagnostic: if the column guess is wrong, surface the real schema
+  // in the logs so the next iteration is one-shot.
+  const msg = String(err?.message ?? err ?? "");
+  if (!/invalid identifier/i.test(msg)) return;
+  try {
+    const cols = await svc.executeQuery(`
+      SELECT COLUMN_NAME, DATA_TYPE
+      FROM PARTS_SUPPLYCHAIN.INFORMATION_SCHEMA.COLUMNS
+      WHERE TABLE_SCHEMA = 'FLEET'
+        AND TABLE_NAME   = 'VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS'
+      ORDER BY ORDINAL_POSITION
+    `) as Array<{ COLUMN_NAME: string; DATA_TYPE: string }>;
+    console.error(
+      "[VRM/Snowflake] VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS columns:",
+      cols.map((c) => `${c.COLUMN_NAME}(${c.DATA_TYPE})`).join(", "),
+    );
+  } catch (diagErr: any) {
+    console.error("[VRM/Snowflake] Failed to introspect Nexus view columns:", diagErr?.message);
+  }
+}
+
 export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
   if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
   const svc = getSnowflakeService();
-  const rows = await svc.executeQuery(`
-    WITH nexus_deduped AS (
+  try {
+    const rows = await svc.executeQuery(`
+      WITH nexus_deduped AS (
+        SELECT
+          LPAD(TRIM(n.TRUCK_NUMBER), 6, '0') AS TRUCK_KEY,
+          n.ENTERPRISE_ID,
+          n.RENTER_NAME,
+          n.RENTAL_START_DATE,
+          n.DAYS_OPEN,
+          n.PRIMARY_ZIP,
+          n.TRUCK_STATUS,
+          n.SOURCE
+        FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
+        WHERE n.TRUCK_NUMBER IS NOT NULL
+        QUALIFY ROW_NUMBER() OVER (
+          PARTITION BY LPAD(TRIM(n.TRUCK_NUMBER), 6, '0')
+          ORDER BY
+            CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
+            n.DAYS_OPEN DESC NULLS LAST
+        ) = 1
+      )
       SELECT
-        n.TRUCK_LISTED_FOR_RENTAL,
-        n.ENTERPRISE_ID,
-        n.RENTER_NAME,
-        n.RENTAL_START_DATE,
-        n.DAYS_OPEN,
-        n.PRIMARY_ZIP,
-        n.TRUCK_STATUS,
-        n.SOURCE
-      FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
-      QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY n.TRUCK_LISTED_FOR_RENTAL
-        ORDER BY
-          CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
-          n.DAYS_OPEN DESC NULLS LAST
-      ) = 1
-    )
-    SELECT
-      nd.ENTERPRISE_ID,
-      nd.RENTER_NAME,
-      nd.RENTAL_START_DATE,
-      nd.DAYS_OPEN,
-      nd.PRIMARY_ZIP,
-      nd.TRUCK_STATUS,
-      nd.SOURCE
-    FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST r
-    LEFT JOIN nexus_deduped nd
-      ON nd.TRUCK_LISTED_FOR_RENTAL = r.TRUCK_LISTED_FOR_RENTAL
-    ORDER BY nd.DAYS_OPEN DESC NULLS LAST
-  `) as RentalRosterRow[];
-  return rows;
+        nd.ENTERPRISE_ID,
+        nd.RENTER_NAME,
+        nd.RENTAL_START_DATE,
+        nd.DAYS_OPEN,
+        nd.PRIMARY_ZIP,
+        nd.TRUCK_STATUS,
+        nd.SOURCE
+      FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST r
+      LEFT JOIN nexus_deduped nd
+        ON nd.TRUCK_KEY = LPAD(TRIM(r.TRUCK_LISTED_FOR_RENTAL), 6, '0')
+      ORDER BY nd.DAYS_OPEN DESC NULLS LAST
+    `) as RentalRosterRow[];
+    return rows;
+  } catch (err: any) {
+    await logNexusViewColumnsOnFailure(svc, err);
+    throw err;
+  }
 }
 
 /**
@@ -103,16 +137,17 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
   const svc = getSnowflakeService();
 
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
-  const rows = await svc.executeQuery(`
+  const queryText = `
     WITH nexus_deduped AS (
       SELECT
-        n.TRUCK_LISTED_FOR_RENTAL,
+        LPAD(TRIM(n.TRUCK_NUMBER), 6, '0') AS TRUCK_KEY,
         n.ENTERPRISE_ID,
         n.DAYS_OPEN,
         n.RENTAL_START_DATE
       FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
+      WHERE n.TRUCK_NUMBER IS NOT NULL
       QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY n.TRUCK_LISTED_FOR_RENTAL
+        PARTITION BY LPAD(TRIM(n.TRUCK_NUMBER), 6, '0')
         ORDER BY
           CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
           n.DAYS_OPEN DESC NULLS LAST
@@ -126,7 +161,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
         nd.RENTAL_START_DATE                                                 AS start_date
       FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST r
       INNER JOIN nexus_deduped nd
-        ON nd.TRUCK_LISTED_FOR_RENTAL = r.TRUCK_LISTED_FOR_RENTAL
+        ON nd.TRUCK_KEY = LPAD(TRIM(r.TRUCK_LISTED_FOR_RENTAL), 6, '0')
       WHERE nd.ENTERPRISE_ID IS NOT NULL
         AND nd.ENTERPRISE_ID != ''
         AND nd.ENTERPRISE_ID IN (${ldapList})
@@ -200,9 +235,14 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
     FROM rental_techs rt
     LEFT JOIN financials fin ON rt.tech_ldap = fin.tech_ldap
     ORDER BY 13 ASC NULLS LAST
-  `) as AdjustedNetRow[];
-
-  return rows;
+  `;
+  try {
+    const rows = await svc.executeQuery(queryText) as AdjustedNetRow[];
+    return rows;
+  } catch (err: any) {
+    await logNexusViewColumnsOnFailure(svc, err);
+    throw err;
+  }
 }
 
 /**

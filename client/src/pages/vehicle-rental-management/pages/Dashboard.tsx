@@ -42,6 +42,9 @@ interface ActiveRentalRow {
   rentalCheckedAt?: string | null;
   hasFinancialData?: boolean;
   financialSource?: "vrm_techs" | "vrm_rental_checks" | "none";
+  // District/state populated by /api/vrm/active-rentals
+  district?: string | null;
+  state?: string | null;
 }
 
 interface ActiveRentalsResponse {
@@ -743,14 +746,19 @@ export default function Dashboard() {
           <thead>
             <tr style={{ backgroundColor: colors.surface }}>
               {([
-                { label: "Tech",         key: "tech"         as SortKey },
-                { label: "Market",       key: "market"       as SortKey },
-                { label: "Status",       key: "status"       as SortKey },
-                { label: "Tenure",       key: "tenure"       as SortKey },
-                { label: "Adjusted Net", key: "adjustedNet"  as SortKey },
-                { label: "DCA Review",   key: "dcaReview"    as SortKey },
-                { label: "Gate Class",   key: "gateClass"    as SortKey },
-                { label: "",             key: null },
+                { label: "Tech",           key: "tech"         as SortKey },
+                { label: "Market",         key: "market"       as SortKey },
+                { label: "District / State", key: null },
+                { label: "Status",         key: "status"       as SortKey },
+                { label: "Tenure",         key: "tenure"       as SortKey },
+                { label: "Adjusted Net",   key: "adjustedNet"  as SortKey },
+                { label: "Daily Net (w/ rental)", key: null },
+                { label: "Scorecard",      key: null },
+                { label: "Recommendation", key: null },
+                { label: "Last Evaluated", key: null },
+                { label: "DCA Review",     key: "dcaReview"    as SortKey },
+                { label: "Gate Class",     key: "gateClass"    as SortKey },
+                { label: "",               key: null },
               ]).map((col, i) => {
                 const isActive = col.key !== null && sortKey === col.key && sortDir !== null;
                 const Icon = !col.key
@@ -831,7 +839,7 @@ export default function Dashboard() {
             {techsLoading ? (
               Array.from({ length: 8 }).map((_, i) => (
                 <tr key={i}>
-                  {Array.from({ length: 8 }).map((_, j) => (
+                  {Array.from({ length: 13 }).map((_, j) => (
                     <td key={j} style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                       <div className="animate-pulse rounded" style={{ height: 14, backgroundColor: colors.surface, width: j === 0 ? 140 : 80 }} />
                     </td>
@@ -841,7 +849,7 @@ export default function Dashboard() {
             ) : rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={13}
                   style={{
                     fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 14,
                     color: colors.inkMuted, padding: "48px 16px", textAlign: "center",
@@ -907,6 +915,11 @@ export default function Dashboard() {
                     <td style={{ fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13, color: colors.inkSoft, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
                       {tech.market ?? "—"}
                     </td>
+                    <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
+                      {tech.district || tech.state
+                        ? `${tech.district ?? "—"}${tech.state ? ` · ${tech.state}` : ""}`
+                        : <span style={{ color: colors.inkMuted }}>—</span>}
+                    </td>
                     <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                       <StatusPill status={tech.currentStatus} />
                     </td>
@@ -917,6 +930,37 @@ export default function Dashboard() {
                       {net !== null
                         ? `${net < 0 ? "−" : "+"}$${Math.abs(net).toLocaleString()}`
                         : <span style={{ color: colors.inkMuted }}>—</span>}
+                    </td>
+                    {/* Evaluator output: Daily Net (with $78/day rental applied) */}
+                    <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, fontWeight: 500, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap",
+                      color: tech.dailyNetWithRental == null ? colors.inkMuted
+                           : tech.dailyNetWithRental < 0 ? colors.red
+                           : colors.green }}>
+                      {tech.dailyNetWithRental != null
+                        ? `${tech.dailyNetWithRental < 0 ? "−" : "+"}$${Math.abs(tech.dailyNetWithRental).toLocaleString(undefined, { maximumFractionDigits: 2 })}`
+                        : "—"}
+                    </td>
+                    {/* Evaluator output: Scorecard score (Gate-2 weighted) */}
+                    <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
+                      {tech.scorecardScore != null
+                        ? tech.scorecardScore.toFixed(2)
+                        : <span style={{ color: colors.inkMuted }}>—</span>}
+                    </td>
+                    {/* Evaluator output: Recommendation pill (Approve / Deny) */}
+                    <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
+                      {tech.recommendation
+                        ? <StatusPill status={
+                            /approve/i.test(tech.recommendation) ? "approve"
+                            : /deny|decline/i.test(tech.recommendation) ? "deny"
+                            : "pending"
+                          } label={tech.recommendation} />
+                        : <span style={{ color: colors.inkMuted, fontSize: 13, fontFamily: fonts.dmSans }}>—</span>}
+                    </td>
+                    {/* Evaluator output: Last evaluated date */}
+                    <td style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
+                      {tech.rentalCheckedAt
+                        ? new Date(tech.rentalCheckedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+                        : "—"}
                     </td>
                     <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                       <StatusPill status={tech.dcaReviewOutcome ?? "pending"} />
