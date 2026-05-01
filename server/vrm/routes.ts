@@ -64,7 +64,7 @@ import {
   getProfitabilityCacheMeta,
   getProfitabilitySnapshotRows,
 } from "./storage";
-import { runProfitabilitySync } from "./profitability-sync";
+import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
@@ -1112,16 +1112,25 @@ export function registerVrmRoutes(): Router {
         // to detect when the initial sync hasn't run.
       } else {
         // ── Day-one bootstrap: no snapshot yet ───────────────────────────────
-        // First, check whether a sync is currently building (status='building' was checked
-        // above); if not, we fall back to a live Snowflake call with a warning.
+        // Run a single-pass settle gate before making any live Snowflake read.
+        // If the IHR table is still rebuilding (or INFORMATION_SCHEMA unreadable),
+        // return HTTP 202 so the UI retries instead of reading mid-rebuild data.
         if (!isSnowflakeConfigured()) {
           return res.status(202).json({
             status: "preparing",
             message: "Profitability snapshot not yet available and Snowflake is not configured.",
-            retryAfterSeconds: 60,
+            retryAfterSeconds: 300,
           });
         }
-        console.warn("[VRM] profitability/check: no snapshot — falling back to live Snowflake call (day-one bootstrap).");
+        const gateResult = await checkSettleGateOnce();
+        if (!gateResult.settled) {
+          return res.status(202).json({
+            status: "preparing",
+            message: "The IHR data source is still rebuilding. Please try again shortly.",
+            retryAfterSeconds: gateResult.retryAfterSeconds,
+          });
+        }
+        console.warn("[VRM] profitability/check: no snapshot, settle gate cleared — falling back to live Snowflake call (day-one bootstrap).");
         rows = await fetchProfitabilityCheck(cleaned);
       }
 
@@ -2224,6 +2233,23 @@ export function registerVrmRoutes(): Router {
 
   scheduleProfitabilitySync();
   console.log("[VRM Scheduler] Profitability snapshot scheduler initialised (01:00 UTC daily)");
+
+  // Bootstrap: if no snapshot has ever been taken (or last sync errored), trigger one now
+  // so the eval panel works on day one without waiting for the 01:00 UTC window.
+  // Runs in the background — does not block route registration.
+  (async () => {
+    try {
+      const existingMeta = await getProfitabilityCacheMeta();
+      if (!existingMeta || existingMeta.status === "error") {
+        console.log("[VRM Scheduler] No valid profitability snapshot found — running bootstrap sync in background.");
+        await runProfitabilitySync();
+      } else {
+        console.log(`[VRM Scheduler] Profitability snapshot exists (status=${existingMeta.status}, rowCount=${existingMeta.rowCount}) — skipping bootstrap sync.`);
+      }
+    } catch (e: any) {
+      console.error("[VRM Scheduler] Profitability bootstrap sync failed:", e.message);
+    }
+  })();
 
   // ─── Tech-Punch sync scheduler (every 15 min, active sections only) ─────────
   const PUNCH_SYNC_INTERVAL_MS = 15 * 60 * 1000;

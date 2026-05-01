@@ -1164,20 +1164,35 @@ export default function NewRentals() {
               {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · ${rentalPerDay}/day rental
             </span>
           </div>
-          {/* Snapshot timestamp label — always shown when snapshotMeta is present */}
-          {snapshotMeta?.syncedAt && (
-            <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 8, flexWrap: "wrap" }}>
-              <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-                Evaluated against snapshot taken{" "}
-                {new Date(snapshotMeta.syncedAt).toLocaleString("en-US", {
-                  month: "short", day: "numeric", year: "numeric",
-                  hour: "numeric", minute: "2-digit", timeZoneName: "short",
-                })}
-              </span>
-              {/* Freshness warning: show amber alert when snapshot is older than 36 hours */}
-              {(() => {
-                const ageHours = (Date.now() - new Date(snapshotMeta.syncedAt).getTime()) / 3_600_000;
-                if (ageHours < 36) return null;
+          {/* Snapshot provenance label — always shown below the stats row */}
+          <div style={{ marginBottom: 8 }}>
+            {(() => {
+              // Format a Date as "MMM d, yyyy at h:mm a UTC"
+              const fmtUtc = (d: Date) =>
+                d.toLocaleString("en-US", {
+                  timeZone: "UTC",
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                  hour: "numeric",
+                  minute: "2-digit",
+                  timeZoneName: "short",
+                });
+
+              if (!snapshotMeta || !snapshotMeta.syncedAt) {
+                // Day-one live fallback — no snapshot exists yet.
+                return (
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                    Live Snowflake data (snapshot unavailable)
+                  </span>
+                );
+              }
+
+              const syncedDate = new Date(snapshotMeta.syncedAt);
+              const ageHours = (Date.now() - syncedDate.getTime()) / 3_600_000;
+
+              if (ageHours >= 36) {
+                // Stale snapshot — amber warning replaces the muted timestamp label.
                 return (
                   <span style={{
                     fontFamily: fonts.dmSans,
@@ -1188,13 +1203,21 @@ export default function NewRentals() {
                     border: `1px solid ${colors.amber}`,
                     borderRadius: 4,
                     padding: "2px 8px",
+                    display: "inline-block",
                   }}>
-                    Snapshot is {Math.round(ageHours)} hours old — values may not reflect latest financials
+                    Snapshot is {Math.round(ageHours)} hours old (taken {fmtUtc(syncedDate)}) — values may not reflect latest financials
                   </span>
                 );
-              })()}
-            </div>
-          )}
+              }
+
+              // Fresh snapshot — show the muted label only.
+              return (
+                <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                  Evaluated against snapshot taken {fmtUtc(syncedDate)}
+                </span>
+              );
+            })()}
+          </div>
 
           <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>

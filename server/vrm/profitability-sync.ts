@@ -59,17 +59,24 @@ function sleep(ms: number): Promise<void> {
  * Settle gate: waits until IHR_UNIT_ECONOMICS has not been altered in the last
  * SETTLE_THRESHOLD_SECONDS seconds, or until SETTLE_MAX_RETRIES is exhausted.
  *
- * Returns { settled: true, lastAltered } on success, or
- *         { settled: false, lastAltered: null } if the gate never cleared.
+ * Strict mode: a null LAST_ALTERED (INFORMATION_SCHEMA unreadable or row missing)
+ * is treated as "table not yet settled" and triggers a retry — never a bypass.
+ * After SETTLE_MAX_RETRIES exhausted, returns { settled: false, lastAltered: null }.
  */
 async function waitForSettle(): Promise<{ settled: boolean; lastAltered: Date | null }> {
+  let lastKnownAltered: Date | null = null;
   for (let attempt = 0; attempt < SETTLE_MAX_RETRIES; attempt++) {
     const lastAltered = await fetchIhrLastAltered();
     if (!lastAltered) {
-      // If we can't read INFORMATION_SCHEMA at all, proceed optimistically.
-      console.warn("[ProfitabilitySync] Settle gate: INFORMATION_SCHEMA query returned null — proceeding optimistically.");
-      return { settled: true, lastAltered: null };
+      // Null = INFORMATION_SCHEMA unreadable or row missing. Treat as not yet settled.
+      console.warn(
+        `[ProfitabilitySync] Settle gate attempt ${attempt + 1}/${SETTLE_MAX_RETRIES}: ` +
+        `INFORMATION_SCHEMA returned null — treating as not yet settled, will retry.`
+      );
+      await sleep(SETTLE_RETRY_INTERVAL_MS);
+      continue;
     }
+    lastKnownAltered = lastAltered;
     const ageSeconds = (Date.now() - lastAltered.getTime()) / 1000;
     console.log(
       `[ProfitabilitySync] Settle gate attempt ${attempt + 1}/${SETTLE_MAX_RETRIES}: ` +
@@ -78,12 +85,41 @@ async function waitForSettle(): Promise<{ settled: boolean; lastAltered: Date | 
     if (ageSeconds >= SETTLE_THRESHOLD_SECONDS) {
       return { settled: true, lastAltered };
     }
-    const waitSeconds = Math.round((SETTLE_RETRY_INTERVAL_MS - (ageSeconds * 1000)) / 1000);
+    const waitSeconds = Math.ceil(SETTLE_RETRY_INTERVAL_MS / 1000);
     console.log(`[ProfitabilitySync] IHR table still rebuilding — waiting ${waitSeconds}s before retry.`);
     await sleep(SETTLE_RETRY_INTERVAL_MS);
   }
   console.error(`[ProfitabilitySync] Settle gate exhausted after ${SETTLE_MAX_RETRIES} retries — aborting sync.`);
-  return { settled: false, lastAltered: null };
+  return { settled: false, lastAltered: lastKnownAltered };
+}
+
+/**
+ * Single-pass settle gate check for the day-one route fallback.
+ * Does NOT retry — returns immediately so the HTTP request is not blocked.
+ *
+ * Returns { settled: true } if the IHR table is ready to read,
+ * or { settled: false, retryAfterSeconds } if the table is still rebuilding or
+ * INFORMATION_SCHEMA cannot be read.
+ */
+export async function checkSettleGateOnce(): Promise<
+  { settled: true; lastAltered: Date | null } | { settled: false; retryAfterSeconds: number }
+> {
+  const lastAltered = await fetchIhrLastAltered();
+  if (!lastAltered) {
+    // INFORMATION_SCHEMA unreadable — conservatively treat as not settled.
+    console.warn("[ProfitabilitySync] checkSettleGateOnce: INFORMATION_SCHEMA returned null — returning not settled.");
+    return { settled: false, retryAfterSeconds: SETTLE_RETRY_INTERVAL_MS / 1000 };
+  }
+  const ageSeconds = (Date.now() - lastAltered.getTime()) / 1000;
+  if (ageSeconds < SETTLE_THRESHOLD_SECONDS) {
+    const retryAfterSeconds = Math.ceil(SETTLE_THRESHOLD_SECONDS - ageSeconds + 30);
+    console.log(
+      `[ProfitabilitySync] checkSettleGateOnce: LAST_ALTERED=${lastAltered.toISOString()}, ` +
+      `age=${Math.round(ageSeconds)}s — not yet settled, retryAfter=${retryAfterSeconds}s.`
+    );
+    return { settled: false, retryAfterSeconds };
+  }
+  return { settled: true, lastAltered };
 }
 
 /**
