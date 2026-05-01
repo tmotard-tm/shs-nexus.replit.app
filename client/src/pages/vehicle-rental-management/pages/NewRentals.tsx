@@ -1155,68 +1155,65 @@ export default function NewRentals() {
       {/* ── Results table ─────────────────────────────────────────────────────── */}
       {evaluatedRows.length > 0 && (
         <div style={{ marginBottom: 40 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
-              Evaluation Results
-            </h2>
+          {/* Panel title row with inline snapshot provenance label */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
+                Evaluation Results
+              </h2>
+              {/* Snapshot provenance label — inline next to panel title */}
+              {(() => {
+                const fmtUtc = (d: Date) =>
+                  d.toLocaleString("en-US", {
+                    timeZone: "UTC",
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "numeric",
+                    minute: "2-digit",
+                    timeZoneName: "short",
+                  });
+
+                if (!snapshotMeta || !snapshotMeta.syncedAt) {
+                  return (
+                    <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                      Live Snowflake data (snapshot unavailable)
+                    </span>
+                  );
+                }
+
+                const syncedDate = new Date(snapshotMeta.syncedAt);
+                const ageHours = (Date.now() - syncedDate.getTime()) / 3_600_000;
+
+                if (ageHours > 36) {
+                  // Stale: amber badge replaces the muted timestamp label.
+                  return (
+                    <span style={{
+                      fontFamily: fonts.dmSans,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: colors.amber,
+                      backgroundColor: colors.amberLight,
+                      border: `1px solid ${colors.amber}`,
+                      borderRadius: 4,
+                      padding: "2px 8px",
+                    }}>
+                      Snapshot is {Math.round(ageHours)} hours old (taken {fmtUtc(syncedDate)}) — today's evaluations may be based on out-of-date data
+                    </span>
+                  );
+                }
+
+                return (
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+                    Evaluated against snapshot taken {fmtUtc(syncedDate)}
+                  </span>
+                );
+              })()}
+            </div>
             <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
               {evaluatedRows.length} tech{evaluatedRows.length !== 1 ? "s" : ""} evaluated · 90-day lookback ·{" "}
               {Math.round(evaluatedRows.filter(r => r.working_days > 0).reduce((s, r) => s + r.working_days, 0) / Math.max(evaluatedRows.filter(r => r.working_days > 0).length, 1))} working days avg · ${rentalPerDay}/day rental
             </span>
-          </div>
-          {/* Snapshot provenance label — always shown below the stats row */}
-          <div style={{ marginBottom: 8 }}>
-            {(() => {
-              // Format a Date as "MMM d, yyyy at h:mm a UTC"
-              const fmtUtc = (d: Date) =>
-                d.toLocaleString("en-US", {
-                  timeZone: "UTC",
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
-                  timeZoneName: "short",
-                });
-
-              if (!snapshotMeta || !snapshotMeta.syncedAt) {
-                // Day-one live fallback — no snapshot exists yet.
-                return (
-                  <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-                    Live Snowflake data (snapshot unavailable)
-                  </span>
-                );
-              }
-
-              const syncedDate = new Date(snapshotMeta.syncedAt);
-              const ageHours = (Date.now() - syncedDate.getTime()) / 3_600_000;
-
-              if (ageHours >= 36) {
-                // Stale snapshot — amber warning replaces the muted timestamp label.
-                return (
-                  <span style={{
-                    fontFamily: fonts.dmSans,
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: colors.amber,
-                    backgroundColor: colors.amberLight,
-                    border: `1px solid ${colors.amber}`,
-                    borderRadius: 4,
-                    padding: "2px 8px",
-                    display: "inline-block",
-                  }}>
-                    Snapshot is {Math.round(ageHours)} hours old (taken {fmtUtc(syncedDate)}) — values may not reflect latest financials
-                  </span>
-                );
-              }
-
-              // Fresh snapshot — show the muted label only.
-              return (
-                <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
-                  Evaluated against snapshot taken {fmtUtc(syncedDate)}
-                </span>
-              );
-            })()}
           </div>
 
           <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
@@ -1469,10 +1466,10 @@ export default function NewRentals() {
         >
           <Loader2 size={32} className="animate-spin" style={{ color: colors.amber, marginBottom: 12 }} />
           <p style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 6px" }}>
-            Snapshot is being built
+            Profitability snapshot is being prepared
           </p>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
-            The daily profitability snapshot is currently being synced from Snowflake.
+            The daily profitability snapshot is currently being built from Snowflake.
             Please try again in {Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60)} minute{Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60) !== 1 ? "s" : ""}.
           </p>
         </div>

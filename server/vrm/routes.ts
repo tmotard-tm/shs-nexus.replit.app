@@ -1057,26 +1057,17 @@ export function registerVrmRoutes(): Router {
       // ── Snapshot path ────────────────────────────────────────────────────────
       const meta = await getProfitabilityCacheMeta();
 
-      // If a sync is in progress (status='building') or errored with no rows,
-      // tell the UI to retry.
-      if (meta && meta.status === "building") {
-        const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
-        const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
-        const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
-        return res.status(202).json({
-          status: "preparing",
-          message: "The profitability snapshot is being built. Please try again shortly.",
-          retryAfterSeconds,
-        });
-      }
-
-      const snapshotRows = await getProfitabilitySnapshotRows(cleaned);
-      const snapshotHasData = snapshotRows.length > 0 || (meta?.status === "ready" && (meta.rowCount ?? 0) > 0);
+      // The global snapshot is considered populated if at least one row has ever been written.
+      // Building/error status does NOT prevent serving the existing stable data.
+      const snapshotIsGloballyPopulated = !!(meta && (meta.rowCount ?? 0) > 0);
 
       let rows: any[];
 
-      if (snapshotHasData || (meta?.status === "ready")) {
-        // ── Serve from snapshot ───────────────────────────────────────────────
+      if (snapshotIsGloballyPopulated) {
+        // ── Always serve from snapshot ────────────────────────────────────────
+        // Even if status='building' or 'error', the last stable snapshot is served.
+        // This is the core stability guarantee — no Snowflake reads at request time.
+        const snapshotRows = await getProfitabilitySnapshotRows(cleaned);
         const snapshotMap = new Map(snapshotRows.map((r) => [r.techLdap.toUpperCase(), r]));
 
         rows = cleaned.map((ldap) => {
@@ -1107,14 +1098,21 @@ export function registerVrmRoutes(): Router {
             scorecard_exempt: s.scorecardExempt ?? false,
           };
         }).filter(Boolean);
-
-        // Note if no snapshot exists yet (status=ready but row count is 0 for these LDAPs)
-        // to detect when the initial sync hasn't run.
       } else {
-        // ── Day-one bootstrap: no snapshot yet ───────────────────────────────
-        // Run a single-pass settle gate before making any live Snowflake read.
-        // If the IHR table is still rebuilding (or INFORMATION_SCHEMA unreadable),
-        // return HTTP 202 so the UI retries instead of reading mid-rebuild data.
+        // ── Day-one bootstrap: global snapshot table is empty ─────────────────
+        // Only reached when no snapshot has ever been successfully written.
+        // If a sync is currently building, tell the UI to retry rather than
+        // making a live Snowflake read against a potentially rebuilding table.
+        if (meta && meta.status === "building") {
+          const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
+          const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
+          const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
+          return res.status(202).json({
+            status: "preparing",
+            message: "The profitability snapshot is currently being built. Please try again shortly.",
+            retryAfterSeconds,
+          });
+        }
         if (!isSnowflakeConfigured()) {
           return res.status(202).json({
             status: "preparing",
@@ -1122,15 +1120,16 @@ export function registerVrmRoutes(): Router {
             retryAfterSeconds: 300,
           });
         }
+        // Run a single-pass settle gate to ensure IHR is not mid-rebuild.
         const gateResult = await checkSettleGateOnce();
         if (!gateResult.settled) {
           return res.status(202).json({
             status: "preparing",
-            message: "The IHR data source is still rebuilding. Please try again shortly.",
+            message: "The profitability data source is still rebuilding. Please try again shortly.",
             retryAfterSeconds: gateResult.retryAfterSeconds,
           });
         }
-        console.warn("[VRM] profitability/check: no snapshot, settle gate cleared — falling back to live Snowflake call (day-one bootstrap).");
+        console.warn("[VRM] profitability/check: no snapshot (day-one), settle gate cleared — using live Snowflake call.");
         rows = await fetchProfitabilityCheck(cleaned);
       }
 
@@ -1184,21 +1183,7 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] no-data name lookup failed:", err.message);
         }
 
-        const trainingLdaps = new Set<string>();
-        try {
-          const punchRows = await fetchTechPunchHistory(missing, 7);
-          for (const p of punchRows) {
-            const label = (p.latestRawPunchLabel ?? "").toUpperCase();
-            if (label.includes("NEW HIRE TRAINING")) {
-              trainingLdaps.add(p.ldap.toUpperCase());
-            }
-          }
-        } catch (err: any) {
-          console.error("[VRM] new-hire training probe failed:", err.message);
-        }
-
         for (const ldap of missing) {
-          const isTrainee = trainingLdaps.has(ldap);
           rows.push({
             tech_ldap: ldap,
             tech_name: nameLookup.get(ldap) ?? null,
@@ -1219,7 +1204,7 @@ export function registerVrmRoutes(): Router {
             daily_net_before_rental: 0,
             daily_net_with_rental: 0,
             daily_ppt_profit: 0,
-            recommendation: isTrainee ? "New Hire — Training" : "No Data",
+            recommendation: "No Data",
             new_hire_exempt: false,
             scorecard_exempt: false,
           });
