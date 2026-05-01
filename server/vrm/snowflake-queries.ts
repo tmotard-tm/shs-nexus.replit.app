@@ -347,8 +347,15 @@ export interface ProfitabilityRow {
   expected_return_dt?: string | null;     // YYYY-MM-DD
   supervisor_name?: string | null;
   supervisor_ldap?: string | null;
-  supervisor_phone?: string | null;       // COMTTU MBL_PH_NO (TPMS source-of-truth)
-  supervisor_email_tpms?: string | null;  // COMTTU EMAIL_ADDR (override applied during write)
+  // Effective values (TPMS_EXTRACT primary → COMTTU fallback). Used by notification
+  // dispatch to actually send SMS/email. Override is applied at snapshot write time.
+  supervisor_phone?: string | null;
+  supervisor_email_tpms?: string | null;
+  // Raw TPMS_EXTRACT-only values (no COMTTU fallback). Used by Settings to detect
+  // "no phone in TPMS_EXTRACT" gaps without false positives from COMTTU coverage.
+  // Only emitted by the roster-joined fetchAllProfitabilityRows path.
+  supervisor_tpms_phone_raw?: string | null;
+  supervisor_tpms_email_raw?: string | null;
 }
 
 /**
@@ -556,7 +563,8 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
         AND TRIM(ENTERPRISE_ID) <> ''
     ),
     -- COMTTU dedup: one row per LDAP_ID, preferring most recent UPD_TS, then rows
-    -- that actually have a phone/email populated. Used for both tech and supervisor.
+    -- that actually have a phone/email populated. Used as a FALLBACK source when
+    -- TPMS_EXTRACT has no row for a given LDAP.
     comttu_dedup AS (
       SELECT *
       FROM (
@@ -573,6 +581,31 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
           ) AS rn
         FROM PRD_TPMS.HSTECH.COMTTU_TECH_UN
         WHERE LDAP_ID IS NOT NULL AND TRIM(LDAP_ID) <> ''
+      )
+      WHERE rn = 1
+    ),
+    -- TPMS_EXTRACT dedup: one row per ENTERPRISE_ID (= LDAP). Prefer rows that
+    -- actually have a phone (primary surfacing signal), then a populated email,
+    -- then the most recent FILE_DATE. This guarantees we surface "no phone in
+    -- TPMS" only when NO row for that LDAP has a phone — never because a stale
+    -- empty row was picked over a complete older one. PRIMARY supervisor source.
+    tpms_extract_dedup AS (
+      SELECT *
+      FROM (
+        SELECT
+          UPPER(TRIM(ENTERPRISE_ID)) AS ENTERPRISE_ID_NORM,
+          MOBILEPHONENUMBER,
+          EMAIL_ADDRESS,
+          FULL_NAME,
+          ROW_NUMBER() OVER (
+            PARTITION BY UPPER(TRIM(ENTERPRISE_ID))
+            ORDER BY CASE WHEN MOBILEPHONENUMBER IS NOT NULL AND TRIM(MOBILEPHONENUMBER) <> '' THEN 0 ELSE 1 END,
+                     CASE WHEN EMAIL_ADDRESS IS NOT NULL AND TRIM(EMAIL_ADDRESS) <> '' THEN 0 ELSE 1 END,
+                     FILE_DATE DESC NULLS LAST,
+                     ENTERPRISE_ID
+          ) AS rn
+        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+        WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
       )
       WHERE rn = 1
     ),
@@ -697,14 +730,22 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       r.EMPL_STATUS                                                      AS "empl_status",
       TO_CHAR(r.LAST_DATE_WORKED,   'YYYY-MM-DD')                       AS "last_date_worked",
       TO_CHAR(r.EXPECTED_RETURN_DT, 'YYYY-MM-DD')                       AS "expected_return_dt",
-      r.SUPERVISOR_NAME                                                  AS "supervisor_name",
+      COALESCE(r.SUPERVISOR_NAME, supv_tpms.FULL_NAME)                   AS "supervisor_name",
       r.SUPERVISOR_LDAP                                                  AS "supervisor_ldap",
-      supv.MBL_PH_NO                                                     AS "supervisor_phone",
-      supv.EMAIL_ADDR                                                    AS "supervisor_email_tpms"
+      -- Effective phone/email used by notification dispatch: TPMS_EXTRACT primary,
+      -- COMTTU fallback. supervisor_phone = MOBILEPHONENUMBER (TPMS) → MBL_PH_NO.
+      COALESCE(supv_tpms.MOBILEPHONENUMBER, supv_comttu.MBL_PH_NO)       AS "supervisor_phone",
+      COALESCE(supv_tpms.EMAIL_ADDRESS,     supv_comttu.EMAIL_ADDR)      AS "supervisor_email_tpms",
+      -- Raw TPMS_EXTRACT-only values (no fallback). Used by Settings to detect
+      -- "no phone in TPMS_EXTRACT" without contamination from COMTTU. NULL means
+      -- TPMS_EXTRACT genuinely has no phone/email for this supervisor's LDAP.
+      supv_tpms.MOBILEPHONENUMBER                                        AS "supervisor_tpms_phone_raw",
+      supv_tpms.EMAIL_ADDRESS                                            AS "supervisor_tpms_email_raw"
     FROM roster r
     LEFT JOIN financials fin ON fin.TECH_LDAP = r.LDAP_ID
     LEFT JOIN scored     sc  ON sc.LDAP_ID    = r.LDAP_ID
-    LEFT JOIN comttu_dedup supv ON supv.LDAP_ID_NORM = r.SUPERVISOR_LDAP
+    LEFT JOIN tpms_extract_dedup supv_tpms   ON supv_tpms.ENTERPRISE_ID_NORM = r.SUPERVISOR_LDAP
+    LEFT JOIN comttu_dedup       supv_comttu ON supv_comttu.LDAP_ID_NORM    = r.SUPERVISOR_LDAP
     ORDER BY "daily_net_with_rental" ASC NULLS LAST
   `) as ProfitabilityRow[];
 

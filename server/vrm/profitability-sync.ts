@@ -262,11 +262,12 @@ export async function runProfitabilitySync(): Promise<void> {
       supervisorLdap: supLdap,
       supervisorPhone: finalPhone,
       supervisorEmail: finalEmail,
-      // Raw TPMS values preserved alongside the coalesced effective values so
-      // the Settings UI can unambiguously identify TPMS-side gaps regardless
-      // of whether an override has filled them.
-      supervisorTpmsPhone: r.supervisor_phone ?? null,
-      supervisorTpmsEmail: r.supervisor_email_tpms ?? null,
+      // Raw TPMS_EXTRACT-only values (NO COMTTU fallback, NO override). The
+      // Settings UI uses these to identify "no phone in TPMS_EXTRACT" supervisors
+      // unambiguously — using the effective coalesced values here would mask
+      // gaps whenever COMTTU happens to have phone/email coverage.
+      supervisorTpmsPhone: r.supervisor_tpms_phone_raw ?? null,
+      supervisorTpmsEmail: r.supervisor_tpms_email_raw ?? null,
     };
   });
 

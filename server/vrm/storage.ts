@@ -1909,13 +1909,13 @@ export async function upsertSupervisorContactOverride(
 
 /**
  * Returns supervisors from the latest snapshot that EITHER
- *   (a) are missing at least one TPMS channel (raw supervisor_tpms_phone or
- *       supervisor_tpms_email is NULL/empty), OR
+ *   (a) have NO phone in TPMS_EXTRACT (raw supervisor_tpms_phone is NULL/empty), OR
  *   (b) already have an override row on file (so the admin can keep editing).
  *
- * Uses the snapshot's raw TPMS columns for unambiguous "missing in TPMS"
- * detection — no equality heuristic. LEFT-joined with the override table so
- * the UI can show current override phone/email per row.
+ * Spec: SMS dispatch is the primary deny-notification channel; supervisors
+ * without a TPMS_EXTRACT phone need an override to be reachable. Email-only
+ * gaps are NOT surfaced because TPMS_EXTRACT has near-complete email coverage
+ * via EMAIL_ADDRESS and any remaining gaps are tolerated.
  */
 export async function getSupervisorsNeedingOverride(): Promise<Array<{
   supervisorLdap: string;
@@ -1928,8 +1928,6 @@ export async function getSupervisorsNeedingOverride(): Promise<Array<{
   overrideUpdatedBy: string | null;
   overrideUpdatedAt: Date | null;
 }>> {
-  // Aggregate every supervisor present in the snapshot so we can later decide
-  // which to surface based on raw TPMS gaps + override existence.
   const rows = await db
     .select({
       supervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
@@ -1967,9 +1965,10 @@ export async function getSupervisorsNeedingOverride(): Promise<Array<{
     const ov = ovMap.get(ldap);
     const tpmsPhone = r.tpmsPhone && r.tpmsPhone.trim() !== "" ? r.tpmsPhone : null;
     const tpmsEmail = r.tpmsEmail && r.tpmsEmail.trim() !== "" ? r.tpmsEmail : null;
-    const tpmsHasGap = !tpmsPhone || !tpmsEmail;
+    // Surface ONLY when TPMS_EXTRACT phone is missing, OR an override row exists.
+    const tpmsPhoneMissing = !tpmsPhone;
     const hasOverride = !!ov;
-    if (!tpmsHasGap && !hasOverride) continue; // both TPMS channels present + no override → not surfaced
+    if (!tpmsPhoneMissing && !hasOverride) continue;
     result.push({
       supervisorLdap: ldap,
       supervisorName: r.supervisorName,

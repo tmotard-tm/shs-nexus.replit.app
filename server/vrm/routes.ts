@@ -2163,14 +2163,17 @@ export function registerVrmRoutes(): Router {
     }
   });
 
-  // ─── Supervisor Contact Overrides (item 6 — Settings tab; phone OR email) ───
+  // ─── Supervisor Contact Overrides (item 6 — Settings tab) ───────────────────
 
   /**
    * GET /api/vrm/settings/supervisor-overrides
-   * Lists supervisors discovered in the latest snapshot whose TPMS phone OR
-   * email is missing (i.e. missing at least one channel). Each row carries
-   * the current override phone/email if present, plus the underlying TPMS
-   * values for read-only display.
+   * Lists supervisors discovered in the latest snapshot whose TPMS_EXTRACT
+   * phone is missing (matched by ENTERPRISE_ID = SUPERVISOR_LDAP), OR who
+   * already have an override row on file. SMS is the primary deny-notification
+   * channel, so a missing phone is the surfacing trigger; email-only gaps are
+   * not surfaced because TPMS_EXTRACT.EMAIL_ADDRESS coverage is near-complete.
+   * Each row carries the current override phone/email if present, plus the raw
+   * TPMS values for read-only display.
    */
   router.get("/settings/supervisor-overrides", async (_req, res) => {
     try {

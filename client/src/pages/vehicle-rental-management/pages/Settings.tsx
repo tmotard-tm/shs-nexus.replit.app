@@ -260,13 +260,14 @@ function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
     setEditing(false);
   }
 
-  // Badge — describe what's missing on the TPMS side (and therefore why the row appears).
+  // Badge — surfacing focus is "no phone in TPMS_EXTRACT". The row may also be
+  // showing because an override exists (admin previously added contact info).
   const tpmsMissingPhone = !row.tpmsPhone;
   const tpmsMissingEmail = !row.tpmsEmail;
   let badgeText = "";
-  if (tpmsMissingPhone && tpmsMissingEmail) badgeText = "No phone or email on file";
-  else if (tpmsMissingPhone) badgeText = "No phone";
-  else if (tpmsMissingEmail) badgeText = "No email";
+  if (tpmsMissingPhone && tpmsMissingEmail) badgeText = "No phone or email in TPMS";
+  else if (tpmsMissingPhone) badgeText = "No phone in TPMS";
+  else if (row.overridePhone || row.overrideEmail) badgeText = "Override on file";
 
   const cellStyle: React.CSSProperties = {
     padding: "12px 16px",
@@ -483,7 +484,8 @@ export default function Settings() {
 
   const containerStyle: React.CSSProperties = {
     padding: "32px 40px",
-    maxWidth: 820,
+    width: "100%",
+    boxSizing: "border-box",
     fontFamily: fonts.dmSans,
   };
 
@@ -637,10 +639,10 @@ export default function Settings() {
         Supervisor Contact Overrides
       </h2>
       <p style={{ fontSize: 13, color: colors.inkMuted, marginTop: 0, marginBottom: 16 }}>
-        Supervisors below are missing at least one contact channel (phone, email, or both) in TPMS, so
-        denial-notification dispatch may fail to reach them. Provide an override phone, email, or both —
-        at least one channel is required. Override values replace the TPMS values on the next snapshot
-        rebuild and at notification dispatch time.
+        Supervisors below have no phone number on file in TPMS_EXTRACT, so denial-notification SMS
+        can&apos;t reach them. Provide an override phone, email, or both — at least one channel is
+        required. Override values replace the TPMS values on the next snapshot rebuild and at
+        notification dispatch time.
       </p>
 
       <div style={cardStyle}>
@@ -656,7 +658,7 @@ export default function Settings() {
         )}
         {!supLoading && !supError && supervisors.length === 0 && (
           <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
-            All supervisors have both a phone and email on file — no overrides needed.
+            All supervisors have a phone number in TPMS_EXTRACT — no overrides needed.
           </div>
         )}
         {!supLoading && !supError && supervisors.length > 0 && (
