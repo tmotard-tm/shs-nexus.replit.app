@@ -40,6 +40,10 @@ export const colors = {
   blueLight: "var(--vrm-blue-light)",
   blueDeep: "var(--vrm-blue-deep)",
   blueDeepLight: "var(--vrm-blue-deep-light)",
+  purple: "var(--vrm-purple)",
+  purpleLight: "var(--vrm-purple-light)",
+  purpleDeep: "var(--vrm-purple-deep)",
+  purpleDeepLight: "var(--vrm-purple-deep-light)",
   sidebarBg: "var(--vrm-sidebar-bg)",
   sidebarActiveItemBg: "var(--vrm-sidebar-active-item-bg)",
 };

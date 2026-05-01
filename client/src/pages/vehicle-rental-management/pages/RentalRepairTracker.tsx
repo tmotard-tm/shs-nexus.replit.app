@@ -455,10 +455,10 @@ function LegacyNotesPanel({
   };
 
   return (
-    <div style={{ marginTop: 16, padding: 14, borderRadius: 10, border: `1px dashed ${colors.rule}`, backgroundColor: "#FFFBEB" }}>
+    <div style={{ marginTop: 16, padding: 14, borderRadius: 10, border: `1px dashed ${colors.amber}`, backgroundColor: colors.amberLight }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <AlertTriangle size={14} color="#B45309" />
-        <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: "#B45309", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        <AlertTriangle size={14} color={colors.amber} />
+        <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12, color: colors.amber, textTransform: "uppercase", letterSpacing: "0.05em" }}>
           Legacy Notes (pre-migration)
         </span>
       </div>
@@ -611,8 +611,8 @@ function TechOutreachTab({
             onClick={() => setShowAdd(true)}
             style={{
               fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-              color: colors.accent, backgroundColor: "#EFF4FF",
-              border: "1px solid #C7D7F9", borderRadius: 6,
+              color: colors.accent, backgroundColor: colors.accentLight,
+              border: `1px solid ${colors.accent}`, borderRadius: 6,
               padding: "4px 10px", cursor: "pointer",
               display: "flex", alignItems: "center", gap: 4,
             }}
@@ -650,8 +650,8 @@ function TechOutreachTab({
             <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} style={INPUT_STYLE} />
           </div>
           {!editingId && (
-            <div style={{ marginBottom: 10, padding: 10, borderRadius: 6, backgroundColor: "#F0F9FF", border: "1px solid #BAE6FD" }}>
-              <div style={{ ...LABEL_STYLE, marginBottom: 4, color: "#0369A1" }}>BYOV Decision (optional)</div>
+            <div style={{ marginBottom: 10, padding: 10, borderRadius: 6, backgroundColor: colors.blueDeepLight, border: `1px solid ${colors.blueDeep}` }}>
+              <div style={{ ...LABEL_STYLE, marginBottom: 4, color: colors.blueDeep }}>BYOV Decision (optional)</div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                 {(["", "Temporary", "Permanent", "Declined"] as const).map((v) => (
                   <button
@@ -719,7 +719,7 @@ function TechOutreachTab({
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                   {latest.method && (
-                    <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#0369A1", backgroundColor: "#F0F9FF", padding: "2px 7px", borderRadius: 4 }}>
+                    <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: colors.blueDeep, backgroundColor: colors.blueDeepLight, padding: "2px 7px", borderRadius: 4 }}>
                       {latest.method}
                     </span>
                   )}
@@ -729,7 +729,7 @@ function TechOutreachTab({
                     </span>
                   )}
                   {revs.length > 0 && (
-                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#B45309", backgroundColor: "#FFFBEB", padding: "2px 7px", borderRadius: 4 }}>
+                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.amber, backgroundColor: colors.amberLight, padding: "2px 7px", borderRadius: 4 }}>
                       Revised ({revs.length})
                     </span>
                   )}
@@ -858,8 +858,8 @@ function ShopContactTab({
             onClick={() => setShowAdd(true)}
             style={{
               fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-              color: colors.accent, backgroundColor: "#EFF4FF",
-              border: "1px solid #C7D7F9", borderRadius: 6,
+              color: colors.accent, backgroundColor: colors.accentLight,
+              border: `1px solid ${colors.accent}`, borderRadius: 6,
               padding: "4px 10px", cursor: "pointer",
               display: "flex", alignItems: "center", gap: 4,
             }}
@@ -883,8 +883,8 @@ function ShopContactTab({
             <input type="text" value={author} onChange={(e) => setAuthor(e.target.value)} style={INPUT_STYLE} />
           </div>
           {!editingId && (
-            <div style={{ padding: 10, borderRadius: 6, backgroundColor: "#FAF5FF", border: "1px solid #E9D5FF", marginBottom: 10 }}>
-              <div style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#6D28D9", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
+            <div style={{ padding: 10, borderRadius: 6, backgroundColor: colors.purpleLight, border: `1px solid ${colors.purpleDeep}`, marginBottom: 10 }}>
+              <div style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: colors.purpleDeep, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>
                 Cascading Updates (optional)
               </div>
               <div style={{ marginBottom: 6 }}>
@@ -958,11 +958,11 @@ function ShopContactTab({
             <div key={e.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.background }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6, gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#7C3AED", backgroundColor: "#FAF5FF", padding: "2px 7px", borderRadius: 4 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: colors.purple, backgroundColor: colors.purpleLight, padding: "2px 7px", borderRadius: 4 }}>
                     Shop
                   </span>
                   {revs.length > 0 && (
-                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#B45309", backgroundColor: "#FFFBEB", padding: "2px 7px", borderRadius: 4 }}>
+                    <span title={`Revised ${revs.length} time(s)`} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.amber, backgroundColor: colors.amberLight, padding: "2px 7px", borderRadius: 4 }}>
                       Revised ({revs.length})
                     </span>
                   )}
@@ -979,7 +979,7 @@ function ShopContactTab({
               {sideEffects.length > 0 && (
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
                   {sideEffects.map((s) => (
-                    <span key={s} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: "#6D28D9", backgroundColor: "#F3E8FF", padding: "2px 6px", borderRadius: 4 }}>
+                    <span key={s} style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.purpleDeep, backgroundColor: colors.purpleDeepLight, padding: "2px 6px", borderRadius: 4 }}>
                       {s}
                     </span>
                   ))}
@@ -1073,8 +1073,8 @@ function AmsDrawerTab({ truckNumber, query }: { truckNumber: string; query: any 
         return (
           <div style={{
             marginBottom: 16, padding: "10px 12px",
-            backgroundColor: "#FEF3C7", border: "1px solid #F59E0B", borderRadius: 6,
-            fontFamily: fonts.dmSans, fontSize: 12, color: "#92400E",
+            backgroundColor: colors.amberLight, border: `1px solid ${colors.amber}`, borderRadius: 6,
+            fontFamily: fonts.dmSans, fontSize: 12, color: colors.amber,
             display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap",
           }}>
             <span>
@@ -1337,7 +1337,7 @@ function PunchHistoryTab({
           Loading punches…
         </div>
       ) : query.isError ? (
-        <div style={{ padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, fontSize: 13, color: colors.red, backgroundColor: "#FEF2F2" }}>
+        <div style={{ padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}`, fontFamily: fonts.dmSans, fontSize: 13, color: colors.red, backgroundColor: colors.redLight }}>
           Failed to load punch history. Try Refresh.
         </div>
       ) : events.length === 0 ? (
@@ -1360,7 +1360,7 @@ function PunchHistoryTab({
                 <td style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtDate(e.punchDate)}</td>
                 <td style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft, padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>{fmtTime(e.punchTs)}</td>
                 <td style={{ padding: "9px 10px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap" }}>
-                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: "#0369A1", backgroundColor: "#F0F9FF", padding: "2px 7px", borderRadius: 4 }}>
+                  <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 11, color: colors.blueDeep, backgroundColor: colors.blueDeepLight, padding: "2px 7px", borderRadius: 4 }}>
                     {e.punchType || "—"}
                   </span>
                 </td>
@@ -2188,7 +2188,7 @@ function UnifiedPanel({
                   fontWeight: 600,
                   fontSize: 13,
                   color: colors.red,
-                  backgroundColor: "#FEF2F2",
+                  backgroundColor: colors.redLight,
                   border: "none",
                   borderRadius: 8,
                   padding: "10px 14px",
@@ -2927,8 +2927,8 @@ export default function RentalRepairTracker() {
                           title="Move to In Progress"
                           style={{
                             fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
-                            color: "#1D4ED8", backgroundColor: "#EFF6FF",
-                            border: "1px solid #BFDBFE", borderRadius: 5,
+                            color: colors.accent, backgroundColor: colors.accentLight,
+                            border: `1px solid ${colors.accent}`, borderRadius: 5,
                             padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
                           }}
                         >
@@ -2950,8 +2950,8 @@ export default function RentalRepairTracker() {
                           title="Move to Completed"
                           style={{
                             fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
-                            color: "#15803D", backgroundColor: "#F0FDF4",
-                            border: "1px solid #BBF7D0", borderRadius: 5,
+                            color: colors.green, backgroundColor: colors.greenLight,
+                            border: `1px solid ${colors.green}`, borderRadius: 5,
                             padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
                           }}
                         >
@@ -2975,8 +2975,8 @@ export default function RentalRepairTracker() {
                           title="Close case"
                           style={{
                             fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
-                            color: "#15803D", backgroundColor: "#F0FDF4",
-                            border: "1px solid #BBF7D0", borderRadius: 5,
+                            color: colors.green, backgroundColor: colors.greenLight,
+                            border: `1px solid ${colors.green}`, borderRadius: 5,
                             padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
                           }}
                         >
@@ -2998,8 +2998,8 @@ export default function RentalRepairTracker() {
                           title="Reopen case"
                           style={{
                             fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 10,
-                            color: "#0369A1", backgroundColor: "#F0F9FF",
-                            border: "1px solid #BAE6FD", borderRadius: 5,
+                            color: colors.blueDeep, backgroundColor: colors.blueDeepLight,
+                            border: `1px solid ${colors.blueDeep}`, borderRadius: 5,
                             padding: "2px 7px", cursor: "pointer", whiteSpace: "nowrap",
                           }}
                         >
@@ -3014,7 +3014,7 @@ export default function RentalRepairTracker() {
 
         const renderHeader = () => (
           <thead>
-            <tr style={{ backgroundColor: "#F8FAFC" }}>
+            <tr style={{ backgroundColor: colors.surface }}>
               <th style={thStyle} onClick={() => handleSort("techName")}>Case{sortIndicator("techName")}</th>
               <th style={thStyle} onClick={() => handleSort("truckNumber")}>Truck #{sortIndicator("truckNumber")}</th>
               <th style={thStyle} onClick={() => handleSort("district")}>District{sortIndicator("district")}</th>
