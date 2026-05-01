@@ -673,8 +673,15 @@ export const vrmProfitabilitySnapshot = pgTable("vrm_profitability_snapshot", {
   expectedReturnDt: date("expected_return_dt"),
   supervisorName: varchar("supervisor_name", { length: 255 }),
   supervisorLdap: varchar("supervisor_ldap", { length: 50 }),
+  // supervisorPhone / supervisorEmail are the EFFECTIVE values (override > TPMS)
+  // — used by the notification dispatcher.
   supervisorPhone: varchar("supervisor_phone", { length: 50 }),
   supervisorEmail: varchar("supervisor_email", { length: 255 }),
+  // supervisorTpmsPhone / supervisorTpmsEmail are the RAW TPMS COMTTU values
+  // (no override applied) — used by the Settings UI to detect "missing in TPMS"
+  // unambiguously regardless of whether an override has filled the gap.
+  supervisorTpmsPhone: varchar("supervisor_tpms_phone", { length: 50 }),
+  supervisorTpmsEmail: varchar("supervisor_tpms_email", { length: 255 }),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_profitability_snapshot_ldap_idx").on(table.techLdap),
@@ -718,17 +725,18 @@ export const insertVrmNotificationSchema = createInsertSchema(vrmNotifications).
 export type VrmNotification = typeof vrmNotifications.$inferSelect;
 export type InsertVrmNotification = z.infer<typeof insertVrmNotificationSchema>;
 
-// ─── Supervisor Email Overrides ───────────────────────────────────────────────
+// ─── Supervisor Contact Overrides (phone + email; at least one required) ─────
 
-export const vrmSupervisorEmailOverrides = pgTable("vrm_supervisor_email_overrides", {
+export const vrmSupervisorContactOverrides = pgTable("vrm_supervisor_contact_overrides", {
   supervisorLdap: varchar("supervisor_ldap", { length: 50 }).primaryKey(),
   supervisorName: varchar("supervisor_name", { length: 255 }),
-  email: varchar("email", { length: 255 }).notNull(),
+  overridePhone: varchar("override_phone", { length: 50 }),
+  overrideEmail: varchar("override_email", { length: 255 }),
   notes: text("notes"),
   updatedBy: varchar("updated_by", { length: 255 }),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
-export const insertVrmSupervisorEmailOverrideSchema = createInsertSchema(vrmSupervisorEmailOverrides).omit({ updatedAt: true });
-export type VrmSupervisorEmailOverride = typeof vrmSupervisorEmailOverrides.$inferSelect;
-export type InsertVrmSupervisorEmailOverride = z.infer<typeof insertVrmSupervisorEmailOverrideSchema>;
+export const insertVrmSupervisorContactOverrideSchema = createInsertSchema(vrmSupervisorContactOverrides).omit({ updatedAt: true });
+export type VrmSupervisorContactOverride = typeof vrmSupervisorContactOverrides.$inferSelect;
+export type InsertVrmSupervisorContactOverride = z.infer<typeof insertVrmSupervisorContactOverrideSchema>;

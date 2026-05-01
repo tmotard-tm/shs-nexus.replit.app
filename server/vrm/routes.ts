@@ -65,8 +65,8 @@ import {
   getProfitabilitySnapshotRows,
   countProfitabilitySnapshotRows,
   getSupervisorsNeedingOverride,
-  upsertSupervisorEmailOverride,
-  getAllSupervisorEmailOverrides,
+  upsertSupervisorContactOverride,
+  getAllSupervisorContactOverrides,
 } from "./storage";
 import { runProfitabilitySync } from "./profitability-sync";
 import { enqueueNotificationsForDeny } from "./notification-dispatcher";
@@ -2163,13 +2163,14 @@ export function registerVrmRoutes(): Router {
     }
   });
 
-  // ─── Supervisor Email Overrides (item 6 — Settings tab) ─────────────────────
+  // ─── Supervisor Contact Overrides (item 6 — Settings tab; phone OR email) ───
 
   /**
    * GET /api/vrm/settings/supervisor-overrides
-   * Lists supervisors discovered in the latest snapshot whose TPMS phone is
-   * missing (so SMS dispatch isn't possible).  Each row carries the current
-   * override email if present, plus the TPMS-side email (when distinct).
+   * Lists supervisors discovered in the latest snapshot whose TPMS phone OR
+   * email is missing (i.e. missing at least one channel). Each row carries
+   * the current override phone/email if present, plus the underlying TPMS
+   * values for read-only display.
    */
   router.get("/settings/supervisor-overrides", async (_req, res) => {
     try {
@@ -2188,7 +2189,7 @@ export function registerVrmRoutes(): Router {
    */
   router.get("/settings/supervisor-overrides/all", async (_req, res) => {
     try {
-      const overrides = await getAllSupervisorEmailOverrides();
+      const overrides = await getAllSupervisorContactOverrides();
       res.json({ overrides });
     } catch (e: any) {
       console.error("[VRM] supervisor-overrides all GET error:", e.message);
@@ -2198,24 +2199,41 @@ export function registerVrmRoutes(): Router {
 
   /**
    * PUT /api/vrm/settings/supervisor-overrides/:ldap
-   * Upserts an override email for a supervisor LDAP.  Email is required and
-   * must look like an email; supervisorName/notes optional.  Stamps
-   * updatedBy from the authenticated user.
+   * Upserts a supervisor contact override. Body accepts optional
+   * `overridePhone` and `overrideEmail` — at least one must be non-null after
+   * trimming, otherwise 400. Phone format: digits, optional + and dashes.
+   * Email format: standard. Either field may be set to "" (or null) to clear
+   * a previously saved value, but the upsert is rejected if BOTH would end
+   * up null (both DB CHECK and the explicit guard below enforce this).
    */
   router.put("/settings/supervisor-overrides/:ldap", async (req, res) => {
     try {
       const ldap = (req.params.ldap || "").trim().toUpperCase();
       if (!ldap) return res.status(400).json({ error: "ldap path param required" });
-      const { email, supervisorName, notes } = req.body ?? {};
-      const cleanedEmail = typeof email === "string" ? email.trim() : "";
-      if (!cleanedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
-        return res.status(400).json({ error: "valid email is required" });
+      const { overridePhone, overrideEmail, supervisorName, notes } = req.body ?? {};
+      const cleanedPhone = typeof overridePhone === "string" ? overridePhone.trim() : "";
+      const cleanedEmail = typeof overrideEmail === "string" ? overrideEmail.trim() : "";
+
+      // Phone format: must contain at least one digit; allow digits, +, -,
+      // spaces and parens. Reject anything else.
+      if (cleanedPhone && (!/^[\d+\-\s()]+$/.test(cleanedPhone) || !/\d/.test(cleanedPhone))) {
+        return res.status(400).json({ error: "overridePhone must contain digits and may include + and dashes" });
       }
+      // Email format: standard.
+      if (cleanedEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+        return res.status(400).json({ error: "overrideEmail is not a valid email address" });
+      }
+      // Guard: at least one channel must remain non-null.
+      if (!cleanedPhone && !cleanedEmail) {
+        return res.status(400).json({ error: "at least one of overridePhone or overrideEmail must be provided" });
+      }
+
       const updatedBy = (req as any).user?.username ?? null;
-      const row = await upsertSupervisorEmailOverride({
+      const row = await upsertSupervisorContactOverride({
         supervisorLdap: ldap,
         supervisorName: supervisorName ?? null,
-        email: cleanedEmail,
+        overridePhone: cleanedPhone || null,
+        overrideEmail: cleanedEmail || null,
         notes: notes ?? null,
         updatedBy,
       });

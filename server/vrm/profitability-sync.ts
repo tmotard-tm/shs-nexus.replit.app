@@ -16,7 +16,7 @@ import {
   getProfitabilityCacheMeta,
   upsertProfitabilityCacheMeta,
   replaceProfitabilitySnapshot,
-  getAllSupervisorEmailOverrides,
+  getAllSupervisorContactOverrides,
 } from "./storage";
 import type { InsertVrmProfitabilitySnapshot } from "../../shared/vrm-schema";
 
@@ -203,26 +203,34 @@ export async function runProfitabilitySync(): Promise<void> {
     return;
   }
 
-  // Load supervisor email overrides ONCE (small table — keyed by supervisorLdap).
-  // Override email always takes precedence over TPMS COMTTU EMAIL_ADDR per spec item (4).
-  let overrideMap = new Map<string, string>();
+  // Load supervisor contact overrides ONCE (small table — keyed by supervisorLdap).
+  // Override values always take precedence over TPMS COMTTU MBL_PH_NO / EMAIL_ADDR
+  // per spec item (4). At least one of override_phone / override_email is
+  // guaranteed non-null by the DB CHECK constraint.
+  let overrideMap = new Map<string, { phone: string | null; email: string | null }>();
   try {
-    const overrides = await getAllSupervisorEmailOverrides();
+    const overrides = await getAllSupervisorContactOverrides();
     overrideMap = new Map(
-      overrides
-        .filter((o) => o.email && o.email.trim() !== "")
-        .map((o) => [o.supervisorLdap.toUpperCase(), o.email.trim()])
+      overrides.map((o) => [
+        o.supervisorLdap.toUpperCase(),
+        {
+          phone: o.overridePhone && o.overridePhone.trim() !== "" ? o.overridePhone.trim() : null,
+          email: o.overrideEmail && o.overrideEmail.trim() !== "" ? o.overrideEmail.trim() : null,
+        },
+      ])
     );
-    console.log(`[ProfitabilitySync] Loaded ${overrideMap.size} supervisor email overrides.`);
+    console.log(`[ProfitabilitySync] Loaded ${overrideMap.size} supervisor contact overrides.`);
   } catch (err: any) {
-    console.warn("[ProfitabilitySync] Could not load supervisor email overrides — using TPMS only:", err.message);
+    console.warn("[ProfitabilitySync] Could not load supervisor contact overrides — using TPMS only:", err.message);
   }
 
   // Map to insert schema.
   const snapshotRows: InsertVrmProfitabilitySnapshot[] = rawRows.map((r) => {
     const supLdap = r.supervisor_ldap ? String(r.supervisor_ldap).toUpperCase() : null;
-    const overrideEmail = supLdap ? overrideMap.get(supLdap) ?? null : null;
-    const finalEmail = overrideEmail || (r.supervisor_email_tpms ?? null) || null;
+    const ov = supLdap ? overrideMap.get(supLdap) : undefined;
+    // Coalesce override > TPMS for BOTH phone and email channels independently.
+    const finalPhone = (ov?.phone ?? null) || (r.supervisor_phone ?? null) || null;
+    const finalEmail = (ov?.email ?? null) || (r.supervisor_email_tpms ?? null) || null;
     return {
       techLdap: String(r.tech_ldap ?? "").toUpperCase(),
       techName: r.tech_name ?? null,
@@ -252,8 +260,13 @@ export async function runProfitabilitySync(): Promise<void> {
       expectedReturnDt: r.expected_return_dt ?? null,
       supervisorName: r.supervisor_name ?? null,
       supervisorLdap: supLdap,
-      supervisorPhone: r.supervisor_phone ?? null,
+      supervisorPhone: finalPhone,
       supervisorEmail: finalEmail,
+      // Raw TPMS values preserved alongside the coalesced effective values so
+      // the Settings UI can unambiguously identify TPMS-side gaps regardless
+      // of whether an override has filled them.
+      supervisorTpmsPhone: r.supervisor_phone ?? null,
+      supervisorTpmsEmail: r.supervisor_email_tpms ?? null,
     };
   });
 

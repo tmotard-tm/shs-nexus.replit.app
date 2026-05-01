@@ -23,7 +23,7 @@ import {
   vrmProfitabilityCacheMeta,
   vrmProfitabilitySnapshot,
   vrmNotifications,
-  vrmSupervisorEmailOverrides,
+  vrmSupervisorContactOverrides,
   type VrmTech,
   type VrmRentalDecision,
   type VrmRateConfig,
@@ -34,8 +34,8 @@ import {
   type InsertVrmProfitabilitySnapshot,
   type VrmNotification,
   type InsertVrmNotification,
-  type VrmSupervisorEmailOverride,
-  type InsertVrmSupervisorEmailOverride,
+  type VrmSupervisorContactOverride,
+  type InsertVrmSupervisorContactOverride,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -1862,24 +1862,42 @@ export async function getProfitabilitySnapshotRows(
     .where(inArray(vrmProfitabilitySnapshot.techLdap, upper));
 }
 
-// ─── Supervisor Email Overrides (item 6) ──────────────────────────────────────
+// ─── Supervisor Contact Overrides (phone OR email OR both — item 6) ───────────
 
-export async function getAllSupervisorEmailOverrides(): Promise<VrmSupervisorEmailOverride[]> {
-  return db.select().from(vrmSupervisorEmailOverrides);
+export async function getAllSupervisorContactOverrides(): Promise<VrmSupervisorContactOverride[]> {
+  return db.select().from(vrmSupervisorContactOverrides);
 }
 
-export async function upsertSupervisorEmailOverride(
-  row: InsertVrmSupervisorEmailOverride,
-): Promise<VrmSupervisorEmailOverride> {
+/**
+ * Upserts a contact override row. CHECK constraint at DB level enforces that
+ * at least one of override_phone / override_email is non-null; the route
+ * layer ALSO enforces this with a clearer 400 response.
+ */
+export async function upsertSupervisorContactOverride(
+  row: InsertVrmSupervisorContactOverride,
+): Promise<VrmSupervisorContactOverride> {
   const ldap = row.supervisorLdap.toUpperCase();
+  const phone = (row.overridePhone ?? null) || null;
+  const email = (row.overrideEmail ?? null) || null;
+  if (!phone && !email) {
+    throw new Error("at least one of override_phone or override_email must be non-null");
+  }
   const [out] = await db
-    .insert(vrmSupervisorEmailOverrides)
-    .values({ ...row, supervisorLdap: ldap })
+    .insert(vrmSupervisorContactOverrides)
+    .values({
+      supervisorLdap: ldap,
+      supervisorName: row.supervisorName ?? null,
+      overridePhone: phone,
+      overrideEmail: email,
+      notes: row.notes ?? null,
+      updatedBy: row.updatedBy ?? null,
+    })
     .onConflictDoUpdate({
-      target: vrmSupervisorEmailOverrides.supervisorLdap,
+      target: vrmSupervisorContactOverrides.supervisorLdap,
       set: {
         supervisorName: row.supervisorName ?? null,
-        email: row.email,
+        overridePhone: phone,
+        overrideEmail: email,
         notes: row.notes ?? null,
         updatedBy: row.updatedBy ?? null,
         updatedAt: new Date(),
@@ -1890,65 +1908,81 @@ export async function upsertSupervisorEmailOverride(
 }
 
 /**
- * Returns supervisors found in the latest snapshot that have NO phone in TPMS
- * (so SMS dispatch can't reach them — they need an override email).
- * LEFT-joined with the override table so the UI shows current override email.
+ * Returns supervisors from the latest snapshot that EITHER
+ *   (a) are missing at least one TPMS channel (raw supervisor_tpms_phone or
+ *       supervisor_tpms_email is NULL/empty), OR
+ *   (b) already have an override row on file (so the admin can keep editing).
+ *
+ * Uses the snapshot's raw TPMS columns for unambiguous "missing in TPMS"
+ * detection — no equality heuristic. LEFT-joined with the override table so
+ * the UI can show current override phone/email per row.
  */
 export async function getSupervisorsNeedingOverride(): Promise<Array<{
   supervisorLdap: string;
   supervisorName: string | null;
   techCount: number;
+  tpmsPhone: string | null;
   tpmsEmail: string | null;
+  overridePhone: string | null;
   overrideEmail: string | null;
   overrideUpdatedBy: string | null;
   overrideUpdatedAt: Date | null;
 }>> {
-  // Aggregate snapshot rows by supervisor where supervisor_phone IS NULL.
-  // We treat the snapshot's stored supervisor_email as the "current effective email"
-  // (which is override > TPMS at write time), but we also pull the override row
-  // directly so the UI can distinguish override vs. TPMS source.
+  // Aggregate every supervisor present in the snapshot so we can later decide
+  // which to surface based on raw TPMS gaps + override existence.
   const rows = await db
     .select({
       supervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
       supervisorName: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorName})`,
       techCount: sql<number>`COUNT(*)::int`,
-      effectiveEmail: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorEmail})`,
+      tpmsPhone: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorTpmsPhone})`,
+      tpmsEmail: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorTpmsEmail})`,
     })
     .from(vrmProfitabilitySnapshot)
-    .where(
-      and(
-        sql`${vrmProfitabilitySnapshot.supervisorPhone} IS NULL OR ${vrmProfitabilitySnapshot.supervisorPhone} = ''`,
-        sql`${vrmProfitabilitySnapshot.supervisorLdap} IS NOT NULL`,
-      ),
-    )
+    .where(sql`${vrmProfitabilitySnapshot.supervisorLdap} IS NOT NULL`)
     .groupBy(vrmProfitabilitySnapshot.supervisorLdap);
 
   if (rows.length === 0) return [];
   const ldaps = rows.map((r) => r.supervisorLdap as string).filter(Boolean);
 
   const overrides = ldaps.length > 0
-    ? await db.select().from(vrmSupervisorEmailOverrides).where(inArray(vrmSupervisorEmailOverrides.supervisorLdap, ldaps))
+    ? await db.select().from(vrmSupervisorContactOverrides).where(inArray(vrmSupervisorContactOverrides.supervisorLdap, ldaps))
     : [];
   const ovMap = new Map(overrides.map((o) => [o.supervisorLdap, o]));
 
-  return rows.map((r) => {
-    const ov = ovMap.get(r.supervisorLdap as string);
-    // effectiveEmail came through write-through pipeline (override > TPMS).
-    // If an override exists, the effective email IS the override; otherwise effective == TPMS.
-    const overrideEmail = ov?.email ?? null;
-    const tpmsEmail = overrideEmail
-      ? (overrideEmail === r.effectiveEmail ? null : r.effectiveEmail)
-      : r.effectiveEmail;
-    return {
-      supervisorLdap: r.supervisorLdap as string,
+  const result: Array<{
+    supervisorLdap: string;
+    supervisorName: string | null;
+    techCount: number;
+    tpmsPhone: string | null;
+    tpmsEmail: string | null;
+    overridePhone: string | null;
+    overrideEmail: string | null;
+    overrideUpdatedBy: string | null;
+    overrideUpdatedAt: Date | null;
+  }> = [];
+
+  for (const r of rows) {
+    const ldap = r.supervisorLdap as string;
+    const ov = ovMap.get(ldap);
+    const tpmsPhone = r.tpmsPhone && r.tpmsPhone.trim() !== "" ? r.tpmsPhone : null;
+    const tpmsEmail = r.tpmsEmail && r.tpmsEmail.trim() !== "" ? r.tpmsEmail : null;
+    const tpmsHasGap = !tpmsPhone || !tpmsEmail;
+    const hasOverride = !!ov;
+    if (!tpmsHasGap && !hasOverride) continue; // both TPMS channels present + no override → not surfaced
+    result.push({
+      supervisorLdap: ldap,
       supervisorName: r.supervisorName,
       techCount: r.techCount,
+      tpmsPhone,
       tpmsEmail,
-      overrideEmail,
+      overridePhone: ov?.overridePhone ?? null,
+      overrideEmail: ov?.overrideEmail ?? null,
       overrideUpdatedBy: ov?.updatedBy ?? null,
       overrideUpdatedAt: ov?.updatedAt ?? null,
-    };
-  });
+    });
+  }
+  return result;
 }
 
 // ─── Notifications outbox (DENY-only — items 4+5+7) ───────────────────────────

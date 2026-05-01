@@ -558,6 +558,10 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_ldap    VARCHAR(50);`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_phone   VARCHAR(50);`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_email   VARCHAR(255);`);
+  // Raw TPMS values (no override applied) — additive in the dual-channel amendment.
+  // The Settings UI uses these to detect "missing in TPMS" without ambiguity.
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_tpms_phone VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_tpms_email VARCHAR(255);`);
 
   // ── Notification enums ─────────────────────────────────────────────────────
   await db.execute(sql`
@@ -588,16 +592,42 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS vrm_notifications_decision_channel_uq ON vrm_notifications(decision_id, channel);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_status_idx ON vrm_notifications(status);`);
 
-  // ── Supervisor email overrides (settings tab edits) ────────────────────────
+  // ── Supervisor contact overrides (phone + email; ≥1 channel required) ──────
+  // Fresh-DB shape (final). The CHECK constraint is enforced server-side too,
+  // but having it at the DB level is the last line of defence.
   await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS vrm_supervisor_email_overrides (
+    CREATE TABLE IF NOT EXISTS vrm_supervisor_contact_overrides (
       supervisor_ldap  VARCHAR(50) PRIMARY KEY,
       supervisor_name  VARCHAR(255),
-      email            VARCHAR(255) NOT NULL,
+      override_phone   VARCHAR(50),
+      override_email   VARCHAR(255),
       notes            TEXT,
       updated_by       VARCHAR(255),
-      updated_at       TIMESTAMP DEFAULT NOW() NOT NULL
+      updated_at       TIMESTAMP DEFAULT NOW() NOT NULL,
+      CONSTRAINT vrm_sup_contact_at_least_one_channel
+        CHECK (override_phone IS NOT NULL OR override_email IS NOT NULL)
     );
+  `);
+
+  // Migrate from the older email-only table shape if it exists. The original
+  // table was named vrm_supervisor_email_overrides with column `email NOT NULL`.
+  // Copy any rows over (mapping email -> override_email), then drop the legacy
+  // table. Idempotent: no-ops once the legacy table is gone.
+  await db.execute(sql`
+    DO $$
+    BEGIN
+      IF EXISTS (
+        SELECT 1 FROM information_schema.tables
+        WHERE table_schema = 'public' AND table_name = 'vrm_supervisor_email_overrides'
+      ) THEN
+        INSERT INTO vrm_supervisor_contact_overrides
+          (supervisor_ldap, supervisor_name, override_phone, override_email, notes, updated_by, updated_at)
+        SELECT supervisor_ldap, supervisor_name, NULL, email, notes, updated_by, updated_at
+        FROM vrm_supervisor_email_overrides
+        ON CONFLICT (supervisor_ldap) DO NOTHING;
+        DROP TABLE vrm_supervisor_email_overrides;
+      END IF;
+    END $$;
   `);
 
   console.log("[VRM] Schema initialised");
