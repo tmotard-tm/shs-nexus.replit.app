@@ -825,6 +825,8 @@ export default function NewRentals() {
     onSuccess: (data) => {
       if (data.status === "preparing") {
         setPreparingInfo({ retryAfterSeconds: data.retryAfterSeconds ?? 300 });
+        setEvaluatedRows([]);
+        setSnapshotMeta(null);
         return;
       }
       setPreparingInfo(null);
