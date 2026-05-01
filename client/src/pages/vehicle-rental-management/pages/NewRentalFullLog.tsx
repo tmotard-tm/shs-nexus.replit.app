@@ -1,8 +1,9 @@
 import { useState, useRef, useCallback, CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Upload, X, Pencil, Trash2, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Upload, X, Pencil, Trash2, ChevronDown, ChevronUp, Download } from "lucide-react";
 import * as XLSX from "xlsx";
 import { fonts, colors } from "../lib/constants";
+import { DiscrepancyFlag, useDiscrepancies } from "../components/discrepancy";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -35,9 +36,26 @@ interface RentalLogEntry {
   techServiceDate: string | null;
   declinedRepair: boolean;
   createdAt: string;
+  // Enrichment fields (from /api/vrm/new-rental-log/enriched)
+  ldap?: string | null;
+  tenureMonths?: number | null;
+  scorecardScore?: number | null;
+  completes?: number | null;
+  workingDays?: number | null;
+  dailyRevenue?: number | null;
+  dailyCosts?: number | null;
+  dailyNetBeforeRental?: number | null;
+  dailyNetWithRental?: number | null;
+  dailyPptProfit?: number | null;
+  recommendation?: string | null;
+  state?: string | null;
+  district?: string | null;
+  technician?: string | null;
+  truckNumber?: string | null;
+  tpmsPhone?: string | null;
 }
 
-type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong" | "vanAssignedInTpms" | "unitNumber" | "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair">;
+type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong" | "vanAssignedInTpms" | "unitNumber" | "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair" | "ldap" | "tenureMonths" | "scorecardScore" | "completes" | "workingDays" | "dailyRevenue" | "dailyCosts" | "dailyNetBeforeRental" | "dailyNetWithRental" | "dailyPptProfit" | "recommendation" | "state" | "district" | "technician" | "truckNumber" | "tpmsPhone">;
 
 const EMPTY_FORM: FormData = {
   dateOfRequest: "",
@@ -113,6 +131,135 @@ function fmtDate(d: string | null) {
   const dt = new Date(d.length === 10 ? d + "T00:00:00" : d);
   if (isNaN(dt.getTime())) return d;
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
+
+function fmtMoney(n: number | null | undefined) {
+  if (n == null || isNaN(Number(n))) return "—";
+  return `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+function fmtMoneySigned(n: number | null | undefined) {
+  if (n == null || isNaN(Number(n))) return "—";
+  const v = Number(n);
+  const formatted = `$${Math.abs(v).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+  return v < 0 ? `-${formatted}` : formatted;
+}
+
+// CSV cell escape:
+//   1. Defuse Excel/Sheets formula injection by prefixing leading =, @, |, \t, \r with a
+//      single quote. Leading + / - are only escaped when NOT followed by a digit/decimal,
+//      so legitimate negative numbers like "-150" remain numeric.
+//   2. Wrap in double quotes if the cell contains comma, quote, newline, or carriage return.
+//   3. Double any internal quotes per RFC 4180.
+function csvCell(v: unknown): string {
+  if (v == null) return "";
+  let s = String(v);
+  if (s.length > 0) {
+    const c = s[0];
+    const isFormulaStart =
+      c === "=" || c === "@" || c === "|" || c === "\t" || c === "\r" ||
+      ((c === "+" || c === "-") && s.length > 1 && !/[0-9.]/.test(s[1]));
+    if (isFormulaStart) s = "'" + s;
+  }
+  if (s.includes(",") || s.includes('"') || s.includes("\n") || s.includes("\r")) {
+    return `"${s.replace(/"/g, '""')}"`;
+  }
+  return s;
+}
+
+function exportEntriesToCsv(rows: RentalLogEntry[]) {
+  const header = [
+    "Date of Request",
+    "Van Rental PO",
+    "Tech Name",
+    "Enterprise ID",
+    "LDAP",
+    "TPMS Phone",
+    "Tech Phone (VRM)",
+    "Trim/Van #",
+    "Van in TPMS",
+    "Start Rental Date",
+    "Repair Location",
+    "Repair Phone",
+    "Issue",
+    "Perm Solution",
+    "AMS Updated",
+    "Fleet Tracker Updated",
+    "Rental Approved",
+    "Approved in Holman",
+    "Tenure (months)",
+    "Scorecard",
+    "Completes",
+    "Working Days",
+    "Daily Revenue",
+    "Daily Costs",
+    "Daily Net (pre-rental)",
+    "Daily Net (with rental)",
+    "Daily PPT",
+    "Recommendation",
+    "State",
+    "District",
+    "Technician (TPMS)",
+    "Truck #",
+    "Declined",
+    "Created At",
+  ];
+
+  const lines = [header.map(csvCell).join(",")];
+  for (const e of rows) {
+    lines.push(
+      [
+        e.dateOfRequest ?? "",
+        e.vanRentalPo ?? "",
+        e.name ?? "",
+        e.enterpriseId ?? "",
+        e.ldap ?? "",
+        e.tpmsPhone ?? "",
+        e.techPhNum ?? "",
+        e.trimVanNum ?? "",
+        e.vanAssignedInTpms ?? "",
+        e.startRentalDate ?? "",
+        e.repairLocation ?? "",
+        e.repairPhone ?? "",
+        e.issue ?? "",
+        e.permanentSolution ? "Y" : "N",
+        e.amsUpdated ? "Y" : "N",
+        e.fleetTrackerUpdated ? "Y" : "N",
+        e.rentalApproved ? "Y" : "N",
+        e.approvedInHolman ? "Y" : "N",
+        e.tenureMonths ?? "",
+        e.scorecardScore ?? "",
+        e.completes ?? "",
+        e.workingDays ?? "",
+        e.dailyRevenue ?? "",
+        e.dailyCosts ?? "",
+        e.dailyNetBeforeRental ?? "",
+        e.dailyNetWithRental ?? "",
+        e.dailyPptProfit ?? "",
+        e.recommendation ?? "",
+        e.state ?? "",
+        e.district ?? "",
+        e.technician ?? "",
+        e.truckNumber ?? "",
+        e.declinedRepair ? "Y" : "N",
+        e.createdAt ?? "",
+      ]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+
+  // Prepend BOM so Excel detects UTF-8 correctly.
+  const blob = new Blob(["\uFEFF" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `decision-log-${stamp}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function BoolBadge({ value }: { value: boolean }) {
@@ -416,7 +563,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
       return apiRequest("POST", "/api/vrm/new-rental-log", payload);
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
       toast({ title: isEdit ? "Entry updated" : "Entry created" });
       onSaved();
     },
@@ -429,12 +576,12 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
     mutationFn: (patch: Record<string, boolean | null>) =>
       apiRequest("PATCH", `/api/vrm/new-rental-log/${entry!.id}`, patch),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
     },
     onError: (e: any) => {
       setLocalApproved(entry!.rentalApproved ?? null);
       setLocalDeclined(entry!.declinedRepair ?? false);
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
       toast({ title: "Update failed", description: e.message, variant: "destructive" });
     },
   });
@@ -672,6 +819,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
 export default function NewRentalFullLog() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const discrepancies = useDiscrepancies();
   const csvInputRef = useRef<HTMLInputElement>(null);
 
   const [panelEntry, setPanelEntry] = useState<RentalLogEntry | null | "new">(null);
@@ -681,13 +829,13 @@ export default function NewRentalFullLog() {
   const [page, setPage] = useState(1);
 
   const { data: entries = [], isLoading } = useQuery<RentalLogEntry[]>({
-    queryKey: ["/api/vrm/new-rental-log"],
+    queryKey: ["/api/vrm/new-rental-log/enriched"],
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => apiRequest("DELETE", `/api/vrm/new-rental-log/${id}`),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
       toast({ title: "Entry deleted" });
     },
     onError: (e: any) => toast({ title: "Error", description: e.message, variant: "destructive" }),
@@ -699,7 +847,7 @@ export default function NewRentalFullLog() {
       return res.json();
     },
     onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
       toast({
         title: "Import complete",
         description: `${data.inserted} row(s) imported${data.skipped ? `, ${data.skipped} skipped` : ""}.`,
@@ -720,7 +868,7 @@ export default function NewRentalFullLog() {
   const clearAllMutation = useMutation({
     mutationFn: () => apiRequest("DELETE", "/api/vrm/new-rental-log"),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] });
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
       toast({ title: "Database cleared", description: "All Full Log entries have been deleted." });
     },
     onError: (e: any) => toast({ title: "Clear failed", description: e.message, variant: "destructive" }),
@@ -733,7 +881,7 @@ export default function NewRentalFullLog() {
       apiRequest("PATCH", `/api/vrm/new-rental-log/${id}`, patch),
     onMutate: ({ id }) => setPatchingIds((s) => new Set(s).add(id)),
     onSettled: (_d, _e, { id }) => setPatchingIds((s) => { const n = new Set(s); n.delete(id); return n; }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log"] }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] }),
     onError: (e: any) => toast({ title: "Update failed", description: e.message, variant: "destructive" }),
   });
 
@@ -948,7 +1096,15 @@ export default function NewRentalFullLog() {
     {
       label: "Enterprise ID",
       sortKey: "enterpriseId",
-      render: (e) => e.enterpriseId ?? "—",
+      render: (e) => (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          {e.enterpriseId ?? "—"}
+          <DiscrepancyFlag
+            row={discrepancies.byRequestId.get(e.id)}
+            size={11}
+          />
+        </span>
+      ),
     },
     {
       label: "Van Number",
@@ -993,6 +1149,71 @@ export default function NewRentalFullLog() {
     {
       label: "AMS Updated",
       render: (e) => <BoolBadge value={e.amsUpdated} />,
+    },
+    // ── Decision Log expansion (T006): profitability + geo + truck ──
+    {
+      label: "LDAP",
+      render: (e) => (
+        <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
+          {e.ldap ?? e.enterpriseId ?? "—"}
+        </span>
+      ),
+    },
+    {
+      label: "Tenure (mo)",
+      render: (e) => (e.tenureMonths != null ? `${e.tenureMonths}` : "—"),
+    },
+    {
+      label: "Scorecard",
+      render: (e) => (e.scorecardScore != null ? Number(e.scorecardScore).toFixed(2) : "—"),
+    },
+    {
+      label: "Completes",
+      render: (e) => (e.completes != null ? `${e.completes}` : "—"),
+    },
+    {
+      label: "Working Days",
+      render: (e) => (e.workingDays != null ? `${e.workingDays}` : "—"),
+    },
+    {
+      label: "Daily Revenue",
+      render: (e) => fmtMoney(e.dailyRevenue),
+    },
+    {
+      label: "Daily Costs",
+      render: (e) => fmtMoney(e.dailyCosts),
+    },
+    {
+      label: "Daily Net (pre-rental)",
+      render: (e) => fmtMoneySigned(e.dailyNetBeforeRental),
+    },
+    {
+      label: "Daily Net (w/ rental)",
+      render: (e) => fmtMoneySigned(e.dailyNetWithRental),
+    },
+    {
+      label: "Daily PPT",
+      render: (e) => fmtMoneySigned(e.dailyPptProfit),
+    },
+    {
+      label: "Recommendation",
+      render: (e) => e.recommendation ?? "—",
+    },
+    {
+      label: "State",
+      render: (e) => e.state ?? "—",
+    },
+    {
+      label: "District",
+      render: (e) => (e.district ? e.district.replace(/^0+/, "") || "0" : "—"),
+    },
+    {
+      label: "Technician",
+      render: (e) => e.technician ?? e.name ?? "—",
+    },
+    {
+      label: "Truck #",
+      render: (e) => e.truckNumber ?? e.unitNumber ?? e.trimVanNum ?? "—",
     },
     {
       label: "",
@@ -1125,6 +1346,31 @@ export default function NewRentalFullLog() {
           >
             <Upload size={14} />
             {importMutation.isPending ? "Importing…" : "Import CSV / XLSX"}
+          </button>
+
+          {/* Export CSV */}
+          <button
+            onClick={() => exportEntriesToCsv(sorted)}
+            disabled={sorted.length === 0}
+            title="Download all filtered entries as CSV (includes profitability + TPMS phone)"
+            style={{
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 13,
+              color: colors.inkSoft,
+              backgroundColor: colors.background,
+              border: `1px solid ${colors.rule}`,
+              borderRadius: 6,
+              padding: "7px 14px",
+              cursor: sorted.length === 0 ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              opacity: sorted.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <Download size={14} />
+            Export CSV
           </button>
 
           {/* Add Entry */}

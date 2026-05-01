@@ -110,7 +110,6 @@ export const navItems: NavItem[] = [
   { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
   { label: "Rental Repair Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
   { label: "Active Rentals", path: "/vehicle-rental-management/active-rentals", icon: Users },
-  { label: "Tech Population (legacy)", path: "/vehicle-rental-management/tech-population", icon: Users },
   { label: "Escalations", path: "/vehicle-rental-management/escalations", icon: AlertTriangle },
   { label: "DCA Review", path: "/vehicle-rental-management/dca-review", icon: ClipboardCheck },
   { label: "Exception Cases", path: "/vehicle-rental-management/exception-cases", icon: ShieldAlert },

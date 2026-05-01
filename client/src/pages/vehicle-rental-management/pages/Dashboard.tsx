@@ -1,9 +1,11 @@
 import { useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, SlidersHorizontal, X, RefreshCw, Database, Loader2, PlayCircle, ArrowUp, ArrowDown, ArrowUpDown, FileDown } from "lucide-react";
 import { StatCard } from "../components/stat-card";
 import { StatusPill } from "../components/status-pill";
 import { TechRecordPanel } from "../components/tech-record-panel";
+import { DiscrepancySummaryBanner, DiscrepancyFlag, useDiscrepancies } from "../components/discrepancy";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -223,11 +225,70 @@ function ActionMenu({ techId, onViewRecord }: { techId: string; onViewRecord: ()
   );
 }
 
+// ─── Active Rentals consolidated summary ──────────────────────────────────────
+
+interface ActiveRentalsSummary {
+  totalActive: number;
+  totalRentals: number;
+  averageDurationDays: number;
+  overdueCount: number;
+  returnedThisWeek: number;
+  enrichment: {
+    matchedToLdap: number;
+    missingLdap: number;
+    avgDailyNetWithRental: number | null;
+    profitSampleSize: number;
+  };
+}
+
+function ActiveRentalsSummarySection() {
+  const { data, isLoading } = useQuery<ActiveRentalsSummary>({
+    queryKey: ["/api/vrm/active-rentals-dashboard/summary"],
+    refetchInterval: 60_000,
+  });
+  const totalActive = isLoading || !data ? "—" : data.totalActive;
+  const overdue = isLoading || !data ? "—" : data.overdueCount;
+  const avgDuration = isLoading || !data ? "—" : `${Math.round(data.averageDurationDays)}d`;
+  const returnedWk = isLoading || !data ? "—" : data.returnedThisWeek;
+  const avgNet = isLoading || !data || data.enrichment.avgDailyNetWithRental === null
+    ? "—"
+    : `${data.enrichment.avgDailyNetWithRental < 0 ? "−" : "+"}$${Math.abs(data.enrichment.avgDailyNetWithRental).toLocaleString(undefined, { maximumFractionDigits: 0 })}`;
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div className="flex items-center justify-between mb-3">
+        <span style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 16, color: colors.ink }}>
+          Active Rentals
+        </span>
+        <Link
+          href="/vehicle-rental-management/active-rentals"
+          data-testid="link-view-active-rentals"
+          style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.accent, textDecoration: "none", fontWeight: 500 }}
+        >
+          View full list →
+        </Link>
+      </div>
+      <div className="flex gap-4">
+        <StatCard label="Total Active" value={totalActive} accentColor={colors.accent} />
+        <StatCard label="Overdue" value={overdue} accentColor={colors.red} />
+        <StatCard label="Avg Duration" value={avgDuration} />
+        <StatCard label="Returned This Week" value={returnedWk} accentColor={colors.green} />
+        <StatCard
+          label="Avg Daily Net (w/ rental)"
+          value={avgNet}
+          accentColor={colors.amber}
+        />
+      </div>
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const qc = useQueryClient();
   const { toast } = useToast();
+  const discrepancies = useDiscrepancies();
   const [statusFilter, setStatusFilter] = useState("all");
   const [marketFilter, setMarketFilter] = useState("all");
   const [gateFilter, setGateFilter] = useState("all");
@@ -504,6 +565,12 @@ export default function Dashboard() {
       {selectedTechId && (
         <TechRecordPanel techId={selectedTechId} onClose={() => setSelectedTechId(null)} />
       )}
+
+      {/* Discrepancy Banner */}
+      <DiscrepancySummaryBanner summary={discrepancies.summary} />
+
+      {/* Active Rentals consolidated summary */}
+      <ActiveRentalsSummarySection />
 
       {/* Summary Bar */}
       <div className="flex gap-4 mb-8">
@@ -821,6 +888,9 @@ export default function Dashboard() {
                       </div>
                       <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         <span>{tech.ldap ?? "no LDAP"}</span>
+                        {tech.ldap && (
+                          <DiscrepancyFlag row={discrepancies.byEnterpriseId.get(tech.ldap.toUpperCase())} size={12} />
+                        )}
                         {tech.truckNumber && <span>· truck {tech.truckNumber}</span>}
                         {isLowConfidenceMatch && (
                           <span title={`LDAP resolved via ${tech.ldapMatchSource === "fuzzy_name" ? "fuzzy name match" : "truck number lookup"}`} style={{ color: colors.amber, fontFamily: fonts.dmSans, fontWeight: 500 }}>

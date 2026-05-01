@@ -3,6 +3,7 @@ import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Plus, X, Pencil, Trash2, Search, RefreshCw, Clock, Download, AlertTriangle } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
+import { DiscrepancyFlag, useDiscrepancies } from "../components/discrepancy";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
@@ -2396,6 +2397,7 @@ function PunchStatusCell({ ldap, status, section }: { ldap: string | null; statu
 export default function RentalRepairTracker() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const discrepancies = useDiscrepancies();
   const { lookupCostCenter } = useCostCenters();
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -2797,8 +2799,12 @@ export default function RentalRepairTracker() {
             >
                   <td style={{ ...tdStyle, borderLeft: `3px solid ${colors.rule}` }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                      <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink }}>
+                      <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink, display: "inline-flex", alignItems: "center", gap: 6 }}>
                         {entry.techName ?? "—"}
+                        <DiscrepancyFlag
+                          row={discrepancies.byTrackerId.get(entry.id)}
+                          size={12}
+                        />
                       </span>
                       <span style={{ fontFamily: "monospace", fontSize: 11, color: colors.inkSoft, fontWeight: 500 }}>
                         {entry.techLdap ?? "—"}

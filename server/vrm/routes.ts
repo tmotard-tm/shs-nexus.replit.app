@@ -69,6 +69,8 @@ import {
   getAllSupervisorContactOverrides,
 } from "./storage";
 import { runProfitabilitySync } from "./profitability-sync";
+import { getDiscrepancies } from "./discrepancies";
+import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import { enqueueNotificationsForDeny } from "./notification-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -97,6 +99,17 @@ export function registerVrmRoutes(): Router {
       res.json(stats);
     } catch (e: any) {
       console.error("[VRM] stats error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/vrm/discrepancies — TPMS vs VRM mismatch detector for active records
+  router.get("/discrepancies", async (_req, res) => {
+    try {
+      const result = await getDiscrepancies();
+      res.json(result);
+    } catch (e: any) {
+      console.error("[VRM] discrepancies error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
@@ -1553,6 +1566,19 @@ export function registerVrmRoutes(): Router {
       const rows = await listNewRentalLog();
       res.json(rows);
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/vrm/new-rental-log/enriched
+  // Returns the new-rental-log joined with profitability snapshot, district/state,
+  // and TPMS phone for the Decision Log expanded view + CSV export.
+  router.get("/new-rental-log/enriched", async (_req, res) => {
+    try {
+      const rows = await listNewRentalLogEnriched();
+      res.json(rows);
+    } catch (e: any) {
+      console.error("[VRM] new-rental-log/enriched error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
