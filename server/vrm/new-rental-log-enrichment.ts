@@ -50,6 +50,13 @@ export interface EnrichedNewRentalLogRow {
 
   // Enrichment — TPMS phone (for export)
   tpmsPhone: string | null;
+
+  // Enrichment — latest rental decision (vrm_rental_decisions, by tech_ldap)
+  // Mirrors the "Decision Log" columns on the evaluation step (NewRentals.tsx).
+  decision: string | null;
+  decisionNotes: string | null;
+  decisionDate: string | null;
+  decidedByName: string | null;
 }
 
 interface RawLogRow {
@@ -109,6 +116,14 @@ interface TpmsRow {
   last_name: string | null;
 }
 
+interface DecisionRow {
+  tech_ldap: string;
+  decision: string | null;
+  notes: string | null;
+  decided_by_name: string | null;
+  created_at: string | null;
+}
+
 const toNum = (s: string | null): number | null => (s == null ? null : Number(s));
 
 export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRow[]> {
@@ -138,11 +153,12 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
   let snapshotByLdap = new Map<string, SnapshotRow>();
   let dsByLdap = new Map<string, { district: string | null; state: string | null }>();
   let tpmsByLdap = new Map<string, TpmsRow>();
+  let decisionByLdap = new Map<string, DecisionRow>();
 
   if (ldaps.length > 0) {
     const ldapList = sql.join(ldaps.map((l) => sql`${l}`), sql`, `);
 
-    const [snapshotResult, dsResult, tpmsResult] = await Promise.all([
+    const [snapshotResult, dsResult, tpmsResult, decisionResult] = await Promise.all([
       db.execute(sql`
         SELECT tech_ldap, tenure_months, scorecard_score, completes, working_days,
                daily_revenue, daily_costs, daily_net_before_rental, daily_net_with_rental,
@@ -172,6 +188,17 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
         FROM tpms_cached_assignments
         WHERE UPPER(enterprise_id) IN (${ldapList})
       `),
+      db.execute(sql`
+        SELECT DISTINCT ON (UPPER(tech_ldap))
+               UPPER(tech_ldap)   AS tech_ldap,
+               decision,
+               notes,
+               decided_by_name,
+               created_at::text   AS created_at
+        FROM vrm_rental_decisions
+        WHERE UPPER(tech_ldap) IN (${ldapList})
+        ORDER BY UPPER(tech_ldap), created_at DESC
+      `),
     ]);
 
     for (const r of (snapshotResult.rows ?? []) as unknown as SnapshotRow[]) {
@@ -183,6 +210,9 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
     for (const r of (tpmsResult.rows ?? []) as unknown as TpmsRow[]) {
       tpmsByLdap.set(r.enterprise_id, r);
     }
+    for (const r of (decisionResult.rows ?? []) as unknown as DecisionRow[]) {
+      decisionByLdap.set(r.tech_ldap, r);
+    }
   }
 
   return logs.map((r): EnrichedNewRentalLogRow => {
@@ -190,6 +220,7 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
     const snap = ldapKey ? snapshotByLdap.get(ldapKey) : undefined;
     const ds = ldapKey ? dsByLdap.get(ldapKey) : undefined;
     const tpms = ldapKey ? tpmsByLdap.get(ldapKey) : undefined;
+    const dec = ldapKey ? decisionByLdap.get(ldapKey) : undefined;
 
     const truckNumber = r.unit_number ?? r.trim_van_num ?? tpms?.truck_no ?? null;
     const technician = r.name ?? (tpms ? `${tpms.first_name ?? ""} ${tpms.last_name ?? ""}`.trim() || null : null);
@@ -240,6 +271,11 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
       truckNumber,
 
       tpmsPhone: tpms?.contact_no ?? null,
+
+      decision: dec?.decision ?? null,
+      decisionNotes: dec?.notes ?? null,
+      decisionDate: dec?.created_at ?? null,
+      decidedByName: dec?.decided_by_name ?? null,
     };
   });
 }

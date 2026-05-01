@@ -53,9 +53,14 @@ interface RentalLogEntry {
   technician?: string | null;
   truckNumber?: string | null;
   tpmsPhone?: string | null;
+  // Latest rental decision (mirrors evaluation-step Decision Log)
+  decision?: string | null;
+  decisionNotes?: string | null;
+  decisionDate?: string | null;
+  decidedByName?: string | null;
 }
 
-type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong" | "vanAssignedInTpms" | "unitNumber" | "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair" | "ldap" | "tenureMonths" | "scorecardScore" | "completes" | "workingDays" | "dailyRevenue" | "dailyCosts" | "dailyNetBeforeRental" | "dailyNetWithRental" | "dailyPptProfit" | "recommendation" | "state" | "district" | "technician" | "truckNumber" | "tpmsPhone">;
+type FormData = Omit<RentalLogEntry, "id" | "createdAt" | "teamMembers" | "existingRentalOnTruck" | "existingRentalOpenHowLong" | "vanAssignedInTpms" | "unitNumber" | "permanentSolution" | "amsUpdated" | "fleetTrackerUpdated" | "rentalApproved" | "approvedInHolman" | "declinedRepair" | "ldap" | "tenureMonths" | "scorecardScore" | "completes" | "workingDays" | "dailyRevenue" | "dailyCosts" | "dailyNetBeforeRental" | "dailyNetWithRental" | "dailyPptProfit" | "recommendation" | "state" | "district" | "technician" | "truckNumber" | "tpmsPhone" | "decision" | "decisionNotes" | "decisionDate" | "decidedByName">;
 
 const EMPTY_FORM: FormData = {
   dateOfRequest: "",
@@ -197,6 +202,10 @@ function exportEntriesToCsv(rows: RentalLogEntry[]) {
     "Daily Net (with rental)",
     "Daily PPT",
     "Recommendation",
+    "Decision",
+    "Decision Notes",
+    "Decision Date",
+    "Decided By",
     "State",
     "District",
     "Technician (TPMS)",
@@ -237,6 +246,10 @@ function exportEntriesToCsv(rows: RentalLogEntry[]) {
         e.dailyNetWithRental ?? "",
         e.dailyPptProfit ?? "",
         e.recommendation ?? "",
+        e.decision ?? "",
+        e.decisionNotes ?? "",
+        e.decisionDate ?? "",
+        e.decidedByName ?? "",
         e.state ?? "",
         e.district ?? "",
         e.technician ?? "",
@@ -1198,6 +1211,51 @@ export default function NewRentalFullLog() {
     {
       label: "Recommendation",
       render: (e) => e.recommendation ?? "—",
+    },
+    {
+      label: "Decision",
+      render: (e) => {
+        if (!e.decision) return "—";
+        const d = e.decision.toLowerCase();
+        const cfg =
+          d === "approved" || d === "approve"
+            ? { fg: "#15803d", bg: "#dcfce7" }
+            : d === "denied" || d === "deny"
+            ? { fg: "#b91c1c", bg: "#fee2e2" }
+            : { fg: colors.inkMuted, bg: colors.surface };
+        return (
+          <span
+            style={{
+              display: "inline-block",
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 11,
+              color: cfg.fg,
+              backgroundColor: cfg.bg,
+              padding: "2px 10px",
+              borderRadius: 6,
+              textTransform: "capitalize",
+            }}
+          >
+            {e.decision}
+          </span>
+        );
+      },
+    },
+    {
+      label: "Notes",
+      render: (e) =>
+        e.decisionNotes ? (
+          <span title={e.decisionNotes} style={{ fontSize: 12, color: colors.inkSoft }}>
+            {e.decisionNotes.length > 60 ? e.decisionNotes.slice(0, 57) + "…" : e.decisionNotes}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+    {
+      label: "Date",
+      render: (e) => (e.decisionDate ? fmtDate(e.decisionDate) : "—"),
     },
     {
       label: "State",

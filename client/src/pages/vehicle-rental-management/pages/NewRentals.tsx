@@ -525,6 +525,8 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
+      // Decision Log on NewRentalFullLog mirrors decision/notes/date — keep it fresh.
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
     },
   });
 
@@ -909,6 +911,8 @@ export default function NewRentals() {
       setFormRow(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
+      // Decision Log on NewRentalFullLog mirrors decision/notes/date — keep it fresh.
+      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
     },
   });
 
