@@ -299,6 +299,15 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   notes: text("notes"),
   scorecardScore: decimal("scorecard_score", { precision: 6, scale: 3 }),
   tenureMonths: integer("tenure_months"),
+  // Snapshot of evaluator inputs/outputs at decision time. All optional so
+  // older decisions (pre-snapshot) keep working — UI renders "—" for nulls.
+  state: text("state"),
+  district: text("district"),
+  completes: integer("completes"),
+  dailyRevenue: decimal("daily_revenue", { precision: 10, scale: 2 }),
+  dailyCosts: decimal("daily_costs", { precision: 10, scale: 2 }),
+  dailyNetBeforeRental: decimal("daily_net_before_rental", { precision: 10, scale: 2 }),
+  dailyPptProfit: decimal("daily_ppt_profit", { precision: 10, scale: 2 }),
   smsSentAt: timestamp("sms_sent_at"),
   smsResponseStatus: varchar("sms_response_status", { length: 50 }),
   byovEnrolled: boolean("byov_enrolled").notNull().default(false),

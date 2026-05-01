@@ -279,6 +279,15 @@ interface DecisionRow {
   notes: string | null;
   scorecardScore: string | null;
   tenureMonths: number | null;
+  // Snapshot of evaluator context at decision time. Older decisions (pre-snapshot)
+  // will be null — UI renders "—" in those cells.
+  state: string | null;
+  district: string | null;
+  completes: number | null;
+  dailyRevenue: string | null;
+  dailyCosts: string | null;
+  dailyNetBeforeRental: string | null;
+  dailyPptProfit: string | null;
   smsSentAt: string | null;
   smsResponseStatus: string | null;
   byovEnrolled: boolean;
@@ -1525,6 +1534,15 @@ export default function NewRentals() {
                               notes: notes || null,
                               scorecardScore: row.scorecard_score,
                               tenureMonths: row.tenure_months,
+                              // Snapshot of evaluator inputs/outputs so the
+                              // Decision Log can mirror Evaluation Results columns.
+                              state: row.state,
+                              district: row.district,
+                              completes: row.completes,
+                              dailyRevenue: row.daily_revenue,
+                              dailyCosts: row.daily_costs,
+                              dailyNetBeforeRental: row.daily_net_before_rental,
+                              dailyPptProfit: row.daily_ppt_profit,
                             })
                           }
                         />
@@ -1605,11 +1623,27 @@ export default function NewRentals() {
         ) : (
           <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              {/*
+                Decision Log mirrors the Evaluation Results columns above so
+                approvers see the same context they decided against, plus the
+                decision-tracking columns. Snapshot fields (state/district/
+                completes/daily_*) are pulled from vrm_rental_decisions, which
+                captures them at decision time. Pre-snapshot rows render "—".
+              */}
               <thead>
                 <tr>
                   <th style={thStyle}>LDAP</th>
                   <th style={thStyle}>Name</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>State</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>District</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Tenure</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Scorecard</th>
+                  <th style={{ ...thStyle, textAlign: "center" }}>Completes</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Revenue</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Costs</th>
+                  <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (pre-rental)</th>
                   <th style={{ ...thStyle, textAlign: "right" }}>Daily Net (w/ ${rentalPerDay})</th>
+                  <th style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)">Daily PPT</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Recommendation</th>
                   <th style={{ ...thStyle, textAlign: "center" }}>Decision</th>
                   <th style={thStyle}>Decided By</th>
@@ -1621,6 +1655,13 @@ export default function NewRentals() {
                 {decisionLog.map((d) => {
                   const decisionAsRec = d.decision === "approved" ? "Approve" : d.decision === "denied" ? "Deny" : d.decision;
                   const isOverride = decisionAsRec !== d.recommendation && d.recommendation !== "No Data";
+                  // Snapshot values may be null on legacy rows; coerce numerics safely.
+                  const dailyRevenue = d.dailyRevenue != null ? Number(d.dailyRevenue) : null;
+                  const dailyCosts = d.dailyCosts != null ? Number(d.dailyCosts) : null;
+                  const dailyNetBefore = d.dailyNetBeforeRental != null ? Number(d.dailyNetBeforeRental) : null;
+                  const dailyNetWith = d.dailyNetWithRental != null ? Number(d.dailyNetWithRental) : null;
+                  const dailyPpt = d.dailyPptProfit != null ? Number(d.dailyPptProfit) : null;
+                  const scorecard = d.scorecardScore != null ? Number(d.scorecardScore) : null;
                   return (
                     <tr
                       key={d.id}
@@ -1647,8 +1688,58 @@ export default function NewRentals() {
                         )}
                       </td>
                       <td style={tdStyle}>{d.techName ?? "—"}</td>
-                      <td style={{ ...tdStyle, textAlign: "right", fontWeight: 500 }}>
-                        {d.dailyNetWithRental != null ? fmt$(Number(d.dailyNetWithRental)) : "—"}
+                      <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
+                        {d.state ?? "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                        {d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        {d.tenureMonths != null ? `${Math.round(d.tenureMonths)} mo` : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        {scorecard != null ? scorecard.toFixed(2) : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "center" }}>
+                        {d.completes != null ? fmtInt(d.completes) : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        {dailyRevenue != null ? fmt$(dailyRevenue) : "—"}
+                      </td>
+                      <td style={{ ...tdStyle, textAlign: "right" }}>
+                        {dailyCosts != null ? fmt$(dailyCosts) : "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          textAlign: "right",
+                          fontWeight: 500,
+                          color: dailyNetBefore == null ? colors.inkMuted : dailyNetBefore < 0 ? colors.red : colors.green,
+                        }}
+                      >
+                        {dailyNetBefore != null ? fmt$(dailyNetBefore) : "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          textAlign: "right",
+                          fontWeight: 600,
+                          fontFamily: fonts.syne,
+                          fontSize: 14,
+                          color: dailyNetWith == null ? colors.inkMuted : dailyNetWith < 0 ? colors.red : colors.green,
+                        }}
+                      >
+                        {dailyNetWith != null ? fmt$(dailyNetWith) : "—"}
+                      </td>
+                      <td
+                        style={{
+                          ...tdStyle,
+                          textAlign: "right",
+                          fontWeight: 500,
+                          color: dailyPpt == null ? colors.inkMuted : dailyPpt < 0 ? colors.red : colors.green,
+                        }}
+                      >
+                        {dailyPpt != null ? fmt$(dailyPpt) : "—"}
                       </td>
                       <td style={{ ...tdStyle, textAlign: "center" }}>
                         <RecPill rec={d.recommendation} />

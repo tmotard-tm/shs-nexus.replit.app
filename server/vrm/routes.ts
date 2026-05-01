@@ -1394,7 +1394,12 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/profitability/log", async (req, res) => {
     try {
-      const { techLdap, techName, dailyNetWithRental, recommendation, decision, decidedByName, notes, scorecardScore, tenureMonths } = req.body;
+      const {
+        techLdap, techName, dailyNetWithRental, recommendation, decision,
+        decidedByName, notes, scorecardScore, tenureMonths,
+        state, district, completes, dailyRevenue, dailyCosts,
+        dailyNetBeforeRental, dailyPptProfit,
+      } = req.body;
       if (!techLdap || !decision || !decidedByName)
         return res.status(400).json({ error: "techLdap, decision, and decidedByName required" });
       const row = await addRentalDecision({
@@ -1407,6 +1412,15 @@ export function registerVrmRoutes(): Router {
         notes: notes ?? null,
         scorecardScore: scorecardScore != null ? String(scorecardScore) : null,
         tenureMonths: tenureMonths ?? null,
+        // Snapshot of evaluator context at decision time so the Decision Log
+        // can render the same columns as the Evaluation Results table above it.
+        state: state ?? null,
+        district: district ?? null,
+        completes: completes ?? null,
+        dailyRevenue: dailyRevenue != null ? String(dailyRevenue) : null,
+        dailyCosts: dailyCosts != null ? String(dailyCosts) : null,
+        dailyNetBeforeRental: dailyNetBeforeRental != null ? String(dailyNetBeforeRental) : null,
+        dailyPptProfit: dailyPptProfit != null ? String(dailyPptProfit) : null,
       });
 
       let trackerSync: { imported: boolean; skipped: boolean; reason: string | null; trackerId: string | null } | null = null;

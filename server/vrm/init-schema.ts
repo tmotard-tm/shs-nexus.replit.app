@@ -303,6 +303,17 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS returned_rental BOOLEAN NOT NULL DEFAULT FALSE;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS rental_return_date DATE;`);
 
+  // Snapshot of evaluator inputs/outputs at decision time so the Decision Log
+  // on /new-rentals can mirror the Evaluation Results table columns. All nullable
+  // for backward compatibility with pre-snapshot rows (UI renders "—").
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS state TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS district TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS completes INTEGER;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_revenue NUMERIC(10,2);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_costs NUMERIC(10,2);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_net_before_rental NUMERIC(10,2);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_ppt_profit NUMERIC(10,2);`);
+
   // Indexes
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_ldap_idx ON vrm_rental_checks(tech_ldap);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_at_idx ON vrm_rental_checks(checked_at);`);
