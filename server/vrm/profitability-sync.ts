@@ -19,6 +19,15 @@ import {
   getAllSupervisorContactOverrides,
 } from "./storage";
 import type { InsertVrmProfitabilitySnapshot } from "../../shared/vrm-schema";
+// In-memory TPMS_EXTRACT cache used as a backstop when the Snowflake CTE
+// JOIN against PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT fails to surface a
+// supervisor's row (observed for several supervisors whose ENTERPRISE_ID
+// IS present in TPMS_EXTRACT with a populated MOBILEPHONENUMBER).
+import {
+  getTpmsContact,
+  isTpmsSnapshotLoaded,
+  refreshTpmsExtractSnapshot,
+} from "../tpms-extract-snapshot";
 
 // Maximum seconds since the IHR table was last altered before we consider it settled.
 const SETTLE_THRESHOLD_SECONDS = 300;
@@ -224,12 +233,58 @@ export async function runProfitabilitySync(): Promise<void> {
     console.warn("[ProfitabilitySync] Could not load supervisor contact overrides — using TPMS only:", err.message);
   }
 
+  // ── Ensure the in-memory TPMS_EXTRACT snapshot is loaded ────────────────────
+  // The row mapper below relies on getTpmsContact() to backstop NULLs from the
+  // Snowflake CTE join. If the snapshot hasn't been bootstrapped yet (cold
+  // start / failed startup refresh / early manual sync), the backfill would
+  // silently no-op and we'd persist NULLs for supervisor_tpms_phone again.
+  // Failures here are non-fatal — we log and continue with whatever snapshot
+  // state is currently in memory.
+  if (!isTpmsSnapshotLoaded()) {
+    try {
+      await refreshTpmsExtractSnapshot();
+    } catch (err: any) {
+      console.warn(
+        "[ProfitabilitySync] TPMS_EXTRACT snapshot warm-up failed — supervisor phone backfill may be incomplete:",
+        err?.message ?? err,
+      );
+    }
+  }
+  const tpmsSnapshotReady = isTpmsSnapshotLoaded();
+
   // Map to insert schema.
+  let tpmsBackfillAttempted = 0;
+  let tpmsBackfillApplied = 0;
   const snapshotRows: InsertVrmProfitabilitySnapshot[] = rawRows.map((r) => {
     const supLdap = r.supervisor_ldap ? String(r.supervisor_ldap).toUpperCase() : null;
     const ov = supLdap ? overrideMap.get(supLdap) : undefined;
+    // ── TPMS_EXTRACT backfill ───────────────────────────────────────────────
+    // The Snowflake CTE join against TPMS_EXTRACT can return NULL even when the
+    // supervisor's ENTERPRISE_ID is present with a populated MOBILEPHONENUMBER
+    // (root cause unknown — likely a stale CTE row or join-key formatting drift
+    // between the materialized join and the live table). We use the in-memory
+    // TPMS_EXTRACT snapshot (keyed by UPPER(TRIM(ENTERPRISE_ID))) as a
+    // backstop so vrm_profitability_snapshot.supervisor_tpms_phone reflects
+    // the live TPMS_EXTRACT MOBILEPHONENUMBER value.
+    const rawTpmsPhoneTrimmed = r.supervisor_tpms_phone_raw != null
+      ? String(r.supervisor_tpms_phone_raw).trim()
+      : "";
+    const hasRawTpmsPhone = rawTpmsPhoneTrimmed !== "";
+    const tpmsLivePhone = supLdap ? (getTpmsContact(supLdap)?.mobilePhone ?? null) : null;
+    const livePhoneTrimmed = tpmsLivePhone ? tpmsLivePhone.trim() : "";
+    const effectiveTpmsPhone = hasRawTpmsPhone
+      ? rawTpmsPhoneTrimmed
+      : (livePhoneTrimmed !== "" ? livePhoneTrimmed : null);
+    if (!hasRawTpmsPhone && supLdap && tpmsSnapshotReady) {
+      tpmsBackfillAttempted++;
+      if (effectiveTpmsPhone) tpmsBackfillApplied++;
+    }
     // Coalesce override > TPMS for BOTH phone and email channels independently.
-    const finalPhone = (ov?.phone ?? null) || (r.supervisor_phone ?? null) || null;
+    // Effective phone now considers the live TPMS_EXTRACT value too.
+    const finalPhone = (ov?.phone ?? null)
+      || (r.supervisor_phone ?? null)
+      || effectiveTpmsPhone
+      || null;
     const finalEmail = (ov?.email ?? null) || (r.supervisor_email_tpms ?? null) || null;
     return {
       techLdap: String(r.tech_ldap ?? "").toUpperCase(),
@@ -266,10 +321,23 @@ export async function runProfitabilitySync(): Promise<void> {
       // Settings UI uses these to identify "no phone in TPMS_EXTRACT" supervisors
       // unambiguously — using the effective coalesced values here would mask
       // gaps whenever COMTTU happens to have phone/email coverage.
-      supervisorTpmsPhone: r.supervisor_tpms_phone_raw ?? null,
+      // For phone: prefer the Snowflake CTE value (raw), but fall back to the
+      // in-memory TPMS_EXTRACT snapshot when the CTE returned NULL despite the
+      // ENTERPRISE_ID having a populated MOBILEPHONENUMBER in TPMS_EXTRACT.
+      supervisorTpmsPhone: effectiveTpmsPhone,
       supervisorTpmsEmail: r.supervisor_tpms_email_raw ?? null,
     };
   });
+
+  if (tpmsBackfillAttempted > 0) {
+    console.log(
+      `[ProfitabilitySync] supervisor_tpms_phone backfill from in-memory TPMS_EXTRACT — attempted ${tpmsBackfillAttempted}, applied ${tpmsBackfillApplied} (snapshot ready: ${tpmsSnapshotReady}).`,
+    );
+  } else if (!tpmsSnapshotReady) {
+    console.warn(
+      "[ProfitabilitySync] In-memory TPMS_EXTRACT snapshot not ready — supervisor_tpms_phone backfill was skipped.",
+    );
+  }
 
   // Atomically replace the snapshot.
   try {

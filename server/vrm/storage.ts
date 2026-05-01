@@ -55,6 +55,14 @@ import {
 } from "../../shared/repair-tracker-stage";
 import { fleetScopeStorage } from "../fleet-scope-storage";
 import type { Truck as FleetScopeTruck, InsertTruck as InsertFleetScopeTruck } from "../../shared/fleet-scope-schema";
+// In-memory TPMS_EXTRACT cache (PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT, keyed by
+// UPPER(TRIM(ENTERPRISE_ID))). Used to live-enrich supervisor phone numbers in
+// case the daily Snowflake JOIN didn't find the supervisor's TPMS row.
+import {
+  getTpmsContact,
+  isTpmsSnapshotLoaded,
+  refreshTpmsExtractSnapshot,
+} from "../tpms-extract-snapshot";
 
 // ─── Dashboard queries ────────────────────────────────────────────────────────
 
@@ -1958,6 +1966,18 @@ export async function getSupervisorsNeedingOverride(): Promise<Array<{
     : [];
   const ovMap = new Map(overrides.map((o) => [o.supervisorLdap, o]));
 
+  // Ensure the in-memory TPMS_EXTRACT snapshot is loaded so the live
+  // supervisor-phone enrichment below has data to read. This is a no-op once
+  // the snapshot is loaded for the process. Failures are non-fatal — we'll
+  // simply fall back to the daily-sync snapshot phone value.
+  if (!isTpmsSnapshotLoaded()) {
+    try {
+      await refreshTpmsExtractSnapshot();
+    } catch (err: any) {
+      console.warn("[VRM] TPMS_EXTRACT snapshot warm-up failed:", err?.message ?? err);
+    }
+  }
+
   const result: Array<{
     supervisorLdap: string;
     supervisorName: string | null;
@@ -1973,8 +1993,22 @@ export async function getSupervisorsNeedingOverride(): Promise<Array<{
   for (const r of rows) {
     const ldap = r.supervisorLdap as string;
     const ov = ovMap.get(ldap);
-    const tpmsPhone = r.tpmsPhone && r.tpmsPhone.trim() !== "" ? r.tpmsPhone : null;
+    // Snapshot value (written by daily ProfitabilitySync from Snowflake JOIN).
+    const snapshotPhone = r.tpmsPhone && r.tpmsPhone.trim() !== "" ? r.tpmsPhone : null;
     const tpmsEmail = r.tpmsEmail && r.tpmsEmail.trim() !== "" ? r.tpmsEmail : null;
+    // ── Live TPMS_EXTRACT lookup (fixes false "No phone in TPMS" surfacing) ──
+    // The Snowflake CTE join sometimes fails to surface a supervisor's TPMS row
+    // even though direct queries against PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+    // show MOBILEPHONENUMBER populated for that ENTERPRISE_ID. The in-memory
+    // tpms-extract-snapshot Map (refreshed periodically) keys by ENTERPRISE_ID
+    // exactly as the user requested ("LDAP/ENTERPRISE_ID as the match key"),
+    // so we use it as the live authoritative source. Snapshot value is kept
+    // as a fallback for environments where the snapshot hasn't loaded yet.
+    const liveTpmsContact = getTpmsContact(ldap);
+    const livePhone = liveTpmsContact?.mobilePhone && liveTpmsContact.mobilePhone.trim() !== ""
+      ? liveTpmsContact.mobilePhone.trim()
+      : null;
+    const tpmsPhone = livePhone ?? snapshotPhone;
     // Surface ONLY when TPMS_EXTRACT phone is missing, OR an override row exists.
     const tpmsPhoneMissing = !tpmsPhone;
     const hasOverride = !!ov;
