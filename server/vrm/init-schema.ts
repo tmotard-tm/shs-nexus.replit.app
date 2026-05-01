@@ -505,5 +505,55 @@ export async function initVrmSchema(): Promise<void> {
     );
   `);
 
+  // ── Roster-driven snapshot: new columns added by spec items (1)+(2) ─────────
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS empl_status        VARCHAR(4);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS last_date_worked   DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS expected_return_dt DATE;`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_name    VARCHAR(255);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_ldap    VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_phone   VARCHAR(50);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_email   VARCHAR(255);`);
+
+  // ── Notification enums ─────────────────────────────────────────────────────
+  await db.execute(sql`
+    DO $$ BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vrm_notification_channel') THEN
+        CREATE TYPE vrm_notification_channel AS ENUM ('sms', 'email');
+      END IF;
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vrm_notification_status') THEN
+        CREATE TYPE vrm_notification_status AS ENUM ('queued', 'sent', 'failed', 'skipped');
+      END IF;
+    END $$;
+  `);
+
+  // ── Notifications outbound queue (DENY-only) ───────────────────────────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_notifications (
+      id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+      decision_id  VARCHAR NOT NULL REFERENCES vrm_rental_decisions(id),
+      channel      vrm_notification_channel NOT NULL,
+      recipient    VARCHAR(255),
+      payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
+      status       vrm_notification_status NOT NULL DEFAULT 'queued',
+      error        TEXT,
+      created_at   TIMESTAMP DEFAULT NOW() NOT NULL,
+      sent_at      TIMESTAMP
+    );
+  `);
+  await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS vrm_notifications_decision_channel_uq ON vrm_notifications(decision_id, channel);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_status_idx ON vrm_notifications(status);`);
+
+  // ── Supervisor email overrides (settings tab edits) ────────────────────────
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_supervisor_email_overrides (
+      supervisor_ldap  VARCHAR(50) PRIMARY KEY,
+      supervisor_name  VARCHAR(255),
+      email            VARCHAR(255) NOT NULL,
+      notes            TEXT,
+      updated_by       VARCHAR(255),
+      updated_at       TIMESTAMP DEFAULT NOW() NOT NULL
+    );
+  `);
+
   console.log("[VRM] Schema initialised");
 }

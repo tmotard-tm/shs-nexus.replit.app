@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, Pencil, Check, X, History } from "lucide-react";
+import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -187,6 +187,202 @@ function RateRow({ row }: { row: RateConfig }) {
   );
 }
 
+// ─── Supervisor Email Overrides (item 6) ─────────────────────────────────────
+
+interface SupervisorOverride {
+  supervisorLdap: string;
+  supervisorName: string | null;
+  techCount: number;
+  tpmsEmail: string | null;
+  overrideEmail: string | null;
+  overrideUpdatedBy: string | null;
+  overrideUpdatedAt: string | null;
+}
+
+function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(row.overrideEmail ?? "");
+
+  const mutation = useMutation({
+    mutationFn: (email: string) =>
+      apiRequest("PUT", `/api/vrm/settings/supervisor-overrides/${encodeURIComponent(row.supervisorLdap)}`, {
+        email,
+        supervisorName: row.supervisorName,
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/settings/supervisor-overrides"] });
+      setEditing(false);
+    },
+  });
+
+  const isValidEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.trim());
+
+  function handleSave() {
+    if (!isValidEmail) return;
+    mutation.mutate(draft.trim());
+  }
+  function handleCancel() {
+    setDraft(row.overrideEmail ?? "");
+    setEditing(false);
+  }
+
+  const cellStyle: React.CSSProperties = {
+    padding: "12px 16px",
+    borderBottom: `1px solid ${colors.rule}`,
+    fontFamily: fonts.dmSans,
+    color: colors.ink,
+    fontSize: 13,
+    verticalAlign: "middle",
+  };
+
+  return (
+    <tr>
+      <td style={cellStyle}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <span style={{ fontWeight: 500 }}>{row.supervisorName ?? "—"}</span>
+          <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+            {row.supervisorLdap}
+          </span>
+        </div>
+      </td>
+      <td style={{ ...cellStyle, textAlign: "center" }}>
+        <span
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 4,
+            padding: "2px 8px",
+            borderRadius: 999,
+            background: "#FEF3C7",
+            color: "#78350F",
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          <AlertTriangle size={11} />
+          No phone — email required
+        </span>
+      </td>
+      <td style={{ ...cellStyle, textAlign: "center" }}>{row.techCount}</td>
+      <td style={cellStyle}>
+        {editing ? (
+          <input
+            type="email"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder="supervisor@shs.com"
+            style={{
+              width: "100%",
+              padding: "6px 10px",
+              border: `1px solid ${isValidEmail || draft === "" ? colors.accent : colors.red}`,
+              borderRadius: 4,
+              fontFamily: fonts.dmSans,
+              fontSize: 13,
+              color: colors.ink,
+              background: colors.surface,
+              outline: "none",
+            }}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") handleSave();
+              if (e.key === "Escape") handleCancel();
+            }}
+          />
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+            {row.overrideEmail ? (
+              <span style={{ fontFamily: fonts.dmSans, color: colors.ink }}>{row.overrideEmail}</span>
+            ) : (
+              <span style={{ color: colors.inkMuted, fontStyle: "italic" }}>No override set</span>
+            )}
+            {row.tpmsEmail && row.tpmsEmail !== row.overrideEmail && (
+              <span style={{ fontSize: 11, color: colors.inkMuted }}>
+                TPMS: {row.tpmsEmail}
+              </span>
+            )}
+            {row.overrideUpdatedAt && row.overrideEmail && (
+              <span style={{ fontSize: 11, color: colors.inkMuted }}>
+                Updated {fmtDate(row.overrideUpdatedAt)}
+                {row.overrideUpdatedBy ? ` · ${row.overrideUpdatedBy}` : ""}
+              </span>
+            )}
+          </div>
+        )}
+      </td>
+      <td style={{ ...cellStyle, width: 120 }}>
+        {editing ? (
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={handleSave}
+              disabled={mutation.isPending || !isValidEmail}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "4px 10px",
+                borderRadius: 4,
+                border: "none",
+                background: isValidEmail ? colors.green : colors.rule,
+                color: "#fff",
+                fontFamily: fonts.dmSans,
+                fontSize: 12,
+                cursor: isValidEmail ? "pointer" : "not-allowed",
+                opacity: mutation.isPending ? 0.6 : 1,
+              }}
+            >
+              <Check size={12} />
+              Save
+            </button>
+            <button
+              onClick={handleCancel}
+              disabled={mutation.isPending}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "4px 8px",
+                borderRadius: 4,
+                border: `1px solid ${colors.rule}`,
+                background: "transparent",
+                color: colors.inkMuted,
+                fontFamily: fonts.dmSans,
+                fontSize: 12,
+                cursor: "pointer",
+              }}
+            >
+              <X size={12} />
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => {
+              setDraft(row.overrideEmail ?? "");
+              setEditing(true);
+            }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 10px",
+              borderRadius: 4,
+              border: `1px solid ${colors.rule}`,
+              background: "transparent",
+              color: colors.inkSoft,
+              fontFamily: fonts.dmSans,
+              fontSize: 12,
+              cursor: "pointer",
+            }}
+          >
+            <Pencil size={12} />
+            {row.overrideEmail ? "Edit" : "Add email"}
+          </button>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function Settings() {
   const { data: rates = [], isLoading, error } = useQuery<RateConfig[]>({
     queryKey: ["/api/vrm/settings/rates"],
@@ -195,6 +391,13 @@ export default function Settings() {
   const { data: history = [], isLoading: historyLoading } = useQuery<RateConfigHistory[]>({
     queryKey: ["/api/vrm/settings/rates/history"],
   });
+
+  const { data: supOverrideEnvelope, isLoading: supLoading, error: supError } = useQuery<{
+    supervisors: SupervisorOverride[];
+  }>({
+    queryKey: ["/api/vrm/settings/supervisor-overrides"],
+  });
+  const supervisors = supOverrideEnvelope?.supervisors ?? [];
 
   const containerStyle: React.CSSProperties = {
     padding: "32px 40px",
@@ -341,6 +544,52 @@ export default function Settings() {
                     {fmtDate(row.changedAt)}
                   </td>
                 </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36, display: "flex", alignItems: "center", gap: 8 }}>
+        <Mail size={16} color={colors.accent} />
+        Supervisor Email Overrides
+      </h2>
+      <p style={{ fontSize: 13, color: colors.inkMuted, marginTop: 0, marginBottom: 16 }}>
+        Supervisors below have no phone number on file in TPMS, so denial-notification SMS can&apos;t reach them.
+        Add an email to ensure they receive the deny notification. The override email replaces the TPMS email
+        on the next snapshot rebuild and at notification dispatch time.
+      </p>
+
+      <div style={cardStyle}>
+        {supLoading && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
+            Loading supervisors…
+          </div>
+        )}
+        {supError && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.red, fontSize: 14 }}>
+            Failed to load supervisor list.
+          </div>
+        )}
+        {!supLoading && !supError && supervisors.length === 0 && (
+          <div style={{ padding: 32, textAlign: "center", color: colors.inkMuted, fontSize: 14 }}>
+            No supervisors are missing a phone number — no overrides needed.
+          </div>
+        )}
+        {!supLoading && !supError && supervisors.length > 0 && (
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>Supervisor</th>
+                <th style={{ ...thStyle, textAlign: "center" }}>Status</th>
+                <th style={{ ...thStyle, textAlign: "center" }}>Tech Count</th>
+                <th style={thStyle}>Override Email</th>
+                <th style={thStyle}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {supervisors.map((row) => (
+                <SupervisorOverrideRow key={row.supervisorLdap} row={row} />
               ))}
             </tbody>
           </table>

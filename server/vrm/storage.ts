@@ -22,6 +22,8 @@ import {
   vrmRateConfigHistory,
   vrmProfitabilityCacheMeta,
   vrmProfitabilitySnapshot,
+  vrmNotifications,
+  vrmSupervisorEmailOverrides,
   type VrmTech,
   type VrmRentalDecision,
   type VrmRateConfig,
@@ -30,6 +32,10 @@ import {
   type VrmProfitabilitySnapshot,
   type InsertVrmProfitabilityCacheMeta,
   type InsertVrmProfitabilitySnapshot,
+  type VrmNotification,
+  type InsertVrmNotification,
+  type VrmSupervisorEmailOverride,
+  type InsertVrmSupervisorEmailOverride,
   type InsertVrmTech,
   type InsertVrmRentalDecision,
   type InsertVrmRentalDecisionAction,
@@ -1854,6 +1860,148 @@ export async function getProfitabilitySnapshotRows(
     .select()
     .from(vrmProfitabilitySnapshot)
     .where(inArray(vrmProfitabilitySnapshot.techLdap, upper));
+}
+
+// ─── Supervisor Email Overrides (item 6) ──────────────────────────────────────
+
+export async function getAllSupervisorEmailOverrides(): Promise<VrmSupervisorEmailOverride[]> {
+  return db.select().from(vrmSupervisorEmailOverrides);
+}
+
+export async function upsertSupervisorEmailOverride(
+  row: InsertVrmSupervisorEmailOverride,
+): Promise<VrmSupervisorEmailOverride> {
+  const ldap = row.supervisorLdap.toUpperCase();
+  const [out] = await db
+    .insert(vrmSupervisorEmailOverrides)
+    .values({ ...row, supervisorLdap: ldap })
+    .onConflictDoUpdate({
+      target: vrmSupervisorEmailOverrides.supervisorLdap,
+      set: {
+        supervisorName: row.supervisorName ?? null,
+        email: row.email,
+        notes: row.notes ?? null,
+        updatedBy: row.updatedBy ?? null,
+        updatedAt: new Date(),
+      },
+    })
+    .returning();
+  return out;
+}
+
+/**
+ * Returns supervisors found in the latest snapshot that have NO phone in TPMS
+ * (so SMS dispatch can't reach them — they need an override email).
+ * LEFT-joined with the override table so the UI shows current override email.
+ */
+export async function getSupervisorsNeedingOverride(): Promise<Array<{
+  supervisorLdap: string;
+  supervisorName: string | null;
+  techCount: number;
+  tpmsEmail: string | null;
+  overrideEmail: string | null;
+  overrideUpdatedBy: string | null;
+  overrideUpdatedAt: Date | null;
+}>> {
+  // Aggregate snapshot rows by supervisor where supervisor_phone IS NULL.
+  // We treat the snapshot's stored supervisor_email as the "current effective email"
+  // (which is override > TPMS at write time), but we also pull the override row
+  // directly so the UI can distinguish override vs. TPMS source.
+  const rows = await db
+    .select({
+      supervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
+      supervisorName: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorName})`,
+      techCount: sql<number>`COUNT(*)::int`,
+      effectiveEmail: sql<string | null>`MAX(${vrmProfitabilitySnapshot.supervisorEmail})`,
+    })
+    .from(vrmProfitabilitySnapshot)
+    .where(
+      and(
+        sql`${vrmProfitabilitySnapshot.supervisorPhone} IS NULL OR ${vrmProfitabilitySnapshot.supervisorPhone} = ''`,
+        sql`${vrmProfitabilitySnapshot.supervisorLdap} IS NOT NULL`,
+      ),
+    )
+    .groupBy(vrmProfitabilitySnapshot.supervisorLdap);
+
+  if (rows.length === 0) return [];
+  const ldaps = rows.map((r) => r.supervisorLdap as string).filter(Boolean);
+
+  const overrides = ldaps.length > 0
+    ? await db.select().from(vrmSupervisorEmailOverrides).where(inArray(vrmSupervisorEmailOverrides.supervisorLdap, ldaps))
+    : [];
+  const ovMap = new Map(overrides.map((o) => [o.supervisorLdap, o]));
+
+  return rows.map((r) => {
+    const ov = ovMap.get(r.supervisorLdap as string);
+    // effectiveEmail came through write-through pipeline (override > TPMS).
+    // If an override exists, the effective email IS the override; otherwise effective == TPMS.
+    const overrideEmail = ov?.email ?? null;
+    const tpmsEmail = overrideEmail
+      ? (overrideEmail === r.effectiveEmail ? null : r.effectiveEmail)
+      : r.effectiveEmail;
+    return {
+      supervisorLdap: r.supervisorLdap as string,
+      supervisorName: r.supervisorName,
+      techCount: r.techCount,
+      tpmsEmail,
+      overrideEmail,
+      overrideUpdatedBy: ov?.updatedBy ?? null,
+      overrideUpdatedAt: ov?.updatedAt ?? null,
+    };
+  });
+}
+
+// ─── Notifications outbox (DENY-only — items 4+5+7) ───────────────────────────
+
+/**
+ * Idempotent enqueue: relies on UNIQUE (decision_id, channel) — duplicate
+ * inserts are silently dropped (ON CONFLICT DO NOTHING).
+ */
+export async function enqueueNotification(
+  row: InsertVrmNotification,
+): Promise<VrmNotification | null> {
+  const [out] = await db
+    .insert(vrmNotifications)
+    .values(row)
+    .onConflictDoNothing({ target: [vrmNotifications.decisionId, vrmNotifications.channel] })
+    .returning();
+  return out ?? null;
+}
+
+export async function getQueuedNotifications(limit = 50): Promise<VrmNotification[]> {
+  return db
+    .select()
+    .from(vrmNotifications)
+    .where(eq(vrmNotifications.status, "queued"))
+    .limit(limit);
+}
+
+export async function markNotificationSent(id: string): Promise<void> {
+  await db
+    .update(vrmNotifications)
+    .set({ status: "sent", sentAt: new Date(), error: null })
+    .where(eq(vrmNotifications.id, id));
+}
+
+export async function markNotificationFailed(id: string, error: string): Promise<void> {
+  await db
+    .update(vrmNotifications)
+    .set({ status: "failed", error })
+    .where(eq(vrmNotifications.id, id));
+}
+
+export async function markNotificationSkipped(id: string, reason: string): Promise<void> {
+  await db
+    .update(vrmNotifications)
+    .set({ status: "skipped", error: reason })
+    .where(eq(vrmNotifications.id, id));
+}
+
+export async function getNotificationsForDecision(decisionId: string): Promise<VrmNotification[]> {
+  return db
+    .select()
+    .from(vrmNotifications)
+    .where(eq(vrmNotifications.decisionId, decisionId));
 }
 
 // ─── Legacy Notes ─────────────────────────────────────────────────────────────

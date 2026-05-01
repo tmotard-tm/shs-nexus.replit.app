@@ -64,9 +64,13 @@ import {
   getProfitabilityCacheMeta,
   getProfitabilitySnapshotRows,
   countProfitabilitySnapshotRows,
+  getSupervisorsNeedingOverride,
+  upsertSupervisorEmailOverride,
+  getAllSupervisorEmailOverrides,
 } from "./storage";
 import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
-import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
+import { enqueueNotificationsForDeny } from "./notification-dispatcher";
+import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
@@ -1043,10 +1047,11 @@ export function registerVrmRoutes(): Router {
   /**
    * POST /api/vrm/profitability/check
    * Accepts { ldaps: string[] }.
-   * Reads from the local daily snapshot (vrm_profitability_snapshot) so values are
-   * insulated from mid-rebuild Snowflake data.  Falls back to a live Snowflake call
-   * only when no snapshot exists yet (day-one bootstrap), returning HTTP 202 while the
-   * first sync is still in progress.
+   * Reads from the local daily snapshot (vrm_profitability_snapshot) — the snapshot
+   * is now roster-driven (NS_TECH_ACTIVE_ROSTER_DAILY_VW) so EVERY active-roster tech
+   * is present.  When the snapshot is empty (day-one bootstrap), returns HTTP 202 and
+   * fires off a background sync — never falls back to a live per-tech Snowflake read
+   * (per spec item 5).
    */
   router.post("/profitability/check", async (req, res) => {
     try {
@@ -1063,49 +1068,10 @@ export function registerVrmRoutes(): Router {
       const snapshotActualCount = await countProfitabilitySnapshotRows();
       const snapshotIsGloballyPopulated = snapshotActualCount > 0;
 
-      let rows: any[];
-      let usedLiveFallback = false;
-
-      if (snapshotIsGloballyPopulated) {
-        // ── Always serve from snapshot ────────────────────────────────────────
-        // Even if status='building' or 'error', the last stable snapshot is served.
-        // This is the core stability guarantee — no Snowflake reads at request time.
-        const snapshotRows = await getProfitabilitySnapshotRows(cleaned);
-        const snapshotMap = new Map(snapshotRows.map((r) => [r.techLdap.toUpperCase(), r]));
-
-        rows = cleaned.map((ldap) => {
-          const s = snapshotMap.get(ldap);
-          if (!s) return null;
-          return {
-            tech_ldap: s.techLdap,
-            tech_name: s.techName ?? null,
-            tenure_months: s.tenureMonths ?? null,
-            scorecard_score: s.scorecardScore != null ? Number(s.scorecardScore) : null,
-            completes: s.completes ?? 0,
-            total_sos: s.totalSos ?? 0,
-            total_revenue: Number(s.totalRevenue ?? 0),
-            labor_direct: Number(s.laborDirect ?? 0),
-            labor_benefits: Number(s.laborBenefits ?? 0),
-            parts_cogs: Number(s.partsCogs ?? 0),
-            parts_shipping: Number(s.partsShipping ?? 0),
-            fuel_est: Number(s.fuelEst ?? 0),
-            lookback_days: s.lookbackDays ?? 90,
-            working_days: s.workingDays ?? 0,
-            daily_revenue: Number(s.dailyRevenue ?? 0),
-            daily_costs: Number(s.dailyCosts ?? 0),
-            daily_net_before_rental: Number(s.dailyNetBeforeRental ?? 0),
-            daily_net_with_rental: Number(s.dailyNetWithRental ?? 0),
-            daily_ppt_profit: Number(s.dailyPptProfit ?? 0),
-            recommendation: s.recommendation ?? "No Data",
-            new_hire_exempt: s.newHireExempt ?? false,
-            scorecard_exempt: s.scorecardExempt ?? false,
-          };
-        }).filter(Boolean);
-      } else {
-        // ── Day-one bootstrap: global snapshot table is empty ─────────────────
-        // Only reached when no snapshot has ever been successfully written.
-        // If a sync is currently building, tell the UI to retry rather than
-        // making a live Snowflake read against a potentially rebuilding table.
+      if (!snapshotIsGloballyPopulated) {
+        // ── Day-one bootstrap: snapshot table is empty ────────────────────────
+        // No live per-tech fallback (item 5). Trigger a background build (gated by
+        // settle gate), and return 202 so the UI politely retries.
         if (meta && meta.status === "building") {
           const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
           const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
@@ -1116,26 +1082,57 @@ export function registerVrmRoutes(): Router {
             retryAfterSeconds,
           });
         }
-        if (!isSnowflakeConfigured()) {
-          return res.status(202).json({
-            status: "preparing",
-            message: "Profitability snapshot not yet available and Snowflake is not configured.",
-            retryAfterSeconds: 300,
-          });
-        }
-        // Run a single-pass settle gate to ensure IHR is not mid-rebuild.
-        const gateResult = await checkSettleGateOnce();
-        if (!gateResult.settled) {
-          return res.status(202).json({
-            status: "preparing",
-            message: "The profitability data source is still rebuilding. Please try again shortly.",
-            retryAfterSeconds: gateResult.retryAfterSeconds,
-          });
-        }
-        console.warn("[VRM] profitability/check: no snapshot (day-one), settle gate cleared — using live Snowflake call.");
-        rows = await fetchProfitabilityCheck(cleaned);
-        usedLiveFallback = true;
+        // Kick a background build (settle-gated inside runProfitabilitySync).
+        runProfitabilitySync().catch((e: any) =>
+          console.error("[VRM] background day-one snapshot build failed:", e.message),
+        );
+        return res.status(202).json({
+          status: "preparing",
+          message: "The profitability snapshot is being prepared. Please try again shortly.",
+          retryAfterSeconds: 300,
+        });
       }
+
+      // Always serve from snapshot — no Snowflake reads at request time.
+      const snapshotRows = await getProfitabilitySnapshotRows(cleaned);
+      const snapshotMap = new Map(snapshotRows.map((r) => [r.techLdap.toUpperCase(), r]));
+
+      const rows: any[] = cleaned.map((ldap) => {
+        const s = snapshotMap.get(ldap);
+        if (!s) return null;
+        return {
+          tech_ldap: s.techLdap,
+          tech_name: s.techName ?? null,
+          tenure_months: s.tenureMonths ?? null,
+          scorecard_score: s.scorecardScore != null ? Number(s.scorecardScore) : null,
+          completes: s.completes ?? 0,
+          total_sos: s.totalSos ?? 0,
+          total_revenue: Number(s.totalRevenue ?? 0),
+          labor_direct: Number(s.laborDirect ?? 0),
+          labor_benefits: Number(s.laborBenefits ?? 0),
+          parts_cogs: Number(s.partsCogs ?? 0),
+          parts_shipping: Number(s.partsShipping ?? 0),
+          fuel_est: Number(s.fuelEst ?? 0),
+          lookback_days: s.lookbackDays ?? 90,
+          working_days: s.workingDays ?? 0,
+          daily_revenue: Number(s.dailyRevenue ?? 0),
+          daily_costs: Number(s.dailyCosts ?? 0),
+          daily_net_before_rental: Number(s.dailyNetBeforeRental ?? 0),
+          daily_net_with_rental: Number(s.dailyNetWithRental ?? 0),
+          daily_ppt_profit: Number(s.dailyPptProfit ?? 0),
+          recommendation: s.recommendation ?? "No Data",
+          new_hire_exempt: s.newHireExempt ?? false,
+          scorecard_exempt: s.scorecardExempt ?? false,
+          // ── Roster-driven fields (snapshot only) ──────────────────────────
+          empl_status: s.emplStatus ?? null,
+          last_date_worked: s.lastDateWorked ?? null,
+          expected_return_dt: s.expectedReturnDt ?? null,
+          supervisor_name: s.supervisorName ?? null,
+          supervisor_ldap: s.supervisorLdap ?? null,
+          supervisor_phone: s.supervisorPhone ?? null,
+          supervisor_email: s.supervisorEmail ?? null,
+        };
+      }).filter(Boolean);
 
       // ── District/state lookup (local DB) ─────────────────────────────────────
       const districtStateMap = new Map<string, { district: string | null; state: string | null }>();
@@ -1187,24 +1184,9 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] no-data name lookup failed:", err.message);
         }
 
-        // For the day-one live fallback path (Snowflake already used), also probe
-        // punch history to detect "New Hire — Training" techs.  For the stable
-        // snapshot path, always return "No Data" (no extra Snowflake calls at request time).
-        const trainingLdaps = new Set<string>();
-        if (usedLiveFallback && missing.length > 0) {
-          try {
-            const punchRows = await fetchTechPunchHistory(missing, 7);
-            for (const p of punchRows) {
-              const label = (p.latestRawPunchLabel ?? "").toUpperCase();
-              if (label.includes("NEW HIRE TRAINING")) {
-                trainingLdaps.add(p.ldap.toUpperCase());
-              }
-            }
-          } catch (err: any) {
-            console.error("[VRM] new-hire training probe failed:", err.message);
-          }
-        }
-
+        // Per spec item 5: no live Snowflake fallback at request time, so the
+        // training-probe punch query is no longer needed. A missing LDAP simply
+        // means the tech is NOT in the active roster — return "No Data".
         for (const ldap of missing) {
           rows.push({
             tech_ldap: ldap,
@@ -1226,9 +1208,16 @@ export function registerVrmRoutes(): Router {
             daily_net_before_rental: 0,
             daily_net_with_rental: 0,
             daily_ppt_profit: 0,
-            recommendation: trainingLdaps.has(ldap) ? "New Hire — Training" : "No Data",
+            recommendation: "No Data",
             new_hire_exempt: false,
             scorecard_exempt: false,
+            empl_status: null,
+            last_date_worked: null,
+            expected_return_dt: null,
+            supervisor_name: null,
+            supervisor_ldap: null,
+            supervisor_phone: null,
+            supervisor_email: null,
           });
         }
       }
@@ -1264,15 +1253,27 @@ export function registerVrmRoutes(): Router {
         console.error("[VRM] failed to save rental checks:", err.message),
       );
 
-      const coerced = rows.map((r: any) => ({
-        ...r,
-        daily_ppt_profit: r.daily_ppt_profit != null ? Number(r.daily_ppt_profit) : 0,
-      }));
+      const coerced = rows.map((r: any) => {
+        const empl = r.empl_status ? String(r.empl_status).toUpperCase() : null;
+        const onLoa = empl === "L" || empl === "P" || empl === "S";
+        const missingIhrRow =
+          (Number(r.total_sos ?? 0) === 0) && (Number(r.working_days ?? 0) === 0);
+        return {
+          ...r,
+          daily_ppt_profit: r.daily_ppt_profit != null ? Number(r.daily_ppt_profit) : 0,
+          flags: {
+            on_loa: onLoa,
+            empl_status: empl,
+            expected_return_dt: r.expected_return_dt ?? null,
+            last_date_worked: r.last_date_worked ?? null,
+            missing_ihr_row: missingIhrRow,
+          },
+        };
+      });
 
-      // Build snapshotMeta for the UI label.
-      // Return null when the live Snowflake fallback was used (day-one bootstrap),
-      // so the UI correctly shows "Live Snowflake data (snapshot unavailable)".
-      const snapshotMeta = (!usedLiveFallback && meta) ? {
+      // Build snapshotMeta for the UI label.  Snapshot is now the only source
+      // (no live fallback per item 5), so always emit meta when available.
+      const snapshotMeta = meta ? {
         status: meta.status,
         syncedAt: meta.lastSyncCompletedAt ?? null,
         rowCount: snapshotActualCount,
@@ -1355,6 +1356,18 @@ export function registerVrmRoutes(): Router {
           console.error("[VRM] profitability/log immediate tracker sync error:", syncError.message);
           trackerSync = { imported: false, skipped: false, reason: "sync_failed", trackerId: null };
         }
+        // Enqueue supervisor SMS + email (idempotent via UNIQUE(decision_id, channel)).
+        // Worker drains the queue every 30s — see startNotificationDispatcher().
+        enqueueNotificationsForDeny({
+          decisionId: row.id,
+          techLdap: String(techLdap).toUpperCase(),
+          techName: techName ?? null,
+          dailyNetWithRental: dailyNetWithRental ?? null,
+          scorecardScore: scorecardScore ?? null,
+          tenureMonths: tenureMonths ?? null,
+        }).catch((err: any) =>
+          console.error("[VRM] notification enqueue failed:", err?.message ?? err),
+        );
       }
 
       res.json({ ...row, trackerSync });
@@ -2146,6 +2159,69 @@ export function registerVrmRoutes(): Router {
       res.json(row);
     } catch (e: any) {
       console.error("[VRM] rate-config PUT error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ─── Supervisor Email Overrides (item 6 — Settings tab) ─────────────────────
+
+  /**
+   * GET /api/vrm/settings/supervisor-overrides
+   * Lists supervisors discovered in the latest snapshot whose TPMS phone is
+   * missing (so SMS dispatch isn't possible).  Each row carries the current
+   * override email if present, plus the TPMS-side email (when distinct).
+   */
+  router.get("/settings/supervisor-overrides", async (_req, res) => {
+    try {
+      const supervisors = await getSupervisorsNeedingOverride();
+      res.json({ supervisors });
+    } catch (e: any) {
+      console.error("[VRM] supervisor-overrides GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * GET /api/vrm/settings/supervisor-overrides/all
+   * Returns every override row regardless of current snapshot membership
+   * (admin diagnostic — useful for auditing past entries).
+   */
+  router.get("/settings/supervisor-overrides/all", async (_req, res) => {
+    try {
+      const overrides = await getAllSupervisorEmailOverrides();
+      res.json({ overrides });
+    } catch (e: any) {
+      console.error("[VRM] supervisor-overrides all GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * PUT /api/vrm/settings/supervisor-overrides/:ldap
+   * Upserts an override email for a supervisor LDAP.  Email is required and
+   * must look like an email; supervisorName/notes optional.  Stamps
+   * updatedBy from the authenticated user.
+   */
+  router.put("/settings/supervisor-overrides/:ldap", async (req, res) => {
+    try {
+      const ldap = (req.params.ldap || "").trim().toUpperCase();
+      if (!ldap) return res.status(400).json({ error: "ldap path param required" });
+      const { email, supervisorName, notes } = req.body ?? {};
+      const cleanedEmail = typeof email === "string" ? email.trim() : "";
+      if (!cleanedEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanedEmail)) {
+        return res.status(400).json({ error: "valid email is required" });
+      }
+      const updatedBy = (req as any).user?.username ?? null;
+      const row = await upsertSupervisorEmailOverride({
+        supervisorLdap: ldap,
+        supervisorName: supervisorName ?? null,
+        email: cleanedEmail,
+        notes: notes ?? null,
+        updatedBy,
+      });
+      res.json(row);
+    } catch (e: any) {
+      console.error("[VRM] supervisor-overrides PUT error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });

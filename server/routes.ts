@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
 import { initVrmSchema } from "./vrm/init-schema";
+import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
 import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
@@ -550,8 +551,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   try {
     await initVrmSchema();
     const vrmRouter = registerVrmRoutes();
-    app.use("/api/vrm", vrmRouter);
-    console.log("[VRM] Routes mounted at /api/vrm/*");
+    app.use("/api/vrm", requireAuth, vrmRouter);
+    console.log("[VRM] Routes mounted at /api/vrm/* (auth-gated)");
+    // Start the notification dispatcher loop (drains vrm_notifications.queued every 30s).
+    startNotificationDispatcher();
   } catch (e: any) {
     console.error("[VRM] Failed to initialise:", e.message);
   }

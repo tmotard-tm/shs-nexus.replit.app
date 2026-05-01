@@ -16,6 +16,7 @@ import {
   getProfitabilityCacheMeta,
   upsertProfitabilityCacheMeta,
   replaceProfitabilitySnapshot,
+  getAllSupervisorEmailOverrides,
 } from "./storage";
 import type { InsertVrmProfitabilitySnapshot } from "../../shared/vrm-schema";
 
@@ -202,31 +203,59 @@ export async function runProfitabilitySync(): Promise<void> {
     return;
   }
 
+  // Load supervisor email overrides ONCE (small table — keyed by supervisorLdap).
+  // Override email always takes precedence over TPMS COMTTU EMAIL_ADDR per spec item (4).
+  let overrideMap = new Map<string, string>();
+  try {
+    const overrides = await getAllSupervisorEmailOverrides();
+    overrideMap = new Map(
+      overrides
+        .filter((o) => o.email && o.email.trim() !== "")
+        .map((o) => [o.supervisorLdap.toUpperCase(), o.email.trim()])
+    );
+    console.log(`[ProfitabilitySync] Loaded ${overrideMap.size} supervisor email overrides.`);
+  } catch (err: any) {
+    console.warn("[ProfitabilitySync] Could not load supervisor email overrides — using TPMS only:", err.message);
+  }
+
   // Map to insert schema.
-  const snapshotRows: InsertVrmProfitabilitySnapshot[] = rawRows.map((r) => ({
-    techLdap: String(r.tech_ldap ?? "").toUpperCase(),
-    techName: r.tech_name ?? null,
-    tenureMonths: r.tenure_months != null ? Number(r.tenure_months) : null,
-    scorecardScore: r.scorecard_score != null ? String(r.scorecard_score) : null,
-    completes: r.completes != null ? Number(r.completes) : null,
-    totalSos: r.total_sos != null ? Number(r.total_sos) : null,
-    workingDays: r.working_days != null ? Number(r.working_days) : null,
-    totalRevenue: r.total_revenue != null ? String(r.total_revenue) : null,
-    laborDirect: r.labor_direct != null ? String(r.labor_direct) : null,
-    laborBenefits: r.labor_benefits != null ? String(r.labor_benefits) : null,
-    partsCogs: r.parts_cogs != null ? String(r.parts_cogs) : null,
-    partsShipping: r.parts_shipping != null ? String(r.parts_shipping) : null,
-    fuelEst: r.fuel_est != null ? String(r.fuel_est) : null,
-    lookbackDays: r.lookback_days != null ? Number(r.lookback_days) : null,
-    dailyRevenue: r.daily_revenue != null ? String(r.daily_revenue) : null,
-    dailyCosts: r.daily_costs != null ? String(r.daily_costs) : null,
-    dailyNetBeforeRental: r.daily_net_before_rental != null ? String(r.daily_net_before_rental) : null,
-    dailyNetWithRental: r.daily_net_with_rental != null ? String(r.daily_net_with_rental) : null,
-    dailyPptProfit: r.daily_ppt_profit != null ? String(r.daily_ppt_profit) : null,
-    recommendation: r.recommendation ?? null,
-    newHireExempt: r.new_hire_exempt === true,
-    scorecardExempt: r.scorecard_exempt === true,
-  }));
+  const snapshotRows: InsertVrmProfitabilitySnapshot[] = rawRows.map((r) => {
+    const supLdap = r.supervisor_ldap ? String(r.supervisor_ldap).toUpperCase() : null;
+    const overrideEmail = supLdap ? overrideMap.get(supLdap) ?? null : null;
+    const finalEmail = overrideEmail || (r.supervisor_email_tpms ?? null) || null;
+    return {
+      techLdap: String(r.tech_ldap ?? "").toUpperCase(),
+      techName: r.tech_name ?? null,
+      tenureMonths: r.tenure_months != null ? Number(r.tenure_months) : null,
+      scorecardScore: r.scorecard_score != null ? String(r.scorecard_score) : null,
+      completes: r.completes != null ? Number(r.completes) : null,
+      totalSos: r.total_sos != null ? Number(r.total_sos) : null,
+      workingDays: r.working_days != null ? Number(r.working_days) : null,
+      totalRevenue: r.total_revenue != null ? String(r.total_revenue) : null,
+      laborDirect: r.labor_direct != null ? String(r.labor_direct) : null,
+      laborBenefits: r.labor_benefits != null ? String(r.labor_benefits) : null,
+      partsCogs: r.parts_cogs != null ? String(r.parts_cogs) : null,
+      partsShipping: r.parts_shipping != null ? String(r.parts_shipping) : null,
+      fuelEst: r.fuel_est != null ? String(r.fuel_est) : null,
+      lookbackDays: r.lookback_days != null ? Number(r.lookback_days) : null,
+      dailyRevenue: r.daily_revenue != null ? String(r.daily_revenue) : null,
+      dailyCosts: r.daily_costs != null ? String(r.daily_costs) : null,
+      dailyNetBeforeRental: r.daily_net_before_rental != null ? String(r.daily_net_before_rental) : null,
+      dailyNetWithRental: r.daily_net_with_rental != null ? String(r.daily_net_with_rental) : null,
+      dailyPptProfit: r.daily_ppt_profit != null ? String(r.daily_ppt_profit) : null,
+      recommendation: r.recommendation ?? null,
+      newHireExempt: r.new_hire_exempt === true,
+      scorecardExempt: r.scorecard_exempt === true,
+      // Roster-driven fields (item 1+2)
+      emplStatus: r.empl_status ?? null,
+      lastDateWorked: r.last_date_worked ?? null,
+      expectedReturnDt: r.expected_return_dt ?? null,
+      supervisorName: r.supervisor_name ?? null,
+      supervisorLdap: supLdap,
+      supervisorPhone: r.supervisor_phone ?? null,
+      supervisorEmail: finalEmail,
+    };
+  });
 
   // Atomically replace the snapshot.
   try {

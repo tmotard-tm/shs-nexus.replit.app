@@ -252,6 +252,20 @@ interface ProfitRow {
   union_exempt: boolean;
   district: string | null;
   state: string | null;
+  empl_status?: string | null;
+  last_date_worked?: string | null;
+  expected_return_dt?: string | null;
+  supervisor_name?: string | null;
+  supervisor_ldap?: string | null;
+  supervisor_phone?: string | null;
+  supervisor_email?: string | null;
+  flags?: {
+    on_loa: boolean;
+    empl_status: string | null;
+    expected_return_dt: string | null;
+    last_date_worked: string | null;
+    missing_ihr_row: boolean;
+  };
 }
 
 interface DecisionRow {
@@ -1241,8 +1255,64 @@ export default function NewRentals() {
                 {evaluatedRows.map((row) => {
                   const be = breakeven(row);
                   const isNoData = row.recommendation === "No Data" || row.recommendation === "New Hire — Training";
+                  const flags = row.flags;
+                  const onLoa = !!flags?.on_loa;
+                  const loaLabel = onLoa
+                    ? (flags?.empl_status === "L"
+                        ? "On Leave"
+                        : flags?.empl_status === "P"
+                          ? "Paid Leave"
+                          : flags?.empl_status === "S"
+                            ? "Suspended"
+                            : "On Leave")
+                    : null;
                   return (
                     <ReactFragment key={row.tech_ldap}>
+                      {onLoa && (
+                        <tr key={`loa-${row.tech_ldap}`}>
+                          <td colSpan={14} style={{ padding: 0, borderBottom: 0 }}>
+                            <div
+                              role="alert"
+                              style={{
+                                margin: "8px 0 0 0",
+                                padding: "10px 14px",
+                                backgroundColor: "#FEF3C7",
+                                border: "1px solid #F59E0B",
+                                borderLeft: "4px solid #B45309",
+                                borderRadius: 6,
+                                color: "#78350F",
+                                fontFamily: fonts.dmSans,
+                                fontSize: 12,
+                                lineHeight: 1.4,
+                              }}
+                            >
+                              <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 4 }}>
+                                <TriangleAlert size={14} color="#B45309" />
+                                <span>{loaLabel} — {row.tech_name ?? row.tech_ldap} ({row.tech_ldap})</span>
+                              </div>
+                              <div style={{ fontSize: 11 }}>
+                                {flags?.last_date_worked && (
+                                  <span style={{ marginRight: 16 }}>
+                                    Last date worked:&nbsp;
+                                    <span style={{ fontFamily: fonts.jetbrains }}>{flags.last_date_worked}</span>
+                                  </span>
+                                )}
+                                {flags?.expected_return_dt && (
+                                  <span>
+                                    Expected return:&nbsp;
+                                    <span style={{ fontFamily: fonts.jetbrains }}>{flags.expected_return_dt}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: 11, marginTop: 4 }}>
+                                Tech is currently on leave/suspension per the active roster.
+                                Confirm return-to-work status with HR before issuing a rental.
+                                Approve/Deny actions remain available below.
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       <tr
                         style={{
                           transition: "background 100ms",

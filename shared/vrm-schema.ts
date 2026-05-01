@@ -11,6 +11,8 @@ import {
   date,
   pgEnum,
   index,
+  jsonb,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
@@ -665,6 +667,14 @@ export const vrmProfitabilitySnapshot = pgTable("vrm_profitability_snapshot", {
   recommendation: varchar("recommendation", { length: 50 }),
   newHireExempt: boolean("new_hire_exempt").notNull().default(false),
   scorecardExempt: boolean("scorecard_exempt").notNull().default(false),
+  // Roster-driven snapshot fields (NS_TECH_ACTIVE_ROSTER_DAILY_VW + COMTTU_TECH_UN supervisor join)
+  emplStatus: varchar("empl_status", { length: 4 }),
+  lastDateWorked: date("last_date_worked"),
+  expectedReturnDt: date("expected_return_dt"),
+  supervisorName: varchar("supervisor_name", { length: 255 }),
+  supervisorLdap: varchar("supervisor_ldap", { length: 50 }),
+  supervisorPhone: varchar("supervisor_phone", { length: 50 }),
+  supervisorEmail: varchar("supervisor_email", { length: 255 }),
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_profitability_snapshot_ldap_idx").on(table.techLdap),
@@ -674,3 +684,51 @@ export const insertVrmProfitabilitySnapshotSchema = createInsertSchema(vrmProfit
 export type VrmProfitabilitySnapshot = typeof vrmProfitabilitySnapshot.$inferSelect;
 export type InsertVrmProfitabilitySnapshot = z.infer<typeof insertVrmProfitabilitySnapshotSchema>;
 export type InsertVrmRateConfigHistory = z.infer<typeof insertVrmRateConfigHistorySchema>;
+
+// ─── Notifications (DENY-only SMS + email outbound) ───────────────────────────
+
+export const vrmNotificationChannelEnum = pgEnum("vrm_notification_channel", [
+  "sms",
+  "email",
+]);
+
+export const vrmNotificationStatusEnum = pgEnum("vrm_notification_status", [
+  "queued",
+  "sent",
+  "failed",
+  "skipped",
+]);
+
+export const vrmNotifications = pgTable("vrm_notifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  decisionId: varchar("decision_id").notNull().references(() => vrmRentalDecisions.id),
+  channel: vrmNotificationChannelEnum("channel").notNull(),
+  recipient: varchar("recipient", { length: 255 }),
+  payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
+  status: vrmNotificationStatusEnum("status").notNull().default("queued"),
+  error: text("error"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  sentAt: timestamp("sent_at"),
+}, (table) => ({
+  decisionChannelUq: uniqueIndex("vrm_notifications_decision_channel_uq").on(table.decisionId, table.channel),
+  statusIdx: index("vrm_notifications_status_idx").on(table.status),
+}));
+
+export const insertVrmNotificationSchema = createInsertSchema(vrmNotifications).omit({ id: true, createdAt: true, sentAt: true });
+export type VrmNotification = typeof vrmNotifications.$inferSelect;
+export type InsertVrmNotification = z.infer<typeof insertVrmNotificationSchema>;
+
+// ─── Supervisor Email Overrides ───────────────────────────────────────────────
+
+export const vrmSupervisorEmailOverrides = pgTable("vrm_supervisor_email_overrides", {
+  supervisorLdap: varchar("supervisor_ldap", { length: 50 }).primaryKey(),
+  supervisorName: varchar("supervisor_name", { length: 255 }),
+  email: varchar("email", { length: 255 }).notNull(),
+  notes: text("notes"),
+  updatedBy: varchar("updated_by", { length: 255 }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertVrmSupervisorEmailOverrideSchema = createInsertSchema(vrmSupervisorEmailOverrides).omit({ updatedAt: true });
+export type VrmSupervisorEmailOverride = typeof vrmSupervisorEmailOverrides.$inferSelect;
+export type InsertVrmSupervisorEmailOverride = z.infer<typeof insertVrmSupervisorEmailOverrideSchema>;

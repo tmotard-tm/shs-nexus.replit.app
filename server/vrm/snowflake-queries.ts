@@ -340,6 +340,15 @@ export interface ProfitabilityRow {
   recommendation: "Approve" | "Deny" | "No Data";
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
+  // ── Roster-driven extensions (populated by fetchAllProfitabilityRows; absent
+  //    from the per-tech fetchProfitabilityCheck path which doesn't join roster). ──
+  empl_status?: string | null;            // 'A' | 'L' | 'P' | 'S' (NS_TECH_ACTIVE_ROSTER_DAILY_VW)
+  last_date_worked?: string | null;       // YYYY-MM-DD
+  expected_return_dt?: string | null;     // YYYY-MM-DD
+  supervisor_name?: string | null;
+  supervisor_ldap?: string | null;
+  supervisor_phone?: string | null;       // COMTTU MBL_PH_NO (TPMS source-of-truth)
+  supervisor_email_tpms?: string | null;  // COMTTU EMAIL_ADDR (override applied during write)
 }
 
 /**
@@ -503,8 +512,17 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
 }
 
 /**
- * Bulk version of fetchProfitabilityCheck — returns ALL techs with IHR or DCR data in the
- * last 90 days, with no LDAP filter.  Used by the daily snapshot sync job only.
+ * Roster-driven bulk version — returns ONE ROW PER ACTIVE-ROSTER TECH
+ * (NS_TECH_ACTIVE_ROSTER_DAILY_VW filtered to EMPL_STATUS IN ('A','L','P','S')).
+ *
+ * Per spec items (1)+(2): the roster is the universe driver; IHR/DCR/COMTTU
+ * are LEFT-JOINed so techs without financials still show up (they'll be flagged
+ * `missing_ihr_row` downstream and recommendation='No Data').
+ *
+ * Calculation logic is IDENTICAL to fetchProfitabilityCheck — only the FROM
+ * clause differs (roster left side vs. financials full-outer-joined to scored).
+ *
+ * Used by the daily snapshot sync job only.
  */
 export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
   if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
@@ -523,9 +541,44 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
   }
 
   const rows = await svc.executeQuery(`
-    WITH financials AS (
+    WITH roster AS (
       SELECT
-        f.TECH_LDAP,
+        UPPER(TRIM(ENTERPRISE_ID))               AS LDAP_ID,
+        EMPL_NAME,
+        EMPL_STATUS,
+        LAST_DATE_WORKED,
+        EXPECTED_RETURN_DT,
+        SUPERVISOR_NAME,
+        UPPER(TRIM(SUPERVISOR_ENTERPRISE_ID))    AS SUPERVISOR_LDAP
+      FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_ACTIVE_ROSTER_DAILY_VW
+      WHERE EMPL_STATUS IN ('A','L','P','S')
+        AND ENTERPRISE_ID IS NOT NULL
+        AND TRIM(ENTERPRISE_ID) <> ''
+    ),
+    -- COMTTU dedup: one row per LDAP_ID, preferring most recent UPD_TS, then rows
+    -- that actually have a phone/email populated. Used for both tech and supervisor.
+    comttu_dedup AS (
+      SELECT *
+      FROM (
+        SELECT
+          UPPER(TRIM(LDAP_ID)) AS LDAP_ID_NORM,
+          MBL_PH_NO,
+          EMAIL_ADDR,
+          ROW_NUMBER() OVER (
+            PARTITION BY UPPER(TRIM(LDAP_ID))
+            ORDER BY UPD_TS DESC NULLS LAST,
+                     CASE WHEN MBL_PH_NO IS NOT NULL AND TRIM(MBL_PH_NO) <> '' THEN 0 ELSE 1 END,
+                     CASE WHEN EMAIL_ADDR IS NOT NULL AND TRIM(EMAIL_ADDR) <> '' THEN 0 ELSE 1 END,
+                     LDAP_ID
+          ) AS rn
+        FROM PRD_TPMS.HSTECH.COMTTU_TECH_UN
+        WHERE LDAP_ID IS NOT NULL AND TRIM(LDAP_ID) <> ''
+      )
+      WHERE rn = 1
+    ),
+    financials AS (
+      SELECT
+        UPPER(TRIM(f.TECH_LDAP))                                         AS TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
         COUNT(*)                                                         AS total_sos,
         COUNT(DISTINCT CASE
@@ -543,11 +596,11 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       WHERE f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
         AND f.SO_STS_DT <= CURRENT_DATE
         AND f.TECH_LDAP IS NOT NULL AND f.TECH_LDAP != ''
-      GROUP BY f.TECH_LDAP
+      GROUP BY UPPER(TRIM(f.TECH_LDAP))
     ),
     dcr AS (
       SELECT
-        d.LDAP_ID,
+        UPPER(TRIM(d.LDAP_ID))                  AS LDAP_ID,
         COALESCE(MAX(d.EMP_FULL_NM), d.LDAP_ID) AS tech_name,
         ROUND(MAX(d.TENURE_YRS) * 12, 0)         AS tenure_months,
         DIV0(SUM(d.COMP_PCT_NUM), SUM(d.COMP_PCT_DEN))                 AS completion_pct,
@@ -563,7 +616,7 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
           SELECT MIN(ACCTG_DT) FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW
           WHERE ACCTG_YR = (SELECT ACCTG_YR FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW WHERE ACCTG_DT = CURRENT_DATE)
         )
-      GROUP BY d.LDAP_ID
+      GROUP BY UPPER(TRIM(d.LDAP_ID)), d.LDAP_ID
     ),
     scored AS (
       SELECT
@@ -578,8 +631,8 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       FROM dcr
     )
     SELECT
-      COALESCE(fin.TECH_LDAP, sc.LDAP_ID)                              AS "tech_ldap",
-      sc.tech_name                                                       AS "tech_name",
+      r.LDAP_ID                                                          AS "tech_ldap",
+      COALESCE(r.EMPL_NAME, sc.tech_name, r.LDAP_ID)                    AS "tech_name",
       sc.tenure_months                                                   AS "tenure_months",
       sc.scorecard_score                                                 AS "scorecard_score",
       COALESCE(fin.completes, 0)                                         AS "completes",
@@ -639,9 +692,19 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
             - COALESCE(fin.parts_shipping,0) - COALESCE(fin.completes,0)*${fuelPerComplete},
                COALESCE(fin.working_days, 0)) - ${rentalPerDay} < 0
         THEN TRUE ELSE FALSE
-      END                                                                  AS "scorecard_exempt"
-    FROM financials fin
-    FULL OUTER JOIN scored sc ON fin.TECH_LDAP = sc.LDAP_ID
+      END                                                                  AS "scorecard_exempt",
+      -- ── Roster-driven extensions (item 1+2) ────────────────────────────────
+      r.EMPL_STATUS                                                      AS "empl_status",
+      TO_CHAR(r.LAST_DATE_WORKED,   'YYYY-MM-DD')                       AS "last_date_worked",
+      TO_CHAR(r.EXPECTED_RETURN_DT, 'YYYY-MM-DD')                       AS "expected_return_dt",
+      r.SUPERVISOR_NAME                                                  AS "supervisor_name",
+      r.SUPERVISOR_LDAP                                                  AS "supervisor_ldap",
+      supv.MBL_PH_NO                                                     AS "supervisor_phone",
+      supv.EMAIL_ADDR                                                    AS "supervisor_email_tpms"
+    FROM roster r
+    LEFT JOIN financials fin ON fin.TECH_LDAP = r.LDAP_ID
+    LEFT JOIN scored     sc  ON sc.LDAP_ID    = r.LDAP_ID
+    LEFT JOIN comttu_dedup supv ON supv.LDAP_ID_NORM = r.SUPERVISOR_LDAP
     ORDER BY "daily_net_with_rental" ASC NULLS LAST
   `) as ProfitabilityRow[];
 
