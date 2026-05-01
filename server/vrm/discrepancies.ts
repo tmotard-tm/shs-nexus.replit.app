@@ -60,6 +60,33 @@ function buildFullName(first: string | null, last: string | null): string {
   return `${(first ?? "").trim()} ${(last ?? "").trim()}`.trim();
 }
 
+// Suffix tokens we ignore when comparing names.
+const NAME_SUFFIXES = new Set(["JR", "SR", "II", "III", "IV", "V"]);
+
+/**
+ * Build a canonical, order-independent comparison key for a person's name.
+ *
+ * Handles common variations between source systems:
+ *   - "Mudget, Joshua"  →  "JOSHUA|MUDGET"
+ *   - "Joshua Mudget"   →  "JOSHUA|MUDGET"
+ *   - "MUDGET, JOSHUA M" → "JOSHUA|MUDGET"   (middle initial dropped)
+ *   - "Joshua Mudget Jr" → "JOSHUA|MUDGET"   (suffix dropped)
+ *
+ * Returns "" when the name has no comparable tokens (treated as "unknown",
+ * which the caller skips so it doesn't flag).
+ */
+export function normalizeNameKey(s: string | null | undefined): string {
+  if (!s) return "";
+  // Strip everything that isn't a letter (commas, periods, hyphens, digits).
+  const tokens = s
+    .toUpperCase()
+    .replace(/[^A-Z\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 1 && !NAME_SUFFIXES.has(t));
+  if (tokens.length === 0) return "";
+  return tokens.sort().join("|");
+}
+
 export async function getDiscrepancies(): Promise<DiscrepancyResponse> {
   const [requestsResult, trackerResult, tpmsResult] = await Promise.all([
     db.execute(sql`
@@ -130,9 +157,11 @@ export async function getDiscrepancies(): Promise<DiscrepancyResponse> {
         issues.push("truck_mismatch");
       }
 
-      const vrmNameN = norm(vrmName);
-      const tpmsNameN = norm(tpmsName);
-      if (vrmNameN && tpmsNameN && vrmNameN !== tpmsNameN) {
+      // Compare names by canonical token-set so "Mudget, Joshua" and
+      // "Joshua Mudget" (and middle initials / suffixes) are treated as equal.
+      const vrmNameKey = normalizeNameKey(vrmName);
+      const tpmsNameKey = normalizeNameKey(tpmsName);
+      if (vrmNameKey && tpmsNameKey && vrmNameKey !== tpmsNameKey) {
         issues.push("name_mismatch");
       }
     }
