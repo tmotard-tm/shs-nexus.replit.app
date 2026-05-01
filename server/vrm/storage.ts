@@ -1831,6 +1831,18 @@ export async function replaceProfitabilitySnapshot(
 }
 
 /**
+ * Returns the total number of rows currently in vrm_profitability_snapshot.
+ * Used by the request path to determine whether any stable snapshot data exists,
+ * independent of cache-meta.rowCount (which is null during building/error states).
+ */
+export async function countProfitabilitySnapshotRows(): Promise<number> {
+  const [{ total }] = await db
+    .select({ total: count() })
+    .from(vrmProfitabilitySnapshot);
+  return Number(total ?? 0);
+}
+
+/**
  * Returns snapshot rows for the given list of LDAPs (upper-cased).
  */
 export async function getProfitabilitySnapshotRows(

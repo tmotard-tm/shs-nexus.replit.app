@@ -63,6 +63,7 @@ import {
   upsertRateConfig,
   getProfitabilityCacheMeta,
   getProfitabilitySnapshotRows,
+  countProfitabilitySnapshotRows,
 } from "./storage";
 import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchProfitabilityCheck, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
@@ -1057,11 +1058,13 @@ export function registerVrmRoutes(): Router {
       // ── Snapshot path ────────────────────────────────────────────────────────
       const meta = await getProfitabilityCacheMeta();
 
-      // The global snapshot is considered populated if at least one row has ever been written.
-      // Building/error status does NOT prevent serving the existing stable data.
-      const snapshotIsGloballyPopulated = !!(meta && (meta.rowCount ?? 0) > 0);
+      // Count rows directly from the snapshot table — never rely on meta.rowCount,
+      // which is set to null during building/error states even when stable rows exist.
+      const snapshotActualCount = await countProfitabilitySnapshotRows();
+      const snapshotIsGloballyPopulated = snapshotActualCount > 0;
 
       let rows: any[];
+      let usedLiveFallback = false;
 
       if (snapshotIsGloballyPopulated) {
         // ── Always serve from snapshot ────────────────────────────────────────
@@ -1131,6 +1134,7 @@ export function registerVrmRoutes(): Router {
         }
         console.warn("[VRM] profitability/check: no snapshot (day-one), settle gate cleared — using live Snowflake call.");
         rows = await fetchProfitabilityCheck(cleaned);
+        usedLiveFallback = true;
       }
 
       // ── District/state lookup (local DB) ─────────────────────────────────────
@@ -1248,10 +1252,12 @@ export function registerVrmRoutes(): Router {
       }));
 
       // Build snapshotMeta for the UI label.
-      const snapshotMeta = meta ? {
+      // Return null when the live Snowflake fallback was used (day-one bootstrap),
+      // so the UI correctly shows "Live Snowflake data (snapshot unavailable)".
+      const snapshotMeta = (!usedLiveFallback && meta) ? {
         status: meta.status,
         syncedAt: meta.lastSyncCompletedAt ?? null,
-        rowCount: meta.rowCount ?? null,
+        rowCount: snapshotActualCount,
         sourceLastAltered: meta.sourceSnowflakeLastAltered ?? null,
       } : null;
 
