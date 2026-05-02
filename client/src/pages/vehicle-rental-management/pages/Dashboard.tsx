@@ -9,6 +9,7 @@ import { DiscrepancySummaryBanner, DiscrepancyFlag, useDiscrepancies } from "../
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { formatPersonNameOr } from "../lib/format-name";
 import ExcelJS from "exceljs";
 import { addJsonWorksheet, downloadExcelWorkbook } from "@/lib/xlsx-utils";
 import { format as formatDate } from "date-fns";
@@ -892,7 +893,7 @@ export default function Dashboard() {
                   >
                     <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
                       <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>
-                        {tech.name}
+                        {formatPersonNameOr(tech.name, tech.ldap ?? "—")}
                       </div>
                       <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted, marginTop: 2, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         <span>{tech.ldap ?? "no LDAP"}</span>

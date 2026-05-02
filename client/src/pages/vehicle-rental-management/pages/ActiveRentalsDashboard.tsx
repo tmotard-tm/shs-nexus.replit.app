@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
@@ -1025,7 +1026,7 @@ export default function ActiveRentalsDashboard() {
                             {t.techState && <div className="text-[10px] text-muted-foreground mt-0.5">{t.techState}</div>}
                           </td>
 
-                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>{t.techName ?? enr?.techName ?? "—"}</td>
+                          <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>{formatPersonNameOr(t.techName ?? enr?.techName, "—")}</td>
 
                           {/* Combined Status pill — Main + Sub. Trigger is invisible
                               so the StatusBadge IS the editable element (mirror of
@@ -1268,7 +1269,7 @@ function exportToCsv(
       ? `${adjNetRaw < 0 ? "-" : "+"}${Math.abs(adjNetRaw)}`
       : "";
     const cells = [
-      t.truckNumber, t.techName ?? enr?.techName ?? "", enr?.enterpriseId ?? "",
+      t.truckNumber, formatPersonName(t.techName ?? enr?.techName), enr?.enterpriseId ?? "",
       enr?.district ?? "", t.mainStatus ?? "", t.subStatus ?? "", t.shsOwner ?? "",
       t.datePutInRepair ?? "", t.holmanRegExpiry ?? "",
       yn(t.repairCompleted), yn(t.inAms), yn(t.pickUpSlotBooked), yn(t.rentalReturned), yn(t.vanPickedUp),

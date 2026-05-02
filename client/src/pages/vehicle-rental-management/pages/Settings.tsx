@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle, MessageSquare, RotateCcw } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+import { formatPersonName } from "../lib/format-name";
 
 interface RateConfig {
   key: string;
@@ -294,7 +295,7 @@ function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
     <tr>
       <td style={cellStyle}>
         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          <span style={{ fontWeight: 500 }}>{row.supervisorName ?? "—"}</span>
+          <span style={{ fontWeight: 500 }}>{row.supervisorName ? formatPersonName(row.supervisorName) : "—"}</span>
           <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
             {row.supervisorLdap}
           </span>

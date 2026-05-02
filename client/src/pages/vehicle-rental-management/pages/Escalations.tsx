@@ -5,6 +5,7 @@ import { StatCard } from "../components/stat-card";
 import { StatusPill } from "../components/status-pill";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+import { formatPersonNameOr } from "../lib/format-name";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -157,7 +158,7 @@ function EpvSection({ rows }: { rows: EscalationRow[] }) {
             style={{ border: `1px solid ${colors.red}`, backgroundColor: colors.redLight }}
           >
             <div>
-              <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{row.tech.name}</div>
+              <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{formatPersonNameOr(row.tech.name, row.tech.ldap)}</div>
               <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>{row.tech.ldap}</div>
               {row.escalation.carlOutcomeNotes && (
                 <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, marginTop: 4 }}>"{row.escalation.carlOutcomeNotes}"</div>
@@ -286,7 +287,7 @@ export default function Escalations() {
                     onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.backgroundColor = "transparent"; }}
                   >
                     <td style={{ padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>
-                      <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{row.tech.name}</div>
+                      <div style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 14, color: colors.ink }}>{formatPersonNameOr(row.tech.name, row.tech.ldap)}</div>
                       <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>{row.tech.ldap}</div>
                     </td>
                     <td style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft, padding: "12px 16px", borderBottom: `1px solid ${colors.rule}` }}>

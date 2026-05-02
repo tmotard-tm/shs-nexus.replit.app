@@ -1013,11 +1013,83 @@ export async function addRentalDecision(data: InsertVrmRentalDecision) {
 }
 
 export async function listRentalDecisions(limit = 50) {
-  return db
-    .select()
+  // Decision rows + their tech's CURRENT supervisor (from the daily snapshot)
+  // + the most-recent SMS notification status (channel='sms') so the UI can
+  // render "who was the supervisor" and "did the SMS go out".
+  //
+  // Snapshot join is by tech_ldap (a tech may not be in the snapshot if
+  // they fell out of the daily roster — supervisor cells stay null and the
+  // UI renders "—").
+  const rows = await db
+    .select({
+      id: vrmRentalDecisions.id,
+      techLdap: vrmRentalDecisions.techLdap,
+      techName: vrmRentalDecisions.techName,
+      dailyNetWithRental: vrmRentalDecisions.dailyNetWithRental,
+      recommendation: vrmRentalDecisions.recommendation,
+      decision: vrmRentalDecisions.decision,
+      decidedByName: vrmRentalDecisions.decidedByName,
+      notes: vrmRentalDecisions.notes,
+      scorecardScore: vrmRentalDecisions.scorecardScore,
+      tenureMonths: vrmRentalDecisions.tenureMonths,
+      createdAt: vrmRentalDecisions.createdAt,
+      smsSentAt: vrmRentalDecisions.smsSentAt,
+      smsResponseStatus: vrmRentalDecisions.smsResponseStatus,
+      byovEnrolled: vrmRentalDecisions.byovEnrolled,
+      returnedRental: vrmRentalDecisions.returnedRental,
+      rentalReturnDate: vrmRentalDecisions.rentalReturnDate,
+      state: vrmRentalDecisions.state,
+      district: vrmRentalDecisions.district,
+      completes: vrmRentalDecisions.completes,
+      dailyRevenue: vrmRentalDecisions.dailyRevenue,
+      dailyCosts: vrmRentalDecisions.dailyCosts,
+      dailyNetBeforeRental: vrmRentalDecisions.dailyNetBeforeRental,
+      dailyPptProfit: vrmRentalDecisions.dailyPptProfit,
+      // Supervisor (current) — from snapshot
+      supervisorName: vrmProfitabilitySnapshot.supervisorName,
+      supervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
+      supervisorPhone: vrmProfitabilitySnapshot.supervisorPhone,
+    })
     .from(vrmRentalDecisions)
+    .leftJoin(
+      vrmProfitabilitySnapshot,
+      eq(vrmProfitabilitySnapshot.techLdap, vrmRentalDecisions.techLdap),
+    )
     .orderBy(desc(vrmRentalDecisions.createdAt))
     .limit(limit);
+
+  if (rows.length === 0) return [];
+
+  // Pull supervisor SMS notification status per decision (one row per decision
+  // since UNIQUE(decision_id, channel) is enforced in vrm_notifications).
+  const ids = rows.map((r) => r.id);
+  const smsRows = await db
+    .select({
+      decisionId: vrmNotifications.decisionId,
+      recipient: vrmNotifications.recipient,
+      status: vrmNotifications.status,
+      sentAt: vrmNotifications.sentAt,
+      error: vrmNotifications.error,
+    })
+    .from(vrmNotifications)
+    .where(
+      and(
+        inArray(vrmNotifications.decisionId, ids),
+        eq(vrmNotifications.channel, "sms"),
+      ),
+    );
+  const smsByDecision = new Map(smsRows.map((n) => [n.decisionId, n]));
+
+  return rows.map((r) => {
+    const sms = smsByDecision.get(r.id);
+    return {
+      ...r,
+      supervisorSmsRecipient: sms?.recipient ?? null,
+      supervisorSmsStatus: sms?.status ?? null,
+      supervisorSmsSentAt: sms?.sentAt ?? null,
+      supervisorSmsError: sms?.error ?? null,
+    };
+  });
 }
 
 export async function getRentalDecision(id: string) {

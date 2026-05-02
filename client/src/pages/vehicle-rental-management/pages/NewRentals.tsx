@@ -5,6 +5,7 @@ import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 
 // ─── Tech search autocomplete ─────────────────────────────────────────────────
 // Unified fuzzy search against tpms_tech_profiles — one combo-box that matches
@@ -294,6 +295,15 @@ interface DecisionRow {
   returnedRental: boolean;
   rentalReturnDate: string | null;
   createdAt: string;
+  // Joined from the daily snapshot — current supervisor for this tech.
+  supervisorName: string | null;
+  supervisorLdap: string | null;
+  supervisorPhone: string | null;
+  // Joined from vrm_notifications (channel='sms') — supervisor SMS status.
+  supervisorSmsRecipient: string | null;
+  supervisorSmsStatus: string | null; // queued | sent | failed | skipped
+  supervisorSmsSentAt: string | null;
+  supervisorSmsError: string | null;
 }
 
 interface DecisionAction {
@@ -331,6 +341,81 @@ const fmt$ = (v: number | null | undefined) =>
 
 const fmtInt = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-US");
+
+// Renders the supervisor SMS status pill in the Decision Log.  The status
+// comes from vrm_notifications (channel='sms') joined onto each decision in
+// listRentalDecisions().  Approve decisions never trigger an SMS so we skip
+// the pill there and just render an em-dash.
+function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
+  const isApprove = decision.decision === "approved" || decision.recommendation === "Approve";
+  if (isApprove) {
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+  const status = decision.supervisorSmsStatus;
+  const recipient = decision.supervisorSmsRecipient;
+  const sentAt = decision.supervisorSmsSentAt;
+  const error = decision.supervisorSmsError;
+
+  // No notification row found at all (legacy deny decisions before notifier
+  // existed, or supervisor lookup raced ahead of the snapshot row).
+  if (!status) {
+    if (!decision.supervisorPhone) {
+      return (
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, fontStyle: "italic" }}>
+          No supervisor phone
+        </span>
+      );
+    }
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+
+  const cfg = ((): { fg: string; bg: string; label: string } => {
+    switch (status) {
+      case "sent":
+        return { fg: "#0D9668", bg: "#ECFDF5", label: sentAt ? `Sent ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Sent" };
+      case "queued":
+        return { fg: "#B45309", bg: "#FEF3C7", label: "Queued" };
+      case "failed":
+        return { fg: colors.red, bg: colors.redLight, label: "Failed" };
+      case "skipped":
+        return { fg: colors.inkMuted, bg: colors.surface, label: "Skipped" };
+      default:
+        return { fg: colors.inkMuted, bg: colors.surface, label: status };
+    }
+  })();
+
+  const tooltip = [
+    recipient ? `To: ${recipient}` : null,
+    sentAt ? `Sent: ${new Date(sentAt).toLocaleString()}` : null,
+    error ? `Error: ${error}` : null,
+  ].filter(Boolean).join("\n");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }} title={tooltip || undefined}>
+      <span
+        style={{
+          display: "inline-block",
+          fontFamily: fonts.dmSans,
+          fontWeight: 500,
+          fontSize: 11,
+          color: cfg.fg,
+          backgroundColor: cfg.bg,
+          padding: "2px 8px",
+          borderRadius: 4,
+          whiteSpace: "nowrap",
+          alignSelf: "flex-start",
+        }}
+      >
+        {cfg.label}
+      </span>
+      {recipient && (
+        <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
+          {recipient}
+        </span>
+      )}
+    </div>
+  );
+}
 
 function RecPill({ rec }: { rec: string }) {
   const cfgMap: Record<string, { fg: string; bg: string }> = {
@@ -597,7 +682,7 @@ function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onC
         <div style={{ padding: "20px 24px", borderBottom: `1px solid ${colors.rule}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
           <div>
             <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-              {decision.techName ?? decision.techLdap}
+              {formatPersonNameOr(decision.techName, decision.techLdap)}
             </h2>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
               <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{decision.techLdap}</span>
@@ -1463,6 +1548,7 @@ export default function NewRentals() {
                 <tr>
                   <SortableTh col="ldap"           label="LDAP"            current={evalSort} onChange={setEvalSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={evalSort} onChange={setEvalSort} style={thStyle} />
+                  <th style={thStyle}>Supervisor</th>
                   <SortableTh col="state"          label="State"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
@@ -1496,7 +1582,7 @@ export default function NewRentals() {
                     <ReactFragment key={row.tech_ldap}>
                       {onLoa && (
                         <tr key={`loa-${row.tech_ldap}`}>
-                          <td colSpan={14} style={{ padding: 0, borderBottom: 0 }}>
+                          <td colSpan={15} style={{ padding: 0, borderBottom: 0 }}>
                             <div
                               role="alert"
                               style={{
@@ -1514,7 +1600,7 @@ export default function NewRentals() {
                             >
                               <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 4 }}>
                                 <TriangleAlert size={14} color="#B45309" />
-                                <span>{loaLabel} — {row.tech_name ?? row.tech_ldap} ({row.tech_ldap})</span>
+                                <span>{loaLabel} — {formatPersonNameOr(row.tech_name, row.tech_ldap)} ({row.tech_ldap})</span>
                               </div>
                               <div style={{ fontSize: 11 }}>
                                 {flags?.last_date_worked && (
@@ -1551,7 +1637,21 @@ export default function NewRentals() {
                           <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
                         </td>
                         <td style={tdStyle}>
-                          <span style={{ fontWeight: 500 }}>{row.tech_name ?? "—"}</span>
+                          <span style={{ fontWeight: 500 }}>{formatPersonNameOr(row.tech_name, "—")}</span>
+                        </td>
+                        <td style={tdStyle}>
+                          {row.supervisor_name ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                              <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(row.supervisor_name)}</span>
+                              {row.supervisor_ldap && (
+                                <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
+                                  {row.supervisor_ldap}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ color: colors.inkMuted }}>—</span>
+                          )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
                           {row.state ?? "—"}
@@ -1847,6 +1947,8 @@ export default function NewRentals() {
                 <tr>
                   <SortableTh col="ldap"           label="LDAP"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <th style={thStyle}>Supervisor</th>
+                  <th style={thStyle}>Supervisor SMS</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
@@ -1892,15 +1994,25 @@ export default function NewRentals() {
                           <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{d.techLdap}</span>
                           <ChevronRight size={12} style={{ color: colors.inkMuted, flexShrink: 0 }} />
                         </div>
-                        {d.smsSentAt && (
-                          <div style={{ marginTop: 3 }}>
-                            <span style={{ fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 10, color: "#0D9668", backgroundColor: "#ECFDF5", padding: "1px 6px", borderRadius: 4, whiteSpace: "nowrap" }}>
-                              SMS {new Date(d.smsSentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}
-                            </span>
+                      </td>
+                      <td style={tdStyle}>{formatPersonNameOr(d.techName, "—")}</td>
+                      <td style={tdStyle}>
+                        {d.supervisorName ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                            <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(d.supervisorName)}</span>
+                            {d.supervisorLdap && (
+                              <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
+                                {d.supervisorLdap}
+                              </span>
+                            )}
                           </div>
+                        ) : (
+                          <span style={{ color: colors.inkMuted }}>—</span>
                         )}
                       </td>
-                      <td style={tdStyle}>{d.techName ?? "—"}</td>
+                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                        <SupervisorSmsCell decision={d} />
+                      </td>
                       <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
                         {d.state ?? "—"}
                       </td>
@@ -2035,7 +2147,7 @@ export default function NewRentals() {
                     <td style={tdStyle}>
                       <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{c.techLdap}</span>
                     </td>
-                    <td style={tdStyle}>{c.techName ?? "—"}</td>
+                    <td style={tdStyle}>{formatPersonNameOr(c.techName, "—")}</td>
                     <td style={{ ...tdStyle, textAlign: "center" }}>
                       {c.tenureMonths != null ? `${Math.round(c.tenureMonths)} mo` : "—"}
                     </td>

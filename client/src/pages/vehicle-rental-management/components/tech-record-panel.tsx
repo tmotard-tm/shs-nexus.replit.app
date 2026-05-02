@@ -7,6 +7,7 @@ import {
 import { StatusPill } from "./status-pill";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+import { formatPersonNameOr } from "../lib/format-name";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -652,7 +653,7 @@ export function TechRecordPanel({ techId, onClose }: TechRecordPanelProps) {
             ) : tech ? (
               <>
                 <div className="flex items-center gap-3">
-                  <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 22, color: colors.ink }}>{tech.name}</h2>
+                  <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 22, color: colors.ink }}>{formatPersonNameOr(tech.name, tech.ldap)}</h2>
                   <StatusPill status={tech.currentStatus} />
                 </div>
                 <div className="flex items-center gap-3">

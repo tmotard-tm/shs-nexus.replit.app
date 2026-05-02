@@ -8,6 +8,7 @@ import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
 import { MANUAL_STAGES } from "@shared/repair-tracker-stage";
+import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1785,7 +1786,7 @@ function UnifiedPanel({
         >
           <div>
             <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-              {isEdit ? (currentEntry?.techName ?? currentEntry?.techLdap ?? "Repair Entry") : "Add Entry"}
+              {isEdit ? (formatPersonNameOr(currentEntry?.techName, currentEntry?.techLdap ?? "Repair Entry")) : "Add Entry"}
             </h2>
             {isEdit && currentEntry?.techLdap && (
               <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{currentEntry.techLdap}</span>
@@ -2647,9 +2648,9 @@ export default function RentalRepairTracker() {
                 return (s as any)?.lastSyncedAt ?? (s as any)?.syncedAt ?? "";
               };
               const rows = sorted.map((e: any) => [
-                e.techLdap ?? "", e.techName ?? "", e.techPhone ?? "",
+                e.techLdap ?? "", formatPersonName(e.techName), e.techPhone ?? "",
                 e.district ? e.district.replace(/^0+/, "") || "0" : "",
-                e.supervisorName ?? e.tpmsManagerName ?? "", e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
+                formatPersonName(e.supervisorName ?? e.tpmsManagerName), e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
                 e.truckNumber ?? "", e.repairShopAddress ?? "", e.repairShopPhone ?? "",
                 fmtDate(e.deniedAt), e.denialReason ?? "", e.denialReasonDetail ?? "",
                 e.stage ?? "", e.section ?? "",
@@ -2800,7 +2801,7 @@ export default function RentalRepairTracker() {
                   <td style={{ ...tdStyle, borderLeft: `3px solid ${colors.rule}` }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                       <span style={{ fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 13, color: colors.ink, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                        {entry.techName ?? "—"}
+                        {formatPersonNameOr(entry.techName, "—")}
                         <DiscrepancyFlag
                           row={discrepancies.byTrackerId.get(entry.id)}
                           size={12}
