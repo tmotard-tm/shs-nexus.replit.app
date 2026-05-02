@@ -55,9 +55,9 @@ export interface ScorecardRow {
  * inside sync/roster.
  */
 // On the Nexus enrichment view (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS),
-// the truck identifier is stored as TRUCK_NUMBER (the FLEET schema's standard
-// convention used everywhere else: DRIVELINE_ALL_TECHS, SEPARATION_FLEET_DETAILS,
-// HOLMAN_ETL_PO_DETAILS, SAMSARA_CRITICALITY_SCORE).
+// the truck identifier is exposed as VEHICLE_NUMBER (renamed from TRUCK_NUMBER
+// — verified via INFORMATION_SCHEMA dump in logNexusViewColumnsOnFailure when
+// the previous column name returned "invalid identifier").
 // On VW_RENTAL_LIST, the same value is exposed as TRUCK_LISTED_FOR_RENTAL.
 // We LPAD both sides to 6 chars to defuse padded/unpadded join mismatches.
 async function logNexusViewColumnsOnFailure(svc: any, err: any): Promise<void> {
@@ -89,7 +89,7 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
     const rows = await svc.executeQuery(`
       WITH nexus_deduped AS (
         SELECT
-          LPAD(TRIM(n.TRUCK_NUMBER), 6, '0') AS TRUCK_KEY,
+          LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
           n.ENTERPRISE_ID,
           n.RENTER_NAME,
           n.RENTAL_START_DATE,
@@ -98,9 +98,9 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
           n.TRUCK_STATUS,
           n.SOURCE
         FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
-        WHERE n.TRUCK_NUMBER IS NOT NULL
+        WHERE n.VEHICLE_NUMBER IS NOT NULL
         QUALIFY ROW_NUMBER() OVER (
-          PARTITION BY LPAD(TRIM(n.TRUCK_NUMBER), 6, '0')
+          PARTITION BY LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0')
           ORDER BY
             CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
             n.DAYS_OPEN DESC NULLS LAST
@@ -140,14 +140,14 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
   const queryText = `
     WITH nexus_deduped AS (
       SELECT
-        LPAD(TRIM(n.TRUCK_NUMBER), 6, '0') AS TRUCK_KEY,
+        LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
         n.ENTERPRISE_ID,
         n.DAYS_OPEN,
         n.RENTAL_START_DATE
       FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
-      WHERE n.TRUCK_NUMBER IS NOT NULL
+      WHERE n.VEHICLE_NUMBER IS NOT NULL
       QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY LPAD(TRIM(n.TRUCK_NUMBER), 6, '0')
+        PARTITION BY LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0')
         ORDER BY
           CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
           n.DAYS_OPEN DESC NULLS LAST
