@@ -49,6 +49,7 @@ import {
   archiveEligibleCompleted,
   importDeniedToRepairTracker,
   backfillRepairTrackerTruckNumbers,
+  backfillApr30RebuildDecisionSnapshots,
   listRepairTrackerActions,
   addRepairTrackerAction,
   listTechOutreach,
@@ -92,6 +93,14 @@ export function registerVrmRoutes(): Router {
   backfillRepairTrackerTruckNumbers()
     .then((n) => { if (n > 0) console.log(`[VRM] Backfilled truck numbers on ${n} repair tracker rows`); })
     .catch((e) => console.error("[VRM] Truck-number backfill failed:", e.message));
+
+  // One-time backfill: correct the three Apr 30 2026 mid-rebuild decisions
+  // (CNEWELL/JMCCABE/LSTUEBI) so the Decision Log matches Evaluation Results.
+  // Idempotent — only updates rows whose daily_net_with_rental still matches
+  // the known-bad mid-rebuild value, so it is a no-op once applied (and on dev).
+  backfillApr30RebuildDecisionSnapshots()
+    .then((n) => { if (n > 0) console.log(`[VRM] Apr30 snapshot backfill: corrected ${n} decision row(s)`); })
+    .catch((e) => console.error("[VRM] Apr30 snapshot backfill failed:", e.message));
 
   // ─── Dashboard ──────────────────────────────────────────────────────────────
 

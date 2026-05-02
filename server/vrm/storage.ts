@@ -1116,6 +1116,92 @@ export async function updateRentalDecision(
   return row;
 }
 
+/**
+ * One-time backfill: Apr 30 2026 snapshot rebuild left three Decision Log rows
+ * (CNEWELL, JMCCABE, LSTUEBI) showing the mid-rebuild "Deny" daily-net values
+ * that the evaluator returned while the profitability snapshot was still
+ * settling. The post-rebuild trusted values (captured by `vrm_rental_checks`
+ * once the rebuild completed later that evening) classify all three as
+ * "Approve". This function rewrites those three decision rows in place so the
+ * Decision Log matches the Evaluation Results panel.
+ *
+ * Idempotent: each row is only updated when its current `daily_net_with_rental`
+ * still equals the known-bad mid-rebuild value, so re-running on a healthy DB
+ * (or in development where the rows do not exist) is a no-op.
+ */
+export async function backfillApr30RebuildDecisionSnapshots(): Promise<number> {
+  // (id, bad value seen now, post-rebuild correct values from vrm_rental_checks)
+  const rows: Array<{
+    id: string;
+    techLdap: string;
+    badNetWithRental: string;
+    netWithRental: string;
+    netBeforeRental: string;
+    completes: number;
+    state: string;
+    district: string;
+  }> = [
+    {
+      id: "7d8af18c-ab9d-4cb6-b107-64446293e025",
+      techLdap: "CNEWELL",
+      badNetWithRental: "-215.66",
+      netWithRental: "135.72",
+      netBeforeRental: "213.72",
+      completes: 138,
+      state: "AL",
+      district: "0008035",
+    },
+    {
+      id: "6409eba4-c31c-4fe1-a7d0-856606a64bcf",
+      techLdap: "JMCCABE",
+      badNetWithRental: "-470.03",
+      netWithRental: "33.79",
+      netBeforeRental: "111.79",
+      completes: 94,
+      state: "OH",
+      district: "0004766",
+    },
+    {
+      id: "95b91146-f09d-4bd9-9083-84924b7dafdd",
+      techLdap: "LSTUEBI",
+      badNetWithRental: "-228.34",
+      netWithRental: "19.14",
+      netBeforeRental: "97.14",
+      completes: 65,
+      state: "IL",
+      district: "0008555",
+    },
+  ];
+
+  let updated = 0;
+  for (const r of rows) {
+    const result = await db
+      .update(vrmRentalDecisions)
+      .set({
+        dailyNetWithRental: r.netWithRental,
+        dailyNetBeforeRental: r.netBeforeRental,
+        completes: r.completes,
+        state: r.state,
+        district: r.district,
+        recommendation: "Approve",
+      })
+      .where(
+        and(
+          eq(vrmRentalDecisions.id, r.id),
+          eq(vrmRentalDecisions.dailyNetWithRental, r.badNetWithRental),
+        ),
+      )
+      .returning({ id: vrmRentalDecisions.id });
+    if (result.length > 0) {
+      updated += 1;
+      console.log(
+        `[VRM] Apr30 snapshot backfill: corrected decision ${r.id} (${r.techLdap})`,
+      );
+    }
+  }
+  return updated;
+}
+
 export async function addRentalDecisionAction(data: InsertVrmRentalDecisionAction) {
   const [row] = await db.insert(vrmRentalDecisionActions).values(data).returning();
   return row;
