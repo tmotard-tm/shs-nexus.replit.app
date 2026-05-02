@@ -1,6 +1,6 @@
 import { useState, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle, MessageSquare, RotateCcw } from "lucide-react";
+import { Settings2, Pencil, Check, X, History, Mail, AlertTriangle, MessageSquare, RotateCcw, Database, RefreshCw, CheckCircle2, Loader2 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { formatPersonName } from "../lib/format-name";
@@ -683,6 +683,300 @@ function TemplateEditor({
   );
 }
 
+// ─── Profitability Snapshot Health (admin: status + manual sync) ─────────────
+
+interface ProfitabilityCacheMeta {
+  id: string;
+  status: "building" | "ready" | "error" | string;
+  sourceSnowflakeLastAltered: string | null;
+  lastSyncStartedAt: string | null;
+  lastSyncCompletedAt: string | null;
+  rowCount: number | null;
+  errorMessage: string | null;
+}
+
+function formatDuration(startIso: string | null, endIso: string | null): string {
+  if (!startIso || !endIso) return "—";
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIso).getTime();
+  if (isNaN(start) || isNaN(end) || end < start) return "—";
+  const ms = end - start;
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return sec === 0 ? `${min}m` : `${min}m ${sec}s`;
+}
+
+function formatRelative(iso: string | null): string {
+  if (!iso) return "never";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "—";
+  const diff = Date.now() - then;
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  return `${day}d ago`;
+}
+
+function ProfitabilitySnapshotHealth({ cardStyle }: { cardStyle: React.CSSProperties }) {
+  const qc = useQueryClient();
+  const { data, isLoading, error, refetch, isFetching } = useQuery<{ meta: ProfitabilityCacheMeta | null }>({
+    queryKey: ["/api/vrm/profitability/snapshot-meta"],
+    refetchInterval: (query) => {
+      const m = query.state.data?.meta;
+      return m && m.status === "building" ? 3000 : false;
+    },
+  });
+
+  const syncMutation = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/vrm/profitability/sync-now", {}),
+    onSuccess: () => {
+      // Server returns 200 immediately and runs sync in background.
+      // Invalidate so the UI flips to "building" once the worker writes meta.
+      setTimeout(() => {
+        qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/snapshot-meta"] });
+      }, 500);
+    },
+  });
+
+  const meta = data?.meta ?? null;
+
+  // Status pill colors.
+  const statusStyle = (() => {
+    if (!meta) return { fg: colors.inkSoft, bg: colors.surface, label: "Never synced" };
+    if (meta.status === "ready") return { fg: colors.green, bg: colors.greenLight, label: "Ready" };
+    if (meta.status === "building") return { fg: colors.amber, bg: colors.amberLight, label: "Building…" };
+    if (meta.status === "error") return { fg: colors.red, bg: colors.redLight, label: "Error" };
+    return { fg: colors.inkSoft, bg: colors.surface, label: meta.status };
+  })();
+
+  const isBuilding = meta?.status === "building";
+  const syncDisabled = isBuilding || syncMutation.isPending;
+
+  const fieldLabelStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontSize: 11,
+    fontWeight: 600,
+    color: colors.inkMuted,
+    textTransform: "uppercase",
+    letterSpacing: "0.06em",
+    marginBottom: 4,
+  };
+  const fieldValueStyle: React.CSSProperties = {
+    fontFamily: fonts.dmSans,
+    fontSize: 14,
+    color: colors.ink,
+  };
+  const monoValueStyle: React.CSSProperties = {
+    ...fieldValueStyle,
+    fontFamily: fonts.jetbrains,
+  };
+
+  return (
+    <div style={cardStyle}>
+      <div style={{ padding: "20px 24px" }}>
+        {isLoading && (
+          <div style={{ padding: 8, color: colors.inkMuted, fontSize: 14, fontFamily: fonts.dmSans }}>
+            Loading snapshot status…
+          </div>
+        )}
+        {error && (
+          <div style={{ padding: 8, color: colors.red, fontSize: 14, fontFamily: fonts.dmSans }}>
+            Failed to load snapshot status.
+          </div>
+        )}
+        {!isLoading && !error && (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <span
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "4px 12px",
+                    borderRadius: 999,
+                    background: statusStyle.bg,
+                    color: statusStyle.fg,
+                    fontFamily: fonts.dmSans,
+                    fontSize: 13,
+                    fontWeight: 600,
+                  }}
+                  data-testid="snapshot-status-pill"
+                >
+                  {isBuilding ? <Loader2 size={12} className="animate-spin" /> :
+                    meta?.status === "ready" ? <CheckCircle2 size={12} /> :
+                    meta?.status === "error" ? <AlertTriangle size={12} /> : null}
+                  {statusStyle.label}
+                </span>
+                {meta?.lastSyncCompletedAt && (
+                  <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                    Last completed {formatRelative(meta.lastSyncCompletedAt)}
+                  </span>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => refetch()}
+                  disabled={isFetching}
+                  data-testid="snapshot-refresh-button"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "6px 12px",
+                    borderRadius: 4,
+                    border: `1px solid ${colors.rule}`,
+                    background: "transparent",
+                    color: colors.inkSoft,
+                    fontFamily: fonts.dmSans,
+                    fontSize: 13,
+                    cursor: isFetching ? "wait" : "pointer",
+                    opacity: isFetching ? 0.6 : 1,
+                  }}
+                  title="Refresh status"
+                >
+                  <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
+                  Refresh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => syncMutation.mutate()}
+                  disabled={syncDisabled}
+                  data-testid="snapshot-sync-now-button"
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "6px 14px",
+                    borderRadius: 4,
+                    border: "none",
+                    background: syncDisabled ? colors.rule : colors.accent,
+                    color: "#fff",
+                    fontFamily: fonts.dmSans,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    cursor: syncDisabled ? "not-allowed" : "pointer",
+                    opacity: syncMutation.isPending ? 0.7 : 1,
+                  }}
+                  title={isBuilding ? "A sync is already running" : "Trigger profitability snapshot rebuild"}
+                >
+                  <RotateCcw size={12} />
+                  {syncMutation.isPending ? "Starting…" : isBuilding ? "Sync running…" : "Sync Now"}
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 16,
+              }}
+            >
+              <div>
+                <div style={fieldLabelStyle}>Last sync started</div>
+                <div style={fieldValueStyle} data-testid="snapshot-started-at">
+                  {meta?.lastSyncStartedAt ? fmtDate(meta.lastSyncStartedAt) : "—"}
+                </div>
+              </div>
+              <div>
+                <div style={fieldLabelStyle}>Last sync completed</div>
+                <div style={fieldValueStyle} data-testid="snapshot-completed-at">
+                  {meta?.lastSyncCompletedAt ? fmtDate(meta.lastSyncCompletedAt) : "—"}
+                </div>
+              </div>
+              <div>
+                <div style={fieldLabelStyle}>Duration</div>
+                <div style={monoValueStyle} data-testid="snapshot-duration">
+                  {formatDuration(meta?.lastSyncStartedAt ?? null, meta?.lastSyncCompletedAt ?? null)}
+                </div>
+              </div>
+              <div>
+                <div style={fieldLabelStyle}>Row count</div>
+                <div style={monoValueStyle} data-testid="snapshot-row-count">
+                  {meta?.rowCount != null ? meta.rowCount.toLocaleString() : "—"}
+                </div>
+              </div>
+              <div>
+                <div style={fieldLabelStyle}>Snowflake source updated</div>
+                <div style={fieldValueStyle} data-testid="snapshot-source-altered">
+                  {meta?.sourceSnowflakeLastAltered ? fmtDate(meta.sourceSnowflakeLastAltered) : "—"}
+                </div>
+              </div>
+            </div>
+
+            {meta?.status === "error" && meta.errorMessage && (
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: "10px 12px",
+                  borderRadius: 6,
+                  background: colors.redLight,
+                  border: `1px solid ${colors.red}`,
+                  color: colors.red,
+                  fontFamily: fonts.dmSans,
+                  fontSize: 13,
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: 8,
+                }}
+                data-testid="snapshot-error-message"
+              >
+                <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+                <div>
+                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Last sync failed</div>
+                  <div style={{ fontFamily: fonts.jetbrains, fontSize: 12, wordBreak: "break-word" }}>
+                    {meta.errorMessage}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {syncMutation.isError && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: colors.redLight,
+                  color: colors.red,
+                  fontFamily: fonts.dmSans,
+                  fontSize: 12,
+                }}
+              >
+                Failed to start sync: {(syncMutation.error as Error)?.message ?? "unknown error"}
+              </div>
+            )}
+            {syncMutation.isSuccess && !isBuilding && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  background: colors.greenLight,
+                  color: colors.green,
+                  fontFamily: fonts.dmSans,
+                  fontSize: 12,
+                }}
+              >
+                Sync requested — status will update shortly.
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Settings() {
   const { data: rates = [], isLoading, error } = useQuery<RateConfig[]>({
     queryKey: ["/api/vrm/settings/rates"],
@@ -758,7 +1052,18 @@ export default function Settings() {
         Manage the financial rate assumptions used in profitability calculations. Changes take effect on the next evaluation run — no redeployment needed.
       </p>
 
-      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 0 }}>
+      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 0, display: "flex", alignItems: "center", gap: 8 }}>
+        <Database size={16} color={colors.accent} />
+        Profitability Snapshot Health
+      </h2>
+      <p style={{ fontSize: 13, color: colors.inkMuted, marginTop: 0, marginBottom: 16 }}>
+        The daily Snowflake-backed profitability snapshot powers every rental check. Use the controls
+        below to inspect freshness or manually rebuild the snapshot if it&apos;s stale or failed.
+      </p>
+
+      <ProfitabilitySnapshotHealth cardStyle={cardStyle} />
+
+      <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36 }}>
         Financial Rate Assumptions
       </h2>
 
