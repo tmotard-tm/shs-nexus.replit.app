@@ -433,6 +433,10 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const rows = await svc.executeQuery(`
     WITH financials AS (
+      -- Numeric columns wrapped in TRY_TO_NUMBER(col::STRING) for the same
+      -- defensive reason as fetchAllProfitabilityRows — even though this
+      -- per-tech path filters by TECH_LDAP first, an empty string in any
+      -- requested LDAP's row would still fail the whole query.
       SELECT
         f.TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
@@ -444,13 +448,13 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
           WHEN DAYOFWEEKISO(f.SO_STS_DT) BETWEEN 1 AND 5
           THEN f.SO_STS_DT
         END)                                                             AS working_days,
-        SUM(f.TOTAL_REVENUE)                                            AS total_revenue,
-        SUM(f.LABOR_DIRECT_EXPENSE)                                     AS labor_direct,
-        SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
-        SUM(f.TOTAL_PARTS_COGS_EXPENSE)
-          + SUM(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED)            AS parts_cogs,
-        SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                           AS parts_shipping,
-        SUM(f.PPT_PROFIT)                                               AS ppt_profit
+        SUM(TRY_TO_NUMBER(f.TOTAL_REVENUE::STRING))                     AS total_revenue,
+        SUM(TRY_TO_NUMBER(f.LABOR_DIRECT_EXPENSE::STRING))              AS labor_direct,
+        SUM(TRY_TO_NUMBER(f.LABOR_BENEFITS_EXPENSE::STRING))            AS labor_benefits,
+        SUM(TRY_TO_NUMBER(f.TOTAL_PARTS_COGS_EXPENSE::STRING))
+          + SUM(TRY_TO_NUMBER(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED::STRING)) AS parts_cogs,
+        SUM(TRY_TO_NUMBER(f.TOTAL_SHIPPING_FORWARD_EXPENSE::STRING))    AS parts_shipping,
+        SUM(TRY_TO_NUMBER(f.PPT_PROFIT::STRING))                        AS ppt_profit
       FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
       WHERE f.TECH_LDAP IN (${ldapList})
         AND f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
@@ -619,6 +623,12 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
         AND ENTERPRISE_ID IS NOT NULL
         AND TRIM(ENTERPRISE_ID) <> ''
     ),
+    -- Note: every numeric column from IHR_UNIT_ECONOMICS in the financials CTE
+    -- below is wrapped in TRY_TO_NUMBER(col::STRING) inside its SUM(). The bulk
+    -- query has NO per-tech filter on the financials CTE, so a single poison
+    -- row anywhere in the table (empty string in TOTAL_REVENUE / LABOR_* /
+    -- PARTS_* / PPT_PROFIT) would otherwise fail the entire sync with
+    -- "Numeric value '' is not recognized" — same defensive pattern as DCR.
     -- COMTTU dedup: one row per LDAP_ID, preferring most recent UPD_TS, then rows
     -- that actually have a phone/email populated. Used as a FALLBACK source when
     -- TPMS_EXTRACT has no row for a given LDAP.
@@ -675,13 +685,13 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
           WHEN DAYOFWEEKISO(f.SO_STS_DT) BETWEEN 1 AND 5
           THEN f.SO_STS_DT
         END)                                                             AS working_days,
-        SUM(f.TOTAL_REVENUE)                                            AS total_revenue,
-        SUM(f.LABOR_DIRECT_EXPENSE)                                     AS labor_direct,
-        SUM(f.LABOR_BENEFITS_EXPENSE)                                   AS labor_benefits,
-        SUM(f.TOTAL_PARTS_COGS_EXPENSE)
-          + SUM(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED)            AS parts_cogs,
-        SUM(f.TOTAL_SHIPPING_FORWARD_EXPENSE)                           AS parts_shipping,
-        SUM(f.PPT_PROFIT)                                               AS ppt_profit
+        SUM(TRY_TO_NUMBER(f.TOTAL_REVENUE::STRING))                     AS total_revenue,
+        SUM(TRY_TO_NUMBER(f.LABOR_DIRECT_EXPENSE::STRING))              AS labor_direct,
+        SUM(TRY_TO_NUMBER(f.LABOR_BENEFITS_EXPENSE::STRING))            AS labor_benefits,
+        SUM(TRY_TO_NUMBER(f.TOTAL_PARTS_COGS_EXPENSE::STRING))
+          + SUM(TRY_TO_NUMBER(f.TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED::STRING)) AS parts_cogs,
+        SUM(TRY_TO_NUMBER(f.TOTAL_SHIPPING_FORWARD_EXPENSE::STRING))    AS parts_shipping,
+        SUM(TRY_TO_NUMBER(f.PPT_PROFIT::STRING))                        AS ppt_profit
       FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
       WHERE f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
         AND f.SO_STS_DT <= CURRENT_DATE
