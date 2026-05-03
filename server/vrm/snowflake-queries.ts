@@ -815,13 +815,19 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       r.SUPERVISOR_LDAP                                                  AS "supervisor_ldap",
       -- Effective phone/email used by notification dispatch: TPMS_EXTRACT primary,
       -- COMTTU fallback. supervisor_phone = MOBILEPHONENUMBER (TPMS) → MBL_PH_NO.
-      COALESCE(supv_tpms.MOBILEPHONENUMBER, supv_comttu.MBL_PH_NO)       AS "supervisor_phone",
-      COALESCE(supv_tpms.EMAIL_ADDRESS,     supv_comttu.EMAIL_ADDR)      AS "supervisor_email_tpms",
+      -- Both sides are explicitly cast to VARCHAR before COALESCE because the two
+      -- source tables (TPMS_EXTRACT vs COMTTU_TECH_UN) may store these columns
+      -- with different types (NUMBER vs VARCHAR). Without the casts, Snowflake
+      -- type-unifies the COALESCE arms and an empty string in the VARCHAR side
+      -- gets coerced to NUMBER, failing the entire query with "Numeric value ''
+      -- is not recognized" — even though we never use these values numerically.
+      COALESCE(supv_tpms.MOBILEPHONENUMBER::STRING, supv_comttu.MBL_PH_NO::STRING)   AS "supervisor_phone",
+      COALESCE(supv_tpms.EMAIL_ADDRESS::STRING,     supv_comttu.EMAIL_ADDR::STRING) AS "supervisor_email_tpms",
       -- Raw TPMS_EXTRACT-only values (no fallback). Used by Settings to detect
       -- "no phone in TPMS_EXTRACT" without contamination from COMTTU. NULL means
       -- TPMS_EXTRACT genuinely has no phone/email for this supervisor's LDAP.
-      supv_tpms.MOBILEPHONENUMBER                                        AS "supervisor_tpms_phone_raw",
-      supv_tpms.EMAIL_ADDRESS                                            AS "supervisor_tpms_email_raw"
+      supv_tpms.MOBILEPHONENUMBER::STRING                                AS "supervisor_tpms_phone_raw",
+      supv_tpms.EMAIL_ADDRESS::STRING                                    AS "supervisor_tpms_email_raw"
     FROM roster r
     LEFT JOIN financials fin ON fin.TECH_LDAP = r.LDAP_ID
     LEFT JOIN scored     sc  ON sc.LDAP_ID    = r.LDAP_ID
