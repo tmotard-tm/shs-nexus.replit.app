@@ -138,6 +138,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
 
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const queryText = `
+    /* fetchAdjustedNet */
     WITH nexus_deduped AS (
       SELECT
         LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
@@ -265,6 +266,7 @@ export async function fetchScorecardScores(): Promise<ScorecardRow[]> {
   const svc = getSnowflakeService();
 
   const rows = await svc.executeQuery(`
+    /* fetchScorecardScores */
     WITH dcr AS (
       -- Same defensive TRY_TO_NUMBER wrapping as fetchProfitabilityCheck and
       -- fetchAllProfitabilityRows. Empty strings in any DCR numeric column
@@ -432,6 +434,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
 
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const rows = await svc.executeQuery(`
+    /* fetchProfitabilityCheck */
     WITH financials AS (
       -- Numeric columns wrapped in TRY_TO_NUMBER(col::STRING) for the same
       -- defensive reason as fetchAllProfitabilityRows — even though this
@@ -609,6 +612,7 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
   }
 
   const rows = await svc.executeQuery(`
+    /* fetchAllProfitabilityRows */
     WITH roster AS (
       SELECT
         UPPER(TRIM(ENTERPRISE_ID))               AS LDAP_ID,

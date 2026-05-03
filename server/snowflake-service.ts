@@ -190,7 +190,21 @@ export class SnowflakeService {
         sqlText,
         complete: async (err: any, stmt: any, rows: any[]) => {
           if (err) {
-            console.error('[Snowflake] Query error:', err.message);
+            // Extract leading SQL tag comment (e.g. /* fetchAllProfitabilityRows */)
+            // and the first non-blank line so we can tell WHICH query failed
+            // without dumping the whole multi-thousand-character SQL to logs.
+            const tagMatch = sqlText.match(/\/\*\s*([\w.\-:]+)\s*\*\//);
+            const queryTag = tagMatch ? tagMatch[1] : '(untagged)';
+            const firstLine = sqlText
+              .split('\n')
+              .map(l => l.trim())
+              .find(l => l.length > 0 && !l.startsWith('/*')) || '';
+            console.error(
+              '[Snowflake] Query error:',
+              err.message,
+              `[query=${queryTag}]`,
+              `firstLine="${firstLine.slice(0, 120)}"`,
+            );
             
             // Check if this is a connection termination error and we should retry
             const isConnectionError = err.message?.includes('terminated connection') ||
