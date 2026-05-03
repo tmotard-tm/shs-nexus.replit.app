@@ -1856,6 +1856,12 @@ export default function NewRentals() {
                               dailyCosts: row.daily_costs,
                               dailyNetBeforeRental: row.daily_net_before_rental,
                               dailyPptProfit: row.daily_ppt_profit,
+                              // Freeze the supervisor at decision time so the
+                              // Decision Log keeps the right name even after
+                              // the snapshot rotates / a tech changes teams.
+                              supervisorName: row.supervisor_name ?? null,
+                              supervisorLdap: row.supervisor_ldap ?? null,
+                              supervisorPhone: row.supervisor_phone ?? null,
                             })
                           }
                         />

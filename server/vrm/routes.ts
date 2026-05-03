@@ -1485,6 +1485,7 @@ export function registerVrmRoutes(): Router {
         decidedByName, notes, scorecardScore, tenureMonths,
         state, district, completes, dailyRevenue, dailyCosts,
         dailyNetBeforeRental, dailyPptProfit,
+        supervisorName, supervisorLdap, supervisorPhone,
       } = req.body;
       if (!techLdap || !decision || !decidedByName)
         return res.status(400).json({ error: "techLdap, decision, and decidedByName required" });
@@ -1502,6 +1503,11 @@ export function registerVrmRoutes(): Router {
         // can render the same columns as the Evaluation Results table above it.
         state: state ?? null,
         district: district ?? null,
+        // Supervisor frozen at decision time. Sourced from the evaluator row
+        // (snapshot-derived) at the moment the user clicked Approve/Deny.
+        supervisorName: supervisorName ?? null,
+        supervisorLdap: supervisorLdap ?? null,
+        supervisorPhone: supervisorPhone ?? null,
         completes: completes ?? null,
         dailyRevenue: dailyRevenue != null ? String(dailyRevenue) : null,
         dailyCosts: dailyCosts != null ? String(dailyCosts) : null,

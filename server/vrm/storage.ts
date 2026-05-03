@@ -1045,10 +1045,15 @@ export async function listRentalDecisions(limit = 50) {
       dailyCosts: vrmRentalDecisions.dailyCosts,
       dailyNetBeforeRental: vrmRentalDecisions.dailyNetBeforeRental,
       dailyPptProfit: vrmRentalDecisions.dailyPptProfit,
-      // Supervisor (current) — from snapshot
-      supervisorName: vrmProfitabilitySnapshot.supervisorName,
-      supervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
-      supervisorPhone: vrmProfitabilitySnapshot.supervisorPhone,
+      // Supervisor: prefer the value frozen on the decision row (set at the
+      // moment the decision was logged); fall back to the current snapshot
+      // join for legacy rows where the decision-row column is NULL.
+      decisionSupervisorName: vrmRentalDecisions.supervisorName,
+      decisionSupervisorLdap: vrmRentalDecisions.supervisorLdap,
+      decisionSupervisorPhone: vrmRentalDecisions.supervisorPhone,
+      snapshotSupervisorName: vrmProfitabilitySnapshot.supervisorName,
+      snapshotSupervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
+      snapshotSupervisorPhone: vrmProfitabilitySnapshot.supervisorPhone,
     })
     .from(vrmRentalDecisions)
     .leftJoin(
@@ -1082,8 +1087,19 @@ export async function listRentalDecisions(limit = 50) {
 
   return rows.map((r) => {
     const sms = smsByDecision.get(r.id);
+    const {
+      decisionSupervisorName, decisionSupervisorLdap, decisionSupervisorPhone,
+      snapshotSupervisorName, snapshotSupervisorLdap, snapshotSupervisorPhone,
+      ...rest
+    } = r;
     return {
-      ...r,
+      ...rest,
+      // Effective supervisor — frozen value wins, snapshot is a fallback so
+      // the very first batch of decisions logged before the column existed
+      // still shows the current supervisor instead of "—".
+      supervisorName: decisionSupervisorName ?? snapshotSupervisorName ?? null,
+      supervisorLdap: decisionSupervisorLdap ?? snapshotSupervisorLdap ?? null,
+      supervisorPhone: decisionSupervisorPhone ?? snapshotSupervisorPhone ?? null,
       supervisorSmsRecipient: sms?.recipient ?? null,
       supervisorSmsStatus: sms?.status ?? null,
       supervisorSmsSentAt: sms?.sentAt ?? null,

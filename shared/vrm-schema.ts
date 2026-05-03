@@ -303,6 +303,13 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   // older decisions (pre-snapshot) keep working — UI renders "—" for nulls.
   state: text("state"),
   district: text("district"),
+  // Supervisor frozen at the moment of decision so the Decision Log keeps
+  // showing the right name even after the daily snapshot rotates. The GET
+  // route prefers these stored values and only falls back to the snapshot
+  // join for legacy rows where they are NULL.
+  supervisorName: varchar("supervisor_name", { length: 255 }),
+  supervisorLdap: varchar("supervisor_ldap", { length: 50 }),
+  supervisorPhone: varchar("supervisor_phone", { length: 50 }),
   completes: integer("completes"),
   dailyRevenue: decimal("daily_revenue", { precision: 10, scale: 2 }),
   dailyCosts: decimal("daily_costs", { precision: 10, scale: 2 }),
