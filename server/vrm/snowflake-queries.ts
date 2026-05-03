@@ -266,15 +266,24 @@ export async function fetchScorecardScores(): Promise<ScorecardRow[]> {
 
   const rows = await svc.executeQuery(`
     WITH dcr AS (
+      -- Same defensive TRY_TO_NUMBER wrapping as fetchProfitabilityCheck and
+      -- fetchAllProfitabilityRows. Empty strings in any DCR numeric column
+      -- become NULL instead of failing the whole query with
+      -- "Numeric value '' is not recognized".
       SELECT
         dcr_inner.LDAP_ID,
         COALESCE(MAX(dcr_inner.EMP_FULL_NM), dcr_inner.LDAP_ID)           AS tech_name,
-        MAX(dcr_inner.TENURE_YRS)                                           AS tenure_yrs,
-        DIV0(SUM(dcr_inner.COMP_PCT_NUM), SUM(dcr_inner.COMP_PCT_DEN))    AS completion_pct,
-        DIV0(SUM(dcr_inner.WAGES), SUM(dcr_inner.TOTAL_REVENUE))          AS p2r,
-        DIV0(SUM(dcr_inner.RECALL_30D_WOM_NUM), SUM(dcr_inner.RECALL_30D_WOM_DEN)) AS recall_pct,
-        DIV0(SUM(dcr_inner.CM_CONV_NUM), SUM(dcr_inner.CM_CONV_DEN))      AS pm_conv,
-        DIV0(SUM(dcr_inner.SPHW_ENROLLMENT_SALE_QTY), SUM(dcr_inner.SPHW_ELIG_ENROL_D2C_COMPLETES)) AS d2c_rate
+        MAX(TRY_TO_NUMBER(dcr_inner.TENURE_YRS::STRING))                  AS tenure_yrs,
+        DIV0(SUM(TRY_TO_NUMBER(dcr_inner.COMP_PCT_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(dcr_inner.COMP_PCT_DEN::STRING)))          AS completion_pct,
+        DIV0(SUM(TRY_TO_NUMBER(dcr_inner.WAGES::STRING)),
+             SUM(TRY_TO_NUMBER(dcr_inner.TOTAL_REVENUE::STRING)))         AS p2r,
+        DIV0(SUM(TRY_TO_NUMBER(dcr_inner.RECALL_30D_WOM_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(dcr_inner.RECALL_30D_WOM_DEN::STRING)))    AS recall_pct,
+        DIV0(SUM(TRY_TO_NUMBER(dcr_inner.CM_CONV_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(dcr_inner.CM_CONV_DEN::STRING)))           AS pm_conv,
+        DIV0(SUM(TRY_TO_NUMBER(dcr_inner.SPHW_ENROLLMENT_SALE_QTY::STRING)),
+             SUM(TRY_TO_NUMBER(dcr_inner.SPHW_ELIG_ENROL_D2C_COMPLETES::STRING))) AS d2c_rate
         -- CSAT: TBC — add here once column names confirmed
       FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new AS dcr_inner
       WHERE dcr_inner.TIMEWINDOW IN ('ALL-YTD')
@@ -449,15 +458,23 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       GROUP BY f.TECH_LDAP
     ),
     dcr AS (
+      -- Same defensive TRY_TO_NUMBER wrapping as the bulk roster query
+      -- (fetchAllProfitabilityRows). Protects the per-tech path against a
+      -- DCR row containing '' in any numeric column.
       SELECT
         d.LDAP_ID,
         COALESCE(MAX(d.EMP_FULL_NM), d.LDAP_ID) AS tech_name,
-        ROUND(MAX(d.TENURE_YRS) * 12, 0)         AS tenure_months,
-        DIV0(SUM(d.COMP_PCT_NUM), SUM(d.COMP_PCT_DEN))                 AS completion_pct,
-        DIV0(SUM(d.WAGES), SUM(d.TOTAL_REVENUE))                       AS p2r,
-        DIV0(SUM(d.RECALL_30D_WOM_NUM), SUM(d.RECALL_30D_WOM_DEN))     AS recall_pct,
-        DIV0(SUM(d.CM_CONV_NUM), SUM(d.CM_CONV_DEN))                   AS pm_conv,
-        DIV0(SUM(d.SPHW_ENROLLMENT_SALE_QTY), SUM(d.SPHW_ELIG_ENROL_D2C_COMPLETES)) AS d2c_rate
+        ROUND(MAX(TRY_TO_NUMBER(d.TENURE_YRS::STRING)) * 12, 0)         AS tenure_months,
+        DIV0(SUM(TRY_TO_NUMBER(d.COMP_PCT_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.COMP_PCT_DEN::STRING)))                AS completion_pct,
+        DIV0(SUM(TRY_TO_NUMBER(d.WAGES::STRING)),
+             SUM(TRY_TO_NUMBER(d.TOTAL_REVENUE::STRING)))               AS p2r,
+        DIV0(SUM(TRY_TO_NUMBER(d.RECALL_30D_WOM_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.RECALL_30D_WOM_DEN::STRING)))          AS recall_pct,
+        DIV0(SUM(TRY_TO_NUMBER(d.CM_CONV_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.CM_CONV_DEN::STRING)))                 AS pm_conv,
+        DIV0(SUM(TRY_TO_NUMBER(d.SPHW_ENROLLMENT_SALE_QTY::STRING)),
+             SUM(TRY_TO_NUMBER(d.SPHW_ELIG_ENROL_D2C_COMPLETES::STRING))) AS d2c_rate
       FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new d
       WHERE d.LDAP_ID IN (${ldapList})
         AND d.TIMEWINDOW IN ('ALL-YTD')
@@ -672,15 +689,25 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       GROUP BY UPPER(TRIM(f.TECH_LDAP))
     ),
     dcr AS (
+      -- Numeric columns from daily_assigns_dcr_temp_new are wrapped in
+      -- TRY_TO_NUMBER(... ::STRING) so a single bad row containing an empty
+      -- string ('') in any numeric column does not poison the entire bulk
+      -- aggregate with "Numeric value '' is not recognized". TRY_TO_NUMBER
+      -- returns NULL for unparseable input; SUM/MAX skip NULLs.
       SELECT
         UPPER(TRIM(d.LDAP_ID))                  AS LDAP_ID,
         COALESCE(MAX(d.EMP_FULL_NM), d.LDAP_ID) AS tech_name,
-        ROUND(MAX(d.TENURE_YRS) * 12, 0)         AS tenure_months,
-        DIV0(SUM(d.COMP_PCT_NUM), SUM(d.COMP_PCT_DEN))                 AS completion_pct,
-        DIV0(SUM(d.WAGES), SUM(d.TOTAL_REVENUE))                       AS p2r,
-        DIV0(SUM(d.RECALL_30D_WOM_NUM), SUM(d.RECALL_30D_WOM_DEN))     AS recall_pct,
-        DIV0(SUM(d.CM_CONV_NUM), SUM(d.CM_CONV_DEN))                   AS pm_conv,
-        DIV0(SUM(d.SPHW_ENROLLMENT_SALE_QTY), SUM(d.SPHW_ELIG_ENROL_D2C_COMPLETES)) AS d2c_rate
+        ROUND(MAX(TRY_TO_NUMBER(d.TENURE_YRS::STRING)) * 12, 0)         AS tenure_months,
+        DIV0(SUM(TRY_TO_NUMBER(d.COMP_PCT_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.COMP_PCT_DEN::STRING)))                AS completion_pct,
+        DIV0(SUM(TRY_TO_NUMBER(d.WAGES::STRING)),
+             SUM(TRY_TO_NUMBER(d.TOTAL_REVENUE::STRING)))               AS p2r,
+        DIV0(SUM(TRY_TO_NUMBER(d.RECALL_30D_WOM_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.RECALL_30D_WOM_DEN::STRING)))          AS recall_pct,
+        DIV0(SUM(TRY_TO_NUMBER(d.CM_CONV_NUM::STRING)),
+             SUM(TRY_TO_NUMBER(d.CM_CONV_DEN::STRING)))                 AS pm_conv,
+        DIV0(SUM(TRY_TO_NUMBER(d.SPHW_ENROLLMENT_SALE_QTY::STRING)),
+             SUM(TRY_TO_NUMBER(d.SPHW_ELIG_ENROL_D2C_COMPLETES::STRING))) AS d2c_rate
       FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new d
       WHERE d.TIMEWINDOW IN ('ALL-YTD')
         AND d.BUSUNIT = 'InHomeRepair'

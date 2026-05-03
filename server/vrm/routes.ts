@@ -1143,16 +1143,34 @@ export function registerVrmRoutes(): Router {
 
       if (!snapshotIsGloballyPopulated) {
         // ── Day-one bootstrap: snapshot table is empty ────────────────────────
-        // If a sync is already running, defer to it.
+        // If a sync is genuinely in flight, defer. But if status='building'
+        // is stale (>15 min old, or has no lastSyncStartedAt at all), the
+        // previous worker was killed mid-flight (deploy SIGTERM, etc.) and
+        // would otherwise leave the snapshot stuck forever — kick a fresh
+        // sync inline before falling through to the live read / 202 path.
         if (meta && meta.status === "building") {
+          const STALE_BUILDING_MS = 15 * 60 * 1000;
           const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
           const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
-          const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
-          return res.status(202).json({
-            status: "preparing",
-            message: "The profitability snapshot is currently being built. Please try again shortly.",
-            retryAfterSeconds,
-          });
+          const lockIsStale = !startedAt || elapsedMs > STALE_BUILDING_MS;
+
+          if (lockIsStale) {
+            console.warn(
+              `[VRM] profitability/check — stale 'building' lock detected (startedAt=${startedAt?.toISOString() ?? "null"}, age=${Math.round(elapsedMs / 1000)}s). Kicking recovery sync.`,
+            );
+            runProfitabilitySync().catch((e: any) =>
+              console.error("[VRM] stale-lock recovery sync failed:", e.message),
+            );
+            // Fall through to settle-gate / live read path below so the
+            // caller still gets data on this request rather than another 202.
+          } else {
+            const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
+            return res.status(202).json({
+              status: "preparing",
+              message: "The profitability snapshot is currently being built. Please try again shortly.",
+              retryAfterSeconds,
+            });
+          }
         }
 
         // Otherwise: check the settle gate. If the IHR table is settled (i.e.
@@ -2596,8 +2614,28 @@ export function registerVrmRoutes(): Router {
   (async () => {
     try {
       const existingMeta = await getProfitabilityCacheMeta();
-      if (!existingMeta || existingMeta.status === "error") {
-        console.log("[VRM Scheduler] No valid profitability snapshot found — running bootstrap sync in background.");
+
+      // A previous run can leave status='building' if the process was killed
+      // (e.g. deploy SIGTERM) mid-Snowflake-call before the catch block could
+      // mark it 'error'. Treat any 'building' lock older than 15 minutes as
+      // stale and retry — otherwise the snapshot stays empty forever and
+      // /profitability/check returns 202 "preparing" indefinitely.
+      const STALE_BUILDING_MS = 15 * 60 * 1000;
+      const startedAt = existingMeta?.lastSyncStartedAt
+        ? new Date(existingMeta.lastSyncStartedAt).getTime()
+        : 0;
+      const buildingIsStale =
+        existingMeta?.status === "building" &&
+        startedAt > 0 &&
+        Date.now() - startedAt > STALE_BUILDING_MS;
+
+      if (!existingMeta || existingMeta.status === "error" || buildingIsStale) {
+        const reason = !existingMeta
+          ? "no meta"
+          : existingMeta.status === "error"
+          ? "previous run errored"
+          : "stale 'building' lock (>15 min)";
+        console.log(`[VRM Scheduler] No valid profitability snapshot found (${reason}) — running bootstrap sync in background.`);
         await runProfitabilitySync();
       } else {
         console.log(`[VRM Scheduler] Profitability snapshot exists (status=${existingMeta.status}, rowCount=${existingMeta.rowCount}) — skipping bootstrap sync.`);
