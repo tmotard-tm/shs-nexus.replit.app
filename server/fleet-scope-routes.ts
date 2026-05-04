@@ -1768,7 +1768,10 @@ Respond ONLY with valid JSON, no other text.`;
     const openaiData = await openaiRes.json();
     const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
     console.log(`[ElevenLabs] GPT response (${callType}) for truck ${truckNumber}: ${raw}`);
-    const parsed = JSON.parse(raw);
+    // GPT sometimes wraps the JSON in markdown code fences (```json ... ```).
+    // Strip them before parsing so JSON.parse doesn't choke on the backticks.
+    const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const parsed = JSON.parse(stripped);
     return {
       status: parsed.status || "Unknown",
       summary: parsed.summary || "",
