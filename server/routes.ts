@@ -577,8 +577,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         holman_success boolean NOT NULL,
         holman_error text,
         wms_success boolean NOT NULL,
-        wms_error text
+        wms_error text,
+        blocked_source varchar(10)
       )
+    `);
+    // Migrate existing tables that predate the blocked_source column (Task 361)
+    await db.execute(sql`
+      ALTER TABLE byov_creation_audit
+        ADD COLUMN IF NOT EXISTS blocked_source varchar(10)
     `);
     console.log("[BYOV] byov_creation_audit table ready");
   } catch (e: any) {
@@ -8282,12 +8288,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
           .limit(1);
         let duplicate = directRows.length > 0;
+        // 'cache' = blocked by local Holman cache, 'live' = blocked by live Holman API call
+        let duplicateSource: "cache" | "live" | null = duplicate ? "cache" : null;
         if (!duplicate) {
           // Full scan — no row limit — to catch any non-padded legacy entries
           const allRows = await db
             .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
             .from(holmanVehiclesCache);
           duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
+          if (duplicate) duplicateSource = "cache";
         }
         if (!duplicate) {
           // Cache miss — fall back to a live Holman lookup so a stale cache
@@ -8296,6 +8305,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             const liveResult = await holmanApiService.findVehicleByNumber(vehicleNumber);
             if (liveResult.success && liveResult.vehicle) {
               duplicate = true;
+              duplicateSource = "live";
               console.log(`[BYOV] Live Holman lookup found existing vehicle ${paddedVehicle}; blocking duplicate submission.`);
             }
           } catch (liveErr) {
@@ -8303,6 +8313,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
           }
         }
         if (duplicate) {
+          // Write an audit log entry so dispatchers can trace why the submission was blocked.
+          const u = req.user as any;
+          const submittedBy: string = u?.username || u?.email || u?.id ? String(u.username || u.email || u.id) : "unknown";
+          const blockReason = duplicateSource === "live"
+            ? "Blocked by duplicate guard (live Holman lookup)"
+            : "Blocked by duplicate guard (cache hit)";
+          try {
+            await db.insert(byovCreationAudit).values({
+              vehicleNumber: paddedVehicle,
+              vin: vin ?? null,
+              make: make ?? null,
+              model: model ?? null,
+              modelYear: modelYear ? String(modelYear) : null,
+              assetType: assetType ?? null,
+              district: district ? String(district) : null,
+              submittedBy,
+              holmanSuccess: false,
+              holmanError: blockReason,
+              wmsSuccess: false,
+              wmsError: "Blocked: duplicate vehicle, submission not attempted",
+              blockedSource: duplicateSource ?? "cache",
+            });
+            console.log(`[BYOV] Duplicate block written to audit log for ${paddedVehicle} (source: ${duplicateSource})`);
+          } catch (auditErr) {
+            console.error("[BYOV] Failed to write duplicate-block audit entry:", auditErr);
+          }
           return res.status(409).json({
             error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
           });
@@ -8686,6 +8722,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: "District", key: "district", width: 12 },
         { header: "Submitted By", key: "submittedBy", width: 22 },
         { header: "Date", key: "submittedAt", width: 20 },
+        { header: "Blocked", key: "blocked", width: 10 },
+        { header: "Block Source", key: "blockedSource", width: 18 },
         { header: "Holman Result", key: "holmanResult", width: 16 },
         { header: "Holman Error", key: "holmanError", width: 40 },
         { header: "WMS Result", key: "wmsResult", width: 14 },
@@ -8708,6 +8746,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             hour: "2-digit",
             minute: "2-digit",
           }),
+          blocked: row.blockedSource ? "Yes" : "No",
+          blockedSource: row.blockedSource === "live" ? "Live Holman lookup" : row.blockedSource === "cache" ? "Local cache" : "",
           holmanResult: row.holmanSuccess ? "OK" : "Failed",
           holmanError: row.holmanError || "",
           wmsResult: row.wmsSuccess ? "OK" : "Failed",

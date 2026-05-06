@@ -13,7 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -854,10 +854,9 @@ export default function CreateVehicle() {
                     </thead>
                     <tbody>
                       {auditLogQuery.data.map((row) => {
-                        const bothOk = row.holmanSuccess && row.wmsSuccess;
-                        const noneOk = !row.holmanSuccess && !row.wmsSuccess;
+                        const isBlocked = !!row.blockedSource;
                         return (
-                          <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                          <tr key={row.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors${isBlocked ? " bg-amber-50/40 dark:bg-amber-950/20" : ""}`}>
                             <td className="py-2 pr-4 whitespace-nowrap">
                               <button
                                 type="button"
@@ -886,12 +885,23 @@ export default function CreateVehicle() {
                                 minute: "2-digit",
                               })}
                             </td>
-                            <td className="py-2 pr-4">
-                              <AuditBadge success={row.holmanSuccess} error={row.holmanError} />
-                            </td>
-                            <td className="py-2 pr-4">
-                              <AuditBadge success={row.wmsSuccess} error={row.wmsError} />
-                            </td>
+                            {isBlocked ? (
+                              <td className="py-2 pr-4" colSpan={2}>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                                  <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+                                  Blocked — duplicate ({row.blockedSource === "live" ? "live lookup" : "cache"})
+                                </span>
+                              </td>
+                            ) : (
+                              <>
+                                <td className="py-2 pr-4">
+                                  <AuditBadge success={row.holmanSuccess} error={row.holmanError} />
+                                </td>
+                                <td className="py-2 pr-4">
+                                  <AuditBadge success={row.wmsSuccess} error={row.wmsError} />
+                                </td>
+                              </>
+                            )}
                             <td className="py-2">
                               <Button
                                 variant="ghost"
@@ -982,6 +992,20 @@ export default function CreateVehicle() {
                   })}
                 </div>
               </div>
+
+              {selectedAuditEntry.blockedSource && (
+                <div className="border-t pt-3">
+                  <div className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
+                    <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <div>
+                      <div className="text-xs font-semibold text-amber-800 dark:text-amber-300">Submission blocked — duplicate vehicle</div>
+                      <div className="text-xs text-amber-700 dark:text-amber-400">
+                        Detected via: {selectedAuditEntry.blockedSource === "live" ? "live Holman API lookup" : "local Holman cache"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <div className="border-t pt-3 space-y-2">
                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">System Results</div>

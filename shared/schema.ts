@@ -2277,6 +2277,9 @@ export const byovCreationAudit = pgTable("byov_creation_audit", {
   holmanError: text("holman_error"),
   wmsSuccess: boolean("wms_success").notNull(),
   wmsError: text("wms_error"),
+  // 'cache' = blocked by local Holman cache hit, 'live' = blocked by live Holman API lookup.
+  // NULL for normal (non-blocked) submission attempts.
+  blockedSource: varchar("blocked_source", { length: 10 }),
 });
 
 export type ByovCreationAuditEntry = typeof byovCreationAudit.$inferSelect;
