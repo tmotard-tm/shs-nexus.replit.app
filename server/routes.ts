@@ -8336,14 +8336,44 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isActive: true,
           spareTruck: false,
         };
+        // Pre-check: if the vehicle already exists in Holman (live lookup), treat as success
+        // immediately — idempotent retry guard for cases where Holman creation succeeded
+        // but the local cache hasn't refreshed yet.
+        let holmanAlreadyExists = false;
         try {
-          const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-          console.log("[BYOV] Holman submit response:", holmanResp);
+          const holmanLookup = await holmanApiService.findVehicleByNumber(paddedVehicle);
+          if (holmanLookup.success && holmanLookup.vehicle) {
+            console.log("[BYOV] create: vehicle already exists in Holman, skipping submit:", paddedVehicle);
+            holmanAlreadyExists = true;
+          }
+        } catch (holmanLookupErr: unknown) {
+          // Lookup failure is non-fatal — log and continue to attempt submission
+          console.warn("[BYOV] create: unexpected error during Holman pre-check lookup:", holmanLookupErr);
+        }
+
+        if (holmanAlreadyExists) {
           holmanResult = { success: true };
-        } catch (holmanErr: unknown) {
-          const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
-          console.error("[BYOV] Holman submit error:", holmanErr);
-          holmanResult = { success: false, error: holmanMsg };
+        } else {
+          try {
+            const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
+            console.log("[BYOV] Holman submit response:", holmanResp);
+            holmanResult = { success: true };
+          } catch (holmanErr: unknown) {
+            const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
+            // Safety net: if Holman returns a duplicate/conflict response (race condition
+            // between the pre-check lookup and the actual submit), treat as success.
+            const isHolmanDuplicate =
+              /already.?exists/i.test(holmanMsg) ||
+              /duplicate/i.test(holmanMsg) ||
+              /conflict/i.test(holmanMsg);
+            if (isHolmanDuplicate) {
+              console.log("[BYOV] create: vehicle already exists in Holman (race condition), treating as success:", holmanMsg);
+              holmanResult = { success: true };
+            } else {
+              console.error("[BYOV] Holman submit error:", holmanErr);
+              holmanResult = { success: false, error: holmanMsg };
+            }
+          }
         }
       }
 
