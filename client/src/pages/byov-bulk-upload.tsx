@@ -740,15 +740,26 @@ export default function ByovBulkUpload() {
                 </span>
                 . You can still export the results below, or upload a new file to start a new run.
               </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleReset}
-                className="gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40 shrink-0"
-              >
-                <XCircle className="h-4 w-4" />
-                Dismiss saved results
-              </Button>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleExportCsv}
+                  className="gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                >
+                  <Download className="h-4 w-4" />
+                  Export CSV
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleReset}
+                  className="gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40"
+                >
+                  <XCircle className="h-4 w-4" />
+                  Dismiss saved results
+                </Button>
+              </div>
             </AlertDescription>
           </Alert>
         )}
