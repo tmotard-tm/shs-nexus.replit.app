@@ -18093,6 +18093,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return `${mm}/${dd}/${yyyy}`;
       };
 
+      // ─── BYOV lookup map ─────────────────────────────────────────────────────
+      // Map from canonical (stripped leading zeros) vehicle number -> submittedBy
+      const byovMap = new Map<string, string>();
+      try {
+        const byovRows = await db
+          .select({
+            vehicleNumber: byovCreationAudit.vehicleNumber,
+            submittedBy: byovCreationAudit.submittedBy,
+          })
+          .from(byovCreationAudit)
+          .orderBy(asc(byovCreationAudit.submittedAt));
+        for (const row of byovRows) {
+          if (row.vehicleNumber) {
+            byovMap.set(toCanonical(row.vehicleNumber), row.submittedBy || "Yes");
+          }
+        }
+        console.log(`[Fleet CSV] BYOV: ${byovMap.size} entries loaded`);
+      } catch (byovErr: any) {
+        console.warn("[Fleet CSV] BYOV lookup failed (continuing without):", byovErr?.message);
+      }
+
       const headers = [
         "Vehicle Number", "VIN", "Year", "Make", "Model", "Color",
         "Division", "District", "Region", "State", "City",
@@ -18100,6 +18121,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Status & operational columns
         "TPMS Status",
         "Rental",
+        "BYOV",
         "AMS Status",
         "General Status",
         "Sub Status",
@@ -18142,6 +18164,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const tpmsStatus = v.tpmsEnterpriseId ? "Assigned" : "Unassigned";
           const isRental = rentalVehicleSet.has(truckKey) ? "Yes" : "No";
 
+          const byovValue = byovMap.get(truckKey) ?? "";
+
           return [
             v.vehicleNumber, v.vin, v.year, v.make, v.model, v.color,
             v.division, v.district, v.region, v.state, v.city,
@@ -18149,6 +18173,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Status & operational
             tpmsStatus,
             isRental,
+            byovValue,
             enriched?.truckStatus ?? "",
             enriched?.generalStatus ?? "",
             enriched?.subStatus ?? "",
