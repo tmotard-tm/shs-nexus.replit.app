@@ -451,8 +451,9 @@ export class HolmanApiService {
   // The basic-query GET endpoint does NOT support holmanVehicleNumbers as a filter param.
   async getVehicleAssignedStatus(vehicleNumber: string): Promise<{
     found: boolean;
-    assignedStatus?: string;  // "Assigned" | "Unassigned" | ...
-    techAssigned?: string;    // clientData2 — enterprise ID of assigned tech
+    assignedStatus?: string;      // "Assigned" | "Unassigned" | ...
+    assignedStatusCode?: string;  // "D" for BYOV/Driver-assigned, "U" for unassigned, etc.
+    techAssigned?: string;        // clientData2 — enterprise ID of assigned tech
     rawVehicle?: any;
     error?: string;
   }> {
@@ -465,6 +466,7 @@ export class HolmanApiService {
           'holmanVehicleNumber',
           'clientVehicleNumber',
           'assignedStatus',
+          'assignedStatusCode',
           'clientData2',
           'firstName',
           'lastName',
@@ -483,10 +485,14 @@ export class HolmanApiService {
         return holmanNum === searchCanonical || clientNum === searchCanonical;
       });
       if (!item) return { found: false, error: 'Vehicle not found in Holman' };
-      console.log(`[HolmanVerify] Vehicle ${vehicleNumber}: assignedStatus=${item.assignedStatus}, clientData2=${item.clientData2}`);
+      console.log(
+        `[HolmanVerify] Vehicle ${vehicleNumber}: assignedStatus=${item.assignedStatus}, ` +
+        `assignedStatusCode=${item.assignedStatusCode}, clientData2=${item.clientData2}`
+      );
       return {
         found: true,
         assignedStatus: item.assignedStatus || '',
+        assignedStatusCode: item.assignedStatusCode || '',
         techAssigned: item.clientData2 || '',
         rawVehicle: item,
       };
