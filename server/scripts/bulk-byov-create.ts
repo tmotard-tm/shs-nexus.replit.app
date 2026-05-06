@@ -451,6 +451,7 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
   };
 
   try {
+    console.log(`  [Holman] ${paddedVehicle} REQUEST BODY:`, JSON.stringify([holmanPayload], null, 2));
     const resp = await holmanApiService.submitVehicleSingle(holmanPayload);
     console.log(`  [Holman] ${paddedVehicle} FULL RESPONSE:`, JSON.stringify(resp, null, 2));
     if (resp?.errorCount > 0 && resp?.validatedRecordCount === 0) {
