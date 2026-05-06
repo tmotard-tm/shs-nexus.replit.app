@@ -1209,7 +1209,7 @@ export default function CostCenterManagement() {
                 >
                   Close
                 </Button>
-                <span className="inline-flex" title={!bulkSummary ? "Preview the CSV above to check for changes before applying" : (bulkSummary.newCount + bulkSummary.updateCount === 0 ? "No changes detected in the uploaded file" : undefined)}>
+                <span className="inline-flex flex-col items-start" title={!bulkSummary ? "Preview the CSV above to check for changes before applying" : (bulkSummary.newCount + bulkSummary.updateCount === 0 ? "No changes detected in the uploaded file" : undefined)}>
                 <Button
                   type="button"
                   onClick={handleBulkApply}
@@ -1226,6 +1226,11 @@ export default function CostCenterManagement() {
                       ? `Apply ${bulkSummary.newCount + bulkSummary.updateCount} change${bulkSummary.newCount + bulkSummary.updateCount === 1 ? "" : "s"}`
                       : "Apply"}
                 </Button>
+                {!bulkMutation.isPending && (!bulkSummary || (bulkSummary.newCount + bulkSummary.updateCount === 0)) && (
+                  <span className="text-xs text-muted-foreground mt-0.5">
+                    {!bulkSummary ? "Preview the CSV above before applying" : "No changes detected in the uploaded file"}
+                  </span>
+                )}
                 </span>
               </DialogFooter>
             </DialogContent>
@@ -1692,33 +1697,36 @@ export default function CostCenterManagement() {
                 <History className="h-5 w-5" />
                 Cost Center Change History
               </SheetTitle>
-              <div className="flex items-center gap-2">
-                <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleDownloadHistoryCsv}
-                    disabled={historyLoading || historyEntries.length === 0}
-                    data-testid="button-download-history-csv"
-                  >
-                    <Download className="mr-2 h-4 w-4" />
-                    Download CSV
-                  </Button>
-                </span>
-                <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => { setEmailCsvInput(""); setIsEmailCsvOpen(true); }}
-                    disabled={historyLoading || historyEntries.length === 0}
-                    data-testid="button-email-history-csv"
-                  >
-                    <Mail className="mr-2 h-4 w-4" />
-                    Email CSV
-                  </Button>
-                </span>
+              <div className="flex flex-col items-end gap-0.5">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleDownloadHistoryCsv}
+                      disabled={historyLoading || historyEntries.length === 0}
+                      data-testid="button-download-history-csv"
+                    >
+                      <Download className="mr-2 h-4 w-4" />
+                      Download CSV
+                    </Button>
+                  </span>
+                  <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setEmailCsvInput(""); setIsEmailCsvOpen(true); }}
+                      disabled={historyLoading || historyEntries.length === 0}
+                      data-testid="button-email-history-csv"
+                    >
+                      <Mail className="mr-2 h-4 w-4" />
+                      Email CSV
+                    </Button>
+                  </span>
+                </div>
+                {historyEntries.length === 0 && !historyLoading && <span className="text-xs text-muted-foreground">No history entries to export yet</span>}
               </div>
             </div>
 
@@ -1748,7 +1756,7 @@ export default function CostCenterManagement() {
                   >
                     Cancel
                   </Button>
-                  <span className="inline-flex" title={!emailCsvInput.trim() ? "Enter an email address above before sending" : undefined}>
+                  <span className="inline-flex flex-col items-start" title={!emailCsvInput.trim() ? "Enter an email address above before sending" : undefined}>
                     <Button
                       type="button"
                       onClick={handleEmailCsvSubmit}
@@ -1756,6 +1764,7 @@ export default function CostCenterManagement() {
                     >
                       {emailCsvMutation.isPending ? "Sending…" : "Send"}
                     </Button>
+                    {!emailCsvInput.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter an email address above before sending</span>}
                   </span>
                 </DialogFooter>
               </DialogContent>

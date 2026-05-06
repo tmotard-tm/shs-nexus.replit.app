@@ -260,11 +260,12 @@ export default function ShippingAddresses() {
                   <Label className="text-xs">District #</Label>
                   <Input value={districtNo} onChange={e => setDistrictNo(e.target.value)} placeholder="Enter district number" />
                 </div>
-                <span className="inline-flex" title={!districtNo ? "Enter a district number above to search" : undefined}>
+                <span className="inline-flex flex-col items-start" title={!districtNo ? "Enter a district number above to search" : undefined}>
                   <Button onClick={handleSearch} disabled={!districtNo || searchQuery.isLoading}>
                     {searchQuery.isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
                     GET DISTRICT ADDRESS
                   </Button>
+                  {!districtNo && <span className="text-xs text-muted-foreground mt-0.5">Enter a district number above to search</span>}
                 </span>
               </div>
             ) : (
@@ -277,11 +278,12 @@ export default function ShippingAddresses() {
                   <Label className="text-xs">Zip Code</Label>
                   <Input value={zipCode} onChange={e => setZipCode(e.target.value)} placeholder="Zip" />
                 </div>
-                <span className="inline-flex" title={(!streetAddress && !zipCode) ? "Enter a street address or zip code above to search" : undefined}>
+                <span className="inline-flex flex-col items-start" title={(!streetAddress && !zipCode) ? "Enter a street address or zip code above to search" : undefined}>
                   <Button onClick={handleSearch} disabled={(!streetAddress && !zipCode) || searchQuery.isLoading}>
                     {searchQuery.isLoading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Search className="h-4 w-4 mr-2" />}
                     FIND ADDRESS
                   </Button>
+                  {(!streetAddress && !zipCode) && <span className="text-xs text-muted-foreground mt-0.5">Enter a street address or zip code above to search</span>}
                 </span>
                 <Button variant="outline" onClick={resetAll}>
                   <RotateCcw className="h-4 w-4 mr-2" /> RESET
@@ -368,10 +370,11 @@ export default function ShippingAddresses() {
                 </div>
                 <div className="flex items-center justify-between mt-4">
                   <Badge variant="secondary">{selectedTechs.length} selected</Badge>
-                  <span className="inline-flex" title={selectedTechs.length === 0 ? "Select at least one tech before continuing" : undefined}>
+                  <span className="inline-flex flex-col items-end" title={selectedTechs.length === 0 ? "Select at least one tech before continuing" : undefined}>
                     <Button disabled={selectedTechs.length === 0} onClick={() => setWizardStep("change")}>
                       Next: Add New Address <ArrowRight className="h-4 w-4 ml-2" />
                     </Button>
+                    {selectedTechs.length === 0 && <span className="text-xs text-muted-foreground mt-0.5">Select at least one tech before continuing</span>}
                   </span>
                 </div>
               </div>
@@ -423,10 +426,11 @@ export default function ShippingAddresses() {
               <Button variant="outline" onClick={() => setWizardStep("find")}>
                 <ArrowLeft className="h-4 w-4 mr-2" /> Back
               </Button>
-              <span className="inline-flex" title={!newAddress.addrLine1 ? "Fill in the street address (line 1) before continuing" : undefined}>
+              <span className="inline-flex flex-col items-end" title={!newAddress.addrLine1 ? "Fill in the street address (line 1) before continuing" : undefined}>
                 <Button onClick={() => setWizardStep("confirm")} disabled={!newAddress.addrLine1}>
                   Next: Confirm <ArrowRight className="h-4 w-4 ml-2" />
                 </Button>
+                {!newAddress.addrLine1 && <span className="text-xs text-muted-foreground mt-0.5">Fill in the street address (line 1) before continuing</span>}
               </span>
             </div>
           </CardContent>
@@ -526,11 +530,12 @@ export default function ShippingAddresses() {
           )}
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditDialog(null)}>Cancel</Button>
-            <span className="inline-flex" title={!editingAddress?.addrLine1 ? "Fill in the street address (line 1) before saving" : undefined}>
+            <span className="inline-flex flex-col items-start" title={!editingAddress?.addrLine1 ? "Fill in the street address (line 1) before saving" : undefined}>
               <Button onClick={handleEditSave} disabled={editMutation.isPending || !editingAddress?.addrLine1}>
                 {editMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                 Save Changes
               </Button>
+              {!editingAddress?.addrLine1 && <span className="text-xs text-muted-foreground mt-0.5">Fill in the street address (line 1) before saving</span>}
             </span>
           </DialogFooter>
         </DialogContent>

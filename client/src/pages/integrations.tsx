@@ -716,7 +716,7 @@ export default function Integrations() {
                   <Badge variant={snowflakeEnabled ? "default" : "secondary"} className="text-xs">
                     {snowflakeEnabled ? "Active" : "Inactive"}
                   </Badge>
-                  <span className="inline-flex" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup above before testing" : undefined}>
+                  <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup above before testing" : undefined}>
                   <Button
                     variant="outline"
                     size="sm"
@@ -731,6 +731,7 @@ export default function Integrations() {
                     )}
                     Test
                   </Button>
+                  {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup above first</span>}
                   </span>
                   <Switch
                     checked={snowflakeEnabled}
@@ -754,7 +755,7 @@ export default function Integrations() {
                         </CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="inline-flex" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
+                        <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
                           <Button 
                             onClick={() => syncTruckInventoryMutation.mutate()}
                             disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
@@ -765,6 +766,7 @@ export default function Integrations() {
                             <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
                             {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
                           </Button>
+                          {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup first</span>}
                         </span>
                       </div>
                     </div>
@@ -805,7 +807,7 @@ export default function Integrations() {
                               : 'Never synced'}
                           </div>
                         )}
-                        <span className="inline-flex" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
+                        <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
                           <Button 
                             onClick={() => syncAllTechsMutation.mutate()}
                             disabled={syncAllTechsMutation.isPending || !snowflakeStatus?.configured}
@@ -816,6 +818,7 @@ export default function Integrations() {
                             <RefreshCw className={`h-3 w-3 mr-1 ${syncAllTechsMutation.isPending ? 'animate-spin' : ''}`} />
                             {syncAllTechsMutation.isPending ? 'Syncing...' : 'Sync'}
                           </Button>
+                          {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup first</span>}
                         </span>
                       </div>
                     </div>
@@ -1147,7 +1150,7 @@ export default function Integrations() {
                         data-testid="textarea-sql-query"
                       />
                     </div>
-                    <span className="inline-flex" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before running queries" : undefined}>
+                    <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before running queries" : undefined}>
                     <Button
                       onClick={handleExecuteQuery}
                       disabled={!snowflakeStatus?.configured || executeQueryMutation.isPending}
@@ -1165,6 +1168,7 @@ export default function Integrations() {
                         </>
                       )}
                     </Button>
+                    {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup before running queries</span>}
                     </span>
                   </CardContent>
                 </Card>

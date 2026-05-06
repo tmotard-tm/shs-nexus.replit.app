@@ -213,17 +213,19 @@ function RolePermissionsEditor({
           )}
         </div>
         <div className="flex gap-2">
-          <span className="inline-flex" title={!canEdit ? "You don't have permission to edit this role" : undefined}>
+          <span className="inline-flex flex-col items-start" title={!canEdit ? "You don't have permission to edit this role" : undefined}>
             <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Reset to Default
             </Button>
+            {!canEdit && <span className="text-xs text-muted-foreground mt-0.5">You don't have permission to edit this role</span>}
           </span>
-          <span className="inline-flex" title={!canEdit ? "You don't have permission to edit this role" : !hasChanges ? "No changes to save yet" : undefined}>
+          <span className="inline-flex flex-col items-start" title={!canEdit ? "You don't have permission to edit this role" : !hasChanges ? "No changes to save yet" : undefined}>
             <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
               <Save className="h-4 w-4 mr-2" />
               {isSaving ? 'Saving...' : 'Save Changes'}
             </Button>
+            {!isSaving && (!canEdit || !hasChanges) && <span className="text-xs text-muted-foreground mt-0.5">{!canEdit ? "You don't have permission to edit this role" : "No changes to save yet"}</span>}
           </span>
         </div>
       </div>
@@ -593,7 +595,7 @@ export default function RolePermissions() {
                   <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <span className="inline-flex" title={!newRoleName.trim() ? "Enter a name for the new role before creating" : undefined}>
+                  <span className="inline-flex flex-col items-start" title={!newRoleName.trim() ? "Enter a name for the new role before creating" : undefined}>
                     <Button 
                       onClick={handleCreateRole} 
                       disabled={!newRoleName.trim() || createRoleMutation.isPending}
@@ -601,6 +603,7 @@ export default function RolePermissions() {
                     >
                       {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
                     </Button>
+                    {!newRoleName.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter a name for the new role before creating</span>}
                   </span>
                 </DialogFooter>
               </DialogContent>

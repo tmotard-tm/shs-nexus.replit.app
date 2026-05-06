@@ -2448,7 +2448,7 @@ export default function Dashboard() {
                     </label>
                   </div>
                   
-                  <span className="inline-flex w-full" title={!importFile ? "Select a file above before importing" : undefined}>
+                  <span className="inline-flex flex-col items-start w-full" title={!importFile ? "Select a file above before importing" : undefined}>
                     <Button
                       onClick={handleImportCSV}
                       disabled={!importFile || bulkImportMutation.isPending}
@@ -2457,6 +2457,7 @@ export default function Dashboard() {
                     >
                       {bulkImportMutation.isPending ? "Importing..." : "Import Trucks"}
                     </Button>
+                    {!importFile && <span className="text-xs text-muted-foreground mt-0.5">Select a file above before importing</span>}
                   </span>
                 </div>
               )}
@@ -2546,7 +2547,7 @@ export default function Dashboard() {
                     </label>
                   </div>
                   
-                  <span className="inline-flex w-full" title={!callImportFile ? "Select a file above before importing" : undefined}>
+                  <span className="inline-flex flex-col items-start w-full" title={!callImportFile ? "Select a file above before importing" : undefined}>
                     <Button
                       onClick={handleCallImport}
                       disabled={!callImportFile || callImportMutation.isPending}
@@ -2555,6 +2556,7 @@ export default function Dashboard() {
                     >
                       {callImportMutation.isPending ? "Importing..." : "Import Call Data"}
                     </Button>
+                    {!callImportFile && <span className="text-xs text-muted-foreground mt-0.5">Select a file above before importing</span>}
                   </span>
                 </div>
               )}
@@ -2620,7 +2622,7 @@ export default function Dashboard() {
                       <p className="text-xs text-muted-foreground">.xlsx, .xls, or .csv</p>
                     </label>
                   </div>
-                  <span className="inline-flex w-full" title={!shopListFile ? "Select a file above before importing" : undefined}>
+                  <span className="inline-flex flex-col items-start w-full" title={!shopListFile ? "Select a file above before importing" : undefined}>
                     <Button
                       onClick={handleShopListImport}
                       disabled={!shopListFile || shopListImportMutation.isPending}
@@ -2629,6 +2631,7 @@ export default function Dashboard() {
                     >
                       {shopListImportMutation.isPending ? "Importing..." : "Import Shop List"}
                     </Button>
+                    {!shopListFile && <span className="text-xs text-muted-foreground mt-0.5">Select a file above before importing</span>}
                   </span>
                   {shopListStatus?.processedAt && (
                     <div className="text-xs text-muted-foreground border-t pt-3">
@@ -2986,7 +2989,7 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">
                     {parseConsolidateInput(consolidatePasteText).length} truck entries detected
                   </p>
-                  <span className="inline-flex w-full" title={!consolidatePasteText.trim() ? "Paste truck data into the field above before running" : undefined}>
+                  <span className="inline-flex flex-col items-start w-full" title={!consolidatePasteText.trim() ? "Paste truck data into the field above before running" : undefined}>
                     <Button
                       onClick={handleConsolidate}
                       disabled={!consolidatePasteText.trim() || consolidateMutation.isPending}
@@ -2995,6 +2998,7 @@ export default function Dashboard() {
                     >
                       {consolidateMutation.isPending ? "Consolidating..." : "Run Consolidation"}
                     </Button>
+                    {!consolidatePasteText.trim() && <span className="text-xs text-muted-foreground mt-0.5">Paste truck data into the field above before running</span>}
                   </span>
                 </div>
               )}
@@ -3107,7 +3111,7 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">
                     {bulkSyncInput.split(/[\n,]+/).filter(s => s.trim()).length} truck numbers detected
                   </p>
-                  <span className="inline-flex w-full" title={!bulkSyncInput.trim() ? "Enter truck numbers above before previewing" : undefined}>
+                  <span className="inline-flex flex-col items-start w-full" title={!bulkSyncInput.trim() ? "Enter truck numbers above before previewing" : undefined}>
                     <Button
                       onClick={calculateBulkSyncPreview}
                       disabled={!bulkSyncInput.trim()}
@@ -3116,6 +3120,7 @@ export default function Dashboard() {
                     >
                       Preview Changes
                     </Button>
+                    {!bulkSyncInput.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter truck numbers above before previewing</span>}
                   </span>
                 </div>
               )}
@@ -4645,7 +4650,7 @@ export default function Dashboard() {
                 <Button variant="outline" onClick={() => { setAmsCommentDialogOpen(false); setAmsNewComment(""); }} disabled={addCommentMutation.isPending}>
                   Cancel
                 </Button>
-                <span className="inline-flex" title={!amsNewComment.trim() ? "Type a comment above before submitting" : undefined}>
+                <span className="inline-flex flex-col items-start" title={!amsNewComment.trim() ? "Type a comment above before submitting" : undefined}>
                   <Button
                     onClick={() => amsNewComment.trim() && addCommentMutation.mutate(amsNewComment.trim())}
                     disabled={!amsNewComment.trim() || addCommentMutation.isPending}
@@ -4653,6 +4658,7 @@ export default function Dashboard() {
                     {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
                     Add Comment
                   </Button>
+                  {!amsNewComment.trim() && <span className="text-xs text-muted-foreground mt-0.5">Type a comment above before submitting</span>}
                 </span>
               </DialogFooter>
             </DialogContent>

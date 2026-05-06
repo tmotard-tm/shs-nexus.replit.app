@@ -257,10 +257,11 @@ export default function ShippingSchedules() {
                 </div>
                 <div className="flex items-center justify-between mt-4">
                   <Badge variant="secondary">{selectedTechs.length} selected</Badge>
-                  <span className="inline-flex" title={selectedTechs.length === 0 ? "Select at least one tech before continuing" : undefined}>
+                  <span className="inline-flex flex-col items-end" title={selectedTechs.length === 0 ? "Select at least one tech before continuing" : undefined}>
                     <Button disabled={selectedTechs.length === 0} onClick={() => setWizardStep("change")}>
                       Next: Change Schedule <ArrowRight className="h-4 w-4 ml-2" />
                     </Button>
+                    {selectedTechs.length === 0 && <span className="text-xs text-muted-foreground mt-0.5">Select at least one tech before continuing</span>}
                   </span>
                 </div>
               </CardContent>
