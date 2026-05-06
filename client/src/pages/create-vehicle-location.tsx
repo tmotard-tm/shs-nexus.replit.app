@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,721 +7,520 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User } from "lucide-react";
-import { Separator } from "@/components/ui/separator";
-import { type InsertVehicle } from "@shared/schema";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
+
+const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
+  "KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT",
+  "VA","WA","WV","WI","WY","DC",
+];
+
+const PLATE_TYPES = ["Standard", "Commercial", "Government", "Personalized", "Dealer", "Other"];
+
+interface FormState {
+  vehicleNumber: string;
+  vin: string;
+  assetType: string;
+  modelYear: string;
+  make: string;
+  model: string;
+  district: string;
+  deliveryAddress: string;
+  city: string;
+  state: string;
+  zip: string;
+  deliveryDate: string;
+  onRoadDate: string;
+  firstName: string;
+  lastName: string;
+  enterpriseId: string;
+  phone: string;
+  licensePlate: string;
+  plateState: string;
+  plateType: string;
+  regRenewalDate: string;
+}
+
+interface SubmitResult {
+  holman: { success: boolean; error?: string };
+  wms: { success: boolean; error?: string };
+}
+
+const today = new Date().toISOString().split("T")[0];
+
+const emptyForm: FormState = {
+  vehicleNumber: "",
+  vin: "",
+  assetType: "",
+  modelYear: String(new Date().getFullYear()),
+  make: "",
+  model: "",
+  district: "",
+  deliveryAddress: "",
+  city: "",
+  state: "",
+  zip: "",
+  deliveryDate: today,
+  onRoadDate: today,
+  firstName: "",
+  lastName: "",
+  enterpriseId: "",
+  phone: "",
+  licensePlate: "",
+  plateState: "",
+  plateType: "",
+  regRenewalDate: "",
+};
 
 export default function CreateVehicle() {
   const { toast } = useToast();
-  const [vehicleForm, setVehicleForm] = useState<Partial<InsertVehicle & { vehicleType: string }>>({
-    vin: "",
-    vehicleNumber: "",
-    modelYear: new Date().getFullYear(),
-    makeName: "",
-    modelName: "",
-    vehicleType: "",
-    color: "",
-    licensePlate: "",
-    licenseState: "",
-    branding: "",
-    interior: "",
-    tuneStatus: "",
-    region: "",
-    district: "",
-    deliveryAddress: "",
-    city: "",
-    state: "",
-    zip: "",
-    status: "available"
-  });
-  
-  const [employeeData, setEmployeeData] = useState({
-    firstName: "",
-    lastName: "",
-    email: "",
-    phone: "",
-    department: "",
-    position: "",
-    manager: "",
-    enterpriseId: "",
-    region: "",
-    district: "",
-    requisitionId: "",
-    techId: "",
-    proposedRouteStartDate: "",
-    specialties: [] as string[],
-    emergencyContact: "",
-    emergencyPhone: ""
-  });
-  
-  const departments = [
-    "Human Resources",
-    "Sales", 
-    "Marketing",
-    "Operations",
-    "Finance",
-    "IT",
-    "Customer Service"
-  ];
+  const [form, setForm] = useState<FormState>(emptyForm);
+  const [vehicleExistsWarning, setVehicleExistsWarning] = useState<string | null>(null);
+  const [checkingVehicle, setCheckingVehicle] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
 
-  const specialtyOptions = [
-    "Cooking",
-    "Microwave",
-    "Laundry",
-    "Dishwasher",
-    "Refrigerator",
-    "HA PM Check"
-  ];
+  const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm((prev) => ({ ...prev, [field]: e.target.value }));
 
-  const regions = [
-    "Northeast",
-    "Southeast",
-    "Midwest",
-    "Southwest",
-    "West Coast",
-    "Central"
-  ];
-  
-  const managers = [
-    { id: "1", name: "Sarah Johnson", department: "Sales" },
-    { id: "2", name: "Mike Chen", department: "Operations" },
-    { id: "3", name: "Emily Davis", department: "Marketing" },
-    { id: "4", name: "Robert Wilson", department: "Finance" }
-  ];
+  const setSelect = (field: keyof FormState) => (value: string) =>
+    setForm((prev) => ({ ...prev, [field]: value }));
 
-  // Apply prefill data from query parameters on component mount
   useEffect(() => {
-    const vehicleFields = [
-      'vin', 'vehicleNumber', 'modelYear', 'makeName', 'modelName', 'vehicleType',
-      'color', 'licensePlate', 'licenseState', 'branding', 'interior', 'tuneStatus',
-      'region', 'district', 'deliveryAddress', 'city', 'state', 'zip', 'status'
+    const allowedKeys = [
+      "vehicleNumber","vin","assetType","modelYear","make","model",
+      "district","deliveryAddress","city","state","zip",
+      "deliveryDate","onRoadDate",
+      "firstName","lastName","enterpriseId","phone",
+      "licensePlate","plateState","plateType","regRenewalDate",
     ];
-    
-    const employeeFields = [
-      'firstName', 'lastName', 'email', 'phone', 'department', 'position', 'manager',
-      'enterpriseId', 'region', 'district', 'requisitionId', 'techId', 'proposedRouteStartDate',
-      'emergencyContact', 'emergencyPhone'
-    ];
-
-    const vehiclePrefill = getPrefillParams(vehicleFields);
-    const employeePrefill = getPrefillParams(employeeFields);
-
-    // Apply vehicle prefill data
-    if (Object.keys(vehiclePrefill).length > 0) {
-      const processedData: any = {};
-      
-      // Process and validate individual fields
-      if (vehiclePrefill.email) processedData.email = commonValidators.email(vehiclePrefill.email);
-      if (vehiclePrefill.phone) processedData.phone = commonValidators.phone(vehiclePrefill.phone);
-      if (vehiclePrefill.vehicleNumber) processedData.vehicleNumber = commonValidators.vehicleNumber(vehiclePrefill.vehicleNumber);
-      if (vehiclePrefill.firstName) processedData.firstName = commonValidators.employeeName(vehiclePrefill.firstName);
-      if (vehiclePrefill.lastName) processedData.lastName = commonValidators.employeeName(vehiclePrefill.lastName);
-      if (vehiclePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(vehiclePrefill.proposedRouteStartDate);
-      if (vehiclePrefill.modelYear) processedData.modelYear = parseInt(vehiclePrefill.modelYear, 10) || new Date().getFullYear();
-      if (vehiclePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(vehiclePrefill.emergencyContact);
-      if (vehiclePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(vehiclePrefill.emergencyPhone);
-      
-      // Copy remaining vehicle fields
-      Object.keys(vehiclePrefill).forEach(key => {
-        if (!processedData.hasOwnProperty(key) && vehiclePrefill[key]) {
-          processedData[key] = vehiclePrefill[key];
-        }
-      });
-      
-      setVehicleForm(prev => ({ ...prev, ...processedData }));
-    }
-
-    // Apply employee prefill data
-    if (Object.keys(employeePrefill).length > 0) {
-      const processedData: any = {};
-      
-      // Process and validate individual fields
-      if (employeePrefill.email) processedData.email = commonValidators.email(employeePrefill.email);
-      if (employeePrefill.phone) processedData.phone = commonValidators.phone(employeePrefill.phone);
-      if (employeePrefill.firstName) processedData.firstName = commonValidators.employeeName(employeePrefill.firstName);
-      if (employeePrefill.lastName) processedData.lastName = commonValidators.employeeName(employeePrefill.lastName);
-      if (employeePrefill.proposedRouteStartDate) processedData.proposedRouteStartDate = commonValidators.date(employeePrefill.proposedRouteStartDate);
-      if (employeePrefill.emergencyContact) processedData.emergencyContact = commonValidators.employeeName(employeePrefill.emergencyContact);
-      if (employeePrefill.emergencyPhone) processedData.emergencyPhone = commonValidators.phone(employeePrefill.emergencyPhone);
-      
-      // Copy remaining employee fields
-      Object.keys(employeePrefill).forEach(key => {
-        if (!processedData.hasOwnProperty(key) && employeePrefill[key]) {
-          processedData[key] = employeePrefill[key];
-        }
-      });
-      
-      setEmployeeData(prev => ({ ...prev, ...processedData }));
+    const prefill = getPrefillParams(allowedKeys);
+    if (Object.keys(prefill).length > 0) {
+      const processed: Partial<FormState> = {};
+      if (prefill.vehicleNumber) processed.vehicleNumber = commonValidators.vehicleNumber(prefill.vehicleNumber);
+      if (prefill.vin) processed.vin = commonValidators.vin(prefill.vin);
+      if (prefill.firstName) processed.firstName = commonValidators.employeeName(prefill.firstName);
+      if (prefill.lastName) processed.lastName = commonValidators.employeeName(prefill.lastName);
+      if (prefill.phone) processed.phone = commonValidators.phone(prefill.phone);
+      if (prefill.deliveryDate) processed.deliveryDate = commonValidators.date(prefill.deliveryDate) || today;
+      if (prefill.onRoadDate) processed.onRoadDate = commonValidators.date(prefill.onRoadDate) || today;
+      if (prefill.regRenewalDate) processed.regRenewalDate = commonValidators.date(prefill.regRenewalDate) || "";
+      if (prefill.zip) processed.zip = commonValidators.zipCode(prefill.zip);
+      if (prefill.licensePlate) processed.licensePlate = commonValidators.licensePlate(prefill.licensePlate);
+      if (prefill.plateState) processed.plateState = commonValidators.stateAbbr(prefill.plateState);
+      if (prefill.state) processed.state = commonValidators.stateAbbr(prefill.state);
+      if (prefill.modelYear) processed.modelYear = String(parseInt(prefill.modelYear, 10) || new Date().getFullYear());
+      if (prefill.assetType) processed.assetType = prefill.assetType;
+      if (prefill.make) processed.make = prefill.make;
+      if (prefill.model) processed.model = prefill.model;
+      if (prefill.district) processed.district = prefill.district;
+      if (prefill.deliveryAddress) processed.deliveryAddress = prefill.deliveryAddress;
+      if (prefill.city) processed.city = prefill.city;
+      if (prefill.plateType) processed.plateType = prefill.plateType;
+      if (prefill.enterpriseId) processed.enterpriseId = prefill.enterpriseId;
+      setForm((prev) => ({ ...prev, ...processed }));
     }
   }, []);
 
-  const handleVehicleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    toast({
-      title: "Vehicle Created",
-      description: `${vehicleForm.modelYear} ${vehicleForm.makeName} ${vehicleForm.modelName} has been added to the system`,
-    });
-    setVehicleForm({
-      vin: "",
-      vehicleNumber: "",
-      modelYear: new Date().getFullYear(),
-      makeName: "",
-      modelName: "",
-      vehicleType: "",
-      color: "",
-      licensePlate: "",
-      licenseState: "",
-      branding: "",
-      interior: "",
-      tuneStatus: "",
-      region: "",
-      district: "",
-      deliveryAddress: "",
-      city: "",
-      state: "",
-      zip: "",
-      status: "available"
-    });
+  const checkVehicleExists = async (vehicleNumber: string) => {
+    const trimmed = vehicleNumber.trim();
+    if (!trimmed) { setVehicleExistsWarning(null); return; }
+    setCheckingVehicle(true);
+    try {
+      const resp = await fetch(`/api/holman/vehicles/exists/${encodeURIComponent(trimmed)}`, {
+        credentials: "include",
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.exists) {
+          setVehicleExistsWarning(
+            `Vehicle ${trimmed} already exists in Holman (canonical: ${data.canonical}). Please use a different number.`
+          );
+        } else {
+          setVehicleExistsWarning(null);
+        }
+      } else {
+        setVehicleExistsWarning(null);
+      }
+    } catch {
+      setVehicleExistsWarning(null);
+    } finally {
+      setCheckingVehicle(false);
+    }
   };
 
+  const createMutation = useMutation({
+    mutationFn: async (payload: FormState) => {
+      const resp = await apiRequest("POST", "/api/byov/create", payload);
+      return (await resp.json()) as SubmitResult & { error?: string };
+    },
+    onSuccess: (data) => {
+      if ("error" in data && data.error) {
+        toast({ title: "Submission Blocked", description: data.error, variant: "destructive" });
+        return;
+      }
+      setSubmitResult(data as SubmitResult);
+      const bothOk = data.holman?.success && data.wms?.success;
+      toast({
+        title: bothOk ? "Vehicle Created" : "Partial Success",
+        description: bothOk
+          ? "BYOV vehicle submitted to Holman and WMS successfully."
+          : "One or more systems had an error — see results below.",
+        variant: bothOk ? "default" : "destructive",
+      });
+    },
+    onError: (err: Error) => {
+      toast({
+        title: "Submission Failed",
+        description: err.message || "An unexpected error occurred.",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const REQUIRED_FIELDS: { key: keyof FormState; label: string }[] = [
+    { key: "vehicleNumber", label: "Vehicle number" },
+    { key: "vin", label: "VIN" },
+    { key: "make", label: "Make" },
+    { key: "model", label: "Model" },
+    { key: "modelYear", label: "Model year" },
+    { key: "firstName", label: "First name" },
+    { key: "lastName", label: "Last name" },
+    { key: "enterpriseId", label: "Enterprise ID" },
+    { key: "deliveryAddress", label: "Delivery address" },
+    { key: "city", label: "City" },
+    { key: "state", label: "State" },
+    { key: "zip", label: "ZIP code" },
+    { key: "district", label: "District" },
+    { key: "licensePlate", label: "License plate" },
+    { key: "plateState", label: "Plate state" },
+    { key: "assetType", label: "Asset type" },
+    { key: "plateType", label: "Plate type" },
+    { key: "regRenewalDate", label: "Registration renewal date" },
+  ];
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (vehicleExistsWarning) {
+      toast({ title: "Duplicate Vehicle", description: vehicleExistsWarning, variant: "destructive" });
+      return;
+    }
+    const missing = REQUIRED_FIELDS.filter(({ key }) => !form[key] || String(form[key]).trim() === "");
+    if (missing.length > 0) {
+      toast({
+        title: "Required fields missing",
+        description: `Please fill in: ${missing.map((f) => f.label).join(", ")}`,
+        variant: "destructive",
+      });
+      return;
+    }
+    setSubmitResult(null);
+    createMutation.mutate(form);
+  };
+
+  const handleReset = () => {
+    setForm(emptyForm);
+    setSubmitResult(null);
+    setVehicleExistsWarning(null);
+  };
 
   return (
     <MainContent>
-      <TopBar 
-        title="Create Vehicle" 
-        breadcrumbs={["Home", "Create Vehicle"]}
-      />
-      
+      <TopBar title="Create BYOV Vehicle" breadcrumbs={["Home", "Create BYOV Vehicle"]} />
+
       <main className="p-6">
-        <div className="max-w-4xl mx-auto">
+        <div className="max-w-4xl mx-auto space-y-6">
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                  <CardTitle data-testid="text-vehicle-title">Add New Vehicle</CardTitle>
+                  <CardTitle>New BYOV Vehicle</CardTitle>
                   <CardDescription>
-                    Enter the vehicle details to add it to your fleet
+                    Creates the vehicle record in both Holman and WMS. Vehicle type is fixed to BYOV.
                   </CardDescription>
                 </div>
-                <CopyLinkButton
-                  variant="icon"
-                  preserveQuery={true}
-                  preserveHash={true}
-                  data-testid="button-copy-form-link"
-                  className="shrink-0"
-                />
+                <CopyLinkButton variant="icon" preserveQuery preserveHash className="shrink-0" />
               </div>
             </CardHeader>
+
             <CardContent>
-              <form onSubmit={handleVehicleSubmit} className="space-y-8">
-                {/* Employee Information Section */}
+              <form onSubmit={handleSubmit} className="space-y-8">
+
+                {/* Section 1: Tech / Employee Info */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2" data-testid="text-section-employee">
+                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
                     <User className="h-5 w-5" />
-                    Employee Assignment Information
+                    Tech / Employee Info
                   </h3>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="firstName">First Name</Label>
-                      <Input
-                        id="firstName"
-                        value={employeeData.firstName}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, firstName: e.target.value }))}
-                        placeholder="John"
-                        data-testid="input-first-name"
-                      />
+                      <Label htmlFor="firstName">First Name <span className="text-destructive">*</span></Label>
+                      <Input id="firstName" value={form.firstName} onChange={set("firstName")} placeholder="John" />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="lastName">Last Name</Label>
-                      <Input
-                        id="lastName"
-                        value={employeeData.lastName}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, lastName: e.target.value }))}
-                        placeholder="Doe"
-                        data-testid="input-last-name"
-                      />
+                      <Label htmlFor="lastName">Last Name <span className="text-destructive">*</span></Label>
+                      <Input id="lastName" value={form.lastName} onChange={set("lastName")} placeholder="Doe" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="email">Email</Label>
-                      <Input
-                        id="email"
-                        type="email"
-                        value={employeeData.email}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, email: e.target.value }))}
-                        placeholder="john.doe@company.com"
-                        data-testid="input-email"
-                      />
+                      <Label htmlFor="enterpriseId">Enterprise ID <span className="text-destructive">*</span></Label>
+                      <Input id="enterpriseId" value={form.enterpriseId} onChange={set("enterpriseId")} placeholder="ENT12345" />
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="phone">Phone</Label>
-                      <Input
-                        id="phone"
-                        value={employeeData.phone}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, phone: e.target.value }))}
-                        placeholder="(555) 123-4567"
-                        data-testid="input-phone"
-                      />
+                      <Input id="phone" type="tel" value={form.phone} onChange={set("phone")} placeholder="(555) 123-4567" />
+                    </div>
+                  </div>
+                </div>
+
+                <Separator />
+
+                {/* Section 2: Vehicle Info */}
+                <div className="space-y-4">
+                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                    <Car className="h-5 w-5" />
+                    Vehicle Info
+                  </h3>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="vehicleNumber">
+                        Vehicle Number <span className="text-destructive">*</span>
+                      </Label>
+                      <div className="relative">
+                        <Input
+                          id="vehicleNumber"
+                          value={form.vehicleNumber}
+                          onChange={(e) => {
+                            setForm((prev) => ({ ...prev, vehicleNumber: e.target.value }));
+                            setVehicleExistsWarning(null);
+                          }}
+                          onBlur={(e) => checkVehicleExists(e.target.value)}
+                          placeholder="e.g. 88095"
+                          className={vehicleExistsWarning ? "border-destructive pr-9" : checkingVehicle ? "pr-9" : ""}
+                        />
+                        {checkingVehicle && (
+                          <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
+                      {vehicleExistsWarning && (
+                        <Alert variant="destructive" className="py-2">
+                          <AlertTriangle className="h-4 w-4" />
+                          <AlertDescription className="text-sm">{vehicleExistsWarning}</AlertDescription>
+                        </Alert>
+                      )}
+                      <p className="text-xs text-muted-foreground">
+                        Will be zero-padded to 6 digits (e.g. 88095 → 088095)
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="vin">VIN <span className="text-destructive">*</span></Label>
+                      <Input id="vin" value={form.vin} onChange={set("vin")} placeholder="17-character VIN" maxLength={17} className="uppercase" />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="empRegion">Employee Region</Label>
-                      <Select 
-                        value={employeeData.region} 
-                        onValueChange={(value) => setEmployeeData(prev => ({ ...prev, region: value }))}
-                        data-testid="select-emp-region"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select employee region" />
-                        </SelectTrigger>
+                      <Label>Asset Type <span className="text-destructive">*</span></Label>
+                      <Select value={form.assetType} onValueChange={setSelect("assetType")}>
+                        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                         <SelectContent>
-                          {regions.map(region => (
-                            <SelectItem key={region} value={region} data-testid={`option-${region.toLowerCase().replace(/\s+/g, '-')}`}>
-                              {region}
-                            </SelectItem>
+                          <SelectItem value="SUV">SUV</SelectItem>
+                          <SelectItem value="Truck">Truck</SelectItem>
+                          <SelectItem value="Van">Van</SelectItem>
+                          <SelectItem value="Sedan">Sedan</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="modelYear">Model Year <span className="text-destructive">*</span></Label>
+                      <Input
+                        id="modelYear"
+                        type="number"
+                        value={form.modelYear}
+                        onChange={set("modelYear")}
+                        min="1990"
+                        max={new Date().getFullYear() + 2}
+                        placeholder={String(new Date().getFullYear())}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="make">Make <span className="text-destructive">*</span></Label>
+                      <Input id="make" value={form.make} onChange={set("make")} placeholder="e.g. Ford" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="model">Model <span className="text-destructive">*</span></Label>
+                      <Input id="model" value={form.model} onChange={set("model")} placeholder="e.g. Transit" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label htmlFor="district">District <span className="text-destructive">*</span></Label>
+                      <Input id="district" value={form.district} onChange={set("district")} placeholder="e.g. 8206" />
+                      <p className="text-xs text-muted-foreground">Used as prefix and WMS cost center</p>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="deliveryAddress">Delivery Address <span className="text-destructive">*</span></Label>
+                    <Input id="deliveryAddress" value={form.deliveryAddress} onChange={set("deliveryAddress")} placeholder="Street address" />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="city">City <span className="text-destructive">*</span></Label>
+                      <Input id="city" value={form.city} onChange={set("city")} placeholder="City" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>State <span className="text-destructive">*</span></Label>
+                      <Select value={form.state} onValueChange={setSelect("state")}>
+                        <SelectTrigger><SelectValue placeholder="State" /></SelectTrigger>
+                        <SelectContent>
+                          {US_STATES.map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
                           ))}
                         </SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="empDistrict">Employee District</Label>
-                      <Input
-                        id="empDistrict"
-                        value={employeeData.district}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, district: e.target.value }))}
-                        placeholder="e.g., District 25"
-                        data-testid="input-emp-district"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="requisitionId">Requisition ID</Label>
-                      <Input
-                        id="requisitionId"
-                        value={employeeData.requisitionId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, requisitionId: e.target.value }))}
-                        placeholder="REQ-2024-001"
-                        data-testid="input-requisition-id"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="enterpriseId">Enterprise ID</Label>
-                      <Input
-                        id="enterpriseId"
-                        value={employeeData.enterpriseId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, enterpriseId: e.target.value }))}
-                        placeholder="ENT1234"
-                        data-testid="input-enterprise-id"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="techId">Employee ID</Label>
-                      <Input
-                        id="techId"
-                        value={employeeData.techId}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, techId: e.target.value }))}
-                        placeholder="EMP-001"
-                        data-testid="input-tech-id"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="proposedRouteStartDate">Proposed Route Start Date</Label>
-                      <Input
-                        id="proposedRouteStartDate"
-                        type="date"
-                        value={employeeData.proposedRouteStartDate}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, proposedRouteStartDate: e.target.value }))}
-                        data-testid="input-proposed-route-start-date"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-4">
-                    <div className="space-y-2">
-                      <Label>Specialties</Label>
-                      <div className="grid grid-cols-2 gap-2">
-                        {specialtyOptions.map(specialty => (
-                          <div key={specialty} className="flex items-center space-x-2">
-                            <Checkbox 
-                              id={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                              checked={employeeData.specialties.includes(specialty)}
-                              onCheckedChange={(checked) => {
-                                if (checked) {
-                                  setEmployeeData(prev => ({ 
-                                    ...prev, 
-                                    specialties: [...prev.specialties, specialty]
-                                  }));
-                                } else {
-                                  setEmployeeData(prev => ({ 
-                                    ...prev, 
-                                    specialties: prev.specialties.filter(s => s !== specialty)
-                                  }));
-                                }
-                              }}
-                              data-testid={`checkbox-specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                            />
-                            <Label 
-                              htmlFor={`specialty-${specialty.toLowerCase().replace(/\s+/g, '-')}`}
-                              className="text-sm font-normal cursor-pointer"
-                            >
-                              {specialty}
-                            </Label>
-                          </div>
-                        ))}
-                      </div>
+                      <Label htmlFor="zip">ZIP Code <span className="text-destructive">*</span></Label>
+                      <Input id="zip" value={form.zip} onChange={set("zip")} placeholder="e.g. 60601" maxLength={10} />
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="emergencyContact">Emergency Contact</Label>
-                      <Input
-                        id="emergencyContact"
-                        value={employeeData.emergencyContact}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyContact: e.target.value }))}
-                        placeholder="Jane Doe"
-                        data-testid="input-emergency-contact"
-                      />
+                      <Label htmlFor="deliveryDate">Delivery Date</Label>
+                      <Input id="deliveryDate" type="date" value={form.deliveryDate} onChange={set("deliveryDate")} />
+                      <p className="text-xs text-muted-foreground">Defaults to today if left blank</p>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="emergencyPhone">Emergency Phone</Label>
-                      <Input
-                        id="emergencyPhone"
-                        value={employeeData.emergencyPhone}
-                        onChange={(e) => setEmployeeData(prev => ({ ...prev, emergencyPhone: e.target.value }))}
-                        placeholder="(555) 987-6543"
-                        data-testid="input-emergency-phone"
-                      />
+                      <Label htmlFor="onRoadDate">On-Road Date</Label>
+                      <Input id="onRoadDate" type="date" value={form.onRoadDate} onChange={set("onRoadDate")} />
+                      <p className="text-xs text-muted-foreground">Defaults to today if left blank</p>
                     </div>
                   </div>
                 </div>
 
                 <Separator />
 
-                {/* Basic Vehicle Information */}
+                {/* Section 3: Registration & Licensing */}
                 <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary" data-testid="text-section-basic">Basic Vehicle Information</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="vin">VIN *</Label>
-                      <Input
-                        id="vin"
-                        value={vehicleForm.vin || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, vin: e.target.value }))}
-                        placeholder="17-character Vehicle Identification Number"
-                        maxLength={17}
-                        data-testid="input-vin"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="vehicleNumber">Vehicle Number</Label>
-                      <Input
-                        id="vehicleNumber"
-                        value={vehicleForm.vehicleNumber || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, vehicleNumber: e.target.value }))}
-                        placeholder="Internal fleet number"
-                        data-testid="input-vehicle-number"
-                      />
-                    </div>
-                  </div>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="modelYear">Model Year *</Label>
-                      <Input
-                        id="modelYear"
-                        type="number"
-                        value={vehicleForm.modelYear || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, modelYear: parseInt(e.target.value) || undefined }))}
-                        placeholder={new Date().getFullYear().toString()}
-                        min="1990"
-                        max={new Date().getFullYear() + 1}
-                        data-testid="input-model-year"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="makeName">Make *</Label>
-                      <Select 
-                        value={vehicleForm.makeName || ""} 
-                        onValueChange={(value) => setVehicleForm(prev => ({ ...prev, makeName: value }))}
-                        data-testid="select-make"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select make" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="FORD" data-testid="option-ford">Ford</SelectItem>
-                          <SelectItem value="CHEVROLET" data-testid="option-chevrolet">Chevrolet</SelectItem>
-                          <SelectItem value="TOYOTA" data-testid="option-toyota">Toyota</SelectItem>
-                          <SelectItem value="HONDA" data-testid="option-honda">Honda</SelectItem>
-                          <SelectItem value="NISSAN" data-testid="option-nissan">Nissan</SelectItem>
-                          <SelectItem value="RAM" data-testid="option-ram">Ram</SelectItem>
-                          <SelectItem value="GMC" data-testid="option-gmc">GMC</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="modelName">Model *</Label>
-                      <Input
-                        id="modelName"
-                        value={vehicleForm.modelName || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, modelName: e.target.value }))}
-                        placeholder="e.g., Econoline, Transit"
-                        data-testid="input-model-name"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="vehicleType">Vehicle Type *</Label>
-                    <Select 
-                      value={vehicleForm.vehicleType || ""} 
-                      onValueChange={(value) => setVehicleForm(prev => ({ ...prev, vehicleType: value }))}
-                      data-testid="select-vehicle-type"
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select vehicle type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="sears-fleet" data-testid="option-sears-fleet">Sears Fleet</SelectItem>
-                        <SelectItem value="byov" data-testid="option-byov">BYOV (Bring Your Own Vehicle)</SelectItem>
-                        <SelectItem value="rental" data-testid="option-rental">Rental</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="color">Color</Label>
-                    <Select 
-                      value={vehicleForm.color || ""} 
-                      onValueChange={(value) => setVehicleForm(prev => ({ ...prev, color: value }))}
-                      data-testid="select-color"
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select color" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Blue" data-testid="option-blue">Blue</SelectItem>
-                        <SelectItem value="White" data-testid="option-white">White</SelectItem>
-                        <SelectItem value="Red" data-testid="option-red">Red</SelectItem>
-                        <SelectItem value="Black" data-testid="option-black">Black</SelectItem>
-                        <SelectItem value="Silver" data-testid="option-silver">Silver</SelectItem>
-                        <SelectItem value="Gray" data-testid="option-gray">Gray</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Registration & Licensing */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary" data-testid="text-section-registration">Registration & Licensing</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="licensePlate">License Plate</Label>
-                      <Input
-                        id="licensePlate"
-                        value={vehicleForm.licensePlate || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, licensePlate: e.target.value }))}
-                        placeholder="e.g., ABC1234"
-                        data-testid="input-license-plate"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="licenseState">License State</Label>
-                      <Input
-                        id="licenseState"
-                        value={vehicleForm.licenseState || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, licenseState: e.target.value.toUpperCase() }))}
-                        placeholder="e.g., NY, CA, TX"
-                        maxLength={2}
-                        data-testid="input-license-state"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Configuration & Branding */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary" data-testid="text-section-configuration">Configuration & Branding</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="branding">Branding</Label>
-                      <Select 
-                        value={vehicleForm.branding || ""} 
-                        onValueChange={(value) => setVehicleForm(prev => ({ ...prev, branding: value }))}
-                        data-testid="select-branding"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select branding" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Sears" data-testid="option-sears">Sears</SelectItem>
-                          <SelectItem value="AE Factory Service" data-testid="option-ae-factory">AE Factory Service</SelectItem>
-                          <SelectItem value="Unmarked" data-testid="option-unmarked">Unmarked</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="interior">Interior Configuration</Label>
-                      <Select 
-                        value={vehicleForm.interior || ""} 
-                        onValueChange={(value) => setVehicleForm(prev => ({ ...prev, interior: value }))}
-                        data-testid="select-interior"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select interior type" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Lawn & Garden" data-testid="option-lawn-garden">Lawn & Garden</SelectItem>
-                          <SelectItem value="Utility With Ref Racks" data-testid="option-utility-with-racks">Utility With Ref Racks</SelectItem>
-                          <SelectItem value="Utility Without Ref Racks" data-testid="option-utility-without-racks">Utility Without Ref Racks</SelectItem>
-                          <SelectItem value="Empty" data-testid="option-empty">Empty</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tuneStatus">Tune Status</Label>
-                      <Select 
-                        value={vehicleForm.tuneStatus || ""} 
-                        onValueChange={(value) => setVehicleForm(prev => ({ ...prev, tuneStatus: value }))}
-                        data-testid="select-tune-status"
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select tune status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="Maximum" data-testid="option-maximum">Maximum</SelectItem>
-                          <SelectItem value="Medium" data-testid="option-medium">Medium</SelectItem>
-                          <SelectItem value="Stock" data-testid="option-stock">Stock</SelectItem>
-                          <SelectItem value="NA" data-testid="option-na">N/A</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                </div>
-
-                <Separator />
-
-                {/* Location & Assignment */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary" data-testid="text-section-location">Location & Assignment</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="region">Region</Label>
-                      <Input
-                        id="region"
-                        value={vehicleForm.region || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, region: e.target.value }))}
-                        placeholder="e.g., 0000850"
-                        data-testid="input-region"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="district">District</Label>
-                      <Input
-                        id="district"
-                        value={vehicleForm.district || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, district: e.target.value }))}
-                        placeholder="e.g., 0007670"
-                        data-testid="input-district"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label htmlFor="acquisitionAddress">Acquisition Address</Label>
-                    <Input
-                      id="acquisitionAddress"
-                      value={vehicleForm.deliveryAddress || ""}
-                      onChange={(e) => setVehicleForm(prev => ({ ...prev, deliveryAddress: e.target.value }))}
-                      placeholder="Street address"
-                      data-testid="input-acquisition-address"
-                    />
-                  </div>
+                  <h3 className="text-lg font-semibold text-primary flex items-center gap-2">
+                    <FileText className="h-5 w-5" />
+                    Registration &amp; Licensing
+                  </h3>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="space-y-2">
-                      <Label htmlFor="city">City</Label>
-                      <Input
-                        id="city"
-                        value={vehicleForm.city || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, city: e.target.value }))}
-                        placeholder="City name"
-                        data-testid="input-city"
-                      />
+                      <Label htmlFor="licensePlate">License Plate <span className="text-destructive">*</span></Label>
+                      <Input id="licensePlate" value={form.licensePlate} onChange={set("licensePlate")} placeholder="ABC1234" className="uppercase" />
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="state">State</Label>
-                      <Input
-                        id="state"
-                        value={vehicleForm.state || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, state: e.target.value.toUpperCase() }))}
-                        placeholder="e.g., NY, CA"
-                        maxLength={2}
-                        data-testid="input-state"
-                      />
+                      <Label>Plate State <span className="text-destructive">*</span></Label>
+                      <Select value={form.plateState} onValueChange={setSelect("plateState")}>
+                        <SelectTrigger><SelectValue placeholder="State" /></SelectTrigger>
+                        <SelectContent>
+                          {US_STATES.map((s) => (
+                            <SelectItem key={s} value={s}>{s}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label htmlFor="zip">Zip Code</Label>
-                      <Input
-                        id="zip"
-                        value={vehicleForm.zip || ""}
-                        onChange={(e) => setVehicleForm(prev => ({ ...prev, zip: e.target.value }))}
-                        placeholder="Zip code"
-                        data-testid="input-zip"
-                      />
+                      <Label>Plate Type <span className="text-destructive">*</span></Label>
+                      <Select value={form.plateType} onValueChange={setSelect("plateType")}>
+                        <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
+                        <SelectContent>
+                          {PLATE_TYPES.map((t) => (
+                            <SelectItem key={t} value={t}>{t}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="regRenewalDate">Registration Renewal Date <span className="text-destructive">*</span></Label>
+                      <Input id="regRenewalDate" type="date" value={form.regRenewalDate} onChange={set("regRenewalDate")} />
                     </div>
                   </div>
                 </div>
 
-                <Separator />
-
-                {/* Status */}
-                <div className="space-y-4">
-                  <h3 className="text-lg font-semibold text-primary" data-testid="text-section-status">Vehicle Status</h3>
-                  <div className="space-y-2">
-                    <Label htmlFor="status">Status</Label>
-                    <Select 
-                      value={vehicleForm.status || "available"} 
-                      onValueChange={(value) => setVehicleForm(prev => ({ ...prev, status: value }))}
-                      data-testid="select-status"
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select status" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="available" data-testid="option-available">Available</SelectItem>
-                        <SelectItem value="assigned" data-testid="option-assigned">Assigned</SelectItem>
-                        <SelectItem value="maintenance" data-testid="option-maintenance">Maintenance</SelectItem>
-                        <SelectItem value="retired" data-testid="option-retired">Retired</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                <div className="flex gap-3 pt-2">
+                  <Button
+                    type="submit"
+                    className="flex-1"
+                    disabled={createMutation.isPending || !!vehicleExistsWarning}
+                  >
+                    {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    {createMutation.isPending ? "Submitting…" : "Create BYOV Vehicle"}
+                  </Button>
+                  <Button type="button" variant="outline" onClick={handleReset}>
+                    Reset
+                  </Button>
                 </div>
-
-                <Button type="submit" className="w-full" data-testid="button-submit-vehicle">
-                  Create Vehicle & Assign Employee
-                </Button>
               </form>
             </CardContent>
           </Card>
+
+          {/* Results Panel */}
+          {submitResult && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Submission Results</CardTitle>
+                <CardDescription>Per-system status for the most recent submission</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <SystemResultRow system="Holman" result={submitResult.holman} />
+                <SystemResultRow system="WMS" result={submitResult.wms} />
+              </CardContent>
+            </Card>
+          )}
         </div>
       </main>
     </MainContent>
+  );
+}
+
+function SystemResultRow({ system, result }: { system: string; result: { success: boolean; error?: string } }) {
+  return (
+    <div className="flex items-start gap-3 p-3 rounded-lg border bg-muted/30">
+      <div className="mt-0.5">
+        {result.success
+          ? <CheckCircle2 className="h-5 w-5 text-green-600 dark:text-green-400" />
+          : <XCircle className="h-5 w-5 text-destructive" />}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="font-medium text-sm">{system}</span>
+          <Badge variant={result.success ? "default" : "destructive"} className="text-xs">
+            {result.success ? "Success" : "Failed"}
+          </Badge>
+        </div>
+        {!result.success && result.error && (
+          <p className="text-sm text-muted-foreground mt-1 break-words">{result.error}</p>
+        )}
+        {result.success && (
+          <p className="text-sm text-muted-foreground mt-1">Vehicle record created successfully.</p>
+        )}
+      </div>
+    </div>
   );
 }

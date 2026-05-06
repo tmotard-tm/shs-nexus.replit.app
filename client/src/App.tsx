@@ -21,6 +21,7 @@ import ManualLogin from "@/pages/manual-login";
 import SsoCallback from "@/pages/sso-callback";
 import AssistanceSelection from "@/pages/assistance-selection";
 import CreateVehicle from "@/pages/create-vehicle-location";
+import CreateVehiclePublic from "@/pages/create-vehicle-public";
 import AssignVehicleLocation from "@/pages/assign-vehicle-location";
 import UpdateVehicle from "@/pages/update-vehicle";
 import OnboardHire from "@/pages/onboard-hire";
@@ -162,7 +163,7 @@ function Router() {
       <Route path="/forms/create-vehicle">
         <PublicFormRoute>
           <MainContent>
-            <CreateVehicle />
+            <CreateVehiclePublic />
           </MainContent>
         </PublicFormRoute>
       </Route>

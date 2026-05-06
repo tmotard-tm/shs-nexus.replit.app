@@ -34,6 +34,7 @@ import { detectByov, getInitialToolsTaskStatus, TOOLS_OWNER } from "./byov-utils
 import { getDetectionLane, parseTechDataFromQueueItem, generateReturnToken } from "./return-token-service";
 import { registerFleetScopeRoutes } from "./fleet-scope-routes";
 import { registerWmsRoutes } from "./wms-engine-routes";
+import { wmsEngineService } from "./wms-engine-service";
 import { initWebSocket as initFsWebSocket, startScheduledMessageProcessor as startFsScheduledMessages } from "./fleet-scope-reg-messaging";
 import { fsDb } from "./fleet-scope-db";
 import { initFleetScopeSchema } from "./fleet-scope-schema-init";
@@ -8127,6 +8128,210 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: false, 
         error: error.message || "Failed to look up vehicle from Holman API" 
       });
+    }
+  });
+
+  // Duplicate-check: does a vehicle number already exist in the Holman cache?
+  // Uses canonical (strip-leading-zeros) comparison so 88095 and 088095 are treated as the same.
+  app.get("/api/holman/vehicles/exists/:vehicleNumber", requireAuth, async (req: any, res) => {
+    try {
+      const raw = req.params.vehicleNumber;
+      const canonical = toCanonical(raw);
+      if (!canonical) return res.status(400).json({ exists: false, error: "Invalid vehicle number" });
+
+      // The cache stores vehicles in 6-digit padded format (toHolmanRef).
+      // Query for the padded form directly (fast indexed lookup), then also check canonical fallback.
+      const paddedLookup = toHolmanRef(raw);
+
+      const rows = await db
+        .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedLookup))
+        .limit(1);
+
+      // If direct lookup found it, it exists. If not, do a canonical scan as safety net.
+      let exists = rows.length > 0;
+
+      if (!exists) {
+        // Full scan — no row limit — to catch any non-padded legacy entries
+        const allRows = await db
+          .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+          .from(holmanVehiclesCache);
+        exists = allRows.some((row) => toCanonical(row.holmanVehicleNumber) === canonical);
+      }
+
+      return res.json({ exists, canonical });
+    } catch (error: any) {
+      console.error("[BYOV] Vehicle exists check error:", error);
+      return res.status(500).json({ exists: false, error: error.message || "Failed to check vehicle" });
+    }
+  });
+
+  // BYOV vehicle creation — submits to Holman and WMS sequentially
+  app.post("/api/byov/create", requireAuth, async (req, res) => {
+    try {
+      const {
+        vehicleNumber, vin, assetType, modelYear, make, model,
+        firstName, lastName, enterpriseId, phone,
+        deliveryAddress, city, state, zip, district,
+        deliveryDate, onRoadDate,
+        licensePlate, plateState, plateType, regRenewalDate,
+      } = req.body;
+
+      if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+
+      // Zero-pad vehicle number to 6 digits
+      const paddedVehicle = toHolmanRef(vehicleNumber);
+
+      // Required-field validation
+      const requiredFields: Record<string, string> = {
+        vehicleNumber: "Vehicle number",
+        vin: "VIN",
+        make: "Make",
+        model: "Model",
+        modelYear: "Model year",
+        firstName: "First name",
+        lastName: "Last name",
+        enterpriseId: "Enterprise ID",
+        deliveryAddress: "Delivery address",
+        city: "City",
+        state: "State",
+        zip: "ZIP code",
+        district: "District",
+        licensePlate: "License plate",
+        plateState: "Plate state",
+        assetType: "Asset type",
+        plateType: "Plate type",
+        regRenewalDate: "Registration renewal date",
+      };
+      const missingFields = Object.entries(requiredFields)
+        .filter(([key]) => !req.body[key] || String(req.body[key]).trim() === "")
+        .map(([, label]) => label);
+      if (missingFields.length > 0) {
+        return res.status(400).json({
+          error: `Missing required fields: ${missingFields.join(", ")}`,
+        });
+      }
+
+      // Duplicate check before submitting — try exact padded lookup first, then full canonical scan
+      const canonical = toCanonical(vehicleNumber);
+      const directRows = await db
+        .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
+        .limit(1);
+      let duplicate = directRows.length > 0;
+      if (!duplicate) {
+        // Full scan — no row limit — to catch any non-padded legacy entries
+        const allRows = await db
+          .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+          .from(holmanVehiclesCache);
+        duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
+      }
+      if (duplicate) {
+        return res.status(409).json({
+          error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
+        });
+      }
+
+      // --- Derived / fixed values ---
+      const NULL_VAL = "^null^";
+      const isUnknown = (lastName || "").trim().toUpperCase() === "UNKNOWN";
+      // clientData1 mirrors lastName in full; clientData2/4 mirror enterpriseId.
+      // When lastName is UNKNOWN all three use ^null^.
+      const clientData1 = isUnknown ? NULL_VAL : (lastName ? String(lastName) : null);
+      const clientData2 = isUnknown ? NULL_VAL : (enterpriseId || null);
+      const clientData4 = isUnknown ? NULL_VAL : (enterpriseId || null);
+      const auxData7 = zip || null;
+      const todayStr = new Date().toISOString().split("T")[0];
+      const finalDeliveryDate = deliveryDate || todayStr;
+      const finalOnRoadDate = onRoadDate || todayStr;
+
+      // prefix is the full district number (not sliced)
+      const districtStr = String(district || "").trim();
+      const prefix = districtStr || null;
+
+      // WMS paddings
+      const wmsCostCenter = districtStr ? districtStr.padStart(5, "0") : undefined;
+      const regionRaw = "890";
+      const wmsRegionNo = regionRaw.padStart(7, "0");
+
+      // --- Holman submission ---
+      const holmanPayload = {
+        lesseeCode: "2B56",
+        holmanVehicleNumber: paddedVehicle,
+        vendorCode: "OTH",
+        vin: vin || null,
+        modelYear: modelYear ? Number(modelYear) : null,
+        makeVin: make || null,
+        modelVin: model || null,
+        assetType: assetType || null,
+        firstName: firstName || null,
+        lastName: lastName || null,
+        email: "FLEET_SUPPORT@TRANSFORMCO.COM",
+        clientData1,
+        clientData2,
+        clientData3: "890",
+        clientData4,
+        assignedStatusCode: "D",
+        driverClass: "N",
+        prefix,
+        addressLine1: deliveryAddress || null,
+        city: city || null,
+        stateProvince: state || null,
+        zipPostalCode: zip || null,
+        auxData7,
+        licensePlate: licensePlate || null,
+        licenseState: plateState || null,
+        licensePlateType: plateType || null,
+        regRenewalDate: regRenewalDate || null,
+        deliveryDate: finalDeliveryDate,
+        onRoadDate: finalOnRoadDate,
+        workPhone: phone || null,
+        isActive: true,
+        spareTruck: false,
+      };
+
+      let holmanResult: { success: boolean; error?: string } = { success: false };
+      try {
+        const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
+        console.log("[BYOV] Holman submit response:", holmanResp);
+        holmanResult = { success: true };
+      } catch (holmanErr: unknown) {
+        const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
+        console.error("[BYOV] Holman submit error:", holmanErr);
+        holmanResult = { success: false, error: holmanMsg };
+      }
+
+      // --- WMS submission ---
+      const wmsPayload = {
+        name: paddedVehicle,
+        locationId: paddedVehicle,
+        externalId: paddedVehicle,
+        description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+        isActive: true,
+        costCenter: wmsCostCenter,
+        regionNo: wmsRegionNo,
+        spareTruck: false,
+        useCaseId: "Nexus",
+      };
+
+      let wmsResult: { success: boolean; error?: string } = { success: false };
+      try {
+        const wmsResp = await wmsEngineService.createTruck(wmsPayload);
+        console.log("[BYOV] WMS create truck response:", wmsResp);
+        wmsResult = { success: true };
+      } catch (wmsErr: unknown) {
+        const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
+        console.error("[BYOV] WMS create truck error:", wmsErr);
+        wmsResult = { success: false, error: wmsMsg };
+      }
+
+      return res.json({ holman: holmanResult, wms: wmsResult });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "BYOV creation failed";
+      console.error("[BYOV] create error:", error);
+      return res.status(500).json({ error: msg });
     }
   });
 
