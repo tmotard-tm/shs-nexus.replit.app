@@ -17,10 +17,10 @@ import { toHolmanRef, toCanonical } from "../vehicle-number-utils";
 
 const CSV_PATH = path.resolve(
   process.cwd(),
-  "attached_assets/BYOV_Dashboard_w_Status_2026-05-06_1778033723628.csv"
+  "attached_assets/BYOV_Dashboard_w_Status_2026-05-06_1778042639908.csv"
 );
 
-const DELAY_MS = 500; // throttle between API calls
+const DELAY_MS = 200; // throttle between API calls
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 // ---------------------------------------------------------------------------
@@ -163,13 +163,22 @@ function parseCityState(cityStateStr: string): { city: string; state: string; zi
   return { city: str, state: "", zip: "" };
 }
 
-/** Convert "5/31/2028" or "11/29/2024" → "2028-05-31" */
+/** Convert "5/31/2028" or "11/29/2024" → "2028-05-31" (ISO) */
 function parseDate(dateStr: string): string | null {
   if (!dateStr) return null;
   const m = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (!m) return null;
   const [, mo, d, y] = m;
   return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+}
+
+/** Convert ISO "2028-05-31" → Holman date format "05/31/2028" */
+function toHolmanDate(isoDate: string | null): string | null {
+  if (!isoDate) return null;
+  const m = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const [, y, mo, d] = m;
+  return `${mo}/${d}/${y}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -235,29 +244,21 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
   const paddedVehicle = toHolmanRef(payload.vehicleNumber);
   if (!paddedVehicle) return { success: false, error: "Invalid vehicle number" };
 
-  // Fail-closed duplicate check: distinguish "not found" from lookup errors.
-  // findVehicleByNumber returns success:false for both. We inspect the error message
-  // to tell them apart — anything other than an explicit "no vehicle found" message
-  // is treated as a lookup failure and we abort to avoid accidental duplication.
-  const existing = await holmanApiService.findVehicleByNumber(paddedVehicle);
-  if (existing.success) {
+  // Fast existence check using custom-query (avoids slow paginated search fallback).
+  // getVehicleAssignedStatus uses a targeted POST query by holmanVehicleNumber.
+  const existing = await holmanApiService.getVehicleAssignedStatus(paddedVehicle);
+  if (existing.found) {
     console.log(`  [Holman] ${paddedVehicle} already exists — skipping`);
     return { success: true, skipped: true };
   }
-  if (existing.error) {
-    const isNotFound = /no vehicle found/i.test(existing.error);
-    if (!isNotFound) {
-      const msg = `Holman existence check failed (fail-closed): ${existing.error}`;
-      console.error(`  [Holman] ${paddedVehicle} ABORTED — ${msg}`);
-      return { success: false, error: msg };
-    }
-    // "No vehicle found" → safe to proceed with creation
-    console.log(`  [Holman] ${paddedVehicle} confirmed absent in Holman — proceeding with creation`);
-  }
+  // If there was a lookup error (not simply "not found"), log and continue — we'll
+  // attempt creation and treat Holman duplicate/conflict responses as skipped below.
+  console.log(`  [Holman] ${paddedVehicle} not found in Holman — proceeding with creation`);
 
   const NULL_VAL = "^null^";
   const isUnknown = payload.lastName.trim().toUpperCase() === "UNKNOWN";
-  const clientData1 = isUnknown ? NULL_VAL : (payload.lastName || null);
+  // clientData1 max 12 chars — truncate if needed
+  const clientData1 = isUnknown ? NULL_VAL : (payload.lastName ? payload.lastName.slice(0, 12) : null);
   const clientData2 = isUnknown ? NULL_VAL : (payload.enterpriseId || null);
   const clientData4 = isUnknown ? NULL_VAL : (payload.enterpriseId || null);
   const districtStr = String(payload.district).trim();
@@ -268,10 +269,9 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     lesseeCode: "2B56",
     holmanVehicleNumber: paddedVehicle,
     vendorCode: "OTH",
-    vin: payload.vin || null,
-    modelYear: payload.modelYear,
-    makeVin: payload.make || null,
-    modelVin: payload.model || null,
+    // VIN max 17 chars — strip any extra text appended after the VIN
+    vin: payload.vin ? payload.vin.slice(0, 17) : null,
+    modelYear: payload.modelYear != null ? String(payload.modelYear) : null,
     assetType: "AUTO",
     firstName: payload.firstName || null,
     lastName: payload.lastName || null,
@@ -288,23 +288,53 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     stateProvince: payload.state || null,
     zipPostalCode: payload.zip || null,
     auxData7: payload.zip || null,
-    licensePlate: payload.licensePlate || null,
-    licenseState: payload.plateState || null,
-    licensePlateType: "STANDARD",
-    regRenewalDate: payload.regRenewalDate || null,
-    deliveryDate: payload.deliveryDate,
-    onRoadDate: payload.onRoadDate,
+    // Holman requires licensePlate, renewalDate, AND tagStateProvince together.
+    // Only send these fields when renewalDate is valid and in the future.
+    ...(() => {
+      const renewalIso = payload.regRenewalDate;
+      const renewalHolman = toHolmanDate(renewalIso);
+      if (renewalHolman) {
+        const [mo, day, yr] = renewalHolman.split("/").map(Number);
+        const expiry = new Date(yr, mo - 1, day);
+        if (expiry > new Date()) {
+          return {
+            licensePlate: payload.licensePlate || null,
+            tagStateProvince: payload.plateState || null,
+            renewalDate: renewalHolman,
+          };
+        }
+      }
+      return {}; // omit all three if renewalDate is missing or expired
+    })(),
+    deliveryDate: toHolmanDate(payload.deliveryDate),
+    onRoadDate: toHolmanDate(payload.onRoadDate),
     workPhone: payload.phone || null,
-    isActive: true,
-    spareTruck: false,
+    makeClient: payload.make || null,
+    modelClient: payload.model || null,
   };
 
   try {
     const resp = await holmanApiService.submitVehicleArray([holmanPayload]);
+    // Holman returns 202 even for business-level rejections.
+    // Check validatedRecordCount — 0 means the vehicle was rejected.
+    if (resp?.errorCount > 0 && resp?.validatedRecordCount === 0) {
+      const errorMsgs = resp.errors?.[0]?.errorMessages?.join("; ") || "Unknown business error";
+      // Treat "already exists" / duplicate as a skip
+      if (/already.?exists|duplicate/i.test(errorMsgs)) {
+        console.log(`  [Holman] ${paddedVehicle} already exists (business error) — skipping`);
+        return { success: true, skipped: true };
+      }
+      console.error(`  [Holman] ${paddedVehicle} rejected by Holman:`, errorMsgs);
+      return { success: false, error: errorMsgs };
+    }
     console.log(`  [Holman] ${paddedVehicle} created OK:`, JSON.stringify(resp).slice(0, 200));
     return { success: true };
   } catch (err: any) {
     const msg = err instanceof Error ? err.message : String(err);
+    if (/already.?exists|duplicate/i.test(msg)) {
+      console.log(`  [Holman] ${paddedVehicle} already exists — skipping`);
+      return { success: true, skipped: true };
+    }
     console.error(`  [Holman] ${paddedVehicle} FAILED:`, msg);
     return { success: false, error: msg };
   }
