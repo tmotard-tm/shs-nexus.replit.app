@@ -295,6 +295,26 @@ export default function TruckDetail() {
   const [lastOpResult, setLastOpResult] = useState<FleetOpsResult | null>(null);
   const [opDetailDialogOpen, setOpDetailDialogOpen] = useState(false);
 
+  // BYOV creation audit record for this truck
+  const { data: byovAuditEntry } = useQuery<{
+    id: number;
+    vehicleNumber: string;
+    submittedBy: string;
+    submittedAt: string;
+    holmanSuccess: boolean;
+    wmsSuccess: boolean;
+  } | null>({
+    queryKey: ["/api/byov/audit-log", truckNumberForSpecialty],
+    queryFn: async () => {
+      if (!truckNumberForSpecialty) return null;
+      const res = await fetch(`/api/byov/audit-log/${encodeURIComponent(truckNumberForSpecialty)}`);
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!truckNumberForSpecialty,
+    staleTime: 5 * 60 * 1000,
+  });
+
   // Most recent op log for this truck — persists status across page reloads
   const { data: recentOpLog } = useQuery<RecentOpLog | null>({
     queryKey: ["/api/fleet-ops/recent-op", truckNumberForSpecialty],
@@ -2422,6 +2442,21 @@ export default function TruckDetail() {
                     />
                   </CardContent>
                 </Card>
+
+                {/* BYOV Creation Note */}
+                {byovAuditEntry && (
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 border rounded-md px-3 py-2">
+                    <ClipboardCheck className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                    <span>
+                      Created via BYOV by{" "}
+                      <span className="font-medium text-foreground">{byovAuditEntry.submittedBy}</span>
+                      {" "}on{" "}
+                      <span className="font-medium text-foreground">
+                        {format(new Date(byovAuditEntry.submittedAt), "MMM d, yyyy")}
+                      </span>
+                    </span>
+                  </div>
+                )}
 
                 {/* Last Updated */}
                 <div className="text-xs text-muted-foreground text-right">

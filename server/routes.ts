@@ -22,7 +22,7 @@ import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq, and, or, gte, lte, lt, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
+import { sql, eq, and, or, gte, lte, lt, inArray, asc, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
@@ -8519,6 +8519,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to export audit log";
       console.error("[BYOV] audit-log export error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  app.get("/api/byov/audit-log/:vehicleNumber", requireAuth, async (req, res) => {
+    try {
+      const { vehicleNumber } = req.params;
+      const rows = await db
+        .select()
+        .from(byovCreationAudit)
+        .where(eq(byovCreationAudit.vehicleNumber, vehicleNumber))
+        .orderBy(asc(byovCreationAudit.submittedAt))
+        .limit(1);
+      if (rows.length === 0) return res.json(null);
+      return res.json(rows[0]);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to load audit entry";
+      console.error("[BYOV] audit-log/:vehicleNumber error:", error);
       return res.status(500).json({ error: msg });
     }
   });
