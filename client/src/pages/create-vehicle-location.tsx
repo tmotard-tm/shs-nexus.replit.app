@@ -928,7 +928,15 @@ export default function CreateVehicle() {
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-2 gap-x-4 gap-y-2">
                 <div className="text-muted-foreground">Vehicle #</div>
-                <div className="font-medium">{selectedAuditEntry.vehicleNumber}</div>
+                <div className="font-medium">
+                  <button
+                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200 hover:underline focus:outline-none"
+                    onClick={() => handleVehicleNumberClick(selectedAuditEntry.vehicleNumber)}
+                  >
+                    <ExternalLink className="h-3 w-3 opacity-50" />
+                    {selectedAuditEntry.vehicleNumber}
+                  </button>
+                </div>
 
                 {selectedAuditEntry.vin && (
                   <>
