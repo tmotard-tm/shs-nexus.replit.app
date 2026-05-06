@@ -28,6 +28,7 @@ import {
   GraduationCap,
   FileBarChart,
   LayoutDashboard,
+  Upload,
   type LucideIcon
 } from "lucide-react";
 
@@ -538,6 +539,15 @@ export const PAGES: PageDefinition[] = [
     icon: Wrench,
     category: "fleetScope",
     permissionKey: "fleetScope",
+  },
+  {
+    key: "byovBulkUpload",
+    label: "BYOV Bulk Upload",
+    description: "Create BYOV vehicles in bulk from a CSV status export",
+    path: "/byov-bulk-upload",
+    icon: Upload,
+    category: "management",
+    permissionKey: "byovBulkUpload",
   },
   {
     key: "wmsEngine",

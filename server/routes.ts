@@ -8167,7 +8167,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // BYOV vehicle creation — submits to Holman and WMS sequentially
+  // BYOV vehicle creation — submits to Holman and/or WMS based on caller intent.
+  // Optional flags `createInHolman` (default true) and `createInWms` (default true)
+  // let callers target only the system(s) that are missing for a given vehicle.
+  // When createInHolman is false the Holman duplicate-gate is skipped entirely so
+  // WMS-only rows are not incorrectly blocked by the 409 guard.
   app.post("/api/byov/create", requireAuth, async (req, res) => {
     try {
       const {
@@ -8176,7 +8180,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deliveryAddress, city, state, zip, district,
         deliveryDate, onRoadDate,
         licensePlate, plateState, plateType, regRenewalDate,
+        createInHolman: createInHolmanRaw,
+        createInWms: createInWmsRaw,
       } = req.body;
+
+      // Default both flags to true when omitted so existing callers are unaffected.
+      const createInHolman = createInHolmanRaw !== false && createInHolmanRaw !== "false";
+      const createInWms    = createInWmsRaw    !== false && createInWmsRaw    !== "false";
+
+      if (!createInHolman && !createInWms) {
+        return res.status(400).json({ error: "At least one of createInHolman or createInWms must be true." });
+      }
 
       if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
 
@@ -8213,25 +8227,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
       }
 
-      // Duplicate check before submitting — try exact padded lookup first, then full canonical scan
-      const canonical = toCanonical(vehicleNumber);
-      const directRows = await db
-        .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
-        .from(holmanVehiclesCache)
-        .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
-        .limit(1);
-      let duplicate = directRows.length > 0;
-      if (!duplicate) {
-        // Full scan — no row limit — to catch any non-padded legacy entries
-        const allRows = await db
+      // Holman duplicate guard — only enforced when we are actually creating in Holman.
+      // Skipping this check for WMS-only rows avoids a spurious 409 for vehicles that
+      // already exist in Holman (by design) but are missing in WMS.
+      if (createInHolman) {
+        const canonical = toCanonical(vehicleNumber);
+        const directRows = await db
           .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
-          .from(holmanVehiclesCache);
-        duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
-      }
-      if (duplicate) {
-        return res.status(409).json({
-          error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
-        });
+          .from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle))
+          .limit(1);
+        let duplicate = directRows.length > 0;
+        if (!duplicate) {
+          // Full scan — no row limit — to catch any non-padded legacy entries
+          const allRows = await db
+            .select({ holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber })
+            .from(holmanVehiclesCache);
+          duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
+        }
+        if (duplicate) {
+          return res.status(409).json({
+            error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
+          });
+        }
       }
 
       // --- Derived / fixed values ---
@@ -8256,75 +8274,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const regionRaw = "890";
       const wmsRegionNo = regionRaw.padStart(7, "0");
 
-      // --- Holman submission ---
-      const holmanPayload = {
-        lesseeCode: "2B56",
-        holmanVehicleNumber: paddedVehicle,
-        vendorCode: "OTH",
-        vin: vin || null,
-        modelYear: modelYear ? Number(modelYear) : null,
-        makeVin: make || null,
-        modelVin: model || null,
-        assetType: assetType || null,
-        firstName: firstName || null,
-        lastName: lastName || null,
-        email: "FLEET_SUPPORT@TRANSFORMCO.COM",
-        clientData1,
-        clientData2,
-        clientData3: "890",
-        clientData4,
-        assignedStatusCode: "D",
-        driverClass: "N",
-        prefix,
-        addressLine1: deliveryAddress || null,
-        city: city || null,
-        stateProvince: state || null,
-        zipPostalCode: zip || null,
-        auxData7,
-        licensePlate: licensePlate || null,
-        licenseState: plateState || null,
-        licensePlateType: plateType || null,
-        regRenewalDate: regRenewalDate || null,
-        deliveryDate: finalDeliveryDate,
-        onRoadDate: finalOnRoadDate,
-        workPhone: phone || null,
-        isActive: true,
-        spareTruck: false,
-      };
-
-      let holmanResult: { success: boolean; error?: string } = { success: false };
-      try {
-        const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-        console.log("[BYOV] Holman submit response:", holmanResp);
-        holmanResult = { success: true };
-      } catch (holmanErr: unknown) {
-        const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
-        console.error("[BYOV] Holman submit error:", holmanErr);
-        holmanResult = { success: false, error: holmanMsg };
+      // --- Holman submission (conditional) ---
+      let holmanResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
+      if (createInHolman) {
+        const holmanPayload = {
+          lesseeCode: "2B56",
+          holmanVehicleNumber: paddedVehicle,
+          vendorCode: "OTH",
+          vin: vin || null,
+          modelYear: modelYear ? Number(modelYear) : null,
+          makeVin: make || null,
+          modelVin: model || null,
+          assetType: assetType || null,
+          firstName: firstName || null,
+          lastName: lastName || null,
+          email: "FLEET_SUPPORT@TRANSFORMCO.COM",
+          clientData1,
+          clientData2,
+          clientData3: "890",
+          clientData4,
+          assignedStatusCode: "D",
+          driverClass: "N",
+          prefix,
+          addressLine1: deliveryAddress || null,
+          city: city || null,
+          stateProvince: state || null,
+          zipPostalCode: zip || null,
+          auxData7,
+          licensePlate: licensePlate || null,
+          licenseState: plateState || null,
+          licensePlateType: plateType || null,
+          regRenewalDate: regRenewalDate || null,
+          deliveryDate: finalDeliveryDate,
+          onRoadDate: finalOnRoadDate,
+          workPhone: phone || null,
+          isActive: true,
+          spareTruck: false,
+        };
+        try {
+          const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
+          console.log("[BYOV] Holman submit response:", holmanResp);
+          holmanResult = { success: true };
+        } catch (holmanErr: unknown) {
+          const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
+          console.error("[BYOV] Holman submit error:", holmanErr);
+          holmanResult = { success: false, error: holmanMsg };
+        }
       }
 
-      // --- WMS submission ---
-      const wmsPayload = {
-        name: paddedVehicle,
-        locationId: paddedVehicle,
-        externalId: paddedVehicle,
-        description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
-        isActive: true,
-        costCenter: wmsCostCenter,
-        regionNo: wmsRegionNo,
-        spareTruck: false,
-        useCaseId: "Nexus",
-      };
-
-      let wmsResult: { success: boolean; error?: string } = { success: false };
-      try {
-        const wmsResp = await wmsEngineService.createTruck(wmsPayload);
-        console.log("[BYOV] WMS create truck response:", wmsResp);
-        wmsResult = { success: true };
-      } catch (wmsErr: unknown) {
-        const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
-        console.error("[BYOV] WMS create truck error:", wmsErr);
-        wmsResult = { success: false, error: wmsMsg };
+      // --- WMS submission (conditional) ---
+      let wmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
+      if (createInWms) {
+        const wmsPayload = {
+          name: paddedVehicle,
+          locationId: paddedVehicle,
+          externalId: paddedVehicle,
+          description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+          isActive: true,
+          costCenter: wmsCostCenter,
+          regionNo: wmsRegionNo,
+          spareTruck: false,
+          useCaseId: "Nexus",
+        };
+        try {
+          const wmsResp = await wmsEngineService.createTruck(wmsPayload);
+          console.log("[BYOV] WMS create truck response:", wmsResp);
+          wmsResult = { success: true };
+        } catch (wmsErr: unknown) {
+          const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
+          console.error("[BYOV] WMS create truck error:", wmsErr);
+          wmsResult = { success: false, error: wmsMsg };
+        }
       }
 
       const holmanOnly = holmanResult.success && !wmsResult.success;

@@ -46,6 +46,7 @@ import AnalyticsBoard from "@/pages/analytics-board";
 import OperationsDashboard from "@/pages/operations-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
+import ByovBulkUpload from "@/pages/byov-bulk-upload";
 import OffboardingReturn from "@/pages/offboarding-return";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
@@ -269,6 +270,12 @@ function Router() {
           <MainContent>
             <SearsDriveEnrollment />
           </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/byov-bulk-upload">
+        <ProtectedRoute>
+          <ByovBulkUpload />
         </ProtectedRoute>
       </Route>
 
