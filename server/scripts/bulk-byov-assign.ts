@@ -4,12 +4,17 @@
  * Reads the BYOV status CSV and assigns each vehicle to its technician
  * (identified by the LDAP column) in both Holman and WMS.
  *
- * Run: npx tsx server/scripts/bulk-byov-assign.ts [--force]
+ * Run: npx tsx server/scripts/bulk-byov-assign.ts [--force] [--dry-run] [--dry-run-with-reads]
  *
  * Flags:
- *   --force   When a technician is already assigned to a different truck in WMS,
- *             delete the old assignment first (fail-closed) and then create the
- *             new one. Without this flag the existing assignment is updated via PUT.
+ *   --force              When a technician is already assigned to a different truck in WMS,
+ *                        delete the old assignment first (fail-closed) and then create the
+ *                        new one. Without this flag the existing assignment is updated via PUT.
+ *   --dry-run            Strict preview: skips ALL Holman and WMS API calls (reads and writes).
+ *                        Shows intent per row (would assign / would attempt swap).
+ *   --dry-run-with-reads State-aware preview: performs the read-only WMS lookup per tech to
+ *                        determine the exact outcome (skip / create / update / swap X → Y),
+ *                        then skips all write calls. More informative than --dry-run.
  *
  * Required env vars (same as production BYOV assignment):
  *   HOLMAN_API_ENDPOINT, HOLMAN_CLIENT_ID, HOLMAN_CLIENT_SECRET
@@ -160,13 +165,20 @@ function normalizeString(val: any): string | null {
 
 async function assignInHolman(
   vehicleNumber: string,
-  row: CsvRow
+  row: CsvRow,
+  dryRun: boolean
 ): Promise<{ success: boolean; skipped?: boolean; error?: string }> {
   const paddedVehicle = toHolmanRef(vehicleNumber);
   if (!paddedVehicle) return { success: false, error: "Invalid vehicle number" };
 
   const ldap = row.ldap.trim();
   if (!ldap) return { success: false, error: "No LDAP/enterprise ID in CSV row" };
+
+  // Both --dry-run and --dry-run-with-reads skip Holman writes (there is no read step in Holman).
+  if (dryRun) {
+    console.log(`  [Holman] DRY RUN — would assign ${paddedVehicle} → ${ldap} (${row.name.trim()})`);
+    return { success: true };
+  }
 
   const { firstName, lastName } = parseName(row.name);
   const { city, state, zip } = parseCityState(row.cityState);
@@ -237,33 +249,37 @@ async function assignInHolman(
 async function assignInWms(
   vehicleNumber: string,
   ldap: string,
-  force: boolean
+  force: boolean,
+  dryRun: boolean,
+  dryRunWithReads: boolean
 ): Promise<{ success: boolean; skipped?: boolean; swapped?: boolean; previousTruck?: string; error?: string }> {
   const paddedVehicle = toHolmanRef(vehicleNumber);
   if (!paddedVehicle) return { success: false, error: "Invalid vehicle number" };
   if (!ldap) return { success: false, error: "No LDAP/enterprise ID" };
 
-  // Check if this tech already has an assignment.
-  // If assigned to same truck → skip. If different truck → force-swap or update. If none → create.
+  // --dry-run (strict): skip ALL API calls and show generic intent messages.
+  if (dryRun) {
+    if (force) {
+      console.log(
+        `  [WMS] DRY RUN — would assign ${paddedVehicle} → ${ldap}` +
+        ` (force: would swap existing truck if conflict, or create if none)`
+      );
+    } else {
+      console.log(
+        `  [WMS] DRY RUN — would assign ${paddedVehicle} → ${ldap}` +
+        ` (would skip if already correct, update if conflicting, create if none)`
+      );
+    }
+    return { success: true };
+  }
+
+  // Look up the current WMS assignment for this tech. Runs in both --dry-run-with-reads
+  // and live modes so we can determine the exact per-tech action.
   let existingTruck: string | null = null;
   try {
     const existing = await wmsEngineService.getAssignment(ldap);
     if (existing && (existing.name || existing.id)) {
       existingTruck = existing.name || existing.id || "";
-      if (existingTruck === paddedVehicle) {
-        console.log(`  [WMS] ${paddedVehicle} already assigned to ${ldap} — skipping`);
-        return { success: true, skipped: true };
-      }
-      // Tech exists but points to a different truck
-      if (force) {
-        console.log(
-          `  [WMS] CONFLICT: ${ldap} is assigned to "${existingTruck}" — force-swapping to "${paddedVehicle}"`
-        );
-      } else {
-        console.log(
-          `  [WMS] ${ldap} currently assigned to "${existingTruck}" — updating to "${paddedVehicle}"`
-        );
-      }
     }
   } catch (lookupErr: any) {
     const status = lookupErr?.status ?? 0;
@@ -278,9 +294,51 @@ async function assignInWms(
     // 404 means no existing assignment → safe to create
   }
 
+  const alreadyAssigned = existingTruck !== null && existingTruck === paddedVehicle;
+  const hasConflict     = existingTruck !== null && existingTruck !== paddedVehicle;
+
+  // --dry-run-with-reads: log the exact per-tech outcome and return without any write calls.
+  if (dryRunWithReads) {
+    if (alreadyAssigned) {
+      console.log(`  [WMS] DRY RUN — would skip ${ldap} (already assigned to "${paddedVehicle}")`);
+      return { success: true, skipped: true };
+    }
+    if (hasConflict) {
+      if (force) {
+        console.log(
+          `  [WMS] DRY RUN — would swap ${existingTruck} → ${paddedVehicle} for ${ldap}`
+        );
+        return { success: true, swapped: true, previousTruck: existingTruck! };
+      }
+      console.log(
+        `  [WMS] DRY RUN — would update ${ldap}: ${existingTruck} → ${paddedVehicle}`
+      );
+      return { success: true };
+    }
+    console.log(`  [WMS] DRY RUN — would assign ${paddedVehicle} → ${ldap} (create new)`);
+    return { success: true };
+  }
+
+  // Live mode — log current state and proceed with write operations.
+  if (alreadyAssigned) {
+    console.log(`  [WMS] ${paddedVehicle} already assigned to ${ldap} — skipping`);
+    return { success: true, skipped: true };
+  }
+  if (hasConflict) {
+    if (force) {
+      console.log(
+        `  [WMS] CONFLICT: ${ldap} is assigned to "${existingTruck}" — force-swapping to "${paddedVehicle}"`
+      );
+    } else {
+      console.log(
+        `  [WMS] ${ldap} currently assigned to "${existingTruck}" — updating to "${paddedVehicle}"`
+      );
+    }
+  }
+
   try {
     let resp: any;
-    if (existingTruck !== null) {
+    if (hasConflict) {
       if (force) {
         // --force: delete old assignment first (fail-closed), then create fresh
         try {
@@ -297,7 +355,7 @@ async function assignInWms(
           `  [WMS] SWAP ${existingTruck} → ${paddedVehicle} for ${ldap} created OK:`,
           JSON.stringify(resp).slice(0, 200)
         );
-        return { success: true, swapped: true, previousTruck: existingTruck };
+        return { success: true, swapped: true, previousTruck: existingTruck! };
       } else {
         // Default: update via PUT
         resp = await wmsEngineService.updateAssignment(ldap, { techId: ldap, truckId: paddedVehicle });
@@ -328,13 +386,29 @@ interface RowResult {
 }
 
 async function main() {
-  const force = process.argv.includes("--force");
+  const force            = process.argv.includes("--force");
+  const dryRun           = process.argv.includes("--dry-run");
+  const dryRunWithReads  = process.argv.includes("--dry-run-with-reads");
+  const anyDryRun        = dryRun || dryRunWithReads;
 
   console.log("=== Bulk BYOV Vehicle Assignment ===");
+  if (dryRun) {
+    console.log("*** DRY RUN MODE — no Holman or WMS API calls will be made (strict preview) ***");
+  } else if (dryRunWithReads) {
+    console.log("*** DRY RUN MODE — reads current WMS state; no write operations will be committed ***");
+  }
   console.log(`CSV: ${CSV_PATH}`);
   console.log(`Timestamp: ${new Date().toISOString()}`);
-  if (force) {
+  if (force && dryRun) {
+    console.log("Mode: --force --dry-run (strict: no API calls; shows intended force-swap per row)");
+  } else if (force && dryRunWithReads) {
+    console.log("Mode: --force --dry-run-with-reads (reads WMS state; shows exact swap X → Y per row; no writes)");
+  } else if (force) {
     console.log("Mode: --force (conflicting WMS assignments will be deleted then re-created)");
+  } else if (dryRun) {
+    console.log("Mode: --dry-run (strict: no API calls; shows intended action per row)");
+  } else if (dryRunWithReads) {
+    console.log("Mode: --dry-run-with-reads (reads WMS state; shows exact skip/create/update per row; no writes)");
   }
   console.log("");
 
@@ -361,11 +435,11 @@ async function main() {
     console.log(`  Status: "${row.status}"`);
     console.log(`  District: ${row.district} | City/State: ${row.cityState}`);
 
-    await sleep(DELAY_MS);
-    const holmanResult = await assignInHolman(row.truckId.trim(), row);
+    if (!anyDryRun) await sleep(DELAY_MS);
+    const holmanResult = await assignInHolman(row.truckId.trim(), row, anyDryRun);
 
-    await sleep(DELAY_MS);
-    const wmsResult = await assignInWms(row.truckId.trim(), ldap, force);
+    if (!anyDryRun) await sleep(DELAY_MS);
+    const wmsResult = await assignInWms(row.truckId.trim(), ldap, force, dryRun, dryRunWithReads);
 
     results.push({
       vehicleNumber: paddedVehicle,
@@ -379,7 +453,11 @@ async function main() {
   // ---------------------------------------------------------------------------
   // Summary
   // ---------------------------------------------------------------------------
-  console.log("\n\n=== SUMMARY ===");
+  if (anyDryRun) {
+    console.log("\n\n=== SUMMARY (DRY RUN — PREVIEW ONLY, NO CHANGES MADE) ===");
+  } else {
+    console.log("\n\n=== SUMMARY ===");
+  }
   console.log(`Total attempted: ${results.length}`);
 
   const holmanSuccess = results.filter((r) => r.holman.success && !r.holman.skipped).length;
@@ -391,16 +469,19 @@ async function main() {
   const wmsSwapped = results.filter((r) => r.wms.swapped).length;
   const wmsFailed  = results.filter((r) => !r.wms.success).length;
 
+  const holmanLabel = anyDryRun ? "would assign" : "Assigned";
   console.log(`\nHolman assignments (${results.length} vehicles):`);
-  console.log(`  Assigned: ${holmanSuccess}`);
+  console.log(`  ${holmanLabel}: ${holmanSuccess}`);
   console.log(`  Skipped (already assigned or conflict): ${holmanSkipped}`);
   console.log(`  Failed:   ${holmanFailed}`);
 
+  const wmsLabel = anyDryRun ? "would assign" : "Assigned";
   console.log(`\nWMS assignments (${results.length} vehicles):`);
-  console.log(`  Assigned: ${wmsSuccess}`);
+  console.log(`  ${wmsLabel}: ${wmsSuccess}`);
   console.log(`  Skipped (already assigned to same truck): ${wmsSkipped}`);
-  if (force) {
-    console.log(`  Force-swapped (deleted old, created new): ${wmsSwapped}`);
+  if (force || wmsSwapped > 0) {
+    const swapLabel = anyDryRun ? "Would force-swap (delete old, create new)" : "Force-swapped (deleted old, created new)";
+    console.log(`  ${swapLabel}: ${wmsSwapped}`);
   }
   console.log(`  Failed:   ${wmsFailed}`);
 
@@ -423,11 +504,21 @@ async function main() {
         console.log(`  WMS FAIL   — ${f.vehicleNumber} (${f.name}) [${f.ldap}]: ${f.wms.error}`);
       }
     }
+  } else if (anyDryRun) {
+    console.log("\nDRY RUN complete — all rows previewed. No changes were committed to Holman or WMS.");
+    if (dryRun) {
+      console.log("Tip: use --dry-run-with-reads to see exact per-tech WMS outcomes (skip/update/swap).");
+    }
+    console.log("Re-run without a dry-run flag to commit these assignments.");
   } else {
     console.log("\nAll vehicles assigned successfully (or skipped as already present).");
   }
 
-  console.log("\n=== DONE ===");
+  if (anyDryRun) {
+    console.log("\n=== DRY RUN COMPLETE ===");
+  } else {
+    console.log("\n=== DONE ===");
+  }
 }
 
 main().catch((err) => {
