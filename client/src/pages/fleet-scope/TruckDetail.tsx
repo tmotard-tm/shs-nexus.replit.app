@@ -55,7 +55,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, Save, Search, FileCheck, Wrench, Tags, Calendar, Truck as TruckIcon, DollarSign, FileText, MapPin, ClipboardCheck, CheckCircle2, Package, RefreshCw, Plus, Trash2, ExternalLink } from "lucide-react";
+import { ArrowLeft, Save, Search, FileCheck, Wrench, Tags, Calendar, Truck as TruckIcon, DollarSign, FileText, MapPin, ClipboardCheck, CheckCircle2, Package, RefreshCw, Plus, Trash2, ExternalLink, AlertTriangle } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
@@ -2465,6 +2466,35 @@ export default function TruckDetail() {
                           {format(new Date(byovAuditEntry.submittedAt), "MMM d, yyyy")}
                         </span>
                       </span>
+                      {(!byovAuditEntry.holmanSuccess || !byovAuditEntry.wmsSuccess) && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span
+                                className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 font-medium cursor-default ${
+                                  !byovAuditEntry.holmanSuccess && !byovAuditEntry.wmsSuccess
+                                    ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                    : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                }`}
+                              >
+                                <AlertTriangle className="w-3 h-3 shrink-0" />
+                                {!byovAuditEntry.holmanSuccess && !byovAuditEntry.wmsSuccess
+                                  ? "Holman & WMS failed"
+                                  : !byovAuditEntry.holmanSuccess
+                                  ? "Holman failed"
+                                  : "WMS failed"}
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent>
+                              {!byovAuditEntry.holmanSuccess && !byovAuditEntry.wmsSuccess
+                                ? "Holman and WMS registration failed"
+                                : !byovAuditEntry.holmanSuccess
+                                ? "Holman registration failed"
+                                : "WMS registration failed"}
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      )}
                     </div>
                     <button
                       type="button"
