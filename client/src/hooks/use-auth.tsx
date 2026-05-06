@@ -47,9 +47,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               setRequiresSecurityQuestions(true);
             }
           } else if (response.status === 401) {
-            console.log("Session expired, clearing stored user");
+            console.log("Session expired, clearing stored user — attempting SSO fallback");
             localStorage.removeItem("user");
-            setUser(null);
+            try {
+              const ssoRes = await fetch("/api/auth/sso-user", { credentials: "include" });
+              if (ssoRes.ok) {
+                const data = await ssoRes.json();
+                setUser(data.user);
+                localStorage.setItem("user", JSON.stringify(data.user));
+                setRequiresSecurityQuestions(!!data.requiresSecurityQuestions);
+              } else {
+                setUser(null);
+              }
+            } catch {
+              setUser(null);
+            }
           } else {
             console.warn("Error verifying session:", response.status, response.statusText);
             setUser(parsedUser);
