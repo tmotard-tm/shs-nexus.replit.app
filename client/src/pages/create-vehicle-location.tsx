@@ -781,7 +781,11 @@ export default function CreateVehicle() {
               ) : auditLogQuery.isError ? (
                 <p className="text-sm text-destructive py-4 text-center">Failed to load history.</p>
               ) : !auditLogQuery.data || auditLogQuery.data.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4 text-center">No submissions recorded yet.</p>
+                <p className="text-sm text-muted-foreground py-4 text-center">
+                  {exportFrom || exportTo
+                    ? "No submissions found in this date range."
+                    : "No submissions recorded yet."}
+                </p>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
