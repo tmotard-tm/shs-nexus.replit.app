@@ -296,13 +296,22 @@ export default function TruckDetail() {
   const [opDetailDialogOpen, setOpDetailDialogOpen] = useState(false);
 
   // BYOV creation audit record for this truck
+  const [byovDetailOpen, setByovDetailOpen] = useState(false);
   const { data: byovAuditEntry } = useQuery<{
     id: number;
     vehicleNumber: string;
+    vin: string | null;
+    make: string | null;
+    model: string | null;
+    modelYear: string | null;
+    assetType: string | null;
+    district: string | null;
     submittedBy: string;
     submittedAt: string;
     holmanSuccess: boolean;
+    holmanError: string | null;
     wmsSuccess: boolean;
+    wmsError: string | null;
   } | null>({
     queryKey: ["/api/byov/audit-log", truckNumberForSpecialty],
     queryFn: async () => {
@@ -2445,16 +2454,25 @@ export default function TruckDetail() {
 
                 {/* BYOV Creation Note */}
                 {byovAuditEntry && (
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground bg-muted/40 border rounded-md px-3 py-2">
-                    <ClipboardCheck className="w-3.5 h-3.5 shrink-0 text-blue-500" />
-                    <span>
-                      Created via BYOV by{" "}
-                      <span className="font-medium text-foreground">{byovAuditEntry.submittedBy}</span>
-                      {" "}on{" "}
-                      <span className="font-medium text-foreground">
-                        {format(new Date(byovAuditEntry.submittedAt), "MMM d, yyyy")}
+                  <div className="flex items-center justify-between gap-1.5 text-xs text-muted-foreground bg-muted/40 border rounded-md px-3 py-2">
+                    <div className="flex items-center gap-1.5">
+                      <ClipboardCheck className="w-3.5 h-3.5 shrink-0 text-blue-500" />
+                      <span>
+                        Created via BYOV by{" "}
+                        <span className="font-medium text-foreground">{byovAuditEntry.submittedBy}</span>
+                        {" "}on{" "}
+                        <span className="font-medium text-foreground">
+                          {format(new Date(byovAuditEntry.submittedAt), "MMM d, yyyy")}
+                        </span>
                       </span>
-                    </span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setByovDetailOpen(true)}
+                      className="text-blue-500 hover:text-blue-600 hover:underline font-medium shrink-0"
+                    >
+                      View details
+                    </button>
                   </div>
                 )}
 
@@ -2486,6 +2504,85 @@ export default function TruckDetail() {
           </form>
         </Form>
       </main>
+
+      {/* BYOV Creation Detail Dialog */}
+      {byovAuditEntry && (
+        <Dialog open={byovDetailOpen} onOpenChange={setByovDetailOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <ClipboardCheck className="w-4 h-4 text-blue-500" />
+                BYOV Submission Details
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div className="text-muted-foreground">Vehicle #</div>
+                <div className="font-medium">{byovAuditEntry.vehicleNumber}</div>
+
+                {byovAuditEntry.vin && (
+                  <>
+                    <div className="text-muted-foreground">VIN</div>
+                    <div className="font-medium font-mono text-xs">{byovAuditEntry.vin}</div>
+                  </>
+                )}
+
+                {(byovAuditEntry.make || byovAuditEntry.model || byovAuditEntry.modelYear) && (
+                  <>
+                    <div className="text-muted-foreground">Vehicle</div>
+                    <div className="font-medium">
+                      {[byovAuditEntry.modelYear, byovAuditEntry.make, byovAuditEntry.model].filter(Boolean).join(" ") || "—"}
+                    </div>
+                  </>
+                )}
+
+                {byovAuditEntry.assetType && (
+                  <>
+                    <div className="text-muted-foreground">Asset Type</div>
+                    <div className="font-medium">{byovAuditEntry.assetType}</div>
+                  </>
+                )}
+
+                {byovAuditEntry.district && (
+                  <>
+                    <div className="text-muted-foreground">District</div>
+                    <div className="font-medium">{byovAuditEntry.district}</div>
+                  </>
+                )}
+
+                <div className="text-muted-foreground">Submitted By</div>
+                <div className="font-medium">{byovAuditEntry.submittedBy}</div>
+
+                <div className="text-muted-foreground">Submitted At</div>
+                <div className="font-medium">{format(new Date(byovAuditEntry.submittedAt), "MMM d, yyyy h:mm a")}</div>
+              </div>
+
+              <div className="border-t pt-3 space-y-2">
+                <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">System Results</div>
+                <div className="flex items-start gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${byovAuditEntry.holmanSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                    {byovAuditEntry.holmanSuccess ? "✓" : "✗"} Holman
+                  </span>
+                  {!byovAuditEntry.holmanSuccess && byovAuditEntry.holmanError && (
+                    <span className="text-xs text-muted-foreground">{byovAuditEntry.holmanError}</span>
+                  )}
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${byovAuditEntry.wmsSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                    {byovAuditEntry.wmsSuccess ? "✓" : "✗"} WMS
+                  </span>
+                  {!byovAuditEntry.wmsSuccess && byovAuditEntry.wmsError && (
+                    <span className="text-xs text-muted-foreground">{byovAuditEntry.wmsError}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" size="sm" onClick={() => setByovDetailOpen(false)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Status Change Confirmation Dialog */}
       <AlertDialog open={showStatusConfirmDialog} onOpenChange={setShowStatusConfirmDialog}>
