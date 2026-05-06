@@ -15336,28 +15336,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  let cachedStorageClient: any = null;
   async function getStorageClient(): Promise<any> {
-    if (cachedStorageClient) return cachedStorageClient;
     const { Client } = await import("@replit/object-storage");
-    let lastErr: any = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        const c = new Client();
-        const probe = await c.list();
-        if (probe && (probe.ok || Array.isArray(probe.value))) {
-          cachedStorageClient = c;
-          return c;
-        }
-        lastErr = new Error('Storage client probe returned not-ok');
-      } catch (e: any) {
-        lastErr = e;
-        const delay = 200 * Math.pow(2.5, attempt - 1);
-        console.warn(`[MMS] Storage client init attempt ${attempt}/3 failed: ${e.message} — retrying in ${delay}ms`);
-        await new Promise(r => setTimeout(r, delay));
-      }
-    }
-    throw new Error(`Storage client init failed after 3 attempts: ${lastErr?.message || 'unknown'}`);
+    return new Client();
   }
 
   async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
@@ -15683,6 +15664,80 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json(updated);
     } catch (err: any) {
       console.error('[DecommMsg] Retry media failed:', err);
+      res.status(500).json({ message: err.message || 'Retry failed' });
+    }
+  });
+
+  // POST /api/fs/reg-messages/:id/retry-media — re-fetch MMS media from Twilio for a media_failed reg message
+  app.post("/reg-messages/:id/retry-media", requireFsAuth, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [row] = await getDb().select().from(regMessages).where(eq(regMessages.id, id)).limit(1);
+      if (!row) return res.status(404).json({ message: "Message not found" });
+      if (row.direction !== 'inbound') return res.status(400).json({ message: "Only inbound messages can have media retried" });
+      if (row.mediaUrl) return res.status(400).json({ message: "Message already has media" });
+
+      const accountSid = process.env.FS_TWILIO_ACCOUNT_SID;
+      const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
+      if (!accountSid || !authToken) return res.status(500).json({ message: "Twilio credentials not configured" });
+
+      const twilioClient = twilio(accountSid, authToken);
+
+      let messageSid: string | null = row.twilioSid || null;
+      if (!messageSid) {
+        if (!row.sentAt) return res.status(400).json({ message: "Cannot recover: no timestamp on message" });
+        const center = new Date(row.sentAt).getTime();
+        const after = new Date(center - 24 * 60 * 60 * 1000);
+        const before = new Date(center + 24 * 60 * 60 * 1000);
+        const fsTwilioFrom = process.env.FS_TWILIO_PHONE_NUMBER;
+        const candidates = await twilioClient.messages.list({
+          from: row.techPhone,
+          to: fsTwilioFrom,
+          dateSentAfter: after,
+          dateSentBefore: before,
+          limit: 100,
+        });
+        const TEN_MIN = 10 * 60 * 1000;
+        const near = candidates.filter(m => {
+          const d = new Date(m.dateSent || m.dateCreated).getTime();
+          return Math.abs(d - center) <= TEN_MIN;
+        });
+        const withMedia = near.filter(m => parseInt((m.numMedia as any) || '0', 10) > 0);
+        const pool = withMedia.length > 0 ? withMedia : near;
+        if (pool.length === 0) {
+          return res.status(404).json({ message: "No matching Twilio message found within ±10 minutes of this row's timestamp" });
+        }
+        pool.sort((a, b) => Math.abs(new Date(a.dateSent || a.dateCreated).getTime() - center) - Math.abs(new Date(b.dateSent || b.dateCreated).getTime() - center));
+        messageSid = pool[0].sid;
+      }
+
+      const mediaList = await twilioClient.messages(messageSid).media.list({ limit: 10 });
+      if (mediaList.length === 0) {
+        return res.status(404).json({ message: "Twilio reports no media on this message (it may have expired or never had any)" });
+      }
+
+      const media = mediaList[0];
+      const mediaContentType = media.contentType || 'application/octet-stream';
+      const mediaResourceUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${media.sid}`;
+
+      const result = await downloadTwilioMedia(mediaResourceUrl, mediaContentType, 'mms/reg');
+
+      const [updated] = await getDb()
+        .update(regMessages)
+        .set({
+          mediaUrl: result.storageKey,
+          mediaType: result.mediaType,
+          status: 'received',
+          twilioSid: messageSid,
+        })
+        .where(eq(regMessages.id, id))
+        .returning();
+
+      console.log(`[RegMsg] Retried media for ${id} via Twilio SID ${messageSid} -> ${result.storageKey}`);
+      broadcastMessage(row.truckNumber, { message: updated });
+      res.json(updated);
+    } catch (err: any) {
+      console.error('[RegMsg] Retry media failed:', err);
       res.status(500).json({ message: err.message || 'Retry failed' });
     }
   });

@@ -22,6 +22,7 @@ import {
   Clock,
   X,
   Download,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -174,6 +175,23 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
         description: err.message || "Unknown error",
         variant: "destructive",
       });
+    },
+  });
+
+  const retryMediaMutation = useMutation({
+    mutationFn: async (messageId: string) => {
+      const resp = await apiRequest("POST", `/api/fs/reg-messages/${messageId}/retry-media`, {});
+      return resp.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Photo recovered", description: "Pulled the attachment from Twilio." });
+      if (selectedTruck) {
+        queryClient.invalidateQueries({ queryKey: ["/api/fs/reg-messages", selectedTruck] });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/reg-conversations"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "Couldn't recover photo", description: err?.message || "Twilio retry failed", variant: "destructive" });
     },
   });
 
@@ -550,6 +568,35 @@ export function RegConversations({ registrationData, initialTruckNumber }: RegCo
                           <Download className="h-3 w-3" />
                           Download attachment ({msg.mediaType?.split('/')[1] || 'file'})
                         </a>
+                      )}
+                      {!msg.mediaUrl && msg.status === 'media_failed' && (
+                        <div className={`flex flex-col gap-1 mb-1 px-2 py-1 rounded border italic ${
+                          msg.direction === "outbound"
+                            ? "border-primary-foreground/30 text-primary-foreground/80"
+                            : "border-amber-300 bg-amber-50 text-amber-800"
+                        }`}>
+                          <span className="text-xs">📷 Photo attached but didn't save — try retry, otherwise ask sender to resend</span>
+                          {msg.direction === "inbound" && (
+                            <button
+                              type="button"
+                              onClick={() => retryMediaMutation.mutate(msg.id)}
+                              disabled={retryMediaMutation.isPending && retryMediaMutation.variables === msg.id}
+                              className="self-start inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded border border-amber-400 bg-white hover:bg-amber-100 not-italic disabled:opacity-50"
+                            >
+                              {retryMediaMutation.isPending && retryMediaMutation.variables === msg.id ? (
+                                <>
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                  Retrying…
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="h-3 w-3" />
+                                  Retry download
+                                </>
+                              )}
+                            </button>
+                          )}
+                        </div>
                       )}
                       {msg.body && <p className="whitespace-pre-wrap break-words">{msg.body}</p>}
                       <div className={`flex items-center gap-1 mt-1 ${msg.direction === "outbound" ? "justify-end" : "justify-start"}`}>
