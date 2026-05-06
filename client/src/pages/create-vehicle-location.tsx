@@ -103,6 +103,7 @@ export default function CreateVehicle() {
 
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
+  const [exportPreset, setExportPreset] = useState("");
 
   const auditLogQueryParams = new URLSearchParams();
   if (exportFrom) auditLogQueryParams.set("from", exportFrom);
@@ -293,6 +294,55 @@ export default function CreateVehicle() {
     setSubmitResult(null);
     setVehicleExistsWarning(null);
     setLastSubmittedForm(null);
+  };
+
+  const applyExportPreset = (preset: string) => {
+    setExportPreset(preset);
+    const now = new Date();
+    const fmt = (d: Date) => {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    };
+
+    if (preset === "all") {
+      setExportFrom("");
+      setExportTo("");
+      return;
+    }
+    if (preset === "last7") {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 6);
+      setExportFrom(fmt(from));
+      setExportTo(fmt(now));
+      return;
+    }
+    if (preset === "last30") {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 29);
+      setExportFrom(fmt(from));
+      setExportTo(fmt(now));
+      return;
+    }
+    if (preset === "thisMonth") {
+      setExportFrom(fmt(new Date(now.getFullYear(), now.getMonth(), 1)));
+      setExportTo(fmt(now));
+      return;
+    }
+    if (preset === "lastMonth") {
+      const firstOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const lastOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+      setExportFrom(fmt(firstOfLastMonth));
+      setExportTo(fmt(lastOfLastMonth));
+      return;
+    }
+    if (preset === "thisQuarter") {
+      const quarterStart = Math.floor(now.getMonth() / 3) * 3;
+      setExportFrom(fmt(new Date(now.getFullYear(), quarterStart, 1)));
+      setExportTo(fmt(now));
+      return;
+    }
   };
 
   const paddedVehicleNumber = form.vehicleNumber.trim().padStart(6, "0");
@@ -654,13 +704,26 @@ export default function CreateVehicle() {
                   </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
+                  <Select value={exportPreset} onValueChange={applyExportPreset}>
+                    <SelectTrigger className="h-8 text-xs w-36">
+                      <SelectValue placeholder="Quick range…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All time</SelectItem>
+                      <SelectItem value="last7">Last 7 days</SelectItem>
+                      <SelectItem value="last30">Last 30 days</SelectItem>
+                      <SelectItem value="thisMonth">This month</SelectItem>
+                      <SelectItem value="lastMonth">Last month</SelectItem>
+                      <SelectItem value="thisQuarter">This quarter</SelectItem>
+                    </SelectContent>
+                  </Select>
                   <div className="flex items-center gap-1.5">
                     <Label htmlFor="exportFrom" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">From</Label>
                     <Input
                       id="exportFrom"
                       type="date"
                       value={exportFrom}
-                      onChange={(e) => setExportFrom(e.target.value)}
+                      onChange={(e) => { setExportFrom(e.target.value); setExportPreset(""); }}
                       className="h-8 text-xs w-36"
                     />
                   </div>
@@ -670,7 +733,7 @@ export default function CreateVehicle() {
                       id="exportTo"
                       type="date"
                       value={exportTo}
-                      onChange={(e) => setExportTo(e.target.value)}
+                      onChange={(e) => { setExportTo(e.target.value); setExportPreset(""); }}
                       className="h-8 text-xs w-36"
                     />
                   </div>
