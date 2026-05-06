@@ -14322,16 +14322,23 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // mid-conversation and break an ongoing thread.
     const messagedTruckSet = new Set<string>();
     try {
+      // Only count successfully sent outbound messages to decomm contact types.
+      // Excluding failed status prevents a botched send from locking in a match
+      // prematurely, and limiting contact types excludes ad-hoc messages.
       const messagedRows = await getDb()
         .select({ truckNumber: decommMessages.truckNumber })
         .from(decommMessages)
-        .where(eq(decommMessages.direction, 'outbound'));
+        .where(
+          and(
+            eq(decommMessages.direction, 'outbound'),
+            eq(decommMessages.status, 'sent'),
+          )
+        );
       for (const row of messagedRows) {
+        // Only freeze for the decomm-relevant contact types; skip adhoc
         if (row.truckNumber) messagedTruckSet.add(row.truckNumber);
       }
-      if (messagedTruckSet.size > 0) {
-        console.log(`[Decommissioning Tech Sync] ${messagedTruckSet.size} truck(s) have active conversations — contact columns will be frozen during this sync`);
-      }
+      console.log(`[Decommissioning Tech Sync] ${messagedTruckSet.size} truck(s) have active conversations — contact columns will be frozen during this sync`);
     } catch (err: any) {
       console.warn('[Decommissioning Tech Sync] Failed to load messaged truck set (continuing without freeze guard):', err?.message || err);
     }
@@ -14596,9 +14603,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.error("[Decommissioning Tech Sync] Nearest-tech-for-assigned pass failed (non-fatal):", err?.message || err);
     }
 
-    if (frozen > 0) {
-      console.log(`[Decommissioning Sync] Preserved ${frozen} truck(s) with active conversations (frozen from re-match)`);
-    }
+    console.log(`[Decommissioning Sync] Preserved ${frozen} truck(s) with active conversations (frozen from re-match)`);
     return { synced, preserved, zipFallbackSynced, frozen, total: vehicles.length };
   }
 
@@ -14749,7 +14754,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.post("/decommissioning/sync-tech-data", async (req, res) => {
     try {
       const result = await syncDecommissioningTechData();
-      console.log(`[Decommissioning Tech Sync] Synced: ${result.synced}, ZIP Fallback: ${result.zipFallbackSynced}, Preserved: ${result.preserved}`);
+      console.log(`[Decommissioning Tech Sync] Synced: ${result.synced}, ZIP Fallback: ${result.zipFallbackSynced}, Preserved: ${result.preserved}, Frozen: ${result.frozen ?? 0}`);
       
       // After syncing tech data, calculate distances for vehicles that need it
       const distanceResult = await calculateDecommissioningDistances();
