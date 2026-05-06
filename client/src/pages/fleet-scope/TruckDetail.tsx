@@ -2485,11 +2485,22 @@ export default function TruckDetail() {
                                   : "WMS failed"}
                               </span>
                             </TooltipTrigger>
-                            <TooltipContent>
+                            <TooltipContent className="max-w-xs whitespace-pre-line">
                               {!byovAuditEntry.holmanSuccess && !byovAuditEntry.wmsSuccess
-                                ? "Holman and WMS registration failed"
+                                ? [
+                                    byovAuditEntry.holmanError
+                                      ? `Holman: ${byovAuditEntry.holmanError}`
+                                      : "Holman registration failed",
+                                    byovAuditEntry.wmsError
+                                      ? `WMS: ${byovAuditEntry.wmsError}`
+                                      : "WMS registration failed",
+                                  ].join("\n")
                                 : !byovAuditEntry.holmanSuccess
-                                ? "Holman registration failed"
+                                ? byovAuditEntry.holmanError
+                                  ? `Holman: ${byovAuditEntry.holmanError}`
+                                  : "Holman registration failed"
+                                : byovAuditEntry.wmsError
+                                ? `WMS: ${byovAuditEntry.wmsError}`
                                 : "WMS registration failed"}
                             </TooltipContent>
                           </Tooltip>
