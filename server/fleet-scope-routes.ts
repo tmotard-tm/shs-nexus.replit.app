@@ -14316,9 +14316,30 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.warn(`[Decommissioning Tech Sync] Holman district lookup failed (non-fatal): ${err.message}`);
     }
 
+    // Pre-load the set of truck numbers that already have at least one outbound
+    // message. Once a conversation has been started we freeze the matched
+    // contact columns so the daily re-match cannot swap out the tech/manager
+    // mid-conversation and break an ongoing thread.
+    const messagedTruckSet = new Set<string>();
+    try {
+      const messagedRows = await getDb()
+        .select({ truckNumber: decommMessages.truckNumber })
+        .from(decommMessages)
+        .where(eq(decommMessages.direction, 'outbound'));
+      for (const row of messagedRows) {
+        if (row.truckNumber) messagedTruckSet.add(row.truckNumber);
+      }
+      if (messagedTruckSet.size > 0) {
+        console.log(`[Decommissioning Tech Sync] ${messagedTruckSet.size} truck(s) have active conversations — contact columns will be frozen during this sync`);
+      }
+    } catch (err: any) {
+      console.warn('[Decommissioning Tech Sync] Failed to load messaged truck set (continuing without freeze guard):', err?.message || err);
+    }
+
     // Update each vehicle - only update if Snowflake has data, otherwise preserve existing
     let synced = 0;
     let preserved = 0;
+    let frozen = 0;
     const unmatchedWithZip: typeof vehicles = []; // Track vehicles needing ZIP fallback
     
     for (const vehicle of vehicles) {
@@ -14336,25 +14357,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         null;
 
       if (snowflakeData) {
-        // Update with fresh data from Snowflake (direct truck match)
+        // Update with fresh data from Snowflake (direct truck match).
+        // If this truck already has an active conversation, freeze contact
+        // columns — only refresh safe metadata so the thread stays intact.
         const techEntId = snowflakeData.enterpriseId?.trim() || '';
-        await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
-          vin,
-          district,
-          enterpriseId: snowflakeData.enterpriseId || null,
-          fullName: snowflakeData.fullName || null,
-          mobilePhone: snowflakeData.mobilePhone || null,
-          primaryZip: snowflakeData.primaryZip || null,
-          managerEntId: snowflakeData.managerEntId || null,
-          managerName: snowflakeData.managerName || null,
-          managerPhone: snowflakeData.managerPhone || null,
-          managerZip: snowflakeData.managerZip || null,
-          techMatchSource: 'truck', // Direct truck number match
-          isAssigned: true, // Truck found in TPMS_EXTRACT
-          isManager: !!techEntId && globalManagerEntIdSet.has(techEntId.toUpperCase()),
-          techDataSyncedAt: new Date(),
-        });
-        synced++;
+        if (messagedTruckSet.has(vehicle.truckNumber)) {
+          await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
+            vin,
+            district,
+            isAssigned: true,
+            techDataSyncedAt: new Date(),
+          });
+          frozen++;
+        } else {
+          await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
+            vin,
+            district,
+            enterpriseId: snowflakeData.enterpriseId || null,
+            fullName: snowflakeData.fullName || null,
+            mobilePhone: snowflakeData.mobilePhone || null,
+            primaryZip: snowflakeData.primaryZip || null,
+            managerEntId: snowflakeData.managerEntId || null,
+            managerName: snowflakeData.managerName || null,
+            managerPhone: snowflakeData.managerPhone || null,
+            managerZip: snowflakeData.managerZip || null,
+            techMatchSource: 'truck', // Direct truck number match
+            isAssigned: true, // Truck found in TPMS_EXTRACT
+            isManager: !!techEntId && globalManagerEntIdSet.has(techEntId.toUpperCase()),
+            techDataSyncedAt: new Date(),
+          });
+          synced++;
+        }
       } else {
         // Truck not in Snowflake - try ZIP code fallback if vehicle has a zipCode
         if (vehicle.zipCode && vehicle.zipCode.trim()) {
@@ -14471,59 +14504,72 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         if (nearestManager) {
           // Get VIN for this vehicle
           const vin = vinLookup.get(vehicle.truckNumber) || null;
-          
-          // Check if the fallback ZIP has changed - only clear distances if it changed
-          const newFallbackZip = nearestManager.managerZip || null;
-          const zipChanged = vehicle.managerZip !== newFallbackZip || vehicle.primaryZip !== newFallbackZip;
-          
-          const updateData: Record<string, any> = {
-            vin,
-            district: holmanDistrictLookup.get(vehicle.truckNumber?.toString().trim().padStart(6, '0') || vehicle.truckNumber) || vehicle.district || null,
-            enterpriseId: nearestManager.enterpriseId || null,
-            fullName: nearestManager.fullName || null,
-            mobilePhone: nearestManager.mobilePhone || null,
-            primaryZip: newFallbackZip, // Tech ZIP = Manager ZIP (since we matched by manager)
-            managerEntId: nearestManager.managerEntId || null,
-            managerName: nearestManager.managerName || null,
-            managerPhone: nearestManager.mobilePhone || null,
-            managerZip: newFallbackZip,
-            techMatchSource: 'manager_zip_fallback', // Matched by nearest manager ZIP code
-            isAssigned: false, // Not directly assigned in TPMS_EXTRACT
-            // The fallback "tech" we matched is itself a manager (enterpriseId == managerEntId)
-            isManager: true,
-            techDataSyncedAt: new Date(),
-          };
+          const normalizedForDistrict = vehicle.truckNumber?.toString().trim().padStart(6, '0') || vehicle.truckNumber;
+          const districtForVehicle = holmanDistrictLookup.get(normalizedForDistrict) || vehicle.district || null;
 
-          if (nearestTech) {
-            const newNearestTechZip = nearestTech.primaryZip || null;
-            const nearestTechZipChanged = vehicle.nearestTechZip !== newNearestTechZip;
-            updateData.nearestTechName = nearestTech.fullName || null;
-            updateData.nearestTechPhone = nearestTech.mobilePhone || null;
-            updateData.nearestTechZip = newNearestTechZip;
-            updateData.nearestTechEnterpriseId = nearestTech.enterpriseId || null;
-            if (nearestTechZipChanged) {
+          // If this truck already has an active conversation, freeze contact
+          // columns — only refresh safe metadata (VIN, district, isAssigned).
+          if (messagedTruckSet.has(vehicle.truckNumber)) {
+            await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, {
+              vin,
+              district: districtForVehicle,
+              isAssigned: false,
+            });
+            frozen++;
+          } else {
+            // Check if the fallback ZIP has changed - only clear distances if it changed
+            const newFallbackZip = nearestManager.managerZip || null;
+            const zipChanged = vehicle.managerZip !== newFallbackZip || vehicle.primaryZip !== newFallbackZip;
+            
+            const updateData: Record<string, any> = {
+              vin,
+              district: districtForVehicle,
+              enterpriseId: nearestManager.enterpriseId || null,
+              fullName: nearestManager.fullName || null,
+              mobilePhone: nearestManager.mobilePhone || null,
+              primaryZip: newFallbackZip, // Tech ZIP = Manager ZIP (since we matched by manager)
+              managerEntId: nearestManager.managerEntId || null,
+              managerName: nearestManager.managerName || null,
+              managerPhone: nearestManager.mobilePhone || null,
+              managerZip: newFallbackZip,
+              techMatchSource: 'manager_zip_fallback', // Matched by nearest manager ZIP code
+              isAssigned: false, // Not directly assigned in TPMS_EXTRACT
+              // The fallback "tech" we matched is itself a manager (enterpriseId == managerEntId)
+              isManager: true,
+              techDataSyncedAt: new Date(),
+            };
+
+            if (nearestTech) {
+              const newNearestTechZip = nearestTech.primaryZip || null;
+              const nearestTechZipChanged = vehicle.nearestTechZip !== newNearestTechZip;
+              updateData.nearestTechName = nearestTech.fullName || null;
+              updateData.nearestTechPhone = nearestTech.mobilePhone || null;
+              updateData.nearestTechZip = newNearestTechZip;
+              updateData.nearestTechEnterpriseId = nearestTech.enterpriseId || null;
+              if (nearestTechZipChanged) {
+                updateData.nearestTechDistance = null;
+              }
+            } else {
+              updateData.nearestTechName = null;
+              updateData.nearestTechPhone = null;
+              updateData.nearestTechZip = null;
+              updateData.nearestTechDistance = null;
+              updateData.nearestTechEnterpriseId = null;
+            }
+            
+            // Only clear distance cache if ZIP changed - preserve existing distances otherwise
+            if (zipChanged) {
+              updateData.lastTechZipForDistance = null;
+              updateData.lastManagerZipForDistance = null;
+              updateData.techDistance = null;
+              updateData.managerDistance = null;
               updateData.nearestTechDistance = null;
             }
-          } else {
-            updateData.nearestTechName = null;
-            updateData.nearestTechPhone = null;
-            updateData.nearestTechZip = null;
-            updateData.nearestTechDistance = null;
-            updateData.nearestTechEnterpriseId = null;
+            
+            await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, updateData);
+            zipFallbackSynced++;
+            console.log(`[Decommissioning Manager ZIP Fallback] Vehicle ${vehicle.truckNumber} (ZIP ${vehicleZip}) matched to nearest manager ${nearestManager.managerName} (ZIP ${nearestManager.managerZip})${nearestTech ? `, nearest tech ${nearestTech.fullName} (ZIP ${nearestTech.primaryZip})` : ''}`);
           }
-          
-          // Only clear distance cache if ZIP changed - preserve existing distances otherwise
-          if (zipChanged) {
-            updateData.lastTechZipForDistance = null;
-            updateData.lastManagerZipForDistance = null;
-            updateData.techDistance = null;
-            updateData.managerDistance = null;
-            updateData.nearestTechDistance = null;
-          }
-          
-          await fleetScopeStorage.updateDecommissioningVehicle(vehicle.id, updateData);
-          zipFallbackSynced++;
-          console.log(`[Decommissioning Manager ZIP Fallback] Vehicle ${vehicle.truckNumber} (ZIP ${vehicleZip}) matched to nearest manager ${nearestManager.managerName} (ZIP ${nearestManager.managerZip})${nearestTech ? `, nearest tech ${nearestTech.fullName} (ZIP ${nearestTech.primaryZip})` : ''}`);
         } else {
           // No match found - mark as not assigned but preserve existing tech data
           // Still update VIN and district (from Holman fallback) even if no tech data
@@ -14550,7 +14596,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.error("[Decommissioning Tech Sync] Nearest-tech-for-assigned pass failed (non-fatal):", err?.message || err);
     }
 
-    return { synced, preserved, zipFallbackSynced, total: vehicles.length };
+    if (frozen > 0) {
+      console.log(`[Decommissioning Sync] Preserved ${frozen} truck(s) with active conversations (frozen from re-match)`);
+    }
+    return { synced, preserved, zipFallbackSynced, frozen, total: vehicles.length };
   }
 
   // For every decommissioning vehicle that has a zipCode, find the nearest
@@ -14602,8 +14651,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       return Math.abs(n1 - n2);
     };
 
+    // Freeze nearest-tech columns for trucks that already have an active
+    // conversation (same guard as syncDecommissioningTechData).
+    const passMessagedSet = new Set<string>();
+    try {
+      const rows = await getDb()
+        .select({ truckNumber: decommMessages.truckNumber })
+        .from(decommMessages)
+        .where(eq(decommMessages.direction, 'outbound'));
+      for (const row of rows) {
+        if (row.truckNumber) passMessagedSet.add(row.truckNumber);
+      }
+    } catch (_err) {
+      // Non-fatal — proceed without freeze guard if the query fails
+    }
+
     let updated = 0;
     for (const v of candidates) {
+      // Skip trucks with active conversations — keep their nearest-tech match frozen.
+      if (passMessagedSet.has(v.truckNumber)) continue;
+
       const vZip = v.zipCode!.trim();
       // Exclude the assigned tech themselves so "nearest tech" ≠ "assigned tech".
       const ownEntId = v.enterpriseId?.trim() || '';
@@ -14968,7 +15035,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.log(`[Decommissioning Scheduler] Starting daily tech data sync at ${new Date().toISOString()}`);
       try {
         const result = await syncDecommissioningTechData();
-        console.log(`[Decommissioning Scheduler] Daily sync complete: ${result.synced} synced, ${result.preserved} preserved`);
+        console.log(`[Decommissioning Scheduler] Daily sync complete: ${result.synced} synced, ${result.preserved} preserved, ${result.frozen ?? 0} frozen`);
         // Also calculate distances after tech data sync
         const distanceResult = await calculateDecommissioningDistances();
         console.log(`[Decommissioning Scheduler] Distance calculation complete: ${distanceResult.managerCalculated} manager, ${distanceResult.techCalculated} tech`);
@@ -14998,7 +15065,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
     try {
       const result = await syncDecommissioningTechData();
-      console.log(`[Decommissioning Scheduler] Initial sync complete: ${result.synced} synced, ${result.preserved} preserved`);
+      console.log(`[Decommissioning Scheduler] Initial sync complete: ${result.synced} synced, ${result.preserved} preserved, ${result.frozen ?? 0} frozen`);
       // Also calculate distances after tech data sync
       const distanceResult = await calculateDecommissioningDistances();
       console.log(`[Decommissioning Scheduler] Distance calculation complete: ${distanceResult.managerCalculated} manager, ${distanceResult.techCalculated} tech`);
