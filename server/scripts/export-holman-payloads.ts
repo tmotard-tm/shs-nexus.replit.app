@@ -241,7 +241,6 @@ async function main() {
       prefix,
       addressLine1,
       addressLine2,
-      addressLine3:        null,
       city,
       stateProvince:       state,
       zipPostalCode:       zip,

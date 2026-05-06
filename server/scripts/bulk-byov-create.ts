@@ -398,7 +398,6 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     ? {
         addressLine1:  sanitizeAddr(payload.addressLine1),
         addressLine2:  sanitizeAddr(payload.addressLine2) || null,
-        addressLine3:  null,
         city:          payload.city   || null,
         stateProvince: payload.state  || null,
         zipPostalCode: payload.zip    || null,
@@ -407,7 +406,6 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     : {
         addressLine1:  null,
         addressLine2:  null,
-        addressLine3:  null,
         city:          null,
         stateProvince: null,
         zipPostalCode: null,
