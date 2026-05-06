@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
   DialogContent,
@@ -1050,18 +1051,31 @@ function ConfirmRow({ label, value, note }: { label: string; value: string; note
 }
 
 function AuditBadge({ success, error }: { success: boolean; error?: string | null }) {
+  if (success) {
+    return (
+      <div className="flex items-center gap-1.5">
+        <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+        <span className="text-green-700 dark:text-green-400">OK</span>
+      </div>
+    );
+  }
+
+  const tooltipText = error || "Registration failed";
+
   return (
-    <div className="flex items-center gap-1.5">
-      {success
-        ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
-        : <XCircle className="h-4 w-4 text-destructive shrink-0" />}
-      <span className={success ? "text-green-700 dark:text-green-400" : "text-destructive"}>
-        {success ? "OK" : "Failed"}
-      </span>
-      {!success && error && (
-        <span className="text-muted-foreground truncate max-w-[200px]" title={error}>{error}</span>
-      )}
-    </div>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="flex items-center gap-1.5 cursor-default">
+            <XCircle className="h-4 w-4 text-destructive shrink-0" />
+            <span className="text-destructive">Failed</span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs whitespace-pre-line">
+          {tooltipText}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 
