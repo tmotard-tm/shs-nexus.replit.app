@@ -15341,7 +15341,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     return new Client();
   }
 
-  async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+  async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3, maxDelay = 2000): Promise<T> {
     let lastErr: any = null;
     for (let i = 1; i <= attempts; i++) {
       try {
@@ -15349,7 +15349,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       } catch (e: any) {
         lastErr = e;
         if (i === attempts) break;
-        const delay = 200 * Math.pow(2.5, i - 1);
+        const delay = Math.min(200 * Math.pow(2.5, i - 1), maxDelay);
         console.warn(`[MMS] ${label} attempt ${i}/${attempts} failed: ${e.message} — retrying in ${delay}ms`);
         await new Promise(r => setTimeout(r, delay));
       }
@@ -15395,7 +15395,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const r = await client.uploadFromBytes(storageKey, buffer);
       if (r && r.ok === false) throw new Error(`Storage upload returned not-ok: ${r.error?.message || 'unknown'}`);
       return r;
-    });
+    }, 5, 2000);
     console.log(`[MMS] Stored media: ${storageKey} (${contentType}, ${buffer.length} bytes)`);
     return { storageKey, mediaType: contentType };
   }
