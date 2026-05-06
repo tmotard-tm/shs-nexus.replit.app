@@ -242,7 +242,7 @@ export default function FleetManagement() {
   const [districtFilter, setDistrictFilter] = useState("all");
   
   // Stat card quick-filter (clicking a summary card filters the grid)
-  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental"|"maintenance"|"dtc">("all");
+  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental"|"maintenance"|"dtc"|"byov">("all");
 
   // Tech Assignment filters
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
@@ -1417,6 +1417,7 @@ export default function FleetManagement() {
       const isRentalSC = rentalOpsVehicleSet.has(vehicle.vehicleNumber)
         || rentalOpsVehicleSet.has(toCanonical(vehicle.vehicleNumber))
         || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
+      const isByovSC = getVehicleOwnership(vehicle.vehicleNumber).type === 'BYOV';
       const matchesStatCard =
         statCardFilter === "all" ||
         (statCardFilter === "assigned"     && !!tpmsId2) ||
@@ -1424,7 +1425,8 @@ export default function FleetManagement() {
         (statCardFilter === "mismatch"     && isMismatchSC) ||
         (statCardFilter === "rental"       && isRentalSC) ||
         (statCardFilter === "maintenance"  && !!(poFlagsMap.get(vehicle.vehicleNumber)?.hasOpenMaintenance)) ||
-        (statCardFilter === "dtc"          && hasDTCF);
+        (statCardFilter === "dtc"          && hasDTCF) ||
+        (statCardFilter === "byov"         && isByovSC);
 
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
              matchesProgram && matchesBranding && matchesInterior && matchesTuneStatus &&
@@ -1609,6 +1611,9 @@ export default function FleetManagement() {
   const dtcCount = activeVehicles.filter(v =>
     dtcTruckSet.has(v.vehicleNumber) || dtcTruckSet.has(toCanonical(v.vehicleNumber))
   ).length;
+  const byovCount = activeVehicles.filter(v =>
+    getVehicleOwnership(v.vehicleNumber).type === 'BYOV'
+  ).length;
 
   return (
     <MainContent>
@@ -1621,7 +1626,7 @@ export default function FleetManagement() {
         <div className="max-w-7xl mx-auto">
           <div className="space-y-6">
             {/* Stats Cards — clickable quick-filters */}
-            <div className="grid grid-cols-2 md:grid-cols-7 gap-4">
+            <div className="grid grid-cols-2 md:grid-cols-8 gap-4">
               {/* Total Vehicles — clears filter */}
               <Card
                 onClick={() => setStatCardFilter("all")}
@@ -1748,6 +1753,19 @@ export default function FleetManagement() {
                 </CardHeader>
                 <CardContent>
                   <p className="text-2xl font-bold text-rose-600">{dtcCount}</p>
+                </CardContent>
+              </Card>
+
+              {/* BYOV */}
+              <Card
+                onClick={() => setStatCardFilter(statCardFilter === "byov" ? "all" : "byov")}
+                className={`cursor-pointer transition-all hover:shadow-md select-none border-purple-200 bg-purple-50/50 dark:bg-purple-950/10 ${statCardFilter === "byov" ? "ring-2 ring-offset-1 ring-purple-500" : ""}`}
+              >
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm font-medium text-purple-600">BYOV</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-2xl font-bold text-purple-600">{byovCount}</p>
                 </CardContent>
               </Card>
             </div>
