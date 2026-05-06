@@ -161,6 +161,8 @@ export default function DCAReview() {
     return true;
   });
 
+  const hasActiveFilter = marketFilter !== "all" || statusFilter !== "all";
+
   const selectStyle: React.CSSProperties = {
     fontFamily: fonts.dmSans, fontWeight: 400, fontSize: 13, height: 34,
     borderRadius: 6, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface,
@@ -227,7 +229,9 @@ export default function DCAReview() {
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ padding: "48px 16px", textAlign: "center", fontFamily: fonts.dmSans, fontSize: 14, color: colors.inkMuted }}>
-                  No techs in DCA review queue — run Sync Eligibility on the Tech Population page
+                  {hasActiveFilter
+                    ? "No results match your current filters."
+                    : "No techs in DCA review queue — run Sync Eligibility on the Tech Population page"}
                 </td>
               </tr>
             ) : (

@@ -1046,6 +1046,8 @@ export default function POs() {
     return result;
   }, [orders, searchQuery, robDecisionFilter, differenceFilter, finalApprovalFilter, submittedHolmanFilter, vehicleNoFilter, spareVanFilter, robDecisionColumnName, differenceColumnName, vehicleNoColumnName, spareVanColumnName]);
 
+  const hasActiveOrderFilters = searchQuery.trim() !== "" || robDecisionFilter !== "__all__" || differenceFilter !== "__all__" || finalApprovalFilter !== "__all__" || submittedHolmanFilter !== "__all__" || vehicleNoFilter.trim() !== "" || spareVanFilter !== "__all__";
+
   const displayHeaders = useMemo(() => {
     if (rawHeaders.length === 0) return [];
     
@@ -1714,7 +1716,13 @@ export default function POs() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredOrders.map((order, idx) => (
+                      {filteredOrders.length === 0 && hasActiveOrderFilters ? (
+                        <tr>
+                          <td colSpan={displayHeaders.length} className="text-center py-12 text-muted-foreground text-sm">
+                            No results match your current filters.
+                          </td>
+                        </tr>
+                      ) : filteredOrders.map((order, idx) => (
                         <tr key={order.id || idx} data-testid={`row-po-${idx}`} className="border-b hover:bg-muted/50">
                           {displayHeaders.map((header, colIdx) => {
                             // Handle special "__IMPORTED_AT__" column

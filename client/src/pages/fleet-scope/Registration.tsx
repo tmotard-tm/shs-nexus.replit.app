@@ -826,6 +826,16 @@ export default function Registration() {
     return result;
   }, [data?.trucks, searchTerm, truckNumberFilter, statusFilter, ownerFilter, stateFilters, tagStateFilters, expiryMonthFilter, daysToExpirySort, caseStatusFilter, pendingTasksFilter]);
 
+  const hasActiveFilters = searchTerm !== "" ||
+    truckNumberFilter !== "" ||
+    statusFilter !== "all" ||
+    ownerFilter !== "all" ||
+    stateFilters !== null ||
+    tagStateFilters !== null ||
+    expiryMonthFilter !== null ||
+    caseStatusFilter !== "all" ||
+    pendingTasksFilter !== "all";
+
   const toggleStateFilter = (state: string, allStates: string[]) => {
     setStateFilters(prev => {
       // If null (all selected), create set with all states except the one being toggled off
@@ -1835,7 +1845,7 @@ export default function Registration() {
                   {filteredTrucks.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={25} className="text-center py-8 text-muted-foreground">
-                        No trucks found matching your search
+                        {hasActiveFilters ? "No results match your current filters." : "No trucks found"}
                       </TableCell>
                     </TableRow>
                   ) : (
