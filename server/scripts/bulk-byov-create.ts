@@ -418,9 +418,6 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     lesseeCode:          "2B56",
     holmanVehicleNumber: paddedVehicle,
     vendorCode:          "OTH",
-    // "ADD" tells Holman to CREATE a new vehicle record (vs "UPDATE" for existing).
-    // Omitting this field defaults to UPDATE behavior, causing silent no-ops for new vehicles.
-    assetAction:         "ADD",
     division:            "01",
     // VIN max 17 chars — strip any extra text
     vin:                 payload.vin ? payload.vin.slice(0, 17) : null,
