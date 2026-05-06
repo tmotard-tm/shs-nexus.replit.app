@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { format, startOfDay, endOfDay, isWithinInterval } from "date-fns";
@@ -915,33 +916,30 @@ export default function ActivityLogs() {
                   </div>
                 </div>
               </CollapsibleTrigger>
-              <div className="flex flex-col items-end">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <span
-                      className="inline-flex"
-                      title={filteredLogs.length === 0 ? "No logs to export — adjust the filters to load results first" : undefined}
-                      style={(isExporting || filteredLogs.length === 0) ? { pointerEvents: 'none' } : undefined}
-                    >
-                      <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
-                        <Download className="mr-2 h-4 w-4" />
-                        {isExporting ? "Exporting..." : "Export"}
-                      </Button>
-                    </span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
-                      <FileText className="mr-2 h-4 w-4" />
-                      Export as CSV
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={exportToXLSX} data-testid="menu-export-xlsx">
-                      <FileSpreadsheet className="mr-2 h-4 w-4" />
-                      Export as Excel (XLSX)
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-                {filteredLogs.length === 0 && !isExporting && <span className="text-xs text-muted-foreground mt-0.5">Adjust filters to load results first</span>}
-              </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <span
+                    className="inline-flex"
+                    title={filteredLogs.length === 0 ? "No logs to export — adjust the filters to load results first" : undefined}
+                    style={(isExporting || filteredLogs.length === 0) ? { pointerEvents: 'none' } : undefined}
+                  >
+                    <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
+                      <Download className="mr-2 h-4 w-4" />
+                      {isExporting ? "Exporting..." : "Export"}
+                    </Button>
+                  </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Export as CSV
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportToXLSX} data-testid="menu-export-xlsx">
+                    <FileSpreadsheet className="mr-2 h-4 w-4" />
+                    Export as Excel (XLSX)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </CardHeader>
             <CollapsibleContent>
               <CardContent>
@@ -1074,7 +1072,6 @@ export default function ActivityLogs() {
                 >
                   <RefreshCw className={`h-4 w-4 ${submissionsFetching ? 'animate-spin' : ''}`} />
                 </Button>
-                <div className="flex flex-col items-end">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <span
@@ -1099,8 +1096,6 @@ export default function ActivityLogs() {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-                {submissions.length === 0 && !isSubExporting && <span className="text-xs text-muted-foreground mt-0.5">Load submissions first to enable export</span>}
-                </div>
               </div>
             </CardHeader>
             <CollapsibleContent>
@@ -1382,7 +1377,9 @@ export default function ActivityLogs() {
                       Use space (" ") instead of null
                     </label>
                   </div>
-                  <span className="inline-flex flex-col items-start" title={!fieldTestVehicle ? "Enter a vehicle number above before running the field test" : undefined}>
+                  <Tooltip>
+                  <TooltipTrigger asChild>
+                  <span className="inline-flex">
                   <Button
                     onClick={() => {
                       if (window.confirm(`This will run ${19} field tests on vehicle ${fieldTestVehicle}. Each test overwrites data. Continue?`)) {
@@ -1405,8 +1402,10 @@ export default function ActivityLogs() {
                       </>
                     )}
                   </Button>
-                  {!fieldTestVehicle && <span className="text-xs text-muted-foreground mt-0.5">Enter a vehicle number above before running</span>}
                   </span>
+                  </TooltipTrigger>
+                  {!fieldTestVehicle && <TooltipContent>Enter a vehicle number above before running the field test</TooltipContent>}
+                  </Tooltip>
                 </div>
 
                 {fieldTestResults && (

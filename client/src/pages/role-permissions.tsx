@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -213,20 +214,32 @@ function RolePermissionsEditor({
           )}
         </div>
         <div className="flex gap-2">
-          <span className="inline-flex flex-col items-start" title={!canEdit ? "You don't have permission to edit this role" : undefined}>
-            <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Reset to Default
-            </Button>
-            {!canEdit && <span className="text-xs text-muted-foreground mt-0.5">You don't have permission to edit this role</span>}
-          </span>
-          <span className="inline-flex flex-col items-start" title={!canEdit ? "You don't have permission to edit this role" : !hasChanges ? "No changes to save yet" : undefined}>
-            <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
-              <Save className="h-4 w-4 mr-2" />
-              {isSaving ? 'Saving...' : 'Save Changes'}
-            </Button>
-            {!isSaving && (!canEdit || !hasChanges) && <span className="text-xs text-muted-foreground mt-0.5">{!canEdit ? "You don't have permission to edit this role" : "No changes to save yet"}</span>}
-          </span>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  Reset to Default
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!canEdit && <TooltipContent>You don't have permission to edit this role</TooltipContent>}
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex">
+                <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
+                  <Save className="h-4 w-4 mr-2" />
+                  {isSaving ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {(!canEdit || !hasChanges) && (
+              <TooltipContent>
+                {!canEdit ? "You don't have permission to edit this role" : "No changes to save yet"}
+              </TooltipContent>
+            )}
+          </Tooltip>
         </div>
       </div>
 
@@ -353,33 +366,6 @@ export default function RolePermissions() {
     },
   });
 
-  const bulkGrantByovMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest('POST', '/api/role-permissions/bulk-patch', {
-        permissionPath: ['sidebar', 'management', 'byovBulkUpload'],
-        value: true,
-      });
-      return res.json();
-    },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/role-permissions'] });
-      const count = data?.updatedCount ?? 0;
-      toast({
-        title: "BYOV Bulk Upload Granted",
-        description: count === 0
-          ? "No custom roles found to update."
-          : `BYOV Bulk Upload access has been enabled for ${count} custom role${count === 1 ? '' : 's'}.`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Error",
-        description: error.message || "Failed to apply permission to custom roles",
-        variant: "destructive",
-      });
-    },
-  });
-
   const handleCreateRole = () => {
     const trimmedName = newRoleName.trim().toLowerCase().replace(/\s+/g, '_');
     if (trimmedName) {
@@ -444,8 +430,6 @@ export default function RolePermissions() {
       .sort() || [];
     return [...coreRoles, ...customRoles];
   })();
-
-  const customRoleCount = allRoles.filter(isCustomRole).length;
 
   // Allow both developer and admin to access this page
   if (user?.role !== 'developer' && user?.role !== 'admin') {
@@ -531,37 +515,6 @@ export default function RolePermissions() {
             <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
           </div>
           {(user?.role === 'developer' || user?.role === 'admin') && (
-            <div className="flex items-center gap-2">
-              {customRoleCount > 0 && (
-                <AlertDialog>
-                  <AlertDialogTrigger asChild>
-                    <Button variant="outline" data-testid="btn-bulk-grant-byov">
-                      <Shield className="h-4 w-4 mr-2" />
-                      Grant BYOV Upload to Custom Roles
-                    </Button>
-                  </AlertDialogTrigger>
-                  <AlertDialogContent>
-                    <AlertDialogHeader>
-                      <AlertDialogTitle>Grant BYOV Bulk Upload to All Custom Roles?</AlertDialogTitle>
-                      <AlertDialogDescription>
-                        This will enable the <strong>BYOV Bulk Upload</strong> permission for all{' '}
-                        {customRoleCount} custom role{customRoleCount === 1 ? '' : 's'}.
-                        Individual roles can still be adjusted afterwards on their own permission panel.
-                      </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                      <AlertDialogCancel>Cancel</AlertDialogCancel>
-                      <AlertDialogAction
-                        onClick={() => bulkGrantByovMutation.mutate()}
-                        disabled={bulkGrantByovMutation.isPending}
-                        data-testid="btn-confirm-bulk-grant-byov"
-                      >
-                        {bulkGrantByovMutation.isPending ? 'Applying…' : 'Apply to All Custom Roles'}
-                      </AlertDialogAction>
-                    </AlertDialogFooter>
-                  </AlertDialogContent>
-                </AlertDialog>
-              )}
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button data-testid="btn-create-role">
@@ -595,20 +548,23 @@ export default function RolePermissions() {
                   <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <span className="inline-flex flex-col items-start" title={!newRoleName.trim() ? "Enter a name for the new role before creating" : undefined}>
-                    <Button 
-                      onClick={handleCreateRole} 
-                      disabled={!newRoleName.trim() || createRoleMutation.isPending}
-                      data-testid="btn-confirm-create-role"
-                    >
-                      {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
-                    </Button>
-                    {!newRoleName.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter a name for the new role before creating</span>}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button 
+                          onClick={handleCreateRole} 
+                          disabled={!newRoleName.trim() || createRoleMutation.isPending}
+                          data-testid="btn-confirm-create-role"
+                        >
+                          {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {!newRoleName.trim() && <TooltipContent>Enter a name for the new role before creating</TooltipContent>}
+                  </Tooltip>
                 </DialogFooter>
               </DialogContent>
             </Dialog>
-            </div>
           )}
         </div>
         <p className="text-muted-foreground">

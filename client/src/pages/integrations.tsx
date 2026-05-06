@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -716,7 +717,9 @@ export default function Integrations() {
                   <Badge variant={snowflakeEnabled ? "default" : "secondary"} className="text-xs">
                     {snowflakeEnabled ? "Active" : "Inactive"}
                   </Badge>
-                  <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup above before testing" : undefined}>
+                  <Tooltip>
+                  <TooltipTrigger asChild>
+                  <span className="inline-flex">
                   <Button
                     variant="outline"
                     size="sm"
@@ -731,8 +734,10 @@ export default function Integrations() {
                     )}
                     Test
                   </Button>
-                  {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup above first</span>}
                   </span>
+                  </TooltipTrigger>
+                  {!snowflakeStatus?.configured && <TooltipContent>Snowflake is not configured — complete setup above before testing</TooltipContent>}
+                  </Tooltip>
                   <Switch
                     checked={snowflakeEnabled}
                     onCheckedChange={setSnowflakeEnabled}
@@ -755,19 +760,23 @@ export default function Integrations() {
                         </CardDescription>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
-                          <Button 
-                            onClick={() => syncTruckInventoryMutation.mutate()}
-                            disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
-                            variant="outline"
-                            size="sm"
-                            data-testid="button-sync-truck-inventory"
-                          >
-                            <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
-                            {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
-                          </Button>
-                          {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup first</span>}
-                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex">
+                              <Button 
+                                onClick={() => syncTruckInventoryMutation.mutate()}
+                                disabled={syncTruckInventoryMutation.isPending || !snowflakeStatus?.configured}
+                                variant="outline"
+                                size="sm"
+                                data-testid="button-sync-truck-inventory"
+                              >
+                                <RefreshCw className={`h-3 w-3 mr-1 ${syncTruckInventoryMutation.isPending ? 'animate-spin' : ''}`} />
+                                {syncTruckInventoryMutation.isPending ? 'Syncing...' : 'Sync Inventory'}
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          {!snowflakeStatus?.configured && <TooltipContent>Snowflake is not configured — complete setup before syncing</TooltipContent>}
+                        </Tooltip>
                       </div>
                     </div>
                   </CardHeader>
@@ -807,19 +816,23 @@ export default function Integrations() {
                               : 'Never synced'}
                           </div>
                         )}
-                        <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before syncing" : undefined}>
-                          <Button 
-                            onClick={() => syncAllTechsMutation.mutate()}
-                            disabled={syncAllTechsMutation.isPending || !snowflakeStatus?.configured}
-                            variant="outline"
-                            size="sm"
-                            data-testid="button-sync-all-techs"
-                          >
-                            <RefreshCw className={`h-3 w-3 mr-1 ${syncAllTechsMutation.isPending ? 'animate-spin' : ''}`} />
-                            {syncAllTechsMutation.isPending ? 'Syncing...' : 'Sync'}
-                          </Button>
-                          {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup first</span>}
-                        </span>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="inline-flex">
+                              <Button 
+                                onClick={() => syncAllTechsMutation.mutate()}
+                                disabled={syncAllTechsMutation.isPending || !snowflakeStatus?.configured}
+                                variant="outline"
+                                size="sm"
+                                data-testid="button-sync-all-techs"
+                              >
+                                <RefreshCw className={`h-3 w-3 mr-1 ${syncAllTechsMutation.isPending ? 'animate-spin' : ''}`} />
+                                {syncAllTechsMutation.isPending ? 'Syncing...' : 'Sync'}
+                              </Button>
+                            </span>
+                          </TooltipTrigger>
+                          {!snowflakeStatus?.configured && <TooltipContent>Snowflake is not configured — complete setup before syncing</TooltipContent>}
+                        </Tooltip>
                       </div>
                     </div>
                   </CardHeader>
@@ -1150,7 +1163,9 @@ export default function Integrations() {
                         data-testid="textarea-sql-query"
                       />
                     </div>
-                    <span className="inline-flex flex-col items-start" title={!snowflakeStatus?.configured ? "Snowflake is not configured — complete setup before running queries" : undefined}>
+                    <Tooltip>
+                    <TooltipTrigger asChild>
+                    <span className="inline-flex">
                     <Button
                       onClick={handleExecuteQuery}
                       disabled={!snowflakeStatus?.configured || executeQueryMutation.isPending}
@@ -1168,8 +1183,10 @@ export default function Integrations() {
                         </>
                       )}
                     </Button>
-                    {!snowflakeStatus?.configured && <span className="text-xs text-muted-foreground mt-0.5">Complete Snowflake setup before running queries</span>}
                     </span>
+                    </TooltipTrigger>
+                    {!snowflakeStatus?.configured && <TooltipContent>Snowflake is not configured — complete setup before running queries</TooltipContent>}
+                    </Tooltip>
                   </CardContent>
                 </Card>
 

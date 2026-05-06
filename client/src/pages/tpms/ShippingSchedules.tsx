@@ -4,6 +4,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -257,12 +258,16 @@ export default function ShippingSchedules() {
                 </div>
                 <div className="flex items-center justify-between mt-4">
                   <Badge variant="secondary">{selectedTechs.length} selected</Badge>
-                  <span className="inline-flex flex-col items-end" title={selectedTechs.length === 0 ? "Select at least one tech before continuing" : undefined}>
-                    <Button disabled={selectedTechs.length === 0} onClick={() => setWizardStep("change")}>
-                      Next: Change Schedule <ArrowRight className="h-4 w-4 ml-2" />
-                    </Button>
-                    {selectedTechs.length === 0 && <span className="text-xs text-muted-foreground mt-0.5">Select at least one tech before continuing</span>}
-                  </span>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="inline-flex">
+                        <Button disabled={selectedTechs.length === 0} onClick={() => setWizardStep("change")}>
+                          Next: Change Schedule <ArrowRight className="h-4 w-4 ml-2" />
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    {selectedTechs.length === 0 && <TooltipContent>Select at least one tech before continuing</TooltipContent>}
+                  </Tooltip>
                 </div>
               </CardContent>
             </Card>

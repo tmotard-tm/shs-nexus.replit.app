@@ -434,22 +434,29 @@ export default function TechRoster() {
 
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Showing {paginatedTechs.length} of {filteredTechs.length} Employees{filteredTechs.length !== techs.length ? ` (${techs.length} total)` : ''}</span>
-                  <div className="flex flex-col items-end gap-0.5">
-                    <div className="flex items-center gap-2">
-                      <span className="inline-flex" title={filteredTechs.length === 0 ? "No employees match the current filters — clear filters to enable export" : undefined}>
-                        <Button variant="outline" size="sm" onClick={exportCSV} disabled={filteredTechs.length === 0} data-testid="button-export-csv">
-                          <Download className="h-4 w-4 mr-1" />
-                          CSV
-                        </Button>
-                      </span>
-                      <span className="inline-flex" title={filteredTechs.length === 0 ? "No employees match the current filters — clear filters to enable export" : undefined}>
-                        <Button variant="outline" size="sm" onClick={exportExcel} disabled={filteredTechs.length === 0} data-testid="button-export-excel">
-                          <Download className="h-4 w-4 mr-1" />
-                          Excel
-                        </Button>
-                      </span>
-                    </div>
-                    {filteredTechs.length === 0 && <span className="text-xs text-muted-foreground">No employees match the current filters</span>}
+                  <div className="flex items-center gap-2">
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button variant="outline" size="sm" onClick={exportCSV} disabled={filteredTechs.length === 0} data-testid="button-export-csv">
+                            <Download className="h-4 w-4 mr-1" />
+                            CSV
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {filteredTechs.length === 0 && <TooltipContent>No employees match the current filters — clear filters to enable export</TooltipContent>}
+                    </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button variant="outline" size="sm" onClick={exportExcel} disabled={filteredTechs.length === 0} data-testid="button-export-excel">
+                            <Download className="h-4 w-4 mr-1" />
+                            Excel
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {filteredTechs.length === 0 && <TooltipContent>No employees match the current filters — clear filters to enable export</TooltipContent>}
+                    </Tooltip>
                   </div>
                 </div>
               </CardContent>

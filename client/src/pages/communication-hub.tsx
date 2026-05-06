@@ -3,6 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -674,12 +675,16 @@ export default function CommunicationHub() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddWhitelistOpen(false)}>Cancel</Button>
-            <span className="inline-flex flex-col items-start" title={!newWhitelistEntry.value ? "Enter a token value before adding to the whitelist" : undefined}>
-              <Button onClick={() => addWhitelistMutation.mutate(newWhitelistEntry)} disabled={!newWhitelistEntry.value}>
-                Add to Whitelist
-              </Button>
-              {!newWhitelistEntry.value && <span className="text-xs text-muted-foreground mt-0.5">Enter a token value before adding to the whitelist</span>}
-            </span>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex">
+                  <Button onClick={() => addWhitelistMutation.mutate(newWhitelistEntry)} disabled={!newWhitelistEntry.value}>
+                    Add to Whitelist
+                  </Button>
+                </span>
+              </TooltipTrigger>
+              {!newWhitelistEntry.value && <TooltipContent>Enter a token value before adding to the whitelist</TooltipContent>}
+            </Tooltip>
           </DialogFooter>
         </DialogContent>
       </Dialog>

@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -232,12 +233,16 @@ export default function VehicleAssignments() {
                       onKeyDown={(e) => e.key === 'Enter' && handleTechLookup()}
                       data-testid="input-tech-lookup"
                     />
-                    <span className="inline-flex flex-col items-start" title={!techLookup.trim() ? "Enter an Enterprise ID above to search" : undefined}>
-                      <Button onClick={handleTechLookup} disabled={!techLookup.trim()} data-testid="button-tech-lookup">
-                        <Search className="h-4 w-4" />
-                      </Button>
-                      {!techLookup.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter an Enterprise ID above to search</span>}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button onClick={handleTechLookup} disabled={!techLookup.trim()} data-testid="button-tech-lookup">
+                            <Search className="h-4 w-4" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!techLookup.trim() && <TooltipContent>Enter an Enterprise ID above to search</TooltipContent>}
+                    </Tooltip>
                   </div>
                 </CardContent>
               </Card>
@@ -255,12 +260,16 @@ export default function VehicleAssignments() {
                       onKeyDown={(e) => e.key === 'Enter' && handleTruckLookup()}
                       data-testid="input-truck-lookup"
                     />
-                    <span className="inline-flex flex-col items-start" title={!truckLookup.trim() ? "Enter a truck number above to search" : undefined}>
-                      <Button onClick={handleTruckLookup} disabled={!truckLookup.trim()} data-testid="button-truck-lookup">
-                        <Search className="h-4 w-4" />
-                      </Button>
-                      {!truckLookup.trim() && <span className="text-xs text-muted-foreground mt-0.5">Enter a truck number above to search</span>}
-                    </span>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span className="inline-flex">
+                          <Button onClick={handleTruckLookup} disabled={!truckLookup.trim()} data-testid="button-truck-lookup">
+                            <Search className="h-4 w-4" />
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {!truckLookup.trim() && <TooltipContent>Enter a truck number above to search</TooltipContent>}
+                    </Tooltip>
                   </div>
                 </CardContent>
               </Card>
