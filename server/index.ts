@@ -243,18 +243,39 @@ async function initializeSnowflake() {
   }
 }
 
+/**
+ * On every server start, bring every stored role record up to date with the
+ * current default permission schema.
+ *
+ * Scope: ALL roles — built-in (developer, admin, agent) AND any custom roles
+ * created by admins.  Custom roles use DEFAULT_AGENT_PERMISSIONS as their
+ * baseline (see getServerDefaultPermissions), so any permission key that was
+ * added to the agent defaults after the custom role was saved (e.g.
+ * `byovBulkUpload`) will be backfilled here with the agent default value
+ * (false).  Admins can then enable the permission for specific custom roles
+ * via the Role Permissions page.
+ */
 async function patchStoredRolePermissions() {
   try {
     const { deepMergePermissions, getServerDefaultPermissions } = await import('./permission-utils');
 
+    const builtInRoles = new Set(['developer', 'admin', 'agent']);
     const allRecords = await storage.getAllRolePermissions();
+    let patchedBuiltIn = 0;
+    let patchedCustom = 0;
     for (const record of allRecords) {
       const defaults = getServerDefaultPermissions(record.role);
       const merged = deepMergePermissions(defaults, record.permissions);
       if (JSON.stringify(merged) !== JSON.stringify(record.permissions)) {
         await storage.upsertRolePermission(record.role, merged);
-        log(`✅ Patched stored permissions for role '${record.role}' with missing keys`);
+        const isBuiltIn = builtInRoles.has(record.role);
+        const roleType = isBuiltIn ? 'built-in' : 'custom';
+        log(`✅ Patched stored permissions for ${roleType} role '${record.role}' with missing keys`);
+        if (isBuiltIn) { patchedBuiltIn++; } else { patchedCustom++; }
       }
+    }
+    if (patchedBuiltIn > 0 || patchedCustom > 0) {
+      log(`✅ Permission patch summary: ${patchedBuiltIn} built-in role(s), ${patchedCustom} custom role(s) updated`);
     }
   } catch (error) {
     console.error("⚠️ Failed to patch stored role permissions:", error);

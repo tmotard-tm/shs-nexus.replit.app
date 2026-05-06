@@ -41,9 +41,21 @@ export function deepMergePermissions(defaults: any, stored: any): any {
   return result;
 }
 
+/**
+ * Returns the canonical default permission set for a role.
+ *
+ * Built-in roles map to their own defaults.
+ * Every other role (i.e. custom roles created by admins) falls back to
+ * DEFAULT_AGENT_PERMISSIONS — the same base used when the role was first
+ * created.  This means any permission key added to the agent defaults after
+ * a custom role was created (e.g. `byovBulkUpload`) will be backfilled with
+ * the agent default value (false) the next time patchStoredRolePermissions
+ * runs.  Admins can then toggle individual keys via the Role Permissions UI.
+ */
 export function getServerDefaultPermissions(role: string): RolePermissionSettings {
   if (role === 'developer') return DEFAULT_SUPERADMIN_PERMISSIONS;
   if (role === 'admin') return DEFAULT_ADMIN_PERMISSIONS;
+  // 'agent' and all custom roles share the agent baseline
   return DEFAULT_AGENT_PERMISSIONS;
 }
 
