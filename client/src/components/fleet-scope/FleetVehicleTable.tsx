@@ -239,7 +239,10 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
   const [samsaraStatusFilters, setSamsaraStatusFilters] = useState<Set<string>>(new Set());
   const [rentalFilter, setRentalFilter] = useState<string>('');
-  const [byovFilter, setByovFilter] = useState<string>('');
+  const [byovFilter, setByovFilter] = useState<string>(() => {
+    const stored = sessionStorage.getItem('fleet-byov-filter') ?? '';
+    return ['Yes', 'No'].includes(stored) ? stored : '';
+  });
 
   // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
   const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
@@ -396,6 +399,14 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     setter(newSet);
   };
 
+
+  useEffect(() => {
+    if (byovFilter) {
+      sessionStorage.setItem('fleet-byov-filter', byovFilter);
+    } else {
+      sessionStorage.removeItem('fleet-byov-filter');
+    }
+  }, [byovFilter]);
 
   const clearAllFilters = () => {
     setAssignmentFilters(new Set());
