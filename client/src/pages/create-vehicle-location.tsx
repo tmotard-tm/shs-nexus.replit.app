@@ -108,10 +108,24 @@ export default function CreateVehicle() {
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
-  const [exportFrom, setExportFrom] = useState("");
-  const [exportTo, setExportTo] = useState("");
-  const [exportPreset, setExportPreset] = useState("");
+  const [exportFrom, setExportFrom] = useState(() => {
+    try { return localStorage.getItem("byov-export-from") ?? ""; } catch { return ""; }
+  });
+  const [exportTo, setExportTo] = useState(() => {
+    try { return localStorage.getItem("byov-export-to") ?? ""; } catch { return ""; }
+  });
+  const [exportPreset, setExportPreset] = useState(() => {
+    try { return localStorage.getItem("byov-export-preset") ?? ""; } catch { return ""; }
+  });
   const [selectedAuditEntry, setSelectedAuditEntry] = useState<ByovCreationAuditEntry | null>(null);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("byov-export-from", exportFrom);
+      localStorage.setItem("byov-export-to", exportTo);
+      localStorage.setItem("byov-export-preset", exportPreset);
+    } catch {}
+  }, [exportFrom, exportTo, exportPreset]);
 
   const auditLogQueryParams = new URLSearchParams();
   if (exportFrom) auditLogQueryParams.set("from", exportFrom);
