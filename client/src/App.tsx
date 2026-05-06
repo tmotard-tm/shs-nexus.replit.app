@@ -47,6 +47,7 @@ import OperationsDashboard from "@/pages/operations-dashboard";
 import StorageSpots from "@/pages/storage-spots";
 import SearsDriveEnrollment from "@/pages/sears-drive-enrollment";
 import ByovBulkUpload from "@/pages/byov-bulk-upload";
+import ByovDriftCheck from "@/pages/byov-drift-check";
 import OffboardingReturn from "@/pages/offboarding-return";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
@@ -276,6 +277,12 @@ function Router() {
       <Route path="/byov-bulk-upload">
         <ProtectedRoute>
           <ByovBulkUpload />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/byov-drift-check">
+        <ProtectedRoute>
+          <ByovDriftCheck />
         </ProtectedRoute>
       </Route>
 

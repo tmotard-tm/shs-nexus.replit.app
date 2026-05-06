@@ -324,6 +324,16 @@ async function patchStoredRolePermissions() {
     console.error("❌ Failed to start sync scheduler:", error);
   }
 
+  // Start the BYOV assignment drift scheduler (nightly at 2am EST by default)
+  try {
+    const { startByovDriftScheduler } = await import("./byov-verification-service");
+    startByovDriftScheduler();
+    const checkHour = process.env.BYOV_DRIFT_CHECK_HOUR ?? "2";
+    log(`✅ BYOV drift scheduler started (nightly at ${checkHour}:00 EST)`);
+  } catch (error) {
+    console.error("❌ Failed to start BYOV drift scheduler:", error);
+  }
+
   // Background Holman submission verifier — polls every 90s for pending assign/unassign operations
   // and re-fetches the vehicle from Holman to confirm the change was actually applied
   try {

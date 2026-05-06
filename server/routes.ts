@@ -609,6 +609,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.error("[BYOV] Failed to init byov_enrollments table:", e.message);
   }
 
+  // BYOV Drift Check history — idempotent table init (Task 327)
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS byov_drift_checks (
+        id serial PRIMARY KEY,
+        run_at timestamp NOT NULL DEFAULT NOW(),
+        triggered_by text NOT NULL DEFAULT 'scheduler',
+        total_checked integer NOT NULL DEFAULT 0,
+        holman_fail_count integer NOT NULL DEFAULT 0,
+        wms_fail_count integer NOT NULL DEFAULT 0,
+        mismatches jsonb NOT NULL DEFAULT '[]'::jsonb,
+        duration_ms integer NOT NULL DEFAULT 0
+      )
+    `);
+    console.log("[BYOV] byov_drift_checks table ready");
+  } catch (e: any) {
+    console.error("[BYOV] Failed to init byov_drift_checks table:", e.message);
+  }
+
   // Mount WMS Engine routes at /api/wms/*
   const wmsRouter = registerWmsRoutes(requireAuth);
   app.use("/api/wms", wmsRouter);
@@ -18813,6 +18832,103 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error('[BYOV] POST /api/byov-enrollments/backfill error:', err.message);
       return res.status(500).json({ message: err.message || 'Backfill failed' });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // BYOV Drift Check — admin-only API (Task 327)
+  // -------------------------------------------------------------------------
+
+  // POST /api/byov/verify — trigger an on-demand verification run
+  app.post("/api/byov/verify", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ message: "Access denied. Admin or developer role required." });
+      }
+
+      const { runByovDriftCheck } = await import("./byov-verification-service");
+      const r = await runByovDriftCheck(`manual:${currentUser.username ?? currentUser.id}`);
+
+      // Normalize to snake_case so the API contract matches the GET endpoints
+      // and the UI DriftCheckRun interface works for both manual and polled runs.
+      const result = {
+        run_at:            r.runAt.toISOString(),
+        triggered_by:      r.triggeredBy,
+        total_checked:     r.totalChecked,
+        holman_fail_count: r.holmanFailCount,
+        wms_fail_count:    r.wmsFailCount,
+        mismatches:        r.mismatches,
+        duration_ms:       r.durationMs,
+      };
+      return res.json({ success: true, result });
+    } catch (err: any) {
+      console.error("[BYOV] POST /api/byov/verify error:", err.message);
+      return res.status(500).json({ message: err.message || "Verification run failed" });
+    }
+  });
+
+  // GET /api/byov/verify/history — return recent run summaries
+  app.get("/api/byov/verify/history", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ message: "Access denied. Admin or developer role required." });
+      }
+
+      const limitParam = Math.min(parseInt((req.query.limit as string) || "20", 10), 100);
+      const rows = await db.execute<{
+        id: number;
+        run_at: string;
+        triggered_by: string;
+        total_checked: number;
+        holman_fail_count: number;
+        wms_fail_count: number;
+        mismatches: any;
+        duration_ms: number;
+      }>(sql`
+        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms
+        FROM byov_drift_checks
+        ORDER BY run_at DESC
+        LIMIT ${limitParam}
+      `);
+
+      return res.json({ history: rows.rows ?? [] });
+    } catch (err: any) {
+      console.error("[BYOV] GET /api/byov/verify/history error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load history" });
+    }
+  });
+
+  // GET /api/byov/verify/latest — latest run in full detail
+  app.get("/api/byov/verify/latest", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ message: "Access denied. Admin or developer role required." });
+      }
+
+      const rows = await db.execute<{
+        id: number;
+        run_at: string;
+        triggered_by: string;
+        total_checked: number;
+        holman_fail_count: number;
+        wms_fail_count: number;
+        mismatches: any;
+        duration_ms: number;
+      }>(sql`
+        SELECT id, run_at, triggered_by, total_checked, holman_fail_count, wms_fail_count, mismatches, duration_ms
+        FROM byov_drift_checks
+        ORDER BY run_at DESC
+        LIMIT 1
+      `);
+
+      const latest = (rows.rows ?? [])[0] ?? null;
+      return res.json({ latest });
+    } catch (err: any) {
+      console.error("[BYOV] GET /api/byov/verify/latest error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load latest run" });
     }
   });
 
