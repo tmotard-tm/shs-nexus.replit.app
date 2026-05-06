@@ -2257,6 +2257,30 @@ export type OffboardingReturnToken = typeof offboardingReturnTokens.$inferSelect
 export type InsertOffboardingReturnToken = z.infer<typeof insertOffboardingReturnTokenSchema>;
 
 // ===============================
+// BYOV Creation Audit Log (Task 293)
+// Records every POST /api/byov/create attempt for staff review.
+// ===============================
+
+export const byovCreationAudit = pgTable("byov_creation_audit", {
+  id: serial("id").primaryKey(),
+  vehicleNumber: varchar("vehicle_number", { length: 20 }).notNull(),
+  vin: varchar("vin", { length: 17 }),
+  make: varchar("make", { length: 100 }),
+  model: varchar("model", { length: 100 }),
+  modelYear: varchar("model_year", { length: 4 }),
+  assetType: varchar("asset_type", { length: 50 }),
+  district: varchar("district", { length: 20 }),
+  submittedBy: varchar("submitted_by", { length: 100 }).notNull(),
+  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  holmanSuccess: boolean("holman_success").notNull(),
+  holmanError: text("holman_error"),
+  wmsSuccess: boolean("wms_success").notNull(),
+  wmsError: text("wms_error"),
+});
+
+export type ByovCreationAuditEntry = typeof byovCreationAudit.$inferSelect;
+
+// ===============================
 // District Cost Centers (Task 207)
 // Maps each district number to its accounting cost center.
 // Default rule: cost_center = "0" + last 4 digits of district (e.g. 0004766 -> 04766)

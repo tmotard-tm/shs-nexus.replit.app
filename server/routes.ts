@@ -23,7 +23,7 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, or, gte, lte, lt, inArray, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
-import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
 const amsApiService = new AmsApiService();
@@ -558,6 +558,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     startNotificationDispatcher();
   } catch (e: any) {
     console.error("[VRM] Failed to initialise:", e.message);
+  }
+
+  // BYOV Creation Audit — idempotent table init (Task 293)
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS byov_creation_audit (
+        id serial PRIMARY KEY,
+        vehicle_number varchar(20) NOT NULL,
+        vin varchar(17),
+        make varchar(100),
+        model varchar(100),
+        model_year varchar(4),
+        asset_type varchar(50),
+        district varchar(20),
+        submitted_by varchar(100) NOT NULL,
+        submitted_at timestamp DEFAULT NOW() NOT NULL,
+        holman_success boolean NOT NULL,
+        holman_error text,
+        wms_success boolean NOT NULL,
+        wms_error text
+      )
+    `);
+    console.log("[BYOV] byov_creation_audit table ready");
+  } catch (e: any) {
+    console.error("[BYOV] Failed to init byov_creation_audit table:", e.message);
   }
 
   // BYOV Enrollments — idempotent table init
@@ -8172,7 +8197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // let callers target only the system(s) that are missing for a given vehicle.
   // When createInHolman is false the Holman duplicate-gate is skipped entirely so
   // WMS-only rows are not incorrectly blocked by the 409 guard.
-  app.post("/api/byov/create", requireAuth, async (req, res) => {
+  app.post("/api/byov/create", requireAuth, async (req: any, res) => {
     try {
       const {
         vehicleNumber, vin, assetType, modelYear, make, model,
@@ -8411,6 +8436,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "WMS-only creation failed";
       console.error("[BYOV] create-wms-only error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  app.get("/api/byov/audit-log", requireAuth, async (_req, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(byovCreationAudit)
+        .orderBy(desc(byovCreationAudit.submittedAt))
+        .limit(100);
+      return res.json(rows);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to load audit log";
+      console.error("[BYOV] audit-log error:", error);
       return res.status(500).json({ error: msg });
     }
   });

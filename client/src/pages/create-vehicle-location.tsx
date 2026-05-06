@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,8 +12,8 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
-import { apiRequest } from "@/lib/queryClient";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History } from "lucide-react";
+import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import {
   AlertDialog,
@@ -25,6 +25,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import type { ByovCreationAuditEntry } from "@shared/schema";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -99,6 +100,11 @@ export default function CreateVehicle() {
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+
+  const auditLogQuery = useQuery<ByovCreationAuditEntry[]>({
+    queryKey: ["/api/byov/audit-log"],
+    staleTime: 30_000,
+  });
 
   const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -189,6 +195,7 @@ export default function CreateVehicle() {
           : "One or more systems had an error — see results below.",
         variant: bothOk ? "default" : "destructive",
       });
+      queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
     },
     onError: (err: Error) => {
       toast({
@@ -593,6 +600,87 @@ export default function CreateVehicle() {
               </CardContent>
             </Card>
           )}
+
+          {/* Audit History Panel */}
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div className="space-y-1">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <History className="h-4 w-4" />
+                    Submission History
+                  </CardTitle>
+                  <CardDescription>Last 100 BYOV creation attempts — newest first</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] })}
+                  disabled={auditLogQuery.isFetching}
+                >
+                  {auditLogQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent>
+              {auditLogQuery.isLoading ? (
+                <div className="flex items-center justify-center py-8 text-muted-foreground">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Loading history…
+                </div>
+              ) : auditLogQuery.isError ? (
+                <p className="text-sm text-destructive py-4 text-center">Failed to load history.</p>
+              ) : !auditLogQuery.data || auditLogQuery.data.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4 text-center">No submissions recorded yet.</p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-muted-foreground">
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">Vehicle #</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">Vehicle</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">District</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">Submitted By</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">Date</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">Holman</th>
+                        <th className="pb-2 font-medium whitespace-nowrap">WMS</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {auditLogQuery.data.map((row) => {
+                        const bothOk = row.holmanSuccess && row.wmsSuccess;
+                        const noneOk = !row.holmanSuccess && !row.wmsSuccess;
+                        return (
+                          <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
+                            <td className="py-2 pr-4 font-mono font-medium whitespace-nowrap">{row.vehicleNumber}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
+                              {[row.modelYear, row.make, row.model].filter(Boolean).join(" ") || "—"}
+                            </td>
+                            <td className="py-2 pr-4 whitespace-nowrap">{row.district || "—"}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap">{row.submittedBy}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
+                              {new Date(row.submittedAt).toLocaleString(undefined, {
+                                month: "short",
+                                day: "numeric",
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </td>
+                            <td className="py-2 pr-4">
+                              <AuditBadge success={row.holmanSuccess} error={row.holmanError} />
+                            </td>
+                            <td className="py-2">
+                              <AuditBadge success={row.wmsSuccess} error={row.wmsError} />
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </div>
       </main>
     </MainContent>
@@ -607,6 +695,22 @@ function ConfirmRow({ label, value, note }: { label: string; value: string; note
         {value}
         {note && <span className="ml-1 text-xs text-muted-foreground font-normal">({note})</span>}
       </span>
+    </div>
+  );
+}
+
+function AuditBadge({ success, error }: { success: boolean; error?: string | null }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      {success
+        ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400 shrink-0" />
+        : <XCircle className="h-4 w-4 text-destructive shrink-0" />}
+      <span className={success ? "text-green-700 dark:text-green-400" : "text-destructive"}>
+        {success ? "OK" : "Failed"}
+      </span>
+      {!success && error && (
+        <span className="text-muted-foreground truncate max-w-[200px]" title={error}>{error}</span>
+      )}
     </div>
   );
 }
