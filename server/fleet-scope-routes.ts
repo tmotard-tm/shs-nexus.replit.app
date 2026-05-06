@@ -15914,6 +15914,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // DECOMMISSIONING MESSAGING — Bidirectional SMS with technicians
   // ============================================================
 
+  // Returns the set of truck numbers whose contact is frozen (same predicate as sync freeze guard)
+  app.get("/decomm-locked-trucks", async (req, res) => {
+    try {
+      const rows = await getDb()
+        .selectDistinct({ truckNumber: decommMessages.truckNumber })
+        .from(decommMessages)
+        .where(
+          and(
+            eq(decommMessages.direction, 'outbound'),
+            eq(decommMessages.status, 'sent'),
+          )
+        );
+      res.json(rows.map((r) => r.truckNumber));
+    } catch (error: any) {
+      console.error("[DecommMsg] Error fetching locked trucks:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/decomm-conversations", async (req, res) => {
     try {
       const allMessages = await getDb()

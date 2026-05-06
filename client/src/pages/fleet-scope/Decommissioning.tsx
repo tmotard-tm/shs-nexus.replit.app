@@ -30,7 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw, Lock } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocation } from "wouter";
 import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
 import ExcelJS from 'exceljs';
@@ -121,6 +122,12 @@ export default function Decommissioning() {
   const { data: vehicles = [], isLoading } = useQuery<DecommissioningVehicle[]>({
     queryKey: ["/api/fs/decommissioning"],
   });
+
+  const { data: lockedTruckList = [] } = useQuery<string[]>({
+    queryKey: ["/api/fs/decomm-locked-trucks"],
+  });
+
+  const lockedTrucks = new Set(lockedTruckList);
 
   // Sync tech data from Snowflake
   const syncTechDataMutation = useMutation({
@@ -1201,10 +1208,22 @@ export default function Decommissioning() {
                         {vehicle.managerEntId || "-"}
                       </TableCell>
                       <TableCell className={`text-sm ${vehicle.techMatchSource === 'manager_zip_fallback' ? 'text-orange-600 dark:text-orange-400' : ''}`}>
-                        {vehicle.managerName || "-"}
-                        {vehicle.techMatchSource === 'manager_zip_fallback' && vehicle.managerName && (
-                          <span className="ml-1 text-xs">(nearest mgr)</span>
-                        )}
+                        <span className="flex items-center gap-1">
+                          {vehicle.managerName || "-"}
+                          {vehicle.techMatchSource === 'manager_zip_fallback' && vehicle.managerName && (
+                            <span className="ml-1 text-xs">(nearest mgr)</span>
+                          )}
+                          {lockedTrucks.has(vehicle.truckNumber) && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Lock className="h-3 w-3 text-amber-500 shrink-0 cursor-default" />
+                                </TooltipTrigger>
+                                <TooltipContent>Contact locked — a conversation is in progress</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </span>
                       </TableCell>
                       <TableCell className={`text-sm font-mono ${vehicle.techMatchSource === 'manager_zip_fallback' ? 'text-orange-600 dark:text-orange-400' : ''}`}>
                         {vehicle.managerZip || "-"}
@@ -1216,7 +1235,19 @@ export default function Decommissioning() {
                         {vehicle.nearestTechEnterpriseId || "-"}
                       </TableCell>
                       <TableCell className="text-sm bg-blue-50/50 dark:bg-blue-900/20">
-                        {vehicle.nearestTechName || "-"}
+                        <span className="flex items-center gap-1">
+                          {vehicle.nearestTechName || "-"}
+                          {lockedTrucks.has(vehicle.truckNumber) && (
+                            <TooltipProvider>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Lock className="h-3 w-3 text-amber-500 shrink-0 cursor-default" />
+                                </TooltipTrigger>
+                                <TooltipContent>Contact locked — a conversation is in progress</TooltipContent>
+                              </Tooltip>
+                            </TooltipProvider>
+                          )}
+                        </span>
                       </TableCell>
                       <TableCell className="text-sm bg-blue-50/50 dark:bg-blue-900/20">
                         {vehicle.nearestTechPhone || "-"}

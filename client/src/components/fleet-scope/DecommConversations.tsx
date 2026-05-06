@@ -379,6 +379,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       }
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-messages", selectedTruck] });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-locked-trucks"] });
     },
     onError: (err: any) => {
       toast({
@@ -434,6 +435,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           const data = JSON.parse(event.data);
           if (data.source === "decomm" || data.type === "reg_message") {
             queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
+            queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-locked-trucks"] });
             if (data.truckNumber === selectedTruckRef.current) {
               queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-messages", selectedTruckRef.current] });
             }
@@ -800,6 +802,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
       setBatchResults(data.results || []);
       setBatchStep("results");
       queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-conversations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decomm-locked-trucks"] });
       toast({
         title: "Batch text complete",
         description: `Tech: ${data.techSent || 0} sent / ${data.techFailed || 0} failed / ${data.techSkipped || 0} skipped · Manager: ${data.managerSent || 0} sent / ${data.managerFailed || 0} failed / ${data.managerSkipped || 0} skipped`,
