@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Progress } from "@/components/ui/progress";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Upload,
@@ -20,6 +21,7 @@ import {
   RotateCcw,
   Play,
   Download,
+  History,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -335,11 +337,59 @@ function StatusBadge({
 }
 
 // ---------------------------------------------------------------------------
+// localStorage helpers
+// ---------------------------------------------------------------------------
+
+interface PersistedRun {
+  fileName: string;
+  actionableRows: ActionableRow[];
+  skippedCount: number;
+  results: [string, RowResult][];
+  runCompletedAt: string;
+}
+
+function getStorageKey(userId: number | string): string {
+  return `byov-bulk-run-${userId}`;
+}
+
+function saveRun(
+  userId: number | string,
+  data: Omit<PersistedRun, "results"> & { results: Map<string, RowResult> },
+): void {
+  try {
+    const payload: PersistedRun = {
+      ...data,
+      results: [...data.results.entries()],
+    };
+    localStorage.setItem(getStorageKey(userId), JSON.stringify(payload));
+  } catch {
+    // Ignore quota errors
+  }
+}
+
+function loadRun(userId: number | string): PersistedRun | null {
+  try {
+    const raw = localStorage.getItem(getStorageKey(userId));
+    if (!raw) return null;
+    return JSON.parse(raw) as PersistedRun;
+  } catch {
+    return null;
+  }
+}
+
+function clearRun(userId: number | string): void {
+  try {
+    localStorage.removeItem(getStorageKey(userId));
+  } catch {}
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
 export default function ByovBulkUpload() {
   const { toast } = useToast();
+  const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
@@ -351,6 +401,22 @@ export default function ByovBulkUpload() {
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
   const [runCompletedAt, setRunCompletedAt] = useState<Date | null>(null);
+  const [restoredRun, setRestoredRun] = useState(false);
+
+  // Restore persisted run on mount (once the user is resolved)
+  useEffect(() => {
+    if (!user) return;
+    const saved = loadRun(user.id);
+    if (!saved) return;
+    setFileName(saved.fileName);
+    setActionableRows(saved.actionableRows);
+    setSkippedCount(saved.skippedCount);
+    setResults(new Map(saved.results));
+    setRunCompletedAt(new Date(saved.runCompletedAt));
+    // Mark all processed rows as selected so the table renders them correctly
+    setSelectedIds(new Set(saved.results.map(([id]) => id)));
+    setRestoredRun(true);
+  }, [user]);
 
   const handleFileRead = useCallback((file: File) => {
     setFileName(file.name);
@@ -360,6 +426,8 @@ export default function ByovBulkUpload() {
     setResults(new Map());
     setCompletedCount(0);
     setRunCompletedAt(null);
+    setRestoredRun(false);
+    if (user) clearRun(user.id);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -401,7 +469,7 @@ export default function ByovBulkUpload() {
 
     // Read as latin1 to match the script's behavior
     reader.readAsText(file, "iso-8859-1");
-  }, [toast]);
+  }, [toast, user]);
 
   const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -486,7 +554,20 @@ export default function ByovBulkUpload() {
     }
 
     setRunning(false);
-    setRunCompletedAt(new Date());
+    const completedAt = new Date();
+    setRunCompletedAt(completedAt);
+    setRestoredRun(false);
+
+    // Persist the run so it survives page reloads / navigation
+    if (user) {
+      saveRun(user.id, {
+        fileName: fileName ?? "",
+        actionableRows,
+        skippedCount,
+        results: freshResults,
+        runCompletedAt: completedAt.toISOString(),
+      });
+    }
 
     const errCount = [...freshResults.values()].filter((r) => r.status === "error").length;
     const fullyOkCount = toProcess.filter((row) => {
@@ -563,6 +644,8 @@ export default function ByovBulkUpload() {
     setCompletedCount(0);
     setRunning(false);
     setRunCompletedAt(null);
+    setRestoredRun(false);
+    if (user) clearRun(user.id);
   };
 
   const toProcess = actionableRows.filter((r) => selectedIds.has(r.id));
@@ -643,6 +726,21 @@ export default function ByovBulkUpload() {
             )}
           </CardContent>
         </Card>
+
+        {/* Restored-run notice */}
+        {restoredRun && runCompletedAt && (
+          <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
+            <History className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+            <AlertDescription className="text-blue-800 dark:text-blue-300">
+              Showing results from a previous run completed on{" "}
+              <span className="font-medium">
+                {runCompletedAt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{" "}
+                at {runCompletedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+              </span>
+              . You can still export the results below, or click <span className="font-medium">Start over</span> to begin a new run.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Preview table */}
         {actionableRows.length > 0 && (
