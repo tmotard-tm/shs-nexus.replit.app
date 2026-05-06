@@ -554,7 +554,7 @@ export default function CreateVehicle() {
                   <Button
                     type="submit"
                     className="flex-1"
-                    disabled={createMutation.isPending || !!vehicleExistsWarning}
+                    disabled={createMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
                   >
                     {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                     {createMutation.isPending ? "Submitting…" : "Create BYOV Vehicle"}
