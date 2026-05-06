@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Search, MapPin, Car, X, ChevronDown, Filter, ArrowUpDown, ArrowUp, ArrowDown, Map } from 'lucide-react';
+import { Search, MapPin, Car, X, ChevronDown, Filter, ArrowUpDown, ArrowUp, ArrowDown, Map as MapIcon } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { MapSelection, MapFilters, CategoryKey } from '@/components/fleet-scope/USMapVehicles';
 
@@ -699,7 +699,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             )}
             {!allCategoriesVisible && (
               <Badge variant="secondary" className="gap-1 text-xs">
-                <Map className="w-3 h-3" />
+                <MapIcon className="w-3 h-3" />
                 {visibleMapCategories?.size || 0} of {TOTAL_CATEGORIES} categories
               </Badge>
             )}
@@ -717,7 +717,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                 }}
                 data-testid={`chip-table-map-selection-${idx}`}
               >
-                <Map className="w-3 h-3" />
+                <MapIcon className="w-3 h-3" />
                 {sel.label}
                 <X className="w-3 h-3" />
               </Badge>
