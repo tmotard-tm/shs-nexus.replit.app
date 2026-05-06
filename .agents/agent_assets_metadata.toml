@@ -48,3 +48,9 @@ id = "7_eZwWMax54m89KX4J-Cb"
 uri = "file://attached_assets/profitability_group2_export.csv"
 type = "table"
 title = "Profitability Export — 27-Tech Group"
+
+[[outputs]]
+id = "GDPmyaH--RTgrkExtyNHK"
+uri = "file://attached_assets/holman-byov-payloads.json"
+type = "unspecified"
+title = "Holman BYOV Payloads — 106 vehicles"
