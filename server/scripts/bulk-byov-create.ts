@@ -461,7 +461,9 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
       console.error(`  [Holman] ${paddedVehicle} rejected by Holman:`, errorMsgs);
       return { success: false, error: errorMsgs };
     }
-    console.log(`  [Holman] ${paddedVehicle} created OK:`, JSON.stringify(resp).slice(0, 200));
+    const refToken = resp?.userReferenceToken || resp?.referenceToken || resp?.submissionToken || "(none)";
+    console.log(`  [Holman] ${paddedVehicle} created OK — userReferenceToken: ${refToken}`);
+    console.log(`  [Holman] Full response:`, JSON.stringify(resp));
     return { success: true };
   } catch (err: any) {
     const msg = err instanceof Error ? err.message : String(err);
