@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { HumanVerificationGate } from "./human-verification-gate";
+import { PageSpinner } from "@/components/ui/page-spinner";
 
 interface PublicFormRouteProps {
   children: React.ReactNode;
@@ -38,16 +39,7 @@ export function PublicFormRoute({ children }: PublicFormRouteProps) {
 
   // Loading state
   if (isVerified === null) {
-    return (
-      <>
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Checking access...</p>
-          </div>
-        </div>
-      </>
-    );
+    return <PageSpinner message="Checking access..." />;
   }
 
   // Show verification gate if not verified

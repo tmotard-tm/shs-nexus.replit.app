@@ -79,6 +79,7 @@ import EditTruck from "@/pages/fleet-scope/EditTruck";
 import { UserProvider as FleetScopeUserProvider } from "@/context/FleetScopeUserContext";
 import TpmsLayout from "@/pages/tpms/TpmsLayout";
 import { TpmsGate } from "@/components/tpms/TpmsGate";
+import { AuthLoadingGate } from "@/components/auth-loading-gate";
 
 function AmsGate() {
   const { user } = useAuth();
@@ -585,7 +586,9 @@ function App() {
                       <OnboardingOverlay />
                       <SecurityQuestionsGate />
                       <BackgroundSyncManager />
-                      <Router />
+                      <AuthLoadingGate>
+                        <Router />
+                      </AuthLoadingGate>
                     </OnboardingProvider>
                   </SidebarProvider>
                 </PermissionsProvider>

@@ -7,6 +7,7 @@ import { checkRouteAccess, getRoleAccessDeniedMessage, getRoleDisplayName } from
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ShieldX, ArrowLeft, Home } from "lucide-react";
+import { PageSpinner } from "@/components/ui/page-spinner";
 
 interface RoleProtectedRouteProps {
   children: React.ReactNode;
@@ -58,16 +59,7 @@ export function RoleProtectedRoute({
 
   // Loading state
   if (isLoading || permissionsLoading || !accessChecked) {
-    return (
-      <>
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading...</p>
-          </div>
-        </div>
-      </>
-    );
+    return <PageSpinner />;
   }
 
   // Not authenticated

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { ShieldX, ArrowLeft } from "lucide-react";
 import { BackButton } from "@/components/ui/back-button";
+import { PageSpinner } from "@/components/ui/page-spinner";
 
 interface PermissionProtectedRouteProps {
   children: React.ReactNode;
@@ -65,16 +66,7 @@ export function PermissionProtectedRoute({
 
   // Loading state
   if (isLoading || permissionsLoading || !accessChecked) {
-    return (
-      <>
-        <div className="min-h-screen bg-background flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading...</p>
-          </div>
-        </div>
-      </>
-    );
+    return <PageSpinner />;
   }
 
   // Not authenticated

@@ -1,10 +1,11 @@
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { useToast } from "@/hooks/use-toast";
-import { Settings, Shield, AlertCircle } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
+import { Settings, Shield, AlertCircle } from "lucide-react";
+import { useEffect } from "react";
+import { PageSpinner } from "@/components/ui/page-spinner";
 
 function getSsoErrorMessage(error: string | null): string | null {
   if (!error) return null;
@@ -18,13 +19,27 @@ function getSsoErrorMessage(error: string | null): string | null {
 }
 
 export default function Login() {
+  const { user, isLoading } = useAuth();
+  const [, setLocation] = useLocation();
+
   const urlParams = new URLSearchParams(window.location.search);
   const ssoError = getSsoErrorMessage(urlParams.get("error"));
+
+  useEffect(() => {
+    if (!isLoading && user) {
+      const next = urlParams.get("next");
+      setLocation(next && next.startsWith("/") ? next : "/");
+    }
+  }, [isLoading, user, setLocation]);
 
   const handleSsoLogin = () => {
     const nextUrl = urlParams.get('next') || '/';
     window.location.href = `/auth/login?next=${encodeURIComponent(nextUrl)}`;
   };
+
+  if (isLoading || user) {
+    return <PageSpinner />;
+  }
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-4">
