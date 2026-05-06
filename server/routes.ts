@@ -8409,6 +8409,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // Cache refresh: upsert the newly created vehicle into holman_vehicles_cache so that
+      // same-session duplicate checks (the DB-cache guard above) reliably catch retries
+      // without needing a live Holman API round-trip on every subsequent attempt.
+      if (createInHolman && holmanResult.success) {
+        try {
+          const now = new Date();
+          const cacheValues = {
+            holmanVehicleNumber: paddedVehicle,
+            vin: vin ? String(vin) : null,
+            modelYear: modelYear ? Number(modelYear) : null,
+            makeName: make ? String(make) : null,
+            modelName: model ? String(model) : null,
+            licensePlate: licensePlate ? String(licensePlate) : null,
+            licenseState: plateState ? String(plateState) : null,
+            city: city ? String(city) : null,
+            state: state ? String(state) : null,
+            region: "890",
+            division: prefix,
+            district: districtStr || null,
+            holmanTechAssigned: enterpriseId ? String(enterpriseId) : null,
+            holmanTechName:
+              firstName && lastName && String(lastName).toUpperCase() !== "UNKNOWN"
+                ? `${String(firstName)} ${String(lastName)}`.trim()
+                : null,
+            regRenewalDate: regRenewalDate ? String(regRenewalDate) : null,
+            holmanAssignedStatusCd: "D",
+            statusCode: 1,
+            isActive: true,
+            byovVinMissing: !vin,
+            lastLocalUpdateAt: now,
+          };
+          await db
+            .insert(holmanVehiclesCache)
+            .values(cacheValues)
+            .onConflictDoUpdate({
+              target: holmanVehiclesCache.holmanVehicleNumber,
+              set: { ...cacheValues, updatedAt: now },
+            });
+          console.log("[BYOV] create: upserted vehicle into holman_vehicles_cache:", paddedVehicle);
+        } catch (cacheErr: unknown) {
+          // Cache update failure is non-fatal — log and continue
+          console.warn("[BYOV] create: failed to upsert into holman_vehicles_cache:", cacheErr);
+        }
+      }
+
       // --- WMS submission (conditional) ---
       let wmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
       if (createInWms) {
