@@ -8455,6 +8455,74 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/byov/audit-log/export", requireAuth, async (_req, res) => {
+    try {
+      const rows = await db
+        .select()
+        .from(byovCreationAudit)
+        .orderBy(desc(byovCreationAudit.submittedAt));
+
+      const workbook = new ExcelJS.Workbook();
+      const worksheet = workbook.addWorksheet("BYOV Submission History");
+
+      worksheet.columns = [
+        { header: "Vehicle #", key: "vehicleNumber", width: 14 },
+        { header: "Year", key: "modelYear", width: 8 },
+        { header: "Make", key: "make", width: 14 },
+        { header: "Model", key: "model", width: 14 },
+        { header: "Asset Type", key: "assetType", width: 12 },
+        { header: "District", key: "district", width: 12 },
+        { header: "Submitted By", key: "submittedBy", width: 22 },
+        { header: "Date", key: "submittedAt", width: 20 },
+        { header: "Holman Result", key: "holmanResult", width: 16 },
+        { header: "Holman Error", key: "holmanError", width: 40 },
+        { header: "WMS Result", key: "wmsResult", width: 14 },
+        { header: "WMS Error", key: "wmsError", width: 40 },
+      ];
+
+      rows.forEach((row) => {
+        worksheet.addRow({
+          vehicleNumber: row.vehicleNumber,
+          modelYear: row.modelYear || "",
+          make: row.make || "",
+          model: row.model || "",
+          assetType: row.assetType || "",
+          district: row.district || "",
+          submittedBy: row.submittedBy,
+          submittedAt: new Date(row.submittedAt).toLocaleString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+          holmanResult: row.holmanSuccess ? "OK" : "Failed",
+          holmanError: row.holmanError || "",
+          wmsResult: row.wmsSuccess ? "OK" : "Failed",
+          wmsError: row.wmsError || "",
+        });
+      });
+
+      worksheet.getRow(1).font = { bold: true };
+      worksheet.getRow(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFE0E0E0" },
+      };
+
+      const dateStr = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename=byov-submission-history-${dateStr}.xlsx`);
+
+      await workbook.xlsx.write(res);
+      res.end();
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to export audit log";
+      console.error("[BYOV] audit-log export error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
   // Contacts endpoints
   app.get("/api/holman/contacts", requireAuth, async (req: any, res) => {
     try {

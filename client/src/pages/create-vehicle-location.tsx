@@ -12,7 +12,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import {
@@ -623,14 +623,26 @@ export default function CreateVehicle() {
                   </CardTitle>
                   <CardDescription>Last 100 BYOV creation attempts — newest first</CardDescription>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] })}
-                  disabled={auditLogQuery.isFetching}
-                >
-                  {auditLogQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      window.location.href = "/api/byov/audit-log/export";
+                    }}
+                  >
+                    <Download className="h-4 w-4 mr-1.5" />
+                    Export
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] })}
+                    disabled={auditLogQuery.isFetching}
+                  >
+                    {auditLogQuery.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
