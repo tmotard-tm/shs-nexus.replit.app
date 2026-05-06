@@ -4180,6 +4180,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   let poStatusCache: { data: any; timestamp: number } | null = null;
   const PO_STATUS_CACHE_TTL = 5 * 60 * 1000;
 
+  app.get("/trucks/by-number/:truckNumber", async (req, res) => {
+    try {
+      const truck = await fleetScopeStorage.getTruckByNumber(req.params.truckNumber);
+      if (!truck) {
+        return res.status(404).json({ message: "Truck not found" });
+      }
+      return res.json({ id: truck.id, truckNumber: truck.truckNumber });
+    } catch (err) {
+      console.error("Error looking up truck by number:", err);
+      return res.status(500).json({ message: "Internal server error" });
+    }
+  });
+
   app.get("/trucks/po-status", async (req, res) => {
     try {
       const now = Date.now();

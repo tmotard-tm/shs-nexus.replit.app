@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -12,7 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -101,6 +102,8 @@ const emptyForm: FormState = {
 
 export default function CreateVehicle() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
+  const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [vehicleExistsWarning, setVehicleExistsWarning] = useState<string | null>(null);
   const [checkingVehicle, setCheckingVehicle] = useState(false);
@@ -141,6 +144,40 @@ export default function CreateVehicle() {
     }),
     staleTime: 30_000,
   });
+
+  const handleVehicleNumberClick = async (vehicleNumber: string) => {
+    if (navigatingTo === vehicleNumber) return;
+    setNavigatingTo(vehicleNumber);
+    try {
+      const resp = await fetch(`/api/fs/trucks/by-number/${encodeURIComponent(vehicleNumber)}`, {
+        credentials: "include",
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        navigate(`/fleet-scope/trucks/${data.id}`);
+      } else if (resp.status === 404) {
+        toast({
+          title: "Vehicle not in fleet",
+          description: `Vehicle ${vehicleNumber} was not found in the fleet list. It may still be pending.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Lookup failed",
+          description: "Could not look up the fleet record. Please try again.",
+          variant: "destructive",
+        });
+      }
+    } catch {
+      toast({
+        title: "Lookup failed",
+        description: "Could not reach the server. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setNavigatingTo(null);
+    }
+  };
 
   const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -821,7 +858,21 @@ export default function CreateVehicle() {
                         const noneOk = !row.holmanSuccess && !row.wmsSuccess;
                         return (
                           <tr key={row.id} className="border-b last:border-0 hover:bg-muted/30 transition-colors">
-                            <td className="py-2 pr-4 font-mono font-medium whitespace-nowrap">{row.vehicleNumber}</td>
+                            <td className="py-2 pr-4 whitespace-nowrap">
+                              <button
+                                type="button"
+                                onClick={() => handleVehicleNumberClick(row.vehicleNumber)}
+                                disabled={navigatingTo === row.vehicleNumber}
+                                className="font-mono font-medium text-primary hover:underline inline-flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed"
+                                title="Open fleet record"
+                              >
+                                {navigatingTo === row.vehicleNumber
+                                  ? <Loader2 className="h-3 w-3 animate-spin" />
+                                  : <ExternalLink className="h-3 w-3 opacity-50" />
+                                }
+                                {row.vehicleNumber}
+                              </button>
+                            </td>
                             <td className="py-2 pr-4 whitespace-nowrap text-muted-foreground">
                               {[row.modelYear, row.make, row.model].filter(Boolean).join(" ") || "—"}
                             </td>
