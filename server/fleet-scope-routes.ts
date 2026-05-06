@@ -14322,9 +14322,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // mid-conversation and break an ongoing thread.
     const messagedTruckSet = new Set<string>();
     try {
-      // Only count successfully sent outbound messages to decomm contact types.
-      // Excluding failed status prevents a botched send from locking in a match
-      // prematurely, and limiting contact types excludes ad-hoc messages.
+      // Only count successfully sent outbound messages. Excluding status='failed'
+      // prevents a botched send from prematurely locking a match before a real
+      // conversation has started. Ad-hoc messages use truck numbers like
+      // 'ADHOC-...' so they will never collide with a real truck number.
       const messagedRows = await getDb()
         .select({ truckNumber: decommMessages.truckNumber })
         .from(decommMessages)
@@ -14335,7 +14336,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           )
         );
       for (const row of messagedRows) {
-        // Only freeze for the decomm-relevant contact types; skip adhoc
         if (row.truckNumber) messagedTruckSet.add(row.truckNumber);
       }
       console.log(`[Decommissioning Tech Sync] ${messagedTruckSet.size} truck(s) have active conversations — contact columns will be frozen during this sync`);
@@ -14658,12 +14658,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
     // Freeze nearest-tech columns for trucks that already have an active
     // conversation (same guard as syncDecommissioningTechData).
+    // Uses the same predicate: outbound + status='sent' so failed sends
+    // don't prematurely lock a match.
     const passMessagedSet = new Set<string>();
     try {
       const rows = await getDb()
         .select({ truckNumber: decommMessages.truckNumber })
         .from(decommMessages)
-        .where(eq(decommMessages.direction, 'outbound'));
+        .where(
+          and(
+            eq(decommMessages.direction, 'outbound'),
+            eq(decommMessages.status, 'sent'),
+          )
+        );
       for (const row of rows) {
         if (row.truckNumber) passMessagedSet.add(row.truckNumber);
       }
@@ -14903,10 +14910,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
     } // end if vehicles.length > 0
 
-    // Calculate nearest tech distances for vehicles that have nearestTechZip but no nearestTechDistance
+    // Calculate nearest tech distances for vehicles that have nearestTechZip but no nearestTechDistance.
+    // Skip trucks with active conversations — their matched tech is frozen and the distance
+    // is still valid for the frozen contact (same outbound+sent predicate as the freeze guard).
     const allVehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
+    const distMessagedSet = new Set<string>();
+    try {
+      const distMsgRows = await getDb()
+        .select({ truckNumber: decommMessages.truckNumber })
+        .from(decommMessages)
+        .where(and(eq(decommMessages.direction, 'outbound'), eq(decommMessages.status, 'sent')));
+      for (const row of distMsgRows) {
+        if (row.truckNumber) distMessagedSet.add(row.truckNumber);
+      }
+    } catch (_err) {
+      // Non-fatal — skip guard if query fails; distance recalc is idempotent anyway
+    }
     const needsNearestTechDist = allVehicles.filter(v =>
-      v.zipCode && v.nearestTechZip && v.nearestTechDistance === null
+      v.zipCode && v.nearestTechZip && v.nearestTechDistance === null &&
+      !distMessagedSet.has(v.truckNumber)
     );
     let nearestTechSuccess = 0;
     if (needsNearestTechDist.length > 0) {
