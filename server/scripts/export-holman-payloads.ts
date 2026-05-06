@@ -191,17 +191,23 @@ async function main() {
     const paddedVehicle = toHolmanRef(row.truckId.trim());
     if (!paddedVehicle) continue;
 
+    const up = (s: string | null | undefined): string | null =>
+      s ? s.trim().toUpperCase() || null : null;
+
     const NULL_VAL    = "^null^";
     const isUnknown   = lastName.trim().toUpperCase() === "UNKNOWN";
-    const clientData1 = isUnknown ? NULL_VAL : (lastName ? lastName.slice(0,12) : null);
-    const clientData2 = isUnknown ? NULL_VAL : (row.ldap.trim() || null);
+    const clientData1 = isUnknown ? NULL_VAL : (lastName ? lastName.trim().toUpperCase().slice(0,12) : null);
+    const clientData2 = isUnknown ? NULL_VAL : (up(row.ldap) || null);
     const clientData4 = clientData2;
     const prefix      = toCanonical(row.district.trim()) || row.district.trim() || null;
 
-    const addressLine1 = tpms?.addr1 ?? null;
-    const addressLine2 = tpms?.addr2 ?? null;
-    const city         = tpms?.city  ?? csvAddr.city  ?? null;
-    const state        = tpms?.state ?? csvAddr.state ?? null;
+    const sanitizeAddr = (s: string | null | undefined): string | null =>
+      s ? s.replace(/#/g, "").replace(/\s{2,}/g, " ").trim().toUpperCase() || null : null;
+
+    const addressLine1 = sanitizeAddr(tpms?.addr1 ?? null);
+    const addressLine2 = sanitizeAddr(tpms?.addr2 ?? null);
+    const city         = up(tpms?.city  ?? csvAddr.city  ?? null);
+    const state        = up(tpms?.state ?? csvAddr.state ?? null);
     const zip          = tpms?.zip   ?? csvAddr.zip   ?? null;
     const assetType    = getAssetType(make, model, row.vehicle);
 
@@ -210,7 +216,7 @@ async function main() {
       if (rh) {
         const [mo,day,yr] = rh.split("/").map(Number);
         if (new Date(yr,mo-1,day) > new Date()) {
-          return { licensePlate: row.plate||null, tagStateProvince: row.plateState||null, plateType:"PAS", renewalDate: rh };
+          return { licensePlate: up(row.plate)||null, tagStateProvince: up(row.plateState)||null, plateType:"PAS", renewalDate: rh };
         }
       }
       return {};
@@ -226,11 +232,11 @@ async function main() {
       holmanVehicleNumber: paddedVehicle,
       vendorCode:          "OTH",
       division:            "01",
-      vin:                 row.vin.trim() ? row.vin.trim().slice(0,17) : null,
+      vin:                 row.vin.trim() ? row.vin.trim().toUpperCase().slice(0,17) : null,
       modelYear:           modelYear != null ? String(modelYear) : null,
       assetType,
-      firstName:           firstName || null,
-      lastName:            lastName  || null,
+      firstName:           up(firstName) || null,
+      lastName:            up(lastName)  || null,
       email:               "FLEET_SUPPORT@TRANSFORMCO.COM",
       clientData1,
       clientData2,
@@ -249,8 +255,8 @@ async function main() {
       deliveryDate:        toHolmanDate(deliveryDate),
       onRoadDate:          toHolmanDate(deliveryDate),
       workPhone:           row.phone.trim() || null,
-      makeClient:          make || null,
-      modelClient:         model || null,
+      makeClient:          up(make) || null,
+      modelClient:         up(model) || null,
     });
   }
 

@@ -358,12 +358,15 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
   }
   console.log(`  [Holman] ${paddedVehicle} not found in Holman — proceeding with creation`);
 
+  const up = (s: string | null | undefined): string | null =>
+    s ? s.trim().toUpperCase() || null : null;
+
   const NULL_VAL    = "^null^";
   const isUnknown   = payload.lastName.trim().toUpperCase() === "UNKNOWN";
   // clientData1 max 12 chars
-  const clientData1 = isUnknown ? NULL_VAL : (payload.lastName ? payload.lastName.slice(0, 12) : null);
-  const clientData2 = isUnknown ? NULL_VAL : (payload.enterpriseId || null);
-  const clientData4 = isUnknown ? NULL_VAL : (payload.enterpriseId || null);
+  const clientData1 = isUnknown ? NULL_VAL : (payload.lastName ? payload.lastName.trim().toUpperCase().slice(0, 12) : null);
+  const clientData2 = isUnknown ? NULL_VAL : (up(payload.enterpriseId) || null);
+  const clientData4 = isUnknown ? NULL_VAL : (up(payload.enterpriseId) || null);
   const districtStr = String(payload.district).trim();
   const prefix      = toCanonical(districtStr) || districtStr || null;
 
@@ -372,8 +375,8 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
   // and the renewal date is in the future.
   const licenseFields = (() => {
     const renewalHolman = toHolmanDate(payload.regRenewalDate);
-    const plate = payload.licensePlate?.trim() || "";
-    const state = payload.plateState?.trim()   || "";
+    const plate = up(payload.licensePlate) || "";
+    const state = up(payload.plateState)   || "";
     if (plate && state && renewalHolman) {
       const [mo, day, yr] = renewalHolman.split("/").map(Number);
       if (new Date(yr, mo - 1, day) > new Date()) {
@@ -388,9 +391,9 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     return {};
   })();
 
-  // Sanitize address strings — strip # and collapse extra spaces
+  // Sanitize address strings — strip # and collapse extra spaces, then uppercase
   const sanitizeAddr = (s: string | null) =>
-    s ? s.replace(/#/g, "").replace(/\s{2,}/g, " ").trim() || null : null;
+    s ? s.replace(/#/g, "").replace(/\s{2,}/g, " ").trim().toUpperCase() || null : null;
 
   // Address block — Holman requires addressLine1 + city + stateProvince + zipPostalCode
   // all together. If addressLine1 is missing, omit all address fields.
@@ -398,10 +401,10 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     ? {
         addressLine1:  sanitizeAddr(payload.addressLine1),
         addressLine2:  sanitizeAddr(payload.addressLine2) || null,
-        city:          payload.city   || null,
-        stateProvince: payload.state  || null,
-        zipPostalCode: payload.zip    || null,
-        auxData7:      payload.zip    || null,
+        city:          up(payload.city)   || null,
+        stateProvince: up(payload.state)  || null,
+        zipPostalCode: payload.zip        || null,
+        auxData7:      payload.zip        || null,
       }
     : {
         addressLine1:  null,
@@ -418,11 +421,11 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     vendorCode:          "OTH",
     division:            "01",
     // VIN max 17 chars — strip any extra text
-    vin:                 payload.vin ? payload.vin.slice(0, 17) : null,
+    vin:                 payload.vin ? payload.vin.trim().toUpperCase().slice(0, 17) : null,
     modelYear:           payload.modelYear != null ? String(payload.modelYear) : null,
     assetType:           payload.assetType,
-    firstName:           payload.firstName   || null,
-    lastName:            payload.lastName    || null,
+    firstName:           up(payload.firstName) || null,
+    lastName:            up(payload.lastName)  || null,
     email:               "FLEET_SUPPORT@TRANSFORMCO.COM",
     clientData1,
     clientData2,
@@ -436,8 +439,8 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     deliveryDate:        toHolmanDate(payload.deliveryDate),
     onRoadDate:          toHolmanDate(payload.onRoadDate),
     workPhone:           payload.phone        || null,
-    makeClient:          payload.make         || null,
-    modelClient:         payload.model        || null,
+    makeClient:          up(payload.make)     || null,
+    modelClient:         up(payload.model)    || null,
   };
 
   try {
