@@ -8270,6 +8270,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
             .from(holmanVehiclesCache);
           duplicate = allRows.some((r) => toCanonical(r.holmanVehicleNumber) === canonical);
         }
+        if (!duplicate) {
+          // Cache miss — fall back to a live Holman lookup so a stale cache
+          // cannot let a real duplicate slip through.
+          try {
+            const liveResult = await holmanApiService.findVehicleByNumber(vehicleNumber);
+            if (liveResult.success && liveResult.vehicle) {
+              duplicate = true;
+              console.log(`[BYOV] Live Holman lookup found existing vehicle ${paddedVehicle}; blocking duplicate submission.`);
+            }
+          } catch (liveErr) {
+            console.error("[BYOV] Live Holman duplicate check failed (non-fatal):", liveErr);
+          }
+        }
         if (duplicate) {
           return res.status(409).json({
             error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
