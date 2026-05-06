@@ -213,14 +213,18 @@ function RolePermissionsEditor({
           )}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Reset to Default
-          </Button>
-          <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
-            <Save className="h-4 w-4 mr-2" />
-            {isSaving ? 'Saving...' : 'Save Changes'}
-          </Button>
+          <span className="inline-flex" title={!canEdit ? "You don't have permission to edit this role" : undefined}>
+            <Button variant="outline" size="sm" onClick={handleReset} disabled={!canEdit} data-testid={`btn-reset-${role}`}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Reset to Default
+            </Button>
+          </span>
+          <span className="inline-flex" title={!canEdit ? "You don't have permission to edit this role" : !hasChanges ? "No changes to save yet" : undefined}>
+            <Button size="sm" onClick={handleSave} disabled={!canEdit || !hasChanges || isSaving} data-testid={`btn-save-${role}`}>
+              <Save className="h-4 w-4 mr-2" />
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          </span>
         </div>
       </div>
 
@@ -529,13 +533,15 @@ export default function RolePermissions() {
                   <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>
                     Cancel
                   </Button>
-                  <Button 
-                    onClick={handleCreateRole} 
-                    disabled={!newRoleName.trim() || createRoleMutation.isPending}
-                    data-testid="btn-confirm-create-role"
-                  >
-                    {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
-                  </Button>
+                  <span className="inline-flex" title={!newRoleName.trim() ? "Enter a name for the new role before creating" : undefined}>
+                    <Button 
+                      onClick={handleCreateRole} 
+                      disabled={!newRoleName.trim() || createRoleMutation.isPending}
+                      data-testid="btn-confirm-create-role"
+                    >
+                      {createRoleMutation.isPending ? 'Creating...' : 'Create Role'}
+                    </Button>
+                  </span>
                 </DialogFooter>
               </DialogContent>
             </Dialog>

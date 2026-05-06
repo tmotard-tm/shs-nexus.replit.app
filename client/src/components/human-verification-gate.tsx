@@ -117,14 +117,16 @@ export function HumanVerificationGate({ onVerificationComplete, originalUrl }: H
                 </label>
               </div>
 
-              <Button
-                onClick={handleVerify}
-                disabled={!isChecked || isVerifying}
-                className="w-full"
-                data-testid="button-verify"
-              >
-                {isVerifying ? 'Verifying...' : 'Verify & Continue'}
-              </Button>
+              <span className="inline-flex w-full" title={!isChecked ? "Check the box above to confirm you're not a robot" : undefined}>
+                <Button
+                  onClick={handleVerify}
+                  disabled={!isChecked || isVerifying}
+                  className="w-full"
+                  data-testid="button-verify"
+                >
+                  {isVerifying ? 'Verifying...' : 'Verify & Continue'}
+                </Button>
+              </span>
             </>
           )}
 

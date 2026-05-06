@@ -917,10 +917,16 @@ export default function ActivityLogs() {
               </CollapsibleTrigger>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
-                    <Download className="mr-2 h-4 w-4" />
-                    {isExporting ? "Exporting..." : "Export"}
-                  </Button>
+                  <span
+                    className="inline-flex"
+                    title={filteredLogs.length === 0 ? "No logs to export — adjust the filters to load results first" : undefined}
+                    style={(isExporting || filteredLogs.length === 0) ? { pointerEvents: 'none' } : undefined}
+                  >
+                    <Button variant="outline" disabled={isExporting || filteredLogs.length === 0} data-testid="button-export">
+                      <Download className="mr-2 h-4 w-4" />
+                      {isExporting ? "Exporting..." : "Export"}
+                    </Button>
+                  </span>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem onClick={exportToCSV} data-testid="menu-export-csv">
@@ -1067,10 +1073,16 @@ export default function ActivityLogs() {
                 </Button>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={isSubExporting || submissions.length === 0} data-testid="button-export-submissions">
-                      <Download className="mr-2 h-4 w-4" />
-                      {isSubExporting ? "Exporting..." : "Export"}
-                    </Button>
+                    <span
+                      className="inline-flex"
+                      title={submissions.length === 0 ? "No submissions to export — load submissions first" : undefined}
+                      style={(isSubExporting || submissions.length === 0) ? { pointerEvents: 'none' } : undefined}
+                    >
+                      <Button variant="outline" disabled={isSubExporting || submissions.length === 0} data-testid="button-export-submissions">
+                        <Download className="mr-2 h-4 w-4" />
+                        {isSubExporting ? "Exporting..." : "Export"}
+                      </Button>
+                    </span>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onClick={exportSubmissionsToCSV} data-testid="menu-export-submissions-csv">
@@ -1364,6 +1376,7 @@ export default function ActivityLogs() {
                       Use space (" ") instead of null
                     </label>
                   </div>
+                  <span className="inline-flex" title={!fieldTestVehicle ? "Enter a vehicle number above before running the field test" : undefined}>
                   <Button
                     onClick={() => {
                       if (window.confirm(`This will run ${19} field tests on vehicle ${fieldTestVehicle}. Each test overwrites data. Continue?`)) {
@@ -1386,6 +1399,7 @@ export default function ActivityLogs() {
                       </>
                     )}
                   </Button>
+                  </span>
                 </div>
 
                 {fieldTestResults && (

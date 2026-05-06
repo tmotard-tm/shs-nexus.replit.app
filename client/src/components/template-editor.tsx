@@ -1245,18 +1245,20 @@ function StepEditor({
                     />
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="default"
-                      size="sm"
-                      onClick={addStepLink}
-                      disabled={!newStepLinkText.trim() || !newStepLinkUrl.trim()}
-                      className="h-7"
-                      data-testid={`button-confirm-step-link-${stepIndex}`}
-                    >
-                      <Check className="h-3 w-3 mr-1" />
-                      OK
-                    </Button>
+                    <span className="inline-flex" title={!newStepLinkText.trim() || !newStepLinkUrl.trim() ? "Fill in both the link text and URL before confirming" : undefined}>
+                      <Button
+                        type="button"
+                        variant="default"
+                        size="sm"
+                        onClick={addStepLink}
+                        disabled={!newStepLinkText.trim() || !newStepLinkUrl.trim()}
+                        className="h-7"
+                        data-testid={`button-confirm-step-link-${stepIndex}`}
+                      >
+                        <Check className="h-3 w-3 mr-1" />
+                        OK
+                      </Button>
+                    </span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1447,18 +1449,20 @@ function StepEditor({
                             />
                           </div>
                           <div className="flex gap-2">
-                            <Button
-                              type="button"
-                              variant="default"
-                              size="sm"
-                              onClick={() => addSubstepLink(substepIndex)}
-                              disabled={!newSubstepLinkText[substepIndex]?.trim() || !newSubstepLinkUrl[substepIndex]?.trim()}
-                              className="h-6 text-xs"
-                              data-testid={`button-confirm-substep-link-${stepIndex}-${substepIndex}`}
-                            >
-                              <Check className="h-3 w-3 mr-1" />
-                              OK
-                            </Button>
+                            <span className="inline-flex" title={!newSubstepLinkText[substepIndex]?.trim() || !newSubstepLinkUrl[substepIndex]?.trim() ? "Fill in both the link text and URL before confirming" : undefined}>
+                              <Button
+                                type="button"
+                                variant="default"
+                                size="sm"
+                                onClick={() => addSubstepLink(substepIndex)}
+                                disabled={!newSubstepLinkText[substepIndex]?.trim() || !newSubstepLinkUrl[substepIndex]?.trim()}
+                                className="h-6 text-xs"
+                                data-testid={`button-confirm-substep-link-${stepIndex}-${substepIndex}`}
+                              >
+                                <Check className="h-3 w-3 mr-1" />
+                                OK
+                              </Button>
+                            </span>
                             <Button
                               type="button"
                               variant="ghost"

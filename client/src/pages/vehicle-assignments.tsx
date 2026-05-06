@@ -232,9 +232,11 @@ export default function VehicleAssignments() {
                       onKeyDown={(e) => e.key === 'Enter' && handleTechLookup()}
                       data-testid="input-tech-lookup"
                     />
-                    <Button onClick={handleTechLookup} disabled={!techLookup.trim()} data-testid="button-tech-lookup">
-                      <Search className="h-4 w-4" />
-                    </Button>
+                    <span className="inline-flex" title={!techLookup.trim() ? "Enter an Enterprise ID above to search" : undefined}>
+                      <Button onClick={handleTechLookup} disabled={!techLookup.trim()} data-testid="button-tech-lookup">
+                        <Search className="h-4 w-4" />
+                      </Button>
+                    </span>
                   </div>
                 </CardContent>
               </Card>
@@ -252,9 +254,11 @@ export default function VehicleAssignments() {
                       onKeyDown={(e) => e.key === 'Enter' && handleTruckLookup()}
                       data-testid="input-truck-lookup"
                     />
-                    <Button onClick={handleTruckLookup} disabled={!truckLookup.trim()} data-testid="button-truck-lookup">
-                      <Search className="h-4 w-4" />
-                    </Button>
+                    <span className="inline-flex" title={!truckLookup.trim() ? "Enter a truck number above to search" : undefined}>
+                      <Button onClick={handleTruckLookup} disabled={!truckLookup.trim()} data-testid="button-truck-lookup">
+                        <Search className="h-4 w-4" />
+                      </Button>
+                    </span>
                   </div>
                 </CardContent>
               </Card>

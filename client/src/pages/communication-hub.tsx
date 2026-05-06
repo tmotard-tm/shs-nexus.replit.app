@@ -674,9 +674,11 @@ export default function CommunicationHub() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsAddWhitelistOpen(false)}>Cancel</Button>
-            <Button onClick={() => addWhitelistMutation.mutate(newWhitelistEntry)} disabled={!newWhitelistEntry.value}>
-              Add to Whitelist
-            </Button>
+            <span className="inline-flex" title={!newWhitelistEntry.value ? "Enter a token value before adding to the whitelist" : undefined}>
+              <Button onClick={() => addWhitelistMutation.mutate(newWhitelistEntry)} disabled={!newWhitelistEntry.value}>
+                Add to Whitelist
+              </Button>
+            </span>
           </DialogFooter>
         </DialogContent>
       </Dialog>

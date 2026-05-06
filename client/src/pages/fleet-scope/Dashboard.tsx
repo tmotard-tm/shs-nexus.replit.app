@@ -2448,14 +2448,16 @@ export default function Dashboard() {
                     </label>
                   </div>
                   
-                  <Button
-                    onClick={handleImportCSV}
-                    disabled={!importFile || bulkImportMutation.isPending}
-                    className="w-full"
-                    data-testid="button-start-import"
-                  >
-                    {bulkImportMutation.isPending ? "Importing..." : "Import Trucks"}
-                  </Button>
+                  <span className="inline-flex w-full" title={!importFile ? "Select a file above before importing" : undefined}>
+                    <Button
+                      onClick={handleImportCSV}
+                      disabled={!importFile || bulkImportMutation.isPending}
+                      className="w-full"
+                      data-testid="button-start-import"
+                    >
+                      {bulkImportMutation.isPending ? "Importing..." : "Import Trucks"}
+                    </Button>
+                  </span>
                 </div>
               )}
             </DialogContent>
@@ -2544,14 +2546,16 @@ export default function Dashboard() {
                     </label>
                   </div>
                   
-                  <Button
-                    onClick={handleCallImport}
-                    disabled={!callImportFile || callImportMutation.isPending}
-                    className="w-full"
-                    data-testid="button-start-call-import"
-                  >
-                    {callImportMutation.isPending ? "Importing..." : "Import Call Data"}
-                  </Button>
+                  <span className="inline-flex w-full" title={!callImportFile ? "Select a file above before importing" : undefined}>
+                    <Button
+                      onClick={handleCallImport}
+                      disabled={!callImportFile || callImportMutation.isPending}
+                      className="w-full"
+                      data-testid="button-start-call-import"
+                    >
+                      {callImportMutation.isPending ? "Importing..." : "Import Call Data"}
+                    </Button>
+                  </span>
                 </div>
               )}
             </DialogContent>
@@ -2616,14 +2620,16 @@ export default function Dashboard() {
                       <p className="text-xs text-muted-foreground">.xlsx, .xls, or .csv</p>
                     </label>
                   </div>
-                  <Button
-                    onClick={handleShopListImport}
-                    disabled={!shopListFile || shopListImportMutation.isPending}
-                    className="w-full"
-                    data-testid="button-start-shop-list-import"
-                  >
-                    {shopListImportMutation.isPending ? "Importing..." : "Import Shop List"}
-                  </Button>
+                  <span className="inline-flex w-full" title={!shopListFile ? "Select a file above before importing" : undefined}>
+                    <Button
+                      onClick={handleShopListImport}
+                      disabled={!shopListFile || shopListImportMutation.isPending}
+                      className="w-full"
+                      data-testid="button-start-shop-list-import"
+                    >
+                      {shopListImportMutation.isPending ? "Importing..." : "Import Shop List"}
+                    </Button>
+                  </span>
                   {shopListStatus?.processedAt && (
                     <div className="text-xs text-muted-foreground border-t pt-3">
                       <p className="font-medium mb-1">Last auto-sync:</p>
@@ -2980,14 +2986,16 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">
                     {parseConsolidateInput(consolidatePasteText).length} truck entries detected
                   </p>
-                  <Button
-                    onClick={handleConsolidate}
-                    disabled={!consolidatePasteText.trim() || consolidateMutation.isPending}
-                    className="w-full"
-                    data-testid="button-run-consolidate"
-                  >
-                    {consolidateMutation.isPending ? "Consolidating..." : "Run Consolidation"}
-                  </Button>
+                  <span className="inline-flex w-full" title={!consolidatePasteText.trim() ? "Paste truck data into the field above before running" : undefined}>
+                    <Button
+                      onClick={handleConsolidate}
+                      disabled={!consolidatePasteText.trim() || consolidateMutation.isPending}
+                      className="w-full"
+                      data-testid="button-run-consolidate"
+                    >
+                      {consolidateMutation.isPending ? "Consolidating..." : "Run Consolidation"}
+                    </Button>
+                  </span>
                 </div>
               )}
             </DialogContent>
@@ -3099,14 +3107,16 @@ export default function Dashboard() {
                   <p className="text-xs text-muted-foreground">
                     {bulkSyncInput.split(/[\n,]+/).filter(s => s.trim()).length} truck numbers detected
                   </p>
-                  <Button
-                    onClick={calculateBulkSyncPreview}
-                    disabled={!bulkSyncInput.trim()}
-                    className="w-full"
-                    data-testid="button-preview-bulk-sync"
-                  >
-                    Preview Changes
-                  </Button>
+                  <span className="inline-flex w-full" title={!bulkSyncInput.trim() ? "Enter truck numbers above before previewing" : undefined}>
+                    <Button
+                      onClick={calculateBulkSyncPreview}
+                      disabled={!bulkSyncInput.trim()}
+                      className="w-full"
+                      data-testid="button-preview-bulk-sync"
+                    >
+                      Preview Changes
+                    </Button>
+                  </span>
                 </div>
               )}
             </DialogContent>
@@ -4635,13 +4645,15 @@ export default function Dashboard() {
                 <Button variant="outline" onClick={() => { setAmsCommentDialogOpen(false); setAmsNewComment(""); }} disabled={addCommentMutation.isPending}>
                   Cancel
                 </Button>
-                <Button
-                  onClick={() => amsNewComment.trim() && addCommentMutation.mutate(amsNewComment.trim())}
-                  disabled={!amsNewComment.trim() || addCommentMutation.isPending}
-                >
-                  {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
-                  Add Comment
-                </Button>
+                <span className="inline-flex" title={!amsNewComment.trim() ? "Type a comment above before submitting" : undefined}>
+                  <Button
+                    onClick={() => amsNewComment.trim() && addCommentMutation.mutate(amsNewComment.trim())}
+                    disabled={!amsNewComment.trim() || addCommentMutation.isPending}
+                  >
+                    {addCommentMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Send className="h-4 w-4 mr-2" />}
+                    Add Comment
+                  </Button>
+                </span>
               </DialogFooter>
             </DialogContent>
           </Dialog>

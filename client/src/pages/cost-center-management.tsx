@@ -1209,6 +1209,7 @@ export default function CostCenterManagement() {
                 >
                   Close
                 </Button>
+                <span className="inline-flex" title={!bulkSummary ? "Preview the CSV above to check for changes before applying" : (bulkSummary.newCount + bulkSummary.updateCount === 0 ? "No changes detected in the uploaded file" : undefined)}>
                 <Button
                   type="button"
                   onClick={handleBulkApply}
@@ -1225,6 +1226,7 @@ export default function CostCenterManagement() {
                       ? `Apply ${bulkSummary.newCount + bulkSummary.updateCount} change${bulkSummary.newCount + bulkSummary.updateCount === 1 ? "" : "s"}`
                       : "Apply"}
                 </Button>
+                </span>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -1691,28 +1693,32 @@ export default function CostCenterManagement() {
                 Cost Center Change History
               </SheetTitle>
               <div className="flex items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={handleDownloadHistoryCsv}
-                  disabled={historyLoading || historyEntries.length === 0}
-                  data-testid="button-download-history-csv"
-                >
-                  <Download className="mr-2 h-4 w-4" />
-                  Download CSV
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => { setEmailCsvInput(""); setIsEmailCsvOpen(true); }}
-                  disabled={historyLoading || historyEntries.length === 0}
-                  data-testid="button-email-history-csv"
-                >
-                  <Mail className="mr-2 h-4 w-4" />
-                  Email CSV
-                </Button>
+                <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDownloadHistoryCsv}
+                    disabled={historyLoading || historyEntries.length === 0}
+                    data-testid="button-download-history-csv"
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Download CSV
+                  </Button>
+                </span>
+                <span className="inline-flex" title={historyEntries.length === 0 ? "No history entries to export yet" : undefined}>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => { setEmailCsvInput(""); setIsEmailCsvOpen(true); }}
+                    disabled={historyLoading || historyEntries.length === 0}
+                    data-testid="button-email-history-csv"
+                  >
+                    <Mail className="mr-2 h-4 w-4" />
+                    Email CSV
+                  </Button>
+                </span>
               </div>
             </div>
 
@@ -1742,13 +1748,15 @@ export default function CostCenterManagement() {
                   >
                     Cancel
                   </Button>
-                  <Button
-                    type="button"
-                    onClick={handleEmailCsvSubmit}
-                    disabled={emailCsvMutation.isPending || !emailCsvInput.trim()}
-                  >
-                    {emailCsvMutation.isPending ? "Sending…" : "Send"}
-                  </Button>
+                  <span className="inline-flex" title={!emailCsvInput.trim() ? "Enter an email address above before sending" : undefined}>
+                    <Button
+                      type="button"
+                      onClick={handleEmailCsvSubmit}
+                      disabled={emailCsvMutation.isPending || !emailCsvInput.trim()}
+                    >
+                      {emailCsvMutation.isPending ? "Sending…" : "Send"}
+                    </Button>
+                  </span>
                 </DialogFooter>
               </DialogContent>
             </Dialog>

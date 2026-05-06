@@ -435,14 +435,18 @@ export default function TechRoster() {
                 <div className="flex items-center justify-between text-sm text-muted-foreground">
                   <span>Showing {paginatedTechs.length} of {filteredTechs.length} Employees{filteredTechs.length !== techs.length ? ` (${techs.length} total)` : ''}</span>
                   <div className="flex items-center gap-2">
-                    <Button variant="outline" size="sm" onClick={exportCSV} disabled={filteredTechs.length === 0} data-testid="button-export-csv">
-                      <Download className="h-4 w-4 mr-1" />
-                      CSV
-                    </Button>
-                    <Button variant="outline" size="sm" onClick={exportExcel} disabled={filteredTechs.length === 0} data-testid="button-export-excel">
-                      <Download className="h-4 w-4 mr-1" />
-                      Excel
-                    </Button>
+                    <span className="inline-flex" title={filteredTechs.length === 0 ? "No employees match the current filters — clear filters to enable export" : undefined}>
+                      <Button variant="outline" size="sm" onClick={exportCSV} disabled={filteredTechs.length === 0} data-testid="button-export-csv">
+                        <Download className="h-4 w-4 mr-1" />
+                        CSV
+                      </Button>
+                    </span>
+                    <span className="inline-flex" title={filteredTechs.length === 0 ? "No employees match the current filters — clear filters to enable export" : undefined}>
+                      <Button variant="outline" size="sm" onClick={exportExcel} disabled={filteredTechs.length === 0} data-testid="button-export-excel">
+                        <Download className="h-4 w-4 mr-1" />
+                        Excel
+                      </Button>
+                    </span>
                   </div>
                 </div>
               </CardContent>
