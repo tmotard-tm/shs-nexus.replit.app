@@ -731,13 +731,24 @@ export default function ByovBulkUpload() {
         {restoredRun && runCompletedAt && (
           <Alert className="border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950/30">
             <History className="h-4 w-4 text-blue-600 dark:text-blue-400" />
-            <AlertDescription className="text-blue-800 dark:text-blue-300">
-              Showing results from a previous run completed on{" "}
-              <span className="font-medium">
-                {runCompletedAt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{" "}
-                at {runCompletedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+            <AlertDescription className="text-blue-800 dark:text-blue-300 flex items-center justify-between gap-4 flex-wrap">
+              <span>
+                Showing results from a previous run completed on{" "}
+                <span className="font-medium">
+                  {runCompletedAt.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}{" "}
+                  at {runCompletedAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                </span>
+                . You can still export the results below, or upload a new file to start a new run.
               </span>
-              . You can still export the results below, or click <span className="font-medium">Start over</span> to begin a new run.
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReset}
+                className="gap-1.5 border-blue-300 text-blue-700 hover:bg-blue-100 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-900/40 shrink-0"
+              >
+                <XCircle className="h-4 w-4" />
+                Dismiss saved results
+              </Button>
             </AlertDescription>
           </Alert>
         )}
