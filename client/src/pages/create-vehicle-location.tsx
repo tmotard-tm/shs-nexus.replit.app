@@ -551,14 +551,25 @@ export default function CreateVehicle() {
                 </div>
 
                 <div className="flex gap-3 pt-2">
-                  <Button
-                    type="submit"
+                  {showConfirmDialog && (
+                    <span id="confirm-dialog-hint" className="sr-only">
+                      Confirm or cancel the dialog above before submitting.
+                    </span>
+                  )}
+                  <span
                     className="flex-1"
-                    disabled={createMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
+                    title={showConfirmDialog ? "Confirm or cancel the dialog above" : undefined}
                   >
-                    {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                    {createMutation.isPending ? "Submitting…" : "Create BYOV Vehicle"}
-                  </Button>
+                    <Button
+                      type="submit"
+                      className="w-full"
+                      disabled={createMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
+                      aria-describedby={showConfirmDialog ? "confirm-dialog-hint" : undefined}
+                    >
+                      {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {createMutation.isPending ? "Submitting…" : "Create BYOV Vehicle"}
+                    </Button>
+                  </span>
                   <Button type="button" variant="outline" onClick={handleReset}>
                     Reset
                   </Button>
