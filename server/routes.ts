@@ -8443,6 +8443,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             }
           }
         }
+
       }
 
       // Cache refresh: upsert the newly created vehicle into holman_vehicles_cache so that
