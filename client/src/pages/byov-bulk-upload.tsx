@@ -19,6 +19,7 @@ import {
   SkipForward,
   RotateCcw,
   Play,
+  Download,
 } from "lucide-react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
@@ -349,6 +350,7 @@ export default function ByovBulkUpload() {
   const [results, setResults] = useState<Map<string, RowResult>>(new Map());
   const [running, setRunning] = useState(false);
   const [completedCount, setCompletedCount] = useState(0);
+  const [runCompletedAt, setRunCompletedAt] = useState<Date | null>(null);
 
   const handleFileRead = useCallback((file: File) => {
     setFileName(file.name);
@@ -357,6 +359,7 @@ export default function ByovBulkUpload() {
     setSelectedIds(new Set());
     setResults(new Map());
     setCompletedCount(0);
+    setRunCompletedAt(null);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -483,6 +486,7 @@ export default function ByovBulkUpload() {
     }
 
     setRunning(false);
+    setRunCompletedAt(new Date());
 
     const errCount = [...freshResults.values()].filter((r) => r.status === "error").length;
     const fullyOkCount = toProcess.filter((row) => {
@@ -502,6 +506,53 @@ export default function ByovBulkUpload() {
     });
   };
 
+  const handleExportCsv = () => {
+    const processedRows = actionableRows.filter((r) => results.has(r.id));
+    const header = ["Vehicle #", "Technician", "Needs Holman", "Needs WMS", "Holman result", "WMS result", "Error"];
+
+    const escapeField = (val: string) => {
+      if (val.includes(",") || val.includes('"') || val.includes("\n")) {
+        return `"${val.replace(/"/g, '""')}"`;
+      }
+      return val;
+    };
+
+    const csvRows = processedRows.map((row) => {
+      const result = results.get(row.id)!;
+      const holmanResult = !row.needsHolman
+        ? "N/A"
+        : result.holman?.success
+        ? "OK"
+        : result.holman?.error ?? (result.status === "error" ? "Error" : "—");
+      const wmsResult = !row.needsWms
+        ? "N/A"
+        : result.wms?.success
+        ? "OK"
+        : result.wms?.error ?? (result.status === "error" ? "Error" : "—");
+      const errorMsg = result.apiError ?? "";
+
+      return [
+        row.truckId.trim(),
+        row.name.trim(),
+        row.needsHolman ? "Yes" : "No",
+        row.needsWms ? "Yes" : "No",
+        holmanResult,
+        wmsResult,
+        errorMsg,
+      ].map(escapeField).join(",");
+    });
+
+    const csv = [header.join(","), ...csvRows].join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const dateStr = (runCompletedAt ?? new Date()).toISOString().split("T")[0];
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `byov-bulk-results-${dateStr}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const handleReset = () => {
     setFileName(null);
     setParseError(null);
@@ -511,6 +562,7 @@ export default function ByovBulkUpload() {
     setResults(new Map());
     setCompletedCount(0);
     setRunning(false);
+    setRunCompletedAt(null);
   };
 
   const toProcess = actionableRows.filter((r) => selectedIds.has(r.id));
@@ -766,7 +818,13 @@ export default function ByovBulkUpload() {
           return (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Run Summary</CardTitle>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base">Run Summary</CardTitle>
+                  <Button variant="outline" size="sm" onClick={handleExportCsv} className="gap-1.5">
+                    <Download className="h-4 w-4" />
+                    Export results
+                  </Button>
+                </div>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
