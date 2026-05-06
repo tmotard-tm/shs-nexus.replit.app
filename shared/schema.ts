@@ -89,6 +89,7 @@ export interface RolePermissionSettings {
       techRoster: boolean;
       rentalOperations: boolean;
       wmsEngine: boolean;
+      byovBulkUpload: boolean;
     };
     activities: {
       enabled: boolean;

@@ -52,6 +52,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       techRoster: true,
       rentalOperations: true,
       wmsEngine: true,
+      byovBulkUpload: true,
     },
     activities: {
       enabled: true,
@@ -185,6 +186,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       techRoster: true,
       rentalOperations: true,
       wmsEngine: false,
+      byovBulkUpload: true,
     },
     activities: {
       enabled: true,
@@ -317,6 +319,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       techRoster: false,
       rentalOperations: false,
       wmsEngine: false,
+      byovBulkUpload: false,
     },
     activities: {
       enabled: false,
@@ -490,6 +493,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/segno-integration': () => perms.sidebar.management.integrations,
     '/tpms-integration': () => perms.sidebar.management.integrations,
     '/wms-engine': () => perms.sidebar.management.wmsEngine,
+    '/byov-bulk-upload': () => perms.sidebar.management.byovBulkUpload,
   };
 
   // Check exact route match
