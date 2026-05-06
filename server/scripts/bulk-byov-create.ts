@@ -451,7 +451,8 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
   };
 
   try {
-    const resp = await holmanApiService.submitVehicleArray([holmanPayload]);
+    const resp = await holmanApiService.submitVehicleSingle(holmanPayload);
+    console.log(`  [Holman] ${paddedVehicle} FULL RESPONSE:`, JSON.stringify(resp, null, 2));
     if (resp?.errorCount > 0 && resp?.validatedRecordCount === 0) {
       const errorMsgs = resp.errors?.[0]?.errorMessages?.join("; ") || "Unknown business error";
       if (/already.?exists|duplicate/i.test(errorMsgs)) {
@@ -463,7 +464,6 @@ async function createInHolman(payload: VehiclePayload): Promise<{ success: boole
     }
     const refToken = resp?.userReferenceToken || resp?.referenceToken || resp?.submissionToken || "(none)";
     console.log(`  [Holman] ${paddedVehicle} created OK — userReferenceToken: ${refToken}`);
-    console.log(`  [Holman] Full response:`, JSON.stringify(resp));
     return { success: true };
   } catch (err: any) {
     const msg = err instanceof Error ? err.message : String(err);

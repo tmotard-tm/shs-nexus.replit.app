@@ -253,6 +253,17 @@ export class HolmanApiService {
     );
   }
 
+  async submitVehicleSingle(vehicleData: Partial<HolmanVehicle>): Promise<any> {
+    const params = new URLSearchParams();
+    if (vehicleData.lesseeCode) params.set('lesseeCodes', vehicleData.lesseeCode);
+    if (vehicleData.holmanVehicleNumber) params.set('holmanVehicleNumber', vehicleData.holmanVehicleNumber);
+    return this.makeRequest(
+      `/vehicles/submit?${params}`,
+      'POST',
+      [vehicleData]
+    );
+  }
+
   // Helper to process vehicle result and build garaging address
   private processVehicleResult(matchingVehicle: any): {
     success: boolean;
