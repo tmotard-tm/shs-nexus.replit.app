@@ -101,6 +101,9 @@ export default function CreateVehicle() {
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
+  const [exportFrom, setExportFrom] = useState("");
+  const [exportTo, setExportTo] = useState("");
+
   const auditLogQuery = useQuery<ByovCreationAuditEntry[]>({
     queryKey: ["/api/byov/audit-log"],
     staleTime: 30_000,
@@ -615,7 +618,7 @@ export default function CreateVehicle() {
           {/* Audit History Panel */}
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-1">
                   <CardTitle className="text-base flex items-center gap-2">
                     <History className="h-4 w-4" />
@@ -623,12 +626,38 @@ export default function CreateVehicle() {
                   </CardTitle>
                   <CardDescription>Last 100 BYOV creation attempts — newest first</CardDescription>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="exportFrom" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">From</Label>
+                    <Input
+                      id="exportFrom"
+                      type="date"
+                      value={exportFrom}
+                      onChange={(e) => setExportFrom(e.target.value)}
+                      className="h-8 text-xs w-36"
+                    />
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <Label htmlFor="exportTo" className="text-xs text-muted-foreground whitespace-nowrap shrink-0">To</Label>
+                    <Input
+                      id="exportTo"
+                      type="date"
+                      value={exportTo}
+                      onChange={(e) => setExportTo(e.target.value)}
+                      className="h-8 text-xs w-36"
+                    />
+                  </div>
                   <Button
                     variant="outline"
                     size="sm"
+                    disabled={!!(exportFrom && exportTo && exportFrom > exportTo)}
+                    title={exportFrom && exportTo && exportFrom > exportTo ? "'From' date must be before 'To' date" : undefined}
                     onClick={() => {
-                      window.location.href = "/api/byov/audit-log/export";
+                      const params = new URLSearchParams();
+                      if (exportFrom) params.set("from", exportFrom);
+                      if (exportTo) params.set("to", exportTo);
+                      const qs = params.toString();
+                      window.location.href = `/api/byov/audit-log/export${qs ? `?${qs}` : ""}`;
                     }}
                   >
                     <Download className="h-4 w-4 mr-1.5" />

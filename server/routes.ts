@@ -8455,11 +8455,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/byov/audit-log/export", requireAuth, async (_req, res) => {
+  app.get("/api/byov/audit-log/export", requireAuth, async (req, res) => {
     try {
+      const { from: fromParam, to: toParam } = req.query as { from?: string; to?: string };
+
+      const conditions: SQL[] = [];
+      let validFromStr: string | undefined;
+      let validToStr: string | undefined;
+
+      if (fromParam) {
+        const fromDate = new Date(fromParam);
+        if (!isNaN(fromDate.getTime())) {
+          validFromStr = fromDate.toISOString().slice(0, 10);
+          conditions.push(gte(byovCreationAudit.submittedAt, fromDate.toISOString()));
+        }
+      }
+      if (toParam) {
+        const toDate = new Date(toParam);
+        if (!isNaN(toDate.getTime())) {
+          validToStr = toDate.toISOString().slice(0, 10);
+          toDate.setUTCHours(23, 59, 59, 999);
+          conditions.push(lte(byovCreationAudit.submittedAt, toDate.toISOString()));
+        }
+      }
+
       const rows = await db
         .select()
         .from(byovCreationAudit)
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
         .orderBy(desc(byovCreationAudit.submittedAt));
 
       const workbook = new ExcelJS.Workbook();
@@ -8511,8 +8534,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const dateStr = new Date().toISOString().slice(0, 10);
+      const filenameParts = ["byov-submission-history"];
+      if (validFromStr) filenameParts.push(`from-${validFromStr}`);
+      if (validToStr) filenameParts.push(`to-${validToStr}`);
+      filenameParts.push(dateStr);
+      const filename = `${filenameParts.join("-")}.xlsx`;
       res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-      res.setHeader("Content-Disposition", `attachment; filename=byov-submission-history-${dateStr}.xlsx`);
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
 
       await workbook.xlsx.write(res);
       res.end();
