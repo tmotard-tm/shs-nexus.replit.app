@@ -239,6 +239,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   const [categoryFilters, setCategoryFilters] = useState<Set<string>>(new Set());
   const [samsaraStatusFilters, setSamsaraStatusFilters] = useState<Set<string>>(new Set());
   const [rentalFilter, setRentalFilter] = useState<string>('');
+  const [byovFilter, setByovFilter] = useState<string>('');
 
   // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
   const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
@@ -403,13 +404,14 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     setCategoryFilters(new Set());
     setSamsaraStatusFilters(new Set());
     setRentalFilter('');
+    setByovFilter('');
     setSearch('');
     setVehicleNumberSearch('');
   };
 
   const hasActiveFilters = assignmentFilters.size > 0 || generalStatusFilters.size > 0 || 
                            subStatusFilters.size > 0 || categoryFilters.size > 0 || 
-                           samsaraStatusFilters.size > 0 || rentalFilter || search || vehicleNumberSearch;
+                           samsaraStatusFilters.size > 0 || rentalFilter || byovFilter || search || vehicleNumberSearch;
 
   // Helper to parse maintenance value from string like "$36,871.91" to number
   const parseMaintenanceValue = (value: string | undefined): number | null => {
@@ -527,8 +529,10 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
       const matchesSamsaraStatus = samsaraStatusFilters.size === 0 || samsaraStatusFilters.has(vehicle.samsaraStatus || 'Not Installed');
       const isRental = rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0'));
       const matchesRental = !rentalFilter || (rentalFilter === 'Yes' ? isRental : !isRental);
+      const isByov = byovAuditMap.has(vehicle.vehicleNumber);
+      const matchesByov = !byovFilter || (byovFilter === 'Yes' ? isByov : !isByov);
       
-      return matchesSearch && matchesVehicleNumber && matchesAssignment && matchesGeneralStatus && matchesSubStatus && matchesCategory && matchesSamsaraStatus && matchesRental;
+      return matchesSearch && matchesVehicleNumber && matchesAssignment && matchesGeneralStatus && matchesSubStatus && matchesCategory && matchesSamsaraStatus && matchesRental && matchesByov;
     });
     
     // Apply sorting if a sort column is selected
@@ -558,7 +562,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     }
     
     return result;
-  }, [preFilteredVehicles, search, vehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, rentalFilter, rentalTruckNumbers, sortColumn, sortDirection]);
+  }, [preFilteredVehicles, search, vehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, rentalFilter, byovFilter, rentalTruckNumbers, byovAuditMap, sortColumn, sortDirection]);
 
   const getAssignmentBadgeColor = (status: string) => {
     if (status === 'Assigned') return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
@@ -858,6 +862,52 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     </PopoverContent>
                   </Popover>
                 </TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className={`h-auto p-1 font-medium text-left justify-start gap-1 ${byovFilter ? 'text-primary' : ''}`}
+                        data-testid="button-filter-byov"
+                      >
+                        BYOV
+                        <Filter className={`w-3 h-3 ${byovFilter ? 'opacity-100' : 'opacity-50'}`} />
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-36 p-2" align="start">
+                      <div className="space-y-1">
+                        <Button
+                          variant={byovFilter === '' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="w-full justify-start text-xs"
+                          onClick={() => setByovFilter('')}
+                          data-testid="filter-byov-all"
+                        >
+                          All
+                        </Button>
+                        <Button
+                          variant={byovFilter === 'Yes' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="w-full justify-start text-xs"
+                          onClick={() => setByovFilter('Yes')}
+                          data-testid="filter-byov-yes"
+                        >
+                          Yes
+                        </Button>
+                        <Button
+                          variant={byovFilter === 'No' ? 'secondary' : 'ghost'}
+                          size="sm"
+                          className="w-full justify-start text-xs"
+                          onClick={() => setByovFilter('No')}
+                          data-testid="filter-byov-no"
+                        >
+                          No
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">District</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">VIN</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Make</TableHead>
@@ -894,7 +944,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             <TableBody>
               {filteredVehicles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={20} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={21} className="text-center py-8 text-muted-foreground">
                     No vehicles found matching your filters
                   </TableCell>
                 </TableRow>
@@ -1038,6 +1088,13 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                         <TableCell data-testid={`text-rental-${vehicle.vehicleNumber}`}>
                           {rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0')) ? (
                             <Badge className="bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400">Yes</Badge>
+                          ) : (
+                            <span className="text-sm text-muted-foreground">No</span>
+                          )}
+                        </TableCell>
+                        <TableCell data-testid={`text-byov-${vehicle.vehicleNumber}`}>
+                          {byovAuditMap.has(vehicle.vehicleNumber) ? (
+                            <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300">Yes</Badge>
                           ) : (
                             <span className="text-sm text-muted-foreground">No</span>
                           )}
