@@ -63,3 +63,15 @@ export function mergeRolePermissionWithDefaults(record: { role: string; permissi
   const defaults = getServerDefaultPermissions(record.role);
   return { ...record, permissions: deepMergePermissions(defaults, record.permissions) };
 }
+
+export function setNestedPermissionValue(obj: any, path: string[], value: boolean): any {
+  if (path.length === 0) return value;
+  if (path.length === 1) {
+    return { ...obj, [path[0]]: value };
+  }
+  const [first, ...rest] = path;
+  return {
+    ...obj,
+    [first]: setNestedPermissionValue(obj[first] || {}, rest, value),
+  };
+}

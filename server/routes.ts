@@ -42,7 +42,7 @@ import { initFleetScopeSchema } from "./fleet-scope-schema-init";
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 
-import { mergeRolePermissionWithDefaults } from "./permission-utils";
+import { mergeRolePermissionWithDefaults, setNestedPermissionValue } from "./permission-utils";
 
 // Initialize session cleanup on startup
 try {
@@ -8107,6 +8107,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error seeding role permissions:", error);
       res.status(500).json({ message: "Failed to seed role permissions" });
+    }
+  });
+
+  // Bulk-patch a permission key across all custom roles in one shot
+  app.post("/api/role-permissions/bulk-patch", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Role permissions require Developer or Admin role." });
+      }
+
+      const { permissionPath, value } = req.body;
+
+      if (!Array.isArray(permissionPath) || permissionPath.length === 0 || !permissionPath.every((s: any) => typeof s === 'string')) {
+        return res.status(400).json({ message: "permissionPath must be a non-empty array of strings" });
+      }
+      if (typeof value !== 'boolean') {
+        return res.status(400).json({ message: "value must be a boolean" });
+      }
+
+      const CORE_ROLES = ['developer', 'admin', 'agent'];
+      const allPermissions = await storage.getAllRolePermissions();
+      const customRoles = allPermissions.filter(p => !CORE_ROLES.includes(p.role));
+
+      const updatedRoles: string[] = [];
+      for (const roleRecord of customRoles) {
+        const merged = mergeRolePermissionWithDefaults(roleRecord);
+        const updated = setNestedPermissionValue(merged.permissions, permissionPath, value);
+        await storage.upsertRolePermission(roleRecord.role, updated);
+        updatedRoles.push(roleRecord.role);
+      }
+
+      await storage.createActivityLog({
+        userId: currentUser.id,
+        action: "role_permissions_bulk_patched",
+        entityType: "role_permission",
+        entityId: "bulk",
+        details: `Bulk-set ${permissionPath.join('.')}=${value} on ${updatedRoles.length} custom role(s) by ${currentUser.role}`,
+      });
+
+      res.json({ updatedCount: updatedRoles.length, roles: updatedRoles });
+    } catch (error) {
+      console.error("Error bulk patching role permissions:", error);
+      res.status(500).json({ message: "Failed to bulk patch role permissions" });
     }
   });
 

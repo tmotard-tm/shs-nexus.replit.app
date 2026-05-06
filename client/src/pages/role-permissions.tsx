@@ -351,6 +351,33 @@ export default function RolePermissions() {
     },
   });
 
+  const bulkGrantByovMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest('POST', '/api/role-permissions/bulk-patch', {
+        permissionPath: ['sidebar', 'management', 'byovBulkUpload'],
+        value: true,
+      });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/role-permissions'] });
+      const count = data?.updatedCount ?? 0;
+      toast({
+        title: "BYOV Bulk Upload Granted",
+        description: count === 0
+          ? "No custom roles found to update."
+          : `BYOV Bulk Upload access has been enabled for ${count} custom role${count === 1 ? '' : 's'}.`,
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to apply permission to custom roles",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleCreateRole = () => {
     const trimmedName = newRoleName.trim().toLowerCase().replace(/\s+/g, '_');
     if (trimmedName) {
@@ -415,6 +442,8 @@ export default function RolePermissions() {
       .sort() || [];
     return [...coreRoles, ...customRoles];
   })();
+
+  const customRoleCount = allRoles.filter(isCustomRole).length;
 
   // Allow both developer and admin to access this page
   if (user?.role !== 'developer' && user?.role !== 'admin') {
@@ -500,6 +529,37 @@ export default function RolePermissions() {
             <h1 className="text-3xl font-bold" data-testid="page-title">Role Permissions</h1>
           </div>
           {(user?.role === 'developer' || user?.role === 'admin') && (
+            <div className="flex items-center gap-2">
+              {customRoleCount > 0 && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" data-testid="btn-bulk-grant-byov">
+                      <Shield className="h-4 w-4 mr-2" />
+                      Grant BYOV Upload to Custom Roles
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Grant BYOV Bulk Upload to All Custom Roles?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        This will enable the <strong>BYOV Bulk Upload</strong> permission for all{' '}
+                        {customRoleCount} custom role{customRoleCount === 1 ? '' : 's'}.
+                        Individual roles can still be adjusted afterwards on their own permission panel.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={() => bulkGrantByovMutation.mutate()}
+                        disabled={bulkGrantByovMutation.isPending}
+                        data-testid="btn-confirm-bulk-grant-byov"
+                      >
+                        {bulkGrantByovMutation.isPending ? 'Applying…' : 'Apply to All Custom Roles'}
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
             <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
               <DialogTrigger asChild>
                 <Button data-testid="btn-create-role">
@@ -545,6 +605,7 @@ export default function RolePermissions() {
                 </DialogFooter>
               </DialogContent>
             </Dialog>
+            </div>
           )}
         </div>
         <p className="text-muted-foreground">
