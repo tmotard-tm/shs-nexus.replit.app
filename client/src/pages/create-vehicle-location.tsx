@@ -12,7 +12,14 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
 import {
@@ -104,6 +111,7 @@ export default function CreateVehicle() {
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
   const [exportPreset, setExportPreset] = useState("");
+  const [selectedAuditEntry, setSelectedAuditEntry] = useState<ByovCreationAuditEntry | null>(null);
 
   const auditLogQueryParams = new URLSearchParams();
   if (exportFrom) auditLogQueryParams.set("from", exportFrom);
@@ -785,7 +793,8 @@ export default function CreateVehicle() {
                         <th className="pb-2 pr-4 font-medium whitespace-nowrap">Submitted By</th>
                         <th className="pb-2 pr-4 font-medium whitespace-nowrap">Date</th>
                         <th className="pb-2 pr-4 font-medium whitespace-nowrap">Holman</th>
-                        <th className="pb-2 font-medium whitespace-nowrap">WMS</th>
+                        <th className="pb-2 pr-4 font-medium whitespace-nowrap">WMS</th>
+                        <th className="pb-2 font-medium whitespace-nowrap"></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -811,8 +820,19 @@ export default function CreateVehicle() {
                             <td className="py-2 pr-4">
                               <AuditBadge success={row.holmanSuccess} error={row.holmanError} />
                             </td>
-                            <td className="py-2">
+                            <td className="py-2 pr-4">
                               <AuditBadge success={row.wmsSuccess} error={row.wmsError} />
+                            </td>
+                            <td className="py-2">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => setSelectedAuditEntry(row)}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                Details
+                              </Button>
                             </td>
                           </tr>
                         );
@@ -825,6 +845,93 @@ export default function CreateVehicle() {
           </Card>
         </div>
       </main>
+
+      {/* BYOV Submission Detail Dialog */}
+      <Dialog open={!!selectedAuditEntry} onOpenChange={(open) => { if (!open) setSelectedAuditEntry(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4 text-blue-500" />
+              BYOV Submission Details
+            </DialogTitle>
+          </DialogHeader>
+          {selectedAuditEntry && (
+            <div className="space-y-4 text-sm">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                <div className="text-muted-foreground">Vehicle #</div>
+                <div className="font-medium">{selectedAuditEntry.vehicleNumber}</div>
+
+                {selectedAuditEntry.vin && (
+                  <>
+                    <div className="text-muted-foreground">VIN</div>
+                    <div className="font-medium font-mono text-xs">{selectedAuditEntry.vin}</div>
+                  </>
+                )}
+
+                {(selectedAuditEntry.make || selectedAuditEntry.model || selectedAuditEntry.modelYear) && (
+                  <>
+                    <div className="text-muted-foreground">Vehicle</div>
+                    <div className="font-medium">
+                      {[selectedAuditEntry.modelYear, selectedAuditEntry.make, selectedAuditEntry.model].filter(Boolean).join(" ") || "—"}
+                    </div>
+                  </>
+                )}
+
+                {selectedAuditEntry.assetType && (
+                  <>
+                    <div className="text-muted-foreground">Asset Type</div>
+                    <div className="font-medium">{selectedAuditEntry.assetType}</div>
+                  </>
+                )}
+
+                {selectedAuditEntry.district && (
+                  <>
+                    <div className="text-muted-foreground">District</div>
+                    <div className="font-medium">{selectedAuditEntry.district}</div>
+                  </>
+                )}
+
+                <div className="text-muted-foreground">Submitted By</div>
+                <div className="font-medium">{selectedAuditEntry.submittedBy}</div>
+
+                <div className="text-muted-foreground">Submitted At</div>
+                <div className="font-medium">
+                  {new Date(selectedAuditEntry.submittedAt).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    year: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
+              </div>
+
+              <div className="border-t pt-3 space-y-2">
+                <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">System Results</div>
+                <div className="flex items-start gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${selectedAuditEntry.holmanSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                    {selectedAuditEntry.holmanSuccess ? "✓" : "✗"} Holman
+                  </span>
+                  {!selectedAuditEntry.holmanSuccess && selectedAuditEntry.holmanError && (
+                    <span className="text-xs text-muted-foreground">{selectedAuditEntry.holmanError}</span>
+                  )}
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${selectedAuditEntry.wmsSuccess ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"}`}>
+                    {selectedAuditEntry.wmsSuccess ? "✓" : "✗"} WMS
+                  </span>
+                  {!selectedAuditEntry.wmsSuccess && selectedAuditEntry.wmsError && (
+                    <span className="text-xs text-muted-foreground">{selectedAuditEntry.wmsError}</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setSelectedAuditEntry(null)}>Close</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </MainContent>
   );
 }
