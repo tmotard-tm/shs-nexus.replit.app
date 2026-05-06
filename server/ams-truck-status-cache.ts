@@ -1,4 +1,7 @@
 import { AmsApiService } from "./ams-api-service";
+import { db } from "./db";
+import { amsVehiclesCache } from "@shared/schema";
+import { isNotNull } from "drizzle-orm";
 
 const amsApiService = new AmsApiService();
 
@@ -101,6 +104,21 @@ async function build(): Promise<Record<string, string | null>> {
     console.log(
       `[AMS TruckStatusMap] Built map from AMS API: ${Object.keys(result).length} vehicles (${totalFetched} rows fetched)`,
     );
+    // Supplement with ams_vehicles_cache DB for any VINs the AMS bulk search missed
+    try {
+      const dbRows = await db
+        .select({ vin: amsVehiclesCache.vin, label: amsVehiclesCache.amsTruckStatusLabel })
+        .from(amsVehiclesCache)
+        .where(isNotNull(amsVehiclesCache.amsTruckStatusLabel));
+      let dbAdded = 0;
+      for (const row of dbRows) {
+        const vin = (row.vin || "").trim().toUpperCase();
+        if (vin && !result[vin] && row.label) { result[vin] = row.label; dbAdded++; }
+      }
+      if (dbAdded > 0) console.log(`[AMS TruckStatusMap] DB supplement: added ${dbAdded} VINs from ams_vehicles_cache`);
+    } catch (dbErr: any) {
+      console.warn("[AMS TruckStatusMap] DB supplement failed (continuing):", dbErr?.message);
+    }
     oosCache = { data: oosByVin, builtAt: Date.now() };
     return result;
   }

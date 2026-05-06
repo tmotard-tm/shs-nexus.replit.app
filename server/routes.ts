@@ -23,7 +23,7 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, or, gte, lte, lt, inArray, asc, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
-import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit, amsVehiclesCache } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
 const amsApiService = new AmsApiService();
@@ -14726,10 +14726,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     if (amsWorked) {
       console.log(`[AMS TruckStatusMap] Built map from AMS API: ${Object.keys(result).length} vehicles (${totalFetched} rows fetched)`);
+      // Supplement with ams_vehicles_cache DB for any VINs the AMS bulk search missed
+      try {
+        const dbRows = await db
+          .select({ vin: amsVehiclesCache.vin, label: amsVehiclesCache.amsTruckStatusLabel })
+          .from(amsVehiclesCache)
+          .where(isNotNull(amsVehiclesCache.amsTruckStatusLabel));
+        let dbAdded = 0;
+        for (const row of dbRows) {
+          const vin = (row.vin || '').trim().toUpperCase();
+          if (vin && !result[vin] && row.label) { result[vin] = row.label; dbAdded++; }
+        }
+        if (dbAdded > 0) console.log(`[AMS TruckStatusMap] DB supplement: added ${dbAdded} VINs from ams_vehicles_cache`);
+      } catch (dbErr: any) {
+        console.warn('[AMS TruckStatusMap] DB supplement failed (continuing):', dbErr?.message);
+      }
       return result;
     }
 
-    // Step 3: AMS search returned nothing — fall back to Snowflake REPLIT_ALL_VEHICLES.TRUCK_STATUS
     console.log('[AMS TruckStatusMap] AMS API returned 0 vehicles — falling back to Snowflake REPLIT_ALL_VEHICLES');
     const { getSnowflakeService } = await import("./snowflake-service");
     const snowflakeService = getSnowflakeService();
@@ -14745,7 +14759,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!row.VIN) continue;
       const vin = row.VIN.trim().toUpperCase();
       const rawStatus = (row.TRUCK_STATUS || '').trim();
-      // Try to resolve via lookup map in case TRUCK_STATUS stores numeric IDs
       const label = lookupMap.get(rawStatus) ?? rawStatus;
       result[vin] = label || null;
     }
@@ -18107,6 +18120,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.warn("[Fleet CSV] Enrichment fetch failed (continuing without):", enrichErr?.message);
       }
 
+      // ─── AMS truck status map — fallback for vehicles missing truckStatus ────
+      let amsCsvStatusMap: Record<string, string | null> = {};
+      try {
+        const { getAmsTruckStatusMap } = await import("./ams-truck-status-cache");
+        amsCsvStatusMap = await getAmsTruckStatusMap();
+        console.log(`[Fleet CSV] AMS truck status map: ${Object.keys(amsCsvStatusMap).length} VINs loaded`);
+      } catch (amsErr: any) {
+        console.warn("[Fleet CSV] AMS truck status map load failed (continuing):", amsErr?.message);
+      }
+
       // ─── Odometer candidate type ────────────────────────────────────────────
       interface OdoCandidate { miles: number; date: string; source: string; }
 
@@ -18336,7 +18359,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
             tpmsStatus,
             isRental,
             byovValue,
-            enriched?.truckStatus ?? "",
+            (() => {
+              if (enriched?.truckStatus) return enriched.truckStatus;
+              // Skip AMS lookup for 88-prefix BYOV vehicles (not registered in AMS)
+              if (vinKey && !toCanonical(v.vehicleNumber ?? "").startsWith("88")) {
+                return amsCsvStatusMap[vinKey] ?? "";
+              }
+              return "";
+            })(),
             enriched?.generalStatus ?? "",
             enriched?.subStatus ?? "",
             enriched?.lastKnownLocation ?? "",
