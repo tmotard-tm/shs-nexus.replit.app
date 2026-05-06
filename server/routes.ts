@@ -8361,14 +8361,50 @@ export async function registerRoutes(app: Express): Promise<Server> {
           spareTruck: false,
           useCaseId: "Nexus",
         };
+
+        // Pre-check: if the truck already exists in WMS, treat as success immediately
+        // (idempotent retry — truck was created on a prior partial-failure attempt)
+        let wmsAlreadyExists = false;
         try {
-          const wmsResp = await wmsEngineService.createTruck(wmsPayload);
-          console.log("[BYOV] WMS create truck response:", wmsResp);
+          const existing = await wmsEngineService.getTruck(paddedVehicle);
+          if (existing) {
+            console.log("[BYOV] create: truck already exists in WMS, skipping create:", paddedVehicle);
+            wmsAlreadyExists = true;
+          }
+        } catch (lookupErr: unknown) {
+          const lookupStatus: number | undefined = (lookupErr as any)?.status;
+          if (lookupStatus !== 404) {
+            // Unexpected lookup error — log but continue to attempt create
+            console.warn("[BYOV] create: unexpected error during WMS truck lookup:", lookupErr);
+          }
+          // 404 means not found — proceed to create below
+        }
+
+        if (wmsAlreadyExists) {
           wmsResult = { success: true };
-        } catch (wmsErr: unknown) {
-          const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
-          console.error("[BYOV] WMS create truck error:", wmsErr);
-          wmsResult = { success: false, error: wmsMsg };
+        } else {
+          try {
+            const wmsResp = await wmsEngineService.createTruck(wmsPayload);
+            console.log("[BYOV] WMS create truck response:", wmsResp);
+            wmsResult = { success: true };
+          } catch (wmsErr: unknown) {
+            const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
+            const wmsStatus: number | undefined = (wmsErr as any)?.status;
+            const wmsMessage: string = (wmsErr as any)?.wmsMessage || wmsMsg;
+            // Safety net: treat 409 Conflict or any "already exists" WMS response as success
+            // in case a concurrent request created the truck between our lookup and create
+            const isAlreadyExists =
+              wmsStatus === 409 ||
+              /already.?exists/i.test(wmsMessage) ||
+              /duplicate/i.test(wmsMessage);
+            if (isAlreadyExists) {
+              console.log("[BYOV] create: truck already exists in WMS (race condition), treating as success:", wmsMessage);
+              wmsResult = { success: true };
+            } else {
+              console.error("[BYOV] WMS create truck error:", wmsErr);
+              wmsResult = { success: false, error: wmsMsg };
+            }
+          }
         }
       }
 
