@@ -559,9 +559,22 @@ export default function CreateVehicle() {
                       Confirm or cancel the dialog above before submitting.
                     </span>
                   )}
+                  <div
+                    aria-live="polite"
+                    aria-atomic="true"
+                    className="sr-only"
+                  >
+                    {createMutation.isPending ? "Submitting vehicle, please wait…" : ""}
+                  </div>
                   <span
                     className="flex-1"
-                    title={showConfirmDialog ? "Confirm or cancel the dialog above" : undefined}
+                    title={
+                      showConfirmDialog
+                        ? "Confirm or cancel the dialog above"
+                        : vehicleExistsWarning
+                        ? "Resolve the vehicle conflict above before submitting"
+                        : undefined
+                    }
                   >
                     <Button
                       type="submit"
