@@ -204,11 +204,18 @@ async function main() {
     const sanitizeAddr = (s: string | null | undefined): string | null =>
       s ? s.replace(/#/g, "").replace(/\s{2,}/g, " ").trim().toUpperCase() || null : null;
 
-    const addressLine1 = sanitizeAddr(tpms?.addr1 ?? null);
-    const addressLine2 = sanitizeAddr(tpms?.addr2 ?? null);
-    const city         = up(tpms?.city  ?? csvAddr.city  ?? null);
-    const state        = up(tpms?.state ?? csvAddr.state ?? null);
-    const zip          = tpms?.zip   ?? csvAddr.zip   ?? null;
+    const FALLBACK_ADDR = {
+      addr1: "5407 TRILLIUM BLVD",
+      addr2: "SUITE B120",
+      city:  "HOFFMAN ESTATES",
+      state: "IL",
+      zip:   "60192",
+    };
+    const addressLine1 = sanitizeAddr(tpms?.addr1 ?? FALLBACK_ADDR.addr1);
+    const addressLine2 = sanitizeAddr(tpms?.addr2 ?? FALLBACK_ADDR.addr2);
+    const city         = up(tpms?.city  ?? FALLBACK_ADDR.city);
+    const state        = up(tpms?.state ?? FALLBACK_ADDR.state);
+    const zip          = tpms?.zip   ?? FALLBACK_ADDR.zip;
     const assetType    = getAssetType(make, model, row.vehicle);
 
     const licenseFields = (() => {

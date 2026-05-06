@@ -310,12 +310,19 @@ function buildPayload(row: CsvRow, tpmsAddr?: TpmsAddress): VehiclePayload {
   const deliveryDate    = parseDate(row.dateEnrolled) || todayStr;
   const regRenewalDate  = parseDate(row.regExpiration);
 
-  // Prefer TPMS address; fall back to CSV city/state
-  const addressLine1 = tpmsAddr?.addr1 ?? null;
-  const addressLine2 = tpmsAddr?.addr2 ?? null;
-  const city  = tpmsAddr?.city  ?? csvAddr.city  ?? null;
-  const state = tpmsAddr?.state ?? csvAddr.state ?? null;
-  const zip   = tpmsAddr?.zip   ?? csvAddr.zip   ?? null;
+  // Prefer TPMS address; fall back to corporate office address
+  const FALLBACK_ADDR = {
+    addr1: "5407 TRILLIUM BLVD",
+    addr2: "SUITE B120",
+    city:  "HOFFMAN ESTATES",
+    state: "IL",
+    zip:   "60192",
+  };
+  const addressLine1 = tpmsAddr?.addr1 ?? FALLBACK_ADDR.addr1;
+  const addressLine2 = tpmsAddr?.addr2 ?? FALLBACK_ADDR.addr2;
+  const city  = tpmsAddr?.city  ?? FALLBACK_ADDR.city;
+  const state = tpmsAddr?.state ?? FALLBACK_ADDR.state;
+  const zip   = tpmsAddr?.zip   ?? FALLBACK_ADDR.zip;
 
   return {
     vehicleNumber: row.truckId.trim(),
