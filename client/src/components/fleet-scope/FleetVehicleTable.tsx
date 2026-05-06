@@ -10,6 +10,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Search, MapPin, Car, X, ChevronDown, Filter, ArrowUpDown, ArrowUp, ArrowDown, Map } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import type { MapSelection, MapFilters, CategoryKey } from '@/components/fleet-scope/USMapVehicles';
 
 interface Vehicle {
@@ -266,6 +267,30 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     refetchOnWindowFocus: false,
     retry: false,
   });
+
+  // BYOV creation audit summary: vehicleNumber → { submittedBy, submittedAt }
+  const { data: byovAuditRows } = useQuery<Array<{ vehicleNumber: string; submittedBy: string; submittedAt: string }>>({
+    queryKey: ['/api/byov/audit-log/summary'],
+    staleTime: 60 * 60 * 1000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const byovAuditMap = useMemo(() => {
+    const m = new Map<string, { submittedBy: string; submittedAt: string }>();
+    if (!byovAuditRows) return m;
+    for (const row of byovAuditRows) {
+      const entry = { submittedBy: row.submittedBy, submittedAt: row.submittedAt };
+      const variants = [
+        row.vehicleNumber,
+        toCanonical(row.vehicleNumber),
+        toDisplayNumber(row.vehicleNumber),
+      ].filter(Boolean) as string[];
+      for (const v of variants) {
+        if (!m.has(v)) m.set(v, entry);
+      }
+    }
+    return m;
+  }, [byovAuditRows]);
 
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
@@ -974,7 +999,41 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                             {vehicle.samsaraStatus || 'Not Installed'}
                           </Badge>
                         </TableCell>
-                        <TableCell className="font-medium">{vehicle.vehicleNumber}</TableCell>
+                        <TableCell className="font-medium">
+                          <div className="flex items-center gap-1.5">
+                            <span>{vehicle.vehicleNumber}</span>
+                            {(() => {
+                              const byovEntry = byovAuditMap.get(vehicle.vehicleNumber);
+                              if (!byovEntry) return null;
+                              const formattedDate = (() => {
+                                try {
+                                  const d = new Date(byovEntry.submittedAt);
+                                  if (isNaN(d.getTime())) return byovEntry.submittedAt;
+                                  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+                                } catch {
+                                  return byovEntry.submittedAt;
+                                }
+                              })();
+                              return (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Badge
+                                      className="text-[10px] px-1.5 py-0 h-4 bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-300 border-none cursor-default select-none"
+                                      data-testid={`badge-byov-${vehicle.vehicleNumber}`}
+                                    >
+                                      BYOV
+                                    </Badge>
+                                  </TooltipTrigger>
+                                  <TooltipContent side="top" align="start" className="text-xs">
+                                    <p className="font-medium">Added via BYOV</p>
+                                    <p className="text-muted-foreground">By: {byovEntry.submittedBy}</p>
+                                    <p className="text-muted-foreground">On: {formattedDate}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              );
+                            })()}
+                          </div>
+                        </TableCell>
                         <TableCell>{vehicle.inventoryProductCategory || '-'}</TableCell>
                         <TableCell data-testid={`text-rental-${vehicle.vehicleNumber}`}>
                           {rentalTruckNumbers.has(vehicle.vehicleNumber?.toString().padStart(6, '0')) ? (

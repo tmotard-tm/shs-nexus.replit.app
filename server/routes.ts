@@ -8633,6 +8633,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/byov/audit-log/summary", requireAuth, async (_req, res) => {
+    try {
+      const rows = await db
+        .select({
+          vehicleNumber: byovCreationAudit.vehicleNumber,
+          submittedBy: byovCreationAudit.submittedBy,
+          submittedAt: byovCreationAudit.submittedAt,
+        })
+        .from(byovCreationAudit)
+        .orderBy(asc(byovCreationAudit.submittedAt));
+      return res.json(rows);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to load audit summary";
+      console.error("[BYOV] audit-log/summary error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
   app.get("/api/byov/audit-log/:vehicleNumber", requireAuth, async (req, res) => {
     try {
       const { vehicleNumber } = req.params;
