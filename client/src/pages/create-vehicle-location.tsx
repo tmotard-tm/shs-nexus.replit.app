@@ -15,6 +15,16 @@ import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2 } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { getPrefillParams, commonValidators } from "@/lib/prefill-params";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const US_STATES = [
   "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA",
@@ -88,6 +98,7 @@ export default function CreateVehicle() {
   const [checkingVehicle, setCheckingVehicle] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
+  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -248,6 +259,11 @@ export default function CreateVehicle() {
       });
       return;
     }
+    setShowConfirmDialog(true);
+  };
+
+  const handleConfirm = () => {
+    setShowConfirmDialog(false);
     setSubmitResult(null);
     createMutation.mutate(form);
   };
@@ -259,9 +275,45 @@ export default function CreateVehicle() {
     setLastSubmittedForm(null);
   };
 
+  const paddedVehicleNumber = form.vehicleNumber.trim().padStart(6, "0");
+  const paddedCostCenter = form.district.trim().padStart(5, "0");
+
   return (
     <MainContent>
       <TopBar title="Create BYOV Vehicle" breadcrumbs={["Home", "Create BYOV Vehicle"]} />
+
+      <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm BYOV Submission</AlertDialogTitle>
+            <AlertDialogDescription>
+              Review the details below before submitting to Holman and WMS. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="my-2 rounded-lg border bg-muted/40 divide-y text-sm">
+            <ConfirmRow label="Vehicle Number" value={paddedVehicleNumber} note="zero-padded 6-digit" />
+            <ConfirmRow label="VIN" value={form.vin.toUpperCase()} />
+            <ConfirmRow label="Make / Model" value={`${form.modelYear} ${form.make} ${form.model}`} />
+            <ConfirmRow label="Asset Type" value={form.assetType} />
+            <ConfirmRow label="Tech Name" value={`${form.firstName} ${form.lastName}`} />
+            <ConfirmRow label="Enterprise ID" value={form.enterpriseId} />
+            <ConfirmRow label="District" value={form.district} />
+            <ConfirmRow label="WMS Cost Center" value={paddedCostCenter} note="5-digit" />
+            <ConfirmRow label="Delivery Date" value={form.deliveryDate} />
+            <ConfirmRow label="License Plate" value={`${form.licensePlate.toUpperCase()} (${form.plateState})`} />
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={createMutation.isPending}>Go Back &amp; Edit</AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirm} disabled={createMutation.isPending}>
+              {createMutation.isPending
+                ? <><Loader2 className="mr-2 h-4 w-4 animate-spin inline" />Submitting…</>
+                : "Submit to Holman & WMS"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <main className="p-6">
         <div className="max-w-4xl mx-auto space-y-6">
@@ -544,6 +596,18 @@ export default function CreateVehicle() {
         </div>
       </main>
     </MainContent>
+  );
+}
+
+function ConfirmRow({ label, value, note }: { label: string; value: string; note?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-4 px-3 py-2">
+      <span className="text-muted-foreground shrink-0">{label}</span>
+      <span className="font-medium text-right break-all">
+        {value}
+        {note && <span className="ml-1 text-xs text-muted-foreground font-normal">({note})</span>}
+      </span>
+    </div>
   );
 }
 
