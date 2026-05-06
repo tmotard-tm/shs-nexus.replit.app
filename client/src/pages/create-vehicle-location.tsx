@@ -52,6 +52,7 @@ interface FormState {
 interface SubmitResult {
   holman: { success: boolean; error?: string };
   wms: { success: boolean; error?: string };
+  holmanOnly?: boolean;
 }
 
 const today = new Date().toISOString().split("T")[0];
@@ -86,6 +87,7 @@ export default function CreateVehicle() {
   const [vehicleExistsWarning, setVehicleExistsWarning] = useState<string | null>(null);
   const [checkingVehicle, setCheckingVehicle] = useState(false);
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
+  const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
 
   const set = (field: keyof FormState) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
@@ -161,11 +163,12 @@ export default function CreateVehicle() {
       const resp = await apiRequest("POST", "/api/byov/create", payload);
       return (await resp.json()) as SubmitResult & { error?: string };
     },
-    onSuccess: (data) => {
+    onSuccess: (data, payload) => {
       if ("error" in data && data.error) {
         toast({ title: "Submission Blocked", description: data.error, variant: "destructive" });
         return;
       }
+      setLastSubmittedForm(payload);
       setSubmitResult(data as SubmitResult);
       const bothOk = data.holman?.success && data.wms?.success;
       toast({
@@ -182,6 +185,30 @@ export default function CreateVehicle() {
         description: err.message || "An unexpected error occurred.",
         variant: "destructive",
       });
+    },
+  });
+
+  const retryWmsMutation = useMutation({
+    mutationFn: async (payload: FormState) => {
+      const resp = await apiRequest("POST", "/api/byov/create-wms-only", payload);
+      return (await resp.json()) as { wms: { success: boolean; error?: string }; error?: string };
+    },
+    onSuccess: (data) => {
+      if ("error" in data && data.error) {
+        toast({ title: "WMS Retry Failed", description: data.error, variant: "destructive" });
+        return;
+      }
+      setSubmitResult((prev) =>
+        prev ? { ...prev, wms: data.wms, holmanOnly: !data.wms.success } : prev
+      );
+      if (data.wms.success) {
+        toast({ title: "WMS Retry Succeeded", description: "Truck record created in WMS successfully." });
+      } else {
+        toast({ title: "WMS Retry Failed", description: data.wms.error || "WMS truck creation failed.", variant: "destructive" });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "WMS Retry Failed", description: err.message || "An unexpected error occurred.", variant: "destructive" });
     },
   });
 
@@ -229,6 +256,7 @@ export default function CreateVehicle() {
     setForm(emptyForm);
     setSubmitResult(null);
     setVehicleExistsWarning(null);
+    setLastSubmittedForm(null);
   };
 
   return (
@@ -490,6 +518,26 @@ export default function CreateVehicle() {
               <CardContent className="space-y-3">
                 <SystemResultRow system="Holman" result={submitResult.holman} />
                 <SystemResultRow system="WMS" result={submitResult.wms} />
+                {submitResult.holmanOnly && lastSubmittedForm && (
+                  <Alert className="border-amber-400 dark:border-amber-500">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <AlertDescription className="flex items-center justify-between gap-4">
+                      <span>
+                        Holman succeeded but WMS failed. You can retry just the WMS step without re-submitting to Holman.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        disabled={retryWmsMutation.isPending}
+                        onClick={() => retryWmsMutation.mutate(lastSubmittedForm)}
+                      >
+                        {retryWmsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Retry WMS only
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
               </CardContent>
             </Card>
           )}

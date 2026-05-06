@@ -8327,10 +8327,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
         wmsResult = { success: false, error: wmsMsg };
       }
 
-      return res.json({ holman: holmanResult, wms: wmsResult });
+      const holmanOnly = holmanResult.success && !wmsResult.success;
+      return res.json({ holman: holmanResult, wms: wmsResult, holmanOnly });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "BYOV creation failed";
       console.error("[BYOV] create error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // BYOV WMS-only retry — for when Holman succeeded but WMS failed on a prior attempt
+  app.post("/api/byov/create-wms-only", requireAuth, async (req, res) => {
+    try {
+      const {
+        vehicleNumber, make, model, modelYear, district,
+      } = req.body;
+
+      if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+
+      const paddedVehicle = toHolmanRef(vehicleNumber);
+      const districtStr = String(district || "").trim();
+      const wmsCostCenter = districtStr ? districtStr.padStart(5, "0") : undefined;
+      const regionRaw = "890";
+      const wmsRegionNo = regionRaw.padStart(7, "0");
+
+      const wmsPayload = {
+        name: paddedVehicle,
+        locationId: paddedVehicle,
+        externalId: paddedVehicle,
+        description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+        isActive: true,
+        costCenter: wmsCostCenter,
+        regionNo: wmsRegionNo,
+        spareTruck: false,
+        useCaseId: "Nexus",
+      };
+
+      let wmsResult: { success: boolean; error?: string } = { success: false };
+      try {
+        const wmsResp = await wmsEngineService.createTruck(wmsPayload);
+        console.log("[BYOV] WMS-only retry response:", wmsResp);
+        wmsResult = { success: true };
+      } catch (wmsErr: unknown) {
+        const wmsMsg = wmsErr instanceof Error ? wmsErr.message : "WMS truck creation failed";
+        const wmsStatus: number | undefined = (wmsErr as any)?.status;
+        const wmsMessage: string = (wmsErr as any)?.wmsMessage || wmsMsg;
+        // Treat 409 Conflict or any "already exists" WMS response as success
+        // (idempotent retry — truck was created on a prior attempt)
+        const isAlreadyExists =
+          wmsStatus === 409 ||
+          /already.?exists/i.test(wmsMessage) ||
+          /duplicate/i.test(wmsMessage);
+        if (isAlreadyExists) {
+          console.log("[BYOV] WMS-only retry: truck already exists, treating as success:", wmsMessage);
+          wmsResult = { success: true };
+        } else {
+          console.error("[BYOV] WMS-only retry error:", wmsErr);
+          wmsResult = { success: false, error: wmsMsg };
+        }
+      }
+
+      return res.json({ wms: wmsResult });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "WMS-only creation failed";
+      console.error("[BYOV] create-wms-only error:", error);
       return res.status(500).json({ error: msg });
     }
   });
