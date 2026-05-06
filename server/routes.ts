@@ -8440,13 +8440,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/byov/audit-log", requireAuth, async (_req, res) => {
+  app.get("/api/byov/audit-log", requireAuth, async (req, res) => {
     try {
-      const rows = await db
+      const { from: fromParam, to: toParam } = req.query as { from?: string; to?: string };
+
+      const conditions: SQL[] = [];
+
+      if (fromParam) {
+        const fromDate = new Date(fromParam);
+        if (!isNaN(fromDate.getTime())) {
+          conditions.push(gte(byovCreationAudit.submittedAt, fromDate.toISOString()));
+        }
+      }
+      if (toParam) {
+        const toDate = new Date(toParam);
+        if (!isNaN(toDate.getTime())) {
+          toDate.setUTCHours(23, 59, 59, 999);
+          conditions.push(lte(byovCreationAudit.submittedAt, toDate.toISOString()));
+        }
+      }
+
+      const query = db
         .select()
         .from(byovCreationAudit)
-        .orderBy(desc(byovCreationAudit.submittedAt))
-        .limit(100);
+        .where(conditions.length > 0 ? and(...conditions) : undefined)
+        .orderBy(desc(byovCreationAudit.submittedAt));
+
+      const rows = conditions.length > 0
+        ? await query
+        : await query.limit(100);
+
       return res.json(rows);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to load audit log";

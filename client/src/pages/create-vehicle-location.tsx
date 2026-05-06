@@ -104,8 +104,18 @@ export default function CreateVehicle() {
   const [exportFrom, setExportFrom] = useState("");
   const [exportTo, setExportTo] = useState("");
 
+  const auditLogQueryParams = new URLSearchParams();
+  if (exportFrom) auditLogQueryParams.set("from", exportFrom);
+  if (exportTo) auditLogQueryParams.set("to", exportTo);
+  const auditLogQs = auditLogQueryParams.toString();
+  const auditLogUrl = `/api/byov/audit-log${auditLogQs ? `?${auditLogQs}` : ""}`;
+
   const auditLogQuery = useQuery<ByovCreationAuditEntry[]>({
-    queryKey: ["/api/byov/audit-log"],
+    queryKey: ["/api/byov/audit-log", exportFrom, exportTo],
+    queryFn: () => fetch(auditLogUrl, { credentials: "include" }).then((r) => {
+      if (!r.ok) throw new Error(`Failed to load audit log (${r.status})`);
+      return r.json();
+    }),
     staleTime: 30_000,
   });
 
@@ -637,7 +647,11 @@ export default function CreateVehicle() {
                     <History className="h-4 w-4" />
                     Submission History
                   </CardTitle>
-                  <CardDescription>Last 100 BYOV creation attempts — newest first</CardDescription>
+                  <CardDescription>
+                    {exportFrom || exportTo
+                      ? `Filtered results — newest first`
+                      : `Last 100 BYOV creation attempts — newest first`}
+                  </CardDescription>
                 </div>
                 <div className="flex flex-wrap items-end gap-2">
                   <div className="flex items-center gap-1.5">
