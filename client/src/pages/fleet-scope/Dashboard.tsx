@@ -811,27 +811,27 @@ export default function Dashboard() {
   });
   const { data: amsLookupRepairReason } = useQuery<any[]>({
     queryKey: ["/api/ams/lookups", "service-reasons"],
-    enabled: amsActiveModal === "amsRepair",
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 10 * 60 * 1000,
   });
   const { data: amsLookupRepairStatus } = useQuery<any[]>({
     queryKey: ["/api/ams/lookups", "repair-status"],
-    enabled: amsActiveModal === "amsRepair",
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 10 * 60 * 1000,
   });
   const { data: amsLookupDisposition } = useQuery<any[]>({
     queryKey: ["/api/ams/lookups", "repair-disposition"],
-    enabled: amsActiveModal === "amsRepair",
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 10 * 60 * 1000,
   });
   const { data: amsLookupDispositionReason } = useQuery<any[]>({
     queryKey: ["/api/ams/lookups", "disposition-reasons"],
-    enabled: amsActiveModal === "amsRepair",
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 10 * 60 * 1000,
   });
   const { data: amsLookupRentalCar } = useQuery<any[]>({
     queryKey: ["/api/ams/lookups", "rental-car"],
-    enabled: amsActiveModal === "amsRepair",
+    enabled: amsVehiclePanelOpen && !!selectedVinForAms,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -4441,18 +4441,6 @@ export default function Dashboard() {
                         </div>
                       );
                     })()}
-                    {amsVehicle.InRepair != null && (
-                      <div>
-                        <Label className="text-xs text-muted-foreground">In Repair</Label>
-                        <p>{amsVehicle.InRepair === true || amsVehicle.InRepair === "Y" ? "Yes" : "No"}</p>
-                      </div>
-                    )}
-                    {amsVehicle.DaysInRepair != null && (
-                      <div>
-                        <Label className="text-xs text-muted-foreground">Days In Repair</Label>
-                        <p>{amsVehicle.DaysInRepair}</p>
-                      </div>
-                    )}
                     {amsVehicle.TheftVerified != null && (
                       <div>
                         <Label className="text-xs text-muted-foreground">Theft Verified</Label>
@@ -4481,6 +4469,150 @@ export default function Dashboard() {
                 </div>
 
                 <Separator />
+
+                {/* Repair Updates */}
+                {(() => {
+                  const v: any = amsVehicle;
+                  const isInRepair = v.InRepair === true || v.InRepair === "Y" || v.InRepair === "Yes";
+                  const labelFor = (lookup: any[] | undefined, raw: any, nameField?: any): string | null => {
+                    if (nameField) return String(nameField);
+                    if (raw == null || raw === "") return null;
+                    const match = Array.isArray(lookup) ? lookup.find((item: any) => String(item.UniqueID) === String(raw)) : undefined;
+                    return match ? getAmsLookupLabel(match) : String(raw);
+                  };
+                  const fmtDate = (d: any): string | null => {
+                    if (!d) return null;
+                    const s = String(d);
+                    return s.length > 10 ? s.slice(0, 10) : s;
+                  };
+                  const repairReason = labelFor(amsLookupRepairReason, v.RepairReason, v.RepairReasonName);
+                  const repairStatus = labelFor(amsLookupRepairStatus, v.RepairStatus, v.RepairStatusName);
+                  const rentalCar = labelFor(amsLookupRentalCar, v.RentalCar, v.RentalCarName);
+                  const finalDispo = labelFor(amsLookupDisposition, v.FinalDisposition, v.FinalDispositionName);
+                  const finalDispoReason = labelFor(amsLookupDispositionReason, v.FinalDispositionReason, v.FinalDispositionReasonName);
+                  const repairDateStart = fmtDate(v.RepairDateStart ?? v.RepairStartDate);
+                  const etaDate = fmtDate(v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA);
+                  const rentalStart = fmtDate(v.RentalStartDate);
+                  const rentalEnd = fmtDate(v.RentalEndDate);
+                  const finalDate = fmtDate(v.FinalDispositionDate);
+                  const vendor = v.Vendor ?? v.RepairVendor;
+                  const estCost = v.EstimateCost ?? v.RepairEstimateCost;
+                  const hasAnyRepairData =
+                    v.InRepair != null || v.DaysInRepair != null ||
+                    repairReason || repairStatus || rentalCar || finalDispo || finalDispoReason ||
+                    repairDateStart || etaDate || rentalStart || rentalEnd || finalDate ||
+                    vendor || estCost != null;
+                  if (!hasAnyRepairData) return null;
+                  return (
+                    <>
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5 flex items-center gap-1.5">
+                          <Wrench className="h-3 w-3" /> Repair Updates
+                        </p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                          {v.InRepair != null && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">In Repair</Label>
+                              <div className="mt-0.5">
+                                {isInRepair ? (
+                                  <Badge className="bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300 border-none text-xs">Yes</Badge>
+                                ) : (
+                                  <Badge variant="outline" className="text-xs">No</Badge>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                          {v.DaysInRepair != null && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Days In Repair</Label>
+                              <p>{v.DaysInRepair}</p>
+                            </div>
+                          )}
+                          {repairDateStart && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Repair Date</Label>
+                              <p>{repairDateStart}</p>
+                            </div>
+                          )}
+                          {etaDate && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Repair ETA</Label>
+                              <p>{etaDate}</p>
+                            </div>
+                          )}
+                          {repairReason && (
+                            <div className="col-span-2">
+                              <Label className="text-xs text-muted-foreground">Svc. Reason</Label>
+                              <p className="text-xs">{repairReason}</p>
+                            </div>
+                          )}
+                          {repairStatus && (
+                            <div className="col-span-2">
+                              <Label className="text-xs text-muted-foreground">Repair Status</Label>
+                              <p className="text-xs">{repairStatus}</p>
+                            </div>
+                          )}
+                          {vendor && (
+                            <div className="col-span-2">
+                              <Label className="text-xs text-muted-foreground">Repair Vendor</Label>
+                              <p className="text-xs">{vendor}</p>
+                            </div>
+                          )}
+                          {estCost != null && estCost !== "" && !isNaN(Number(estCost)) && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Estimate Cost</Label>
+                              <p>${Number(estCost).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+                            </div>
+                          )}
+                          {rentalCar && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Rental Car</Label>
+                              <p>{rentalCar}</p>
+                            </div>
+                          )}
+                          {rentalStart && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Rental Start</Label>
+                              <p>{rentalStart}</p>
+                            </div>
+                          )}
+                          {rentalEnd && (
+                            <div>
+                              <Label className="text-xs text-muted-foreground">Rental End</Label>
+                              <p>{rentalEnd}</p>
+                            </div>
+                          )}
+                          {(finalDispo || finalDispoReason || finalDate) && (
+                            <div className="col-span-2 border-t mt-1 pt-2 space-y-2">
+                              <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Final Disposition</p>
+                              <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+                                {finalDispo && (
+                                  <div className="col-span-2">
+                                    <Label className="text-xs text-muted-foreground">Disposition</Label>
+                                    <p className="text-xs">{finalDispo}</p>
+                                  </div>
+                                )}
+                                {finalDispoReason && (
+                                  <div className="col-span-2">
+                                    <Label className="text-xs text-muted-foreground">Disposition Reason</Label>
+                                    <p className="text-xs">{finalDispoReason}</p>
+                                  </div>
+                                )}
+                                {finalDate && (
+                                  <div>
+                                    <Label className="text-xs text-muted-foreground">Final Date</Label>
+                                    <p>{finalDate}</p>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <Separator />
+                    </>
+                  );
+                })()}
 
                 {/* Location */}
                 <div>
@@ -4623,19 +4755,38 @@ export default function Dashboard() {
                 <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
               </Button>
               <Button size="sm" variant="outline" className="flex-1" onClick={() => {
-                setAmsRepairInRepair(!!amsVehicle?.InRepair);
-                setAmsRepairDate("");
-                setAmsRepairReason("");
-                setAmsRepairVendor("");
-                setAmsRepairETA("");
-                setAmsRepairStatus("");
-                setAmsRepairEstimate("");
-                setAmsRepairRentalCar("");
-                setAmsRepairRentalStart("");
-                setAmsRepairRentalEnd("");
-                setAmsRepairFinalDisposition("");
-                setAmsRepairDispositionReason("");
-                setAmsRepairFinalDate("");
+                const v: any = amsVehicle || {};
+                const ir = v.InRepair;
+                setAmsRepairInRepair(ir === true || ir === "Y" || ir === "Yes");
+                const fromAmsDate = (d: any): string => {
+                  if (!d) return "";
+                  const s = String(d);
+                  const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+                  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+                  const us = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+                  if (us) return `${us[3]}-${us[1].padStart(2,"0")}-${us[2].padStart(2,"0")}`;
+                  return "";
+                };
+                const matchLookupRepair = (lookup: any[] | undefined, raw: any): string => {
+                  if (raw == null || raw === "" || !lookup?.length) return "";
+                  const s = String(raw);
+                  const byId = lookup.find((item: any) => String(item.UniqueID) === s);
+                  if (byId) return s;
+                  const byLabel = lookup.find((item: any) => getAmsLookupLabel(item).toLowerCase() === s.toLowerCase());
+                  return byLabel ? String(byLabel.UniqueID) : "";
+                };
+                setAmsRepairDate(fromAmsDate(v.RepairDateStart ?? v.RepairStartDate));
+                setAmsRepairReason(matchLookupRepair(amsLookupRepairReason, v.RepairReason ?? v.RepairReasonName));
+                setAmsRepairVendor(v.Vendor ?? v.RepairVendor ?? "");
+                setAmsRepairETA(fromAmsDate(v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA));
+                setAmsRepairStatus(matchLookupRepair(amsLookupRepairStatus, v.RepairStatus ?? v.RepairStatusName));
+                setAmsRepairEstimate(v.EstimateCost != null ? String(v.EstimateCost) : (v.RepairEstimateCost != null ? String(v.RepairEstimateCost) : ""));
+                setAmsRepairRentalCar(matchLookupRepair(amsLookupRentalCar, v.RentalCar ?? v.RentalCarName));
+                setAmsRepairRentalStart(fromAmsDate(v.RentalStartDate));
+                setAmsRepairRentalEnd(fromAmsDate(v.RentalEndDate));
+                setAmsRepairFinalDisposition(matchLookupRepair(amsLookupDisposition, v.FinalDisposition ?? v.FinalDispositionName));
+                setAmsRepairDispositionReason(matchLookupRepair(amsLookupDispositionReason, v.FinalDispositionReason ?? v.FinalDispositionReasonName));
+                setAmsRepairFinalDate(fromAmsDate(v.FinalDispositionDate));
                 setAmsActiveModal("amsRepair");
               }}>
                 <Wrench className="h-4 w-4 mr-1.5" />Repair
