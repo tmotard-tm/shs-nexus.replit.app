@@ -18321,7 +18321,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "TPMS District", "TPMS Contact", "TPMS Email",
         // Odometer
         "Odometer (Miles)", "Odometer Date", "Odometer Source", "Odometer Notes",
-        // Managed by (Holman active fleet tag)
+        // Lifetime maintenance + Managed by (Holman active fleet tag)
+        "Lifetime Maintenance",
         "Managed by",
       ];
 
@@ -18382,7 +18383,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
             v.tpmsDistrict, v.tpmsContact, v.tpmsEmail,
             // Odometer
             best?.miles != null ? Math.round(best.miles * 10) / 10 : "", formatDate(best?.date), best?.source ?? "", notes,
-            // Managed by — pulled from /api/fs/all-vehicles enrichment (Holman active set)
+            // Lifetime maintenance + Managed by — pulled from /api/fs/all-vehicles enrichment
+            enriched?.lifetimeMaintenance ?? "",
             enriched?.managedBy ?? "",
           ].map(escapeCell).join(",");
         }),
