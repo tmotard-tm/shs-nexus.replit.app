@@ -1,0 +1,36 @@
+Here are four recommendations to consider before you lock in the canonical model:
+
+1. The "Ghost of Previous Data" (Mismatch Resolution)
+When the audit in Step 2 surfaces a mismatch (e.g., Holman says the odometer is 85,000 but AMS says 84,200), the UI needs a way to "Force Sync."
+
+The Idea: Don't just show the mismatch; provide a one-click "Master Sync" button. If the user knows Holman is right, clicking a small "Set as Source" icon next to the Holman value should automatically push that value to all other systems.
+
+Why: It transforms the card from a "viewing tool" into a "data-cleaning tool."
+
+2. Time-Stamped "Last Seen" Indicators
+Since you are pulling from Snowflake and other async sources, "Review" data can sometimes be stale.
+
+The Idea: Next to the Review fields, include a tiny relative timestamp (e.g., "Snowflake: 4h ago").
+
+Why: If a dispatcher is looking at a truck's location or odometer, they need to know if they are looking at "live" data or "yesterday's" data before they make an assignment.
+
+3. Smart "Update" Prioritization
+The Update section could get cluttered if it shows every editable field for every vehicle.
+
+The Idea: Use "Predictive Fields." If a vehicle is currently in a "Rental" status, the Update section should prioritize fields like Rental End Date or Vendor Contact. If it’s a "Fleet" vehicle, it should prioritize Odometer and Next PM (Preventative Maintenance).
+
+Why: It keeps the "Update" region compact and contextually relevant.
+
+4. Direct "Log Activity" in the Unassign Flow
+Currently, unassigning is often a "destructive" or "binary" action (it's just gone).
+
+The Idea: Add a "Reason for Unassignment" dropdown (e.g., Resignation, Vehicle Repair, Termination) directly in the Unassign region.
+
+Why: This data is gold for long-term supply chain analytics. If you capture why vehicles are being unassigned now, you can later build reports on vehicle downtime or technician turnover trends without needing a separate audit.
+
+Suggested Addition to "Done Looks Like":
+Conflict Resolution UI: A clear visual pattern for resolving data mismatches between systems (e.g., Holman vs. AMS) with a "Push to All" action.
+
+Source Freshness: Every consolidated field in the Review section displays the "Last Updated" timestamp from its source-of-truth integration.
+
+Does Variant C (Two-Column Split) still feel like the best way to house these, or do you think a "Context-Aware" version of Variant A might be easier for the mobile teams in the field?
