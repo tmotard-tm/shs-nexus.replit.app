@@ -15441,14 +15441,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const twilioMediaUrl = req.body['MediaUrl0'];
         const twilioMediaType = req.body['MediaContentType0'] || 'application/octet-stream';
         if (twilioMediaUrl) {
-          try {
-            const result = await downloadTwilioMedia(twilioMediaUrl, twilioMediaType, 'mms/reg');
-            mediaUrl = result.storageKey;
-            mediaType = result.mediaType;
-          } catch (err: any) {
-            console.error('[RegMsg] Failed to download MMS media:', err.message);
-            mediaError = true;
-          }
+          mediaUrl = twilioMediaUrl;
+          mediaType = twilioMediaType;
+          console.log(`[RegMsg] Storing Twilio media URL directly (no object storage): ${twilioMediaUrl}`);
         }
       }
 
@@ -15512,14 +15507,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const twilioMediaUrl = req.body['MediaUrl0'];
         const twilioMediaType = req.body['MediaContentType0'] || 'application/octet-stream';
         if (twilioMediaUrl) {
-          try {
-            const result = await downloadTwilioMedia(twilioMediaUrl, twilioMediaType, 'mms/decomm');
-            mediaUrl = result.storageKey;
-            mediaType = result.mediaType;
-          } catch (err: any) {
-            console.error('[DecommMsg] Failed to download MMS media:', err.message);
-            mediaError = true;
-          }
+          mediaUrl = twilioMediaUrl;
+          mediaType = twilioMediaType;
+          console.log(`[DecommMsg] Storing Twilio media URL directly (no object storage): ${twilioMediaUrl}`);
         }
       }
 
@@ -15646,20 +15636,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const mediaContentType = media.contentType || 'application/octet-stream';
       const mediaResourceUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${media.sid}`;
 
-      const result = await downloadTwilioMedia(mediaResourceUrl, mediaContentType, 'mms/decomm');
-
       const [updated] = await getDb()
         .update(decommMessages)
         .set({
-          mediaUrl: result.storageKey,
-          mediaType: result.mediaType,
+          mediaUrl: mediaResourceUrl,
+          mediaType: mediaContentType,
           status: 'received',
           twilioSid: messageSid,
         })
         .where(eq(decommMessages.id, id))
         .returning();
 
-      console.log(`[DecommMsg] Retried media for ${id} via Twilio SID ${messageSid} -> ${result.storageKey}`);
+      console.log(`[DecommMsg] Retried media for ${id} via Twilio SID ${messageSid} -> stored URL directly`);
       broadcastMessage(row.truckNumber, { message: updated, source: 'decomm' });
       res.json(updated);
     } catch (err: any) {
@@ -15720,20 +15708,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const mediaContentType = media.contentType || 'application/octet-stream';
       const mediaResourceUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${messageSid}/Media/${media.sid}`;
 
-      const result = await downloadTwilioMedia(mediaResourceUrl, mediaContentType, 'mms/reg');
-
       const [updated] = await getDb()
         .update(regMessages)
         .set({
-          mediaUrl: result.storageKey,
-          mediaType: result.mediaType,
+          mediaUrl: mediaResourceUrl,
+          mediaType: mediaContentType,
           status: 'received',
           twilioSid: messageSid,
         })
         .where(eq(regMessages.id, id))
         .returning();
 
-      console.log(`[RegMsg] Retried media for ${id} via Twilio SID ${messageSid} -> ${result.storageKey}`);
+      console.log(`[RegMsg] Retried media for ${id} via Twilio SID ${messageSid} -> stored URL directly`);
       broadcastMessage(row.truckNumber, { message: updated });
       res.json(updated);
     } catch (err: any) {
@@ -15742,16 +15728,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  async function proxyTwilioMedia(storageKey: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    const accountSid = process.env.FS_TWILIO_ACCOUNT_SID || '';
+    const authToken = process.env.FS_TWILIO_AUTH_TOKEN || '';
+    const resp = await fetch(storageKey, {
+      headers: { 'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64') },
+      redirect: 'follow',
+    });
+    if (!resp.ok) return null;
+    const contentType = resp.headers.get('content-type') || 'application/octet-stream';
+    const buffer = Buffer.from(await resp.arrayBuffer());
+    return { buffer, contentType };
+  }
+
   app.get("/mms-media/:key(*)", requireFsAuth, async (req, res) => {
     try {
-      const { Client } = await import("@replit/object-storage");
-      const client = new Client();
       const storageKey = req.params.key;
+
+      if (storageKey.startsWith('https://')) {
+        const result = await proxyTwilioMedia(storageKey);
+        if (!result) return res.status(404).json({ message: "Media not found" });
+        res.set('Content-Type', result.contentType);
+        res.set('Content-Disposition', 'inline; filename="media"');
+        return res.send(result.buffer);
+      }
 
       if (!storageKey.startsWith('mms/')) {
         return res.status(403).json({ message: "Access denied" });
       }
 
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
       const result = await client.downloadAsBytes(storageKey);
       if (!result.ok) {
         return res.status(404).json({ message: "Media not found" });
@@ -15772,14 +15779,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.get("/mms-media-download/:key(*)", requireFsAuth, async (req, res) => {
     try {
-      const { Client } = await import("@replit/object-storage");
-      const client = new Client();
       const storageKey = req.params.key;
+
+      if (storageKey.startsWith('https://')) {
+        const result = await proxyTwilioMedia(storageKey);
+        if (!result) return res.status(404).json({ message: "Media not found" });
+        res.set('Content-Type', result.contentType);
+        res.set('Content-Disposition', 'attachment; filename="mms-media"');
+        return res.send(result.buffer);
+      }
 
       if (!storageKey.startsWith('mms/')) {
         return res.status(403).json({ message: "Access denied" });
       }
 
+      const { Client } = await import("@replit/object-storage");
+      const client = new Client();
       const result = await client.downloadAsBytes(storageKey);
       if (!result.ok) {
         return res.status(404).json({ message: "Media not found" });
