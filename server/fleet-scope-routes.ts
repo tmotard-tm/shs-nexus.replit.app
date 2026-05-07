@@ -8,7 +8,7 @@ import {
   getAmsStatusForMissingVins,
   getAmsOutOfServiceMap,
 } from "./ams-truck-status-cache";
-import { sql, eq, desc, and, isNull, count } from "drizzle-orm";
+import { sql, eq, desc, and, isNull, isNotNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
 import { z } from "zod";
@@ -16920,6 +16920,126 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.status(500).json({ message: error.message });
     }
   });
+
+  // Auto-recover stuck inbound MMS media (Task #386).
+  // Background sweep that re-fetches Twilio media for messages that landed as
+  // status='media_failed' before Task #384's fix. Runs once 30s after server
+  // boot. Each row is processed serially with a 1s delay to avoid hammering
+  // Twilio. Rows without a twilioSid cannot be recovered automatically — those
+  // still require the user-driven retry endpoint.
+  async function sweepStuckMmsMedia(): Promise<void> {
+    const accountSid = process.env.FS_TWILIO_ACCOUNT_SID;
+    const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
+    if (!accountSid || !authToken) {
+      console.log('[MMS Sweep] Skipping — Twilio credentials not configured');
+      return;
+    }
+
+    let twilioClient: ReturnType<typeof twilio>;
+    try {
+      twilioClient = twilio(accountSid, authToken);
+    } catch (err: any) {
+      console.error('[MMS Sweep] Failed to construct Twilio client:', err.message);
+      return;
+    }
+
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+    async function recoverOne(
+      table: typeof decommMessages | typeof regMessages,
+      label: 'decomm' | 'reg',
+      row: { id: string; truckNumber: string; twilioSid: string | null },
+    ): Promise<'recovered' | 'no_media' | 'error'> {
+      try {
+        if (!row.twilioSid) return 'no_media';
+        const mediaList = await twilioClient.messages(row.twilioSid).media.list({ limit: 10 });
+        if (mediaList.length === 0) return 'no_media';
+        const media = mediaList[0];
+        const mediaContentType = media.contentType || 'application/octet-stream';
+        const mediaResourceUrl = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages/${row.twilioSid}/Media/${media.sid}`;
+
+        // Re-check status='media_failed' in the WHERE clause so we don't race
+        // with a concurrent manual retry or webhook retry that already fixed
+        // the row. If the row moved on, .returning() yields nothing and we
+        // skip the broadcast.
+        const updatedRows = await getDb()
+          .update(table as any)
+          .set({
+            mediaUrl: mediaResourceUrl,
+            mediaType: mediaContentType,
+            status: 'received',
+          })
+          .where(and(
+            eq((table as any).id, row.id),
+            eq((table as any).status, 'media_failed'),
+            eq((table as any).direction, 'inbound'),
+          ))
+          .returning();
+
+        const updated = updatedRows[0];
+        if (!updated) {
+          console.log(`[MMS Sweep] ${label} message ${row.id} no longer media_failed — skipping`);
+          return 'no_media';
+        }
+
+        if (label === 'decomm') {
+          broadcastMessage(row.truckNumber, { message: updated, source: 'decomm' });
+        } else {
+          broadcastMessage(row.truckNumber, { message: updated });
+        }
+        return 'recovered';
+      } catch (err: any) {
+        console.warn(`[MMS Sweep] ${label} message ${row.id} recovery error:`, err.message);
+        return 'error';
+      }
+    }
+
+    try {
+      const decommStuck = await getDb()
+        .select({ id: decommMessages.id, truckNumber: decommMessages.truckNumber, twilioSid: decommMessages.twilioSid })
+        .from(decommMessages)
+        .where(and(
+          eq(decommMessages.status, 'media_failed'),
+          eq(decommMessages.direction, 'inbound'),
+          isNotNull(decommMessages.twilioSid),
+        ));
+
+      const regStuck = await getDb()
+        .select({ id: regMessages.id, truckNumber: regMessages.truckNumber, twilioSid: regMessages.twilioSid })
+        .from(regMessages)
+        .where(and(
+          eq(regMessages.status, 'media_failed'),
+          eq(regMessages.direction, 'inbound'),
+          isNotNull(regMessages.twilioSid),
+        ));
+
+      const total = decommStuck.length + regStuck.length;
+      if (total === 0) {
+        console.log('[MMS Sweep] No stuck inbound MMS messages to recover');
+        return;
+      }
+      console.log(`[MMS Sweep] Starting recovery: ${decommStuck.length} decomm + ${regStuck.length} reg = ${total} stuck messages`);
+
+      let recovered = 0, noMedia = 0, errors = 0;
+      for (const row of decommStuck) {
+        const r = await recoverOne(decommMessages, 'decomm', row);
+        if (r === 'recovered') recovered++; else if (r === 'no_media') noMedia++; else errors++;
+        await sleep(1000);
+      }
+      for (const row of regStuck) {
+        const r = await recoverOne(regMessages, 'reg', row);
+        if (r === 'recovered') recovered++; else if (r === 'no_media') noMedia++; else errors++;
+        await sleep(1000);
+      }
+      console.log(`[MMS Sweep] Complete: ${recovered} recovered, ${noMedia} no-media-on-twilio, ${errors} errors`);
+    } catch (err: any) {
+      console.error('[MMS Sweep] Sweep failed:', err.message);
+    }
+  }
+
+  setTimeout(() => {
+    sweepStuckMmsMedia().catch(err => console.error('[MMS Sweep] Unhandled error:', err));
+  }, 30_000);
 
   return app;
 }
