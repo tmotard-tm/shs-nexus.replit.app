@@ -15728,7 +15728,25 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  const TWILIO_MEDIA_ALLOWED_HOSTS = ['api.twilio.com', 'media.twiliocdn.com'];
+
+  function assertTwilioMediaUrl(url: string): void {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error(`Invalid media URL: ${url}`);
+    }
+    if (!TWILIO_MEDIA_ALLOWED_HOSTS.some(h => parsed.hostname === h || parsed.hostname.endsWith('.' + h))) {
+      throw new Error(`Rejected media URL from untrusted host: ${parsed.hostname}`);
+    }
+    if (parsed.protocol !== 'https:') {
+      throw new Error(`Rejected non-HTTPS media URL`);
+    }
+  }
+
   async function proxyTwilioMedia(storageKey: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+    assertTwilioMediaUrl(storageKey);
     const accountSid = process.env.FS_TWILIO_ACCOUNT_SID || '';
     const authToken = process.env.FS_TWILIO_AUTH_TOKEN || '';
     const resp = await fetch(storageKey, {
@@ -15746,11 +15764,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const storageKey = req.params.key;
 
       if (storageKey.startsWith('https://')) {
-        const result = await proxyTwilioMedia(storageKey);
-        if (!result) return res.status(404).json({ message: "Media not found" });
-        res.set('Content-Type', result.contentType);
-        res.set('Content-Disposition', 'inline; filename="media"');
-        return res.send(result.buffer);
+        try {
+          const result = await proxyTwilioMedia(storageKey);
+          if (!result) return res.status(404).json({ message: "Media not found" });
+          res.set('Content-Type', result.contentType);
+          res.set('Content-Disposition', 'inline; filename="media"');
+          return res.send(result.buffer);
+        } catch (proxyErr: any) {
+          console.warn('[MMS] Rejected proxy request:', proxyErr.message);
+          return res.status(403).json({ message: "Access denied" });
+        }
       }
 
       if (!storageKey.startsWith('mms/')) {
@@ -15782,11 +15805,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const storageKey = req.params.key;
 
       if (storageKey.startsWith('https://')) {
-        const result = await proxyTwilioMedia(storageKey);
-        if (!result) return res.status(404).json({ message: "Media not found" });
-        res.set('Content-Type', result.contentType);
-        res.set('Content-Disposition', 'attachment; filename="mms-media"');
-        return res.send(result.buffer);
+        try {
+          const result = await proxyTwilioMedia(storageKey);
+          if (!result) return res.status(404).json({ message: "Media not found" });
+          res.set('Content-Type', result.contentType);
+          res.set('Content-Disposition', 'attachment; filename="mms-media"');
+          return res.send(result.buffer);
+        } catch (proxyErr: any) {
+          console.warn('[MMS] Rejected proxy download request:', proxyErr.message);
+          return res.status(403).json({ message: "Access denied" });
+        }
       }
 
       if (!storageKey.startsWith('mms/')) {
