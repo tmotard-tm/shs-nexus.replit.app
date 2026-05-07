@@ -4756,8 +4756,32 @@ export default function Dashboard() {
               </Button>
               <Button size="sm" variant="outline" className="flex-1" onClick={() => {
                 const v: any = amsVehicle || {};
-                const ir = v.InRepair;
-                setAmsRepairInRepair(ir === true || ir === "Y" || ir === "Yes");
+                const findField = (obj: any, ...names: string[]): any => {
+                  for (const n of names) if (obj?.[n] != null) return obj[n];
+                  const lcKeys = Object.keys(obj || {});
+                  for (const n of names) {
+                    const found = lcKeys.find(k => k.toLowerCase() === n.toLowerCase());
+                    if (found && obj[found] != null) return obj[found];
+                  }
+                  return undefined;
+                };
+                const isTruthy = (val: any): boolean => {
+                  if (val === true || val === 1) return true;
+                  if (typeof val === "string") {
+                    const s = val.trim().toLowerCase();
+                    return s === "y" || s === "yes" || s === "true" || s === "1" || s === "t";
+                  }
+                  return false;
+                };
+                const ir = findField(v, "InRepair", "inRepair", "Repair", "IsInRepair");
+                const repairDateAny = findField(v, "RepairDateStart", "RepairStartDate", "DateInRepair", "DatePutInRepair");
+                const finalDateAny = findField(v, "FinalDispositionDate", "DispositionDate");
+                const repairReasonAny = findField(v, "RepairReason", "RepairReasonName");
+                const repairStatusAny = findField(v, "RepairStatus", "RepairStatusName");
+                const vendorAny = findField(v, "Vendor", "RepairVendor");
+                const inferredInRepair = !finalDateAny && (!!repairDateAny || !!repairReasonAny || !!repairStatusAny || !!vendorAny);
+                console.log("[Repair Prefill FS] InRepair raw:", ir, "inferred:", inferredInRepair, "all keys:", Object.keys(v).join(","));
+                setAmsRepairInRepair(ir != null ? isTruthy(ir) : inferredInRepair);
                 const fromAmsDate = (d: any): string => {
                   if (!d) return "";
                   const s = String(d);

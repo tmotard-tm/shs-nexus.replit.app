@@ -14854,6 +14854,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       } else {
         console.log(`[AMS] No key-related fields found in response for ${req.params.vin}. All fields: ${Object.keys(result || {}).join(', ')}`);
       }
+      const repairFields = Object.keys(result || {}).filter(k => /repair|disposition|rental|vendor|estimate|eta/i.test(k));
+      if (repairFields.length > 0) {
+        console.log(`[AMS] Repair/disposition fields for ${req.params.vin}:`, repairFields.map(k => `${k}=${JSON.stringify(result[k])}`).join(', '));
+      }
       res.json(result);
     } catch (error: any) {
       console.error("Error fetching AMS vehicle:", error);
