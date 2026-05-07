@@ -15765,14 +15765,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       if (storageKey.startsWith('https://')) {
         try {
+          assertTwilioMediaUrl(storageKey);
+        } catch (validationErr: any) {
+          console.warn('[MMS] Rejected proxy request:', validationErr.message);
+          return res.status(403).json({ message: "Access denied" });
+        }
+        try {
           const result = await proxyTwilioMedia(storageKey);
-          if (!result) return res.status(404).json({ message: "Media not found" });
+          if (!result) return res.status(502).json({ message: "Upstream media unavailable" });
           res.set('Content-Type', result.contentType);
           res.set('Content-Disposition', 'inline; filename="media"');
           return res.send(result.buffer);
-        } catch (proxyErr: any) {
-          console.warn('[MMS] Rejected proxy request:', proxyErr.message);
-          return res.status(403).json({ message: "Access denied" });
+        } catch (fetchErr: any) {
+          console.error('[MMS] Twilio proxy fetch error:', fetchErr.message);
+          return res.status(502).json({ message: "Failed to retrieve media from upstream" });
         }
       }
 
@@ -15806,14 +15812,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       if (storageKey.startsWith('https://')) {
         try {
+          assertTwilioMediaUrl(storageKey);
+        } catch (validationErr: any) {
+          console.warn('[MMS] Rejected proxy download request:', validationErr.message);
+          return res.status(403).json({ message: "Access denied" });
+        }
+        try {
           const result = await proxyTwilioMedia(storageKey);
-          if (!result) return res.status(404).json({ message: "Media not found" });
+          if (!result) return res.status(502).json({ message: "Upstream media unavailable" });
           res.set('Content-Type', result.contentType);
           res.set('Content-Disposition', 'attachment; filename="mms-media"');
           return res.send(result.buffer);
-        } catch (proxyErr: any) {
-          console.warn('[MMS] Rejected proxy download request:', proxyErr.message);
-          return res.status(403).json({ message: "Access denied" });
+        } catch (fetchErr: any) {
+          console.error('[MMS] Twilio proxy fetch error (download):', fetchErr.message);
+          return res.status(502).json({ message: "Failed to retrieve media from upstream" });
         }
       }
 
