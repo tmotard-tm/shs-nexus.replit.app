@@ -920,7 +920,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     </PopoverContent>
                   </Popover>
                 </TableHead>
-                <TableHead className="whitespace-nowrap bg-muted">Managed by</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">District</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">VIN</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Make</TableHead>
@@ -952,6 +951,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     {getSortIcon('lifetimeMaintenance')}
                   </Button>
                 </TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">Managed by</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -1112,9 +1112,6 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                             <span className="text-sm text-muted-foreground">No</span>
                           )}
                         </TableCell>
-                        <TableCell data-testid={`text-managed-by-${vehicle.vehicleNumber}`}>
-                          {vehicle.managedBy || '-'}
-                        </TableCell>
                         <TableCell>{vehicle.district || '-'}</TableCell>
                         <TableCell className="font-mono text-xs">{vehicle.vin || '-'}</TableCell>
                         <TableCell>{vehicle.makeName || '-'}</TableCell>
@@ -1153,6 +1150,9 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           >
                             {vehicle.lifetimeMaintenance || '-'}
                           </span>
+                        </TableCell>
+                        <TableCell data-testid={`text-managed-by-${vehicle.vehicleNumber}`}>
+                          {vehicle.managedBy || '-'}
                         </TableCell>
                       </TableRow>
                   );
