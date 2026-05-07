@@ -8368,6 +8368,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // We strip leading zeros so we can compare against fleet vehicle numbers in 1-2
       // leading-zero variants.
       const holmanManagedSet = new Set<string>();
+      let holmanManagedMatchCount = 0;
       try {
         const { db } = await import("./db");
         const { holmanVehiclesCache } = await import("@shared/schema");
@@ -9413,6 +9414,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             const key = candidate.replace(/^0+/, '') || '0';
             if (holmanManagedSet.has(key)) {
               managedBy = 'Holman';
+              holmanManagedMatchCount++;
               break;
             }
           }
@@ -9449,6 +9451,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lifetimeMaintenanceNumeric,
           managedBy,
         });
+      }
+
+      if (holmanManagedSet.size > 0) {
+        console.log(`[AllVehicles] Holman managed matches: ${holmanManagedMatchCount} of ${vehicles.length} vehicles tagged (set size=${holmanManagedSet.size})`);
       }
       
       const responseData = { 
