@@ -2773,7 +2773,8 @@ export default function FleetManagement() {
 
                       {/* Repair Updates */}
                       {(() => {
-                        const isInRepair = amsVehicle.InRepair === true || amsVehicle.InRepair === "Y" || amsVehicle.InRepair === "Yes";
+                        const irRaw = amsVehicle.VehicleInRepair ?? amsVehicle.InRepair;
+                        const isInRepair = irRaw === true || irRaw === 1 || (typeof irRaw === "string" && ["y","yes","true","1","t"].includes(irRaw.trim().toLowerCase()));
                         const labelFor = (lookup: any[] | undefined, raw: any, nameField?: any): string | null => {
                           if (nameField) return String(nameField);
                           if (raw == null || raw === "") return null;
@@ -2791,14 +2792,14 @@ export default function FleetManagement() {
                         const finalDispo = labelFor(dispositionLookup, amsVehicle.FinalDisposition, amsVehicle.FinalDispositionName);
                         const finalDispoReason = labelFor(dispositionReasonLookup, amsVehicle.FinalDispositionReason, amsVehicle.FinalDispositionReasonName);
                         const repairDateStart = fmtDate(amsVehicle.RepairDateStart ?? amsVehicle.RepairStartDate);
-                        const etaDate = fmtDate(amsVehicle.EtaDate ?? amsVehicle.RepairEtaDate ?? amsVehicle.RepairETA);
+                        const etaDate = fmtDate(amsVehicle.RepairETADate ?? amsVehicle.EtaDate ?? amsVehicle.RepairEtaDate ?? amsVehicle.RepairETA);
                         const rentalStart = fmtDate(amsVehicle.RentalStartDate);
                         const rentalEnd = fmtDate(amsVehicle.RentalEndDate);
                         const finalDate = fmtDate(amsVehicle.FinalDispositionDate);
                         const vendor = amsVehicle.Vendor ?? amsVehicle.RepairVendor;
                         const estCost = amsVehicle.EstimateCost ?? amsVehicle.RepairEstimateCost;
                         const hasAnyRepairData =
-                          amsVehicle.InRepair != null || amsVehicle.DaysInRepair != null ||
+                          irRaw != null || amsVehicle.DaysInRepair != null ||
                           repairReason || repairStatus || rentalCar || finalDispo || finalDispoReason ||
                           repairDateStart || etaDate || rentalStart || rentalEnd || finalDate ||
                           vendor || estCost != null;
@@ -2809,7 +2810,7 @@ export default function FleetManagement() {
                               <Wrench className="h-3 w-3" /> Repair Updates
                             </p>
                             <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                              {amsVehicle.InRepair != null && (
+                              {irRaw != null && (
                                 <div>
                                   <Label className="text-xs text-muted-foreground">In Repair</Label>
                                   <div className="mt-0.5">
@@ -3002,17 +3003,8 @@ export default function FleetManagement() {
                             }
                             return false;
                           };
-                          const ir = findField(v, "InRepair", "inRepair", "Repair", "IsInRepair");
-                          const repairDateAny = findField(v, "RepairDateStart", "RepairStartDate", "DateInRepair", "DatePutInRepair");
-                          const finalDateAny = findField(v, "FinalDispositionDate", "DispositionDate");
-                          const repairReasonAny = findField(v, "RepairReason", "RepairReasonName");
-                          const repairStatusAny = findField(v, "RepairStatus", "RepairStatusName");
-                          const vendorAny = findField(v, "Vendor", "RepairVendor");
-                          // Fallback: if AMS doesn't return an InRepair flag but does return repair data
-                          // (date/reason/status/vendor) AND no final disposition date, treat as in-repair.
-                          const inferredInRepair = !finalDateAny && (!!repairDateAny || !!repairReasonAny || !!repairStatusAny || !!vendorAny);
-                          console.log("[Repair Prefill] InRepair raw:", ir, "inferred:", inferredInRepair, "all keys:", Object.keys(v).join(","));
-                          setAmsRepairInRepair(ir != null ? isTruthy(ir) : inferredInRepair);
+                          const ir = findField(v, "VehicleInRepair", "InRepair", "inRepair", "IsInRepair");
+                          setAmsRepairInRepair(isTruthy(ir));
                           // Convert AMS date (ISO or MM/DD/YYYY) to YYYY-MM-DD for date inputs
                           const fromAmsDate = (d: any): string => {
                             if (!d) return "";
@@ -3034,7 +3026,7 @@ export default function FleetManagement() {
                           setAmsRepairDate(fromAmsDate(v.RepairDateStart ?? v.RepairStartDate));
                           setAmsRepairReason(matchLookup(repairReasonLookup, v.RepairReason ?? v.RepairReasonName));
                           setAmsRepairVendor(v.Vendor ?? v.RepairVendor ?? "");
-                          setAmsRepairETA(fromAmsDate(v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA));
+                          setAmsRepairETA(fromAmsDate(v.RepairETADate ?? v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA));
                           setAmsRepairStatus(matchLookup(repairStatusLookup, v.RepairStatus ?? v.RepairStatusName));
                           setAmsRepairEstimate(v.EstimateCost != null ? String(v.EstimateCost) : (v.RepairEstimateCost != null ? String(v.RepairEstimateCost) : ""));
                           setAmsRepairRentalCar(matchLookup(rentalCarLookup, v.RentalCar ?? v.RentalCarName));

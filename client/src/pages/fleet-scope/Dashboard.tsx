@@ -4473,7 +4473,8 @@ export default function Dashboard() {
                 {/* Repair Updates */}
                 {(() => {
                   const v: any = amsVehicle;
-                  const isInRepair = v.InRepair === true || v.InRepair === "Y" || v.InRepair === "Yes";
+                  const irRaw = v.VehicleInRepair ?? v.InRepair;
+                  const isInRepair = irRaw === true || irRaw === 1 || (typeof irRaw === "string" && ["y","yes","true","1","t"].includes(irRaw.trim().toLowerCase()));
                   const labelFor = (lookup: any[] | undefined, raw: any, nameField?: any): string | null => {
                     if (nameField) return String(nameField);
                     if (raw == null || raw === "") return null;
@@ -4491,14 +4492,14 @@ export default function Dashboard() {
                   const finalDispo = labelFor(amsLookupDisposition, v.FinalDisposition, v.FinalDispositionName);
                   const finalDispoReason = labelFor(amsLookupDispositionReason, v.FinalDispositionReason, v.FinalDispositionReasonName);
                   const repairDateStart = fmtDate(v.RepairDateStart ?? v.RepairStartDate);
-                  const etaDate = fmtDate(v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA);
+                  const etaDate = fmtDate(v.RepairETADate ?? v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA);
                   const rentalStart = fmtDate(v.RentalStartDate);
                   const rentalEnd = fmtDate(v.RentalEndDate);
                   const finalDate = fmtDate(v.FinalDispositionDate);
                   const vendor = v.Vendor ?? v.RepairVendor;
                   const estCost = v.EstimateCost ?? v.RepairEstimateCost;
                   const hasAnyRepairData =
-                    v.InRepair != null || v.DaysInRepair != null ||
+                    irRaw != null || v.DaysInRepair != null ||
                     repairReason || repairStatus || rentalCar || finalDispo || finalDispoReason ||
                     repairDateStart || etaDate || rentalStart || rentalEnd || finalDate ||
                     vendor || estCost != null;
@@ -4510,7 +4511,7 @@ export default function Dashboard() {
                           <Wrench className="h-3 w-3" /> Repair Updates
                         </p>
                         <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-                          {v.InRepair != null && (
+                          {irRaw != null && (
                             <div>
                               <Label className="text-xs text-muted-foreground">In Repair</Label>
                               <div className="mt-0.5">
@@ -4773,15 +4774,8 @@ export default function Dashboard() {
                   }
                   return false;
                 };
-                const ir = findField(v, "InRepair", "inRepair", "Repair", "IsInRepair");
-                const repairDateAny = findField(v, "RepairDateStart", "RepairStartDate", "DateInRepair", "DatePutInRepair");
-                const finalDateAny = findField(v, "FinalDispositionDate", "DispositionDate");
-                const repairReasonAny = findField(v, "RepairReason", "RepairReasonName");
-                const repairStatusAny = findField(v, "RepairStatus", "RepairStatusName");
-                const vendorAny = findField(v, "Vendor", "RepairVendor");
-                const inferredInRepair = !finalDateAny && (!!repairDateAny || !!repairReasonAny || !!repairStatusAny || !!vendorAny);
-                console.log("[Repair Prefill FS] InRepair raw:", ir, "inferred:", inferredInRepair, "all keys:", Object.keys(v).join(","));
-                setAmsRepairInRepair(ir != null ? isTruthy(ir) : inferredInRepair);
+                const ir = findField(v, "VehicleInRepair", "InRepair", "inRepair", "IsInRepair");
+                setAmsRepairInRepair(isTruthy(ir));
                 const fromAmsDate = (d: any): string => {
                   if (!d) return "";
                   const s = String(d);
@@ -4802,7 +4796,7 @@ export default function Dashboard() {
                 setAmsRepairDate(fromAmsDate(v.RepairDateStart ?? v.RepairStartDate));
                 setAmsRepairReason(matchLookupRepair(amsLookupRepairReason, v.RepairReason ?? v.RepairReasonName));
                 setAmsRepairVendor(v.Vendor ?? v.RepairVendor ?? "");
-                setAmsRepairETA(fromAmsDate(v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA));
+                setAmsRepairETA(fromAmsDate(v.RepairETADate ?? v.EtaDate ?? v.RepairEtaDate ?? v.RepairETA));
                 setAmsRepairStatus(matchLookupRepair(amsLookupRepairStatus, v.RepairStatus ?? v.RepairStatusName));
                 setAmsRepairEstimate(v.EstimateCost != null ? String(v.EstimateCost) : (v.RepairEstimateCost != null ? String(v.RepairEstimateCost) : ""));
                 setAmsRepairRentalCar(matchLookupRepair(amsLookupRentalCar, v.RentalCar ?? v.RentalCarName));
