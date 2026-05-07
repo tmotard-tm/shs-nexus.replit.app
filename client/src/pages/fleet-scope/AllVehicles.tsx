@@ -64,6 +64,7 @@ interface VehicleTableRow {
   inventoryProductCategory: string;
   odometer: number | null;
   odometerDate: string | null;
+  managedBy?: string | null;
 }
 
 interface AllVehiclesResponse {

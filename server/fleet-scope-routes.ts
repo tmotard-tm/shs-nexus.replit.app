@@ -8362,6 +8362,32 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       } catch (holmanError: any) {
         console.error("[AllVehicles] Error fetching Holman odometer data:", holmanError.message);
       }
+
+      // Build set of Holman-managed vehicle numbers (status_code = 3 means Holman-managed)
+      // Sourced from local holman_vehicles_cache PG table (mirrors Snowflake Holman_VEHICLES).
+      // We strip leading zeros so we can compare against fleet vehicle numbers in 1-2
+      // leading-zero variants.
+      const holmanManagedSet = new Set<string>();
+      try {
+        const { db } = await import("./db");
+        const { holmanVehiclesCache } = await import("@shared/schema");
+        const holmanRows = await db
+          .select({
+            holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+            statusCode: holmanVehiclesCache.statusCode,
+          })
+          .from(holmanVehiclesCache);
+        for (const row of holmanRows) {
+          if (row.statusCode === 3 && row.holmanVehicleNumber) {
+            const digits = row.holmanVehicleNumber.toString().replace(/\D/g, '');
+            const stripped = digits.replace(/^0+/, '') || '0';
+            holmanManagedSet.add(stripped);
+          }
+        }
+        console.log(`[AllVehicles] Holman managed set: ${holmanManagedSet.size} vehicles with status_code=3`);
+      } catch (holmanManagedErr: any) {
+        console.error("[AllVehicles] Error loading Holman managed set:", holmanManagedErr.message);
+      }
       
       // Fetch Spare Vehicle Assignment Status data for CONFIRMED_ADDRESS location source
       interface SpareVehicleLocationData {
@@ -9370,7 +9396,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const maintenanceData = maintenanceCostMap.get(vehicleNumber);
         const lifetimeMaintenance = maintenanceData?.formatted || '';
         const lifetimeMaintenanceNumeric = maintenanceData?.numeric || null;
-        
+
+        // Determine "Managed by" via Holman cache. Try the raw fleet vehicle
+        // number with 0, 1, and 2 leading zeros stripped against status_code=3
+        // entries from holman_vehicles_cache.
+        let managedBy: string | null = null;
+        if (holmanManagedSet.size > 0) {
+          const rawDigits = rawVehicleNumber.replace(/\D/g, '');
+          const candidates = new Set<string>();
+          if (rawDigits) candidates.add(rawDigits);
+          if (rawDigits.startsWith('0')) candidates.add(rawDigits.slice(1));
+          if (rawDigits.startsWith('00')) candidates.add(rawDigits.slice(2));
+          // Also include the fully-stripped form (used as the set key)
+          candidates.add(rawDigits.replace(/^0+/, '') || '0');
+          for (const candidate of candidates) {
+            const key = candidate.replace(/^0+/, '') || '0';
+            if (holmanManagedSet.has(key)) {
+              managedBy = 'Holman';
+              break;
+            }
+          }
+        }
+
         vehicles.push({
           vehicleNumber: rawVehicleNumber,
           assignmentStatus,
@@ -9399,7 +9446,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           odometerDate: holmanData?.odometerDate || null,
           licensePlate: holmanData?.licensePlate || null,
           lifetimeMaintenance,
-          lifetimeMaintenanceNumeric
+          lifetimeMaintenanceNumeric,
+          managedBy,
         });
       }
       

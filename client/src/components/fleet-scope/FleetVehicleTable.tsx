@@ -41,6 +41,7 @@ interface Vehicle {
   odometerDate?: string | null;
   lifetimeMaintenance?: string;
   lifetimeMaintenanceNumeric?: number | null;
+  managedBy?: string | null;
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -919,6 +920,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                     </PopoverContent>
                   </Popover>
                 </TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">Managed by</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">District</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">VIN</TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Make</TableHead>
@@ -955,7 +957,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
             <TableBody>
               {filteredVehicles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={21} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={22} className="text-center py-8 text-muted-foreground">
                     No vehicles found matching your filters
                   </TableCell>
                 </TableRow>
@@ -1109,6 +1111,9 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           ) : (
                             <span className="text-sm text-muted-foreground">No</span>
                           )}
+                        </TableCell>
+                        <TableCell data-testid={`text-managed-by-${vehicle.vehicleNumber}`}>
+                          {vehicle.managedBy || '-'}
                         </TableCell>
                         <TableCell>{vehicle.district || '-'}</TableCell>
                         <TableCell className="font-mono text-xs">{vehicle.vin || '-'}</TableCell>
