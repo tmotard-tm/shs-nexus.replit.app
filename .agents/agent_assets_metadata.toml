@@ -54,3 +54,9 @@ id = "GDPmyaH--RTgrkExtyNHK"
 uri = "file://attached_assets/holman-byov-payloads.json"
 type = "unspecified"
 title = "Holman BYOV Payloads — 106 vehicles"
+
+[[outputs]]
+id = "mrAd8mmPvRtWg0CCrxCmz"
+uri = "file://docs/vehicle-field-inventory.md"
+type = "text"
+title = "Vehicle Field & Action Inventory (Plan #383, Step 1)"
