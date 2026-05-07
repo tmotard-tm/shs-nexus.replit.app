@@ -8363,7 +8363,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.error("[AllVehicles] Error fetching Holman odometer data:", holmanError.message);
       }
 
-      // Build set of Holman-managed vehicle numbers (status_code = 3 means Holman-managed)
+      // Build set of Holman-managed vehicle numbers (status_code = 1 means active/managed by Holman)
       // Sourced from local holman_vehicles_cache PG table (mirrors Snowflake Holman_VEHICLES).
       // We strip leading zeros so we can compare against fleet vehicle numbers in 1-2
       // leading-zero variants.
@@ -8379,13 +8379,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           })
           .from(holmanVehiclesCache);
         for (const row of holmanRows) {
-          if (row.statusCode === 3 && row.holmanVehicleNumber) {
+          if (row.statusCode === 1 && row.holmanVehicleNumber) {
             const digits = row.holmanVehicleNumber.toString().replace(/\D/g, '');
             const stripped = digits.replace(/^0+/, '') || '0';
             holmanManagedSet.add(stripped);
           }
         }
-        console.log(`[AllVehicles] Holman managed set: ${holmanManagedSet.size} vehicles with status_code=3`);
+        console.log(`[AllVehicles] Holman managed set: ${holmanManagedSet.size} vehicles with status_code=1`);
       } catch (holmanManagedErr: any) {
         console.error("[AllVehicles] Error loading Holman managed set:", holmanManagedErr.message);
       }
@@ -9399,7 +9399,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const lifetimeMaintenanceNumeric = maintenanceData?.numeric || null;
 
         // Determine "Managed by" via Holman cache. Try the raw fleet vehicle
-        // number with 0, 1, and 2 leading zeros stripped against status_code=3
+        // number with 0, 1, and 2 leading zeros stripped against status_code=1
         // entries from holman_vehicles_cache.
         let managedBy: string | null = null;
         if (holmanManagedSet.size > 0) {
