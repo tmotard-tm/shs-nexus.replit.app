@@ -15759,9 +15759,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     return { buffer, contentType };
   }
 
-  app.get("/mms-media/:key(*)", requireFsAuth, async (req, res) => {
+  app.get("/mms-media/:key(*)?", requireFsAuth, async (req, res) => {
     try {
-      const storageKey = req.params.key;
+      const storageKey = (typeof req.query.url === 'string' && req.query.url.length > 0)
+        ? req.query.url
+        : req.params.key;
+      if (!storageKey) return res.status(400).json({ message: "Missing media key" });
 
       if (storageKey.startsWith('https://')) {
         try {
@@ -15806,9 +15809,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
-  app.get("/mms-media-download/:key(*)", requireFsAuth, async (req, res) => {
+  app.get("/mms-media-download/:key(*)?", requireFsAuth, async (req, res) => {
     try {
-      const storageKey = req.params.key;
+      const storageKey = (typeof req.query.url === 'string' && req.query.url.length > 0)
+        ? req.query.url
+        : req.params.key;
+      if (!storageKey) return res.status(400).json({ message: "Missing media key" });
 
       if (storageKey.startsWith('https://')) {
         try {
