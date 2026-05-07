@@ -871,15 +871,15 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         </div>
         {msg.mediaUrl && msg.mediaType?.startsWith('image/') && (
           <div className="mb-1.5">
-            <a href={`/api/fs/mms-media/${msg.mediaUrl}`} target="_blank" rel="noopener noreferrer">
+            <a href={`/api/fs/mms-media/${encodeURIComponent(msg.mediaUrl)}`} target="_blank" rel="noopener noreferrer">
               <img
-                src={`/api/fs/mms-media/${msg.mediaUrl}`}
+                src={`/api/fs/mms-media/${encodeURIComponent(msg.mediaUrl)}`}
                 alt="MMS attachment"
                 className="rounded max-w-full max-h-60 cursor-pointer hover:opacity-90 transition-opacity"
               />
             </a>
             <a
-              href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+              href={`/api/fs/mms-media-download/${encodeURIComponent(msg.mediaUrl)}`}
               className={`inline-flex items-center gap-1 text-xs mt-1 hover:underline ${
                 msg.direction === "outbound" ? "text-primary-foreground/80" : "text-muted-foreground"
               }`}
@@ -891,7 +891,7 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
         )}
         {msg.mediaUrl && !msg.mediaType?.startsWith('image/') && (
           <a
-            href={`/api/fs/mms-media-download/${msg.mediaUrl}`}
+            href={`/api/fs/mms-media-download/${encodeURIComponent(msg.mediaUrl)}`}
             className={`inline-flex items-center gap-1.5 text-xs mb-1 px-2 py-1 rounded border hover:underline ${
               msg.direction === "outbound"
                 ? "border-primary-foreground/30 text-primary-foreground/80"
