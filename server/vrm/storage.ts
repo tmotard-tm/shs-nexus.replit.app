@@ -1826,6 +1826,25 @@ export async function listTechOutreach(repairTrackerId: string) {
     .orderBy(desc(vrmRepairTrackerTechOutreach.occurredAt));
 }
 
+/** Batched variant: fetch tech outreach rows for many trackers in one query.
+ *  Returns a Map keyed by repairTrackerId, each value sorted newest-first.
+ *  Used by /repair-tracker/full to avoid an N+1 fan-out. */
+export async function listTechOutreachForTrackers(repairTrackerIds: string[]) {
+  const out = new Map<string, Awaited<ReturnType<typeof listTechOutreach>>>();
+  if (repairTrackerIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(vrmRepairTrackerTechOutreach)
+    .where(inArray(vrmRepairTrackerTechOutreach.repairTrackerId, repairTrackerIds))
+    .orderBy(desc(vrmRepairTrackerTechOutreach.occurredAt));
+  for (const r of rows) {
+    const arr = out.get(r.repairTrackerId) ?? [];
+    arr.push(r);
+    out.set(r.repairTrackerId, arr);
+  }
+  return out;
+}
+
 export async function addTechOutreach(
   data: InsertVrmRepairTrackerTechOutreach,
   sideEffect?: {
@@ -1874,6 +1893,24 @@ export async function listShopContact(repairTrackerId: string) {
     .from(vrmRepairTrackerShopContact)
     .where(eq(vrmRepairTrackerShopContact.repairTrackerId, repairTrackerId))
     .orderBy(desc(vrmRepairTrackerShopContact.occurredAt));
+}
+
+/** Batched variant of listShopContact for many trackers in one query.
+ *  Used by /repair-tracker/full to avoid an N+1 fan-out. */
+export async function listShopContactForTrackers(repairTrackerIds: string[]) {
+  const out = new Map<string, Awaited<ReturnType<typeof listShopContact>>>();
+  if (repairTrackerIds.length === 0) return out;
+  const rows = await db
+    .select()
+    .from(vrmRepairTrackerShopContact)
+    .where(inArray(vrmRepairTrackerShopContact.repairTrackerId, repairTrackerIds))
+    .orderBy(desc(vrmRepairTrackerShopContact.occurredAt));
+  for (const r of rows) {
+    const arr = out.get(r.repairTrackerId) ?? [];
+    arr.push(r);
+    out.set(r.repairTrackerId, arr);
+  }
+  return out;
 }
 
 export async function addShopContact(

@@ -53,9 +53,11 @@ import {
   listRepairTrackerActions,
   addRepairTrackerAction,
   listTechOutreach,
+  listTechOutreachForTrackers,
   addTechOutreach,
   reviseTechOutreach,
   listShopContact,
+  listShopContactForTrackers,
   addShopContact,
   reviseShopContact,
   getLegacyNotesIfUnmigrated,
@@ -1816,6 +1818,92 @@ export function registerVrmRoutes(): Router {
     try {
       res.json(await listRepairTracker());
     } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // GET /api/vrm/repair-tracker/full
+  // Read-only aggregator that returns everything the Rental Repair Tracker
+  // tab renders, in a single response. Each tracker row is the same shape as
+  // GET /repair-tracker (including derived stage/section/flags), enriched
+  // with its full tech-outreach + shop-contact timelines and the latest
+  // Snowflake tech punch status for active rows. Strictly read-only — no
+  // inserts/updates/side effects, safe to call repeatedly. Snowflake punch
+  // status is best-effort: if the upstream call fails or no LDAP is present
+  // for a row, `punchStatus` is null and the request still succeeds.
+  router.get("/repair-tracker/full", async (_req, res) => {
+    try {
+      const entries = await listRepairTracker();
+      const trackerIds = entries.map((e: any) => e.id);
+
+      // Batched timeline lookups — two queries total, regardless of N. The
+      // sibling per-row endpoints (/:id/tech-outreach, /:id/shop-contact)
+      // remain available for incremental callers.
+      const [outreachByTracker, shopByTracker] = await Promise.all([
+        listTechOutreachForTrackers(trackerIds).catch((err: any) => {
+          console.error("[VRM] /repair-tracker/full tech-outreach batch failed:", err?.message);
+          return new Map<string, any[]>();
+        }),
+        listShopContactForTrackers(trackerIds).catch((err: any) => {
+          console.error("[VRM] /repair-tracker/full shop-contact batch failed:", err?.message);
+          return new Map<string, any[]>();
+        }),
+      ]);
+
+      // Snowflake punch status: read-only path. We deliberately do NOT use
+      // syncPunchStatusFor here because that helper persists a
+      // tech_punch_last_synced_at stamp; this endpoint must be free of
+      // side effects. We call fetchTechPunchHistory directly and reuse the
+      // in-route summarizeStatus helper.
+      const activeLdaps = Array.from(new Set(
+        entries
+          .filter((e: any) => e.section === "Action Needed" || e.section === "In Progress")
+          .map((e: any) => (e.techLdap ?? "").trim().toUpperCase())
+          .filter((l: string) => l.length > 0),
+      ));
+      const punchByLdap: Record<string, any> = {};
+      const sourceConfigured = isSnowflakeConfigured();
+      if (activeLdaps.length > 0) {
+        let allRows: TechPunchRow[] = [];
+        let snowflakeError: string | null = null;
+        if (sourceConfigured) {
+          try {
+            allRows = await fetchTechPunchHistory(activeLdaps, 7);
+          } catch (err: any) {
+            snowflakeError = err?.message ?? String(err);
+            console.error("[VRM] /repair-tracker/full snowflake error:", snowflakeError);
+          }
+        }
+        const rowsByLdap = new Map<string, TechPunchRow[]>();
+        for (const r of allRows) {
+          const key = (r.ldap || "").toUpperCase();
+          if (!rowsByLdap.has(key)) rowsByLdap.set(key, []);
+          rowsByLdap.get(key)!.push(r);
+        }
+        for (const ldap of activeLdaps) {
+          punchByLdap[ldap] = summarizeStatus(rowsByLdap.get(ldap) ?? [], {
+            error: snowflakeError, sourceConfigured,
+          });
+        }
+      }
+
+      const enriched = entries.map((e: any) => {
+        const ldap = (e.techLdap ?? "").trim().toUpperCase();
+        return {
+          ...e,
+          techOutreach: outreachByTracker.get(e.id) ?? [],
+          shopContact: shopByTracker.get(e.id) ?? [],
+          punchStatus: ldap ? punchByLdap[ldap] ?? null : null,
+        };
+      });
+
+      res.json({
+        generatedAt: new Date().toISOString(),
+        count: enriched.length,
+        entries: enriched,
+      });
+    } catch (e: any) {
+      console.error("[VRM] /repair-tracker/full error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
