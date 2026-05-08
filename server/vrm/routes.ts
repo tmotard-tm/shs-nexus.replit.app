@@ -1833,7 +1833,14 @@ export function registerVrmRoutes(): Router {
   // for a row, `punchStatus` is null and the request still succeeds.
   router.get("/repair-tracker/full", async (_req, res) => {
     try {
-      const entries = await listRepairTracker();
+      const allEntries = await listRepairTracker();
+      // Match the UI default: only the three visible sections, and hide
+      // archived Completed rows (those live behind the "Show Archived"
+      // toggle in the tab and are not part of the active dataset).
+      const entries = allEntries.filter((e: any) =>
+        (e.section === "Action Needed" || e.section === "In Progress" || e.section === "Completed")
+        && !e.isArchived,
+      );
       const trackerIds = entries.map((e: any) => e.id);
 
       // Batched timeline lookups — two queries total, regardless of N. The
