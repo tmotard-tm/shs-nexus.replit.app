@@ -421,6 +421,26 @@ function requireAuthOrRentalOpsApiKey(req: any, res: any, next: any): any {
   return requireAuth(req, res, next);
 }
 
+// Auth middleware that allows either a valid session OR a valid Bearer token
+// matching the VRM_REPAIR_TRACKER_API_KEY secret. Scoped to ONE endpoint —
+// GET /api/vrm/repair-tracker/full — for server-to-server mirror consumers.
+// All other /api/vrm/* routes continue to require a session via requireAuth.
+function requireAuthOrRepairTrackerApiKey(req: any, res: any, next: any): any {
+  const expected = process.env.VRM_REPAIR_TRACKER_API_KEY;
+  const authHeader = req.headers.authorization;
+  const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : null;
+  if (expected && bearer && bearer === expected) {
+    // Mark this request as service-authenticated. Downstream handlers don't
+    // need user identity, but logging/auditing can distinguish it from a
+    // human session.
+    req.user = { id: "svc:repair-tracker-mirror", role: "service", departments: [] };
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
+
 // Authentication middleware
 async function requireAuth(req: any, res: any, next: any): Promise<any> {
   const cookieHeader = req.headers.cookie;
@@ -552,8 +572,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   try {
     await initVrmSchema();
     const vrmRouter = registerVrmRoutes();
-    app.use("/api/vrm", requireAuth, vrmRouter);
-    console.log("[VRM] Routes mounted at /api/vrm/* (auth-gated)");
+    // Dispatcher: the consolidated read-only mirror endpoint
+    // /api/vrm/repair-tracker/full also accepts a Bearer token via the
+    // VRM_REPAIR_TRACKER_API_KEY secret for server-to-server consumers.
+    // Every other /api/vrm/* route still requires a session.
+    app.use("/api/vrm", (req, res, next) => {
+      if (req.method === "GET" && req.path === "/repair-tracker/full") {
+        return requireAuthOrRepairTrackerApiKey(req, res, next);
+      }
+      return requireAuth(req, res, next);
+    }, vrmRouter);
+    console.log("[VRM] Routes mounted at /api/vrm/* (session-gated; /repair-tracker/full also accepts Bearer API key)");
     // Start the notification dispatcher loop (drains vrm_notifications.queued every 30s).
     startNotificationDispatcher();
   } catch (e: any) {
