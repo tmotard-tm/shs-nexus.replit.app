@@ -1861,29 +1861,29 @@ export function registerVrmRoutes(): Router {
           .map((e: any) => (e.techLdap ?? "").trim().toUpperCase())
           .filter((l: string) => l.length > 0),
       ));
+      // Best-effort Snowflake punch status. Per the endpoint contract, if
+      // Snowflake is unavailable, unconfigured, or the call fails for any
+      // reason, every entry's punchStatus stays null and the request still
+      // succeeds. We only populate punchByLdap on a successful fetch.
       const punchByLdap: Record<string, any> = {};
-      const sourceConfigured = isSnowflakeConfigured();
-      if (activeLdaps.length > 0) {
-        let allRows: TechPunchRow[] = [];
-        let snowflakeError: string | null = null;
-        if (sourceConfigured) {
-          try {
-            allRows = await fetchTechPunchHistory(activeLdaps, 7);
-          } catch (err: any) {
-            snowflakeError = err?.message ?? String(err);
-            console.error("[VRM] /repair-tracker/full snowflake error:", snowflakeError);
+      if (activeLdaps.length > 0 && isSnowflakeConfigured()) {
+        try {
+          const allRows: TechPunchRow[] = await fetchTechPunchHistory(activeLdaps, 7);
+          const rowsByLdap = new Map<string, TechPunchRow[]>();
+          for (const r of allRows) {
+            const key = (r.ldap || "").toUpperCase();
+            if (!rowsByLdap.has(key)) rowsByLdap.set(key, []);
+            rowsByLdap.get(key)!.push(r);
           }
-        }
-        const rowsByLdap = new Map<string, TechPunchRow[]>();
-        for (const r of allRows) {
-          const key = (r.ldap || "").toUpperCase();
-          if (!rowsByLdap.has(key)) rowsByLdap.set(key, []);
-          rowsByLdap.get(key)!.push(r);
-        }
-        for (const ldap of activeLdaps) {
-          punchByLdap[ldap] = summarizeStatus(rowsByLdap.get(ldap) ?? [], {
-            error: snowflakeError, sourceConfigured,
-          });
+          for (const ldap of activeLdaps) {
+            punchByLdap[ldap] = summarizeStatus(rowsByLdap.get(ldap) ?? [], {
+              error: null, sourceConfigured: true,
+            });
+          }
+        } catch (err: any) {
+          // Swallow Snowflake errors — leave punchByLdap empty so every
+          // entry's punchStatus resolves to null below.
+          console.error("[VRM] /repair-tracker/full snowflake error:", err?.message);
         }
       }
 
