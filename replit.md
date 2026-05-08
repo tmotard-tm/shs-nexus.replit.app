@@ -24,6 +24,7 @@ Nexus is an enterprise task management platform for automating tasks, centralizi
 -   `SAMSARA_API_KEY`
 -   `SAMSARA_BASE_URL`
 -   `SENDGRID_API_KEY`
+-   `VRM_REPAIR_TRACKER_API_KEY` (Bearer token for the read-only `GET /api/vrm/repair-tracker/full` mirror endpoint; all other `/api/vrm/*` routes still require a session cookie)
 
 ## Stack
 
