@@ -66,3 +66,9 @@ id = "mYH7rzzNFREicyTqPv-qh"
 uri = "file://attached_assets/exports/tpms_bulk_update_results_partial.csv"
 type = "table"
 title = "TPMS Bulk Update — Partial Results (all 403 expired token)"
+
+[[outputs]]
+id = "TVsYVQ-ql5rAF4VbcrYJL"
+uri = "file://attached_assets/exports/tpms_bulk_phone_update_results.csv"
+type = "table"
+title = "TPMS Bulk Phone Update — Results (505/505 success)"
