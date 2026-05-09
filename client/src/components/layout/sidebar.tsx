@@ -62,7 +62,7 @@ type NavCategory = {
   items: NavItem[];
 };
 
-export function Sidebar() {
+export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
   const [location, setLocation] = useLocation();
   const { user, logout } = useAuth();
   const { startOnboarding, resetOnboarding } = useOnboarding();
@@ -243,14 +243,18 @@ export function Sidebar() {
 
   const { standalone, categories } = organizeByCategory(filteredNavItems);
 
+  const wrapperCls = inline
+    ? "flex items-center gap-1"
+    : "fixed top-4 left-4 z-50 flex items-center gap-1.5 rounded-md border border-border bg-background/95 backdrop-blur shadow-md px-1 py-1";
+
   return (
-    <div className="fixed top-4 left-4 z-50">
+    <div className={wrapperCls}>
       <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
         <DropdownMenuTrigger asChild>
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
-            className="h-10 w-10 bg-background shadow-md"
+            className="h-8 w-8"
             data-testid="button-hamburger-menu"
           >
             <Menu className="h-5 w-5" />
@@ -267,9 +271,6 @@ export function Sidebar() {
               <Settings className="h-4 w-4 text-primary-foreground" />
             </div>
             <span className="font-semibold text-sm">Nexus</span>
-            <div className="ml-auto">
-              <ThemeToggle />
-            </div>
           </div>
 
           <div className="px-2 py-2 border-b border-border mb-2">
@@ -485,6 +486,7 @@ export function Sidebar() {
           </div>
         </DropdownMenuContent>
       </DropdownMenu>
+      <ThemeToggle />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { Bell, Search, Home, ChevronLeft } from "lucide-react";
 import { Link } from "wouter";
 import { fonts, colors } from "../lib/constants";
+import { Sidebar as GlobalNavMenu } from "@/components/layout/sidebar";
 
 interface RouteReadyTopbarProps {
   title: string;
@@ -30,6 +31,8 @@ export function RouteReadyTopbar({ title, notificationCount = 3 }: RouteReadyTop
     >
       {/* Back + Nexus nav row */}
       <div className="flex items-center gap-3 px-8 pt-2 pb-0">
+        <GlobalNavMenu inline />
+        <span style={{ color: colors.inkMuted, fontSize: 10 }}>·</span>
         <button
           onClick={handleBack}
           className="flex items-center gap-1 text-xs hover:opacity-70 transition-opacity"

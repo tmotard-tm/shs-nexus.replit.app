@@ -551,19 +551,19 @@ function Router() {
       </Route>
 
       <Route path="/tpms/:rest*">
-        <ProtectedRoute>
+        <RoleProtectedRoute>
           <TpmsGate>
             <TpmsLayout />
           </TpmsGate>
-        </ProtectedRoute>
+        </RoleProtectedRoute>
       </Route>
 
       <Route path="/tpms">
-        <ProtectedRoute>
+        <RoleProtectedRoute>
           <TpmsGate>
             <TpmsLayout />
           </TpmsGate>
-        </ProtectedRoute>
+        </RoleProtectedRoute>
       </Route>
       
       <Route component={NotFound} />

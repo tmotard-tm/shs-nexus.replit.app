@@ -5,6 +5,7 @@ import { AppSidebar } from "@/components/fleet-scope/app-sidebar";
 import { UserProvider } from "@/context/FleetScopeUserContext";
 import { Separator } from "@/components/ui/separator";
 import { Home, ChevronLeft } from "lucide-react";
+import { Sidebar as GlobalNavMenu } from "@/components/layout/sidebar";
 
 import AllVehicles from "./AllVehicles";
 import Dashboard from "./Dashboard";
@@ -34,6 +35,8 @@ export default function FleetScopeLayout() {
           <AppSidebar />
           <SidebarInset>
             <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
+              <GlobalNavMenu inline />
+              <Separator orientation="vertical" className="h-4" />
               <SidebarTrigger className="-ml-1" />
               <Separator orientation="vertical" className="h-4" />
               <button

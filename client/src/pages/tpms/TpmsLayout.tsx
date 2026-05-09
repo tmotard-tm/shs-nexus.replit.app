@@ -4,6 +4,7 @@ import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/s
 import { TpmsSidebar } from "@/components/tpms/app-sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Home, ChevronLeft } from "lucide-react";
+import { Sidebar as GlobalNavMenu } from "@/components/layout/sidebar";
 
 import TechProfiles from "./TechProfiles";
 import ShippingAddresses from "./ShippingAddresses";
@@ -17,6 +18,8 @@ export default function TpmsLayout() {
         <TpmsSidebar />
         <SidebarInset>
           <header className="sticky top-0 z-20 flex h-12 shrink-0 items-center gap-2 border-b border-border bg-background px-4">
+            <GlobalNavMenu inline />
+            <Separator orientation="vertical" className="h-4" />
             <SidebarTrigger className="-ml-1" />
             <Separator orientation="vertical" className="h-4" />
             <button
