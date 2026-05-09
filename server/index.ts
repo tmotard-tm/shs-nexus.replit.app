@@ -408,6 +408,18 @@ async function patchStoredRolePermissions() {
     console.error("⚠️ All-techs startup sync check failed:", error);
   }
 
+  // Task #386: sweep stuck inbound MMS rows (status='media_failed') and re-fetch
+  // their media from Twilio so dispatchers don't have to click "Retry download"
+  // on every row. Runs ~30s after startup and every 15min thereafter, rate-limited
+  // to 1 message/sec.
+  try {
+    const { startMmsSweepScheduler } = await import("./fleet-scope-media-sweep");
+    startMmsSweepScheduler();
+    log("✅ MMS media-failed sweep scheduler started (startup + every 15min, 1/sec)");
+  } catch (error) {
+    console.error("❌ Failed to start MMS media-failed sweep scheduler:", error);
+  }
+
   // Task #221: prime the in-process TPMS snapshot in the background so the
   // first decommissioning batch SMS / rental-enrichment / manager-phone caller
   // doesn't pay the full Snowflake scan latency. Non-blocking: failures are
