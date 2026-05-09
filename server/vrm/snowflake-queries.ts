@@ -62,123 +62,189 @@ export interface ScorecardRow {
 }
 
 /**
- * Pull the full active rental roster from VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS.
+ * Pull the active rental roster directly from the three validated Holman
+ * source tables — NO Fleet Scope, NO derived views.
  *
- * That view IS the authoritative current-rental list (~306 rows today). It
- * already enriches each rental with ENTERPRISE_ID / LDAP, RENTER_NAME,
- * PRIMARY_ZIP, TRUCK_STATUS, and SOURCE.
+ * Sources (the same three tables that match the daily Holman email reports):
+ *   1. ENTERPRISE_OPEN_RENTAL_TICKET_REPORT  — Enterprise open tickets
+ *   2. HOLMAN_OPEN_RENTAL_REPORT             — Holman PO line items (used for
+ *      non-Enterprise vendor rentals AND for truck-owner LDAP resolution)
+ *   3. HOLMAN_CLOSED_RENTAL_REPORT           — not used for active list
  *
- * Historical note: an earlier version of this query used
- * PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST as the backbone and LEFT JOINed the
- * NEXUS view for enrichment. VW_RENTAL_LIST stopped loading on 2026-01-12,
- * which froze the dashboard against the Jan-12 snapshot — 234 trucks listed
- * as "still rented" had since returned, and 208 newer rentals were missing
- * entirely. Switching the backbone to the live view restored accuracy.
+ * Each table is filtered to its MAX(FILE_DATE), giving today's snapshot.
  *
- * QUALIFY ROW_NUMBER() deduplicates NEXUS rows per truck (e.g. duplicate rows
- * from the AMS-status join), preferring rows that carry a valid ENTERPRISE_ID.
+ * Active-rental definition (matches the daily Holman/Enterprise spreadsheets):
+ *   - Enterprise: TICKET_STATUS = 'OPEN' on today's snapshot (~286 rows)
+ *   - Holman:    DESCRIPTION LIKE 'RENTAL%' AND non-Enterprise vendor (~18)
+ *   Total: ~304 unique trucks.
  *
- * Rows with no ENTERPRISE_ID (LDAP-less) are returned as-is so callers can
- * count and disclose them; they are excluded from the local vrm_techs upsert
- * inside sync/roster.
+ * LDAP resolution priority:
+ *   1. Holman truck-owner ENTERPRISE_ID (when the same truck appears in
+ *      HOLMAN_OPEN_RENTAL_REPORT with a non-null ENTERPRISE_ID — most direct)
+ *   2. DRIVELINE_ALL_TECHS name match (FIRST + LAST or LAST, FIRST formats)
+ *   3. Otherwise: ENTERPRISE_ID is null and the row is flagged
+ *      EID_MATCH_CONFIDENCE = 'LOW - Unresolved' for manual follow-up.
+ *
+ * Per-row enrichment via DRIVELINE_ALL_TECHS LEFT JOIN on the resolved LDAP:
+ *   district_no, planning_area_nm (market), tenure_category, years_of_service,
+ *   employment_status, job_title, full_name.
  */
-// On the Nexus enrichment view (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS),
-// the truck identifier is exposed as VEHICLE_NUMBER. We LPAD to 6 chars to
-// keep the dedupe key consistent with the rest of the codebase (truck numbers
-// elsewhere are zero-padded to 6 chars).
-async function logNexusViewColumnsOnFailure(svc: any, err: any): Promise<void> {
-  // Self-diagnostic: if the column guess is wrong, surface the real schema
-  // in the logs so the next iteration is one-shot.
-  const msg = String(err?.message ?? err ?? "");
-  if (!/invalid identifier/i.test(msg)) return;
-  try {
-    const cols = await svc.executeQuery(`
-      SELECT COLUMN_NAME, DATA_TYPE
-      FROM PARTS_SUPPLYCHAIN.INFORMATION_SCHEMA.COLUMNS
-      WHERE TABLE_SCHEMA = 'FLEET'
-        AND TABLE_NAME   = 'VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS'
-      ORDER BY ORDINAL_POSITION
-    `) as Array<{ COLUMN_NAME: string; DATA_TYPE: string }>;
-    console.error(
-      "[VRM/Snowflake] VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS columns:",
-      cols.map((c) => `${c.COLUMN_NAME}(${c.DATA_TYPE})`).join(", "),
-    );
-  } catch (diagErr: any) {
-    console.error("[VRM/Snowflake] Failed to introspect Nexus view columns:", diagErr?.message);
-  }
-}
-
 export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
   if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
   const svc = getSnowflakeService();
-  try {
-    const rows = await svc.executeQuery(`
-      WITH nexus_deduped AS (
-        SELECT
-          LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
-          n.VEHICLE_NUMBER,
-          n.ENTERPRISE_ID,
-          n.EID_MATCH_CONFIDENCE,
-          n.RENTER_NAME,
-          n.RENTAL_VENDOR,
-          n.RENTAL_START_DATE,
-          n.DAYS_OPEN,
-          n.DAYS_AUTHORIZED,
-          n.DAYS_BEHIND,
-          n.NUMBER_OF_EXTENSIONS,
-          n.NUMBER_OF_REWRITES,
-          n.REPAIRS_COMPLETE,
-          n.TICKET_NUMBER,
-          n.PO_NUMBER,
-          n.CLAIM_NUMBER,
-          n.PRIMARY_ZIP,
-          n.TRUCK_STATUS,
-          n.SOURCE
-        FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
-        WHERE n.VEHICLE_NUMBER IS NOT NULL
-        QUALIFY ROW_NUMBER() OVER (
-          PARTITION BY LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0')
-          ORDER BY
-            CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
-            n.DAYS_OPEN DESC NULLS LAST
-        ) = 1
-      )
+  const rows = await svc.executeQuery(`
+    /* fetchRentalRoster — direct from Enterprise + Holman raw tables, no Fleet Scope */
+    WITH today_ent AS (
+      SELECT MAX(FILE_DATE) AS d
+      FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
+    ),
+    today_hol AS (
+      SELECT MAX(FILE_DATE) AS d
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+    ),
+    -- Holman-side truck owner mapping (PRIMARY LDAP source for Enterprise rentals)
+    holman_truck_owner AS (
       SELECT
-        nd.VEHICLE_NUMBER,
-        nd.ENTERPRISE_ID,
-        nd.EID_MATCH_CONFIDENCE,
-        nd.RENTER_NAME,
-        nd.RENTAL_VENDOR,
-        nd.RENTAL_START_DATE,
-        nd.DAYS_OPEN,
-        nd.DAYS_AUTHORIZED,
-        nd.DAYS_BEHIND,
-        nd.NUMBER_OF_EXTENSIONS,
-        nd.NUMBER_OF_REWRITES,
-        nd.REPAIRS_COMPLETE,
-        nd.TICKET_NUMBER,
-        nd.PO_NUMBER,
-        nd.CLAIM_NUMBER,
-        nd.PRIMARY_ZIP,
-        nd.TRUCK_STATUS,
-        nd.SOURCE,
-        d.DISTRICT_NO       AS DISTRICT,
-        d.PLANNING_AREA_NM  AS MARKET,
-        d.TENURE_CATEGORY,
-        d.YEARS_OF_SERVICE,
-        d.EMPLOYMENT_STATUS,
-        d.JOB_TITLE,
-        d.FULL_NAME         AS HR_FULL_NAME
-      FROM nexus_deduped nd
-      LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
-        ON UPPER(d.ENTERPRISE_ID) = UPPER(nd.ENTERPRISE_ID)
-      ORDER BY nd.DAYS_OPEN DESC NULLS LAST
-    `) as RentalRosterRow[];
-    return rows;
-  } catch (err: any) {
-    await logNexusViewColumnsOnFailure(svc, err);
-    throw err;
-  }
+        LPAD(TRIM(VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
+        UPPER(ENTERPRISE_ID) AS ENTERPRISE_ID
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+      WHERE FILE_DATE = (SELECT d FROM today_hol)
+        AND ENTERPRISE_ID IS NOT NULL
+        AND ENTERPRISE_ID <> ''
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
+        ORDER BY ENTERPRISE_ID
+      ) = 1
+    ),
+    -- Enterprise OPEN tickets (today)
+    enterprise_rentals AS (
+      SELECT
+        LPAD(TRIM(t.VEHICLE_NUMBER), 6, '0')                AS TRUCK_KEY,
+        t.VEHICLE_NUMBER,
+        t.RENTER_NAME,
+        'Enterprise'                                         AS SOURCE,
+        'ENTERPRISE RENT-A-CAR INC.'                         AS RENTAL_VENDOR,
+        t.ECARS_2_0_TKT_NBR                                  AS TICKET_NUMBER,
+        NULL                                                 AS PO_NUMBER,
+        t.CLAIM_NUMBER,
+        TRY_TO_DATE(t.RENTAL_START_DATE)                     AS RENTAL_START_DATE,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(t.RENTAL_DAYS::STRING), 0))     AS DAYS_OPEN,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(t.DAYS_AUTHORIZED::STRING), 0)) AS DAYS_AUTHORIZED,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(t.DAYS_BEHIND::STRING), 0))     AS DAYS_BEHIND,
+        COALESCE(TRY_TO_NUMBER(t.NUMBER_OF_EXTENSIONS::STRING), 0)         AS NUMBER_OF_EXTENSIONS,
+        COALESCE(TRY_TO_NUMBER(t.NUMBER_OF_REWRITES::STRING), 0)           AS NUMBER_OF_REWRITES,
+        t.REPAIRS_COMPLETE
+      FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT t
+      WHERE t.FILE_DATE = (SELECT d FROM today_ent)
+        AND UPPER(t.TICKET_STATUS) = 'OPEN'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(t.VEHICLE_NUMBER), 6, '0')
+        ORDER BY t.RENTAL_START_DATE DESC NULLS LAST
+      ) = 1
+    ),
+    -- Holman non-Enterprise vendor rentals (HERTZ HLE, AVIS, PEPBOYS, etc.)
+    holman_rentals AS (
+      SELECT
+        LPAD(TRIM(h.VEHICLE_NUMBER), 6, '0')                AS TRUCK_KEY,
+        h.VEHICLE_NUMBER,
+        NULLIF(TRIM(NULLIF(h.FIRST_NAME, 'UNKNOWN') || ' ' || NULLIF(h.LAST_NAME, 'UNKNOWN')), '')
+                                                             AS RENTER_NAME,
+        'Holman'                                             AS SOURCE,
+        h.RENTAL_VENDOR,
+        NULL                                                 AS TICKET_NUMBER,
+        h.PO_NUMBER,
+        h.EVENT_ID                                           AS CLAIM_NUMBER,
+        TRY_TO_DATE(h.PO_DATE)                               AS RENTAL_START_DATE,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(h.NO_OF_DAYS::STRING), 0))      AS DAYS_OPEN,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(h.NO_OF_DAYS::STRING), 0))      AS DAYS_AUTHORIZED,
+        0                                                                   AS DAYS_BEHIND,
+        0                                                                   AS NUMBER_OF_EXTENSIONS,
+        0                                                                   AS NUMBER_OF_REWRITES,
+        NULL                                                                AS REPAIRS_COMPLETE
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT h
+      WHERE h.FILE_DATE = (SELECT d FROM today_hol)
+        AND UPPER(h.DESCRIPTION) LIKE 'RENTAL%'
+        AND UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%ENTERPRISE%'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(h.VEHICLE_NUMBER), 6, '0')
+        ORDER BY h.PO_DATE DESC NULLS LAST
+      ) = 1
+    ),
+    all_rentals AS (
+      SELECT * FROM enterprise_rentals
+      UNION ALL
+      SELECT * FROM holman_rentals
+    ),
+    -- DRIVELINE name → LDAP lookup (multiple name format variants)
+    name_keys AS (
+      SELECT
+        UPPER(d.ENTERPRISE_ID) AS ENTERPRISE_ID,
+        UPPER(REGEXP_REPLACE(TRIM(d.FIRST_NAME) || ' ' || TRIM(d.LAST_NAME), '\\\\s+', ' ')) AS first_last,
+        UPPER(REGEXP_REPLACE(TRIM(d.LAST_NAME) || ', ' || TRIM(d.FIRST_NAME), '\\\\s+', ' ')) AS last_comma_first
+      FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
+      WHERE d.ENTERPRISE_ID IS NOT NULL
+        AND d.FIRST_NAME IS NOT NULL
+        AND d.LAST_NAME IS NOT NULL
+    ),
+    name_idx AS (
+      SELECT NORMALIZED_NAME, ENTERPRISE_ID FROM (
+        SELECT first_last AS NORMALIZED_NAME, ENTERPRISE_ID FROM name_keys
+        UNION
+        SELECT last_comma_first, ENTERPRISE_ID FROM name_keys
+      )
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY NORMALIZED_NAME
+        ORDER BY ENTERPRISE_ID
+      ) = 1
+    ),
+    resolved AS (
+      SELECT
+        ar.*,
+        COALESCE(hto.ENTERPRISE_ID, ni.ENTERPRISE_ID) AS ENTERPRISE_ID,
+        CASE
+          WHEN hto.ENTERPRISE_ID IS NOT NULL AND hto.ENTERPRISE_ID = ni.ENTERPRISE_ID
+            THEN 'HIGH - Truck Owner + Name Match'
+          WHEN hto.ENTERPRISE_ID IS NOT NULL THEN 'HIGH - Holman Truck Owner'
+          WHEN ni.ENTERPRISE_ID IS NOT NULL THEN 'MEDIUM - Name Match'
+          ELSE 'LOW - Unresolved'
+        END AS EID_MATCH_CONFIDENCE
+      FROM all_rentals ar
+      LEFT JOIN holman_truck_owner hto ON hto.TRUCK_KEY = ar.TRUCK_KEY
+      LEFT JOIN name_idx ni
+        ON ni.NORMALIZED_NAME = UPPER(REGEXP_REPLACE(TRIM(ar.RENTER_NAME), '\\\\s+', ' '))
+    )
+    SELECT
+      r.VEHICLE_NUMBER,
+      r.ENTERPRISE_ID,
+      r.EID_MATCH_CONFIDENCE,
+      r.RENTER_NAME,
+      r.RENTAL_VENDOR,
+      r.RENTAL_START_DATE,
+      r.DAYS_OPEN,
+      r.DAYS_AUTHORIZED,
+      r.DAYS_BEHIND,
+      r.NUMBER_OF_EXTENSIONS,
+      r.NUMBER_OF_REWRITES,
+      r.REPAIRS_COMPLETE,
+      r.TICKET_NUMBER,
+      r.PO_NUMBER,
+      r.CLAIM_NUMBER,
+      NULL                                AS PRIMARY_ZIP,
+      NULL                                AS TRUCK_STATUS,
+      r.SOURCE,
+      d.DISTRICT_NO                       AS DISTRICT,
+      d.PLANNING_AREA_NM                  AS MARKET,
+      d.TENURE_CATEGORY,
+      d.YEARS_OF_SERVICE,
+      d.EMPLOYMENT_STATUS,
+      d.JOB_TITLE,
+      d.FULL_NAME                         AS HR_FULL_NAME
+    FROM resolved r
+    LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
+      ON UPPER(d.ENTERPRISE_ID) = UPPER(r.ENTERPRISE_ID)
+    ORDER BY r.DAYS_OPEN DESC NULLS LAST
+  `) as RentalRosterRow[];
+  return rows;
 }
 
 /**
@@ -193,32 +259,71 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
 
   const ldapList = ldaps.map((l) => `'${l.replace(/'/g, "''")}'`).join(",");
   const queryText = `
-    /* fetchAdjustedNet */
-    WITH nexus_deduped AS (
+    /* fetchAdjustedNet — same source tables as fetchRentalRoster (no Fleet Scope, no VW_NEXUS) */
+    WITH today_ent AS (
+      SELECT MAX(FILE_DATE) AS d
+      FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
+    ),
+    today_hol AS (
+      SELECT MAX(FILE_DATE) AS d
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+    ),
+    holman_truck_owner AS (
       SELECT
-        LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
-        n.ENTERPRISE_ID,
-        n.DAYS_OPEN,
-        n.RENTAL_START_DATE
-      FROM PARTS_SUPPLYCHAIN.FLEET.VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS n
-      WHERE n.VEHICLE_NUMBER IS NOT NULL
+        LPAD(TRIM(VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
+        UPPER(ENTERPRISE_ID) AS ENTERPRISE_ID
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+      WHERE FILE_DATE = (SELECT d FROM today_hol)
+        AND ENTERPRISE_ID IS NOT NULL
+        AND ENTERPRISE_ID <> ''
       QUALIFY ROW_NUMBER() OVER (
-        PARTITION BY LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0')
-        ORDER BY
-          CASE WHEN n.ENTERPRISE_ID IS NOT NULL AND n.ENTERPRISE_ID != '' THEN 0 ELSE 1 END,
-          n.DAYS_OPEN DESC NULLS LAST
+        PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
+        ORDER BY ENTERPRISE_ID
       ) = 1
     ),
-    rental_techs AS (
+    enterprise_rentals AS (
       SELECT
-        nd.ENTERPRISE_ID                                                     AS tech_ldap,
-        GREATEST(nd.DAYS_OPEN, 0)                                            AS days_in_rental,
-        GREATEST(nd.DAYS_OPEN, 0) * 78.00                                    AS rental_cost,
-        nd.RENTAL_START_DATE                                                 AS start_date
-      FROM nexus_deduped nd
-      WHERE nd.ENTERPRISE_ID IS NOT NULL
-        AND nd.ENTERPRISE_ID != ''
-        AND nd.ENTERPRISE_ID IN (${ldapList})
+        LPAD(TRIM(t.VEHICLE_NUMBER), 6, '0')                AS TRUCK_KEY,
+        TRY_TO_DATE(t.RENTAL_START_DATE)                     AS RENTAL_START_DATE,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(t.RENTAL_DAYS::STRING), 0)) AS DAYS_OPEN
+      FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT t
+      WHERE t.FILE_DATE = (SELECT d FROM today_ent)
+        AND UPPER(t.TICKET_STATUS) = 'OPEN'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(t.VEHICLE_NUMBER), 6, '0')
+        ORDER BY t.RENTAL_START_DATE DESC NULLS LAST
+      ) = 1
+    ),
+    holman_rentals AS (
+      SELECT
+        LPAD(TRIM(h.VEHICLE_NUMBER), 6, '0')                AS TRUCK_KEY,
+        TRY_TO_DATE(h.PO_DATE)                               AS RENTAL_START_DATE,
+        GREATEST(0, COALESCE(TRY_TO_NUMBER(h.NO_OF_DAYS::STRING), 0)) AS DAYS_OPEN
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT h
+      WHERE h.FILE_DATE = (SELECT d FROM today_hol)
+        AND UPPER(h.DESCRIPTION) LIKE 'RENTAL%'
+        AND UPPER(COALESCE(h.RENTAL_VENDOR, '')) NOT LIKE '%ENTERPRISE%'
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(h.VEHICLE_NUMBER), 6, '0')
+        ORDER BY h.PO_DATE DESC NULLS LAST
+      ) = 1
+    ),
+    all_rentals AS (
+      SELECT * FROM enterprise_rentals
+      UNION ALL
+      SELECT * FROM holman_rentals
+    ),
+    rental_techs AS (
+      -- Resolve LDAP from Holman truck owner (the trustworthy direct mapping
+      -- that fetchRentalRoster also uses). Filter to the requested ldapList.
+      SELECT
+        hto.ENTERPRISE_ID                                                    AS tech_ldap,
+        ar.DAYS_OPEN                                                         AS days_in_rental,
+        ar.DAYS_OPEN * 78.00                                                 AS rental_cost,
+        ar.RENTAL_START_DATE                                                 AS start_date
+      FROM all_rentals ar
+      INNER JOIN holman_truck_owner hto ON hto.TRUCK_KEY = ar.TRUCK_KEY
+      WHERE hto.ENTERPRISE_ID IN (${ldapList})
     ),
     financials AS (
       SELECT
@@ -290,13 +395,8 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
     LEFT JOIN financials fin ON rt.tech_ldap = fin.tech_ldap
     ORDER BY 13 ASC NULLS LAST
   `;
-  try {
-    const rows = await svc.executeQuery(queryText) as AdjustedNetRow[];
-    return rows;
-  } catch (err: any) {
-    await logNexusViewColumnsOnFailure(svc, err);
-    throw err;
-  }
+  const rows = await svc.executeQuery(queryText) as AdjustedNetRow[];
+  return rows;
 }
 
 /**
