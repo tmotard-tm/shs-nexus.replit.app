@@ -1590,8 +1590,8 @@ export default function Spares() {
                   </thead>
                   <tbody>
                     {filteredOtherLocations.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b border-border hover:bg-muted/40 transition-colors" data-testid={`row-other-${vehicle.vehicleNumber}`}>
-                        <td className="align-top py-2 px-2 overflow-hidden font-medium">
+                      <tr key={vehicle.vehicleNumber} className="border-b border-border/50 even:bg-muted/30 hover:bg-muted/60 transition-colors" data-testid={`row-other-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-3 px-2 overflow-hidden font-medium">
                           <div className="flex flex-col">
                             <div className="flex items-center gap-1">
                               <span>{vehicle.vehicleNumber}</span>
@@ -1610,7 +1610,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-xs">{vehicle.vin || '-'}</span>
                             {vehicle.vin && (
@@ -1628,7 +1628,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.confirmedAddress}
@@ -1641,7 +1641,7 @@ export default function Spares() {
                             className="w-full max-w-full"
                           />
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           {vehicle.samsaraAddress ? (
                             <div>
                               <span>{vehicle.samsaraAddress}</span>
@@ -1655,7 +1655,7 @@ export default function Spares() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden whitespace-nowrap">
+                        <td className="align-top py-3 px-2 overflow-hidden whitespace-nowrap">
                           {vehicle.locationSource === 'both' && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded">Both</span>
                           )}
@@ -1667,7 +1667,7 @@ export default function Spares() {
                           )}
                         </td>
                         {/* Keys Status */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.keysStatus}
@@ -1679,7 +1679,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Repaired Status */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.repairedStatus}
@@ -1690,7 +1690,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Registration Renewal Date */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.registrationRenewalDate}
@@ -1703,7 +1703,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Contact Name/Phone */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.contactNamePhone}
@@ -1716,7 +1716,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* General Comments */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.generalComments}
@@ -1730,7 +1730,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Fleet Team Comments */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <FleetTeamCommentsCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.fleetTeamComments}
@@ -1738,7 +1738,7 @@ export default function Spares() {
                             isPending={updateStatusMutation.isPending}
                           />
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-3 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-${vehicle.vehicleNumber}`}>
                           {vehicle.manualEditTimestamp ? new Date(vehicle.manualEditTimestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '-'}
                         </td>
                       </tr>
@@ -1885,8 +1885,8 @@ export default function Spares() {
                   </thead>
                   <tbody>
                     {filteredRepairShop.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b border-border hover:bg-muted/40 transition-colors" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
-                        <td className="align-top py-2 px-2 overflow-hidden font-medium">
+                      <tr key={vehicle.vehicleNumber} className="border-b border-border/50 even:bg-muted/30 hover:bg-muted/60 transition-colors" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-3 px-2 overflow-hidden font-medium">
                           <div className="flex items-center gap-1">
                             <Link href={`/trucks/${vehicle.vehicleNumber}`}>
                               <span className="text-primary hover:underline cursor-pointer">{vehicle.vehicleNumber}</span>
@@ -1902,7 +1902,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-xs">{vehicle.vin || '-'}</span>
                             {vehicle.vin && (
@@ -1920,7 +1920,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.confirmedAddress}
@@ -1933,7 +1933,7 @@ export default function Spares() {
                             className="w-full max-w-full"
                           />
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           {vehicle.samsaraAddress ? (
                             <div>
                               <span>{vehicle.samsaraAddress}</span>
@@ -1947,7 +1947,7 @@ export default function Spares() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden whitespace-nowrap">
+                        <td className="align-top py-3 px-2 overflow-hidden whitespace-nowrap">
                           {vehicle.locationSource === 'both' && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded">Both</span>
                           )}
@@ -1959,7 +1959,7 @@ export default function Spares() {
                           )}
                         </td>
                         {/* Keys Status */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.keysStatus}
@@ -1971,7 +1971,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Repaired Status */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.repairedStatus}
@@ -1982,7 +1982,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Registration Renewal Date */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.registrationRenewalDate}
@@ -1995,7 +1995,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Contact Name/Phone */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.contactNamePhone}
@@ -2008,7 +2008,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* General Comments */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.generalComments}
@@ -2022,7 +2022,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Fleet Team Comments */}
-                        <td className="align-top py-2 px-2 overflow-hidden">
+                        <td className="align-top py-3 px-2 overflow-hidden">
                           <FleetTeamCommentsCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.fleetTeamComments}
@@ -2030,7 +2030,7 @@ export default function Spares() {
                             isPending={updateStatusMutation.isPending}
                           />
                         </td>
-                        <td className="align-top py-2 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-repair-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-3 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-repair-${vehicle.vehicleNumber}`}>
                           {vehicle.manualEditTimestamp ? new Date(vehicle.manualEditTimestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '-'}
                         </td>
                       </tr>

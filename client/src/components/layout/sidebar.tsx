@@ -245,7 +245,7 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
 
   const wrapperCls = inline
     ? "flex items-center gap-1"
-    : "fixed top-4 left-4 z-50 flex items-center gap-1.5 rounded-md border border-border bg-background/95 backdrop-blur shadow-md px-1 py-1";
+    : "fixed top-4 left-4 z-50 flex items-center gap-1 rounded-lg border-2 border-border bg-card shadow-xl ring-1 ring-foreground/10 px-1.5 py-1";
 
   return (
     <div className={wrapperCls}>
