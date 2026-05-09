@@ -42,11 +42,19 @@ export interface ScorecardRow {
 }
 
 /**
- * Pull the full active rental roster scoped to Fleet Scope's VW_RENTAL_LIST.
+ * Pull the full active rental roster from VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS.
  *
- * VW_RENTAL_LIST is the authoritative source of truth (same view Fleet Scope
- * uses, returning ~306 rows). We LEFT JOIN the NEXUS view to enrich each truck
- * with ENTERPRISE_ID / LDAP, RENTER_NAME, PRIMARY_ZIP, TRUCK_STATUS, and SOURCE.
+ * That view IS the authoritative current-rental list (~306 rows today). It
+ * already enriches each rental with ENTERPRISE_ID / LDAP, RENTER_NAME,
+ * PRIMARY_ZIP, TRUCK_STATUS, and SOURCE.
+ *
+ * Historical note: an earlier version of this query used
+ * PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST as the backbone and LEFT JOINed the
+ * NEXUS view for enrichment. VW_RENTAL_LIST stopped loading on 2026-01-12,
+ * which froze the dashboard against the Jan-12 snapshot — 234 trucks listed
+ * as "still rented" had since returned, and 208 newer rentals were missing
+ * entirely. Switching the backbone to the live view restored accuracy.
+ *
  * QUALIFY ROW_NUMBER() deduplicates NEXUS rows per truck (e.g. duplicate rows
  * from the AMS-status join), preferring rows that carry a valid ENTERPRISE_ID.
  *
@@ -55,11 +63,9 @@ export interface ScorecardRow {
  * inside sync/roster.
  */
 // On the Nexus enrichment view (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS),
-// the truck identifier is exposed as VEHICLE_NUMBER (renamed from TRUCK_NUMBER
-// — verified via INFORMATION_SCHEMA dump in logNexusViewColumnsOnFailure when
-// the previous column name returned "invalid identifier").
-// On VW_RENTAL_LIST, the same value is exposed as TRUCK_LISTED_FOR_RENTAL.
-// We LPAD both sides to 6 chars to defuse padded/unpadded join mismatches.
+// the truck identifier is exposed as VEHICLE_NUMBER. We LPAD to 6 chars to
+// keep the dedupe key consistent with the rest of the codebase (truck numbers
+// elsewhere are zero-padded to 6 chars).
 async function logNexusViewColumnsOnFailure(svc: any, err: any): Promise<void> {
   // Self-diagnostic: if the column guess is wrong, surface the real schema
   // in the logs so the next iteration is one-shot.
@@ -114,9 +120,7 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
         nd.PRIMARY_ZIP,
         nd.TRUCK_STATUS,
         nd.SOURCE
-      FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST r
-      LEFT JOIN nexus_deduped nd
-        ON nd.TRUCK_KEY = LPAD(TRIM(r.TRUCK_LISTED_FOR_RENTAL), 6, '0')
+      FROM nexus_deduped nd
       ORDER BY nd.DAYS_OPEN DESC NULLS LAST
     `) as RentalRosterRow[];
     return rows;
@@ -157,12 +161,10 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
     rental_techs AS (
       SELECT
         nd.ENTERPRISE_ID                                                     AS tech_ldap,
-        nd.DAYS_OPEN                                                         AS days_in_rental,
-        nd.DAYS_OPEN * 78.00                                                 AS rental_cost,
+        GREATEST(nd.DAYS_OPEN, 0)                                            AS days_in_rental,
+        GREATEST(nd.DAYS_OPEN, 0) * 78.00                                    AS rental_cost,
         nd.RENTAL_START_DATE                                                 AS start_date
-      FROM PARTS_SUPPLYCHAIN.FLEET.VW_RENTAL_LIST r
-      INNER JOIN nexus_deduped nd
-        ON nd.TRUCK_KEY = LPAD(TRIM(r.TRUCK_LISTED_FOR_RENTAL), 6, '0')
+      FROM nexus_deduped nd
       WHERE nd.ENTERPRISE_ID IS NOT NULL
         AND nd.ENTERPRISE_ID != ''
         AND nd.ENTERPRISE_ID IN (${ldapList})

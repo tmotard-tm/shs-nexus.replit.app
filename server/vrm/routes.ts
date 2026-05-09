@@ -399,8 +399,10 @@ export function registerVrmRoutes(): Router {
       for (const row of roster) {
         const ldap = (row.ENTERPRISE_ID || "").trim();
         if (!ldap) {
-          // Row is in Fleet Scope's VW_RENTAL_LIST but has no ENTERPRISE_ID in
-          // the NEXUS enrichment view — cannot be evaluated by gating logic.
+          // Row is in the active rental roster (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS)
+          // but has no resolved ENTERPRISE_ID — typically a Holman-vendor
+          // rental whose renter name didn't match any LDAP. Cannot be
+          // evaluated by gating logic.
           ldapMissing++;
           continue;
         }
