@@ -100,6 +100,9 @@ const CSV_HEADER_MAP: Record<string, keyof FormData> = {
   "van_rental_po": "vanRentalPo",
   "holman po": "vanRentalPo",
   "van rental po is opened up on in holman": "vanRentalPo",
+  "rental vehicle #": "vanRentalPo",
+  "rental vehicle number": "vanRentalPo",
+  "rental_vehicle_number": "vanRentalPo",
   "van number": "trimVanNum",
   "van_number": "trimVanNum",
   "trim van num": "trimVanNum",
@@ -175,7 +178,7 @@ function csvCell(v: unknown): string {
 function exportEntriesToCsv(rows: RentalLogEntry[]) {
   const header = [
     "Date of Request",
-    "Van Rental PO",
+    "Rental Vehicle #",
     "Tech Name",
     "Enterprise ID",
     "LDAP",
@@ -757,7 +760,7 @@ function EntryPanel({ entry, onClose, onSaved }: PanelProps) {
             form={form}
             set={set}
           />
-          <Field label="Van Rental PO (Holman)" field="vanRentalPo" form={form} set={set} />
+          <Field label="Rental Vehicle #" field="vanRentalPo" form={form} set={set} />
           <Field label="Van Number" field="trimVanNum" form={form} set={set} />
           <Field label="Name" field="name" form={form} set={set} />
           <Field label="Enterprise ID" field="enterpriseId" form={form} set={set} />
@@ -1017,7 +1020,7 @@ export default function NewRentalFullLog() {
       render: (e) => fmtDate(e.dateOfRequest),
     },
     {
-      label: "Van Rental PO (Holman)",
+      label: "Rental Vehicle #",
       sortKey: "vanRentalPo",
       render: (e) => e.vanRentalPo ?? "—",
     },

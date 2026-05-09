@@ -36,6 +36,7 @@ import {
   listRentalChecks,
   listNewRentalLog,
   createNewRentalLogEntry,
+  upsertFullLogFromDecision,
   bulkCreateNewRentalLogEntries,
   updateNewRentalLogEntry,
   deleteNewRentalLogEntry,
@@ -1557,9 +1558,12 @@ export function registerVrmRoutes(): Router {
         state, district, completes, dailyRevenue, dailyCosts,
         dailyNetBeforeRental, dailyPptProfit,
         supervisorName, supervisorLdap, supervisorPhone,
+        rentalVehicleNumber,
       } = req.body;
       if (!techLdap || !decision || !decidedByName)
         return res.status(400).json({ error: "techLdap, decision, and decidedByName required" });
+      if (!rentalVehicleNumber || !String(rentalVehicleNumber).trim())
+        return res.status(400).json({ error: "rentalVehicleNumber required" });
       const row = await addRentalDecision({
         techLdap,
         techName: techName ?? null,
@@ -1608,7 +1612,30 @@ export function registerVrmRoutes(): Router {
         );
       }
 
-      res.json({ ...row, trackerSync });
+      // ── Auto-populate the New Rental Full Log ───────────────────────────
+      // Both approvals AND denials create/update a row in vrm_new_rental_log
+      // so the user no longer has to manually re-enter every field. Keyed on
+      // (UPPER(enterprise_id), date_of_request) so re-decisions on the same
+      // day update the existing row instead of duplicating.
+      let fullLogSync: { ok: boolean; rowId: string | null; error: string | null } = {
+        ok: false, rowId: null, error: null,
+      };
+      try {
+        const rowId = await upsertFullLogFromDecision({
+          techLdap: String(techLdap).toUpperCase(),
+          techName: techName ?? null,
+          decidedByName,
+          decision: String(decision).toLowerCase(),
+          notes: notes ?? null,
+          rentalVehicleNumber: String(rentalVehicleNumber).trim(),
+        });
+        fullLogSync = { ok: rowId != null, rowId, error: null };
+      } catch (logErr: any) {
+        console.error("[VRM] profitability/log full-log auto-populate error:", logErr.message);
+        fullLogSync = { ok: false, rowId: null, error: logErr?.message ?? "auto-populate failed" };
+      }
+
+      res.json({ ...row, trackerSync, fullLogSync });
     } catch (e: any) {
       console.error("[VRM] profitability/log error:", e.message);
       res.status(500).json({ error: e.message });

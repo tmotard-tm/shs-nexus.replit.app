@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock, ChevronRight, TriangleAlert, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 
@@ -458,11 +459,13 @@ function DecisionForm({
   row: ProfitRow;
   action: "approved" | "denied";
   onCancel: () => void;
-  onSubmit: (name: string, notes: string) => void;
+  onSubmit: (name: string, notes: string, rentalVehicleNumber: string) => void;
   isSubmitting: boolean;
 }) {
   const [name, setName] = useState("");
   const [notes, setNotes] = useState("");
+  const [rentalVehicleNumber, setRentalVehicleNumber] = useState("");
+  const canSubmit = name.trim().length > 0 && rentalVehicleNumber.trim().length > 0;
   return (
     <tr>
       <td colSpan={12} style={{ padding: "12px 16px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
@@ -488,6 +491,22 @@ function DecisionForm({
           />
           <input
             type="text"
+            placeholder="Rental Vehicle # (Holman)"
+            value={rentalVehicleNumber}
+            onChange={(e) => setRentalVehicleNumber(e.target.value)}
+            style={{
+              fontFamily: fonts.dmSans,
+              fontSize: 13,
+              padding: "6px 10px",
+              border: `1px solid ${colors.rule}`,
+              borderRadius: 8,
+              backgroundColor: colors.background,
+              width: 180,
+              outline: "none",
+            }}
+          />
+          <input
+            type="text"
             placeholder="Notes (optional)"
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
@@ -504,8 +523,8 @@ function DecisionForm({
             }}
           />
           <button
-            disabled={!name.trim() || isSubmitting}
-            onClick={() => onSubmit(name.trim(), notes.trim())}
+            disabled={!canSubmit || isSubmitting}
+            onClick={() => onSubmit(name.trim(), notes.trim(), rentalVehicleNumber.trim())}
             style={{
               fontFamily: fonts.dmSans,
               fontSize: 12,
@@ -513,10 +532,10 @@ function DecisionForm({
               padding: "6px 16px",
               borderRadius: 8,
               border: "none",
-              cursor: name.trim() && !isSubmitting ? "pointer" : "not-allowed",
+              cursor: canSubmit && !isSubmitting ? "pointer" : "not-allowed",
               color: "#fff",
               backgroundColor: action === "approved" ? colors.green : colors.red,
-              opacity: !name.trim() || isSubmitting ? 0.5 : 1,
+              opacity: !canSubmit || isSubmitting ? 0.5 : 1,
             }}
           >
             {isSubmitting ? "Saving…" : "Confirm"}
@@ -1100,6 +1119,7 @@ function checkAccessor(col: string): (r: CheckRow) => unknown {
 
 export default function NewRentals() {
   const qc = useQueryClient();
+  const { toast } = useToast();
   const [ldapInput, setLdapInput] = useState("");
   const [evaluatedRows, setEvaluatedRows] = useState<ProfitRow[]>([]);
   const [snapshotMeta, setSnapshotMeta] = useState<SnapshotMeta | null>(null);
@@ -1189,14 +1209,28 @@ export default function NewRentals() {
   const logMut = useMutation({
     mutationFn: async (body: Record<string, unknown>) => {
       const res = await apiRequest("POST", "/api/vrm/profitability/log", body);
-      return res.json();
+      return res.json() as Promise<{
+        fullLogSync?: { ok: boolean; rowId: string | null; error: string | null };
+      }>;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setFormRow(null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
       qc.invalidateQueries({ queryKey: ["/api/vrm/repair-tracker"] });
       // Decision Log on NewRentalFullLog mirrors decision/notes/date — keep it fresh.
       qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
+
+      // Surface partial-success: decision was logged, but the Full Log
+      // auto-populate failed. The user can still manually add/edit the row,
+      // but they need to know it didn't sync automatically.
+      const sync = data?.fullLogSync;
+      if (sync && !sync.ok) {
+        toast({
+          variant: "destructive",
+          title: "Decision logged, but Full Log auto-populate failed",
+          description: sync.error ?? "Please add the Full Log entry manually.",
+        });
+      }
     },
   });
 
@@ -1836,7 +1870,7 @@ export default function NewRentals() {
                           action={formRow.action}
                           isSubmitting={logMut.isPending}
                           onCancel={() => setFormRow(null)}
-                          onSubmit={(name, notes) =>
+                          onSubmit={(name, notes, rentalVehicleNumber) =>
                             logMut.mutate({
                               techLdap: row.tech_ldap,
                               techName: row.tech_name,
@@ -1845,6 +1879,7 @@ export default function NewRentals() {
                               decision: formRow.action,
                               decidedByName: name,
                               notes: notes || null,
+                              rentalVehicleNumber,
                               scorecardScore: row.scorecard_score,
                               tenureMonths: row.tenure_months,
                               // Snapshot of evaluator inputs/outputs so the

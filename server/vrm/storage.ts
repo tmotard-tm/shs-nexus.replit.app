@@ -1290,6 +1290,195 @@ export async function clearAllNewRentalLogEntries() {
   await db.execute(sql`DELETE FROM vrm_new_rental_log`);
 }
 
+// ─── Auto-populate Full Log from a New Rentals decision ──────────────────────
+
+import { AmsApiService } from "../ams-api-service";
+import { holmanVehiclesCache } from "../../shared/schema";
+import { extractShopInfoFromAmsComments } from "./ams-shop-parser";
+
+const _amsForFullLog = new AmsApiService();
+
+interface UpsertFullLogFromDecisionInput {
+  techLdap: string;          // already uppercased
+  techName: string | null;
+  decidedByName: string;
+  decision: string;          // "approved" | "denied"
+  notes: string | null;
+  rentalVehicleNumber: string;
+}
+
+/**
+ * Build (or refresh) a vrm_new_rental_log row from a freshly-logged decision
+ * so the user no longer has to manually enter every field on the Full Log page.
+ *
+ * Auto-fill sources, in priority order per field:
+ *   - Truck #, tech phone   ← tpms_tech_profiles (truck_no, mobile_phone)
+ *   - Repair location/phone ← (1) existing vrm_repair_tracker row for this
+ *                              LDAP if the shop fields are already filled,
+ *                              else (2) best-effort parse of AMS comments
+ *                              for the tech's truck.
+ *
+ * Keyed on (UPPER(enterprise_id), date_of_request=today): re-deciding the same
+ * tech on the same day updates the same row instead of creating a duplicate.
+ *
+ * Returns the row id, or null if the upsert was skipped.
+ */
+export async function upsertFullLogFromDecision(
+  input: UpsertFullLogFromDecisionInput,
+): Promise<string | null> {
+  const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
+  const ldap = input.techLdap.trim().toUpperCase();
+  if (!ldap) return null;
+
+  const isApproved = input.decision === "approved";
+
+  // 1) TPMS profile for truck # + tech phone (+ name fallback)
+  let truckNo: string | null = null;
+  let techPhone: string | null = null;
+  let nameFromTpms: string | null = null;
+  try {
+    const tpmsResult = await db.execute(sql`
+      SELECT truck_no, mobile_phone, first_name, last_name
+      FROM tpms_tech_profiles
+      WHERE UPPER(enterprise_id) = ${ldap}
+      LIMIT 1
+    `);
+    const r = ((tpmsResult as any).rows ?? [])[0] as
+      | { truck_no: string | null; mobile_phone: string | null; first_name: string | null; last_name: string | null }
+      | undefined;
+    if (r) {
+      truckNo = r.truck_no?.trim() || null;
+      techPhone = r.mobile_phone?.trim() || null;
+      nameFromTpms = [r.first_name, r.last_name].filter(Boolean).join(" ").trim() || null;
+    }
+  } catch (e: any) {
+    console.warn("[VRM] upsertFullLogFromDecision TPMS lookup failed:", e.message);
+  }
+
+  // 2) Existing repair-tracker row for this LDAP — preferred shop source
+  let repairLocation: string | null = null;
+  let repairPhone: string | null = null;
+  try {
+    const trackerRow = await db.execute(sql`
+      SELECT repair_shop_address, repair_shop_phone
+      FROM vrm_repair_tracker
+      WHERE UPPER(tech_ldap) = ${ldap}
+        AND (
+          (repair_shop_address IS NOT NULL AND repair_shop_address <> '')
+          OR (repair_shop_phone IS NOT NULL AND repair_shop_phone <> '')
+        )
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1
+    `);
+    const t = ((trackerRow as any).rows ?? [])[0] as
+      | { repair_shop_address: string | null; repair_shop_phone: string | null }
+      | undefined;
+    if (t) {
+      repairLocation = t.repair_shop_address?.trim() || null;
+      repairPhone = t.repair_shop_phone?.trim() || null;
+    }
+  } catch (e: any) {
+    console.warn("[VRM] upsertFullLogFromDecision tracker lookup failed:", e.message);
+  }
+
+  // 3) Fallback: parse AMS comments for the tech's truck
+  if ((!repairLocation || !repairPhone) && truckNo && _amsForFullLog.isConfigured()) {
+    try {
+      const normalized = truckNo.replace(/^0+/, "") || truckNo;
+      const vinRows = await db
+        .select({ vin: holmanVehiclesCache.vin })
+        .from(holmanVehiclesCache)
+        .where(sql`(
+          LTRIM(${holmanVehiclesCache.holmanVehicleNumber}, '0') = ${normalized}
+          OR LTRIM(COALESCE(${holmanVehiclesCache.holmanVehicleRef}, ''), '0') = ${normalized}
+        )`);
+      const vin = vinRows.find((r) => r.vin && r.vin.trim())?.vin?.trim().toUpperCase() ?? null;
+      if (vin) {
+        const raw = await _amsForFullLog.getComments(vin).catch(() => []);
+        const list: any[] = Array.isArray(raw)
+          ? raw
+          : (raw?.data ?? raw?.comments ?? raw?.results ?? raw?.items ?? []);
+        const parsed = extractShopInfoFromAmsComments(list);
+        if (!repairLocation && parsed.repairLocation) repairLocation = parsed.repairLocation;
+        if (!repairPhone && parsed.repairPhone) repairPhone = parsed.repairPhone;
+      }
+    } catch (e: any) {
+      console.warn("[VRM] upsertFullLogFromDecision AMS parse failed:", e.message);
+    }
+  }
+
+  // 4) Race-safe upsert keyed on (UPPER(enterprise_id), date_of_request).
+  //
+  // We don't have a DB unique constraint on this composite key (existing data
+  // may violate it), so we serialize concurrent same-tech/same-day decisions
+  // with a Postgres transaction-scoped advisory lock keyed on a stable hash
+  // of (ldap, date). All reads + write happen inside the same transaction so
+  // a second concurrent decision sees the row the first one inserted.
+  const effectiveName = (input.techName?.trim() || nameFromTpms || null);
+  const lockKey = `${ldap}|${today}`;
+
+  return await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+
+    const existing = await tx.execute(sql`
+      SELECT id FROM vrm_new_rental_log
+      WHERE UPPER(COALESCE(enterprise_id, '')) = ${ldap}
+        AND date_of_request = ${today}::date
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+    const existingId = ((existing as any).rows ?? [])[0]?.id as string | undefined;
+
+    // Auto-discovered fields (truck #, tech phone, repair shop) use
+    // COALESCE(NULLIF(existing, ''), …) so we never clobber a value the user
+    // hand-edited on the Full Log page. Decision-derived fields (issue notes,
+    // decider, approve/deny booleans, rental vehicle #) are always
+    // overwritten to reflect the latest decision context for re-decisions.
+    if (existingId) {
+      await tx.execute(sql`
+        UPDATE vrm_new_rental_log SET
+          van_rental_po       = ${input.rentalVehicleNumber},
+          name                = COALESCE(NULLIF(name, ''), ${effectiveName}),
+          enterprise_id       = COALESCE(NULLIF(enterprise_id, ''), ${ldap}),
+          trim_van_num        = COALESCE(NULLIF(trim_van_num, ''), ${truckNo}),
+          tech_ph_num         = COALESCE(NULLIF(tech_ph_num, ''), ${techPhone}),
+          van_assigned_in_tpms= COALESCE(NULLIF(van_assigned_in_tpms, ''), ${truckNo}),
+          start_rental_date   = COALESCE(start_rental_date, ${today}::date),
+          repair_location     = COALESCE(NULLIF(repair_location, ''), ${repairLocation}),
+          repair_phone        = COALESCE(NULLIF(repair_phone, ''), ${repairPhone}),
+          issue               = ${input.notes},
+          rental_approved     = ${isApproved},
+          declined_repair     = ${!isApproved},
+          team_members        = ${input.decidedByName}
+        WHERE id = ${existingId}
+      `);
+      return existingId;
+    }
+
+    const inserted = await tx
+      .insert(vrmNewRentalLog)
+      .values({
+        dateOfRequest: today,
+        vanRentalPo: input.rentalVehicleNumber,
+        name: effectiveName,
+        enterpriseId: ldap,
+        trimVanNum: truckNo,
+        techPhNum: techPhone,
+        vanAssignedInTpms: truckNo,
+        startRentalDate: today,
+        repairLocation,
+        repairPhone,
+        issue: input.notes,
+        rentalApproved: isApproved,
+        declinedRepair: !isApproved,
+        teamMembers: input.decidedByName,
+      })
+      .returning({ id: vrmNewRentalLog.id });
+
+    return inserted[0]?.id ?? null;
+  });
+}
+
 // ─── Repair Tracker ──────────────────────────────────────────────────────────
 
 export async function listRepairTracker() {
