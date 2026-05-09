@@ -234,7 +234,7 @@ const FleetTeamCommentsCell = memo(function FleetTeamCommentsCell({
     }}>
       <PopoverTrigger asChild>
         <button
-          className="flex items-center gap-1 text-left hover:bg-muted/50 px-1 py-0.5 rounded cursor-pointer min-w-[120px] w-full text-xs"
+          className="flex items-center gap-1 text-left rounded border border-dashed border-border/60 bg-muted/20 hover:bg-muted hover:border-primary/50 px-2 py-1 cursor-pointer w-full text-xs transition-colors"
           data-testid={`button-fleet-comments-${vehicleNumber}`}
           disabled={isPending}
         >
@@ -419,10 +419,11 @@ const EditableTextCell = memo(function EditableTextCell({
   }
 
   return (
-    <div 
-      className="cursor-pointer hover:bg-muted/50 rounded px-1 py-0.5 text-xs"
+    <div
+      className="group cursor-pointer rounded border border-dashed border-border/60 bg-muted/20 hover:bg-muted hover:border-primary/50 px-2 py-1 text-xs transition-colors w-full"
       onClick={handleStartEdit}
       data-testid={`cell-${testIdPrefix}-${vehicleNumber}`}
+      title="Click to edit"
     >
       {currentValue ? (
         <span style={inputType === 'textarea' ? { whiteSpace: 'pre-wrap', display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' } : { display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
@@ -470,7 +471,7 @@ const EditableSelectCell = memo(function EditableSelectCell({
       onValueChange={handleChange}
       disabled={isPending}
     >
-      <SelectTrigger className="h-7 text-xs" data-testid={`select-${testIdPrefix}-${vehicleNumber}`}>
+      <SelectTrigger className="h-8 text-xs border-dashed border-border/60 bg-muted/20 hover:bg-muted hover:border-primary/50 transition-colors" data-testid={`select-${testIdPrefix}-${vehicleNumber}`}>
         <SelectValue placeholder="Select..." />
       </SelectTrigger>
       <SelectContent>
@@ -1535,14 +1536,14 @@ export default function Spares() {
                           )}
                         </div>
                       </th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[100px] bg-background">Source</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[100px] bg-background">Keys</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[130px] bg-background">Repaired</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[120px] bg-background">Reg. Renewal</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[150px] bg-background">Contact</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[200px] bg-background">General Comments</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Source</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Keys</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Repaired</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Reg. Renewal</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Contact</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">General Comments</th>
                       <th 
-                        className="text-left py-2 px-2 font-medium min-w-[180px] bg-background"
+                        className="text-left py-2 px-2 font-medium bg-background"
                         data-testid="header-fleet-team-comments-other"
                       >
                         <Popover>
@@ -1584,13 +1585,13 @@ export default function Spares() {
                           </PopoverContent>
                         </Popover>
                       </th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[140px] bg-background" data-testid="header-last-edited-other">Last Edited</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background" data-testid="header-last-edited-other">Last Edited</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredOtherLocations.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b hover:bg-muted/50" data-testid={`row-other-${vehicle.vehicleNumber}`}>
-                        <td className="align-top py-2 px-2 font-medium">
+                      <tr key={vehicle.vehicleNumber} className="border-b border-border hover:bg-muted/40 transition-colors" data-testid={`row-other-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-2 px-2 overflow-hidden font-medium">
                           <div className="flex flex-col">
                             <div className="flex items-center gap-1">
                               <span>{vehicle.vehicleNumber}</span>
@@ -1609,7 +1610,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-xs">{vehicle.vin || '-'}</span>
                             {vehicle.vin && (
@@ -1627,7 +1628,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 min-w-[250px]">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.confirmedAddress}
@@ -1637,10 +1638,10 @@ export default function Spares() {
                             testIdPrefix="confirmed-address"
                             showDate={true}
                             dateValue={vehicle.confirmedAddressUpdatedAt ? formatDate(vehicle.confirmedAddressUpdatedAt) : undefined}
-                            className="w-60"
+                            className="w-full max-w-full"
                           />
                         </td>
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           {vehicle.samsaraAddress ? (
                             <div>
                               <span>{vehicle.samsaraAddress}</span>
@@ -1654,7 +1655,7 @@ export default function Spares() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
-                        <td className="align-top py-2 px-2 whitespace-nowrap">
+                        <td className="align-top py-2 px-2 overflow-hidden whitespace-nowrap">
                           {vehicle.locationSource === 'both' && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded">Both</span>
                           )}
@@ -1666,7 +1667,7 @@ export default function Spares() {
                           )}
                         </td>
                         {/* Keys Status */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.keysStatus}
@@ -1678,7 +1679,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Repaired Status */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.repairedStatus}
@@ -1689,7 +1690,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Registration Renewal Date */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.registrationRenewalDate}
@@ -1698,11 +1699,11 @@ export default function Spares() {
                             placeholder="Click to add"
                             inputType="date"
                             testIdPrefix="regdate"
-                            className="w-32"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* Contact Name/Phone */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.contactNamePhone}
@@ -1711,11 +1712,11 @@ export default function Spares() {
                             placeholder="Click to add"
                             maxLength={60}
                             testIdPrefix="contact"
-                            className="w-40"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* General Comments */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.generalComments}
@@ -1725,11 +1726,11 @@ export default function Spares() {
                             maxLength={500}
                             inputType="textarea"
                             testIdPrefix="general-comments"
-                            className="w-48"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* Fleet Team Comments */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <FleetTeamCommentsCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.fleetTeamComments}
@@ -1737,7 +1738,7 @@ export default function Spares() {
                             isPending={updateStatusMutation.isPending}
                           />
                         </td>
-                        <td className="align-top py-2 px-2 text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-2 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-${vehicle.vehicleNumber}`}>
                           {vehicle.manualEditTimestamp ? new Date(vehicle.manualEditTimestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '-'}
                         </td>
                       </tr>
@@ -1830,14 +1831,14 @@ export default function Spares() {
                           )}
                         </div>
                       </th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[100px] bg-background">Source</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[100px] bg-background">Keys</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[130px] bg-background">Repaired</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[120px] bg-background">Reg. Renewal</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[150px] bg-background">Contact</th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[200px] bg-background">General Comments</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Source</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Keys</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Repaired</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Reg. Renewal</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">Contact</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background">General Comments</th>
                       <th 
-                        className="text-left py-2 px-2 font-medium min-w-[180px] bg-background"
+                        className="text-left py-2 px-2 font-medium bg-background"
                         data-testid="header-fleet-team-comments-repair"
                       >
                         <Popover>
@@ -1879,13 +1880,13 @@ export default function Spares() {
                           </PopoverContent>
                         </Popover>
                       </th>
-                      <th className="text-left py-2 px-2 font-medium min-w-[140px] bg-background" data-testid="header-last-edited-repair">Last Edited</th>
+                      <th className="text-left py-2 px-2 font-medium bg-background" data-testid="header-last-edited-repair">Last Edited</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredRepairShop.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b hover:bg-muted/50" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
-                        <td className="align-top py-2 px-2 font-medium">
+                      <tr key={vehicle.vehicleNumber} className="border-b border-border hover:bg-muted/40 transition-colors" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-2 px-2 overflow-hidden font-medium">
                           <div className="flex items-center gap-1">
                             <Link href={`/trucks/${vehicle.vehicleNumber}`}>
                               <span className="text-primary hover:underline cursor-pointer">{vehicle.vehicleNumber}</span>
@@ -1901,7 +1902,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <div className="flex items-center gap-1">
                             <span className="font-mono text-xs">{vehicle.vin || '-'}</span>
                             {vehicle.vin && (
@@ -1919,7 +1920,7 @@ export default function Spares() {
                             )}
                           </div>
                         </td>
-                        <td className="align-top py-2 px-2 min-w-[250px]">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.confirmedAddress}
@@ -1929,10 +1930,10 @@ export default function Spares() {
                             testIdPrefix="confirmed-address-repair"
                             showDate={true}
                             dateValue={vehicle.confirmedAddressUpdatedAt ? formatDate(vehicle.confirmedAddressUpdatedAt) : undefined}
-                            className="w-60"
+                            className="w-full max-w-full"
                           />
                         </td>
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           {vehicle.samsaraAddress ? (
                             <div>
                               <span>{vehicle.samsaraAddress}</span>
@@ -1946,7 +1947,7 @@ export default function Spares() {
                             <span className="text-muted-foreground">-</span>
                           )}
                         </td>
-                        <td className="align-top py-2 px-2 whitespace-nowrap">
+                        <td className="align-top py-2 px-2 overflow-hidden whitespace-nowrap">
                           {vehicle.locationSource === 'both' && (
                             <span className="px-2 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 text-xs rounded">Both</span>
                           )}
@@ -1958,7 +1959,7 @@ export default function Spares() {
                           )}
                         </td>
                         {/* Keys Status */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.keysStatus}
@@ -1970,7 +1971,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Repaired Status */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableSelectCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.repairedStatus}
@@ -1981,7 +1982,7 @@ export default function Spares() {
                           />
                         </td>
                         {/* Registration Renewal Date */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.registrationRenewalDate}
@@ -1990,11 +1991,11 @@ export default function Spares() {
                             placeholder="Click to add"
                             inputType="date"
                             testIdPrefix="regdate-repair"
-                            className="w-32"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* Contact Name/Phone */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.contactNamePhone}
@@ -2003,11 +2004,11 @@ export default function Spares() {
                             placeholder="Click to add"
                             maxLength={60}
                             testIdPrefix="contact-repair"
-                            className="w-40"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* General Comments */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <EditableTextCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.generalComments}
@@ -2017,11 +2018,11 @@ export default function Spares() {
                             maxLength={500}
                             inputType="textarea"
                             testIdPrefix="general-comments-repair"
-                            className="w-48"
+                            className="w-full max-w-full"
                           />
                         </td>
                         {/* Fleet Team Comments */}
-                        <td className="align-top py-2 px-2">
+                        <td className="align-top py-2 px-2 overflow-hidden">
                           <FleetTeamCommentsCell
                             vehicleNumber={vehicle.vehicleNumber}
                             currentValue={vehicle.fleetTeamComments}
@@ -2029,7 +2030,7 @@ export default function Spares() {
                             isPending={updateStatusMutation.isPending}
                           />
                         </td>
-                        <td className="align-top py-2 px-2 text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-repair-${vehicle.vehicleNumber}`}>
+                        <td className="align-top py-2 px-2 overflow-hidden text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-last-edited-repair-${vehicle.vehicleNumber}`}>
                           {vehicle.manualEditTimestamp ? new Date(vehicle.manualEditTimestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true }) : '-'}
                         </td>
                       </tr>
