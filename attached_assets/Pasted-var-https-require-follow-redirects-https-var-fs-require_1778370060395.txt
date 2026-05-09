@@ -1,0 +1,43 @@
+var https = require('follow-redirects').https;
+var fs = require('fs');
+
+var options = {
+  'method': 'PUT',
+  'hostname': 'hspsc-api-gateway.prod.nextgen.shs.com',
+  'path': '/v1/api/techprofile/api/techinfo',
+  'headers': {
+    'Content-Type': 'application/json',
+    'Authorization': 'Bearer eyJhbGciOiJSUzUxMiJ9.eyJpc3MiOiJoc3NvbWF1dGhzZXJ2aWNlLmludHJhLnNlYXJzaGMuY29tIiwiaWF0IjoxNzc4Mjg5MTA5LCJzdWIiOiJkcml2ZWxpbmUiLCJhdXRoIjp7ImFkZHJlc3NlcyI6W10sImNvbXBvbmVudHMiOlt7Im5hbWUiOiJIU1BTQ0FQSUdhdGV3YXkiLCJzZXNzaW9uTGlmZSI6NTQwMCwidXJpcyI6W3sidXJpIjoiW1BPU1RdIC92MS9hcGkvdGVjaHByb2ZpbGUvYXBpL3RlbXB0cnVja2Fzc2lnbiIsInJvbGUiOiJST0xFX1VTRVIifSx7InVyaSI6IltHRVRdIC92MS9hcGkvdGVjaHByb2ZpbGUvYXBpL3RlY2hpbmZvLyoiLCJyb2xlIjoiUk9MRV9VU0VSIn0seyJ1cmkiOiJbUFVUXSAvdjEvYXBpL3RlY2hwcm9maWxlL2FwaS90ZWNoaW5mbyIsInJvbGUiOiJST0xFX1VTRVIifSx7InVyaSI6IltHRVRdIC92MS9hcGkvdGVjaHByb2ZpbGUvYXBpL3RlY2hzdXBkYXRlZGFmdGVyLyoiLCJyb2xlIjoiUk9MRV9VU0VSIn0seyJ1cmkiOiJbR0VUXSAvdjEvYXBpL3dtcy1lbmdpbmUvKioiLCJyb2xlIjoiUk9MRV9VU0VSIn0seyJ1cmkiOiJbUE9TVF0gL3YxL2FwaS93bXMtZW5naW5lLyoqIiwicm9sZSI6IlJPTEVfVVNFUiJ9LHsidXJpIjoiW1BVVF0gL3YxL2FwaS93bXMtZW5naW5lLyoqIiwicm9sZSI6IlJPTEVfVVNFUiJ9LHsidXJpIjoiW0RFTEVURV0gL3YxL2FwaS93bXMtZW5naW5lLyoqIiwicm9sZSI6IlJPTEVfVVNFUiJ9XSwidXNlcnMiOltdfV19LCJleHAiOjE3NzgyOTQ1MDl9.Luk4WtggQVqww_ANg50dP91ysasEg3TsjjRa3OUxwj_qOF0I0xbZdn3bXVBGAlYuWtGHrjiN2sl22ngPDCU71JYLjE_U6sAnE0Bd0ovOACVhONLjTdtBJ1yy2dZcER1ksSqZNmNxShqXqD21MxEa9LWKWfVq5TFw-4BDDsONoPaRfq5Tuh_QnKq9JHnFFGoTn0EY8ZWjOy7Tu3AU5tniKvnxxF2GeSP_VJjIf_e6Dir9JDXnkgaGOa6nVNudSg7ImdS03JKM6uLK8WYBZ_b44laqR-0FfvDlL3Ng45hT26W-_JQisgkNiofXfHjM-ovUETH9sCQM7XbL35ntUnZfN3cDdtKf0GHNDRpNMK8EVokZVsz6rAut_MHP7UuMFTCK8i-7rao_c53RHk7sw095F7z4vRXsc5rOYkx6GHqXS5NgXDYyO7Jfb1hbkix1n0JTd3cbZaZ0kdg_8hTpot4rabQqt0y6WNyFMRuUk1ZXXtg01VutlEzEp6yRCYI-aoLI-jREwnO4_oyaI9-MaUzhbj1b2du_EgY39Sj_DDXSDY64r9-6EfMnCpwn0cyEaeqtD74ev7Pj8M-gqTjPczukjWi-JGRCiLLBPYJh8gvx6KSJGxxej9PNhwD6pg9fOiDuriJivVAfXWn1RlAskXm0jygV1KkKE8JiJJ7VW_AmkHY'
+  },
+  'maxRedirects': 20
+};
+
+var req = https.request(options, function (res) {
+  var chunks = [];
+
+  res.on("data", function (chunk) {
+    chunks.push(chunk);
+  });
+
+  res.on("end", function (chunk) {
+    var body = Buffer.concat(chunks);
+    console.log(body.toString());
+  });
+
+  res.on("error", function (error) {
+    console.error(error);
+  });
+});
+
+var postData = JSON.stringify({
+  "techLdapId": "AARELLA",
+  "upserts": {
+    "contactNo": "3412318463",
+    "email": "3412318463@tmomail.net",
+    "updatedBy": "TMOTARD"
+  }
+});
+
+req.write(postData);
+
+req.end();

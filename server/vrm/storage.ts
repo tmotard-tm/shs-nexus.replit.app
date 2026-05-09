@@ -276,6 +276,55 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
   // source is no longer Fleet Scope.
 
   const roster = await fetchRentalRoster();
+
+  // ─── Truck# → LDAP fallback (fills in rentals where Snowflake name match
+  //     didn't resolve). Sources, in priority order:
+  //       1. tpms_tech_profiles (current TPMS assignment)
+  //       2. tpms_last_known_truck_tech (TPMS persistent snapshot)
+  //       3. holman_vehicles_cache (Holman clientData2 truck owner)
+  //     Truck# normalized to LPAD 6 to match the Snowflake roster keys.
+  const truckLdapResult = await db.execute(sql`
+    SELECT LPAD(LTRIM(COALESCE(truck_no, ''), '0'), 6, '0') AS truck_key,
+           UPPER(enterprise_id) AS ldap,
+           1 AS priority
+    FROM tpms_tech_profiles
+    WHERE enterprise_id IS NOT NULL AND enterprise_id <> '' AND truck_no IS NOT NULL
+    UNION ALL
+    SELECT LPAD(LTRIM(COALESCE(truck_no, ''), '0'), 6, '0'),
+           UPPER(enterprise_id),
+           2
+    FROM tpms_last_known_truck_tech
+    WHERE enterprise_id IS NOT NULL AND enterprise_id <> '' AND truck_no IS NOT NULL
+    UNION ALL
+    SELECT LPAD(LTRIM(COALESCE(holman_vehicle_number, ''), '0'), 6, '0'),
+           UPPER(holman_tech_assigned),
+           3
+    FROM holman_vehicles_cache
+    WHERE holman_tech_assigned IS NOT NULL AND holman_tech_assigned <> ''
+      AND holman_vehicle_number IS NOT NULL
+  `);
+  const truckToLdap = new Map<string, string>();
+  // Sort so priority 1 wins (Map.set keeps first-seen via the !has guard below).
+  const truckRows = (((truckLdapResult as any).rows ?? []) as Array<{ truck_key: string; ldap: string; priority: number }>);
+  truckRows.sort((a, b) => Number(a.priority) - Number(b.priority));
+  for (const r of truckRows) {
+    if (!r.truck_key || !r.ldap) continue;
+    if (!truckToLdap.has(r.truck_key)) truckToLdap.set(r.truck_key, r.ldap);
+  }
+
+  // Apply fallback: any roster row with null ENTERPRISE_ID gets a LDAP from
+  // the truck-side map (mutates the row in place to keep downstream simple).
+  for (const r of roster) {
+    if (!r.ENTERPRISE_ID && r.VEHICLE_NUMBER) {
+      const truckKey = String(r.VEHICLE_NUMBER).trim().padStart(6, "0");
+      const fallback = truckToLdap.get(truckKey);
+      if (fallback) {
+        r.ENTERPRISE_ID = fallback;
+        r.EID_MATCH_CONFIDENCE = "MEDIUM - TPMS Truck#";
+      }
+    }
+  }
+
   const techRows = await db.select().from(vrmTechs);
   const techByLdap = new Map(
     techRows.map((tech) => [String(tech.ldap || "").trim().toUpperCase(), tech]),
@@ -335,15 +384,16 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     const tech = ldap ? techByLdap.get(ldap) ?? null : null;
     const check = ldap ? checkByLdap.get(ldap) ?? null : null;
 
-    // EID_MATCH_CONFIDENCE values from fetchRentalRoster:
-    //   "HIGH - Truck Owner + Name Match"  → both Holman PO and DRIVELINE name match
-    //   "HIGH - Holman Truck Owner"         → Holman PO has the LDAP for this truck
-    //   "MEDIUM - Name Match"               → Only DRIVELINE name match found it
-    //   "LOW - Unresolved"                  → No LDAP resolved
+    // EID_MATCH_CONFIDENCE values:
+    //   "HIGH - Truck Owner + Name Match"  → Holman PO + DRIVELINE name agree (Snowflake)
+    //   "HIGH - Holman Truck Owner"         → Holman PO has the LDAP for this truck (Snowflake)
+    //   "MEDIUM - Name Match"               → DRIVELINE name match (Snowflake)
+    //   "MEDIUM - TPMS Truck#"              → Postgres TPMS truck# fallback (this function)
+    //   "LOW - Unresolved"                  → No LDAP resolved anywhere
     const conf = r.EID_MATCH_CONFIDENCE ?? "";
-    const isLowConf = conf.startsWith("LOW") || !ldap;
     const ldapMatchSource: ActiveRentalRow["ldapMatchSource"] = !ldap
       ? null
+      : conf.includes("TPMS Truck#") ? "truck_number"
       : conf.startsWith("MEDIUM") ? "exact_name"
       : "fleet";
 

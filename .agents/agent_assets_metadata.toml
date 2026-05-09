@@ -60,3 +60,9 @@ id = "mrAd8mmPvRtWg0CCrxCmz"
 uri = "file://docs/vehicle-field-inventory.md"
 type = "text"
 title = "Vehicle Field & Action Inventory (Plan #383, Step 1)"
+
+[[outputs]]
+id = "mYH7rzzNFREicyTqPv-qh"
+uri = "file://attached_assets/exports/tpms_bulk_update_results_partial.csv"
+type = "table"
+title = "TPMS Bulk Update — Partial Results (all 403 expired token)"
