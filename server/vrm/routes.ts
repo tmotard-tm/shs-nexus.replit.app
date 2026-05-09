@@ -778,27 +778,96 @@ export function registerVrmRoutes(): Router {
    */
   router.get("/active-rentals-dashboard/enrichment", async (_req, res) => {
     try {
+      // ── Step 1: Build a TPMS profile index keyed by BOTH truck_no AND name ──
+      // The legacy implementation only keyed by truck_no. That left every truck
+      // whose tech is no longer pointed at it in TPMS (but is still assigned to
+      // it on fs_trucks) without an LDAP, which blanked Enterprise ID, District,
+      // Daily Net, Adj Net, and Scorecard cells on the Active Rentals dashboard
+      // (~53 of 305 trucks today). Driving the map from fs_trucks and falling
+      // back to a name match recovers ~15 of those rows.
       const tpmsResult = await db.execute(sql`
         SELECT enterprise_id, first_name, last_name, mobile_phone, district_no,
                LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
         FROM tpms_tech_profiles
         WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-          AND truck_no IS NOT NULL AND truck_no <> ''
       `);
-      const byTruck = new Map<string, { ldap: string; name: string; phone: string | null; district: string | null }>();
-      const ldaps: string[] = [];
+      type Profile = { ldap: string; name: string; phone: string | null; district: string | null };
+      const profileByTruck = new Map<string, Profile>();
+      // Track all LDAPs seen per name. Name-fallback is only safe when the
+      // name resolves to exactly one LDAP — otherwise we'd attach the wrong
+      // tech (and wrong Daily Net / Adj Net / District) to the truck.
+      const profilesByName = new Map<string, Profile[]>();
       for (const r of ((tpmsResult as any).rows ?? [])) {
-        const norm = String(r.normTruck ?? "");
-        if (!norm) continue;
         const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
         const ldap = String(r.enterprise_id).toUpperCase();
-        byTruck.set(norm, {
+        const profile: Profile = {
           ldap,
           name: name || ldap,
           phone: r.mobile_phone ?? null,
           district: r.district_no ?? null,
-        });
-        ldaps.push(ldap);
+        };
+        const norm = String(r.normTruck ?? "");
+        if (norm) profileByTruck.set(norm, profile);
+        if (name) {
+          const key = name.toUpperCase();
+          const existing = profilesByName.get(key);
+          if (existing) {
+            // Same LDAP showing up twice (multiple TPMS rows for one tech) is
+            // not ambiguity — treat it as the same profile.
+            if (!existing.some(p => p.ldap === ldap)) existing.push(profile);
+          } else {
+            profilesByName.set(key, [profile]);
+          }
+        }
+      }
+
+      // ── Step 2: Drive the map from fs_trucks so every dashboard row appears ──
+      // Even when no enrichment is found, we emit a row keyed by normalized
+      // truck number with `techName` populated from fs_trucks. That guarantees
+      // the Tech Name cell never falls back to "—" purely because TPMS hasn't
+      // caught up to a recent assignment.
+      // DISTINCT ON ensures one row per normalized truck number, with the most
+      // recently created fs_trucks row winning. Without this, duplicate truck
+      // numbers (rare but possible during sync churn) would non-deterministically
+      // overwrite each other in the Map below — and an unmatched dup could
+      // wipe out a matched-LDAP row, re-introducing the blank-cell bug.
+      const trucksResult = await db.execute(sql`
+        SELECT DISTINCT ON (LTRIM(truck_number, '0'))
+               LTRIM(truck_number, '0') AS "normTruck",
+               tech_name, tech_phone
+        FROM fs_trucks
+        WHERE truck_number IS NOT NULL AND truck_number <> ''
+        ORDER BY LTRIM(truck_number, '0'), created_at DESC NULLS LAST
+      `);
+      const byTruck = new Map<string, { ldap: string | null; name: string; phone: string | null; district: string | null }>();
+      const ldaps: string[] = [];
+      for (const r of ((trucksResult as any).rows ?? [])) {
+        const norm = String(r.normTruck ?? "");
+        if (!norm) continue;
+        const truckTechName = (r.tech_name ?? "").toString().trim();
+        // 1st choice: TPMS profile keyed by truck_no (current behaviour)
+        let profile = profileByTruck.get(norm) ?? null;
+        // 2nd choice: TPMS profile keyed by tech_name match — but ONLY when
+        // that name maps unambiguously to a single LDAP. Multiple LDAPs with
+        // the same first+last name would otherwise attach the wrong tech's
+        // financials to the truck.
+        if (!profile && truckTechName) {
+          const candidates = profilesByName.get(truckTechName.toUpperCase());
+          if (candidates && candidates.length === 1) profile = candidates[0];
+        }
+        if (profile) {
+          byTruck.set(norm, profile);
+          ldaps.push(profile.ldap);
+        } else {
+          // No LDAP — still emit a row so the dashboard has a stable hit on
+          // every truck. Tech Name falls back to whatever fs_trucks knows.
+          byTruck.set(norm, {
+            ldap: null,
+            name: truckTechName,
+            phone: r.tech_phone ?? null,
+            district: null,
+          });
+        }
       }
 
       const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null; checkedAt: string | null }>();
@@ -839,8 +908,8 @@ export function registerVrmRoutes(): Router {
 
       const map: Record<string, any> = {};
       for (const [normTruck, info] of Array.from(byTruck.entries())) {
-        const check = latestCheckByLdap.get(info.ldap);
-        const gate1 = gate1ByLdap.get(info.ldap);
+        const check = info.ldap ? latestCheckByLdap.get(info.ldap) : undefined;
+        const gate1 = info.ldap ? gate1ByLdap.get(info.ldap) : undefined;
         map[normTruck] = {
           enterpriseId: info.ldap,
           techName: info.name,
