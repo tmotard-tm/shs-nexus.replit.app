@@ -1496,7 +1496,7 @@ export default function Spares() {
               <p className="text-muted-foreground text-center py-8">No vehicles found</p>
             ) : (
               <DualScrollContainer>
-                <table className="text-sm w-full" style={{tableLayout: 'fixed', minWidth: '1760px'}}>
+                <table className="text-sm w-full border-separate border-spacing-0" style={{tableLayout: 'fixed', minWidth: '1760px'}}>
                   {/* Col widths sum to 1760 (matches minWidth). 12 cols, one
                       per <th>. Previously only 11 cols were declared which
                       let the last column ("Last Edited") size itself from
@@ -1516,7 +1516,7 @@ export default function Spares() {
                     <col style={{width: '100px'}} /> {/* Last Edited        */}
                   </colgroup>
                   <thead className="bg-background">
-                    <tr className="border-b">
+                    <tr className="[&>th]:border-b-2 [&>th]:border-slate-300 dark:[&>th]:border-zinc-700">
                       <th className="text-left py-2 px-2 font-medium bg-background">Truck #</th>
                       <th className="text-left py-2 px-2 font-medium bg-background">VIN</th>
                       <th 
@@ -1609,7 +1609,7 @@ export default function Spares() {
                   </thead>
                   <tbody>
                     {filteredOtherLocations.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b border-border/50 even:bg-muted/30 hover:bg-muted/60 transition-colors" data-testid={`row-other-${vehicle.vehicleNumber}`}>
+                      <tr key={vehicle.vehicleNumber} className="[&>td]:border-b [&>td]:border-slate-200 dark:[&>td]:border-zinc-700 even:bg-slate-50 dark:even:bg-zinc-900/50 hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors" data-testid={`row-other-${vehicle.vehicleNumber}`}>
                         <td className="align-top py-3 px-2 overflow-hidden font-medium">
                           <div className="flex flex-col">
                             <div className="flex items-center gap-1">
@@ -1792,7 +1792,7 @@ export default function Spares() {
               <p className="text-muted-foreground text-center py-8">No vehicles in repair shops</p>
             ) : (
               <DualScrollContainer>
-                <table className="text-sm w-full" style={{tableLayout: 'fixed', minWidth: '1760px'}}>
+                <table className="text-sm w-full border-separate border-spacing-0" style={{tableLayout: 'fixed', minWidth: '1760px'}}>
                   {/* Col widths sum to 1760 (matches minWidth). 12 cols, one
                       per <th>. Previously only 11 cols were declared which
                       let the last column ("Last Edited") size itself from
@@ -1812,7 +1812,7 @@ export default function Spares() {
                     <col style={{width: '100px'}} /> {/* Last Edited        */}
                   </colgroup>
                   <thead className="bg-background">
-                    <tr className="border-b">
+                    <tr className="[&>th]:border-b-2 [&>th]:border-slate-300 dark:[&>th]:border-zinc-700">
                       <th className="text-left py-2 px-2 font-medium bg-background">Truck #</th>
                       <th className="text-left py-2 px-2 font-medium bg-background">VIN</th>
                       <th 
@@ -1905,7 +1905,7 @@ export default function Spares() {
                   </thead>
                   <tbody>
                     {filteredRepairShop.map((vehicle) => (
-                      <tr key={vehicle.vehicleNumber} className="border-b border-border/50 even:bg-muted/30 hover:bg-muted/60 transition-colors" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
+                      <tr key={vehicle.vehicleNumber} className="[&>td]:border-b [&>td]:border-slate-200 dark:[&>td]:border-zinc-700 even:bg-slate-50 dark:even:bg-zinc-900/50 hover:bg-slate-100 dark:hover:bg-zinc-800/40 transition-colors" data-testid={`row-repair-${vehicle.vehicleNumber}`}>
                         <td className="align-top py-3 px-2 overflow-hidden font-medium">
                           <div className="flex items-center gap-1">
                             <Link href={`/trucks/${vehicle.vehicleNumber}`}>
