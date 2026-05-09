@@ -329,6 +329,7 @@ const EditableTextCell = memo(function EditableTextCell({
   testIdPrefix,
   showDate,
   dateValue,
+  clampLines,
 }: {
   vehicleNumber: string;
   currentValue: string | null;
@@ -341,6 +342,7 @@ const EditableTextCell = memo(function EditableTextCell({
   testIdPrefix: string;
   showDate?: boolean;
   dateValue?: string;
+  clampLines?: number;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(currentValue || "");
@@ -423,10 +425,27 @@ const EditableTextCell = memo(function EditableTextCell({
       className="group cursor-pointer rounded border border-dashed border-border/60 bg-muted/20 hover:bg-muted hover:border-primary/50 px-2 py-1 text-xs transition-colors w-full"
       onClick={handleStartEdit}
       data-testid={`cell-${testIdPrefix}-${vehicleNumber}`}
-      title="Click to edit"
+      title={currentValue ? `${currentValue}${showDate && dateValue ? ` (${dateValue})` : ''} — Click to edit` : "Click to edit"}
     >
       {currentValue ? (
-        <span style={inputType === 'textarea' ? { whiteSpace: 'pre-wrap', display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' } : { display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' }}>
+        <span
+          style={
+            clampLines
+              ? {
+                  display: '-webkit-box',
+                  WebkitLineClamp: clampLines,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  wordBreak: 'break-word',
+                  overflowWrap: 'anywhere',
+                  whiteSpace: inputType === 'textarea' ? 'pre-wrap' : 'normal',
+                }
+              : inputType === 'textarea'
+                ? { whiteSpace: 'pre-wrap', display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' }
+                : { display: 'block', wordBreak: 'break-word', overflowWrap: 'anywhere' }
+          }
+        >
           {currentValue}
           {showDate && dateValue && (
             <span className="text-muted-foreground ml-2">({dateValue})</span>
@@ -1485,16 +1504,16 @@ export default function Spares() {
                   <colgroup>
                     <col style={{width: '80px'}}  /> {/* Truck #            */}
                     <col style={{width: '150px'}} /> {/* VIN                */}
-                    <col style={{width: '220px'}} /> {/* Confirmed Address  */}
-                    <col style={{width: '200px'}} /> {/* Samsara Address    */}
+                    <col style={{width: '200px'}} /> {/* Confirmed Address  */}
+                    <col style={{width: '180px'}} /> {/* Samsara Address    */}
                     <col style={{width: '80px'}}  /> {/* Source             */}
                     <col style={{width: '100px'}} /> {/* Keys               */}
                     <col style={{width: '120px'}} /> {/* Repaired           */}
-                    <col style={{width: '120px'}} /> {/* Reg. Renewal       */}
-                    <col style={{width: '140px'}} /> {/* Contact            */}
-                    <col style={{width: '220px'}} /> {/* General Comments   */}
+                    <col style={{width: '110px'}} /> {/* Reg. Renewal       */}
+                    <col style={{width: '120px'}} /> {/* Contact            */}
+                    <col style={{width: '320px'}} /> {/* General Comments   */}
                     <col style={{width: '200px'}} /> {/* Fleet Team Comments*/}
-                    <col style={{width: '130px'}} /> {/* Last Edited        */}
+                    <col style={{width: '100px'}} /> {/* Last Edited        */}
                   </colgroup>
                   <thead className="bg-background">
                     <tr className="border-b">
@@ -1727,6 +1746,7 @@ export default function Spares() {
                             inputType="textarea"
                             testIdPrefix="general-comments"
                             className="w-full max-w-full"
+                            clampLines={3}
                           />
                         </td>
                         {/* Fleet Team Comments */}
@@ -1780,16 +1800,16 @@ export default function Spares() {
                   <colgroup>
                     <col style={{width: '80px'}}  /> {/* Truck #            */}
                     <col style={{width: '150px'}} /> {/* VIN                */}
-                    <col style={{width: '220px'}} /> {/* Confirmed Address  */}
-                    <col style={{width: '200px'}} /> {/* Samsara Address    */}
+                    <col style={{width: '200px'}} /> {/* Confirmed Address  */}
+                    <col style={{width: '180px'}} /> {/* Samsara Address    */}
                     <col style={{width: '80px'}}  /> {/* Source             */}
                     <col style={{width: '100px'}} /> {/* Keys               */}
                     <col style={{width: '120px'}} /> {/* Repaired           */}
-                    <col style={{width: '120px'}} /> {/* Reg. Renewal       */}
-                    <col style={{width: '140px'}} /> {/* Contact            */}
-                    <col style={{width: '220px'}} /> {/* General Comments   */}
+                    <col style={{width: '110px'}} /> {/* Reg. Renewal       */}
+                    <col style={{width: '120px'}} /> {/* Contact            */}
+                    <col style={{width: '320px'}} /> {/* General Comments   */}
                     <col style={{width: '200px'}} /> {/* Fleet Team Comments*/}
-                    <col style={{width: '130px'}} /> {/* Last Edited        */}
+                    <col style={{width: '100px'}} /> {/* Last Edited        */}
                   </colgroup>
                   <thead className="bg-background">
                     <tr className="border-b">
@@ -2019,6 +2039,7 @@ export default function Spares() {
                             inputType="textarea"
                             testIdPrefix="general-comments-repair"
                             className="w-full max-w-full"
+                            clampLines={3}
                           />
                         </td>
                         {/* Fleet Team Comments */}
