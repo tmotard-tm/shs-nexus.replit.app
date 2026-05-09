@@ -33,6 +33,70 @@ import { MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scop
 type SortDir = "asc" | "desc" | null;
 const NONE_MARKER = "__NONE_SELECTED__";
 
+// ─── Performance helpers ──────────────────────────────────────────────────────
+
+/** Trailing-edge debounce. Returns a value that updates `delayMs` after the
+ *  source stops changing. Used to keep search/truckNumber out of the query
+ *  key on every keystroke. */
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const id = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(id);
+  }, [value, delayMs]);
+  return debounced;
+}
+
+/** Per-key debounced localStorage writer. Coalesces bursts and defers the
+ *  actual `setItem` (sync I/O + JSON.stringify) to an idle callback so it
+ *  never runs in the same task as a state update. setTimeout fallback for
+ *  Safari / older Edge that lack requestIdleCallback. */
+const _idleWriteTimers: Record<string, ReturnType<typeof setTimeout>> = {};
+function scheduleIdleWrite(key: string, payload: unknown, delayMs = 300): void {
+  if (_idleWriteTimers[key]) clearTimeout(_idleWriteTimers[key]);
+  _idleWriteTimers[key] = setTimeout(() => {
+    const run = () => {
+      try { localStorage.setItem(key, JSON.stringify(payload)); } catch {}
+    };
+    const ric = (window as any).requestIdleCallback as
+      | ((cb: () => void, opts?: { timeout?: number }) => number)
+      | undefined;
+    if (typeof ric === "function") ric(run, { timeout: 1000 });
+    else setTimeout(run, 0);
+  }, delayMs);
+}
+
+/** Phase-offset for a refetchInterval. Always returns `intervalMs` (so the
+ *  query keeps polling every interval), and additionally fires a one-shot
+ *  manual refetch at `offsetMs` after mount. TanStack Query resets its
+ *  refetch timer on each successful fetch, so the manual refetch at
+ *  `offsetMs` shifts every subsequent auto-refetch by the same offset.
+ *  End result: queries with offsets 0/20/40s land at t=0,60,120 / 20,80,140
+ *  / 40,100,160 instead of all colliding on the same 60s tick.
+ *
+ *  Note: if no consumer ever subscribes to the queryKey, the manual
+ *  refetchQueries is a no-op — safe. */
+function useStaggeredRefetchInterval(
+  qc: ReturnType<typeof useQueryClient>,
+  queryKeyPrefix: readonly unknown[],
+  intervalMs: number,
+  offsetMs: number,
+): number {
+  useEffect(() => {
+    if (offsetMs === 0) return;
+    const id = setTimeout(() => {
+      // Prefix match — works for both bare ["/api/fs/trucks"] and the
+      // ["/api/fs/trucks", paramsObj] paginated variant.
+      void qc.refetchQueries({ queryKey: queryKeyPrefix as unknown[] });
+    }, offsetMs);
+    return () => clearTimeout(id);
+    // queryKeyPrefix is a stable literal at the call site; intentionally
+    // not deep-deps'd to avoid resetting the timer on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intervalMs, offsetMs, qc]);
+  return intervalMs;
+}
+
 const SORT_PREFS_KEY = "activeRentals_sortPrefs";
 interface SortPrefs { dateInRepairSort: SortDir; regExpirySort: SortDir; dailyNetSort: SortDir; adjNetSort: SortDir; }
 function readSortPrefs(): SortPrefs {
@@ -159,6 +223,24 @@ interface SummaryResponse {
   };
 }
 
+/** Shape returned by GET /api/fs/trucks?paginated=1 (server-side filter+sort+page).
+ *  The legacy bare-array response is unchanged for the 14+ other consumers. */
+interface FSTrucksPaginatedResponse {
+  rows: FSTruck[];
+  total: number;          // unfiltered count (drives "Outstanding Rentals" chip)
+  filteredTotal: number;  // post-filter count (drives "Showing X of Y" + page math)
+  page: number;
+  pageSize: number;
+  facets: {
+    states: string[];
+    regions: string[];
+    owners: string[];
+    regExpiries: string[];
+    // Note: holmanStatuses intentionally NOT in facets — the client merges it
+    // from scraperStatusMap, same as legacy mode.
+  };
+}
+
 interface HolmanScraperStatus {
   status: string;
   lastScraped: string;
@@ -206,8 +288,11 @@ export default function ActiveRentalsDashboard() {
   const [regExpirySort, setRegExpirySort] = useState<SortDir>(_initSortPrefs.regExpirySort);
   const [dailyNetSort, setDailyNetSort] = useState<SortDir>(_initSortPrefs.dailyNetSort);
   const [adjNetSort, setAdjNetSort] = useState<SortDir>(_initSortPrefs.adjNetSort);
+  // Persist sort/filter prefs via debounced idle writer — keeps the main
+  // thread free during filter-bar typing (was a noticeable cursor-freeze
+  // contributor: synchronous setItem + JSON.stringify on every keystroke).
   useEffect(() => {
-    localStorage.setItem(SORT_PREFS_KEY, JSON.stringify({ dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort }));
+    scheduleIdleWrite(SORT_PREFS_KEY, { dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort });
   }, [dateInRepairSort, regExpirySort, dailyNetSort, adjNetSort]);
   useEffect(() => {
     const prefs: Record<string, unknown> = {
@@ -218,7 +303,7 @@ export default function ActiveRentalsDashboard() {
     };
     if (mainStatusFilter !== "all") prefs.mainStatusFilter = mainStatusFilter;
     if (subStatusFilter !== "all") prefs.subStatusFilter = subStatusFilter;
-    localStorage.setItem(FILTER_PREFS_KEY, JSON.stringify(prefs));
+    scheduleIdleWrite(FILTER_PREFS_KEY, prefs);
   }, [
     truckNumberFilter, stateFilter, regionFilter, byovFilter,
     mainStatusMulti, ownerFilter, tpmsFilter, repairedFilter,
@@ -250,14 +335,94 @@ export default function ActiveRentalsDashboard() {
   const [bulkSyncInput, setBulkSyncInput] = useState("");
   const [bulkSyncResults, setBulkSyncResults] = useState<any>(null);
 
-  // ── Reads — same endpoints Fleet Scope itself reads ──
-  const trucksQuery = useQuery<FSTruck[]>({
-    queryKey: ["/api/fs/trucks"],
-    refetchInterval: 60_000,
+  // Debounced text inputs — keeps the query key stable during typing.
+  const debouncedSearch = useDebouncedValue(search, 300);
+  const debouncedTruckNumberFilter = useDebouncedValue(truckNumberFilter, 300);
+
+  // ── Mode switch ──────────────────────────────────────────────────────────
+  // Server-side pagination is the default fast path. We fall back to the
+  // legacy full-fetch + client filter/sort path whenever any of these are
+  // true, because the server can't honour them without joining data the
+  // trucks endpoint doesn't have:
+  //  - Daily Net / Adj Net sort  → needs enrichment.dailyNetWithRental etc.
+  //  - holmanStatusFilter active → status comes from scraperStatusMap (a
+  //                                separate query) and the server doesn't
+  //                                join it. Falling back also keeps the
+  //                                Holman facet built from the full fleet.
+  //  - search active             → legacy search includes enrichment-only
+  //                                fields (enterpriseId, district); the
+  //                                server can't match those without joining
+  //                                enrichment, so we fall back to preserve
+  //                                full-text parity.
+  const usePaginatedMode =
+    dailyNetSort === null &&
+    adjNetSort === null &&
+    holmanStatusFilter.length === 0 &&
+    debouncedSearch.trim() === "";
+
+  // Stagger the three 60s queries so they don't all refetch on the same tick.
+  // (Cursor stutter was compounded by them all completing in the same task
+  // and triggering a render storm.) The 300s queries are left untouched.
+  const trucksRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/fs/trucks"], 60_000, 0);
+  const summaryRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/vrm/active-rentals-dashboard/summary"], 60_000, 20_000);
+  const shopListRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/fs/shop-list-status"], 60_000, 40_000);
+
+  // ── Paginated query (active when usePaginatedMode === true) ─────────────
+  // Build the params object that becomes part of the query key.
+  const paginatedParams = useMemo(() => {
+    const p: Record<string, string> = { paginated: "1", page: String(page), pageSize: String(ROWS_PER_PAGE) };
+    if (dateInRepairSort) { p.sort = "datePutInRepair"; p.sortDir = dateInRepairSort; }
+    else if (regExpirySort) { p.sort = "holmanRegExpiry"; p.sortDir = regExpirySort; }
+    if (debouncedSearch.trim()) p.search = debouncedSearch.trim();
+    if (debouncedTruckNumberFilter.trim()) p.truckNumber = debouncedTruckNumberFilter.trim();
+    if (mainStatusFilter !== "all") p.mainStatus = mainStatusFilter;
+    if (subStatusFilter !== "all") p.subStatus = subStatusFilter;
+    if (stateFilter.length) p.state = stateFilter.join(",");
+    if (regionFilter.length) p.region = regionFilter.join(",");
+    if (byovFilter.length) p.byov = byovFilter.join(",");
+    if (mainStatusMulti.length) p.mainStatusIn = mainStatusMulti.join(",");
+    if (ownerFilter.length) p.owner = ownerFilter.join(",");
+    if (tpmsFilter.length) p.tpms = tpmsFilter.join(",");
+    if (repairedFilter.length) p.repaired = repairedFilter.join(",");
+    if (amsFilter.length) p.ams = amsFilter.join(",");
+    if (pickSlotFilter.length) p.pickSlot = pickSlotFilter.join(",");
+    if (rentalReturnedFilter.length) p.rentalReturned = rentalReturnedFilter.join(",");
+    if (vanPickedUpFilter.length) p.vanPickedUp = vanPickedUpFilter.join(",");
+    if (regExpiryFilter.length) p.regExpiry = regExpiryFilter.join(",");
+    return p;
+  }, [
+    page, dateInRepairSort, regExpirySort,
+    debouncedSearch, debouncedTruckNumberFilter,
+    mainStatusFilter, subStatusFilter,
+    stateFilter, regionFilter, byovFilter, mainStatusMulti, ownerFilter,
+    tpmsFilter, repairedFilter, amsFilter, pickSlotFilter,
+    rentalReturnedFilter, vanPickedUpFilter, regExpiryFilter,
+  ]);
+
+  const paginatedTrucksQuery = useQuery<FSTrucksPaginatedResponse>({
+    queryKey: ["/api/fs/trucks", paginatedParams],
+    queryFn: async () => {
+      const qs = new URLSearchParams(paginatedParams).toString();
+      const res = await fetch(`/api/fs/trucks?${qs}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`${res.status}: ${await res.text() || res.statusText}`);
+      return res.json();
+    },
+    enabled: usePaginatedMode,
+    refetchInterval: usePaginatedMode ? trucksRefetchInterval : false,
   });
+
+  // Legacy full-fetch query — used when the user sorts by Daily Net or Adj Net
+  // (server can't sort those without joining enrichment), and as the cache
+  // every other consumer of /api/fs/trucks reads from.
+  const legacyTrucksQuery = useQuery<FSTruck[]>({
+    queryKey: ["/api/fs/trucks"],
+    enabled: !usePaginatedMode,
+    refetchInterval: !usePaginatedMode ? trucksRefetchInterval : false,
+  });
+
   const summaryQuery = useQuery<SummaryResponse>({
     queryKey: ["/api/vrm/active-rentals-dashboard/summary"],
-    refetchInterval: 60_000,
+    refetchInterval: summaryRefetchInterval,
   });
   const enrichmentQuery = useQuery<{ byNormalizedTruckNumber: Record<string, EnrichmentRow> }>({
     queryKey: ["/api/vrm/active-rentals-dashboard/enrichment"],
@@ -272,15 +437,30 @@ export default function ActiveRentalsDashboard() {
     rowsSkipped: number; notFound: string[]; error: string | null;
   }>({
     queryKey: ["/api/fs/shop-list-status"],
-    refetchInterval: 60_000,
+    refetchInterval: shopListRefetchInterval,
   });
 
-  const trucks = trucksQuery.data ?? [];
+  // Unified view of "the trucks for this render". In paginated mode, only the
+  // current page is in memory (50 rows); in legacy mode, the whole fleet.
+  const paginatedRows = paginatedTrucksQuery.data?.rows ?? [];
+  const trucks: FSTruck[] = usePaginatedMode ? paginatedRows : (legacyTrucksQuery.data ?? []);
+  const trucksLoading = usePaginatedMode ? paginatedTrucksQuery.isLoading : legacyTrucksQuery.isLoading;
+  const trucksError = usePaginatedMode ? paginatedTrucksQuery.error : legacyTrucksQuery.error;
   const summary = summaryQuery.data;
   const enrichmentMap = enrichmentQuery.data?.byNormalizedTruckNumber ?? {};
   const scraperStatusMap = scraperStatusQuery.data ?? {};
 
+  // Counts shown in the UI:
+  //  - `totalRentals`     → "Outstanding Rentals" chip (server `total` in
+  //                          paginated mode, full array length in legacy)
+  //  - `filteredTotal`    → "Showing X of Y" + pagination math
+  const serverTotal = paginatedTrucksQuery.data?.total;
+  const serverFilteredTotal = paginatedTrucksQuery.data?.filteredTotal;
+  const serverFacets = paginatedTrucksQuery.data?.facets;
+
   // ── Invalidate all FS + VRM caches after any mutation succeeds ──
+  // Prefix-based — covers both ["/api/fs/trucks"] (legacy) AND
+  // ["/api/fs/trucks", { paginated: 1, ... }] (paginated cache entries).
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
     qc.invalidateQueries({ queryKey: ["/api/fs/rentals/summary"] });
@@ -301,8 +481,22 @@ export default function ActiveRentalsDashboard() {
   });
 
   const saveField = (truckId: string, field: string, value: any) => {
+    // Patch the legacy bare-array cache (consumed by ~14 other components).
     qc.setQueryData<FSTruck[]>(["/api/fs/trucks"], (prev) =>
       prev ? prev.map((t) => (t.id === truckId ? { ...t, [field]: value } : t)) : prev
+    );
+    // Also patch every paginated cache entry under the same prefix so the row
+    // updates instantly in this view too. setQueriesData walks every cached
+    // query whose key starts with the given prefix.
+    qc.setQueriesData<FSTrucksPaginatedResponse>(
+      { queryKey: ["/api/fs/trucks"] },
+      (prev) => {
+        if (!prev || !Array.isArray((prev as any).rows)) return prev as any;
+        return {
+          ...prev,
+          rows: prev.rows.map((t) => (t.id === truckId ? { ...t, [field]: value } : t)),
+        };
+      }
     );
     inlineEditMutation.mutate({ truckId, field, value });
   };
@@ -410,19 +604,38 @@ export default function ActiveRentalsDashboard() {
     return (SUB_STATUSES as any)[mainStatusFilter as MainStatus] ?? [];
   }, [mainStatusFilter]);
 
-  // Build option lists for column-header MultiSelectFilters from actual data.
+  // Build option lists for column-header MultiSelectFilters.
+  // In paginated mode the server precomputes facets over the unfiltered set
+  // (so dropdowns don't shrink when filters narrow the page). In legacy mode
+  // we fall back to walking the in-memory full fleet. Holman status is always
+  // computed client-side from scraperStatusMap (the server doesn't join it).
   const columnOptions = useMemo(() => {
+    const holmanStatuses = new Set<string>();
+    for (const t of trucks) {
+      const sc = scraperStatusMap[t.truckNumber];
+      if (sc?.status) holmanStatuses.add(sc.status);
+    }
+    if (usePaginatedMode && serverFacets) {
+      return {
+        states: serverFacets.states,
+        regions: serverFacets.regions,
+        owners: serverFacets.owners,
+        holmanStatuses: Array.from(holmanStatuses).sort(),
+        regExpiries: serverFacets.regExpiries,
+        byov: ["Yes", "No"],
+        yn: ["Y", "N"],
+        mainStatuses: [...MAIN_STATUSES],
+      };
+    }
+    // Legacy path — walk the full fleet to build facets locally.
     const states = new Set<string>();
     const regions = new Set<string>();
     const owners = new Set<string>();
-    const holmanStatuses = new Set<string>();
     const regExpiries = new Set<string>();
     for (const t of trucks) {
       if (t.techState) states.add(t.techState);
       if (t.techRegion) regions.add(t.techRegion);
       if (t.shsOwner) owners.add(t.shsOwner);
-      const sc = scraperStatusMap[t.truckNumber];
-      if (sc?.status) holmanStatuses.add(sc.status);
       if (t.holmanRegExpiry) regExpiries.add(t.holmanRegExpiry);
     }
     return {
@@ -435,9 +648,12 @@ export default function ActiveRentalsDashboard() {
       yn: ["Y", "N"],
       mainStatuses: [...MAIN_STATUSES],
     };
-  }, [trucks, scraperStatusMap]);
+  }, [trucks, scraperStatusMap, usePaginatedMode, serverFacets]);
 
   const filtered = useMemo(() => {
+    // In paginated mode the server has already filtered + sorted, and `trucks`
+    // is just the current page. Skip the heavy walk and pass-through directly.
+    if (usePaginatedMode) return trucks;
     const q = search.trim().toLowerCase();
     const tnq = truckNumberFilter.trim().toLowerCase();
     const result = trucks.filter((t) => {
@@ -517,6 +733,7 @@ export default function ActiveRentalsDashboard() {
     }
     return result;
   }, [
+    usePaginatedMode,
     trucks, search, mainStatusFilter, subStatusFilter, enrichmentMap, scraperStatusMap,
     truckNumberFilter, stateFilter, regionFilter, byovFilter, mainStatusMulti, ownerFilter,
     tpmsFilter, repairedFilter, amsFilter, pickSlotFilter, rentalReturnedFilter,
@@ -547,10 +764,22 @@ export default function ActiveRentalsDashboard() {
     holmanStatusFilter.length > 0 || regExpiryFilter.length > 0 ||
     dateInRepairSort !== null || regExpirySort !== null || dailyNetSort !== null || adjNetSort !== null;
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / ROWS_PER_PAGE));
+  // Pagination math:
+  //  - Paginated mode: server sliced the page already; `trucks` IS pageRows.
+  //    Use serverFilteredTotal/serverTotal for the bottom row + chip counts.
+  //  - Legacy mode: we slice the in-memory `filtered` array ourselves.
+  const filteredCount = usePaginatedMode
+    ? (serverFilteredTotal ?? trucks.length)
+    : filtered.length;
+  const totalRentalsCount = usePaginatedMode
+    ? (serverTotal ?? trucks.length)
+    : trucks.length;
+  const totalPages = Math.max(1, Math.ceil(filteredCount / ROWS_PER_PAGE));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * ROWS_PER_PAGE;
-  const pageRows = filtered.slice(pageStart, pageStart + ROWS_PER_PAGE);
+  const pageRows = usePaginatedMode
+    ? trucks
+    : filtered.slice(pageStart, pageStart + ROWS_PER_PAGE);
 
   const topStates = useMemo(() => {
     if (!summary?.byRegion) return [] as Array<[string, number]>;
@@ -796,7 +1025,7 @@ export default function ActiveRentalsDashboard() {
               <TruckIcon className="w-4 h-4 text-blue-600" />
               <span className="text-xs font-medium text-blue-700 dark:text-blue-300">Total Rentals</span>
             </div>
-            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{summary?.totalRentals ?? trucks.length}</p>
+            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">{summary?.totalRentals ?? totalRentalsCount}</p>
           </Card>
           <Card className="p-3 border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20">
             <div className="flex items-center gap-2 mb-1">
@@ -831,7 +1060,7 @@ export default function ActiveRentalsDashboard() {
           <div className="space-y-3 mb-6">
             <div className="flex items-center gap-2 text-sm">
               <span className="text-muted-foreground">Outstanding Rentals:</span>
-              <Badge variant="secondary" className="font-semibold">{trucks.length}</Badge>
+              <Badge variant="secondary" className="font-semibold">{totalRentalsCount}</Badge>
               <span className="text-xs text-muted-foreground italic">(from Fleet Scope — source of truth)</span>
             </div>
 
@@ -873,10 +1102,10 @@ export default function ActiveRentalsDashboard() {
           </div>
 
           {/* Table */}
-          {trucksQuery.isLoading ? (
+          {trucksLoading ? (
             <div className="text-center text-muted-foreground py-12">Loading fleet…</div>
-          ) : trucksQuery.error ? (
-            <div className="text-center text-destructive py-12">Failed to load: {(trucksQuery.error as Error).message}</div>
+          ) : trucksError ? (
+            <div className="text-center text-destructive py-12">Failed to load: {(trucksError as Error).message}</div>
           ) : (
             <>
               <div className="overflow-x-auto">
@@ -1140,7 +1369,7 @@ export default function ActiveRentalsDashboard() {
 
               {/* Pagination */}
               <div className="flex items-center justify-between mt-4 text-xs text-muted-foreground">
-                <span>Showing {pageRows.length === 0 ? 0 : pageStart + 1}–{pageStart + pageRows.length} of {filtered.length}</span>
+                <span>Showing {pageRows.length === 0 ? 0 : pageStart + 1}–{pageStart + pageRows.length} of {filteredCount}</span>
                 {totalPages > 1 && (
                   <div className="flex items-center gap-1">
                     <Button variant="outline" size="sm" onClick={() => setPage(1)} disabled={safePage === 1}>First</Button>

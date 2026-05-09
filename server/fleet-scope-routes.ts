@@ -2281,16 +2281,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   })();
 
   // GET all trucks (with UPS tracking status)
+  // Default response shape: bare array `Truck[]` (preserved for the 14+ existing
+  // consumers that read /api/fs/trucks).
+  // When `?paginated=1` is set, the response is `{ rows, total, filteredTotal, facets }`
+  // with server-side filtering, sorting (whitelisted columns) and paging applied.
+  // The paginated branch is only opted into by ActiveRentalsDashboard today; if you
+  // wire up another consumer, mind the response-shape switch.
   app.get("/trucks", async (req, res) => {
     try {
       const trucks = await fleetScopeStorage.getAllTrucks();
-      
+
       // Fetch all tracking records to augment trucks with UPS status
       const allTrackingRecords = await fleetScopeStorage.getTrackingRecords();
-      
+
       // Create a map of truckId -> latest tracking record
       const trackingByTruck = new Map<string, { upsStatus: string | null; upsStatusDescription: string | null; upsLastCheckedAt: Date | null }>();
-      
+
       for (const record of allTrackingRecords) {
         if (record.truckId) {
           const existing = trackingByTruck.get(record.truckId);
@@ -2304,7 +2310,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           }
         }
       }
-      
+
       // Augment trucks with UPS status
       const trucksWithUps = trucks.map(truck => ({
         ...truck,
@@ -2312,8 +2318,147 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         upsStatusDescription: trackingByTruck.get(truck.id)?.upsStatusDescription || null,
         upsLastCheckedAt: trackingByTruck.get(truck.id)?.upsLastCheckedAt || null,
       }));
-      
-      res.json(trucksWithUps);
+
+      // ── Legacy path — unchanged response shape ──
+      if (req.query.paginated !== "1") {
+        return res.json(trucksWithUps);
+      }
+
+      // ── Paginated path ──────────────────────────────────────────────────
+      // Mirrors the client-side filter/sort logic in
+      // client/src/pages/vehicle-rental-management/pages/ActiveRentalsDashboard.tsx
+      // (search the file for `passesMulti`, `cmpDate`). Keep them in sync.
+      const NONE_MARKER = "__NONE_SELECTED__";
+      const passesMulti = (selected: string[], value: string | null | undefined): boolean => {
+        if (!selected || selected.length === 0) return true;
+        if (selected.length === 1 && selected[0] === NONE_MARKER) return false;
+        return selected.includes(String(value ?? ""));
+      };
+      const passesYn = (selected: string[], v: boolean | null | undefined): boolean => {
+        if (!selected || selected.length === 0) return true;
+        if (selected.length === 1 && selected[0] === NONE_MARKER) return false;
+        const label = v === true ? "Y" : v === false ? "N" : "";
+        return selected.includes(label);
+      };
+      const csv = (raw: unknown): string[] => {
+        if (raw == null) return [];
+        return String(raw).split(",").map(s => s.trim()).filter(Boolean);
+      };
+      const str = (raw: unknown): string => (raw == null ? "" : String(raw)).trim();
+
+      // Sort allowlist — only date columns are server-sortable today.
+      // dailyNetWithRental and gate1AdjustedNet require enrichment data that
+      // the trucks endpoint deliberately does not join — the client falls back
+      // to legacy mode when the user picks one of those sorts.
+      const SORT_ALLOWLIST = new Set(["datePutInRepair", "holmanRegExpiry"]);
+      const sortRaw = str(req.query.sort);
+      const sortKey = SORT_ALLOWLIST.has(sortRaw) ? sortRaw : null;
+      const sortDir: "asc" | "desc" | null = sortKey
+        ? (req.query.sortDir === "desc" ? "desc" : "asc")
+        : null;
+
+      const page = Math.max(1, parseInt(str(req.query.page) || "1", 10) || 1);
+      const pageSize = Math.min(200, Math.max(1, parseInt(str(req.query.pageSize) || "50", 10) || 50));
+
+      const search = str(req.query.search).toLowerCase();
+      const truckNumberFilter = str(req.query.truckNumber).toLowerCase();
+      const mainStatus = str(req.query.mainStatus);
+      const subStatus = str(req.query.subStatus);
+      const stateFilter = csv(req.query.state);
+      const regionFilter = csv(req.query.region);
+      const byovFilter = csv(req.query.byov);
+      const mainStatusMulti = csv(req.query.mainStatusIn);
+      const ownerFilter = csv(req.query.owner);
+      const tpmsFilter = csv(req.query.tpms);
+      const repairedFilter = csv(req.query.repaired);
+      const amsFilter = csv(req.query.ams);
+      const pickSlotFilter = csv(req.query.pickSlot);
+      const rentalReturnedFilter = csv(req.query.rentalReturned);
+      const vanPickedUpFilter = csv(req.query.vanPickedUp);
+      const regExpiryFilter = csv(req.query.regExpiry);
+
+      // Search-only enrichment fields (enterpriseId, district) come from the
+      // VRM enrichment query on the client. The server does not join them, so
+      // when `search` is set we can only match against truck columns. The
+      // client still merges those extra fields locally for the visible page —
+      // a search hit on enterpriseId alone won't surface in paginated mode.
+      // Acceptable tradeoff: the same search term would still match truckNumber
+      // / techName / district-on-truck for typical lookups.
+
+      // techRegion / byov are present at runtime (set by Snowflake sync on the
+      // truck row) but not modeled in the Drizzle schema yet — cast to access.
+      const filtered = trucksWithUps.filter(t => {
+        const ta = t as any;
+        if (mainStatus && mainStatus !== "all" && t.mainStatus !== mainStatus) return false;
+        if (subStatus && subStatus !== "all" && t.subStatus !== subStatus) return false;
+        if (truckNumberFilter && !(t.truckNumber ?? "").toLowerCase().includes(truckNumberFilter)) return false;
+        if (!passesMulti(stateFilter, t.techState)) return false;
+        if (!passesMulti(regionFilter, ta.techRegion)) return false;
+        if (byovFilter.length > 0) {
+          if (byovFilter.length === 1 && byovFilter[0] === NONE_MARKER) return false;
+          const isByov = !!ta.byov;
+          if (!byovFilter.includes(isByov ? "Yes" : "No")) return false;
+        }
+        if (!passesMulti(mainStatusMulti, t.mainStatus)) return false;
+        if (!passesMulti(ownerFilter, t.shsOwner)) return false;
+        if (!passesYn(tpmsFilter, t.snowflakeAssigned)) return false;
+        if (!passesYn(repairedFilter, t.repairCompleted)) return false;
+        if (!passesYn(amsFilter, t.inAms)) return false;
+        if (!passesYn(pickSlotFilter, t.pickUpSlotBooked)) return false;
+        if (!passesYn(rentalReturnedFilter, t.rentalReturned)) return false;
+        if (!passesYn(vanPickedUpFilter, t.vanPickedUp)) return false;
+        if (!passesMulti(regExpiryFilter, t.holmanRegExpiry)) return false;
+        if (!search) return true;
+        return (
+          (t.truckNumber ?? "").toLowerCase().includes(search) ||
+          (t.techName ?? "").toLowerCase().includes(search) ||
+          (t.mainStatus ?? "").toLowerCase().includes(search) ||
+          (t.subStatus ?? "").toLowerCase().includes(search) ||
+          (t.shsOwner ?? "").toLowerCase().includes(search) ||
+          (t.techState ?? "").toLowerCase().includes(search)
+        );
+      });
+
+      if (sortKey && sortDir) {
+        const cmpDate = (a: any, b: any): number => {
+          const av = a ? new Date(a).getTime() : 0;
+          const bv = b ? new Date(b).getTime() : 0;
+          return (av - bv) * (sortDir === "asc" ? 1 : -1);
+        };
+        filtered.sort((a: any, b: any) => cmpDate(a[sortKey], b[sortKey]));
+      }
+
+      // Facets — over the unfiltered set (so dropdowns don't shrink as filters apply).
+      // Holman status facet is intentionally NOT included; the client merges it
+      // from scraperStatusMap, same as legacy mode.
+      const states = new Set<string>();
+      const regions = new Set<string>();
+      const owners = new Set<string>();
+      const regExpiries = new Set<string>();
+      for (const t of trucksWithUps) {
+        const ta = t as any;
+        if (t.techState) states.add(t.techState);
+        if (ta.techRegion) regions.add(ta.techRegion);
+        if (t.shsOwner) owners.add(t.shsOwner);
+        if (t.holmanRegExpiry) regExpiries.add(t.holmanRegExpiry);
+      }
+
+      const start = (page - 1) * pageSize;
+      const rows = filtered.slice(start, start + pageSize);
+
+      return res.json({
+        rows,
+        total: trucksWithUps.length,
+        filteredTotal: filtered.length,
+        page,
+        pageSize,
+        facets: {
+          states: Array.from(states).sort(),
+          regions: Array.from(regions).sort(),
+          owners: Array.from(owners).sort(),
+          regExpiries: Array.from(regExpiries).sort(),
+        },
+      });
     } catch (error: any) {
       console.error("Error fetching trucks:", error);
       res.status(500).json({ message: "Failed to fetch trucks" });
