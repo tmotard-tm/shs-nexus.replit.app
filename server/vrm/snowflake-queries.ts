@@ -6,13 +6,33 @@ import { getSnowflakeService, isSnowflakeConfigured } from "../snowflake-service
 import { getRateConfig } from "./storage";
 
 export interface RentalRosterRow {
+  // From VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
+  VEHICLE_NUMBER: string | null;
   ENTERPRISE_ID: string | null;
+  EID_MATCH_CONFIDENCE: string | null;
   RENTER_NAME: string | null;
+  RENTAL_VENDOR: string | null;
   RENTAL_START_DATE: string | Date | null;
   DAYS_OPEN: number | null;
+  DAYS_AUTHORIZED: number | null;
+  DAYS_BEHIND: number | null;
+  NUMBER_OF_EXTENSIONS: number | null;
+  NUMBER_OF_REWRITES: number | null;
+  REPAIRS_COMPLETE: string | null;
+  TICKET_NUMBER: string | null;
+  PO_NUMBER: string | null;
+  CLAIM_NUMBER: string | null;
   PRIMARY_ZIP: string | null;
   TRUCK_STATUS: string | null;
   SOURCE: string | null;
+  // From DRIVELINE_ALL_TECHS LEFT JOIN on ENTERPRISE_ID
+  DISTRICT: string | null;
+  MARKET: string | null;
+  TENURE_CATEGORY: string | null;
+  YEARS_OF_SERVICE: number | null;
+  EMPLOYMENT_STATUS: string | null;
+  JOB_TITLE: string | null;
+  HR_FULL_NAME: string | null;
 }
 
 export interface AdjustedNetRow {
@@ -96,10 +116,21 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
       WITH nexus_deduped AS (
         SELECT
           LPAD(TRIM(n.VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
+          n.VEHICLE_NUMBER,
           n.ENTERPRISE_ID,
+          n.EID_MATCH_CONFIDENCE,
           n.RENTER_NAME,
+          n.RENTAL_VENDOR,
           n.RENTAL_START_DATE,
           n.DAYS_OPEN,
+          n.DAYS_AUTHORIZED,
+          n.DAYS_BEHIND,
+          n.NUMBER_OF_EXTENSIONS,
+          n.NUMBER_OF_REWRITES,
+          n.REPAIRS_COMPLETE,
+          n.TICKET_NUMBER,
+          n.PO_NUMBER,
+          n.CLAIM_NUMBER,
           n.PRIMARY_ZIP,
           n.TRUCK_STATUS,
           n.SOURCE
@@ -113,14 +144,34 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
         ) = 1
       )
       SELECT
+        nd.VEHICLE_NUMBER,
         nd.ENTERPRISE_ID,
+        nd.EID_MATCH_CONFIDENCE,
         nd.RENTER_NAME,
+        nd.RENTAL_VENDOR,
         nd.RENTAL_START_DATE,
         nd.DAYS_OPEN,
+        nd.DAYS_AUTHORIZED,
+        nd.DAYS_BEHIND,
+        nd.NUMBER_OF_EXTENSIONS,
+        nd.NUMBER_OF_REWRITES,
+        nd.REPAIRS_COMPLETE,
+        nd.TICKET_NUMBER,
+        nd.PO_NUMBER,
+        nd.CLAIM_NUMBER,
         nd.PRIMARY_ZIP,
         nd.TRUCK_STATUS,
-        nd.SOURCE
+        nd.SOURCE,
+        d.DISTRICT_NO       AS DISTRICT,
+        d.PLANNING_AREA_NM  AS MARKET,
+        d.TENURE_CATEGORY,
+        d.YEARS_OF_SERVICE,
+        d.EMPLOYMENT_STATUS,
+        d.JOB_TITLE,
+        d.FULL_NAME         AS HR_FULL_NAME
       FROM nexus_deduped nd
+      LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
+        ON UPPER(d.ENTERPRISE_ID) = UPPER(nd.ENTERPRISE_ID)
       ORDER BY nd.DAYS_OPEN DESC NULLS LAST
     `) as RentalRosterRow[];
     return rows;

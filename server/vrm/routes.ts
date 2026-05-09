@@ -634,85 +634,35 @@ export function registerVrmRoutes(): Router {
 
   /**
    * GET /api/vrm/active-rentals-dashboard/summary
-   * Returns the same KPI payload Fleet Scope computes — plus enrichment counts
-   * and a profit snapshot joined via TPMS → enterprise_id → vrm_rental_checks.
+   *
+   * KPIs for the VRM dashboard. Source-of-truth refactor: data comes directly
+   * from the live Snowflake roster (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
+   * via fetchRentalRoster), NOT from fs_trucks. This makes the dashboard
+   * independent of Fleet Scope.
+   *
+   * Counts are scoped to currently-active rentals only (~306 today). Old
+   * fs_trucks-derived metrics (totalRentals = whole fleet, returnedThisWeek
+   * which depended on the now-broken HOLMAN_CLOSED loader, byRegion which used
+   * techState) are dropped or reframed against the live roster.
    */
   router.get("/active-rentals-dashboard/summary", async (_req, res) => {
     try {
-      const { fleetScopeStorage } = await import("../fleet-scope-storage");
-      const { vrmRentalChecks } = await import("../../shared/vrm-schema");
+      const roster = await fetchRentalRoster();
 
-      const allTrucks = await fleetScopeStorage.getAllTrucks();
-      const rentalTrucks = allTrucks.filter(t => t.mainStatus === "NLWC - Return Rental");
+      // Distinct LDAPs for downstream Postgres lookups
+      const ldaps = Array.from(new Set(
+        roster
+          .map(r => (r.ENTERPRISE_ID ?? "").toUpperCase())
+          .filter(Boolean)
+      ));
 
-      const now = new Date();
-      const oneWeekAgo = new Date();
-      oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-
-      // ── Fleet Scope-parity KPIs (formulas copied verbatim from
-      //    server/fleet-scope-routes.ts /rentals/summary) ──
-      let totalDurationDays = 0;
-      let durationsCount = 0;
-      let overdueCount = 0;
-      let returnedThisWeek = 0;
-      const byRegion: Record<string, number> = {};
-
-      for (const t of allTrucks) {
-        if (t.datePutInRepair) {
-          const start = new Date(t.datePutInRepair);
-          if (!isNaN(start.getTime())) {
-            totalDurationDays += Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-            durationsCount++;
-          }
-        }
-        const region = t.techState || "Unknown";
-        byRegion[region] = (byRegion[region] || 0) + 1;
-      }
-      for (const t of rentalTrucks) {
-        if (t.expectedReturnDate) {
-          const expected = new Date(t.expectedReturnDate);
-          if (!isNaN(expected.getTime()) && expected < now && t.rentalStatus !== "Returned") {
-            overdueCount++;
-          }
-        }
-        if (t.rentalStatus === "Returned" && t.lastUpdatedAt) {
-          const updatedAt = new Date(t.lastUpdatedAt);
-          if (updatedAt >= oneWeekAgo) returnedThisWeek++;
-        }
-      }
-
-      // ── TPMS enrichment — truck_no → enterprise_id + name ──
-      const truckNumbers = rentalTrucks
-        .map(t => (t.truckNumber ?? "").replace(/^0+/, ""))
-        .filter(Boolean);
-      const tpmsByNormTruck = new Map<string, { ldap: string; name: string }>();
-      if (truckNumbers.length > 0) {
-        const tpmsResult = await db.execute(sql`
-          SELECT enterprise_id, first_name, last_name,
-                 LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
-          FROM tpms_tech_profiles
-          WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-            AND LTRIM(COALESCE(truck_no, ''), '0') IN (${sql.join(truckNumbers.map(v => sql`${v}`), sql`, `)})
-        `);
-        for (const r of ((tpmsResult as any).rows ?? [])) {
-          const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
-          if (r.normTruck) {
-            tpmsByNormTruck.set(String(r.normTruck), {
-              ldap: String(r.enterprise_id).toUpperCase(),
-              name: name || String(r.enterprise_id),
-            });
-          }
-        }
-      }
-
-      // ── Profit enrichment — latest check per ldap ──
-      const ldaps = Array.from(new Set(Array.from(tpmsByNormTruck.values()).map(v => v.ldap)));
-      const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null }>();
+      // ── Latest profit check per LDAP — vrm_rental_checks ──
+      const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null }>();
       if (ldaps.length > 0) {
         const checksResult = await db.execute(sql`
           SELECT DISTINCT ON (UPPER(tech_ldap))
                  UPPER(tech_ldap) AS "ldap",
-                 daily_net_with_rental, recommendation, scorecard_score
+                 daily_net_with_rental, recommendation
           FROM vrm_rental_checks
           WHERE UPPER(tech_ldap) IN (${sql.join(ldaps.map(v => sql`${v}`), sql`, `)})
           ORDER BY UPPER(tech_ldap), checked_at DESC
@@ -721,23 +671,35 @@ export function registerVrmRoutes(): Router {
           latestCheckByLdap.set(String(r.ldap), {
             dailyNet: r.daily_net_with_rental != null ? Number(r.daily_net_with_rental) : null,
             rec: r.recommendation ?? null,
-            score: r.scorecard_score != null ? Number(r.scorecard_score) : null,
           });
         }
       }
 
-      // ── Enrichment counters + profit averages ──
+      // ── Roster-derived KPIs ──
+      let totalDaysOpen = 0;
+      let durationsCount = 0;
+      let overdueCount = 0;
       let matchedToLdap = 0;
       let missingLdap = 0;
       let profitSum = 0;
       let profitCount = 0;
       const recCounts: Record<string, number> = { Approve: 0, Deny: 0, "Manual Review": 0, Other: 0 };
-      for (const t of rentalTrucks) {
-        const normTruck = (t.truckNumber ?? "").replace(/^0+/, "");
-        const tpms = normTruck ? tpmsByNormTruck.get(normTruck) : undefined;
-        if (tpms) {
+      const byMarket: Record<string, number> = {};
+
+      for (const r of roster) {
+        if (r.DAYS_OPEN != null && r.DAYS_OPEN > 0) {
+          totalDaysOpen += r.DAYS_OPEN;
+          durationsCount++;
+        }
+        if (r.DAYS_BEHIND != null && r.DAYS_BEHIND > 0) overdueCount++;
+
+        const market = (r.MARKET ?? "").trim() || "Unknown";
+        byMarket[market] = (byMarket[market] || 0) + 1;
+
+        const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase();
+        if (ldap) {
           matchedToLdap++;
-          const check = latestCheckByLdap.get(tpms.ldap);
+          const check = latestCheckByLdap.get(ldap);
           if (check?.dailyNet != null) {
             profitSum += check.dailyNet;
             profitCount++;
@@ -751,13 +713,15 @@ export function registerVrmRoutes(): Router {
       }
 
       res.json({
-        totalActive: rentalTrucks.filter(t => t.rentalStatus !== "Returned").length,
-        totalRentals: allTrucks.length,
-        averageDurationDays: durationsCount > 0 ? Math.round(totalDurationDays / durationsCount) : 0,
+        totalActive: roster.length,
+        averageDaysOpen: durationsCount > 0 ? Math.round(totalDaysOpen / durationsCount) : 0,
         overdueCount,
-        returnedThisWeek,
-        byRegion,
-        // Enrichment KPIs (new — not in Fleet Scope's version)
+        byMarket,
+        // Backward-compat aliases for legacy frontend keys
+        totalRentals: roster.length,
+        averageDurationDays: durationsCount > 0 ? Math.round(totalDaysOpen / durationsCount) : 0,
+        byRegion: byMarket,
+        returnedThisWeek: 0, // unsupported until HOLMAN_CLOSED loader is fixed
         enrichment: {
           matchedToLdap,
           missingLdap,
@@ -935,44 +899,57 @@ export function registerVrmRoutes(): Router {
 
   /**
    * GET /api/vrm/active-rentals-dashboard/rows
-   * Full fleet list (mirrors Fleet Scope's rental dashboard — shows all trucks,
-   * caller filters client-side). TPMS enrichment + latest profit check attached.
+   *
+   * One row per CURRENTLY ACTIVE rental (~306 rows today). Source-of-truth
+   * refactor: backbone is the live Snowflake roster
+   * (VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS via fetchRentalRoster), LDAP-
+   * keyed. fs_trucks is no longer the row source — this dashboard is now
+   * independent of Fleet Scope.
+   *
+   * Each row carries:
+   *   - Identity: vehicleNumber, enterpriseId, renterName, hrFullName
+   *   - Match quality: eidMatchConfidence
+   *   - Rental terms: rentalSource, rentalVendor, rentalStartDate, daysOpen,
+   *     daysAuthorized, daysBehind, numberOfExtensions, numberOfRewrites,
+   *     repairsComplete, ticketNumber, poNumber, claimNumber, truckStatus
+   *   - Tech metadata (DRIVELINE_ALL_TECHS): district, market, tenureCategory,
+   *     yearsOfService, employmentStatus, jobTitle, primaryZip
+   *   - Tech contact (tpms_tech_profiles by LDAP): techPhone
+   *   - Financials (vrm_techs + vrm_rental_checks by LDAP): adjustedNet,
+   *     gate1Classification, currentStatus, dailyNetWithRental, recommendation,
+   *     scorecardScore, lastEvaluated
+   *
+   * Backward-compat: also emits truckNumber (alias for vehicleNumber), techName
+   * (= renterName), and profitCheckedAt (= lastEvaluated) so the legacy
+   * frontend rendering path keeps working until it's fully migrated.
    */
   router.get("/active-rentals-dashboard/rows", async (_req, res) => {
     try {
-      const { fleetScopeStorage } = await import("../fleet-scope-storage");
+      const roster = await fetchRentalRoster();
 
-      // Use all trucks (same as Fleet Scope's /api/fs/trucks) rather than
-      // pre-filtering to a single main_status. The UI adds filters on top.
-      const allTrucks = await fleetScopeStorage.getAllTrucks();
+      const ldaps = Array.from(new Set(
+        roster
+          .map(r => (r.ENTERPRISE_ID ?? "").toUpperCase())
+          .filter(Boolean)
+      ));
 
-      const truckNumbers = allTrucks
-        .map(t => (t.truckNumber ?? "").replace(/^0+/, ""))
-        .filter(Boolean);
-
-      const tpmsByNormTruck = new Map<string, { ldap: string; name: string; phone: string | null; district: string | null }>();
-      if (truckNumbers.length > 0) {
+      // ── TPMS phone enrichment by LDAP (no longer truck-keyed) ──
+      const phoneByLdap = new Map<string, string | null>();
+      if (ldaps.length > 0) {
         const tpmsResult = await db.execute(sql`
-          SELECT enterprise_id, first_name, last_name, mobile_phone, district_no,
-                 LTRIM(COALESCE(truck_no, ''), '0') AS "normTruck"
+          SELECT DISTINCT ON (UPPER(enterprise_id))
+                 UPPER(enterprise_id) AS "ldap",
+                 mobile_phone
           FROM tpms_tech_profiles
-          WHERE enterprise_id IS NOT NULL AND enterprise_id <> ''
-            AND LTRIM(COALESCE(truck_no, ''), '0') IN (${sql.join(truckNumbers.map(v => sql`${v}`), sql`, `)})
+          WHERE UPPER(enterprise_id) IN (${sql.join(ldaps.map(v => sql`${v}`), sql`, `)})
+          ORDER BY UPPER(enterprise_id), updated_at DESC NULLS LAST
         `);
         for (const r of ((tpmsResult as any).rows ?? [])) {
-          const name = [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
-          if (r.normTruck) {
-            tpmsByNormTruck.set(String(r.normTruck), {
-              ldap: String(r.enterprise_id).toUpperCase(),
-              name: name || String(r.enterprise_id),
-              phone: r.mobile_phone ?? null,
-              district: r.district_no ?? null,
-            });
-          }
+          phoneByLdap.set(String(r.ldap), r.mobile_phone ?? null);
         }
       }
 
-      const ldaps = Array.from(new Set(Array.from(tpmsByNormTruck.values()).map(v => v.ldap)));
+      // ── Latest profit check per LDAP ──
       const latestCheckByLdap = new Map<string, { dailyNet: number | null; rec: string | null; score: number | null; checkedAt: string | null }>();
       if (ldaps.length > 0) {
         const checksResult = await db.execute(sql`
@@ -993,40 +970,71 @@ export function registerVrmRoutes(): Router {
         }
       }
 
-      const rows = allTrucks.map(t => {
-        const normTruck = (t.truckNumber ?? "").replace(/^0+/, "");
-        const tpms = normTruck ? tpmsByNormTruck.get(normTruck) : undefined;
-        const check = tpms ? latestCheckByLdap.get(tpms.ldap) : undefined;
-        const now = new Date();
-        const daysInRepair = t.datePutInRepair
-          ? Math.floor((now.getTime() - new Date(t.datePutInRepair).getTime()) / (1000 * 60 * 60 * 24))
-          : null;
-        const isOverdue = !!(
-          t.expectedReturnDate &&
-          t.rentalStatus !== "Returned" &&
-          new Date(t.expectedReturnDate) < now
-        );
+      // ── Gate-1 adjusted net + classification + current status from vrm_techs ──
+      const gate1ByLdap = new Map<string, { adjNet: string | null; classification: string | null; currentStatus: string | null }>();
+      if (ldaps.length > 0) {
+        const gate1Result = await db.execute(sql`
+          SELECT UPPER(ldap) AS "ldap",
+                 gate1_adjusted_net, gate1_classification, current_status
+          FROM vrm_techs
+          WHERE UPPER(ldap) IN (${sql.join(ldaps.map(v => sql`${v}`), sql`, `)})
+        `);
+        for (const r of ((gate1Result as any).rows ?? [])) {
+          gate1ByLdap.set(String(r.ldap), {
+            adjNet: r.gate1_adjusted_net != null ? String(r.gate1_adjusted_net) : null,
+            classification: r.gate1_classification ?? null,
+            currentStatus: r.current_status ?? null,
+          });
+        }
+      }
+
+      const rows = roster.map(r => {
+        const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase();
+        const check = ldap ? latestCheckByLdap.get(ldap) : undefined;
+        const tech = ldap ? gate1ByLdap.get(ldap) : undefined;
+        const phone = ldap ? phoneByLdap.get(ldap) ?? null : null;
+
         return {
-          truckNumber: t.truckNumber ?? null,
-          enterpriseId: tpms?.ldap ?? null,
-          techName: t.techName || tpms?.name || null,
-          techPhone: tpms?.phone ?? null,
-          district: tpms?.district ?? null,
-          mainStatus: t.mainStatus ?? null,
-          subStatus: t.subStatus ?? null,
-          rentalStatus: t.rentalStatus ?? null,
-          rentalReturned: t.rentalReturned ?? null,
-          rentalStartDate: t.rentalStartDate ?? null,
-          expectedReturnDate: t.expectedReturnDate ?? null,
-          datePutInRepair: t.datePutInRepair ?? null,
-          daysInRepair,
-          isOverdue,
-          techState: t.techState ?? null,
-          shsOwner: t.shsOwner ?? null,
+          // Identity (Snowflake roster + DRIVELINE)
+          vehicleNumber: r.VEHICLE_NUMBER ?? null,
+          truckNumber: r.VEHICLE_NUMBER ?? null,                  // legacy alias
+          enterpriseId: ldap || null,
+          renterName: r.RENTER_NAME ?? null,
+          techName: r.RENTER_NAME ?? null,                         // legacy alias
+          hrFullName: r.HR_FULL_NAME ?? null,
+          eidMatchConfidence: r.EID_MATCH_CONFIDENCE ?? null,
+          // Rental terms
+          rentalSource: r.SOURCE ?? null,
+          rentalVendor: r.RENTAL_VENDOR ?? null,
+          ticketNumber: r.TICKET_NUMBER ?? null,
+          poNumber: r.PO_NUMBER ?? null,
+          claimNumber: r.CLAIM_NUMBER ?? null,
+          rentalStartDate: r.RENTAL_START_DATE ?? null,
+          daysOpen: r.DAYS_OPEN ?? null,
+          daysAuthorized: r.DAYS_AUTHORIZED ?? null,
+          daysBehind: r.DAYS_BEHIND ?? null,
+          numberOfExtensions: r.NUMBER_OF_EXTENSIONS ?? null,
+          numberOfRewrites: r.NUMBER_OF_REWRITES ?? null,
+          repairsComplete: r.REPAIRS_COMPLETE ?? null,
+          truckStatus: r.TRUCK_STATUS ?? null,
+          // Tech metadata
+          district: r.DISTRICT ?? null,
+          market: r.MARKET ?? null,
+          tenureCategory: r.TENURE_CATEGORY ?? null,
+          yearsOfService: r.YEARS_OF_SERVICE ?? null,
+          employmentStatus: r.EMPLOYMENT_STATUS ?? null,
+          jobTitle: r.JOB_TITLE ?? null,
+          primaryZip: r.PRIMARY_ZIP ?? null,
+          techPhone: phone,
+          // Financials
+          adjustedNet: tech?.adjNet ?? null,
+          gate1Classification: tech?.classification ?? null,
+          currentStatus: tech?.currentStatus ?? null,
           dailyNetWithRental: check?.dailyNet ?? null,
           recommendation: check?.rec ?? null,
           scorecardScore: check?.score ?? null,
-          profitCheckedAt: check?.checkedAt ?? null,
+          lastEvaluated: check?.checkedAt ?? null,
+          profitCheckedAt: check?.checkedAt ?? null,               // legacy alias
         };
       });
       res.json({ total: rows.length, rows });
