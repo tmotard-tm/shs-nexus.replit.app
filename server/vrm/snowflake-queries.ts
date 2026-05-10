@@ -33,6 +33,8 @@ export interface RentalRosterRow {
   EMPLOYMENT_STATUS: string | null;
   JOB_TITLE: string | null;
   HR_FULL_NAME: string | null;
+  // Populated downstream by resolveRosterLdapsByName() from Postgres all_techs.
+  STATE: string | null;
 }
 
 export interface AdjustedNetRow {

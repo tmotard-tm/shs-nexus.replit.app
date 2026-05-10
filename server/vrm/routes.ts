@@ -4,6 +4,7 @@ import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
 import {
   listTechs,
   listActiveRentalsFromFleetScope,
+  resolveRosterLdapsByName,
   getDashboardStats,
   getAutoFlaggedTechIds,
   getTechById,
@@ -386,6 +387,9 @@ export function registerVrmRoutes(): Router {
         fetchScorecardScores(),
         db.execute(sql`SELECT UPPER(tech_racfid) AS ldap, planning_area_name FROM all_techs WHERE planning_area_name IS NOT NULL`),
       ]);
+      // Resolve any rows where Snowflake couldn't pin an ENTERPRISE_ID
+      // by name (uses Postgres all_techs + TPMS truck-owner fallback).
+      await resolveRosterLdapsByName(roster);
 
       const scorecardMap = new Map<string, ScorecardRow>(
         scorecardRows
@@ -648,6 +652,7 @@ export function registerVrmRoutes(): Router {
   router.get("/active-rentals-dashboard/summary", async (_req, res) => {
     try {
       const roster = await fetchRentalRoster();
+      await resolveRosterLdapsByName(roster);
 
       // Distinct LDAPs for downstream Postgres lookups
       const ldaps = Array.from(new Set(
@@ -926,6 +931,7 @@ export function registerVrmRoutes(): Router {
   router.get("/active-rentals-dashboard/rows", async (_req, res) => {
     try {
       const roster = await fetchRentalRoster();
+      await resolveRosterLdapsByName(roster);
 
       const ldaps = Array.from(new Set(
         roster

@@ -1,0 +1,51 @@
+Task: Restore the VRM Dashboard's name-resolution logic that was rolled back. fetchRentalRoster() in server/vrm/snowflake-queries.ts is already correct (queries raw Holman/Enterprise tables). The missing pieces are downstream in storage.ts and routes.ts.
+
+Constraints — DO NOT change:
+
+server/db.ts, server/fleet-scope-db.ts, server/fleet-scope-storage.ts
+DATABASE_URL or any Replit Secret
+Database schema (no DDL)
+syncRepairTrackerToFleetScope and findFleetScopeTruckForTracker in storage.ts (these legitimately still need Fleet Scope for write-back)
+The import { fleetScopeStorage } at the top of storage.ts — leave it for the write-back functions
+Step 1 — Add three helpers in server/vrm/storage.ts (above listActiveRentalsFromFleetScope):
+
+a) fuzzyMatchByName(renterName, rawTechs) — multi-tier fuzzy match against an array of {ldap, first_name, last_name, ...}. Uses existing levenshtein(). Tries:
+
+Last name suffix match (e.g. CLAIR → STCLAIR, score 80)
+Last name prefix or compound match (e.g. BLAND-ASWAD → BLAND, score 70-95)
+First name prefix in either direction (e.g. CHRISTOPHE → CHRISTOPHER, score 80)
+First name Levenshtein ≤ 2 (e.g. BRANDON → BRENDAN, score 65)
+Returns best-scoring candidate. Rejects ties.
+b) logicalNameMatch(renterFull, candidateFirst, candidateLast) — returns 'strong' | 'weak' | false. Used to confirm a truck-assigned tech matches the renter:
+
+Anchor on last name overlap (exact, contains, prefix/suffix ≥ 4 chars). If no overlap → false.
+With last-name anchor, check first name: exact / prefix either direction / 2+ shared leading chars / Levenshtein ≤ 2 → 'strong'. Otherwise → 'weak' (caller flags it).
+c) resolveRosterLdapsByName(roster) — exported. Takes a RentalRosterRow[] and mutates each row's ENTERPRISE_ID, EID_MATCH_CONFIDENCE, DISTRICT, STATE in place. Logic:
+
+Pull all_techs (Postgres) — tech_racfid, first_name, last_name, tech_name, planning_area_name, district_no, home_state. Build a name-variant index (FIRST LAST, LAST, FIRST, hyphens stripped, suffixes stripped, middle-initial stripped, first-word + last-word).
+For each roster row's RENTER_NAME:
+Tier 1: exact variant match → HIGH - Name Match, set district + state from all_techs
+Tier 2: fuzzyMatchByName against rawTechs → MEDIUM - Fuzzy Name Match
+Tier 3: lookup tpms_tech_profiles (then tpms_last_known_truck_tech fallback) by VEHICLE_NUMBER (LPAD to 6). If found, run logicalNameMatch:
+'strong' → MEDIUM - Truck# Confirmed by Name
+'weak' → LOW - Truck# Last Name Only (still resolved, flagged)
+false → unresolved
+Else: LOW - Name Not in Roster
+Returns a Map<ldap, AllTechsRow> for caller use.
+Step 2 — Refactor listActiveRentalsFromFleetScope in storage.ts:
+
+Replace the fleetScopeStorage.getAllTrucks() backbone with await fetchRentalRoster() followed by await resolveRosterLdapsByName(roster).
+Drop the entire truck→TPMS→holman→all_techs identity resolution chain inside this function (~200 lines). The new resolver handles it.
+Map each roster row to an ActiveRentalRow using RENTER_NAME for the display name, ENTERPRISE_ID for the LDAP, and the existing vrm_techs + vrm_rental_checks lookups by LDAP for financials.
+Set ldapMatchSource: "exact_name" for HIGH matches, "fuzzy_name" for MEDIUM/LOW-with-LDAP, null for unresolved.
+Keep the function name unchanged for API stability.
+Step 3 — Wire resolveRosterLdapsByName(roster) into three handlers in server/vrm/routes.ts:
+
+/sync/roster (~line 382): after fetchRentalRoster() resolves
+/active-rentals-dashboard/summary (~line 648)
+/active-rentals-dashboard/rows (~line 926)
+Import: import { resolveRosterLdapsByName } from "./storage"; (or wherever it's exported)
+Verification:
+
+npx tsc --noEmit -p tsconfig.json should not introduce new errors (existing Set<string> warning at routes.ts:2531 is pre-existing).
+After restart and a sync, the dashboard should show LDAPs for ~95%+ of rentals, with amber "fuzzy" badges on truck#-confirmed matches.
