@@ -1601,6 +1601,12 @@ export default function NewRentals() {
                 {sortedEvaluatedRows.map((row) => {
                   const be = breakeven(row);
                   const isNoData = row.recommendation === "No Data" || row.recommendation === "New Hire — Training";
+                  // Recent hire (< 6 months tenure) — approvable into the Full Log
+                  // even when financial data is missing, because no scorecard/PPT
+                  // history exists yet for a brand-new tech.
+                  const isNewHire =
+                    row.recommendation === "New Hire — Training" ||
+                    (row.tenure_months != null && row.tenure_months < 6);
                   const flags = row.flags;
                   const onLoa = !!flags?.on_loa;
                   const loaLabel = onLoa
@@ -1817,7 +1823,7 @@ export default function NewRentals() {
                           )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
-                          {isNoData ? (
+                          {isNoData && !isNewHire ? (
                             <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>N/A</span>
                           ) : (
                             <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
@@ -1840,25 +1846,29 @@ export default function NewRentals() {
                               >
                                 <CheckCircle size={12} /> Approve
                               </button>
-                              <button
-                                onClick={() => setFormRow({ ldap: row.tech_ldap, action: "denied" })}
-                                style={{
-                                  fontFamily: fonts.dmSans,
-                                  fontSize: 11,
-                                  fontWeight: 500,
-                                  padding: "4px 12px",
-                                  borderRadius: 6,
-                                  border: "none",
-                                  cursor: "pointer",
-                                  color: "#fff",
-                                  backgroundColor: colors.red,
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: 4,
-                                }}
-                              >
-                                <XCircle size={12} /> Deny
-                              </button>
+                              {/* Hide Deny when the only reason data is missing
+                                  is "recent hire" — there's nothing to deny against. */}
+                              {!isNoData && (
+                                <button
+                                  onClick={() => setFormRow({ ldap: row.tech_ldap, action: "denied" })}
+                                  style={{
+                                    fontFamily: fonts.dmSans,
+                                    fontSize: 11,
+                                    fontWeight: 500,
+                                    padding: "4px 12px",
+                                    borderRadius: 6,
+                                    border: "none",
+                                    cursor: "pointer",
+                                    color: "#fff",
+                                    backgroundColor: colors.red,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 4,
+                                  }}
+                                >
+                                  <XCircle size={12} /> Deny
+                                </button>
+                              )}
                             </div>
                           )}
                         </td>
