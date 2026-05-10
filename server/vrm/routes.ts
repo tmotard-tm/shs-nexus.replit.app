@@ -4,7 +4,6 @@ import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
 import {
   listTechs,
   listActiveRentalsFromFleetScope,
-  resolveRosterLdapsByName,
   getDashboardStats,
   getAutoFlaggedTechIds,
   getTechById,
@@ -387,9 +386,6 @@ export function registerVrmRoutes(): Router {
         fetchScorecardScores(),
         db.execute(sql`SELECT UPPER(tech_racfid) AS ldap, planning_area_name FROM all_techs WHERE planning_area_name IS NOT NULL`),
       ]);
-      // Resolve renter NAME → LDAP for every roster row via all_techs (no
-      // truck-number matching, no DRIVELINE). Mutates roster in place.
-      await resolveRosterLdapsByName(roster);
 
       const scorecardMap = new Map<string, ScorecardRow>(
         scorecardRows
@@ -434,6 +430,7 @@ export function registerVrmRoutes(): Router {
           gate2Exempt,
           gate2WeightedScore: sc?.weighted_score != null ? String(sc.weighted_score) : undefined,
           currentStatus: currentStatus as any,
+          primaryZip: row.PRIMARY_ZIP ?? undefined,
         });
         upserted++;
       }
@@ -651,7 +648,6 @@ export function registerVrmRoutes(): Router {
   router.get("/active-rentals-dashboard/summary", async (_req, res) => {
     try {
       const roster = await fetchRentalRoster();
-      await resolveRosterLdapsByName(roster);
 
       // Distinct LDAPs for downstream Postgres lookups
       const ldaps = Array.from(new Set(
@@ -697,10 +693,8 @@ export function registerVrmRoutes(): Router {
         }
         if (r.DAYS_BEHIND != null && r.DAYS_BEHIND > 0) overdueCount++;
 
-        // Group by district (geographic source from HOLMAN_OPEN row); market
-        // is no longer pulled at the SQL level — it lives in vrm_techs only.
-        const district = (r.DISTRICT ?? "").trim() || "Unknown";
-        byMarket[district] = (byMarket[district] || 0) + 1;
+        const market = (r.MARKET ?? "").trim() || "Unknown";
+        byMarket[market] = (byMarket[market] || 0) + 1;
 
         const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase();
         if (ldap) {
@@ -932,7 +926,6 @@ export function registerVrmRoutes(): Router {
   router.get("/active-rentals-dashboard/rows", async (_req, res) => {
     try {
       const roster = await fetchRentalRoster();
-      await resolveRosterLdapsByName(roster);
 
       const ldaps = Array.from(new Set(
         roster
@@ -1002,12 +995,13 @@ export function registerVrmRoutes(): Router {
         const phone = ldap ? phoneByLdap.get(ldap) ?? null : null;
 
         return {
-          // Identity (from the three validated rental tables only)
+          // Identity (Snowflake roster + DRIVELINE)
           vehicleNumber: r.VEHICLE_NUMBER ?? null,
           truckNumber: r.VEHICLE_NUMBER ?? null,                  // legacy alias
           enterpriseId: ldap || null,
           renterName: r.RENTER_NAME ?? null,
           techName: r.RENTER_NAME ?? null,                         // legacy alias
+          hrFullName: r.HR_FULL_NAME ?? null,
           eidMatchConfidence: r.EID_MATCH_CONFIDENCE ?? null,
           // Rental terms
           rentalSource: r.SOURCE ?? null,
@@ -1022,9 +1016,15 @@ export function registerVrmRoutes(): Router {
           numberOfExtensions: r.NUMBER_OF_EXTENSIONS ?? null,
           numberOfRewrites: r.NUMBER_OF_REWRITES ?? null,
           repairsComplete: r.REPAIRS_COMPLETE ?? null,
-          // Geographic enrichment (resolved by storage.ts via all_techs name match)
+          truckStatus: r.TRUCK_STATUS ?? null,
+          // Tech metadata
           district: r.DISTRICT ?? null,
-          state: r.STATE ?? null,
+          market: r.MARKET ?? null,
+          tenureCategory: r.TENURE_CATEGORY ?? null,
+          yearsOfService: r.YEARS_OF_SERVICE ?? null,
+          employmentStatus: r.EMPLOYMENT_STATUS ?? null,
+          jobTitle: r.JOB_TITLE ?? null,
+          primaryZip: r.PRIMARY_ZIP ?? null,
           techPhone: phone,
           // Financials
           adjustedNet: tech?.adjNet ?? null,

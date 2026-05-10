@@ -265,351 +265,65 @@ function levenshtein(a: string, b: string): number {
   }
   return dp[n];
 }
-/**
- * Resolves renter NAME → LDAP for every row in a rental roster by joining
- * against the Postgres all_techs employee roster (same source /sync/roster
- * already uses for planning_area_name lookup).
- *
- * Mutates each row's ENTERPRISE_ID, EID_MATCH_CONFIDENCE, DISTRICT, STATE
- * in place. Returns a map of LDAP → all_techs row so callers can also pull
- * market / additional fields without a second query.
- *
- * Two RENTER_NAME format variants are matched:
- *   - "FIRST LAST"   (Enterprise rental ticket format)
- *   - "LAST, FIRST"  (all_techs.tech_name native format)
- * Middle initials in all_techs.first_name (e.g. "AMBER M") are stripped so
- * "AMBER MOORE" still matches against "MOORE, AMBER M".
- */
-type AllTechsRow = {
-  ldap: string;
-  first_last: string;
-  last_comma_first: string;
-  market: string | null;
-  district: string | null;
-  state: string | null;
-};
-/** Iterative Levenshtein distance for short ASCII strings (second copy was a duplicate). */
-function _levenshteinUnused(a: string, b: string): number {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  let prev = new Array<number>(b.length + 1);
-  for (let j = 0; j <= b.length; j++) prev[j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    const curr = new Array<number>(b.length + 1);
-    curr[0] = i;
-    for (let j = 1; j <= b.length; j++) {
-      curr[j] = Math.min(
-        curr[j - 1] + 1,
-        prev[j] + 1,
-        prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1),
-      );
-    }
-    prev = curr;
-  }
-  return prev[b.length];
-}
+export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow[]> {
+  // ─── Source-of-truth refactor ─────────────────────────────────────────────
+  // No more Fleet Scope. The active rental backbone is fetchRentalRoster()
+  // which queries the three validated Holman tables directly:
+  //   - PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT (today)
+  //   - PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT (today, RENTAL line items)
+  // LDAP resolution and DRIVELINE district/market/tenure enrichment happen
+  // inside the SQL. Function name kept for API stability — the underlying
+  // source is no longer Fleet Scope.
 
-/**
- * Confirms whether a candidate tech (resolved via truck#) is the SAME PERSON
- * as the rental renter — by checking last-name overlap AND first-name affinity
- * (exact, prefix in either direction, shared 2+ leading characters, or
- * Levenshtein ≤ 2). Catches nickname shortenings:
- *   VINCE ROSADO ↔ VICENTE DERONE ROSADO   (last="ROSADO" appears in both,
- *                                            first VI/VI shared prefix)
- *   ROB JOHNSON  ↔ ROBERT JOHNSON          (prefix)
- *   AL TORRES    ↔ ALBERT TORRES           (prefix)
- *   BOB SMITH    ↔ ROBERT SMITH            (Levenshtein=3 → REJECT, too different)
- * Rejects wildly-different combinations:
- *   VINCE ROSADO ↔ MARIA ROSADO            (first names share zero leading chars)
- *   VINCE ROSADO ↔ BOB SMITH               (last name doesn't match)
- */
-/**
- * Returns the strength of a logical-name match between a renter and a
- * truck-assigned candidate tech:
- *   'strong' = last name matches AND first name affinity (exact, prefix,
- *              2+ leading chars, or Levenshtein ≤ 2). High confidence — same
- *              person, just nickname / spelling drift.
- *              Examples: VINCE↔VICENTE, ROB↔ROBERT, BRANDON↔BRENDAN
- *   'weak'   = last name matches but first names look unrelated. Could be a
- *              spouse, sibling, or any family member sharing the truck.
- *              Flagged for review.
- *              Examples: MARIA ROSADO renting truck assigned to VICENTE ROSADO
- *   false    = last name doesn't match → REJECT (different person on truck).
- */
-function logicalNameMatch(
-  renterFull: string,
-  candidateFirst: string | null,
-  candidateLast: string | null,
-): 'strong' | 'weak' | false {
-  if (!renterFull) return false;
-  const r = renterFull.toUpperCase().trim().replace(/-/g, ' ').replace(/\s+/g, ' ');
-  const rParts = r.split(' ').filter(Boolean);
-  if (rParts.length < 2) return false;
-  const rFirst = rParts[0];
-  const rLast = rParts[rParts.length - 1];
-  const rLastConcat = rParts.slice(1).join('');
+  const roster = await fetchRentalRoster();
 
-  const cFirst = (candidateFirst ?? '').toUpperCase().trim().split(/\s+/)[0];
-  const cLast = (candidateLast ?? '').toUpperCase().trim();
-  if (!cLast) return false;
-  const cLastWords = cLast.replace(/-/g, ' ').split(/\s+/).filter(Boolean);
-  const cLastConcat = cLast.replace(/[-\s]/g, '');
-
-  // Last-name agreement (must share — anchor of the match)
-  const lastMatch =
-    cLast === rLast ||
-    cLastConcat === rLast ||
-    cLastConcat === rLastConcat ||
-    cLastWords.includes(rLast) ||
-    (rLast.length >= 4 && (cLast.endsWith(rLast) || cLast.startsWith(rLast))) ||
-    (cLast.length >= 4 && (rLast.endsWith(cLast) || rLast.startsWith(cLast)));
-  if (!lastMatch) return false;
-
-  if (!cFirst) return 'weak';
-
-  // First-name affinity: exact, prefix (either direction),
-  // 2+ shared leading chars, or Levenshtein ≤ 2.
-  const minLen = Math.min(cFirst.length, rFirst.length);
-  const firstMatch =
-    cFirst === rFirst ||
-    cFirst.startsWith(rFirst) || rFirst.startsWith(cFirst) ||
-    (minLen >= 2 && cFirst.substring(0, 2) === rFirst.substring(0, 2)) ||
-    (cFirst.length >= 3 && rFirst.length >= 3 && levenshtein(cFirst, rFirst) <= 2);
-
-  return firstMatch ? 'strong' : 'weak';
-}
-
-/**
- * Multi-tier fuzzy match for renter names that don't hit an exact variant.
- * Handles common Enterprise rental data corruption:
- *   - Last name compound dropped:    BLAND-ASWAD → BLAND
- *   - Last name prefix dropped:      CLAIR → STCLAIR (Enterprise drops "ST")
- *   - First name truncation:         CHRISTOPHE → CHRISTOPHER
- *   - Spelling drift:                BRANDON → BRENDAN (Levenshtein ≤ 2)
- *
- * Scores last-name and first-name matches separately. Rejects ambiguous ties.
- */
-type RawTech = { ldap: string; first_name: string | null; last_name: string | null; tech_name: string | null; market: string | null; district: string | null; state: string | null };
-
-function fuzzyMatchByName(renterName: string, rawTechs: RawTech[]): RawTech | undefined {
-  let r = renterName.toUpperCase().trim();
-  r = r.replace(/\s*\b(JR\.?|SR\.?|II|III|IV|SEARS\s+SERVICE)\.?$/g, '').trim();
-  const parts = r.replace(/-/g, ' ').replace(/\s+/g, ' ').split(' ').filter(Boolean);
-  if (parts.length < 2) return undefined;
-  const renterFirst = parts[0];
-  const renterLastWords = parts.slice(1);
-  const renterLastConcat = renterLastWords.join('');
-  const renterLastWord = parts[parts.length - 1];
-
-  type Cand = { tech: RawTech; score: number };
-  const cands: Cand[] = [];
-  for (const t of rawTechs) {
-    if (!t.first_name || !t.last_name) continue;
-    const tFirst = t.first_name.toUpperCase().trim().split(/\s+/)[0];
-    const tLast = t.last_name.toUpperCase().trim();
-    const tLastConcat = tLast.replace(/[-\s]/g, '');
-
-    // Last-name match scoring
-    let lastScore = 0;
-    if (tLast === renterLastConcat || tLastConcat === renterLastConcat) lastScore = 100;
-    else if (renterLastWords.includes(tLast) || renterLastWords.includes(tLastConcat)) lastScore = 95;
-    else if (renterLastWord.length >= 4 && tLast.endsWith(renterLastWord)) lastScore = 80;     // CLAIR → STCLAIR
-    else if (renterLastWord.length >= 4 && tLast.startsWith(renterLastWord)) lastScore = 75;
-    else if (tLast.length >= 4 && renterLastWord.endsWith(tLast)) lastScore = 70;
-    else if (tLast.length >= 4 && renterLastWord.startsWith(tLast)) lastScore = 70;
-    else continue;
-
-    // First-name match scoring
-    let firstScore = 0;
-    if (tFirst === renterFirst) firstScore = 100;
-    else if (renterFirst.length >= 4 && tFirst.startsWith(renterFirst)) firstScore = 80;       // CHRISTOPHE → CHRISTOPHER
-    else if (tFirst.length >= 4 && renterFirst.startsWith(tFirst)) firstScore = 75;
-    else if (renterFirst.length >= 4 && tFirst.length >= 4 && levenshtein(tFirst, renterFirst) <= 2) firstScore = 65; // BRANDON → BRENDAN
-    else continue;
-
-    cands.push({ tech: t, score: lastScore + firstScore });
-  }
-  if (cands.length === 0) return undefined;
-  cands.sort((a, b) => b.score - a.score);
-  // Reject when top two are tied (ambiguous — could be wrong tech).
-  if (cands.length > 1 && cands[1].score === cands[0].score) return undefined;
-  return cands[0].tech;
-}
-
-/**
- * Normalize a name into multiple match variants. Handles:
- *   - Hyphens in last names (BLAND-ASWAD ↔ BLAND ASWAD)
- *   - Suffixes (JR, SR, II, III, IV, "SEARS SERVICE" corruption)
- *   - Middle names / initials (CALEB MICHAEL JACKSON ↔ CALEB JACKSON)
- * Returns the canonical "FIRST LAST" plus simplified variants.
- */
-function nameVariants(raw: string | null | undefined): string[] {
-  if (!raw) return [];
-  let n = String(raw).toUpperCase().trim();
-  // Strip known suffixes (Sears Service corruption + standard generational)
-  n = n.replace(/\s*\b(JR\.?|SR\.?|II|III|IV|SEARS\s+SERVICE)\.?$/g, '').trim();
-  if (!n) return [];
-  const out = new Set<string>();
-  out.add(n.replace(/\s+/g, ' '));
-  // Hyphens → spaces
-  const noHy = n.replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
-  if (noHy) out.add(noHy);
-  // First word + last word only (drops middles)
-  const parts = noHy.split(' ').filter(Boolean);
-  if (parts.length >= 2) {
-    out.add(`${parts[0]} ${parts[parts.length - 1]}`);
-    // Also try "LAST, FIRST" form for matching against all_techs.tech_name
-    out.add(`${parts[parts.length - 1]}, ${parts[0]}`);
-  }
-  return Array.from(out);
-}
-
-export async function resolveRosterLdapsByName(
-  roster: import("./snowflake-queries").RentalRosterRow[],
-): Promise<Map<string, AllTechsRow>> {
-  const allTechsResult = await db.execute(sql`
-    SELECT
-      UPPER(tech_racfid)            AS ldap,
-      first_name                    AS first_name,
-      last_name                     AS last_name,
-      tech_name                     AS tech_name,
-      planning_area_name            AS market,
-      district_no                   AS district,
-      home_state                    AS state
-    FROM all_techs
-    WHERE tech_racfid IS NOT NULL AND tech_racfid <> ''
-      AND (first_name IS NOT NULL OR tech_name IS NOT NULL)
-  `);
-  const rawTechs = (((allTechsResult as any).rows ?? []) as RawTech[]);
-  const rawByLdap = new Map<string, RawTech>();
-  for (const t of rawTechs) {
-    if (t.ldap && !rawByLdap.has(t.ldap)) rawByLdap.set(t.ldap, t);
-  }
-
-  // ─── Truck# → {ldap, first_name, last_name} for last-resort confirmation ─
-  // Used ONLY when name match (exact + fuzzy) fails. We then verify the
-  // truck-assigned tech's name is logically similar to the renter name
-  // (catches nicknames like VINCE/VICENTE; rejects wildly-different combos).
-  const truckLookupResult = await db.execute(sql`
+  // ─── Truck# → LDAP fallback (fills in rentals where Snowflake name match
+  //     didn't resolve). Sources, in priority order:
+  //       1. tpms_tech_profiles (current TPMS assignment)
+  //       2. tpms_last_known_truck_tech (TPMS persistent snapshot)
+  //       3. holman_vehicles_cache (Holman clientData2 truck owner)
+  //     Truck# normalized to LPAD 6 to match the Snowflake roster keys.
+  const truckLdapResult = await db.execute(sql`
     SELECT LPAD(LTRIM(COALESCE(truck_no, ''), '0'), 6, '0') AS truck_key,
            UPPER(enterprise_id) AS ldap,
-           first_name,
-           last_name,
            1 AS priority
     FROM tpms_tech_profiles
     WHERE enterprise_id IS NOT NULL AND enterprise_id <> '' AND truck_no IS NOT NULL
     UNION ALL
     SELECT LPAD(LTRIM(COALESCE(truck_no, ''), '0'), 6, '0'),
-           UPPER(enterprise_id), first_name, last_name, 2
+           UPPER(enterprise_id),
+           2
     FROM tpms_last_known_truck_tech
     WHERE enterprise_id IS NOT NULL AND enterprise_id <> '' AND truck_no IS NOT NULL
+    UNION ALL
+    SELECT LPAD(LTRIM(COALESCE(holman_vehicle_number, ''), '0'), 6, '0'),
+           UPPER(holman_tech_assigned),
+           3
+    FROM holman_vehicles_cache
+    WHERE holman_tech_assigned IS NOT NULL AND holman_tech_assigned <> ''
+      AND holman_vehicle_number IS NOT NULL
   `);
-  type TruckRow = { truck_key: string; ldap: string; first_name: string | null; last_name: string | null; priority: number };
-  const truckRows = (((truckLookupResult as any).rows ?? []) as TruckRow[]);
+  const truckToLdap = new Map<string, string>();
+  // Sort so priority 1 wins (Map.set keeps first-seen via the !has guard below).
+  const truckRows = (((truckLdapResult as any).rows ?? []) as Array<{ truck_key: string; ldap: string; priority: number }>);
   truckRows.sort((a, b) => Number(a.priority) - Number(b.priority));
-  const truckToCandidate = new Map<string, { ldap: string; first_name: string | null; last_name: string | null }>();
-  for (const tr of truckRows) {
-    if (!tr.truck_key || !tr.ldap) continue;
-    if (!truckToCandidate.has(tr.truck_key)) {
-      truckToCandidate.set(tr.truck_key, { ldap: tr.ldap, first_name: tr.first_name, last_name: tr.last_name });
-    }
+  for (const r of truckRows) {
+    if (!r.truck_key || !r.ldap) continue;
+    if (!truckToLdap.has(r.truck_key)) truckToLdap.set(r.truck_key, r.ldap);
   }
 
-  // Build name → tech index. For each tech, compute variants of:
-  //   1. "FIRST LAST"
-  //   2. "LAST, FIRST"
-  //   3. "FIRST_FIRSTWORD LAST_LASTWORD" (handles middle names/initials)
-  //   4. tech_name native ("LAST, FIRST" or "LAST, FIRST M")
-  // First-seen wins to avoid lower-priority matches overwriting good ones.
-  const nameToTech = new Map<string, AllTechsRow>();
-  const techByLdap = new Map<string, AllTechsRow>();
-  for (const t of rawTechs) {
-    const row: AllTechsRow = {
-      ldap: t.ldap,
-      first_last: "",
-      last_comma_first: "",
-      market: t.market,
-      district: t.district,
-      state: t.state,
-    };
-    if (t.ldap && !techByLdap.has(t.ldap)) techByLdap.set(t.ldap, row);
-    const fl = (t.first_name && t.last_name) ? `${t.first_name} ${t.last_name}` : null;
-    const lcf = (t.first_name && t.last_name) ? `${t.last_name}, ${t.first_name}` : null;
-    const native = t.tech_name;
-    const variants = new Set<string>();
-    for (const v of nameVariants(fl)) variants.add(v);
-    for (const v of nameVariants(lcf)) variants.add(v);
-    for (const v of nameVariants(native)) variants.add(v);
-    for (const variant of Array.from(variants)) {
-      if (variant && !nameToTech.has(variant)) nameToTech.set(variant, row);
-    }
-  }
-
+  // Apply fallback: any roster row with null ENTERPRISE_ID gets a LDAP from
+  // the truck-side map (mutates the row in place to keep downstream simple).
   for (const r of roster) {
-    if (!r.RENTER_NAME) {
-      r.ENTERPRISE_ID = null;
-      r.EID_MATCH_CONFIDENCE = "LOW - No Renter Name";
-      continue;
-    }
-    let match: AllTechsRow | undefined;
-    for (const variant of nameVariants(r.RENTER_NAME)) {
-      match = nameToTech.get(variant);
-      if (match) break;
-    }
-    if (match) {
-      r.ENTERPRISE_ID = match.ldap;
-      r.EID_MATCH_CONFIDENCE = "HIGH - Name Match";
-      r.DISTRICT = match.district;
-      r.STATE = match.state;
-      continue;
-    }
-    // Tier 2: Fuzzy name matching (BLAND-ASWAD/CLAIR/CHRISTOPHE/BRANDON patterns)
-    const fuzzy = fuzzyMatchByName(r.RENTER_NAME, rawTechs);
-    if (fuzzy) {
-      r.ENTERPRISE_ID = fuzzy.ldap;
-      r.EID_MATCH_CONFIDENCE = "MEDIUM - Fuzzy Name Match";
-      r.DISTRICT = fuzzy.district;
-      r.STATE = fuzzy.state;
-      continue;
-    }
-    // Tier 3: Truck# → tech, accepted when last names overlap. Strength of
-    // first-name match determines confidence:
-    //   strong → MEDIUM - Truck# Confirmed by Name (full nickname/spelling match)
-    //   weak   → LOW    - Truck# Last Name Only    (flagged — could be relative)
-    //   false  → no match (last names differ → likely different person)
-    const truckKey = r.VEHICLE_NUMBER ? String(r.VEHICLE_NUMBER).trim().padStart(6, "0") : null;
-    const truckCand = truckKey ? truckToCandidate.get(truckKey) : undefined;
-    const matchLevel = truckCand
-      ? logicalNameMatch(r.RENTER_NAME, truckCand.first_name, truckCand.last_name)
-      : false;
-    if (truckCand && (matchLevel === 'strong' || matchLevel === 'weak')) {
-      r.ENTERPRISE_ID = truckCand.ldap;
-      r.EID_MATCH_CONFIDENCE = matchLevel === 'strong'
-        ? "MEDIUM - Truck# Confirmed by Name"
-        : "LOW - Truck# Last Name Only";
-      const tech = rawByLdap.get(truckCand.ldap);
-      if (tech) {
-        r.DISTRICT = tech.district;
-        r.STATE = tech.state;
+    if (!r.ENTERPRISE_ID && r.VEHICLE_NUMBER) {
+      const truckKey = String(r.VEHICLE_NUMBER).trim().padStart(6, "0");
+      const fallback = truckToLdap.get(truckKey);
+      if (fallback) {
+        r.ENTERPRISE_ID = fallback;
+        r.EID_MATCH_CONFIDENCE = "MEDIUM - TPMS Truck#";
       }
-    } else {
-      r.ENTERPRISE_ID = null;
-      r.EID_MATCH_CONFIDENCE = "LOW - Name Not in Roster";
     }
   }
-  return techByLdap;
-}
-
-export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow[]> {
-  // ─── Source-of-truth refactor ─────────────────────────────────────────────
-  // The active rental backbone is fetchRentalRoster() which queries the three
-  // validated Holman tables directly. Identity resolution (renter NAME → LDAP)
-  // happens here via Postgres all_techs — no Fleet Scope, no truck-number
-  // matching, no DRIVELINE.
-
-  const roster = await fetchRentalRoster();
-  const techByLdapAllTechs = await resolveRosterLdapsByName(roster);
 
   const techRows = await db.select().from(vrmTechs);
   const techByLdap = new Map(
@@ -670,21 +384,18 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
     const tech = ldap ? techByLdap.get(ldap) ?? null : null;
     const check = ldap ? checkByLdap.get(ldap) ?? null : null;
 
-    // EID_MATCH_CONFIDENCE values (set by resolveRosterLdapsByName above):
-    //   "HIGH - Name Match"                  → exact variant match in all_techs
-    //   "MEDIUM - Fuzzy Name Match"          → fuzzy (suffix/prefix/Levenshtein)
-    //   "MEDIUM - Truck# Confirmed by Name"  → truck tech, full name agrees
-    //   "LOW - Truck# Last Name Only"        → truck tech, only last name matches
-    //                                          (could be relative — flag for review)
-    //   "LOW - Name Not in Roster"           → no match anywhere
-    //   "LOW - No Renter Name"               → rental row has no renter name
-    // UI mapping: HIGH → no badge, MEDIUM/LOW with LDAP → "fuzzy" amber badge,
-    //             LOW with no LDAP → "no profile".
+    // EID_MATCH_CONFIDENCE values:
+    //   "HIGH - Truck Owner + Name Match"  → Holman PO + DRIVELINE name agree (Snowflake)
+    //   "HIGH - Holman Truck Owner"         → Holman PO has the LDAP for this truck (Snowflake)
+    //   "MEDIUM - Name Match"               → DRIVELINE name match (Snowflake)
+    //   "MEDIUM - TPMS Truck#"              → Postgres TPMS truck# fallback (this function)
+    //   "LOW - Unresolved"                  → No LDAP resolved anywhere
     const conf = r.EID_MATCH_CONFIDENCE ?? "";
-    const ldapMatchSource: ActiveRentalRow["ldapMatchSource"] =
-      !ldap ? null
-      : conf.startsWith("HIGH") ? "exact_name"
-      : "fuzzy_name";
+    const ldapMatchSource: ActiveRentalRow["ldapMatchSource"] = !ldap
+      ? null
+      : conf.includes("TPMS Truck#") ? "truck_number"
+      : conf.startsWith("MEDIUM") ? "exact_name"
+      : "fleet";
 
     const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
       ? "no_ldap"
@@ -707,21 +418,28 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       ldap,
       // Display name priority:
       //   1. RENTER_NAME from the live rental table (the NAME ON THE RENTAL)
-      //   2. vrm_techs.name (Snowflake-synced via /sync/roster)
-      //   3. vrm_rental_checks.techName
-      //   4. ldap → vehicle # → fallback
+      //   2. HR_FULL_NAME from DRIVELINE (canonical employee name)
+      //   3. vrm_techs.name (Snowflake-synced)
+      //   4. vrm_rental_checks.techName
+      //   5. ldap → vehicle # → fallback
       name: r.RENTER_NAME
+        || r.HR_FULL_NAME
         || tech?.name
         || check?.techName
         || ldap
         || r.VEHICLE_NUMBER
         || "Unknown Active Rental",
+      // staleAssignmentName: kept null — the new model doesn't have a "previous tech" concept;
+      // the renter on the live rental IS the authoritative person.
       staleAssignmentName: null,
-      // Market: vrm_techs (synced) → all_techs.planning_area_name (live)
-      market: tech?.market ?? (ldap ? techByLdapAllTechs.get(ldap)?.market ?? null : null),
-      primaryZip: tech?.primaryZip ?? null,
-      // Tenure: vrm_techs > vrm_rental_checks
-      tenureMonths: tech?.tenureMonths ?? check?.tenureMonths ?? null,
+      // Market priority: DRIVELINE > vrm_techs.market
+      market: r.MARKET ?? tech?.market ?? null,
+      primaryZip: tech?.primaryZip ?? r.PRIMARY_ZIP ?? null,
+      // Tenure priority: vrm_techs.tenureMonths > rental_check.tenureMonths
+      // > DRIVELINE.YEARS_OF_SERVICE × 12
+      tenureMonths: tech?.tenureMonths
+        ?? check?.tenureMonths
+        ?? (r.YEARS_OF_SERVICE != null ? Math.round(Number(r.YEARS_OF_SERVICE) * 12) : null),
       gate1DaysInRental: tech?.gate1DaysInRental ?? r.DAYS_OPEN ?? null,
       gate1Completes: tech?.gate1Completes ?? check?.completes ?? null,
       gate1TotalRevenue: tech?.gate1TotalRevenue ?? null,
@@ -756,7 +474,7 @@ export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow
       hasVrmContext: !!(tech || check),
       contextStatus,
       ldapMatchSource,
-      liveTruckStatus: null,
+      liveTruckStatus: r.TRUCK_STATUS ?? null,
       liveSource: "snowflake_rental_tables",
       dailyNetWithRental: check?.dailyNetWithRental ?? null,
       dailyNetBeforeRental: check?.dailyNetBeforeRental ?? null,

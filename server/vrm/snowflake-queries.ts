@@ -6,13 +6,7 @@ import { getSnowflakeService, isSnowflakeConfigured } from "../snowflake-service
 import { getRateConfig } from "./storage";
 
 export interface RentalRosterRow {
-  // All fields come from the three validated source tables only:
-  //   - PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
-  //   - PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
-  // ENTERPRISE_ID + EID_MATCH_CONFIDENCE + DISTRICT + STATE start NULL from
-  // SQL and are filled in by storage.ts via the Postgres all_techs name match
-  // on RENTER_NAME (the only reliable identity chain — the renter, not the
-  // truck owner).
+  // From VW_NEXUS_RENTAL_LIST_W_LDAP_ZIP_AMS_STATUS
   VEHICLE_NUMBER: string | null;
   ENTERPRISE_ID: string | null;
   EID_MATCH_CONFIDENCE: string | null;
@@ -28,11 +22,17 @@ export interface RentalRosterRow {
   TICKET_NUMBER: string | null;
   PO_NUMBER: string | null;
   CLAIM_NUMBER: string | null;
+  PRIMARY_ZIP: string | null;
+  TRUCK_STATUS: string | null;
   SOURCE: string | null;
-  // Filled in by storage.ts from all_techs name match (renter's home, not
-  // truck owner's). NULL when renter name doesn't match the employee roster.
+  // From DRIVELINE_ALL_TECHS LEFT JOIN on ENTERPRISE_ID
   DISTRICT: string | null;
-  STATE: string | null;
+  MARKET: string | null;
+  TENURE_CATEGORY: string | null;
+  YEARS_OF_SERVICE: number | null;
+  EMPLOYMENT_STATUS: string | null;
+  JOB_TITLE: string | null;
+  HR_FULL_NAME: string | null;
 }
 
 export interface AdjustedNetRow {
@@ -62,38 +62,38 @@ export interface ScorecardRow {
 }
 
 /**
- * Pull the active rental roster from the THREE validated Holman/Enterprise
- * source tables only. No Fleet Scope, no derived views, no DRIVELINE — only
- * the tables Tyler validated against the daily Holman email spreadsheets:
+ * Pull the active rental roster directly from the three validated Holman
+ * source tables — NO Fleet Scope, NO derived views.
  *
- *   1. PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
- *   2. PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
- *   3. PARTS_SUPPLYCHAIN.FLEET.HOLMAN_CLOSED_RENTAL_REPORT  (not used here)
+ * Sources (the same three tables that match the daily Holman email reports):
+ *   1. ENTERPRISE_OPEN_RENTAL_TICKET_REPORT  — Enterprise open tickets
+ *   2. HOLMAN_OPEN_RENTAL_REPORT             — Holman PO line items (used for
+ *      non-Enterprise vendor rentals AND for truck-owner LDAP resolution)
+ *   3. HOLMAN_CLOSED_RENTAL_REPORT           — not used for active list
  *
- * Each table is filtered to its MAX(FILE_DATE) — today's snapshot.
+ * Each table is filtered to its MAX(FILE_DATE), giving today's snapshot.
  *
- * Active-rental definition (matches the daily spreadsheets exactly):
- *   - Enterprise:  TICKET_STATUS = 'OPEN'  (~286 trucks)
- *   - Holman:      DESCRIPTION LIKE 'RENTAL%' AND non-Enterprise vendor (~18)
+ * Active-rental definition (matches the daily Holman/Enterprise spreadsheets):
+ *   - Enterprise: TICKET_STATUS = 'OPEN' on today's snapshot (~286 rows)
+ *   - Holman:    DESCRIPTION LIKE 'RENTAL%' AND non-Enterprise vendor (~18)
  *   Total: ~304 unique trucks.
  *
- * LDAP resolution (Snowflake side, only one source — Holman truck owner):
- *   - When the rented truck appears in HOLMAN_OPEN_RENTAL_REPORT with a
- *     non-null ENTERPRISE_ID, we use that as the LDAP. ~57% coverage from
- *     this alone. The remaining ~43% are filled in by the Postgres TPMS
- *     truck# fallback that runs in storage.ts AFTER this query returns.
+ * LDAP resolution priority:
+ *   1. Holman truck-owner ENTERPRISE_ID (when the same truck appears in
+ *      HOLMAN_OPEN_RENTAL_REPORT with a non-null ENTERPRISE_ID — most direct)
+ *   2. DRIVELINE_ALL_TECHS name match (FIRST + LAST or LAST, FIRST formats)
+ *   3. Otherwise: ENTERPRISE_ID is null and the row is flagged
+ *      EID_MATCH_CONFIDENCE = 'LOW - Unresolved' for manual follow-up.
  *
- * Geographic enrichment (truck owner's home district/division/city/state) is
- * carried directly from the same Holman row that gave us the LDAP.
+ * Per-row enrichment via DRIVELINE_ALL_TECHS LEFT JOIN on the resolved LDAP:
+ *   district_no, planning_area_nm (market), tenure_category, years_of_service,
+ *   employment_status, job_title, full_name.
  */
 export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
   if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
   const svc = getSnowflakeService();
   const rows = await svc.executeQuery(`
-    /* fetchRentalRoster — three validated tables only. LDAP/district/state
-       resolution happens downstream in storage.ts via Postgres all_techs name
-       match on RENTER_NAME. We do NOT use Holman truck-owner LDAP/geography
-       because the truck owner is often not the same person as the renter. */
+    /* fetchRentalRoster — direct from Enterprise + Holman raw tables, no Fleet Scope */
     WITH today_ent AS (
       SELECT MAX(FILE_DATE) AS d
       FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
@@ -101,6 +101,20 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
     today_hol AS (
       SELECT MAX(FILE_DATE) AS d
       FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+    ),
+    -- Holman-side truck owner mapping (PRIMARY LDAP source for Enterprise rentals)
+    holman_truck_owner AS (
+      SELECT
+        LPAD(TRIM(VEHICLE_NUMBER), 6, '0') AS TRUCK_KEY,
+        UPPER(ENTERPRISE_ID) AS ENTERPRISE_ID
+      FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
+      WHERE FILE_DATE = (SELECT d FROM today_hol)
+        AND ENTERPRISE_ID IS NOT NULL
+        AND ENTERPRISE_ID <> ''
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY LPAD(TRIM(VEHICLE_NUMBER), 6, '0')
+        ORDER BY ENTERPRISE_ID
+      ) = 1
     ),
     -- Enterprise OPEN tickets (today)
     enterprise_rentals AS (
@@ -160,28 +174,75 @@ export async function fetchRentalRoster(): Promise<RentalRosterRow[]> {
       SELECT * FROM enterprise_rentals
       UNION ALL
       SELECT * FROM holman_rentals
+    ),
+    -- DRIVELINE name → LDAP lookup (multiple name format variants)
+    name_keys AS (
+      SELECT
+        UPPER(d.ENTERPRISE_ID) AS ENTERPRISE_ID,
+        UPPER(REGEXP_REPLACE(TRIM(d.FIRST_NAME) || ' ' || TRIM(d.LAST_NAME), '\\\\s+', ' ')) AS first_last,
+        UPPER(REGEXP_REPLACE(TRIM(d.LAST_NAME) || ', ' || TRIM(d.FIRST_NAME), '\\\\s+', ' ')) AS last_comma_first
+      FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
+      WHERE d.ENTERPRISE_ID IS NOT NULL
+        AND d.FIRST_NAME IS NOT NULL
+        AND d.LAST_NAME IS NOT NULL
+    ),
+    name_idx AS (
+      SELECT NORMALIZED_NAME, ENTERPRISE_ID FROM (
+        SELECT first_last AS NORMALIZED_NAME, ENTERPRISE_ID FROM name_keys
+        UNION
+        SELECT last_comma_first, ENTERPRISE_ID FROM name_keys
+      )
+      QUALIFY ROW_NUMBER() OVER (
+        PARTITION BY NORMALIZED_NAME
+        ORDER BY ENTERPRISE_ID
+      ) = 1
+    ),
+    resolved AS (
+      SELECT
+        ar.*,
+        COALESCE(hto.ENTERPRISE_ID, ni.ENTERPRISE_ID) AS ENTERPRISE_ID,
+        CASE
+          WHEN hto.ENTERPRISE_ID IS NOT NULL AND hto.ENTERPRISE_ID = ni.ENTERPRISE_ID
+            THEN 'HIGH - Truck Owner + Name Match'
+          WHEN hto.ENTERPRISE_ID IS NOT NULL THEN 'HIGH - Holman Truck Owner'
+          WHEN ni.ENTERPRISE_ID IS NOT NULL THEN 'MEDIUM - Name Match'
+          ELSE 'LOW - Unresolved'
+        END AS EID_MATCH_CONFIDENCE
+      FROM all_rentals ar
+      LEFT JOIN holman_truck_owner hto ON hto.TRUCK_KEY = ar.TRUCK_KEY
+      LEFT JOIN name_idx ni
+        ON ni.NORMALIZED_NAME = UPPER(REGEXP_REPLACE(TRIM(ar.RENTER_NAME), '\\\\s+', ' '))
     )
     SELECT
-      ar.VEHICLE_NUMBER,
-      CAST(NULL AS VARCHAR)                                                AS ENTERPRISE_ID,
-      CAST(NULL AS VARCHAR)                                                AS EID_MATCH_CONFIDENCE,
-      ar.RENTER_NAME,
-      ar.RENTAL_VENDOR,
-      ar.RENTAL_START_DATE,
-      ar.DAYS_OPEN,
-      ar.DAYS_AUTHORIZED,
-      ar.DAYS_BEHIND,
-      ar.NUMBER_OF_EXTENSIONS,
-      ar.NUMBER_OF_REWRITES,
-      ar.REPAIRS_COMPLETE,
-      ar.TICKET_NUMBER,
-      ar.PO_NUMBER,
-      ar.CLAIM_NUMBER,
-      ar.SOURCE,
-      CAST(NULL AS VARCHAR)                                                AS DISTRICT,
-      CAST(NULL AS VARCHAR)                                                AS STATE
-    FROM all_rentals ar
-    ORDER BY ar.DAYS_OPEN DESC NULLS LAST
+      r.VEHICLE_NUMBER,
+      r.ENTERPRISE_ID,
+      r.EID_MATCH_CONFIDENCE,
+      r.RENTER_NAME,
+      r.RENTAL_VENDOR,
+      r.RENTAL_START_DATE,
+      r.DAYS_OPEN,
+      r.DAYS_AUTHORIZED,
+      r.DAYS_BEHIND,
+      r.NUMBER_OF_EXTENSIONS,
+      r.NUMBER_OF_REWRITES,
+      r.REPAIRS_COMPLETE,
+      r.TICKET_NUMBER,
+      r.PO_NUMBER,
+      r.CLAIM_NUMBER,
+      NULL                                AS PRIMARY_ZIP,
+      NULL                                AS TRUCK_STATUS,
+      r.SOURCE,
+      d.DISTRICT_NO                       AS DISTRICT,
+      d.PLANNING_AREA_NM                  AS MARKET,
+      d.TENURE_CATEGORY,
+      d.YEARS_OF_SERVICE,
+      d.EMPLOYMENT_STATUS,
+      d.JOB_TITLE,
+      d.FULL_NAME                         AS HR_FULL_NAME
+    FROM resolved r
+    LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS d
+      ON UPPER(d.ENTERPRISE_ID) = UPPER(r.ENTERPRISE_ID)
+    ORDER BY r.DAYS_OPEN DESC NULLS LAST
   `) as RentalRosterRow[];
   return rows;
 }
