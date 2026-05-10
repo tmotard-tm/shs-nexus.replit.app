@@ -329,7 +329,7 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
     ),
     financials AS (
       SELECT
-        f.TECH_LDAP,
+        UPPER(TRIM(f.TECH_LDAP))                                            AS TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)         AS completes,
         COUNT(*)                                                              AS total_sos,
         SUM(f.TOTAL_REVENUE)                                                 AS total_revenue,
@@ -342,10 +342,12 @@ export async function fetchAdjustedNet(ldaps: string[]): Promise<AdjustedNetRow[
         SUM(f.PPT_PROFIT)                                                    AS ppt_profit
       FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
       INNER JOIN rental_techs rt
-        ON f.TECH_LDAP = rt.tech_ldap
+        -- rt.tech_ldap is already UPPER'd from holman_truck_owner; normalize
+        -- f.TECH_LDAP too so a mixed-case IHR row still joins.
+        ON UPPER(TRIM(f.TECH_LDAP)) = rt.tech_ldap
        AND f.SO_STS_DT >= rt.start_date
        AND f.SO_STS_DT <= CURRENT_DATE
-      GROUP BY f.TECH_LDAP
+      GROUP BY UPPER(TRIM(f.TECH_LDAP))
     )
     SELECT
       rt.tech_ldap                                                           AS "tech_ldap",
@@ -596,7 +598,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
       -- per-tech path filters by TECH_LDAP first, an empty string in any
       -- requested LDAP's row would still fail the whole query.
       SELECT
-        f.TECH_LDAP,
+        UPPER(TRIM(f.TECH_LDAP))                                       AS TECH_LDAP,
         COUNT(CASE WHEN f.SO_STS_DESC = 'CO - Complete' THEN 1 END)    AS completes,
         COUNT(*)                                                         AS total_sos,
         -- Count only distinct WEEKDAY dates (Mon–Fri, ISO 1–5) where the tech had SOs.
@@ -614,18 +616,22 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         SUM(TRY_TO_NUMBER(f.TOTAL_SHIPPING_FORWARD_EXPENSE::STRING))    AS parts_shipping,
         SUM(TRY_TO_NUMBER(f.PPT_PROFIT::STRING))                        AS ppt_profit
       FROM FINANCE_ANALYTICS.ADHOC_TBLS.IHR_UNIT_ECONOMICS f
-      WHERE f.TECH_LDAP IN (${ldapList})
+      -- Snowflake string equality is case-sensitive. Normalize both sides via
+      -- UPPER(TRIM(...)) so a mixed-case TECH_LDAP in IHR can't cause 'No Data'.
+      WHERE UPPER(TRIM(f.TECH_LDAP)) IN (${ldapList})
         AND f.SO_STS_DT >= DATEADD('day', -90, CURRENT_DATE)
         AND f.SO_STS_DT <= CURRENT_DATE
-      GROUP BY f.TECH_LDAP
+      GROUP BY UPPER(TRIM(f.TECH_LDAP))
     ),
     dcr AS (
       -- Same defensive TRY_TO_NUMBER wrapping as the bulk roster query
       -- (fetchAllProfitabilityRows). Protects the per-tech path against a
       -- DCR row containing '' in any numeric column.
       SELECT
-        d.LDAP_ID,
-        COALESCE(MAX(d.EMP_FULL_NM), d.LDAP_ID) AS tech_name,
+        UPPER(TRIM(d.LDAP_ID))                                  AS LDAP_ID,
+        -- Wrap d.LDAP_ID in MAX() so we can GROUP BY only the normalized
+        -- key — otherwise mixed-case source rows split into two groups.
+        COALESCE(MAX(d.EMP_FULL_NM), MAX(d.LDAP_ID))            AS tech_name,
         ROUND(MAX(TRY_TO_NUMBER(d.TENURE_YRS::STRING)) * 12, 0)         AS tenure_months,
         DIV0(SUM(TRY_TO_NUMBER(d.COMP_PCT_NUM::STRING)),
              SUM(TRY_TO_NUMBER(d.COMP_PCT_DEN::STRING)))                AS completion_pct,
@@ -638,7 +644,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
         DIV0(SUM(TRY_TO_NUMBER(d.SPHW_ENROLLMENT_SALE_QTY::STRING)),
              SUM(TRY_TO_NUMBER(d.SPHW_ELIG_ENROL_D2C_COMPLETES::STRING))) AS d2c_rate
       FROM IH_DATASCIENCE.HS_REFERENCE.daily_assigns_dcr_temp_new d
-      WHERE d.LDAP_ID IN (${ldapList})
+      WHERE UPPER(TRIM(d.LDAP_ID)) IN (${ldapList})
         AND d.TIMEWINDOW IN ('ALL-YTD')
         AND d.BUSUNIT = 'InHomeRepair'
         AND d.LDAP_ID IS NOT NULL AND d.LDAP_ID != ''
@@ -646,7 +652,7 @@ export async function fetchProfitabilityCheck(ldaps: string[]): Promise<Profitab
           SELECT MIN(ACCTG_DT) FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW
           WHERE ACCTG_YR = (SELECT ACCTG_YR FROM PRD_DB2.HS_DW_TBLS.NPMATFISCALDT_NEW WHERE ACCTG_DT = CURRENT_DATE)
         )
-      GROUP BY d.LDAP_ID
+      GROUP BY UPPER(TRIM(d.LDAP_ID))
     ),
     scored AS (
       SELECT
