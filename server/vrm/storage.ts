@@ -265,6 +265,151 @@ function levenshtein(a: string, b: string): number {
   }
   return dp[n];
 }
+// ─── Nickname & compound-last-name helpers ───────────────────────────────────
+// Many techs rent under a preferred first name (e.g., "Vince Rosado") that
+// differs from their HR record (VICENTE DERONE ROSADO). Without nickname
+// expansion, fuzzy match falls back to last-name-only and ties out when the
+// surname is common, leaving the row unresolved. This dictionary is one-way
+// expanded into a Set per name so all comparators see the same alias graph.
+const NICKNAME_GROUPS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["VINCE", "VINCENT", "VICENTE"],
+  ["MIKE", "MICHAEL", "MIKEAL", "MICHEAL"],
+  ["BILL", "WILLIAM", "WILLIE", "WILL", "BILLY"],
+  ["BOB", "ROBERT", "ROB", "ROBBIE", "ROBBY", "ROBERTO"],
+  ["JIM", "JAMES", "JIMMY", "JAMIE"],
+  ["JOE", "JOSEPH", "JOEY", "JOSE"],
+  ["TOM", "THOMAS", "TOMMY"],
+  ["TONY", "ANTHONY", "ANTONIO"],
+  ["DAVE", "DAVID"],
+  ["DAN", "DANIEL", "DANNY", "DANIELE"],
+  ["RICK", "RICHARD", "RICHIE", "RICKY", "RICARDO"],
+  ["CHRIS", "CHRISTOPHER", "CHRISTOPHE"],
+  ["MATT", "MATTHEW", "MATEO"],
+  ["NICK", "NICHOLAS", "NICOLAS"],
+  ["STEVE", "STEVEN", "STEPHEN", "STEPHAN", "ESTEBAN"],
+  ["KEN", "KENNETH", "KENNY"],
+  ["LARRY", "LAWRENCE", "LAURENCE"],
+  ["EDDIE", "EDWARD", "ED", "EDUARDO"],
+  ["FRED", "FREDERICK", "FREDDIE", "FREDDY"],
+  ["CHUCK", "CHARLES", "CHARLIE", "CHAS"],
+  ["RAY", "RAYMOND"],
+  ["RON", "RONALD", "RONNIE"],
+  ["GREG", "GREGORY"],
+  ["JERRY", "JEROME", "GERALD", "GERARD"],
+  ["JEFF", "JEFFREY", "JEFFERY", "GEOFFREY"],
+  ["TIM", "TIMOTHY"],
+  ["SAM", "SAMUEL"],
+  ["BEN", "BENJAMIN"],
+  ["ALEX", "ALEXANDER", "ALEJANDRO"],
+  ["AL", "ALBERT", "ALBERTO", "ALAN", "ALLAN", "ALLEN"],
+  ["TED", "THEODORE"],
+  ["FRANK", "FRANCIS", "FRANCISCO"],
+  ["VIC", "VICTOR"],
+  ["ANDY", "ANDREW", "ANDRES"],
+  ["DREW", "ANDREW"],
+  ["CARL", "CARLOS"],
+  ["DON", "DONALD", "DONNIE"],
+  ["JON", "JONATHAN", "JOHN", "JOHNNY"],
+  ["KYLE", "KYLEN"],
+  ["MARC", "MARCUS", "MARCO", "MARK"],
+  ["DEMARCUS", "DEMARCO"],
+  ["SERGI", "SERGII", "SERGIO", "SERGE", "SERGIU"],
+  ["RYAN", "RYEN"],
+];
+const NICKNAME_TO_GROUP = new Map<string, ReadonlyArray<string>>();
+for (const grp of NICKNAME_GROUPS) for (const n of grp) NICKNAME_TO_GROUP.set(n, grp);
+
+function firstNameVariants(name: string | null | undefined): string[] {
+  const norm = (name || "").toUpperCase().replace(/[^A-Z]/g, "");
+  if (!norm) return [];
+  const seen = new Map<string, true>();
+  seen.set(norm, true);
+  const grp = NICKNAME_TO_GROUP.get(norm);
+  if (grp) for (const n of grp) seen.set(n, true);
+  const out: string[] = [];
+  seen.forEach((_v, k) => { out.push(k); });
+  return out;
+}
+
+// Common compound-last-name prefixes that get glued or split inconsistently
+// across Holman OER vs HR roster (e.g., "ST CLAIR" vs "STCLAIR" → ASTCLAI;
+// "VAN DER BURGH" vs "VANDERBURGH" → RVANDER). lastNameVariants() returns
+// every alternative form so a single comparator can evaluate them all.
+const COMPOUND_LAST_PREFIXES = [
+  "ST", "MC", "MAC", "VAN", "VON", "DE", "DEL", "DELA", "LA", "LE", "DI", "DA", "DU", "EL", "AL",
+];
+
+function lastNameVariants(rawLast: string | null | undefined): string[] {
+  const norm = normalizeNameForMatch(rawLast);
+  if (!norm) return [];
+  const seen = new Map<string, true>();
+  const add = (v: string) => { if (v) seen.set(v, true); };
+  add(norm);
+  if (norm.includes(" ")) {
+    add(norm.replace(/\s+/g, ""));
+    const tokens = norm.split(" ").filter(Boolean);
+    let i = 0;
+    while (i < tokens.length - 1 && COMPOUND_LAST_PREFIXES.includes(tokens[i])) i++;
+    if (i > 0 && i < tokens.length) add(tokens.slice(i).join(""));
+  } else {
+    for (const p of COMPOUND_LAST_PREFIXES) {
+      if (norm.length > p.length + 2 && norm.startsWith(p)) {
+        const rest = norm.slice(p.length);
+        add(`${p} ${rest}`);
+        for (const q of COMPOUND_LAST_PREFIXES) {
+          if (rest.length > q.length + 2 && rest.startsWith(q)) {
+            add(`${p} ${q} ${rest.slice(q.length)}`);
+          }
+        }
+      }
+    }
+  }
+  const out: string[] = [];
+  seen.forEach((_v, k) => { out.push(k); });
+  return out;
+}
+
+/** True when two last names match under any compound-form / spelling-tolerant
+ *  rule. Used by both fuzzy match and the logical-name sanity check. */
+function lastNameOverlap(a: string, b: string): boolean {
+  const va = lastNameVariants(a);
+  const vb = lastNameVariants(b);
+  for (const x of va) {
+    for (const y of vb) {
+      if (!x || !y) continue;
+      if (x === y) return true;
+      if (x.includes(y) || y.includes(x)) return true;
+      if (x.length >= 4 && y.length >= 4) {
+        if (x.startsWith(y.slice(0, 4)) || y.startsWith(x.slice(0, 4))) return true;
+        if (x.endsWith(y.slice(-4)) || y.endsWith(x.slice(-4))) return true;
+      }
+      // Spelling-tolerant fallback for similarly-sized single-token surnames
+      // (e.g., STRENOVYCH ↔ STRETOVYCH → SSTRETO).
+      if (x.length >= 6 && y.length >= 6 && Math.abs(x.length - y.length) <= 3) {
+        if (levenshtein(x, y) <= 3) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** Nickname-aware first-name agreement check. Returns "strong" only when
+ *  some pair of variants matches by equality, prefix, or short Levenshtein. */
+function firstNameAgrees(rFirst: string, cFirst: string): boolean {
+  if (!rFirst || !cFirst) return false;
+  const rv = firstNameVariants(rFirst);
+  const cv = firstNameVariants(cFirst);
+  for (const x of rv) {
+    for (const y of cv) {
+      if (x === y) return true;
+      if (x.length >= 3 && y.length >= 3 && (x.startsWith(y) || y.startsWith(x))) return true;
+      if (x.length >= 5 && y.length >= 5 && levenshtein(x, y) <= 3) return true;
+      if (x.length >= 3 && y.length >= 3 && levenshtein(x, y) <= 2) return true;
+    }
+  }
+  return false;
+}
+
 // ─── Name-resolution helpers (used by resolveRosterLdapsByName) ──────────────
 
 export type AllTechsRow = {
@@ -314,9 +459,28 @@ function splitRenterName(raw: string): { first: string; last: string; tokens: st
  *    First name prefix     (CHRISTOPHE → CHRISTOPHER) score 80
  *    First name Levenshtein ≤ 2 (BRANDON → BRENDAN)   score 65
  */
-function fuzzyMatchByName(renterName: string, rawTechs: AllTechsRow[]): FuzzyMatch | null {
-  const { first: rFirst, last: rLast } = splitRenterName(renterName);
+function fuzzyMatchByName(
+  renterName: string,
+  rawTechs: AllTechsRow[],
+  options: { overrideMode?: boolean } = {},
+): FuzzyMatch | null {
+  const { first: rFirst, last: rLast, tokens: rTokens } = splitRenterName(renterName);
   if (!rFirst || !rLast) return null;
+
+  // Try the renter's surname AND the compound forms (e.g., "ST CLAIR" so a
+  // candidate stored as "STCLAIR" still scores). When the renter has 3+
+  // tokens, also fold the trailing 2-token combo into the candidate set —
+  // catches "RYAN VAN DER BURGH" (parsed last="BURGH") matching "VAN DER BURGH".
+  const _rlSeen = new Map<string, true>();
+  for (const v of lastNameVariants(rLast)) _rlSeen.set(v, true);
+  if (rTokens.length >= 3) {
+    const tail2 = rTokens.slice(-2).join(" ");
+    const tail3 = rTokens.slice(-3).join(" ");
+    for (const v of lastNameVariants(tail2)) _rlSeen.set(v, true);
+    if (rTokens.length >= 4) for (const v of lastNameVariants(tail3)) _rlSeen.set(v, true);
+  }
+  const renterLastForms: string[] = [];
+  _rlSeen.forEach((_v, k) => { renterLastForms.push(k); });
 
   const candidates: FuzzyMatch[] = [];
   for (const t of rawTechs) {
@@ -327,52 +491,69 @@ function fuzzyMatchByName(renterName: string, rawTechs: AllTechsRow[]): FuzzyMat
     const tLast = tLastTokens[tLastTokens.length - 1] ?? "";
     if (!tFirst || !tLast) continue;
 
+    const _clSeen = new Map<string, true>();
+    if (tLastFull) _clSeen.set(tLastFull, true);
+    if (tLast) _clSeen.set(tLast, true);
+    for (const v of lastNameVariants(tLastFull)) _clSeen.set(v, true);
+    const candidateLastForms: string[] = [];
+    _clSeen.forEach((_v, k) => { candidateLastForms.push(k); });
+
+    // Score by trying every (renter-form × candidate-form) pair and keeping
+    // the best. This is what lets compound surnames and minor misspellings
+    // both win without false positives — the form match still has to beat
+    // the legacy 80-score floor before fuzzy is allowed.
     let lastScore = 0;
     let lastReason = "";
-    if (rLast === tLast && rLast.length >= 3) {
-      lastScore = 95;
-      lastReason = "exact";
-    } else if (rLast.length >= 4 && tLast.length >= 4) {
-      if (tLast.endsWith(rLast) || rLast.endsWith(tLast)) {
-        lastScore = 80;
-        lastReason = "suffix";
-      }
-    }
-    if (lastScore < 95) {
-      const rTokens = rLast.split(/[-\s]/).filter((x) => x.length >= 3);
-      const cTokens = tLast.split(/[-\s]/).filter((x) => x.length >= 3);
-      const exactToken = rTokens.some((a) => cTokens.some((b) => a === b));
-      if (exactToken) {
-        if (95 > lastScore) {
-          lastScore = 95;
-          lastReason = "compound";
+    for (const rl of renterLastForms) {
+      for (const cl of candidateLastForms) {
+        if (!rl || !cl) continue;
+        if (rl === cl && rl.length >= 3) {
+          if (95 > lastScore) { lastScore = 95; lastReason = "exact"; }
+          continue;
         }
-      } else {
-        const prefToken = rTokens.some((a) =>
-          cTokens.some((b) => a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))),
-        );
-        if (prefToken && 70 > lastScore) {
-          lastScore = 70;
-          lastReason = "compound_prefix";
+        if (rl.length >= 4 && cl.length >= 4 && (cl.endsWith(rl) || rl.endsWith(cl))) {
+          if (80 > lastScore) { lastScore = 80; lastReason = "suffix"; }
+        }
+        const rSubs = rl.split(/[-\s]/).filter((x: string) => x.length >= 3);
+        const cSubs = cl.split(/[-\s]/).filter((x: string) => x.length >= 3);
+        if (rSubs.some((a: string) => cSubs.some((b: string) => a === b))) {
+          if (95 > lastScore) { lastScore = 95; lastReason = "compound"; }
+        } else if (rSubs.some((a: string) => cSubs.some((b: string) => a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a))))) {
+          if (70 > lastScore) { lastScore = 70; lastReason = "compound_prefix"; }
+        }
+        // Spelling-tolerant fallback for similar-length single-token surnames
+        // (catches Strenovych ↔ Stretovych). Score is intentionally below
+        // exact/compound so a real exact match always wins the tiebreaker.
+        if (rl.length >= 6 && cl.length >= 6 && Math.abs(rl.length - cl.length) <= 3 && !rl.includes(" ") && !cl.includes(" ")) {
+          const dist = levenshtein(rl, cl);
+          if (dist <= 3 && 60 > lastScore) { lastScore = 60; lastReason = `lev${dist}`; }
         }
       }
     }
     if (lastScore === 0) continue;
 
+    // First-name scoring with nickname expansion. firstNameVariants() folds
+    // "VINCE" → "VICENTE" so VROSADO scores 100 instead of 0 against a renter
+    // who goes by "Vince Rosado".
     let firstScore = 0;
     let firstReason = "";
-    if (rFirst.length >= 3 && tFirst.length >= 3) {
-      if (rFirst === tFirst) {
-        firstScore = 100;
-        firstReason = "exact";
-      } else if (rFirst.length >= 4 && tFirst.length >= 4 && (tFirst.startsWith(rFirst) || rFirst.startsWith(tFirst))) {
-        firstScore = 80;
-        firstReason = "prefix";
-      } else if (rFirst.length >= 4 && tFirst.length >= 4) {
-        const dist = levenshtein(rFirst, tFirst);
-        if (dist <= 2) {
-          firstScore = 65;
-          firstReason = `lev${dist}`;
+    const rFv = firstNameVariants(rFirst);
+    const cFv = firstNameVariants(tFirst);
+    for (const rf of rFv) {
+      for (const cf of cFv) {
+        if (rf.length < 3 || cf.length < 3) continue;
+        if (rf === cf) {
+          if (100 > firstScore) { firstScore = 100; firstReason = "exact"; }
+          continue;
+        }
+        if (rf.length >= 4 && cf.length >= 4 && (cf.startsWith(rf) || rf.startsWith(cf))) {
+          if (80 > firstScore) { firstScore = 80; firstReason = "prefix"; }
+        } else if (rf.length >= 5 && cf.length >= 5) {
+          const dist = levenshtein(rf, cf);
+          if (dist <= 3 && 70 > firstScore) { firstScore = 70; firstReason = `lev${dist}`; }
+        } else if (rf.length >= 4 && cf.length >= 4) {
+          const dist = levenshtein(rf, cf);
+          if (dist <= 2 && 65 > firstScore) { firstScore = 65; firstReason = `lev${dist}`; }
         }
       }
     }
@@ -384,7 +565,24 @@ function fuzzyMatchByName(renterName: string, rawTechs: AllTechsRow[]): FuzzyMat
   if (candidates.length === 0) return null;
   candidates.sort((a, b) => b.score - a.score);
   if (candidates.length > 1 && candidates[0].score === candidates[1].score) return null;
-  return candidates[0];
+  const top = candidates[0];
+  // Floor 1: spelling-tolerant last-name fallback only counts when first name
+  // also agrees strongly (catches Strenovych↔Stretovych w/ exact first name,
+  // rejects bare lev hits on common surnames).
+  if (top.reason.startsWith("last:lev")) {
+    const firstOk = /\+first:(exact|prefix)/.test(top.reason);
+    if (!firstOk) return null;
+  }
+  // Floor 2: in override mode (re-resolving after upstream mismatch) we
+  // require explicit pattern-level evidence — last name must be exact,
+  // compound, or suffix (NOT spelling-tolerant lev), AND first name must be
+  // exact or prefix. This prevents swapping one wrong LDAP for a worse guess.
+  if (options.overrideMode) {
+    const lastOk = /last:(exact|compound|suffix)/.test(top.reason);
+    const firstOk = /\+first:(exact|prefix)/.test(top.reason);
+    if (!lastOk || !firstOk) return null;
+  }
+  return top;
 }
 
 /** Confirm that a truck-assigned tech matches the renter on the rental:
@@ -402,38 +600,23 @@ function logicalNameMatch(
   const cFirstFull = normalizeNameForMatch(candidateFirst);
   const cLastFull = normalizeNameForMatch(candidateLast);
   const cFirst = cFirstFull.split(" ").filter(Boolean)[0] ?? "";
-  const cLastTokens = cLastFull.split(" ").filter(Boolean);
-  const cLast = cLastTokens[cLastTokens.length - 1] ?? "";
-  if (!cLast) return false;
+  if (!cLastFull) return false;
 
-  const overlapWith = (a: string, b: string): boolean => {
-    if (!a || !b) return false;
-    if (a === b) return true;
-    if (a.includes(b) || b.includes(a)) return true;
-    if (a.length >= 4 && b.length >= 4) {
-      if (a.startsWith(b.slice(0, 4)) || b.startsWith(a.slice(0, 4))) return true;
-      if (a.endsWith(b.slice(-4)) || b.endsWith(a.slice(-4))) return true;
-    }
-    return false;
-  };
-  let lastOverlap = overlapWith(rLast, cLast);
-  if (!lastOverlap) {
-    // Only consider renter LAST-name tokens (skip the first-name token at index 0)
-    // to avoid false anchors when the renter's first name happens to equal the
-    // candidate's last name.
-    const lastNameTokens = rTokens.slice(1);
-    lastOverlap = lastNameTokens.some((tok) => tok.length >= 4 && overlapWith(tok, cLast));
+  // Use the compound-aware overlap so "AUSTIN ST CLAIR" agrees with "STCLAIR"
+  // and "RYAN VAN DER BURGH" agrees with "VAN DER BURGH". rTokens[0] is the
+  // renter first name; the rest are last-name candidates.
+  let lastOverlap = lastNameOverlap(rLast, cLastFull);
+  if (!lastOverlap && rTokens.length >= 2) {
+    const lastNameCandidates = [
+      rTokens.slice(1).join(" "),     // full multi-token last name
+      ...rTokens.slice(1),            // each token individually
+    ];
+    lastOverlap = lastNameCandidates.some((tok) => tok.length >= 3 && lastNameOverlap(tok, cLastFull));
   }
   if (!lastOverlap) return false;
 
   if (!rFirst || !cFirst) return "weak";
-
-  if (rFirst === cFirst) return "strong";
-  if (rFirst.length >= 3 && cFirst.length >= 3 && (rFirst.startsWith(cFirst) || cFirst.startsWith(rFirst))) return "strong";
-  if (rFirst.length >= 2 && cFirst.length >= 2 && rFirst.slice(0, 2) === cFirst.slice(0, 2)) return "strong";
-  if (rFirst.length >= 3 && cFirst.length >= 3 && levenshtein(rFirst, cFirst) <= 2) return "strong";
-
-  return "weak";
+  return firstNameAgrees(rFirst, cFirst) ? "strong" : "weak";
 }
 
 /** Resolve missing ENTERPRISE_IDs on a rental roster using the Postgres
@@ -485,6 +668,27 @@ export async function resolveRosterLdapsByName(
       const fnFirst = fn.split(/\s+/)[0] ?? "";
       const lnLast = ln.split(/\s+/).pop() ?? "";
       if (fnFirst && lnLast) addVariant(`${fnFirst} ${lnLast}`, t);
+      // Compound-last-name variants: index every alternative form so a renter
+      // typed as "Austin St Clair" still hits ASTCLAI's "STCLAIR" record, and
+      // "Ryan Van Der Burgh" hits RVANDER's "VAN DER BURGH" record.
+      const lnVariants = lastNameVariants(ln);
+      for (const lv of lnVariants) {
+        if (lv === normalizeNameForMatch(ln)) continue;
+        addVariant(`${fn} ${lv}`, t);
+        addVariant(`${lv} ${fn}`, t);
+        addVariant(`${lv}, ${fn}`, t);
+        if (fnFirst) addVariant(`${fnFirst} ${lv}`, t);
+      }
+      // Nickname-expanded first names so "Vince Rosado" hits VROSADO
+      // ("VICENTE DERONE ROSADO"). Skip the canonical form (already added).
+      const fnVariants = firstNameVariants(fnFirst || fn);
+      for (const fv of fnVariants) {
+        if (fv === (fnFirst || fn).toUpperCase().replace(/[^A-Z]/g, "")) continue;
+        addVariant(`${fv} ${ln}`, t);
+        addVariant(`${ln} ${fv}`, t);
+        addVariant(`${ln}, ${fv}`, t);
+        for (const lv of lnVariants) addVariant(`${fv} ${lv}`, t);
+      }
     }
     if (full) {
       addVariant(full, t);
@@ -524,9 +728,40 @@ export async function resolveRosterLdapsByName(
 
   for (const row of roster) {
     if (row.ENTERPRISE_ID) {
-      const t = techByLdap.get(String(row.ENTERPRISE_ID).toUpperCase());
-      if (t) enrichFromTech(row, t);
-      continue;
+      const upstreamLdap = String(row.ENTERPRISE_ID).toUpperCase();
+      const t = techByLdap.get(upstreamLdap);
+      const renter = (row.RENTER_NAME ?? "").trim();
+      // Sanity-check upstream LDAP against the OER renter name. Holman
+      // attaches ENTERPRISE_ID by truck owner, which can be stale when a truck
+      // rotates between techs. We override in two cases:
+      //   (a) verdict === false  → no last-name overlap (different person)
+      //   (b) verdict === "weak" → last name overlaps but first name
+      //                            disagrees (the classic same-surname stale
+      //                            owner case, e.g. Albert Poole truck once
+      //                            owned by Albert Moreschi).
+      // The override floor in fuzzyMatchByName(overrideMode) keeps us from
+      // displacing the upstream LDAP without strong replacement evidence —
+      // so if re-resolution can't find a better match, the row ends up
+      // unresolved (preferable to misattributed financial data).
+      if (t && renter) {
+        const verdict = logicalNameMatch(renter, t.first_name ?? "", t.last_name ?? "");
+        if (verdict === "strong") {
+          enrichFromTech(row, t);
+          continue;
+        }
+        // Stash the original upstream LDAP so we can fall back to it if
+        // re-resolution doesn't find a higher-confidence replacement.
+        const originalUpstreamLdap = upstreamLdap;
+        const originalUpstreamTech = t;
+        row.ENTERPRISE_ID = null;
+        row.EID_MATCH_CONFIDENCE = "LOW - Upstream LDAP/Name Mismatch";
+        (row as any).__upstreamFallbackLdap = originalUpstreamLdap;
+        (row as any).__upstreamFallbackTech = originalUpstreamTech;
+        // Fall through to re-resolution below.
+      } else {
+        if (t) enrichFromTech(row, t);
+        continue;
+      }
     }
 
     const renter = (row.RENTER_NAME ?? "").trim();
@@ -555,20 +790,29 @@ export async function resolveRosterLdapsByName(
     }
     if (exactMatch) {
       row.ENTERPRISE_ID = String(exactMatch.tech_racfid).toUpperCase();
-      row.EID_MATCH_CONFIDENCE = "HIGH - Name Match";
+      row.EID_MATCH_CONFIDENCE = row.EID_MATCH_CONFIDENCE === "LOW - Upstream LDAP/Name Mismatch"
+        ? "MEDIUM - Renter Name Override"
+        : "HIGH - Name Match";
       enrichFromTech(row, exactMatch);
+      delete (row as any).__upstreamFallbackLdap;
+      delete (row as any).__upstreamFallbackTech;
       continue;
     }
 
-    const fuzzy = fuzzyMatchByName(renter, rawTechs);
+    const wasOverride = row.EID_MATCH_CONFIDENCE === "LOW - Upstream LDAP/Name Mismatch";
+    const fuzzy = fuzzyMatchByName(renter, rawTechs, { overrideMode: wasOverride });
     if (fuzzy) {
       row.ENTERPRISE_ID = String(fuzzy.tech.tech_racfid).toUpperCase();
-      row.EID_MATCH_CONFIDENCE = "MEDIUM - Fuzzy Name Match";
+      row.EID_MATCH_CONFIDENCE = wasOverride
+        ? "MEDIUM - Renter Name Override (Fuzzy)"
+        : "MEDIUM - Fuzzy Name Match";
       enrichFromTech(row, fuzzy.tech);
+      delete (row as any).__upstreamFallbackLdap;
+      delete (row as any).__upstreamFallbackTech;
       continue;
     }
 
-    if (row.VEHICLE_NUMBER) {
+    if (row.VEHICLE_NUMBER && row.EID_MATCH_CONFIDENCE !== "LOW - Upstream LDAP/Name Mismatch") {
       const truckKey = String(row.VEHICLE_NUMBER).trim().padStart(6, "0");
       const truckLdap = truckToLdap.get(truckKey);
       if (truckLdap) {
@@ -591,7 +835,21 @@ export async function resolveRosterLdapsByName(
       }
     }
 
-    row.EID_MATCH_CONFIDENCE = "LOW - Name Not in Roster";
+    const fallbackLdap = (row as any).__upstreamFallbackLdap as string | undefined;
+    const fallbackTech = (row as any).__upstreamFallbackTech as AllTechsRow | undefined;
+    if (fallbackLdap && fallbackTech) {
+      row.ENTERPRISE_ID = fallbackLdap;
+      // No higher-confidence replacement was found. Restore the original
+      // upstream LDAP (verdict was "weak" or "false") with LOW confidence so
+      // financials remain visible but the row is clearly flagged as suspect
+      // for auditors.
+      row.EID_MATCH_CONFIDENCE = "LOW - Upstream LDAP/Name Mismatch";
+      enrichFromTech(row, fallbackTech);
+      delete (row as any).__upstreamFallbackLdap;
+      delete (row as any).__upstreamFallbackTech;
+    } else {
+      row.EID_MATCH_CONFIDENCE = "LOW - Name Not in Roster";
+    }
   }
 
   return techByLdap;
