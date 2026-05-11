@@ -750,6 +750,61 @@ export function registerVrmRoutes(): Router {
    */
   router.get("/active-rentals-dashboard/enrichment", async (_req, res) => {
     try {
+      // ── Step 0: Resolved Snowflake roster is the source of truth ────────────
+      // The Active Rentals page must show the same LDAP/name resolution as the
+      // VRM Dashboard. Both now derive from fetchRentalRoster() +
+      // resolveRosterLdapsByName(). For trucks that appear on fs_trucks but
+      // aren't in the live rental roster (rare sync gap), we fall back to the
+      // legacy TPMS+fs_trucks lookup below so the dashboard still has data.
+      const roster = await fetchRentalRoster();
+      await resolveRosterLdapsByName(roster);
+      type EnrichInfo = { ldap: string | null; name: string; phone: string | null; district: string | null };
+      const byTruckResolved = new Map<string, EnrichInfo>();
+      const rosterTrucks = new Set<string>();
+      for (const r of roster) {
+        const norm = String(r.VEHICLE_NUMBER ?? "").replace(/^0+/, "");
+        if (!norm) continue;
+        rosterTrucks.add(norm);
+        const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase() || null;
+        byTruckResolved.set(norm, {
+          ldap,
+          // RENTER_NAME comes from OER and reflects who is actually in the
+          // rental — same field the Dashboard renders. Falls back to HR name.
+          name: (r.RENTER_NAME ?? r.HR_FULL_NAME ?? "").toString(),
+          phone: null,                       // populated by TPMS lookup below
+          district: r.DISTRICT ?? null,
+        });
+      }
+
+      // ── Step 0b: TPMS phone+district keyed by LDAP, deterministically ──────
+      // Mirrors the /rows endpoint so the Active Rentals page sees the same
+      // phone the Dashboard does. Catches LDAPs that have a TPMS profile but
+      // no current truck_no assignment (the truck-keyed index below misses
+      // those). DISTINCT ON + ORDER BY updated_at DESC ensures we pick the
+      // newest profile when an LDAP has multiple rows.
+      const rosterLdaps = Array.from(new Set(
+        Array.from(byTruckResolved.values())
+          .map(v => v.ldap)
+          .filter((l): l is string => Boolean(l)),
+      ));
+      const tpmsByLdap = new Map<string, { phone: string | null; district: string | null }>();
+      if (rosterLdaps.length > 0) {
+        const ldapPhoneRes = await db.execute(sql`
+          SELECT DISTINCT ON (UPPER(enterprise_id))
+                 UPPER(enterprise_id) AS "ldap",
+                 mobile_phone, district_no
+          FROM tpms_tech_profiles
+          WHERE UPPER(enterprise_id) IN (${sql.join(rosterLdaps.map(v => sql`${v}`), sql`, `)})
+          ORDER BY UPPER(enterprise_id), updated_at DESC NULLS LAST
+        `);
+        for (const r of ((ldapPhoneRes as any).rows ?? [])) {
+          tpmsByLdap.set(String(r.ldap), {
+            phone: r.mobile_phone ?? null,
+            district: r.district_no ?? null,
+          });
+        }
+      }
+
       // ── Step 1: Build a TPMS profile index keyed by BOTH truck_no AND name ──
       // The legacy implementation only keyed by truck_no. That left every truck
       // whose tech is no longer pointed at it in TPMS (but is still assigned to
@@ -813,16 +868,28 @@ export function registerVrmRoutes(): Router {
       `);
       const byTruck = new Map<string, { ldap: string | null; name: string; phone: string | null; district: string | null }>();
       const ldaps: string[] = [];
+      // Seed from the resolved roster first — this is the same source the
+      // VRM Dashboard uses, so LDAP/name decisions stay aligned.
+      for (const [norm, info] of Array.from(byTruckResolved.entries())) {
+        // Layer in TPMS phone by LDAP (resolveRosterLdapsByName doesn't fetch
+        // phone). District from roster wins; TPMS district is a fallback.
+        const tpms = info.ldap ? tpmsByLdap.get(info.ldap) : undefined;
+        const merged = {
+          ldap: info.ldap,
+          name: info.name,
+          phone: tpms?.phone ?? null,
+          district: info.district ?? tpms?.district ?? null,
+        };
+        byTruck.set(norm, merged);
+        if (merged.ldap) ldaps.push(merged.ldap);
+      }
+      // Fallback: trucks present in fs_trucks but NOT in the live roster keep
+      // the legacy TPMS+fs_trucks resolution so the page doesn't lose them.
       for (const r of ((trucksResult as any).rows ?? [])) {
         const norm = String(r.normTruck ?? "");
-        if (!norm) continue;
+        if (!norm || rosterTrucks.has(norm)) continue;
         const truckTechName = (r.tech_name ?? "").toString().trim();
-        // 1st choice: TPMS profile keyed by truck_no (current behaviour)
         let profile = profileByTruck.get(norm) ?? null;
-        // 2nd choice: TPMS profile keyed by tech_name match — but ONLY when
-        // that name maps unambiguously to a single LDAP. Multiple LDAPs with
-        // the same first+last name would otherwise attach the wrong tech's
-        // financials to the truck.
         if (!profile && truckTechName) {
           const candidates = profilesByName.get(truckTechName.toUpperCase());
           if (candidates && candidates.length === 1) profile = candidates[0];
@@ -831,8 +898,6 @@ export function registerVrmRoutes(): Router {
           byTruck.set(norm, profile);
           ldaps.push(profile.ldap);
         } else {
-          // No LDAP — still emit a row so the dashboard has a stable hit on
-          // every truck. Tech Name falls back to whatever fs_trucks knows.
           byTruck.set(norm, {
             ldap: null,
             name: truckTechName,
