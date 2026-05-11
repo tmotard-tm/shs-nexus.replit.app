@@ -122,7 +122,7 @@ export const MANUAL_STAGES: Record<Section, Record<string, readonly string[]>> =
   },
   "In Progress": {
     "In Repair":        ["Awaiting Estimate", "Estimate Approved", "Under Repair", "Parts on Order"],
-    "Ready for Pickup": [],
+    "Ready for Pickup": ["Awaiting Tags/Registration"],
     "Declined Repair":  ["Looking for reassignment", "Need to find a spare"],
   },
   "Completed": {
