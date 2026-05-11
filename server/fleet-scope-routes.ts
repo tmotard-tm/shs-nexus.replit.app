@@ -8508,6 +8508,28 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.error("[AllVehicles] Error fetching Holman odometer data:", holmanError.message);
       }
 
+      // Fetch raw Holman STATUS string per vehicle (e.g. "Active", "Out of Service").
+      // Sourced live from the Snowflake Holman_VEHICLES table, keyed by HOLMAN_VEHICLE_NUMBER.
+      // This is independent of the status_code-derived "Managed by" tag below.
+      const holmanStatusByVehicle = new Map<string, string>();
+      try {
+        const statusSql = `
+          SELECT HOLMAN_VEHICLE_NUMBER, STATUS
+          FROM PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES
+          WHERE HOLMAN_VEHICLE_NUMBER IS NOT NULL
+        `;
+        const statusRows = await executeQuery<{ HOLMAN_VEHICLE_NUMBER: string; STATUS: string | null }>(statusSql);
+        for (const row of statusRows) {
+          if (!row.HOLMAN_VEHICLE_NUMBER || !row.STATUS) continue;
+          const digits = row.HOLMAN_VEHICLE_NUMBER.toString().replace(/\D/g, '');
+          const stripped = digits.replace(/^0+/, '') || '0';
+          holmanStatusByVehicle.set(stripped, row.STATUS.toString().trim());
+        }
+        console.log(`[AllVehicles] Holman status map: ${holmanStatusByVehicle.size} vehicles`);
+      } catch (statusErr: any) {
+        console.error("[AllVehicles] Error fetching Holman STATUS:", statusErr.message);
+      }
+
       // Build set of Holman-managed vehicle numbers (status_code = 1 means active/managed by Holman)
       // Sourced from local holman_vehicles_cache PG table (mirrors Snowflake Holman_VEHICLES).
       // We strip leading zeros so we can compare against fleet vehicle numbers in 1-2
@@ -9547,14 +9569,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // number with 0, 1, and 2 leading zeros stripped against status_code=1
         // entries from holman_vehicles_cache.
         let managedBy: string | null = null;
+        let holmanStatus: string | null = null;
+        const rawDigits = rawVehicleNumber.replace(/\D/g, '');
+        const strippedKey = rawDigits.replace(/^0+/, '') || '0';
         if (holmanManagedSet.size > 0) {
-          const rawDigits = rawVehicleNumber.replace(/\D/g, '');
           const candidates = new Set<string>();
           if (rawDigits) candidates.add(rawDigits);
           if (rawDigits.startsWith('0')) candidates.add(rawDigits.slice(1));
           if (rawDigits.startsWith('00')) candidates.add(rawDigits.slice(2));
           // Also include the fully-stripped form (used as the set key)
-          candidates.add(rawDigits.replace(/^0+/, '') || '0');
+          candidates.add(strippedKey);
           for (const candidate of candidates) {
             const key = candidate.replace(/^0+/, '') || '0';
             if (holmanManagedSet.has(key)) {
@@ -9563,6 +9587,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               break;
             }
           }
+        }
+        if (holmanStatusByVehicle.size > 0) {
+          holmanStatus = holmanStatusByVehicle.get(strippedKey) ?? null;
         }
 
         vehicles.push({
@@ -9595,6 +9622,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lifetimeMaintenance,
           lifetimeMaintenanceNumeric,
           managedBy,
+          holmanStatus,
         });
       }
 

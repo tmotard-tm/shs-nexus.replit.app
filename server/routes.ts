@@ -18353,6 +18353,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Lifetime maintenance + Managed by (Holman active fleet tag)
         "Lifetime Maintenance",
         "Managed by",
+        "Status",
       ];
 
       const csvLines = [
@@ -18415,6 +18416,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
             // Lifetime maintenance + Managed by — pulled from /api/fs/all-vehicles enrichment
             enriched?.lifetimeMaintenance ?? "",
             enriched?.managedBy ?? "",
+            enriched?.holmanStatus ?? "",
           ].map(escapeCell).join(",");
         }),
       ];

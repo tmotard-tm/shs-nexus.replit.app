@@ -42,6 +42,7 @@ interface Vehicle {
   lifetimeMaintenance?: string;
   lifetimeMaintenanceNumeric?: number | null;
   managedBy?: string | null;
+  holmanStatus?: string | null;
 }
 
 type SortDirection = 'asc' | 'desc' | null;
@@ -952,12 +953,13 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                   </Button>
                 </TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Managed by</TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {filteredVehicles.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={22} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={23} className="text-center py-8 text-muted-foreground">
                     No vehicles found matching your filters
                   </TableCell>
                 </TableRow>
@@ -1153,6 +1155,9 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                         </TableCell>
                         <TableCell data-testid={`text-managed-by-${vehicle.vehicleNumber}`}>
                           {vehicle.managedBy || '-'}
+                        </TableCell>
+                        <TableCell data-testid={`text-holman-status-${vehicle.vehicleNumber}`}>
+                          {vehicle.holmanStatus || ''}
                         </TableCell>
                       </TableRow>
                   );

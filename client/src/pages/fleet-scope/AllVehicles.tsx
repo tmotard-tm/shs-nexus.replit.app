@@ -65,6 +65,7 @@ interface VehicleTableRow {
   odometer: number | null;
   odometerDate: string | null;
   managedBy?: string | null;
+  holmanStatus?: string | null;
 }
 
 interface AllVehiclesResponse {
