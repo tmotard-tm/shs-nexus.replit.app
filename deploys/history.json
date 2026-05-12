@@ -94,5 +94,21 @@
       "0006_add_offboarding_return_tokens.sql"
     ],
     "fingerprint": "624a50914863"
+  },
+  {
+    "deployedAt": "2026-05-12T12:16:56.769Z",
+    "bundleHash": "DpCrjd3X",
+    "gitSha": "5255920f",
+    "snapshotKey": null,
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql"
+    ],
+    "fingerprint": "5f372b4daa7a"
   }
 ]
