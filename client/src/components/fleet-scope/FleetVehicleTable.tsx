@@ -953,7 +953,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                   </Button>
                 </TableHead>
                 <TableHead className="whitespace-nowrap bg-muted">Managed by</TableHead>
-                <TableHead className="whitespace-nowrap bg-muted">Status</TableHead>
+                <TableHead className="whitespace-nowrap bg-muted">Holman Status</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
