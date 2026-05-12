@@ -8,8 +8,14 @@ import {
 } from "@/components/ui/select";
 import {
   Eye, Pencil, UserPlus, UserX, AlertTriangle, MapPin, Wrench,
-  ChevronRight, Sparkles, Radio,
+  ChevronRight, Sparkles, Radio, MessageSquarePlus, FileText, Boxes, History,
 } from "lucide-react";
+
+const AMS_COMMENTS = [
+  { who: "n.alvarez", when: "2026-04-30 14:22", body: "Caliber confirms transmission part ETA 5/7. Will reschedule pickup for 5/9." },
+  { who: "ops.team",  when: "2026-04-26 09:10", body: "Rental extended through 5/9. Enterprise mid-size SUV." },
+  { who: "n.alvarez", when: "2026-04-19 16:48", body: "Vehicle dropped at Caliber Collision Tampa. Lockbox 3, key #412." },
+];
 
 const VEHICLE = {
   id: "61385",
@@ -387,6 +393,54 @@ export function Variant10() {
           {active === "update"   && <UpdateBody />}
           {active === "assign"   && <AssignBody />}
           {active === "unassign" && <UnassignBody />}
+        </div>
+
+        {/* AMS notes thread + secondary references */}
+        <div className="px-6 pt-5 pb-5 border-t border-border" style={{ background: "#FAFAF7" }}>
+          <div className="flex items-baseline justify-between mb-3">
+            <div
+              className="font-['Playfair_Display'] text-base tracking-tight"
+              style={{ fontWeight: 600 }}
+            >
+              Latest from AMS
+            </div>
+            <Freshness src="AMS" at="updated 4h ago" />
+          </div>
+          <div className="space-y-2.5">
+            {AMS_COMMENTS.slice(0, 2).map((c, i) => (
+              <div key={i} className="text-xs leading-relaxed">
+                <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                  <span className="font-mono">{c.who}</span>
+                  <span>·</span>
+                  <span>{c.when}</span>
+                </div>
+                <div className="mt-0.5 text-foreground">{c.body}</div>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 mt-3">
+            <button className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground inline-flex items-center gap-1">
+              Show {AMS_COMMENTS.length - 2} earlier
+              <ChevronRight className="w-3 h-3" />
+            </button>
+            <span className="text-muted-foreground">·</span>
+            <button className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1 hover:text-foreground" style={{ color: "#1A56DB" }}>
+              <MessageSquarePlus className="w-3 h-3" /> Add note to AMS
+            </button>
+          </div>
+        </div>
+
+        {/* Reference actions */}
+        <div className="px-6 py-3 border-t border-border grid grid-cols-3 gap-2">
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <FileText className="w-3 h-3 mr-1.5" /> PO History
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <Boxes className="w-3 h-3 mr-1.5" /> Inventory
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <History className="w-3 h-3 mr-1.5" /> History
+          </Button>
         </div>
 
         <div className="px-6 pb-8 pt-4 border-t border-border text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
