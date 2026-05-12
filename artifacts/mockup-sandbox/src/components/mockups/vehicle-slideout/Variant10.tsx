@@ -173,17 +173,17 @@ const TECH_DIRECTORY = [
 function AssignBody() {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<typeof TECH_DIRECTORY[number] | null>(null);
-  const [target, setTarget] = useState<"all" | "holman" | "tpms" | "ams">("all");
 
-  const results = TECH_DIRECTORY.filter((t) => {
-    if (!query.trim()) return true;
-    const q = query.toLowerCase();
-    return (
-      t.name.toLowerCase().includes(q) ||
-      t.racf.toLowerCase().includes(q) ||
-      t.district.includes(q)
-    );
-  });
+  const results = query.trim()
+    ? TECH_DIRECTORY.filter((t) => {
+        const q = query.toLowerCase();
+        return (
+          t.name.toLowerCase().includes(q) ||
+          t.racf.toLowerCase().includes(q) ||
+          t.district.includes(q)
+        );
+      })
+    : [];
 
   return (
     <div className="space-y-6">
@@ -206,48 +206,7 @@ function AssignBody() {
           />
         </div>
 
-        {!picked ? (
-          <div className="border border-border max-h-[208px] overflow-auto">
-            {results.length === 0 ? (
-              <div className="px-3 py-6 text-xs text-muted-foreground text-center">
-                No techs match "{query}".
-              </div>
-            ) : (
-              results.map((t) => (
-                <button
-                  key={t.racf}
-                  onClick={() => setPicked(t)}
-                  className="w-full px-3 py-2 text-left border-b border-border last:border-b-0 hover:bg-muted/50 transition-colors flex items-center gap-3"
-                >
-                  <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm">{t.name}</div>
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
-                      <span className="font-mono">{t.racf}</span>
-                      <span>·</span>
-                      <span>District {t.district}</span>
-                      {!t.inDistrict && (
-                        <span style={{ color: "#B45309" }}>· out of district</span>
-                      )}
-                    </div>
-                  </div>
-                  {t.currentTruck ? (
-                    <span
-                      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 shrink-0"
-                      style={{ background: "#FFFBEB", color: "#B45309" }}
-                    >
-                      On #{t.currentTruck}
-                    </span>
-                  ) : (
-                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
-                      Unassigned
-                    </span>
-                  )}
-                </button>
-              ))
-            )}
-          </div>
-        ) : (
+        {picked ? (
           <div className="border-2 border-foreground p-3 space-y-3">
             <div className="flex items-start gap-3">
               <Check className="w-4 h-4 mt-0.5" style={{ color: "#0D9668" }} />
@@ -272,45 +231,61 @@ function AssignBody() {
                 )}
               </div>
               <button
-                onClick={() => setPicked(null)}
+                onClick={() => { setPicked(null); setQuery(""); }}
                 className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
               >
                 Change
               </button>
             </div>
 
-            <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
-                Push to which systems?
-              </div>
-              <div className="grid grid-cols-4 gap-1">
-                {[
-                  { key: "all",    label: "All 3"  },
-                  { key: "holman", label: "Holman" },
-                  { key: "tpms",   label: "TPMS"   },
-                  { key: "ams",    label: "AMS"    },
-                ].map((o) => (
-                  <button
-                    key={o.key}
-                    onClick={() => setTarget(o.key as typeof target)}
-                    className="px-2 py-1.5 text-[10px] uppercase tracking-wider border border-border transition-colors"
-                    style={{
-                      background: target === o.key ? "#0D9668" : "transparent",
-                      color: target === o.key ? "#fff" : undefined,
-                      borderColor: target === o.key ? "#0D9668" : undefined,
-                    }}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+              We'll sync Holman, TPMS, and AMS in the background.
             </div>
 
             <Button className="w-full rounded-none uppercase tracking-wider text-xs">
               Confirm assignment
             </Button>
           </div>
-        )}
+        ) : results.length > 0 ? (
+          <div className="border border-border">
+            {results.map((t) => (
+              <button
+                key={t.racf}
+                onClick={() => setPicked(t)}
+                className="w-full px-3 py-2 text-left border-b border-border last:border-b-0 hover:bg-muted/50 transition-colors flex items-center gap-3"
+              >
+                <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm">{t.name}</div>
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                    <span className="font-mono">{t.racf}</span>
+                    <span>·</span>
+                    <span>District {t.district}</span>
+                    {!t.inDistrict && (
+                      <span style={{ color: "#B45309" }}>· out of district</span>
+                    )}
+                  </div>
+                </div>
+                {t.currentTruck ? (
+                  <span
+                    className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 shrink-0"
+                    style={{ background: "#FFFBEB", color: "#B45309" }}
+                  >
+                    On #{t.currentTruck}
+                  </span>
+                ) : (
+                  <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                    Unassigned
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        ) : query.trim() ? (
+          <div className="text-xs text-muted-foreground italic px-1">
+            No techs match "{query}".
+          </div>
+        ) : null}
       </section>
 
       {/* DIVIDER */}
