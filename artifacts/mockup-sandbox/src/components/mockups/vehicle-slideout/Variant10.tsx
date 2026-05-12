@@ -8,8 +8,9 @@ import {
 } from "@/components/ui/select";
 import {
   Eye, Pencil, UserPlus, UserX, AlertTriangle, MapPin, Wrench,
-  ChevronRight, Radio, MessageSquarePlus, FileText, Boxes, History,
-  User, Calendar, Building, AlertCircle, XCircle, Search, Check,
+  ChevronRight, ChevronDown, Radio, MessageSquarePlus, FileText, Boxes,
+  History, User, Calendar, Building, AlertCircle, XCircle, Search, Check,
+  Activity, Users, Hash, Palette,
 } from "lucide-react";
 
 // Real data pulled from holman_vehicles_cache + vehicle_nexus_data on 2026-05-12.
@@ -22,7 +23,11 @@ const VEHICLE = {
   plate: "3185806B · IL",
   city: "Salem, WI",
   region: "890 / District 8555",
+  costCenter: "4423",
+  color: null as string | null,            // missing in Holman
   ownership: "Holman Lease (expired 2017-05-31)",
+  ownershipShort: "Holman Lease",
+  assignmentStatus: "Active",              // Holman shows assignment
   odometer: "118,426 mi",
   odometerAt: "2026-04-15 (27d ago)",
   techHolman: "sgoshin",
@@ -32,8 +37,67 @@ const VEHICLE = {
   inService: "2012-06-01",
   lastHolmanSync: "2m ago",
   lastNexusUpdate: "2026-02-09 by jdyer2",
+  lastUpdateUser: "jdyer2",
+  lastUpdateAt: "2026-02-09",
   nexusStatus: "assigned_to_tech",
   repaired: "complete",
+  poCount: 0,                              // no POs against this vehicle
+};
+
+// AMS dossier — every field is missing because this VIN has no AMS record.
+// Render the labels anyway to show structure; values render as em-dash.
+const AMS_DOSSIER = {
+  hasRecord: false,
+  // Ownership hierarchy
+  amsTech: null as string | null,
+  amsTechName: null as string | null,
+  tfd: null as string | null,
+  tfdName: null as string | null,
+  dsm: null as string | null,
+  dsmName: null as string | null,
+  tm: null as string | null,
+  tmName: null as string | null,
+  // Description
+  branding: null as string | null,
+  interior: null as string | null,
+  amsOdometer: null as number | null,
+  amsOdometerDate: null as string | null,
+  remBookValue: null as number | null,
+  leaseEndDate: null as string | null,
+  outOfSvcDate: null as string | null,
+  saleDate: null as string | null,
+  regRenewalDate: null as string | null,
+  lifetimeMaintenanceCost: null as number | null,
+  storageCost: null as number | null,
+  // Condition
+  roadReady: null as string | null,
+  grade: null as string | null,
+  gradeDescription: null as string | null,
+  gradeVerified: null as string | null,
+  truckStatus: null as string | null,
+  theftVerified: null as string | null,
+  vehicleRuns: null as string | null,
+  vehicleLooks: null as string | null,
+  // Location (the "where is the vehicle now" — distinct from garaged city)
+  curLocAddress: null as string | null,
+  curLocCity: null as string | null,
+  curLocState: null as string | null,
+  curLocZip: null as string | null,
+  // Repair (Tier 3 — gates on inRepair)
+  inRepair: false,
+  daysInRepair: null as number | null,
+  repairDateStart: null as string | null,
+  repairETADate: null as string | null,
+  repairReason: null as string | null,
+  repairStatus: null as string | null,
+  repairVendor: null as string | null,
+  estimateCost: null as number | null,
+  rentalCar: null as string | null,
+  rentalStartDate: null as string | null,
+  rentalEndDate: null as string | null,
+  finalDisposition: null as string | null,
+  finalDispositionReason: null as string | null,
+  finalDispositionDate: null as string | null,
 };
 
 // vehicle_nexus_data.comments is empty for 21165 — no AMS comment thread exists.
@@ -86,6 +150,22 @@ function FactRow({
           {value}
         </div>
         <Freshness src={src} at={at} missing={missing} />
+      </div>
+    </div>
+  );
+}
+
+// Editorial-style read-only field for the AMS dossier
+function DossierField({ label, value }: { label: string; value: string | number | null | undefined }) {
+  const empty = value == null || value === "" || value === "—";
+  return (
+    <div>
+      <div className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</div>
+      <div
+        className="mt-0.5 text-xs"
+        style={empty ? { color: "#6B7280", fontStyle: "italic" } : undefined}
+      >
+        {empty ? "— missing —" : String(value)}
       </div>
     </div>
   );
@@ -300,7 +380,7 @@ function AssignBody() {
         </div>
       </div>
 
-      {/* BOTTOM HALF — reconcile existing */}
+      {/* BOTTOM HALF — reconcile existing across all 3 systems */}
       <section className="space-y-3">
         <div className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>
           Holman has an assignment. TPMS and AMS are blank.
@@ -365,7 +445,159 @@ function UnassignBody() {
 function ReviewBody() {
   return (
     <div className="text-sm text-muted-foreground">
-      All canonical fields are shown above in <span className="text-foreground">The Facts</span>. This vehicle is missing AMS and TPMS records — open <span className="text-foreground">Update</span> to force a re-sync, or <span className="text-foreground">Assign</span> to push Holman's assignment downstream.
+      All canonical fields are shown above in <span className="text-foreground">The Facts</span>. The full AMS dossier (Ownership · Description · Condition · Location) sits in the collapsible block below — it's empty for this vehicle because AMS has no record for the VIN. Open <span className="text-foreground">Update</span> to force a re-sync, or <span className="text-foreground">Assign</span> to push Holman's assignment downstream.
+    </div>
+  );
+}
+
+// Tier 2 — full AMS dossier collapsible
+function AmsDossier() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="px-6 py-5 border-t border-border">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-baseline justify-between text-left"
+      >
+        <div className="font-['Playfair_Display'] text-2xl tracking-tight" style={{ fontWeight: 600 }}>
+          AMS dossier
+        </div>
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span style={{ color: "#991B1B" }}>No record · 26 fields blank</span>
+          {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </div>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-5">
+          {/* Ownership hierarchy */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Ownership hierarchy
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="AMS Tech" value={AMS_DOSSIER.amsTech} />
+              <DossierField label="TFD" value={AMS_DOSSIER.tfd} />
+              <DossierField label="DSM" value={AMS_DOSSIER.dsm} />
+              <DossierField label="TM" value={AMS_DOSSIER.tm} />
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Description
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Branding" value={AMS_DOSSIER.branding} />
+              <DossierField label="Interior" value={AMS_DOSSIER.interior} />
+              <DossierField
+                label="AMS Odometer"
+                value={AMS_DOSSIER.amsOdometer != null ? `${AMS_DOSSIER.amsOdometer.toLocaleString()} mi` : null}
+              />
+              <DossierField label="Odo. read date" value={AMS_DOSSIER.amsOdometerDate} />
+              <DossierField
+                label="Book Value"
+                value={AMS_DOSSIER.remBookValue != null ? `$${AMS_DOSSIER.remBookValue.toLocaleString()}` : null}
+              />
+              <DossierField label="Lease End" value={AMS_DOSSIER.leaseEndDate} />
+              <DossierField label="Out of Service" value={AMS_DOSSIER.outOfSvcDate} />
+              <DossierField label="Sale Date" value={AMS_DOSSIER.saleDate} />
+              <DossierField label="Reg Renewal" value={AMS_DOSSIER.regRenewalDate} />
+              <DossierField
+                label="Lifetime Maint."
+                value={AMS_DOSSIER.lifetimeMaintenanceCost != null ? `$${AMS_DOSSIER.lifetimeMaintenanceCost.toLocaleString()}` : null}
+              />
+              <DossierField
+                label="Storage Cost"
+                value={AMS_DOSSIER.storageCost != null ? `$${AMS_DOSSIER.storageCost.toLocaleString()}` : null}
+              />
+            </div>
+          </div>
+
+          {/* Condition */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Condition
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Road Ready" value={AMS_DOSSIER.roadReady} />
+              <DossierField label="Grade" value={AMS_DOSSIER.grade} />
+              <DossierField label="Grade Description" value={AMS_DOSSIER.gradeDescription} />
+              <DossierField label="Grade Verified By" value={AMS_DOSSIER.gradeVerified} />
+              <DossierField label="Truck Status" value={AMS_DOSSIER.truckStatus} />
+              <DossierField label="Theft Verified" value={AMS_DOSSIER.theftVerified} />
+              <div className="col-span-2">
+                <DossierField label="How Vehicle Runs" value={AMS_DOSSIER.vehicleRuns} />
+              </div>
+              <div className="col-span-2">
+                <DossierField label="How Vehicle Looks" value={AMS_DOSSIER.vehicleLooks} />
+              </div>
+            </div>
+          </div>
+
+          {/* Tier 3 — Repair Updates (only if InRepair) */}
+          {AMS_DOSSIER.inRepair && (
+            <div>
+              <div className="text-[10px] uppercase tracking-[0.18em] mb-2 pb-1 border-b inline-flex items-center gap-1.5"
+                style={{ color: "#B45309", borderColor: "#B45309" }}>
+                <Wrench className="w-3 h-3" /> Repair Updates
+              </div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                <DossierField label="In Repair" value={AMS_DOSSIER.inRepair ? "Yes" : "No"} />
+                <DossierField label="Days In Repair" value={AMS_DOSSIER.daysInRepair} />
+                <DossierField label="Repair Date" value={AMS_DOSSIER.repairDateStart} />
+                <DossierField label="Repair ETA" value={AMS_DOSSIER.repairETADate} />
+                <div className="col-span-2"><DossierField label="Svc. Reason" value={AMS_DOSSIER.repairReason} /></div>
+                <div className="col-span-2"><DossierField label="Repair Status" value={AMS_DOSSIER.repairStatus} /></div>
+                <div className="col-span-2"><DossierField label="Repair Vendor" value={AMS_DOSSIER.repairVendor} /></div>
+                <DossierField
+                  label="Estimate Cost"
+                  value={AMS_DOSSIER.estimateCost != null ? `$${AMS_DOSSIER.estimateCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : null}
+                />
+                <DossierField label="Rental Car" value={AMS_DOSSIER.rentalCar} />
+                <DossierField label="Rental Start" value={AMS_DOSSIER.rentalStartDate} />
+                <DossierField label="Rental End" value={AMS_DOSSIER.rentalEndDate} />
+                <div className="col-span-2 mt-1 pt-2 border-t border-border">
+                  <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2">Final Disposition</div>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+                    <div className="col-span-2"><DossierField label="Disposition" value={AMS_DOSSIER.finalDisposition} /></div>
+                    <div className="col-span-2"><DossierField label="Reason" value={AMS_DOSSIER.finalDispositionReason} /></div>
+                    <DossierField label="Final Date" value={AMS_DOSSIER.finalDispositionDate} />
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Location (where the vehicle physically is — distinct from garaged city) */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Current Location
+              <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">(distinct from garaged city)</span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <div className="col-span-2"><DossierField label="Address" value={AMS_DOSSIER.curLocAddress} /></div>
+              <DossierField label="City" value={AMS_DOSSIER.curLocCity} />
+              <DossierField label="State" value={AMS_DOSSIER.curLocState} />
+              <DossierField label="ZIP" value={AMS_DOSSIER.curLocZip} />
+            </div>
+          </div>
+
+          {!AMS_DOSSIER.hasRecord && (
+            <div className="border border-dashed border-border p-3" style={{ background: "#FEF2F2" }}>
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>
+                Why is this empty?
+              </div>
+              <div className="text-xs mt-1 text-muted-foreground">
+                AMS has no record matching VIN <span className="font-mono">{VEHICLE.vin}</span>.
+                Force a sync from the <span className="text-foreground">Update</span> tab to populate
+                Ownership, Description, Condition, Repair, and Location at once.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -393,6 +625,23 @@ export function Variant10() {
               {VEHICLE.year} {VEHICLE.make} {VEHICLE.model}
             </span>
           </div>
+
+          {/* Status + ownership badges (Tier 1) */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span
+              className="text-[10px] uppercase tracking-wider px-2 py-0.5 inline-flex items-center gap-1"
+              style={{ background: "#DCFCE7", color: "#166534" }}
+            >
+              <Check className="w-2.5 h-2.5" /> {VEHICLE.assignmentStatus}
+            </span>
+            <span
+              className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border"
+              style={{ color: "#B45309" }}
+            >
+              {VEHICLE.ownershipShort} · expired 2017
+            </span>
+          </div>
+
           <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
               <MapPin className="w-3 h-3" /> {VEHICLE.city}
@@ -458,6 +707,22 @@ export function Variant10() {
               mono
               src="Holman"
               at={VEHICLE.lastHolmanSync}
+            />
+            {/* Tier 1 additions */}
+            <FactRow
+              icon={Hash}
+              label="Cost Center"
+              value={`CC ${VEHICLE.costCenter}`}
+              src="Holman"
+              at={VEHICLE.lastHolmanSync}
+            />
+            <FactRow
+              icon={Palette}
+              label="Color"
+              value={VEHICLE.color ?? "— missing —"}
+              src="Holman"
+              at={VEHICLE.color ? VEHICLE.lastHolmanSync : "not on file"}
+              missing={!VEHICLE.color}
             />
           </div>
         </div>
@@ -545,19 +810,33 @@ export function Variant10() {
           </div>
         </div>
 
-        {/* References */}
-        <div className="px-6 py-3 border-t border-border grid grid-cols-4 gap-2">
+        {/* AMS dossier (Tier 2 + Tier 3 conditional) */}
+        <AmsDossier />
+
+        {/* References (Tier 1 — added Telematics + Ops Review, PO count) */}
+        <div className="px-6 py-3 border-t border-border grid grid-cols-3 gap-2">
           <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
             <MessageSquarePlus className="w-3 h-3 mr-1.5" /> Add note
           </Button>
           <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <FileText className="w-3 h-3 mr-1.5" /> PO History
+            <FileText className="w-3 h-3 mr-1.5" /> PO History · {VEHICLE.poCount}
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <History className="w-3 h-3 mr-1.5" /> History
           </Button>
           <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
             <Boxes className="w-3 h-3 mr-1.5" /> Inventory
           </Button>
           <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <History className="w-3 h-3 mr-1.5" /> History
+            <Activity className="w-3 h-3 mr-1.5" /> Telematics
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            className="rounded-none text-[10px] uppercase tracking-wider justify-start"
+            style={{ color: "#7E22CE", borderColor: "#E9D5FF" }}
+          >
+            <Users className="w-3 h-3 mr-1.5" /> Ops Review
           </Button>
         </div>
 
@@ -641,9 +920,14 @@ export function Variant10() {
           </div>
         </div>
 
-        <div className="px-6 pb-8 pt-4 border-t border-border text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-          Facts · Alerts · Context · Actions
+        {/* Audit footer (Tier 1) */}
+        <div className="px-6 pt-4 pb-2 border-t border-border flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          <span>Facts · Alerts · Dossier · Context · Actions</span>
+          <span className="normal-case tracking-normal">
+            Last updated <span className="font-mono">{VEHICLE.lastUpdateAt}</span> by <span className="font-mono">{VEHICLE.lastUpdateUser}</span>
+          </span>
         </div>
+        <div className="px-6 pb-8" />
       </div>
     </div>
   );
