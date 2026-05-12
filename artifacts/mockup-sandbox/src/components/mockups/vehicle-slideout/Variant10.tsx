@@ -9,7 +9,7 @@ import {
 import {
   Eye, Pencil, UserPlus, UserX, AlertTriangle, MapPin, Wrench,
   ChevronRight, Radio, MessageSquarePlus, FileText, Boxes, History,
-  User, Calendar, Building, AlertCircle, XCircle,
+  User, Calendar, Building, AlertCircle, XCircle, Search, Check,
 } from "lucide-react";
 
 // Real data pulled from holman_vehicles_cache + vehicle_nexus_data on 2026-05-12.
@@ -48,7 +48,7 @@ const ODO_SOURCES = [
 const PRINCIPLES = [
   { key: "review",   label: "Review",   icon: Eye,      tone: "#1A56DB", note: "9 fields · gaps in AMS / TPMS" },
   { key: "update",   label: "Update",   icon: Pencil,   tone: "#B45309", note: "Pinned: re-sync AMS" },
-  { key: "assign",   label: "Assign",   icon: UserPlus, tone: "#0D9668", note: "Holman only" },
+  { key: "assign",   label: "Assign",   icon: UserPlus, tone: "#0D9668", note: "Pick or reconcile" },
   { key: "unassign", label: "Unassign", icon: UserX,    tone: "#DC2626", note: "Reason required" },
 ] as const;
 
@@ -162,33 +162,200 @@ function UpdateBody() {
   );
 }
 
+const TECH_DIRECTORY = [
+  { racf: "jsmith2",   name: "Jane Smith",       district: "8555", currentTruck: null,    inDistrict: true  },
+  { racf: "mwilson",   name: "Marcus Wilson",    district: "8555", currentTruck: "20987", inDistrict: true  },
+  { racf: "rgarcia4",  name: "Rosa Garcia",      district: "8555", currentTruck: null,    inDistrict: true  },
+  { racf: "tnguyen",   name: "Tran Nguyen",      district: "8501", currentTruck: null,    inDistrict: false },
+  { racf: "dkowalski", name: "Derek Kowalski",   district: "8555", currentTruck: "21002", inDistrict: true  },
+];
+
 function AssignBody() {
+  const [query, setQuery] = useState("");
+  const [picked, setPicked] = useState<typeof TECH_DIRECTORY[number] | null>(null);
+  const [target, setTarget] = useState<"all" | "holman" | "tpms" | "ams">("all");
+
+  const results = TECH_DIRECTORY.filter((t) => {
+    if (!query.trim()) return true;
+    const q = query.toLowerCase();
+    return (
+      t.name.toLowerCase().includes(q) ||
+      t.racf.toLowerCase().includes(q) ||
+      t.district.includes(q)
+    );
+  });
+
   return (
-    <div className="space-y-4">
-      <div className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>
-        Only Holman has an assignment for this truck. TPMS and AMS are blank.
-      </div>
-      <div className="grid grid-cols-3 gap-2">
-        <div className="border border-border p-2">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Holman</div>
-          <div className="font-mono text-xs mt-0.5">{VEHICLE.techHolman}</div>
-          <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastHolmanSync}</div>
+    <div className="space-y-6">
+      {/* TOP HALF — pick a new tech */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between">
+          <div className="text-xs uppercase tracking-wider font-medium">Pick a new tech</div>
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            District {VEHICLE.region.split("/").pop()?.trim()}
+          </span>
         </div>
-        <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
-          <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>TPMS</div>
-          <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
-          <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
+
+        <div className="relative">
+          <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Find a tech by name, RACF ID, or district…"
+            className="h-9 pl-8 rounded-none text-sm"
+          />
         </div>
-        <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
-          <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>AMS</div>
-          <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
-          <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
+
+        {!picked ? (
+          <div className="border border-border max-h-[208px] overflow-auto">
+            {results.length === 0 ? (
+              <div className="px-3 py-6 text-xs text-muted-foreground text-center">
+                No techs match "{query}".
+              </div>
+            ) : (
+              results.map((t) => (
+                <button
+                  key={t.racf}
+                  onClick={() => setPicked(t)}
+                  className="w-full px-3 py-2 text-left border-b border-border last:border-b-0 hover:bg-muted/50 transition-colors flex items-center gap-3"
+                >
+                  <User className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm">{t.name}</div>
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                      <span className="font-mono">{t.racf}</span>
+                      <span>·</span>
+                      <span>District {t.district}</span>
+                      {!t.inDistrict && (
+                        <span style={{ color: "#B45309" }}>· out of district</span>
+                      )}
+                    </div>
+                  </div>
+                  {t.currentTruck ? (
+                    <span
+                      className="text-[10px] uppercase tracking-wider px-1.5 py-0.5 shrink-0"
+                      style={{ background: "#FFFBEB", color: "#B45309" }}
+                    >
+                      On #{t.currentTruck}
+                    </span>
+                  ) : (
+                    <span className="text-[10px] uppercase tracking-wider text-muted-foreground shrink-0">
+                      Unassigned
+                    </span>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="border-2 border-foreground p-3 space-y-3">
+            <div className="flex items-start gap-3">
+              <Check className="w-4 h-4 mt-0.5" style={{ color: "#0D9668" }} />
+              <div className="flex-1 min-w-0">
+                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  Assign to truck #{VEHICLE.id}
+                </div>
+                <div className="text-sm mt-0.5">
+                  <span className="font-medium">{picked.name}</span>{" "}
+                  <span className="text-muted-foreground">
+                    ({picked.racf} · District {picked.district})
+                  </span>
+                </div>
+                {picked.currentTruck && (
+                  <div
+                    className="text-[10px] uppercase tracking-wider mt-1.5 inline-flex items-center gap-1"
+                    style={{ color: "#B45309" }}
+                  >
+                    <AlertCircle className="w-3 h-3" />
+                    Will unassign from truck #{picked.currentTruck}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setPicked(null)}
+                className="text-[10px] uppercase tracking-wider text-muted-foreground hover:text-foreground"
+              >
+                Change
+              </button>
+            </div>
+
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5">
+                Push to which systems?
+              </div>
+              <div className="grid grid-cols-4 gap-1">
+                {[
+                  { key: "all",    label: "All 3"  },
+                  { key: "holman", label: "Holman" },
+                  { key: "tpms",   label: "TPMS"   },
+                  { key: "ams",    label: "AMS"    },
+                ].map((o) => (
+                  <button
+                    key={o.key}
+                    onClick={() => setTarget(o.key as typeof target)}
+                    className="px-2 py-1.5 text-[10px] uppercase tracking-wider border border-border transition-colors"
+                    style={{
+                      background: target === o.key ? "#0D9668" : "transparent",
+                      color: target === o.key ? "#fff" : undefined,
+                      borderColor: target === o.key ? "#0D9668" : undefined,
+                    }}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <Button className="w-full rounded-none uppercase tracking-wider text-xs">
+              Confirm assignment
+            </Button>
+          </div>
+        )}
+      </section>
+
+      {/* DIVIDER */}
+      <div className="relative">
+        <div className="absolute inset-0 flex items-center">
+          <div className="w-full border-t border-border" />
+        </div>
+        <div className="relative flex justify-center">
+          <span className="bg-background px-3 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+            or just reconcile what's already there
+          </span>
         </div>
       </div>
-      <div className="flex gap-2">
-        <Button className="flex-1 rounded-none uppercase tracking-wider text-xs">Push Holman → TPMS + AMS</Button>
-        <Button variant="outline" className="rounded-none uppercase tracking-wider text-xs">Resync</Button>
-      </div>
+
+      {/* BOTTOM HALF — reconcile existing */}
+      <section className="space-y-3">
+        <div className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>
+          Holman has an assignment. TPMS and AMS are blank.
+        </div>
+        <div className="grid grid-cols-3 gap-2">
+          <div className="border border-border p-2">
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Holman</div>
+            <div className="font-mono text-xs mt-0.5">{VEHICLE.techHolman}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastHolmanSync}</div>
+          </div>
+          <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>TPMS</div>
+            <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
+            <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
+          </div>
+          <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>AMS</div>
+            <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
+            <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" className="flex-1 rounded-none uppercase tracking-wider text-xs">
+            Push Holman → TPMS + AMS
+          </Button>
+          <Button variant="ghost" className="rounded-none uppercase tracking-wider text-xs">
+            Resync
+          </Button>
+        </div>
+      </section>
     </div>
   );
 }
