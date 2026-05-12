@@ -72,3 +72,9 @@ id = "TVsYVQ-ql5rAF4VbcrYJL"
 uri = "file://attached_assets/exports/tpms_bulk_phone_update_results.csv"
 type = "table"
 title = "TPMS Bulk Phone Update — Results (505/505 success)"
+
+[[outputs]]
+id = "4VUgPkelF7jhWXbbJkPKr"
+uri = "file://exports/commits-last-2-weeks.csv"
+type = "table"
+title = "All commits — last 2 weeks"

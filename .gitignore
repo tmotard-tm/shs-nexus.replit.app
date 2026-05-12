@@ -5,3 +5,10 @@ server/public
 vite.config.ts.*
 *.tar.gz
 *.p8
+cookies*.txt
+*_cookies.txt
+temp_session.txt
+sessions.json
+*_export_test.csv
+snowflake.log
+diagnostic_output.json
