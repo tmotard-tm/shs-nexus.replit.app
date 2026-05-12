@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 
 // Real data pulled from Holman + AMS + TPMS + WMS on 2026-05-12.
-const VEHICLE = {
+export const VEHICLE = {
   id: "21165",
   year: 2012,
   make: "Chevrolet",
@@ -50,7 +50,7 @@ const VEHICLE = {
 };
 
 // Holman "ledger" facts — the cross-system context AMS/Nexus never see.
-const HOLMAN_FACTS = {
+export const HOLMAN_FACTS = {
   assignedStatus: "Assigned",              // Holman still thinks tech is driving it
   vehicleStatus: "Active",                 // statusCode 1 — Holman never marked it "in repair"
   lessor: "ARI FLEET LT",
@@ -73,7 +73,7 @@ const HOLMAN_FACTS = {
 };
 
 // WMS / Parts truck — the 4th system. Truck #021165 is registered as a Parts Truck.
-const WMS_PARTS_TRUCK = {
+export const WMS_PARTS_TRUCK = {
   truckId: 2191,
   truckName: "021165",
   techEnterpriseId: null as string | null,  // ⚠ no tech bound to this parts truck in WMS
@@ -84,7 +84,7 @@ const WMS_PARTS_TRUCK = {
 };
 
 // TPMS supervisor contact — SMS-only gateway (no real email on file).
-const TPMS_CONTACT = {
+export const TPMS_CONTACT = {
   techId: "0886473",
   racf: "SGOSHIN",
   name: "Shaun Goshinsky",
@@ -95,7 +95,7 @@ const TPMS_CONTACT = {
 };
 
 // AMS dossier — vehicle has a full AMS record (82 fields). Real values below.
-const AMS_DOSSIER = {
+export const AMS_DOSSIER = {
   hasRecord: true,
   // Ownership hierarchy
   amsTech: "SGOSHIN",
@@ -155,15 +155,15 @@ const AMS_DOSSIER = {
 };
 
 // vehicle_nexus_data.comments is empty for 21165 — no AMS comment thread exists.
-const AMS_COMMENTS: { who: string; when: string; body: string }[] = [];
+export const AMS_COMMENTS: { who: string; when: string; body: string }[] = [];
 
-const ODO_SOURCES = [
+export const ODO_SOURCES = [
   { sys: "Holman",  val: "118,426 mi", at: "27d ago",  canonical: true },
   { sys: "AMS",     val: "118,426 mi", at: "27d ago",  match: true },
   { sys: "Samsara", val: "—",          at: "not connected" },
 ];
 
-const PRINCIPLES = [
+export const PRINCIPLES = [
   { key: "review",   label: "Review",   icon: Eye,      tone: "#1A56DB", note: "Repair stuck 103d · est. pending" },
   { key: "update",   label: "Update",   icon: Pencil,   tone: "#B45309", note: "Pinned: chase PEP BOYS estimate" },
   { key: "assign",   label: "Assign",   icon: UserPlus, tone: "#0D9668", note: "Tech aligned in Holman + AMS" },
@@ -172,7 +172,7 @@ const PRINCIPLES = [
 
 type PrincipleKey = typeof PRINCIPLES[number]["key"];
 
-function Freshness({ src, at, missing }: { src: string; at: string; missing?: boolean }) {
+export function Freshness({ src, at, missing }: { src: string; at: string; missing?: boolean }) {
   return (
     <span
       className="text-[10px] uppercase tracking-wider inline-flex items-center gap-1"
@@ -184,7 +184,7 @@ function Freshness({ src, at, missing }: { src: string; at: string; missing?: bo
   );
 }
 
-function FactRow({
+export function FactRow({
   icon: Icon, label, value, mono, src, at, missing,
 }: {
   icon: React.ComponentType<{ className?: string }>;
@@ -210,7 +210,7 @@ function FactRow({
 }
 
 // Editorial-style read-only field for the AMS dossier
-function DossierField({ label, value }: { label: string; value: string | number | null | undefined }) {
+export function DossierField({ label, value }: { label: string; value: string | number | null | undefined }) {
   const empty = value == null || value === "" || value === "—";
   return (
     <div>
@@ -225,7 +225,7 @@ function DossierField({ label, value }: { label: string; value: string | number 
   );
 }
 
-function MismatchPanel() {
+export function MismatchPanel() {
   return (
     <div className="mt-3 border-l-2 pl-3" style={{ borderColor: "#B45309" }}>
       <div className="text-[10px] uppercase tracking-wider mb-2" style={{ color: "#B45309" }}>
@@ -262,7 +262,7 @@ function MismatchPanel() {
   );
 }
 
-function UpdateBody() {
+export function UpdateBody() {
   return (
     <div className="space-y-5">
       <div
@@ -312,7 +312,7 @@ function UpdateBody() {
   );
 }
 
-const TECH_DIRECTORY = [
+export const TECH_DIRECTORY = [
   { racf: "jsmith2",   name: "Jane Smith",       district: "8555", currentTruck: null,    inDistrict: true  },
   { racf: "mwilson",   name: "Marcus Wilson",    district: "8555", currentTruck: "20987", inDistrict: true  },
   { racf: "rgarcia4",  name: "Rosa Garcia",      district: "8555", currentTruck: null,    inDistrict: true  },
@@ -320,7 +320,7 @@ const TECH_DIRECTORY = [
   { racf: "dkowalski", name: "Derek Kowalski",   district: "8555", currentTruck: "21002", inDistrict: true  },
 ];
 
-function AssignBody() {
+export function AssignBody() {
   const [query, setQuery] = useState("");
   const [picked, setPicked] = useState<typeof TECH_DIRECTORY[number] | null>(null);
 
@@ -490,7 +490,7 @@ function AssignBody() {
   );
 }
 
-function UnassignBody() {
+export function UnassignBody() {
   return (
     <div className="space-y-4">
       <div>
@@ -517,7 +517,7 @@ function UnassignBody() {
   );
 }
 
-function ReviewBody() {
+export function ReviewBody() {
   return (
     <div className="text-sm text-muted-foreground space-y-2">
       <p>
@@ -534,7 +534,7 @@ function ReviewBody() {
 }
 
 // Tier 2 — full AMS dossier collapsible
-function AmsDossier() {
+export function AmsDossier() {
   const [open, setOpen] = useState(false);
   return (
     <div className="px-6 py-5 border-t border-border">
@@ -688,7 +688,7 @@ function AmsDossier() {
 }
 
 // Tier 2 — cross-system ledger (Holman + WMS + TPMS) shown alongside the AMS dossier.
-function CrossSystemLedger() {
+export function CrossSystemLedger() {
   const [open, setOpen] = useState(false);
   const overdueMonths = HOLMAN_FACTS.monthsBilled - HOLMAN_FACTS.leaseTerm;
   return (

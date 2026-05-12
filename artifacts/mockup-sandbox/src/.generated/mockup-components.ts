@@ -16,6 +16,7 @@ export const modules: ModuleMap = {
   "./components/mockups/vehicle-slideout/Current.tsx": () => import("../components/mockups/vehicle-slideout/Current.tsx"),
   "./components/mockups/vehicle-slideout/Variant1.tsx": () => import("../components/mockups/vehicle-slideout/Variant1.tsx"),
   "./components/mockups/vehicle-slideout/Variant10.tsx": () => import("../components/mockups/vehicle-slideout/Variant10.tsx"),
+  "./components/mockups/vehicle-slideout/Variant11.tsx": () => import("../components/mockups/vehicle-slideout/Variant11.tsx"),
   "./components/mockups/vehicle-slideout/Variant2.tsx": () => import("../components/mockups/vehicle-slideout/Variant2.tsx"),
   "./components/mockups/vehicle-slideout/Variant3.tsx": () => import("../components/mockups/vehicle-slideout/Variant3.tsx"),
   "./components/mockups/vehicle-slideout/Variant4.tsx": () => import("../components/mockups/vehicle-slideout/Variant4.tsx"),
