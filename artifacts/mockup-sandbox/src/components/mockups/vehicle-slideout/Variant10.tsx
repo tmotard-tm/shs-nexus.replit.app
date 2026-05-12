@@ -543,7 +543,7 @@ export function AmsDossier() {
         className="w-full flex items-baseline justify-between text-left"
       >
         <div className="font-['Playfair_Display'] text-2xl tracking-tight" style={{ fontWeight: 600 }}>
-          AMS dossier
+          Vehicle Info
         </div>
         <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
           <span style={{ color: "#991B1B" }}>No record · 26 fields blank</span>
