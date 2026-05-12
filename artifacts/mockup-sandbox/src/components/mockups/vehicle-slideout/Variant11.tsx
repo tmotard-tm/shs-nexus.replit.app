@@ -144,6 +144,20 @@ const STATE_OPTIONS = [
   { value: "unassigned",  label: "Unassigned" },
 ];
 
+// District → Cost Center is canonical in Holman. Cost Center is never
+// edited directly; it is derived from the district the vehicle is bound to.
+const DISTRICT_COST_CENTER: Record<string, string> = {
+  "8555": "4423",
+  "8501": "4180",
+  "8612": "5210",
+  "8744": "4901",
+  "8290": "3815",
+};
+const DISTRICT_OPTIONS = Object.keys(DISTRICT_COST_CENTER).map((d) => ({
+  value: d, label: `District ${d}`,
+}));
+const deriveCC = (district: string) => DISTRICT_COST_CENTER[district] ?? "—";
+
 export function Variant11() {
   const [active, setActive] = useState<PrincipleKey>("update");
   const Icon = PRINCIPLES.find((p) => p.key === active)!.icon;
@@ -153,7 +167,7 @@ export function Variant11() {
     () => ({
       tech: VEHICLE.techHolmanName,
       city: VEHICLE.city,
-      costCenter: VEHICLE.costCenter,
+      district: "8555",
       color: VEHICLE.color ?? "",
       state: VEHICLE.nexusStatus,
       odometer: "118426",
@@ -286,10 +300,15 @@ export function Variant11() {
                 value={VEHICLE.vin}
                 src="Holman" at={VEHICLE.lastHolmanSync}
               />
-              <EditableFactRow
-                icon={Hash} label="Cost Center"
-                value={draft.costCenter} onChange={set("costCenter")} dirty={isDirty("costCenter")}
-                src="Holman" at={VEHICLE.lastHolmanSync}
+              <EditableSelectRow
+                icon={Hash} label="District"
+                value={draft.district} onChange={set("district")} dirty={isDirty("district")}
+                options={DISTRICT_OPTIONS}
+              />
+              <LockedFactRow
+                icon={Hash} label="Cost Center · auto"
+                value={`CC ${deriveCC(draft.district)}${isDirty("district") ? "  (will change)" : ""}`}
+                src="Holman · derived from district" at={VEHICLE.lastHolmanSync}
               />
               <EditableFactRow
                 icon={Palette} label="Color"
@@ -535,14 +554,23 @@ export function Variant11() {
           {active === "review"   && <ReviewBody />}
           {active === "assign"   && <AssignBody />}
           {active === "unassign" && <UnassignBody />}
-          {active === "update"   && (
-            <UpdateActionPanel
-              dirtyKeys={dirtyKeys as string[]}
-              draft={draft}
-              initial={initial}
-              onDiscard={() => setDraft(initial)}
-            />
-          )}
+          {active === "update"   && (() => {
+            // Surface the auto-derived cost-center change alongside the district.
+            const districtDirty = isDirty("district");
+            const augKeys = districtDirty
+              ? [...dirtyKeys, "costCenter"] as string[]
+              : (dirtyKeys as string[]);
+            const augDraft   = { ...draft,   costCenter: deriveCC(draft.district) };
+            const augInitial = { ...initial, costCenter: deriveCC(initial.district) };
+            return (
+              <UpdateActionPanel
+                dirtyKeys={augKeys}
+                draft={augDraft}
+                initial={augInitial}
+                onDiscard={() => setDraft(initial)}
+              />
+            );
+          })()}
         </div>
       </div>
     </div>
@@ -555,7 +583,8 @@ export function Variant11() {
 const FIELD_LABEL: Record<string, string> = {
   tech: "Assigned tech",
   city: "Garaged city",
-  costCenter: "Cost center",
+  district: "District",
+  costCenter: "Cost center · auto",
   color: "Color",
   state: "Current state",
   odometer: "Odometer",
@@ -567,6 +596,8 @@ function formatVal(k: string, v: string) {
     return Number.isFinite(n) ? `${n.toLocaleString()} mi` : v;
   }
   if (k === "state") return v.replace(/_/g, " ");
+  if (k === "district") return `District ${v}`;
+  if (k === "costCenter") return `CC ${v}`;
   return v || "—";
 }
 
@@ -584,7 +615,7 @@ function UpdateActionPanel({
     <div>
       {!hasChanges ? (
         <div className="text-xs text-muted-foreground">
-          Click any field above to edit it. Only Cost Center, Garaged city, Tech, Color, Current state, and Odometer are editable; VIN, Year/Make/Model, and the AMS-only fields stay locked.
+          Click any field above to edit it. Editable: Tech, Garaged city, District, Color, Current state, Odometer. Cost Center is auto-derived from District. VIN and Year/Make/Model stay locked.
         </div>
       ) : (
         <div className="space-y-1.5 mb-3">
