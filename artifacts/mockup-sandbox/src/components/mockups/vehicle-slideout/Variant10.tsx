@@ -10,7 +10,7 @@ import {
   Eye, Pencil, UserPlus, UserX, AlertTriangle, MapPin, Wrench,
   ChevronRight, ChevronDown, Radio, MessageSquarePlus, FileText, Boxes,
   History, User, Calendar, Building, AlertCircle, XCircle, Search, Check,
-  Activity, Users, Hash, Palette,
+  Activity, Users, Hash, Palette, Car,
 } from "lucide-react";
 
 // Real data pulled from holman_vehicles_cache + vehicle_nexus_data on 2026-05-12.
@@ -24,76 +24,83 @@ const VEHICLE = {
   city: "Salem, WI",
   region: "890 / District 8555",
   costCenter: "4423",
-  color: null as string | null,            // missing in Holman
-  ownership: "Holman Lease (expired 2017-05-31)",
+  color: "White",
+  ownership: "Holman Lease (expired 2017-05-24)",
   ownershipShort: "Holman Lease",
-  assignmentStatus: "Active",              // Holman shows assignment
+  assignmentStatus: "In Repair",           // truth: vehicle is at PEP BOYS, rental open
   odometer: "118,426 mi",
   odometerAt: "2026-04-15 (27d ago)",
   techHolman: "sgoshin",
   techHolmanName: "Shaun Goshinsky",
-  techTpms: null as string | null,
-  techAms: null as string | null,
-  inService: "2012-06-01",
+  techAms: "SGOSHIN",                       // matches Holman ✓
+  techAmsName: "Shaun Goshinsky",
+  techTpms: null as string | null,         // TPMS still blank
+  inService: "2012-05-17",                 // AMS DeliveryDate
+  vehicleAgeMonths: 168,
   lastHolmanSync: "2m ago",
+  lastAmsSync: "2026-01-24 by rdelgal",
+  lastRepairUpdate: "by pyadav",
   lastNexusUpdate: "2026-02-09 by jdyer2",
   lastUpdateUser: "jdyer2",
   lastUpdateAt: "2026-02-09",
-  nexusStatus: "assigned_to_tech",
-  repaired: "complete",
-  poCount: 0,                              // no POs against this vehicle
+  nexusStatus: "in_repair",
+  poCount: 0,
 };
 
-// AMS dossier — every field is missing because this VIN has no AMS record.
-// Render the labels anyway to show structure; values render as em-dash.
+// AMS dossier — vehicle has a full AMS record (82 fields). Real values below.
 const AMS_DOSSIER = {
-  hasRecord: false,
+  hasRecord: true,
   // Ownership hierarchy
-  amsTech: null as string | null,
-  amsTechName: null as string | null,
-  tfd: null as string | null,
-  tfdName: null as string | null,
-  dsm: null as string | null,
-  dsmName: null as string | null,
-  tm: null as string | null,
-  tmName: null as string | null,
+  amsTech: "SGOSHIN",
+  amsTechName: "Shaun Goshinsky",
+  tfd: "CONEI02",
+  tfdName: "Carl L O'Neill",
+  dsm: "FACOST2",
+  dsmName: "Frankie Acosta",
+  tm: "DBALABA",
+  tmName: "Daniel J Balaban",
   // Description
-  branding: null as string | null,
-  interior: null as string | null,
-  amsOdometer: null as number | null,
-  amsOdometerDate: null as string | null,
-  remBookValue: null as number | null,
-  leaseEndDate: null as string | null,
+  branding: "AE Factory Service",
+  interior: "Utility With Ref Racks",
+  sctTune: "Medium",
+  amsOdometer: 118426,
+  amsOdometerDate: "2026-04-15",
+  remBookValue: 0,
+  leaseEndDate: "2017-05-24",
   outOfSvcDate: null as string | null,
   saleDate: null as string | null,
-  regRenewalDate: null as string | null,
-  lifetimeMaintenanceCost: null as number | null,
-  storageCost: null as number | null,
+  regRenewalDate: "2026-10-31",
+  lifetimeMaintenanceCost: 22861.52,
+  storageCost: 0,
   // Condition
-  roadReady: null as string | null,
-  grade: null as string | null,
-  gradeDescription: null as string | null,
-  gradeVerified: null as string | null,
-  truckStatus: null as string | null,
-  theftVerified: null as string | null,
-  vehicleRuns: null as string | null,
-  vehicleLooks: null as string | null,
-  // Location (the "where is the vehicle now" — distinct from garaged city)
-  curLocAddress: null as string | null,
-  curLocCity: null as string | null,
-  curLocState: null as string | null,
-  curLocZip: null as string | null,
-  // Repair (Tier 3 — gates on inRepair)
-  inRepair: false,
-  daysInRepair: null as number | null,
-  repairDateStart: null as string | null,
-  repairETADate: null as string | null,
-  repairReason: null as string | null,
-  repairStatus: null as string | null,
-  repairVendor: null as string | null,
-  estimateCost: null as number | null,
-  rentalCar: null as string | null,
-  rentalStartDate: null as string | null,
+  roadReady: "Yes",
+  grade: "B",
+  gradeDescription: "101K–175K mi. Baseball-size dents, 6\" scratches, 4×4\" rust patch. Safety aspects good.",
+  gradeVerified: "Yes",
+  truckStatus: "Assigned to Tech",
+  theftVerified: "Yes",
+  vehicleRuns: "Operational",
+  vehicleLooks: "Poor — decals/paint peeling, minor body damage, minor rust",
+  // Key location (AMS has a typo here — SHERWOOD vs SHOREWOOD on current loc)
+  keyLocAddress: "7816 Sherwood Dr",
+  keyLocZip: "53168",
+  // Current location (where the vehicle physically is — distinct from garaged city)
+  curLocAddress: "7816 Shorewood Dr",
+  curLocCity: "Salem",
+  curLocState: "WI",
+  curLocZip: "53168",
+  // Repair (Tier 3 — gates on inRepair). Vehicle has been at PEP BOYS since 2026-01-29.
+  inRepair: true,
+  daysInRepair: 103,
+  repairDateStart: "2026-01-29",
+  repairETADate: "2026-02-04",
+  etaOverdueDays: 97,
+  repairReason: "Mechanical Breakdown / Failure",
+  repairStatus: "Waiting Estimate From Shop",
+  repairVendor: "PEP BOYS · 818 E Rollins Rd, Round Lake Beach IL 60073",
+  estimateCost: 0,
+  rentalCar: "YES — Rental",
+  rentalStartDate: "2026-01-29",
   rentalEndDate: null as string | null,
   finalDisposition: null as string | null,
   finalDispositionReason: null as string | null,
@@ -105,15 +112,15 @@ const AMS_COMMENTS: { who: string; when: string; body: string }[] = [];
 
 const ODO_SOURCES = [
   { sys: "Holman",  val: "118,426 mi", at: "27d ago",  canonical: true },
-  { sys: "AMS",     val: "—",          at: "no record" },
+  { sys: "AMS",     val: "118,426 mi", at: "27d ago",  match: true },
   { sys: "Samsara", val: "—",          at: "not connected" },
 ];
 
 const PRINCIPLES = [
-  { key: "review",   label: "Review",   icon: Eye,      tone: "#1A56DB", note: "9 fields · gaps in AMS / TPMS" },
-  { key: "update",   label: "Update",   icon: Pencil,   tone: "#B45309", note: "Pinned: re-sync AMS" },
-  { key: "assign",   label: "Assign",   icon: UserPlus, tone: "#0D9668", note: "Pick or reconcile" },
-  { key: "unassign", label: "Unassign", icon: UserX,    tone: "#DC2626", note: "Reason required" },
+  { key: "review",   label: "Review",   icon: Eye,      tone: "#1A56DB", note: "Repair stuck 103d · est. pending" },
+  { key: "update",   label: "Update",   icon: Pencil,   tone: "#B45309", note: "Pinned: chase PEP BOYS estimate" },
+  { key: "assign",   label: "Assign",   icon: UserPlus, tone: "#0D9668", note: "Tech aligned in Holman + AMS" },
+  { key: "unassign", label: "Unassign", icon: UserX,    tone: "#DC2626", note: "Blocked while in repair" },
 ] as const;
 
 type PrincipleKey = typeof PRINCIPLES[number]["key"];
@@ -213,29 +220,45 @@ function UpdateBody() {
     <div className="space-y-5">
       <div
         className="text-[10px] uppercase tracking-wider px-2 py-1 inline-flex items-center gap-1.5"
-        style={{ background: "#FEF2F2", color: "#991B1B" }}
+        style={{ background: "#FFFBEB", color: "#92400E" }}
       >
-        <XCircle className="w-3 h-3" />
-        Pinned: AMS has no record for this VIN
+        <Wrench className="w-3 h-3" />
+        Pinned: chase PEP BOYS for repair estimate (97d overdue)
       </div>
       <div className="space-y-4">
         <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Force AMS sync</Label>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Update repair status</Label>
+          <Select>
+            <SelectTrigger className="mt-1 h-9 rounded-none">
+              <SelectValue placeholder={AMS_DOSSIER.repairStatus ?? "—"} />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="waiting-estimate">Waiting Estimate From Shop</SelectItem>
+              <SelectItem value="estimate-received">Estimate Received</SelectItem>
+              <SelectItem value="approved">Approved · Repair In Progress</SelectItem>
+              <SelectItem value="completed">Completed · Picked Up</SelectItem>
+              <SelectItem value="totaled">Totaled</SelectItem>
+            </SelectContent>
+          </Select>
+          <Freshness src="AMS" at="updated 2026-01-29" />
+        </div>
+        <div>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Revise repair ETA</Label>
+          <Input placeholder="YYYY-MM-DD" defaultValue={AMS_DOSSIER.repairETADate ?? ""} className="mt-1 h-9 rounded-none font-mono text-sm" />
+          <Freshness src="AMS" at={`overdue ${AMS_DOSSIER.etaOverdueDays}d`} missing />
+        </div>
+        <div>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Estimate cost (USD)</Label>
+          <Input placeholder="0.00" className="mt-1 h-9 rounded-none font-mono text-sm" />
+          <Freshness src="AMS" at="not on file" missing />
+        </div>
+        <div>
+          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Force AMS resync</Label>
           <div className="mt-1 flex items-center gap-2">
             <Input defaultValue={VEHICLE.vin} className="h-9 rounded-none font-mono text-sm" />
             <Button className="h-9 rounded-none uppercase tracking-wider text-xs">Re-sync</Button>
           </div>
-          <Freshness src="AMS" at="never synced" missing />
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Registration renewal date (missing)</Label>
-          <Input placeholder="YYYY-MM-DD" className="mt-1 h-9 rounded-none font-mono text-sm" />
-          <Freshness src="Holman" at="not on file" missing />
-        </div>
-        <div>
-          <Label className="text-xs uppercase tracking-wider text-muted-foreground">Color (missing)</Label>
-          <Input placeholder="—" className="mt-1 h-9 rounded-none text-sm" />
-          <Freshness src="Holman" at="not on file" missing />
+          <Freshness src="AMS" at={VEHICLE.lastAmsSync} />
         </div>
       </div>
     </div>
@@ -382,12 +405,12 @@ function AssignBody() {
 
       {/* BOTTOM HALF — reconcile existing across all 3 systems */}
       <section className="space-y-3">
-        <div className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>
-          Holman has an assignment. TPMS and AMS are blank.
+        <div className="text-[10px] uppercase tracking-wider" style={{ color: "#0D9668" }}>
+          Holman and AMS already agree. Only TPMS is blank.
         </div>
         <div className="grid grid-cols-3 gap-2">
-          <div className="border border-border p-2">
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Holman</div>
+          <div className="border border-border p-2" style={{ background: "#F0FDF4" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#166534" }}>Holman</div>
             <div className="font-mono text-xs mt-0.5">{VEHICLE.techHolman}</div>
             <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastHolmanSync}</div>
           </div>
@@ -396,15 +419,15 @@ function AssignBody() {
             <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
             <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
           </div>
-          <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
-            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>AMS</div>
-            <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
-            <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
+          <div className="border border-border p-2" style={{ background: "#F0FDF4" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#166534" }}>AMS</div>
+            <div className="font-mono text-xs mt-0.5">{VEHICLE.techAms?.toLowerCase()}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastAmsSync}</div>
           </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" className="flex-1 rounded-none uppercase tracking-wider text-xs">
-            Push Holman → TPMS + AMS
+            Push Holman → TPMS
           </Button>
           <Button variant="ghost" className="rounded-none uppercase tracking-wider text-xs">
             Resync
@@ -444,8 +467,16 @@ function UnassignBody() {
 
 function ReviewBody() {
   return (
-    <div className="text-sm text-muted-foreground">
-      All canonical fields are shown above in <span className="text-foreground">The Facts</span>. The full AMS dossier (Ownership · Description · Condition · Location) sits in the collapsible block below — it's empty for this vehicle because AMS has no record for the VIN. Open <span className="text-foreground">Update</span> to force a re-sync, or <span className="text-foreground">Assign</span> to push Holman's assignment downstream.
+    <div className="text-sm text-muted-foreground space-y-2">
+      <p>
+        Vehicle has been at <span className="text-foreground">PEP BOYS Round Lake Beach</span> for{" "}
+        <span className="text-foreground">{AMS_DOSSIER.daysInRepair} days</span> waiting on a repair estimate. ETA{" "}
+        <span className="font-mono text-foreground">{AMS_DOSSIER.repairETADate}</span> passed{" "}
+        <span style={{ color: "#991B1B" }}>{AMS_DOSSIER.etaOverdueDays} days ago</span>. A YES-Rental has been open the entire time.
+      </p>
+      <p>
+        Holman and AMS agree on tech (<span className="font-mono">{VEHICLE.techHolman}</span>). The full AMS dossier (Ownership · Description · Condition · Repair · Location) is in the collapsible block below. Two small drift items worth noting are flagged in <span className="text-foreground">Needs attention</span>.
+      </p>
     </div>
   );
 }
@@ -584,15 +615,17 @@ function AmsDossier() {
             </div>
           </div>
 
-          {!AMS_DOSSIER.hasRecord && (
-            <div className="border border-dashed border-border p-3" style={{ background: "#FEF2F2" }}>
-              <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>
-                Why is this empty?
+          {AMS_DOSSIER.keyLocAddress && AMS_DOSSIER.curLocAddress &&
+            AMS_DOSSIER.keyLocAddress.toLowerCase().replace(/\s+/g, "") !==
+            AMS_DOSSIER.curLocAddress.toLowerCase().replace(/\s+/g, "") && (
+            <div className="border border-dashed border-border p-3" style={{ background: "#FFFBEB" }}>
+              <div className="text-[10px] uppercase tracking-wider" style={{ color: "#92400E" }}>
+                Address drift inside AMS
               </div>
               <div className="text-xs mt-1 text-muted-foreground">
-                AMS has no record matching VIN <span className="font-mono">{VEHICLE.vin}</span>.
-                Force a sync from the <span className="text-foreground">Update</span> tab to populate
-                Ownership, Description, Condition, Repair, and Location at once.
+                Key location reads <span className="font-mono text-foreground">{AMS_DOSSIER.keyLocAddress}</span>{" "}
+                but current location reads <span className="font-mono text-foreground">{AMS_DOSSIER.curLocAddress}</span>.
+                Looks like a typo in one of the two AMS fields — open <span className="text-foreground">Update</span> to correct.
               </div>
             </div>
           )}
@@ -630,9 +663,15 @@ export function Variant10() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <span
               className="text-[10px] uppercase tracking-wider px-2 py-0.5 inline-flex items-center gap-1"
-              style={{ background: "#DCFCE7", color: "#166534" }}
+              style={{ background: "#FFEDD5", color: "#9A3412" }}
             >
-              <Check className="w-2.5 h-2.5" /> {VEHICLE.assignmentStatus}
+              <Wrench className="w-2.5 h-2.5" /> {VEHICLE.assignmentStatus} · {AMS_DOSSIER.daysInRepair}d
+            </span>
+            <span
+              className="text-[10px] uppercase tracking-wider px-2 py-0.5 inline-flex items-center gap-1"
+              style={{ background: "#DBEAFE", color: "#1E40AF" }}
+            >
+              <Car className="w-2.5 h-2.5" /> Rental open
             </span>
             <span
               className="text-[10px] uppercase tracking-wider px-2 py-0.5 border border-border"
@@ -668,9 +707,8 @@ export function Variant10() {
               icon={User}
               label="Who · Assigned tech"
               value={`${VEHICLE.techHolmanName} (${VEHICLE.techHolman})`}
-              src="Holman only"
-              at="TPMS + AMS blank"
-              missing
+              src="Holman + AMS aligned"
+              at="TPMS blank"
             />
             <FactRow
               icon={Building}
@@ -720,9 +758,8 @@ export function Variant10() {
               icon={Palette}
               label="Color"
               value={VEHICLE.color ?? "— missing —"}
-              src="Holman"
-              at={VEHICLE.color ? VEHICLE.lastHolmanSync : "not on file"}
-              missing={!VEHICLE.color}
+              src="AMS"
+              at={VEHICLE.lastAmsSync}
             />
           </div>
         </div>
@@ -742,12 +779,12 @@ export function Variant10() {
             </span>
           </div>
 
-          {/* Alert 1 — AMS missing */}
+          {/* Alert 1 — repair stuck */}
           <div className="bg-background border border-border p-3 mb-2">
             <div className="flex items-baseline justify-between">
               <div className="text-xs font-medium inline-flex items-center gap-1.5">
                 <XCircle className="w-3 h-3" style={{ color: "#991B1B" }} />
-                AMS has no record for this vehicle
+                Repair stuck at PEP BOYS for {AMS_DOSSIER.daysInRepair} days
               </div>
               <span
                 className="text-[10px] uppercase tracking-wider px-1.5 py-0.5"
@@ -757,27 +794,27 @@ export function Variant10() {
               </span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              VIN <span className="font-mono">{VEHICLE.vin}</span> never appeared in <span className="font-mono">ams_vehicles_cache</span>. Re-sync from Update.
+              ETA <span className="font-mono text-foreground">{AMS_DOSSIER.repairETADate}</span> passed {AMS_DOSSIER.etaOverdueDays} days ago. Status still <span className="text-foreground">{AMS_DOSSIER.repairStatus}</span> with no estimate on file. Rental has been running since <span className="font-mono">{AMS_DOSSIER.rentalStartDate}</span>.
             </div>
           </div>
 
-          {/* Alert 2 — assignment misalignment */}
+          {/* Alert 2 — internal AMS address drift (key vs current location) */}
           <div className="bg-background border border-border p-3 mb-2">
             <div className="flex items-baseline justify-between">
-              <div className="text-xs font-medium">Assignment is Holman-only</div>
+              <div className="text-xs font-medium">AMS key-location address has a typo</div>
               <span
                 className="text-[10px] uppercase tracking-wider px-1.5 py-0.5"
                 style={{ background: "#FFFBEB", color: "#B45309" }}
               >
-                Mismatched
+                Drift
               </span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              Holman shows <span className="font-mono">{VEHICLE.techHolman}</span>; TPMS and AMS are blank. Push from Assign tab.
+              KeyLocAddress reads <span className="font-mono text-foreground">SHERWOOD</span> but CurLocAddress reads <span className="font-mono text-foreground">SHOREWOOD</span>. Same ZIP. Pick one and push back to AMS.
             </div>
           </div>
 
-          {/* Alert 3 — odometer is stale + only one source */}
+          {/* Alert 3 — odometer stale (Holman + AMS agree, but both 27d old) */}
           <div className="bg-background border border-border p-3 mb-2">
             <div className="flex items-baseline justify-between">
               <div className="text-xs font-medium">Odometer reading is 27 days stale</div>
@@ -790,22 +827,22 @@ export function Variant10() {
             </div>
             <div className="font-['Playfair_Display'] text-2xl leading-none mt-1.5" style={{ fontWeight: 600 }}>
               {VEHICLE.odometer}
-              <span className="text-xs text-muted-foreground ml-2">canonical · Holman</span>
+              <span className="text-xs text-muted-foreground ml-2">Holman = AMS · Samsara not connected</span>
             </div>
             <MismatchPanel />
           </div>
 
-          {/* Alert 4 — lease expired */}
+          {/* Alert 4 — lease end + 7-day mismatch between Holman and AMS */}
           <div className="bg-background border border-border p-3">
             <div className="flex items-baseline justify-between">
               <div className="text-xs font-medium inline-flex items-center gap-1.5">
                 <AlertCircle className="w-3 h-3" style={{ color: "#92400E" }} />
-                Lease term ended 2017-05-31 (8.9 years ago)
+                Lease ended ~8.9 years ago — 7-day mismatch between systems
               </div>
-              <Freshness src="Holman" at="raw_data" />
+              <Freshness src="Holman ↔ AMS" at="off by 7d" missing />
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              No registration renewal date on file. Confirm ownership status.
+              Holman shows <span className="font-mono text-foreground">2017-05-31</span>, AMS shows <span className="font-mono text-foreground">2017-05-24</span>. Confirm ownership status either way.
             </div>
           </div>
         </div>
@@ -846,11 +883,13 @@ export function Variant10() {
             <div className="font-['Playfair_Display'] text-base tracking-tight" style={{ fontWeight: 600 }}>
               Latest from AMS
             </div>
-            <Freshness src="AMS" at="never synced" missing />
+            <Freshness src="AMS" at={VEHICLE.lastAmsSync} />
           </div>
           {AMS_COMMENTS.length === 0 ? (
             <div className="text-xs text-muted-foreground italic">
-              No AMS notes on file for this vehicle. The most recent Nexus comment was on{" "}
+              No AMS comment thread for this vehicle. AMS record itself was last touched{" "}
+              <span className="font-mono not-italic">{VEHICLE.lastAmsSync}</span>; the repair record was last touched{" "}
+              <span className="font-mono not-italic">{VEHICLE.lastRepairUpdate}</span>; the most recent local Nexus note was{" "}
               <span className="font-mono not-italic">{VEHICLE.lastNexusUpdate}</span>.
             </div>
           ) : (
