@@ -403,6 +403,22 @@ export function Variant10() {
           </div>
         </div>
 
+        {/* References */}
+        <div className="px-6 py-3 border-t border-border grid grid-cols-4 gap-2">
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <MessageSquarePlus className="w-3 h-3 mr-1.5" /> Add note
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <FileText className="w-3 h-3 mr-1.5" /> PO History
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <Boxes className="w-3 h-3 mr-1.5" /> Inventory
+          </Button>
+          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
+            <History className="w-3 h-3 mr-1.5" /> History
+          </Button>
+        </div>
+
         {/* 3. CONTEXT */}
         <div className="px-6 pt-5 pb-5 border-t border-border" style={{ background: "#FAFAF7" }}>
           <div className="flex items-baseline justify-between mb-3">
@@ -481,22 +497,6 @@ export function Variant10() {
             {active === "assign"   && <AssignBody />}
             {active === "unassign" && <UnassignBody />}
           </div>
-        </div>
-
-        {/* References */}
-        <div className="px-6 py-3 border-t border-border grid grid-cols-4 gap-2">
-          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <MessageSquarePlus className="w-3 h-3 mr-1.5" /> Add note
-          </Button>
-          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <FileText className="w-3 h-3 mr-1.5" /> PO History
-          </Button>
-          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <Boxes className="w-3 h-3 mr-1.5" /> Inventory
-          </Button>
-          <Button variant="outline" size="sm" className="rounded-none text-[10px] uppercase tracking-wider justify-start">
-            <History className="w-3 h-3 mr-1.5" /> History
-          </Button>
         </div>
 
         <div className="px-6 pb-8 pt-4 border-t border-border text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
