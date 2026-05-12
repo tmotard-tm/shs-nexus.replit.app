@@ -12,5 +12,16 @@ export const modules: ModuleMap = {
   "./components/mockups/home-redesign/SidebarConcept.tsx": () => import("../components/mockups/home-redesign/SidebarConcept.tsx"),
   "./components/mockups/nexus-integration/FleetScopeLanding.tsx": () => import("../components/mockups/nexus-integration/FleetScopeLanding.tsx"),
   "./components/mockups/nexus-integration/LandingPage.tsx": () => import("../components/mockups/nexus-integration/LandingPage.tsx"),
-  "./components/mockups/nexus-integration/SidebarMenu.tsx": () => import("../components/mockups/nexus-integration/SidebarMenu.tsx")
+  "./components/mockups/nexus-integration/SidebarMenu.tsx": () => import("../components/mockups/nexus-integration/SidebarMenu.tsx"),
+  "./components/mockups/vehicle-slideout/Current.tsx": () => import("../components/mockups/vehicle-slideout/Current.tsx"),
+  "./components/mockups/vehicle-slideout/Variant1.tsx": () => import("../components/mockups/vehicle-slideout/Variant1.tsx"),
+  "./components/mockups/vehicle-slideout/Variant10.tsx": () => import("../components/mockups/vehicle-slideout/Variant10.tsx"),
+  "./components/mockups/vehicle-slideout/Variant2.tsx": () => import("../components/mockups/vehicle-slideout/Variant2.tsx"),
+  "./components/mockups/vehicle-slideout/Variant3.tsx": () => import("../components/mockups/vehicle-slideout/Variant3.tsx"),
+  "./components/mockups/vehicle-slideout/Variant4.tsx": () => import("../components/mockups/vehicle-slideout/Variant4.tsx"),
+  "./components/mockups/vehicle-slideout/Variant5.tsx": () => import("../components/mockups/vehicle-slideout/Variant5.tsx"),
+  "./components/mockups/vehicle-slideout/Variant6.tsx": () => import("../components/mockups/vehicle-slideout/Variant6.tsx"),
+  "./components/mockups/vehicle-slideout/Variant7.tsx": () => import("../components/mockups/vehicle-slideout/Variant7.tsx"),
+  "./components/mockups/vehicle-slideout/Variant8.tsx": () => import("../components/mockups/vehicle-slideout/Variant8.tsx"),
+  "./components/mockups/vehicle-slideout/Variant9.tsx": () => import("../components/mockups/vehicle-slideout/Variant9.tsx")
 };
