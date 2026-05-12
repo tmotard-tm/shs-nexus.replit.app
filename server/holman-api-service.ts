@@ -229,12 +229,39 @@ export class HolmanApiService {
       pageSize?: number;
       lastChangeRecordId?: string;
     }
-  ): Promise<HolmanBaseResponse<HolmanVehicle>> {
-    return this.makeRequest<HolmanBaseResponse<HolmanVehicle>>(
-      '/vehicles/custom-query',
-      'POST',
-      query
-    );
+  ): Promise<HolmanBaseResponse<HolmanVehicle> & { items?: HolmanVehicle[] }> {
+    // Translate to the current Holman /vehicles/custom-query schema:
+    //   { lesseeCodes: string[], additionalFilters: [{ name, values: string[] }], paging: { pageNumber, pageSize } }
+    // Older signature (lesseeCode/filters/pageNumber/pageSize) is kept for caller compatibility.
+    // Note: `properties` is no longer accepted by the upstream endpoint and is dropped from the body.
+    const body: Record<string, any> = {
+      paging: {
+        pageNumber: query.pageNumber ?? 1,
+        pageSize: query.pageSize ?? 1000,
+      },
+    };
+    if (query.lesseeCode) {
+      body.lesseeCodes = [query.lesseeCode];
+    }
+    if (query.filters && Object.keys(query.filters).length > 0) {
+      body.additionalFilters = Object.entries(query.filters).map(([name, value]) => ({
+        name,
+        values: Array.isArray(value) ? value.map((v) => String(v)) : [String(value)],
+      }));
+    }
+    if (query.lastChangeRecordId) {
+      body.lastChangeRecordId = query.lastChangeRecordId;
+    }
+
+    const resp = await this.makeRequest<any>('/vehicles/custom-query', 'POST', body);
+    // Normalize: upstream returns `items`; expose under both `items` and `data` so older
+    // callers reading `.data` keep working alongside newer callers reading `.items`.
+    if (resp && Array.isArray(resp.items) && !resp.data) {
+      resp.data = resp.items;
+    } else if (resp && Array.isArray(resp.data) && !resp.items) {
+      resp.items = resp.data;
+    }
+    return resp;
   }
 
   async submitVehicle(vehicleData: Partial<HolmanVehicle>): Promise<any> {
@@ -346,31 +373,14 @@ export class HolmanApiService {
       const token = await this.getAccessToken();
       
       const customQueryUrl = `${this.apiEndpoint}/vehicles/custom-query`;
+      // Holman /vehicles/custom-query schema:
+      // { lesseeCodes: string[], additionalFilters: [{ name, values }], paging: { pageNumber, pageSize } }
       const customQueryBody = {
-        lesseeCode: '2B56',
-        properties: [
-          'holmanVehicleNumber',
-          'clientVehicleNumber',
-          'modelYear',
-          'makeVin',
-          'makeClient',
-          'modelVin',
-          'modelClient',
-          'vin',
-          'status',
-          'assignedStatus',
-          'garagingStreet1',
-          'garagingStreet2',
-          'garagingCity',
-          'garagingState',
-          'garagingZip',
-          'garagingCounty'
+        lesseeCodes: ['2B56'],
+        additionalFilters: [
+          { name: 'holmanVehicleNumber', values: [holmanRef] },
         ],
-        filters: {
-          holmanVehicleNumber: holmanRef
-        },
-        pageNumber: 1,
-        pageSize: 10
+        paging: { pageNumber: 1, pageSize: 10 },
       };
       
       console.log('[Holman] Trying custom-query with filters for:', vehicleNumber);

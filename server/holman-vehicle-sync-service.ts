@@ -161,7 +161,7 @@ class HolmanVehicleSyncService {
           lastChangeRecordId: useIncremental ? (syncState?.lastChangeRecordId || undefined) : undefined,
         });
         
-        const vehicleData = apiResponse?.data || [];
+        const vehicleData = (apiResponse as any)?.items || apiResponse?.data || [];
         const pageInfo = (apiResponse as any)?.pageInfo;
         
         // Capture the lastChangeRecordId from pageInfo for next sync

@@ -13,19 +13,19 @@ import {
   Activity, Users, Hash, Palette, Car,
 } from "lucide-react";
 
-// Real data pulled from holman_vehicles_cache + vehicle_nexus_data on 2026-05-12.
+// Real data pulled from Holman + AMS + TPMS + WMS on 2026-05-12.
 const VEHICLE = {
   id: "21165",
   year: 2012,
   make: "Chevrolet",
-  model: "Express",
+  model: "Express 1500",                   // Holman modelClient = 'EXPRESS 1500'
   vin: "1GCSGAFX0C1148369",
   plate: "3185806B · IL",
   city: "Salem, WI",
   region: "890 / District 8555",
-  costCenter: "4423",
+  costCenter: "4423",                      // Holman costCenter
   color: "White",
-  ownership: "Holman Lease (expired 2017-05-24)",
+  ownership: "Holman Lease (expired 2017-05-31)",
   ownershipShort: "Holman Lease",
   assignmentStatus: "In Repair",           // truth: vehicle is at PEP BOYS, rental open
   odometer: "118,426 mi",
@@ -34,10 +34,12 @@ const VEHICLE = {
   techHolmanName: "Shaun Goshinsky",
   techAms: "SGOSHIN",                       // matches Holman ✓
   techAmsName: "Shaun Goshinsky",
-  techTpms: null as string | null,         // TPMS still blank
+  techTpms: "SGOSHIN",                      // TPMS does have the record (techId 0886473)
+  techTpmsId: "0886473",
   inService: "2012-05-17",                 // AMS DeliveryDate
   vehicleAgeMonths: 168,
   lastHolmanSync: "2m ago",
+  lastHolmanChange: "2026-04-25",          // Holman lastChangeDate
   lastAmsSync: "2026-01-24 by rdelgal",
   lastRepairUpdate: "by pyadav",
   lastNexusUpdate: "2026-02-09 by jdyer2",
@@ -45,6 +47,51 @@ const VEHICLE = {
   lastUpdateAt: "2026-02-09",
   nexusStatus: "in_repair",
   poCount: 0,
+};
+
+// Holman "ledger" facts — the cross-system context AMS/Nexus never see.
+const HOLMAN_FACTS = {
+  assignedStatus: "Assigned",              // Holman still thinks tech is driving it
+  vehicleStatus: "Active",                 // statusCode 1 — Holman never marked it "in repair"
+  lessor: "ARI FLEET LT",
+  vendor: "ARI",
+  capCost: 21329.19,
+  monthsInService: 167,
+  monthsBilled: 169,                       // billed 9 yrs past lease end
+  leaseStart: "2012-06-01",
+  leaseEnd: "2017-05-31",
+  leaseTerm: 60,
+  remBookValue: 0,
+  // Spec
+  engineType: "V6, 4.3L; MFI",
+  gvwr: 7300,
+  fuelType: "Gas",
+  fuelCapacity: 31,
+  // Telematics — every device field is null upstream
+  telematicsDevice: null as string | null,
+  telematicsSerial: null as string | null,
+};
+
+// WMS / Parts truck — the 4th system. Truck #021165 is registered as a Parts Truck.
+const WMS_PARTS_TRUCK = {
+  truckId: 2191,
+  truckName: "021165",
+  techEnterpriseId: null as string | null,  // ⚠ no tech bound to this parts truck in WMS
+  locationType: "Parts Truck",
+  costCenter: "08555",                      // ⚠ differs from Holman costCenter "4423"
+  bins: ["A01", "RTN"],
+  skuCount: 100,
+};
+
+// TPMS supervisor contact — SMS-only gateway (no real email on file).
+const TPMS_CONTACT = {
+  techId: "0886473",
+  racf: "SGOSHIN",
+  name: "Shaun Goshinsky",
+  manager: "JLEON45",
+  workPhone: "(608) 860-2078",
+  email: "6088602078@tmomail.net",          // T-Mobile SMS gateway — not a real inbox
+  emailIsSmsGateway: true,
 };
 
 // AMS dossier — vehicle has a full AMS record (82 fields). Real values below.
@@ -342,7 +389,7 @@ function AssignBody() {
             </div>
 
             <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-              We'll sync Holman, TPMS, and AMS in the background.
+              We'll sync Holman, AMS, TPMS, and the WMS parts truck in the background.
             </div>
 
             <Button className="w-full rounded-none uppercase tracking-wider text-xs">
@@ -403,31 +450,36 @@ function AssignBody() {
         </div>
       </div>
 
-      {/* BOTTOM HALF — reconcile existing across all 3 systems */}
+      {/* BOTTOM HALF — reconcile existing across all 4 systems */}
       <section className="space-y-3">
-        <div className="text-[10px] uppercase tracking-wider" style={{ color: "#0D9668" }}>
-          Holman and AMS already agree. Only TPMS is blank.
+        <div className="text-[10px] uppercase tracking-wider" style={{ color: "#B45309" }}>
+          Holman, AMS, TPMS all agree on {VEHICLE.techAms}. Only the WMS parts truck has no tech bound.
         </div>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <div className="border border-border p-2" style={{ background: "#F0FDF4" }}>
             <div className="text-[10px] uppercase tracking-wider" style={{ color: "#166534" }}>Holman</div>
             <div className="font-mono text-xs mt-0.5">{VEHICLE.techHolman}</div>
             <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastHolmanSync}</div>
-          </div>
-          <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
-            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>TPMS</div>
-            <div className="font-mono text-xs mt-0.5 text-muted-foreground">— blank —</div>
-            <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>no record</div>
           </div>
           <div className="border border-border p-2" style={{ background: "#F0FDF4" }}>
             <div className="text-[10px] uppercase tracking-wider" style={{ color: "#166534" }}>AMS</div>
             <div className="font-mono text-xs mt-0.5">{VEHICLE.techAms?.toLowerCase()}</div>
             <div className="text-[10px] text-muted-foreground mt-0.5">{VEHICLE.lastAmsSync}</div>
           </div>
+          <div className="border border-border p-2" style={{ background: "#F0FDF4" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#166534" }}>TPMS</div>
+            <div className="font-mono text-xs mt-0.5">{VEHICLE.techTpms?.toLowerCase()}</div>
+            <div className="text-[10px] text-muted-foreground mt-0.5">id {VEHICLE.techTpmsId}</div>
+          </div>
+          <div className="border border-dashed border-border p-2" style={{ background: "#FEF2F2" }}>
+            <div className="text-[10px] uppercase tracking-wider" style={{ color: "#991B1B" }}>WMS</div>
+            <div className="font-mono text-xs mt-0.5 text-muted-foreground">— null —</div>
+            <div className="text-[10px] mt-0.5" style={{ color: "#991B1B" }}>parts truck</div>
+          </div>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" className="flex-1 rounded-none uppercase tracking-wider text-xs">
-            Push Holman → TPMS
+            Bind {VEHICLE.techAms} → WMS truck
           </Button>
           <Button variant="ghost" className="rounded-none uppercase tracking-wider text-xs">
             Resync
@@ -635,6 +687,136 @@ function AmsDossier() {
   );
 }
 
+// Tier 2 — cross-system ledger (Holman + WMS + TPMS) shown alongside the AMS dossier.
+function CrossSystemLedger() {
+  const [open, setOpen] = useState(false);
+  const overdueMonths = HOLMAN_FACTS.monthsBilled - HOLMAN_FACTS.leaseTerm;
+  return (
+    <div className="px-6 py-5 border-t border-border">
+      <button
+        onClick={() => setOpen(!open)}
+        className="w-full flex items-baseline justify-between text-left"
+      >
+        <div className="font-['Playfair_Display'] text-2xl tracking-tight" style={{ fontWeight: 600 }}>
+          Cross-system ledger
+        </div>
+        <div className="flex items-center gap-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <span>Holman · WMS · TPMS</span>
+          {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+        </div>
+      </button>
+
+      {open && (
+        <div className="mt-4 space-y-5">
+          {/* Holman ledger */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Holman ledger
+              <span className="ml-2 normal-case tracking-normal text-muted-foreground/70">
+                (last touched {VEHICLE.lastHolmanChange})
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Vehicle Status" value={`${HOLMAN_FACTS.vehicleStatus} (code 1)`} />
+              <DossierField label="Assigned Status" value={HOLMAN_FACTS.assignedStatus} />
+              <DossierField label="Lessor" value={HOLMAN_FACTS.lessor} />
+              <DossierField label="Vendor" value={HOLMAN_FACTS.vendor} />
+              <DossierField label="Cap Cost" value={`$${HOLMAN_FACTS.capCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}`} />
+              <DossierField label="Book Value" value={`$${HOLMAN_FACTS.remBookValue.toLocaleString()}`} />
+              <DossierField label="Lease Start" value={HOLMAN_FACTS.leaseStart} />
+              <DossierField label="Lease End" value={HOLMAN_FACTS.leaseEnd} />
+              <DossierField label="Lease Term" value={`${HOLMAN_FACTS.leaseTerm} mo`} />
+              <DossierField label="Months in Service" value={HOLMAN_FACTS.monthsInService} />
+              <div className="col-span-2">
+                <DossierField
+                  label="Months Billed"
+                  value={`${HOLMAN_FACTS.monthsBilled} mo  (${overdueMonths} past lease end)`}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Spec */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border">
+              Spec
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Engine" value={HOLMAN_FACTS.engineType} />
+              <DossierField label="GVWR" value={`${HOLMAN_FACTS.gvwr.toLocaleString()} lb`} />
+              <DossierField label="Fuel Type" value={HOLMAN_FACTS.fuelType} />
+              <DossierField label="Fuel Capacity" value={`${HOLMAN_FACTS.fuelCapacity} gal`} />
+            </div>
+          </div>
+
+          {/* Telematics */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border inline-flex items-center gap-1.5">
+              <Activity className="w-3 h-3" /> Telematics
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Device" value={HOLMAN_FACTS.telematicsDevice} />
+              <DossierField label="Serial" value={HOLMAN_FACTS.telematicsSerial} />
+            </div>
+            <div className="mt-2 text-[11px] text-muted-foreground italic">
+              No device installed — Samsara feed will stay silent until one is provisioned.
+            </div>
+          </div>
+
+          {/* WMS Parts Truck */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border inline-flex items-center gap-1.5">
+              <Boxes className="w-3 h-3" /> WMS Parts Truck
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="Truck ID" value={WMS_PARTS_TRUCK.truckId} />
+              <DossierField label="Location Type" value={WMS_PARTS_TRUCK.locationType} />
+              <DossierField label="Bound Tech" value={WMS_PARTS_TRUCK.techEnterpriseId} />
+              <DossierField label="Cost Center" value={WMS_PARTS_TRUCK.costCenter} />
+              <DossierField label="Bins" value={WMS_PARTS_TRUCK.bins.join(", ")} />
+              <DossierField label="SKU Count" value={WMS_PARTS_TRUCK.skuCount} />
+            </div>
+            {WMS_PARTS_TRUCK.costCenter !== VEHICLE.costCenter && (
+              <div className="mt-2 border border-dashed border-border p-2" style={{ background: "#FFFBEB" }}>
+                <div className="text-[10px] uppercase tracking-wider" style={{ color: "#92400E" }}>
+                  Cost center mismatch
+                </div>
+                <div className="text-xs mt-0.5 text-muted-foreground">
+                  WMS uses <span className="font-mono text-foreground">{WMS_PARTS_TRUCK.costCenter}</span>,
+                  Holman uses <span className="font-mono text-foreground">{VEHICLE.costCenter}</span>.
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* TPMS supervisor contact */}
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.18em] text-muted-foreground mb-2 pb-1 border-b border-border inline-flex items-center gap-1.5">
+              <User className="w-3 h-3" /> TPMS contact
+            </div>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <DossierField label="RACF" value={TPMS_CONTACT.racf} />
+              <DossierField label="Tech ID" value={TPMS_CONTACT.techId} />
+              <DossierField label="Name" value={TPMS_CONTACT.name} />
+              <DossierField label="Manager" value={TPMS_CONTACT.manager} />
+              <DossierField label="Work Phone" value={TPMS_CONTACT.workPhone} />
+              <DossierField
+                label={TPMS_CONTACT.emailIsSmsGateway ? "Email (SMS gateway)" : "Email"}
+                value={TPMS_CONTACT.email}
+              />
+            </div>
+            {TPMS_CONTACT.emailIsSmsGateway && (
+              <div className="mt-2 text-[11px] text-muted-foreground italic">
+                Email on file is a T-Mobile SMS gateway, not a real inbox. Use the work phone or send SMS.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function Variant10() {
   const [active, setActive] = useState<PrincipleKey>("update");
   const Icon = PRINCIPLES.find((p) => p.key === active)!.icon;
@@ -707,8 +889,8 @@ export function Variant10() {
               icon={User}
               label="Who · Assigned tech"
               value={`${VEHICLE.techHolmanName} (${VEHICLE.techHolman})`}
-              src="Holman + AMS aligned"
-              at="TPMS blank"
+              src="Holman + AMS + TPMS aligned"
+              at="WMS parts truck unbound"
             />
             <FactRow
               icon={Building}
@@ -775,7 +957,7 @@ export function Variant10() {
               Needs attention
             </div>
             <span className="text-[10px] uppercase tracking-wider" style={{ color: "#92400E" }}>
-              4 items
+              6 items
             </span>
           </div>
 
@@ -832,23 +1014,64 @@ export function Variant10() {
             <MismatchPanel />
           </div>
 
-          {/* Alert 4 — lease end + 7-day mismatch between Holman and AMS */}
-          <div className="bg-background border border-border p-3">
+          {/* Alert 4 — Holman still says Active/Assigned even though AMS shows In Repair */}
+          <div className="bg-background border border-border p-3 mb-2">
+            <div className="flex items-baseline justify-between">
+              <div className="text-xs font-medium inline-flex items-center gap-1.5">
+                <XCircle className="w-3 h-3" style={{ color: "#991B1B" }} />
+                Holman still shows <span className="font-mono">Active · Assigned</span> — AMS says In Repair
+              </div>
+              <span
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5"
+                style={{ background: "#FEE2E2", color: "#991B1B" }}
+              >
+                Drift
+              </span>
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              Holman last touched <span className="font-mono text-foreground">{VEHICLE.lastHolmanChange}</span> with statusCode <span className="font-mono text-foreground">1</span>. The PEP BOYS repair has never been mirrored back to Holman, so the lessor still treats this truck as in service. Push the AMS repair status into Holman.
+            </div>
+          </div>
+
+          {/* Alert 5 — billed past lease end */}
+          <div className="bg-background border border-border p-3 mb-2">
             <div className="flex items-baseline justify-between">
               <div className="text-xs font-medium inline-flex items-center gap-1.5">
                 <AlertCircle className="w-3 h-3" style={{ color: "#92400E" }} />
-                Lease ended ~8.9 years ago — 7-day mismatch between systems
+                Still being billed {HOLMAN_FACTS.monthsBilled - HOLMAN_FACTS.leaseTerm} months past the {HOLMAN_FACTS.leaseTerm}-month lease term
               </div>
-              <Freshness src="Holman ↔ AMS" at="off by 7d" missing />
+              <span
+                className="text-[10px] uppercase tracking-wider px-1.5 py-0.5"
+                style={{ background: "#FFFBEB", color: "#B45309" }}
+              >
+                Lease
+              </span>
             </div>
             <div className="text-xs text-muted-foreground mt-1">
-              Holman shows <span className="font-mono text-foreground">2017-05-31</span>, AMS shows <span className="font-mono text-foreground">2017-05-24</span>. Confirm ownership status either way.
+              Lease ran <span className="font-mono text-foreground">{HOLMAN_FACTS.leaseStart} → {HOLMAN_FACTS.leaseEnd}</span> ({HOLMAN_FACTS.leaseTerm} mo). Holman has now billed <span className="font-mono text-foreground">{HOLMAN_FACTS.monthsBilled} mo</span> at a <span className="font-mono text-foreground">${HOLMAN_FACTS.capCost.toLocaleString()}</span> cap cost; book value is <span className="font-mono text-foreground">$0</span>. Decide buyout vs. terminate. Holman shows lease end <span className="font-mono text-foreground">2017-05-31</span> but AMS shows <span className="font-mono text-foreground">2017-05-24</span> — 7-day drift.
+            </div>
+          </div>
+
+          {/* Alert 6 — WMS parts truck has no tech bound and a different cost center */}
+          <div className="bg-background border border-border p-3">
+            <div className="flex items-baseline justify-between">
+              <div className="text-xs font-medium inline-flex items-center gap-1.5">
+                <Boxes className="w-3 h-3" style={{ color: "#B45309" }} />
+                WMS Parts Truck has no tech bound · cost center mismatch
+              </div>
+              <Freshness src="WMS ↔ Holman" at="not aligned" missing />
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">
+              WMS truck <span className="font-mono text-foreground">#{WMS_PARTS_TRUCK.truckName}</span> ({WMS_PARTS_TRUCK.skuCount} SKUs across {WMS_PARTS_TRUCK.bins.join(" + ")}) has <span className="text-foreground">techEnterpriseId = null</span>, so parts moves don't tie back to Shaun. WMS cost center <span className="font-mono text-foreground">{WMS_PARTS_TRUCK.costCenter}</span> doesn't match Holman <span className="font-mono text-foreground">{VEHICLE.costCenter}</span> either.
             </div>
           </div>
         </div>
 
         {/* AMS dossier (Tier 2 + Tier 3 conditional) */}
         <AmsDossier />
+
+        {/* Cross-system ledger — Holman + WMS + TPMS facts that aren't in AMS */}
+        <CrossSystemLedger />
 
         {/* References (Tier 1 — added Telematics + Ops Review, PO count) */}
         <div className="px-6 py-3 border-t border-border grid grid-cols-3 gap-2">
