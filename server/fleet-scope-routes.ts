@@ -9588,6 +9588,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             }
           }
         }
+        // BYOV fallback: vehicle numbers starting with "088" or "88" are
+        // technician-owned (Bring Your Own Vehicle) unless Holman has them
+        // on file as managed.
+        if (!managedBy && (rawDigits.startsWith('088') || rawDigits.startsWith('88'))) {
+          managedBy = 'BYOV';
+        }
         if (holmanStatusByVehicle.size > 0) {
           holmanStatus = holmanStatusByVehicle.get(strippedKey) ?? null;
         }
