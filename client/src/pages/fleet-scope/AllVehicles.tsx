@@ -431,10 +431,15 @@ export default function AllVehicles() {
       .map(([status, count]) => ({ status, count }));
   }, [data?.vehicles]);
 
-  const { data: amsDeclinedData } = useQuery<{ count: number }>({
+  const { data: amsDeclinedData } = useQuery<{
+    count: number;
+    declinedRepairCount?: number;
+    sentToAuctionCount?: number;
+  }>({
     queryKey: ['/api/ams/declined-repair-count'],
   });
-  const declineRepairCount = amsDeclinedData?.count || 0;
+  const declineRepairCount = amsDeclinedData?.declinedRepairCount ?? amsDeclinedData?.count ?? 0;
+  const sentToAuctionCount = amsDeclinedData?.sentToAuctionCount ?? 0;
 
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
@@ -744,6 +749,49 @@ export default function AllVehicles() {
                           {declineRepairCount} Decline Repair
                         </p>
                       )}
+                      {sentToAuctionCount > 0 && (
+                        <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mt-0.5">
+                          {sentToAuctionCount} Sent to Auction
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                  <Card
+                    className="cursor-pointer hover-elevate border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20 flex-1 min-w-0"
+                    onClick={() =>
+                      setCategoryFilter(
+                        categoryFilter?.truckStatus === 'Declined Repair'
+                          ? null
+                          : { truckStatus: 'Declined Repair', label: 'AMS: Declined Repair' },
+                      )
+                    }
+                    data-testid="card-ams-declined-repair"
+                  >
+                    <CardContent className="p-4">
+                      <p className="text-xs font-medium text-red-700 dark:text-red-400">Declined Repair</p>
+                      <div className="text-2xl font-bold text-red-700 dark:text-red-400">
+                        {declineRepairCount.toLocaleString()}
+                      </div>
+                      <p className="text-xs text-red-600 dark:text-red-500">via AMS API</p>
+                    </CardContent>
+                  </Card>
+                  <Card
+                    className="cursor-pointer hover-elevate border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20 flex-1 min-w-0"
+                    onClick={() =>
+                      setCategoryFilter(
+                        categoryFilter?.truckStatus === 'Sent to Auction'
+                          ? null
+                          : { truckStatus: 'Sent to Auction', label: 'AMS: Sent to Auction' },
+                      )
+                    }
+                    data-testid="card-ams-sent-to-auction"
+                  >
+                    <CardContent className="p-4">
+                      <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Sent to Auction</p>
+                      <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">
+                        {sentToAuctionCount.toLocaleString()}
+                      </div>
+                      <p className="text-xs text-amber-600 dark:text-amber-500">via AMS API</p>
                     </CardContent>
                   </Card>
                   {amsStatusCounts.map(({ status, count }, idx) => {

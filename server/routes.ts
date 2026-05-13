@@ -14817,13 +14817,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
         amsTruckStatusCache = { data: await buildAmsTruckStatusMap(), builtAt: now };
       }
-      let count = 0;
+      let declinedRepairCount = 0;
+      let sentToAuctionCount = 0;
       for (const status of Object.values(amsTruckStatusCache.data)) {
-        if (status && status.toLowerCase().includes('declined repair')) {
-          count++;
-        }
+        if (!status) continue;
+        const s = status.toLowerCase();
+        if (s.includes('declined repair')) declinedRepairCount++;
+        if (s.includes('sent to auction')) sentToAuctionCount++;
       }
-      res.json({ count });
+      // `count` retained for backward compatibility with existing callers
+      // that expect the legacy declined-repair-only field.
+      res.json({
+        count: declinedRepairCount,
+        declinedRepairCount,
+        sentToAuctionCount,
+      });
     } catch (error: any) {
       console.error('[AMS DeclinedRepairCount] Error:', error);
       res.status(500).json({ message: error.message });
