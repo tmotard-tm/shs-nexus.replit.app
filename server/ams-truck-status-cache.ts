@@ -43,7 +43,17 @@ async function build(): Promise<Record<string, string | null>> {
   while (true) {
     let raw: any;
     try {
-      raw = await amsApiService.searchVehicles({ limit: pageSize, offset });
+      // 30s per-page timeout so a stalled AMS request can't block the
+      // overall build (and the Snowflake supplement that follows).
+      raw = await Promise.race([
+        amsApiService.searchVehicles({ limit: pageSize, offset }),
+        new Promise((_, reject) =>
+          setTimeout(
+            () => reject(new Error(`AMS page timeout (offset ${offset})`)),
+            30_000,
+          ),
+        ),
+      ]);
     } catch (err: any) {
       console.warn(
         `[AMS TruckStatusMap] AMS search error at offset ${offset}: ${err.message}`,
@@ -119,41 +129,62 @@ async function build(): Promise<Record<string, string | null>> {
     } catch (dbErr: any) {
       console.warn("[AMS TruckStatusMap] DB supplement failed (continuing):", dbErr?.message);
     }
-    oosCache = { data: oosByVin, builtAt: Date.now() };
-    return result;
+  } else {
+    console.log(
+      "[AMS TruckStatusMap] AMS API returned 0 vehicles — relying on Snowflake REPLIT_ALL_VEHICLES",
+    );
   }
 
-  console.log(
-    "[AMS TruckStatusMap] AMS API returned 0 vehicles — falling back to Snowflake REPLIT_ALL_VEHICLES",
-  );
-  const { getSnowflakeService } = await import("./snowflake-service");
-  const snowflakeService = getSnowflakeService();
-  const sql = `
-      SELECT VIN, TRUCK_STATUS, OUT_OF_SERVICE_DATE
-      FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-      WHERE VIN IS NOT NULL
-        AND TRUCK_STATUS IS NOT NULL
-        AND TRUCK_STATUS != ''
-    `;
-  const sfRows = (await snowflakeService.executeQuery(sql)) as Array<{
-    VIN: string;
-    TRUCK_STATUS: string;
-    OUT_OF_SERVICE_DATE: string | null;
-  }>;
-  for (const row of sfRows) {
-    if (!row.VIN) continue;
-    const vin = row.VIN.trim().toUpperCase();
-    const rawStatus = (row.TRUCK_STATUS || "").trim();
-    const label = lookupMap.get(rawStatus) ?? rawStatus;
-    result[vin] = label || null;
-    oosByVin[vin] =
-      row.OUT_OF_SERVICE_DATE == null
-        ? null
-        : String(row.OUT_OF_SERVICE_DATE).trim();
+  // Always supplement from Snowflake REPLIT_ALL_VEHICLES. The AMS list and
+  // per-VIN endpoints currently return TruckStatus: null for every row, so
+  // without this step no statuses (Declined Repair, Sent To Auction, etc.)
+  // would surface. Snowflake's TRUCK_STATUS is the source of truth here.
+  try {
+    const { getSnowflakeService } = await import("./snowflake-service");
+    const snowflakeService = getSnowflakeService();
+    const sql = `
+        SELECT VIN, TRUCK_STATUS, OUT_OF_SERVICE_DATE
+        FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
+        WHERE VIN IS NOT NULL
+          AND TRUCK_STATUS IS NOT NULL
+          AND TRUCK_STATUS != ''
+      `;
+    const sfRows = (await snowflakeService.executeQuery(sql)) as Array<{
+      VIN: string;
+      TRUCK_STATUS: string;
+      OUT_OF_SERVICE_DATE: string | null;
+    }>;
+    let sfFilled = 0;
+    let sfAddedVins = 0;
+    for (const row of sfRows) {
+      if (!row.VIN) continue;
+      const vin = row.VIN.trim().toUpperCase();
+      const rawStatus = (row.TRUCK_STATUS || "").trim();
+      if (!rawStatus) continue;
+      const label = lookupMap.get(rawStatus) ?? rawStatus;
+      const existing = result[vin];
+      if (existing == null) {
+        if (!(vin in result)) sfAddedVins++;
+        result[vin] = label || null;
+        sfFilled++;
+      }
+      if (oosByVin[vin] == null) {
+        oosByVin[vin] =
+          row.OUT_OF_SERVICE_DATE == null
+            ? null
+            : String(row.OUT_OF_SERVICE_DATE).trim();
+      }
+    }
+    console.log(
+      `[AMS TruckStatusMap] Snowflake supplement: filled ${sfFilled} statuses (${sfAddedVins} new VINs) from ${sfRows.length} rows`,
+    );
+  } catch (sfErr: any) {
+    console.warn(
+      "[AMS TruckStatusMap] Snowflake supplement failed (continuing):",
+      sfErr?.message,
+    );
   }
-  console.log(
-    `[AMS TruckStatusMap] Snowflake fallback: ${Object.keys(result).length} vehicles from ${sfRows.length} rows`,
-  );
+
   oosCache = { data: oosByVin, builtAt: Date.now() };
   return result;
 }
