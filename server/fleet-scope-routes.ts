@@ -9595,7 +9595,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           managedBy = 'BYOV';
         }
         if (holmanStatusByVehicle.size > 0) {
-          holmanStatus = holmanStatusByVehicle.get(strippedKey) ?? null;
+          // Mirror the multi-candidate matching used for "Managed by" so
+          // vehicle numbers with different leading-zero padding still find
+          // their Holman STATUS (Active, Out of Service, In Transit, etc.).
+          const statusCandidates = new Set<string>();
+          if (rawDigits) statusCandidates.add(rawDigits);
+          if (rawDigits.startsWith('0')) statusCandidates.add(rawDigits.slice(1));
+          if (rawDigits.startsWith('00')) statusCandidates.add(rawDigits.slice(2));
+          statusCandidates.add(strippedKey);
+          for (const candidate of statusCandidates) {
+            const key = candidate.replace(/^0+/, '') || '0';
+            const found = holmanStatusByVehicle.get(key);
+            if (found) {
+              holmanStatus = found;
+              break;
+            }
+          }
         }
 
         vehicles.push({
