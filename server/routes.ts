@@ -14674,13 +14674,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // AMS API Integration Routes
   console.log("Registering AMS API routes...");
 
-  // In-memory cache for AMS truck status map (VIN → label)
-  let amsTruckStatusCache: { data: Record<string, string | null>; builtAt: number } | null = null;
+  // In-memory cache for AMS truck status map (VIN → label).
+  // `activeVins` is the set of AMS VINs considered active (no SaleDate, no
+  // OutofSvcDate, no FinalDisposition) — used to scope the Declined Repair /
+  // Sent to Auction counts to active vehicles only.
+  let amsTruckStatusCache: {
+    data: Record<string, string | null>;
+    activeVins: Set<string>;
+    activeSweepComplete: boolean;
+    builtAt: number;
+  } | null = null;
   const AMS_TRUCK_STATUS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
   // Note: A shared cache module (server/ams-truck-status-cache.ts) mirrors this
   // logic so other route files (e.g. fleet-scope-routes) can read the same data.
-  async function buildAmsTruckStatusMap(): Promise<Record<string, string | null>> {
+  async function buildAmsTruckStatusMap(): Promise<{
+    map: Record<string, string | null>;
+    activeVins: Set<string>;
+    activeSweepComplete: boolean;
+  }> {
     console.log('[AMS TruckStatusMap] Building VIN→TruckStatus map...');
 
     // Step 1: Fetch truck-status lookup to resolve numeric IDs → human-readable labels
@@ -14700,10 +14712,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
     // Step 2: Paginate AMS /api/v1/vehicles endpoint
     const result: Record<string, string | null> = {};
+    const activeVins = new Set<string>();
     const pageSize = 500;
     let offset = 0;
     let totalFetched = 0;
     let amsWorked = false;
+    // Whether the AMS pagination loop ran to completion (last page returned
+    // fewer rows than pageSize). Only when this is true do we trust
+    // activeVins as a complete set; partial sweeps must fall back to the
+    // unfiltered map so the dependent counts don't silently undercount.
+    let activeSweepComplete = false;
 
     while (true) {
       let raw: any;
@@ -14753,10 +14771,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
           const label = lookupMap.get(String(raw_status));
           result[vin] = label ?? String(raw_status);
         }
+        // Track "active" status — matches AMS UI's Active count (no SaleDate,
+        // no OutofSvcDate, no FinalDisposition). Used to scope the Declined
+        // Repair / Sent to Auction counts to active vehicles only.
+        // Normalize date/disposition fields: AMS may return empty strings or
+        // string numerics, so coerce before testing.
+        const saleDate = v.SaleDate;
+        const oosDate = v.OutofSvcDate;
+        const sold = saleDate != null && String(saleDate).trim() !== '';
+        const oos = oosDate != null && String(oosDate).trim() !== '';
+        const finalDispNum = Number(v.FinalDisposition ?? 0);
+        const finalDisp = Number.isFinite(finalDispNum) && finalDispNum !== 0;
+        if (!sold && !oos && !finalDisp) activeVins.add(vin);
       }
 
       totalFetched += rows.length;
-      if (rows.length < pageSize) break;
+      if (rows.length < pageSize) {
+        // Last page seen — sweep is complete, activeVins is trustworthy.
+        activeSweepComplete = true;
+        break;
+      }
       offset += pageSize;
     }
 
@@ -14814,14 +14848,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (sfErr: any) {
       console.warn('[AMS TruckStatusMap] Snowflake supplement failed (continuing):', sfErr?.message);
     }
-    return result;
+    console.log(`[AMS TruckStatusMap] Active VINs (per AMS): ${activeVins.size} (sweep complete=${activeSweepComplete})`);
+    return { map: result, activeVins, activeSweepComplete };
   }
 
   app.get("/api/ams/truck-status-map", requireAuth, async (_req, res) => {
     try {
       const now = Date.now();
       if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
-        amsTruckStatusCache = { data: await buildAmsTruckStatusMap(), builtAt: now };
+        const built = await buildAmsTruckStatusMap();
+        amsTruckStatusCache = {
+          data: built.map,
+          activeVins: built.activeVins,
+          activeSweepComplete: built.activeSweepComplete,
+          builtAt: now,
+        };
       } else {
         const ageMin = Math.round((now - amsTruckStatusCache.builtAt) / 60000);
         console.log(`[AMS TruckStatusMap] Serving cached map (${Object.keys(amsTruckStatusCache.data).length} vehicles, age ${ageMin}m)`);
@@ -14837,11 +14878,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const now = Date.now();
       if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
-        amsTruckStatusCache = { data: await buildAmsTruckStatusMap(), builtAt: now };
+        const built = await buildAmsTruckStatusMap();
+        amsTruckStatusCache = {
+          data: built.map,
+          activeVins: built.activeVins,
+          activeSweepComplete: built.activeSweepComplete,
+          builtAt: now,
+        };
       }
+      // Restrict the count to AMS-active vehicles (matches AMS UI's Active count:
+      // no SaleDate, no OutofSvcDate, no FinalDisposition). Only trust
+      // activeVins when the AMS pagination loop ran to completion — a partial
+      // sweep would otherwise silently undercount. Fall back to the full map
+      // in that case so the card never silently reads 0.
+      const activeVins = amsTruckStatusCache.activeVins;
+      const useActiveFilter = amsTruckStatusCache.activeSweepComplete && activeVins.size > 0;
       let declinedRepairCount = 0;
       let sentToAuctionCount = 0;
-      for (const status of Object.values(amsTruckStatusCache.data)) {
+      let activeConsidered = 0;
+      for (const [vin, status] of Object.entries(amsTruckStatusCache.data)) {
+        if (useActiveFilter && !activeVins.has(vin)) continue;
+        activeConsidered++;
         if (!status) continue;
         const s = status.toLowerCase();
         if (s.includes('declined repair')) declinedRepairCount++;
@@ -14853,6 +14910,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         count: declinedRepairCount,
         declinedRepairCount,
         sentToAuctionCount,
+        activeFleetCount: useActiveFilter ? activeVins.size : null,
       });
     } catch (error: any) {
       console.error('[AMS DeclinedRepairCount] Error:', error);
@@ -14997,9 +15055,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   setImmediate(() => {
     if (!amsTruckStatusCache) {
       buildAmsTruckStatusMap()
-        .then(data => {
-          amsTruckStatusCache = { data, builtAt: Date.now() };
-          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(data).length} vehicles)`);
+        .then(built => {
+          amsTruckStatusCache = {
+            data: built.map,
+            activeVins: built.activeVins,
+            activeSweepComplete: built.activeSweepComplete,
+            builtAt: Date.now(),
+          };
+          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(built.map).length} vehicles, ${built.activeVins.size} active, sweep complete=${built.activeSweepComplete})`);
         })
         .catch(err => {
           console.warn('[AMS TruckStatusMap] Startup warm-up failed (will retry on first request):', err.message);
