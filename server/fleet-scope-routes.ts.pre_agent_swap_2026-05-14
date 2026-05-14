@@ -1711,8 +1711,8 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
 // ===== ELEVENLABS SHARED HELPERS =====
 // These helpers are used by both the webhook handler and the polling/backfill system.
 
-const ELEVENLABS_SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
-const ELEVENLABS_TECH_AGENT_ID = "agent_4901khvk9569fd2tawwcx0v0hxp5";
+const ELEVENLABS_SHOP_AGENT_ID = "agent_5001kqd4w6c8frqv87rmwqxpxwxy";
+const ELEVENLABS_TECH_AGENT_ID = "agent_9401kk2njc6veajaecs89wtbh840";
 
 function buildTranscriptText(transcript: any): string {
   if (Array.isArray(transcript)) {
@@ -5109,7 +5109,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
       const payload = {
-        agent_id: "agent_7901kgj8m0w8ep6ar78fzthzr9jv",
+        agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
         agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
         to_number: toNumber,
         conversation_initiation_client_data: {
@@ -5207,7 +5207,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const shopPhone = truck.repairPhone || "";
 
       const payload = {
-        agent_id: "agent_4901khvk9569fd2tawwcx0v0hxp5",
+        agent_id: "agent_9401kk2njc6veajaecs89wtbh840",
         agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
         to_number: toNumber,
         conversation_initiation_client_data: {
@@ -5433,7 +5433,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             let payload: any;
             if (callType === "tech") {
               payload = {
-                agent_id: "agent_4901khvk9569fd2tawwcx0v0hxp5",
+                agent_id: "agent_9401kk2njc6veajaecs89wtbh840",
                 agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
                 to_number: toNumber,
                 conversation_initiation_client_data: {
@@ -5481,7 +5481,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               const todaysDate = new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" });
 
               payload = {
-                agent_id: "agent_7901kgj8m0w8ep6ar78fzthzr9jv",
+                agent_id: "agent_5001kqd4w6c8frqv87rmwqxpxwxy",
                 agent_phone_number_id: "phnum_7001kqfdzf48e9avt82k6259egef",
                 to_number: toNumber,
                 conversation_initiation_client_data: {
