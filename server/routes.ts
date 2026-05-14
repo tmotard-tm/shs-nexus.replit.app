@@ -14860,6 +14860,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Diagnostic: report Declined Repair / Sent to Auction counts using ONLY the
+  // AMS API (no Postgres ams_vehicles_cache, no Snowflake REPLIT_ALL_VEHICLES,
+  // no shared in-memory cache). Used to verify the hypothesis that AMS today
+  // returns TruckStatus: null for every row, which would mean the production
+  // 338 figure is essentially driven by the Snowflake supplement.
+  app.get("/api/ams/declined-repair-count/ams-only", requireAuth, async (_req, res) => {
+    const startedAt = Date.now();
+    console.log('[AMS DeclinedDiag] Starting AMS-only diagnostic run');
+    try {
+      // 1. Pull the truck-status lookup so we can translate numeric IDs to labels.
+      const lookupRaw: any = await amsApiService.getLookup('truck-status').catch((e: any) => {
+        console.warn('[AMS DeclinedDiag] truck-status lookup failed:', e?.message);
+        return [];
+      });
+      // Normalize to an array — AMS may return [] or { data|items|results|vehicles: [] }
+      const lookupItems: any[] = Array.isArray(lookupRaw)
+        ? lookupRaw
+        : (lookupRaw && typeof lookupRaw === 'object'
+            ? (Array.isArray(lookupRaw.data) ? lookupRaw.data
+              : Array.isArray(lookupRaw.items) ? lookupRaw.items
+              : Array.isArray(lookupRaw.results) ? lookupRaw.results
+              : Array.isArray(lookupRaw.vehicles) ? lookupRaw.vehicles
+              : [])
+            : []);
+      const lookupMap = new Map<string, string>();
+      const skipKeys = new Set(['UniqueID', 'uniqueID', 'Id', 'id']);
+      for (const item of lookupItems) {
+        const id = String(item.UniqueID ?? item.id ?? '');
+        let label: string | undefined;
+        for (const [key, val] of Object.entries(item)) {
+          if (skipKeys.has(key)) continue;
+          if (typeof val === 'string' && val.trim()) { label = val.trim(); break; }
+        }
+        if (id) lookupMap.set(id, label ?? id);
+      }
+      console.log(`[AMS DeclinedDiag] Truck-status lookup: ${lookupMap.size} entries`);
+
+      // 2. Paginate /api/v1/vehicles, mirroring the production builder's loop shape.
+      const pageSize = 500;
+      let offset = 0;
+      let pagesFetched = 0;
+      let totalVinsFromAms = 0;
+      let vinsWithNonNullStatus = 0;
+      let declinedRepairCount = 0;
+      let sentToAuctionCount = 0;
+      const statusBreakdown: Record<string, number> = {};
+      const seenVins = new Set<string>();
+      let pageError: string | null = null;
+
+      while (true) {
+        let raw: any;
+        try {
+          raw = await Promise.race([
+            amsApiService.searchVehicles({ limit: pageSize, offset }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`AMS page timeout (offset ${offset})`)), 30_000),
+            ),
+          ]);
+        } catch (err: any) {
+          pageError = err?.message || String(err);
+          console.warn(`[AMS DeclinedDiag] AMS search error at offset ${offset}: ${pageError}`);
+          break;
+        }
+
+        let rows: any[];
+        if (Array.isArray(raw)) {
+          rows = raw;
+        } else if (raw && typeof raw === 'object') {
+          rows = Array.isArray(raw.data) ? raw.data
+            : Array.isArray(raw.vehicles) ? raw.vehicles
+            : Array.isArray(raw.results) ? raw.results
+            : Array.isArray(raw.items) ? raw.items
+            : [];
+        } else {
+          rows = [];
+        }
+
+        if (rows.length === 0) break;
+        pagesFetched++;
+
+        let pageNonNull = 0;
+        for (const v of rows) {
+          const vin = (v.VIN || v.vin || '').trim().toUpperCase();
+          if (!vin || seenVins.has(vin)) continue;
+          seenVins.add(vin);
+          totalVinsFromAms++;
+
+          const rawStatus = v.TruckStatus ?? v.truckStatus ?? v.truck_status;
+          if (rawStatus == null) continue;
+
+          const label = lookupMap.get(String(rawStatus)) ?? String(rawStatus);
+          if (!label || !label.trim()) continue;
+
+          vinsWithNonNullStatus++;
+          pageNonNull++;
+          statusBreakdown[label] = (statusBreakdown[label] || 0) + 1;
+          const lower = label.toLowerCase();
+          if (lower.includes('declined repair')) declinedRepairCount++;
+          if (lower.includes('sent to auction')) sentToAuctionCount++;
+        }
+
+        console.log(
+          `[AMS DeclinedDiag] page ${pagesFetched} (offset ${offset}): ${rows.length} rows, ${pageNonNull} non-null statuses`,
+        );
+
+        if (rows.length < pageSize) break;
+        offset += pageSize;
+      }
+
+      const durationMs = Date.now() - startedAt;
+      console.log(
+        `[AMS DeclinedDiag] Done in ${durationMs}ms — VINs=${totalVinsFromAms}, nonNull=${vinsWithNonNullStatus}, declinedRepair=${declinedRepairCount}, sentToAuction=${sentToAuctionCount}, pages=${pagesFetched}`,
+      );
+
+      res.json({
+        totalVinsFromAms,
+        vinsWithNonNullStatus,
+        declinedRepairCount,
+        sentToAuctionCount,
+        statusBreakdown,
+        lookupEntriesLoaded: lookupMap.size,
+        pagesFetched,
+        durationMs,
+        pageError,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error: any) {
+      console.error('[AMS DeclinedDiag] Error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Warm the AMS truck-status cache in the background at startup so the
   // first real request is served instantly from cache.
   setImmediate(() => {
