@@ -465,7 +465,15 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     if (categoryFilter) {
       result = result.filter(v => {
         if (categoryFilter.isRental) return rentalTruckNumbers.has(v.vehicleNumber?.toString().padStart(6, '0'));
-        if (categoryFilter.truckStatus) return (v.truckStatus?.trim() || 'Unknown') === categoryFilter.truckStatus;
+        if (categoryFilter.truckStatus) {
+          // Match the AMS scorecard counts, which exclude vehicles whose
+          // VehicleNumber starts with 88 or 088. Only applied when the user
+          // has clicked an AMS truck-status card; the unfiltered table
+          // continues to show those vehicles.
+          const vn = String(v.vehicleNumber ?? '').trim();
+          if (/^0?88/.test(vn)) return false;
+          return (v.truckStatus?.trim() || 'Unknown') === categoryFilter.truckStatus;
+        }
         if (categoryFilter.generalStatus) {
           // 'Spare-Location confirmed' and 'Spare-Needs confirming' are sub-classifications of
           // the 'Vehicles in storage' bucket, so include them when filtering by 'Vehicles in storage'.

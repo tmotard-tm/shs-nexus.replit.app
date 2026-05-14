@@ -14681,6 +14681,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   let amsTruckStatusCache: {
     data: Record<string, string | null>;
     activeVins: Set<string>;
+    vehicleNumberByVin: Record<string, string>;
     activeSweepComplete: boolean;
     builtAt: number;
   } | null = null;
@@ -14691,6 +14692,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   async function buildAmsTruckStatusMap(): Promise<{
     map: Record<string, string | null>;
     activeVins: Set<string>;
+    vehicleNumberByVin: Record<string, string>;
     activeSweepComplete: boolean;
   }> {
     console.log('[AMS TruckStatusMap] Building VIN→TruckStatus map...');
@@ -14713,6 +14715,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     // Step 2: Paginate AMS /api/v1/vehicles endpoint
     const result: Record<string, string | null> = {};
     const activeVins = new Set<string>();
+    const vehicleNumberByVin: Record<string, string> = {};
     const pageSize = 500;
     let offset = 0;
     let totalFetched = 0;
@@ -14783,6 +14786,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const finalDispNum = Number(v.FinalDisposition ?? 0);
         const finalDisp = Number.isFinite(finalDispNum) && finalDispNum !== 0;
         if (!sold && !oos && !finalDisp) activeVins.add(vin);
+        const vn = String(v.VehicleNumber ?? '').trim();
+        if (vn) vehicleNumberByVin[vin] = vn;
       }
 
       totalFetched += rows.length;
@@ -14849,7 +14854,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.warn('[AMS TruckStatusMap] Snowflake supplement failed (continuing):', sfErr?.message);
     }
     console.log(`[AMS TruckStatusMap] Active VINs (per AMS): ${activeVins.size} (sweep complete=${activeSweepComplete})`);
-    return { map: result, activeVins, activeSweepComplete };
+    return { map: result, activeVins, vehicleNumberByVin, activeSweepComplete };
   }
 
   app.get("/api/ams/truck-status-map", requireAuth, async (_req, res) => {
@@ -14860,6 +14865,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amsTruckStatusCache = {
           data: built.map,
           activeVins: built.activeVins,
+          vehicleNumberByVin: built.vehicleNumberByVin,
           activeSweepComplete: built.activeSweepComplete,
           builtAt: now,
         };
@@ -14882,6 +14888,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amsTruckStatusCache = {
           data: built.map,
           activeVins: built.activeVins,
+          vehicleNumberByVin: built.vehicleNumberByVin,
           activeSweepComplete: built.activeSweepComplete,
           builtAt: now,
         };
@@ -14914,6 +14921,63 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
     } catch (error: any) {
       console.error('[AMS DeclinedRepairCount] Error:', error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Active-AMS scorecard counts for the Fleet Scope All Vehicles dashboard.
+  // Returns a status→count breakdown over AMS-active vehicles only,
+  // excluding any vehicle whose VehicleNumber starts with "88" or "088".
+  // Also returns the totals needed by the Total Operational Fleet card.
+  app.get("/api/ams/active-scorecard-counts", requireAuth, async (_req, res) => {
+    try {
+      const now = Date.now();
+      if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+        const built = await buildAmsTruckStatusMap();
+        amsTruckStatusCache = {
+          data: built.map,
+          activeVins: built.activeVins,
+          vehicleNumberByVin: built.vehicleNumberByVin,
+          activeSweepComplete: built.activeSweepComplete,
+          builtAt: now,
+        };
+      }
+      const cache = amsTruckStatusCache;
+      const useActiveFilter = cache.activeSweepComplete && cache.activeVins.size > 0;
+      const isExcluded88 = (vin: string) => {
+        const vn = cache.vehicleNumberByVin[vin];
+        return !!vn && /^0?88/.test(vn);
+      };
+
+      const statusCounts: Record<string, number> = {};
+      let activeConsidered = 0;
+      let excluded88 = 0;
+      let declinedRepair = 0;
+      let sentToAuction = 0;
+
+      for (const [vin, status] of Object.entries(cache.data)) {
+        if (useActiveFilter && !cache.activeVins.has(vin)) continue;
+        if (isExcluded88(vin)) { excluded88++; continue; }
+        activeConsidered++;
+        const label = (status && status.trim()) ? status.trim() : 'Unknown';
+        const lc = label.toLowerCase();
+        if (lc.includes('declined repair')) { declinedRepair++; continue; }
+        if (lc.includes('sent to auction')) { sentToAuction++; continue; }
+        statusCounts[label] = (statusCounts[label] || 0) + 1;
+      }
+
+      const totalOperational = Object.values(statusCounts).reduce((a, b) => a + b, 0);
+      res.json({
+        statusCounts,
+        totalOperational,
+        declinedRepair,
+        sentToAuction,
+        excluded88,
+        activeFleetCount: useActiveFilter ? cache.activeVins.size : null,
+        activeSweepComplete: cache.activeSweepComplete,
+      });
+    } catch (error: any) {
+      console.error('[AMS ActiveScorecardCounts] Error:', error);
       res.status(500).json({ message: error.message });
     }
   });
@@ -15059,6 +15123,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           amsTruckStatusCache = {
             data: built.map,
             activeVins: built.activeVins,
+            vehicleNumberByVin: built.vehicleNumberByVin,
             activeSweepComplete: built.activeSweepComplete,
             builtAt: Date.now(),
           };

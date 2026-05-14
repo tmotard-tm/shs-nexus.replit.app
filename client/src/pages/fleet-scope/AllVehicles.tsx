@@ -419,31 +419,52 @@ export default function AllVehicles() {
     return { onRoad, repairShop, pmfTotal, otherParking, spareConfirmed, spareNeedsConfirming, byovTotal, repairStatuses, total: vehicles.length };
   }, [data?.vehicles, data?.byov?.technicians]);
 
+  // AMS-active scorecard data — counts come from the AMS API's Active list
+  // (no SaleDate, no OutofSvcDate, no FinalDisposition), excluding any
+  // vehicle whose VehicleNumber starts with "88" or "088".
+  const { data: amsScorecardData, isLoading: amsScorecardLoading } = useQuery<{
+    statusCounts: Record<string, number>;
+    totalOperational: number;
+    declinedRepair: number;
+    sentToAuction: number;
+    excluded88: number;
+    activeFleetCount: number | null;
+    activeSweepComplete: boolean;
+  }>({
+    queryKey: ['/api/ams/active-scorecard-counts'],
+  });
+
+  // Fixed display order requested by the business. Any AMS status not in
+  // this list (and not Declined Repair / Sent to Auction) appears after
+  // these cards, sorted by count, so a future status still surfaces.
+  const AMS_STATUS_DISPLAY_ORDER = useMemo(() => [
+    'Assigned to Tech',
+    'In Repair',
+    'Spare',
+    'Reserved For New Hire',
+    'Tech On LOA',
+    'In Use',
+    'Unknown',
+  ], []);
+
   const amsStatusCounts = useMemo(() => {
-    if (!data?.vehicles) return [];
-    const counts: Record<string, number> = {};
-    for (const v of data.vehicles) {
-      const status = v.truckStatus?.trim() || 'Unknown';
-      counts[status] = (counts[status] || 0) + 1;
-    }
-    return Object.entries(counts)
-      .filter(([status]) => {
-        const lo = status.toLowerCase();
-        return !lo.includes('declined repair') && !lo.includes('sent to auction');
-      })
+    const counts = amsScorecardData?.statusCounts || {};
+    const inOrder = AMS_STATUS_DISPLAY_ORDER.map(status => ({
+      status,
+      count: counts[status] ?? 0,
+    }));
+    const known = new Set(AMS_STATUS_DISPLAY_ORDER);
+    const extras = Object.entries(counts)
+      .filter(([s]) => !known.has(s))
       .sort((a, b) => b[1] - a[1])
       .map(([status, count]) => ({ status, count }));
-  }, [data?.vehicles]);
+    return [...inOrder, ...extras];
+  }, [amsScorecardData?.statusCounts, AMS_STATUS_DISPLAY_ORDER]);
 
-  const { data: amsDeclinedData } = useQuery<{
-    count: number;
-    declinedRepairCount?: number;
-    sentToAuctionCount?: number;
-  }>({
-    queryKey: ['/api/ams/declined-repair-count'],
-  });
-  const declineRepairCount = amsDeclinedData?.declinedRepairCount ?? amsDeclinedData?.count ?? 0;
-  const sentToAuctionCount = amsDeclinedData?.sentToAuctionCount ?? 0;
+  const totalOperational = amsScorecardData?.totalOperational ?? 0;
+  const declineRepairCount = amsScorecardData?.declinedRepair ?? 0;
+  const sentToAuctionCount = amsScorecardData?.sentToAuction ?? 0;
+  const amsSweepComplete = amsScorecardData?.activeSweepComplete ?? false;
 
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
@@ -744,10 +765,13 @@ export default function AllVehicles() {
                     data-testid="card-ams-total-fleet"
                   >
                     <CardContent className="p-4">
-                      <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Fleet</p>
+                      <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Operational Fleet</p>
                       <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                        {(data.vehicles?.length || 0).toLocaleString()}
+                        {totalOperational.toLocaleString()}
                       </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        AMS Active · excludes 88/088
+                      </p>
                       {declineRepairCount > 0 && (
                         <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-1">
                           {declineRepairCount} Decline Repair
@@ -758,11 +782,21 @@ export default function AllVehicles() {
                           {sentToAuctionCount} Sent to Auction
                         </p>
                       )}
+                      {amsScorecardData && !amsSweepComplete && (
+                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
+                          Pending full AMS sweep
+                        </p>
+                      )}
+                      {amsScorecardLoading && !amsScorecardData && (
+                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
+                          Loading…
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
                   {amsStatusCounts.map(({ status, count }, idx) => {
                     const colors = AMS_CARD_COLORS[idx % AMS_CARD_COLORS.length];
-                    const total = data.vehicles?.length || 1;
+                    const total = totalOperational || 1;
                     const pct = ((count / total) * 100).toFixed(1);
                     const isActive = categoryFilter?.truckStatus === status;
                     return (
