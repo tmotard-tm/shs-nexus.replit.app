@@ -1162,7 +1162,9 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                           </span>
                         </TableCell>
                         <TableCell data-testid={`text-managed-by-${vehicle.vehicleNumber}`}>
-                          {vehicle.managedBy || '-'}
+                          {/^0?88/.test(String(vehicle.vehicleNumber ?? '').trim())
+                            ? 'BYOV'
+                            : (vehicle.managedBy || '-')}
                         </TableCell>
                         <TableCell data-testid={`text-holman-status-${vehicle.vehicleNumber}`}>
                           {vehicle.holmanStatus || ''}
