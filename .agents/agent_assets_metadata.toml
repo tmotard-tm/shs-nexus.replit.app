@@ -78,3 +78,9 @@ id = "4VUgPkelF7jhWXbbJkPKr"
 uri = "file://exports/commits-last-2-weeks.csv"
 type = "table"
 title = "All commits — last 2 weeks"
+
+[[outputs]]
+id = "NDpjHxpCYr0EarTz_T_ra"
+uri = "file://.local/exports/decommissioning-conversations-recreation-guide.md"
+type = "text"
+title = "Decommissioning Conversations — Recreation Guide"
