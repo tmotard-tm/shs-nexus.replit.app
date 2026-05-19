@@ -2102,7 +2102,90 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
   return ((tpmsResult as any).rowCount ?? 0) + ((fullLogResult as any).rowCount ?? 0);
 }
 
-type RepairTrackerTpmsContext = {
+/**
+   * Force-refresh tech_phone (and tech_name) on every vrm_repair_tracker row
+   * from the in-memory TPMS_EXTRACT snapshot. Unlike backfillRepairTrackerTruck-
+   * Numbers which only fills empty fields, this OVERWRITES stale values so the
+   * VRM module always reads the latest mobile number that TPMS_EXTRACT has on
+   * file for that tech. Triggered by the nightly Tech Data Scheduler (which
+   * refreshes the snapshot from Snowflake first) and on app startup.
+   *
+   * Why this exists: the New Rentals approval-SMS path resolves a tech's phone
+   * via vrm_repair_tracker. If the mirror falls out of sync with TPMS_EXTRACT
+   * (e.g. tech updated their phone in HR), approvals were going to the old
+   * number. Cost: one bulk UPDATE per refresh.
+   *
+   * Returns the number of rows whose tech_phone or tech_name actually changed.
+   */
+  export async function refreshRepairTrackerTechContactsFromTpms(): Promise<{
+    phoneUpdated: number;
+    nameUpdated: number;
+    snapshotRows: number;
+  }> {
+    if (!isTpmsSnapshotLoaded()) {
+      console.warn(
+        "[VRM RepairTracker] TPMS snapshot not loaded — skipping tech-contact refresh",
+      );
+      return { phoneUpdated: 0, nameUpdated: 0, snapshotRows: 0 };
+    }
+    const { getTpmsSnapshot } = await import("../tpms-extract-snapshot");
+    const snap = getTpmsSnapshot();
+
+    const ldaps: string[] = [];
+    const phones: string[] = [];
+    const names: string[] = [];
+    for (const [entId, contact] of snap) {
+      const phone = (contact.mobilePhone ?? "").trim();
+      const name = (contact.fullName ?? "").trim();
+      if (!entId || (!phone && !name)) continue;
+      ldaps.push(entId);
+      phones.push(phone);
+      names.push(name);
+    }
+
+    if (ldaps.length === 0) {
+      return { phoneUpdated: 0, nameUpdated: 0, snapshotRows: 0 };
+    }
+
+    // Single bulk UPDATE driven by a JSON-encoded payload of {ldap, phone, name}
+    // rows. Drizzle's array binding doesn't always survive a ::text[] cast on
+    // every Postgres driver path, so we hand it a jsonb blob and unpack it with
+    // jsonb_to_recordset — reliable across neon/serverless. Overwrite only when
+    // the snapshot value is non-empty AND differs, so rowCount reflects real
+    // changes and updated_at doesn't churn on every nightly run.
+    const payload = JSON.stringify(
+      ldaps.map((ldap, i) => ({ ldap, phone: phones[i] ?? "", name: names[i] ?? "" })),
+    );
+
+    const phoneRes = await db.execute(sql`
+      UPDATE vrm_repair_tracker rt
+      SET tech_phone = src.phone
+      FROM jsonb_to_recordset(${payload}::jsonb)
+        AS src(ldap text, phone text, name text)
+      WHERE UPPER(rt.tech_ldap) = UPPER(src.ldap)
+        AND src.phone <> ''
+        AND COALESCE(rt.tech_phone, '') <> src.phone
+    `);
+
+    const nameRes = await db.execute(sql`
+      UPDATE vrm_repair_tracker rt
+      SET tech_name = src.name
+      FROM jsonb_to_recordset(${payload}::jsonb)
+        AS src(ldap text, phone text, name text)
+      WHERE UPPER(rt.tech_ldap) = UPPER(src.ldap)
+        AND src.name <> ''
+        AND COALESCE(rt.tech_name, '') <> src.name
+    `);
+
+    const phoneUpdated = (phoneRes as any).rowCount ?? 0;
+    const nameUpdated = (nameRes as any).rowCount ?? 0;
+    console.log(
+      `[VRM RepairTracker] TPMS contact refresh: phoneUpdated=${phoneUpdated}, nameUpdated=${nameUpdated}, snapshotRows=${ldaps.length}`,
+    );
+    return { phoneUpdated, nameUpdated, snapshotRows: ldaps.length };
+  }
+
+  type RepairTrackerTpmsContext = {
   truckByLdap: Map<string, string>;
   phoneByLdap: Map<string, string>;
   mgrNameByLdap: Map<string, string>;

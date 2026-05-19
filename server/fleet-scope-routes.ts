@@ -11442,11 +11442,32 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // Refresh the in-process TPMS_EXTRACT snapshot first so the rest of this
     // run (and subsequent decommissioning sync, manager-phone enrichment,
     // tech-cache rebuild) all see the same nightly truth (Task #221).
+    let snapshotOk = false;
     try {
       const snap = await refreshTpmsExtractSnapshot();
+      snapshotOk = !!snap.ok;
       console.log(`[Tech Data Scheduler] TPMS snapshot refresh: ok=${snap.ok}, rows=${snap.rowCount}, managers=${snap.managerCount}, ${snap.durationMs}ms`);
     } catch (snapErr: any) {
       console.error('[Tech Data Scheduler] TPMS snapshot refresh failed (continuing):', snapErr?.message || snapErr);
+    }
+
+    // Push the freshly-loaded TPMS contacts into the VRM repair-tracker mirror
+    // so the New Rentals module (and the approval-SMS path that reads phone
+    // from vrm_repair_tracker.tech_phone) always sees the latest TPMS number.
+    // Gate on snapshotOk: if tonight's Snowflake refresh failed, the in-memory
+    // snapshot still holds yesterday's values (isTpmsSnapshotLoaded() stays
+    // true once any prior load succeeded), and we'd churn the mirror with
+    // stale data. Skip until the next successful refresh.
+    if (!snapshotOk) {
+      console.warn('[Tech Data Scheduler] Skipping VRM repair-tracker contact refresh — TPMS snapshot did not refresh successfully tonight.');
+    } else {
+      try {
+        const { refreshRepairTrackerTechContactsFromTpms } = await import("./vrm/storage");
+        const result = await refreshRepairTrackerTechContactsFromTpms();
+        console.log(`[Tech Data Scheduler] VRM repair-tracker contact refresh: phoneUpdated=${result.phoneUpdated}, nameUpdated=${result.nameUpdated}, snapshotRows=${result.snapshotRows}`);
+      } catch (vrmErr: any) {
+        console.error('[Tech Data Scheduler] VRM repair-tracker contact refresh failed (continuing):', vrmErr?.message || vrmErr);
+      }
     }
 
     try {
@@ -12149,6 +12170,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.log('[TPMS Snapshot] Bootstrap refresh on startup...');
       const snap = await refreshTpmsExtractSnapshot();
       console.log(`[TPMS Snapshot] Bootstrap: ok=${snap.ok}, rows=${snap.rowCount}, managers=${snap.managerCount}, ${snap.durationMs}ms${snap.error ? ', error=' + snap.error : ''}`);
+      // Push freshly-loaded TPMS contacts into the VRM repair-tracker mirror
+      // so the New Rentals approval-SMS path reads the latest phone for every
+      // tech on startup (not only at the 7:30 AM ET nightly run).
+      if (snap.ok) {
+        try {
+          const { refreshRepairTrackerTechContactsFromTpms } = await import("./vrm/storage");
+          const r = await refreshRepairTrackerTechContactsFromTpms();
+          console.log(`[VRM RepairTracker] Bootstrap contact refresh: phoneUpdated=${r.phoneUpdated}, nameUpdated=${r.nameUpdated}, snapshotRows=${r.snapshotRows}`);
+        } catch (vrmErr: any) {
+          console.error('[VRM RepairTracker] Bootstrap contact refresh failed:', vrmErr?.message || vrmErr);
+        }
+      }
     } catch (err: any) {
       console.error('[TPMS Snapshot] Bootstrap refresh failed:', err?.message || err);
     }
