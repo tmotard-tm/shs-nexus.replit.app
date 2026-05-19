@@ -460,13 +460,18 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
       }
       // VRM approval SMS uses a dedicated one-way Twilio sender (when
       // configured) so technician replies don't land in the shared
-      // registration inbox. Falls back to the registration sender if the
-      // VRM_APPROVAL_TWILIO_* env vars are not set.
+      // registration inbox. Setting VRM_APPROVAL_TWILIO_FROM alone is
+      // enough when the number lives in the same Twilio account as the
+      // registration line — we reuse the FS_TWILIO_* sid/token in that
+      // case. If the number is in a different Twilio account, also set
+      // VRM_APPROVAL_TWILIO_ACCOUNT_SID and VRM_APPROVAL_TWILIO_AUTH_TOKEN.
       const senderOverride =
-        payload.senderKey === "vrm_approval_oneway"
+        payload.senderKey === "vrm_approval_oneway" && process.env.VRM_APPROVAL_TWILIO_FROM
           ? {
-              accountSid: process.env.VRM_APPROVAL_TWILIO_ACCOUNT_SID,
-              authToken: process.env.VRM_APPROVAL_TWILIO_AUTH_TOKEN,
+              accountSid:
+                process.env.VRM_APPROVAL_TWILIO_ACCOUNT_SID ?? process.env.FS_TWILIO_ACCOUNT_SID,
+              authToken:
+                process.env.VRM_APPROVAL_TWILIO_AUTH_TOKEN ?? process.env.FS_TWILIO_AUTH_TOKEN,
               from: process.env.VRM_APPROVAL_TWILIO_FROM,
             }
           : undefined;
