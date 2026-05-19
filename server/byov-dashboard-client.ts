@@ -45,12 +45,24 @@ export function isByovDashboardConfigured(): boolean {
   return getConfig() !== null;
 }
 
-function normalizeIntent(raw: unknown): ByovIntent | null {
-  if (typeof raw !== 'string') return null;
-  const v = raw.trim().toLowerCase();
-  if (v === 'perm' || v === 'permanent') return 'perm';
-  if (v === 'training' || v === 'newhire' || v === 'new_hire' || v === 'new-hire') return 'training';
-  return null;
+/**
+ * Map a BYOV Dashboard roster-check row to our internal intent.
+ *
+ * Per the BYOV Dashboard contract:
+ *   - rosterType="Permanent"                              → already on permanent roster → 'perm'
+ *   - rosterType="NewHire" + intent="Permanent"           → new-hire opting in permanent → 'perm'
+ *   - rosterType="NewHire" + intent in {Training_Only,null} → training van               → 'training'
+ *   - rosterType="None"                                    → not enrolled                → null
+ */
+function deriveIntent(row: { rosterType?: string | null; intent?: string | null }): ByovIntent | null {
+  const rosterType = (row?.rosterType ?? '').trim().toLowerCase();
+  const intent = (row?.intent ?? '').trim().toLowerCase();
+  if (rosterType === 'permanent') return 'perm';
+  if (rosterType === 'newhire') {
+    if (intent === 'permanent') return 'perm';
+    return 'training'; // Training_Only or null
+  }
+  return null; // "None" or unknown
 }
 
 interface BatchOutcome {
@@ -61,23 +73,23 @@ interface BatchOutcome {
 
 async function postBatch(
   cfg: { baseUrl: string; token: string },
-  racfids: string[]
+  enterpriseIds: string[]
 ): Promise<BatchOutcome> {
   const out: ByovIntentMap = new Map();
-  if (racfids.length === 0) return { ok: true, results: out };
+  if (enterpriseIds.length === 0) return { ok: true, results: out };
 
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    const res = await fetch(`${cfg.baseUrl}/api/byov-enrollments/lookup`, {
+    const res = await fetch(`${cfg.baseUrl}/api/v1/roster-check/bulk`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
-        'Authorization': `Bearer ${cfg.token}`,
+        'X-API-Key': cfg.token,
       },
-      body: JSON.stringify({ racfids }),
+      body: JSON.stringify({ enterpriseIds }),
       signal: ac.signal,
     });
 
@@ -88,7 +100,14 @@ async function postBatch(
       return { ok: false, results: out, error: msg };
     }
 
-    const data = (await res.json()) as { results?: Array<{ racfid?: string; intent?: string; enrollmentId?: string | null }> };
+    const data = (await res.json()) as {
+      results?: Array<{
+        enterpriseId?: string;
+        enrolled?: boolean;
+        rosterType?: string | null;
+        intent?: string | null;
+      }>;
+    };
     if (!data || !Array.isArray(data.results)) {
       const msg = 'Lookup response missing "results" array';
       console.error(`[BYOVDashboard] ${msg}`);
@@ -96,12 +115,15 @@ async function postBatch(
     }
 
     for (const row of data.results) {
-      const racfid = (row?.racfid ?? '').trim().toUpperCase();
-      const intent = normalizeIntent(row?.intent);
-      if (!racfid || !intent) continue;
-      out.set(racfid, {
+      const enterpriseId = (row?.enterpriseId ?? '').trim().toUpperCase();
+      if (!enterpriseId) continue;
+      const intent = deriveIntent(row);
+      if (!intent) continue;
+      // BYOV Dashboard doesn't currently return an opaque enrollment id, so we
+      // persist the rosterType for traceability ("Permanent" vs "NewHire").
+      out.set(enterpriseId, {
         intent,
-        enrollmentId: row?.enrollmentId ?? null,
+        enrollmentId: (row?.rosterType ?? null) as string | null,
       });
     }
     return { ok: true, results: out };

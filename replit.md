@@ -25,8 +25,8 @@ Nexus is an enterprise task management platform for automating tasks, centralizi
 -   `SAMSARA_BASE_URL`
 -   `SENDGRID_API_KEY`
 -   `VRM_REPAIR_TRACKER_API_KEY` (Bearer token for the read-only `GET /api/vrm/repair-tracker/full` mirror endpoint; all other `/api/vrm/*` routes still require a session cookie)
--   `BYOV_DASHBOARD_URL` (base URL of the BYOV Dashboard service, used by the Weekly Onboarding BYOV intent cross-check)
--   `FS_BYOV_API_KEY` (Bearer token for `POST {BYOV_DASHBOARD_URL}/api/byov-enrollments/lookup`)
+-   `BYOV_DASHBOARD_URL` (base URL of the BYOV Dashboard service, e.g. `https://byovdashboard.replit.app`, used by the Weekly Onboarding BYOV intent cross-check)
+-   `FS_BYOV_API_KEY` (`X-API-Key` header value for `POST {BYOV_DASHBOARD_URL}/api/v1/roster-check/bulk` — bulk roster check, up to 500 enterprise IDs per request)
 
 ## Stack
 
@@ -74,7 +74,7 @@ Preferred communication style: Simple, everyday language.
 -   **VRM Theming**: Always use the defined `colors` palette for VRM modules; avoid hardcoding hex values to ensure dark mode compatibility.
 -   **Snowflake CTE join for TPMS Phone**: `supervisor_tpms_phone_raw` can be NULL even if `MOBILEPHONENUMBER` is present. The system uses an in-memory `tpms-extract-snapshot` as a backstop.
 -   **VRM Configurable Deny Templates**: Ensure only whitelisted tokens are used in templates; unknown tokens will block saving.
--   **Weekly Onboarding BYOV Intent**: BYOV intent is matched by RACFID (Enterprise ID) only — no name fallback. A null `byov_intent` means "no enrollment found in BYOV Dashboard," not "declined." The **Status=BYOV** value on Weekly Onboarding is *derived* from the assigned truck number prefix (`88…`), not stored, and is intentionally only surfaced on that page (do not add it to other dashboards). The intent fields and `Status=BYOV` derivation must not be propagated to offboarding, fleet ops, or rental dashboards.
+-   **Weekly Onboarding BYOV Intent**: BYOV intent is matched by Enterprise ID (LDAP / RACFID) only — no name fallback. A null `byov_intent` means "no enrollment found in BYOV Dashboard," not "declined." Intent mapping from the roster-check response: `rosterType="Permanent"` → `perm`; `rosterType="NewHire"` + `intent="Permanent"` → `perm`; `rosterType="NewHire"` + `intent` in `{Training_Only, null}` → `training`; `rosterType="None"` → `null`. The **Status=BYOV** value on Weekly Onboarding is *derived* from the assigned truck number prefix (`88…`), not stored, and is intentionally only surfaced on that page (do not add it to other dashboards). The intent fields and `Status=BYOV` derivation must not be propagated to offboarding, fleet ops, or rental dashboards.
 
 ## Pointers
 
