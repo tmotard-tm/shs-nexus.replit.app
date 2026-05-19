@@ -26,7 +26,7 @@ Nexus is an enterprise task management platform for automating tasks, centralizi
 -   `SENDGRID_API_KEY`
 -   `VRM_REPAIR_TRACKER_API_KEY` (Bearer token for the read-only `GET /api/vrm/repair-tracker/full` mirror endpoint; all other `/api/vrm/*` routes still require a session cookie)
 -   `BYOV_DASHBOARD_URL` (base URL of the BYOV Dashboard service, used by the Weekly Onboarding BYOV intent cross-check)
--   `BYOV_DASHBOARD_API_TOKEN` (Bearer token for `POST {BYOV_DASHBOARD_URL}/api/byov-enrollments/lookup`)
+-   `FS_BYOV_API_KEY` (Bearer token for `POST {BYOV_DASHBOARD_URL}/api/byov-enrollments/lookup`)
 
 ## Stack
 

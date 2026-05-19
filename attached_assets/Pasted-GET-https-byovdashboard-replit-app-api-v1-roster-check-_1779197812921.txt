@@ -1,0 +1,88 @@
+GET https://byovdashboard.replit.app/api/v1/roster-check?enterpriseId=<LDAP>
+
+Bulk (use for the weekly file)
+POST https://byovdashboard.replit.app/api/v1/roster-check/bulk
+Content-Type: application/json
+X-API-Key: <key>
+{ "enterpriseIds": ["abc123", "def456", "..."] }   // up to 500 per request
+
+Server trims whitespace, de-dupes, and tolerates empty strings.
+
+Response shapes
+Permanent enrollment:
+
+{
+  "enterpriseId": "AURRIBA",
+  "enrolled": true,
+  "status": "Enrolled",
+  "rosterType": "Permanent",
+  "intent": "Permanent",
+  "name": "Andry Urribarri Chacin",
+  "region": "58850",
+  "district": "07435",
+  "dateStartedByov": "2025-02-10"
+}
+
+New hire:
+
+{
+  "enterpriseId": "JDOE99",
+  "enrolled": true,
+  "rosterType": "NewHire",
+  "intent": "Permanent",              // raw value: "Permanent" | "Training_Only" | null
+  "name": "Jane Doe",
+  "region": "...", "district": "...",
+  "status": "approved",
+  "trainingManager": "...",
+  "trainingClass": "...",
+  "submissionDate": "2026-05-10T14:22:00.000Z",
+  "approvedAt": "2026-05-12T09:00:00.000Z"
+}
+
+Not found:
+
+{ "enterpriseId": "TEST123", "enrolled": false, "rosterType": "None", "intent": null }
+
+Bulk wrapper:
+
+{
+  "results": [ /* one entry per input ID, shapes above */ ],
+  "total": 3,
+  "permanentCount": 1,
+  "newHirePermanentIntentCount": 0,
+  "newHireTrainingOnlyCount": 1,
+  "notFoundCount": 1
+}
+
+Rules
+Permanent wins: if a tech is on both rosters, you'll only see rosterType: "Permanent".
+Skip ordering a new-hire van when either:
+rosterType === "Permanent", or
+rosterType === "NewHire" and intent === "Permanent"
+Order a training van when rosterType === "NewHire" and intent === "Training_Only" (or null).
+rosterType === "None" → tech isn't in either roster; handle per existing onboarding process.
+Drop-in Node helper for the Nexus agent
+const BYOV_URL = "https://byovdashboard.replit.app";
+async function checkRoster(enterpriseIds) {
+  const res = await fetch(`${BYOV_URL}/api/v1/roster-check/bulk`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": process.env.BYOV_API_KEY,
+    },
+    body: JSON.stringify({ enterpriseIds }),
+  });
+  if (!res.ok) throw new Error(`Roster check failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+function needsNewHireVan(result) {
+  if (result.rosterType === "Permanent") return false;
+  if (result.rosterType === "NewHire" && result.intent === "Permanent") return false;
+  return true;
+}
+
+Quick curl test after deploy
+curl -X POST "https://byovdashboard.replit.app/api/v1/roster-check/bulk" \
+  -H "X-API-Key: 62f3016cc68b84acf9c33dd803765d7b43b253ab96be066bdbc2a6638f0ea887" \
+  -H "Content-Type: application/json" \
+  -d '{"enterpriseIds":["aurriba","test123"]}'

@@ -38,7 +38,7 @@ export async function syncByovIntentForOnboarding(): Promise<ByovIntentSyncResul
   };
 
   if (!result.configured) {
-    result.errors.push('BYOV Dashboard is not configured (missing BYOV_DASHBOARD_URL or BYOV_DASHBOARD_API_TOKEN)');
+    result.errors.push('BYOV Dashboard is not configured (missing BYOV_DASHBOARD_URL or FS_BYOV_API_KEY)');
     return result;
   }
 

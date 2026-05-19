@@ -36,7 +36,7 @@ const REQUEST_TIMEOUT_MS = 30_000;
 
 function getConfig(): { baseUrl: string; token: string } | null {
   const baseUrl = process.env.BYOV_DASHBOARD_URL?.trim();
-  const token = process.env.BYOV_DASHBOARD_API_TOKEN?.trim();
+  const token = process.env.FS_BYOV_API_KEY?.trim();
   if (!baseUrl || !token) return null;
   return { baseUrl: baseUrl.replace(/\/+$/, ''), token };
 }
@@ -126,7 +126,7 @@ async function postBatch(
 export async function lookupByovIntents(racfidsRaw: string[]): Promise<ByovIntentLookupOutcome> {
   const cfg = getConfig();
   if (!cfg) {
-    const msg = 'BYOV_DASHBOARD_URL / BYOV_DASHBOARD_API_TOKEN not configured';
+    const msg = 'BYOV_DASHBOARD_URL / FS_BYOV_API_KEY not configured';
     console.warn(`[BYOVDashboard] ${msg} — skipping intent lookup`);
     return { ok: false, results: new Map(), failedRacfids: [], error: msg };
   }

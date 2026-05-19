@@ -202,7 +202,7 @@ export default function WeeklyOnboarding() {
       if (data?.configured === false) {
         toast({
           title: "BYOV Dashboard Not Configured",
-          description: "Set BYOV_DASHBOARD_URL and BYOV_DASHBOARD_API_TOKEN to enable intent cross-check.",
+          description: "Set BYOV_DASHBOARD_URL and FS_BYOV_API_KEY to enable intent cross-check.",
           variant: "destructive",
         });
       } else if (data?.success === false || data?.upstreamOk === false) {
