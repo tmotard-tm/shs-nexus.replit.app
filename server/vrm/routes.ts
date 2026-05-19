@@ -2753,6 +2753,14 @@ export function registerVrmRoutes(): Router {
     sms_template_approve: new Set([
       "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
     ]),
+    // Tech-facing denial SMS — separate from supervisor sms_template_deny
+    // above. {{byov_link}} expands to the BYOV temporary enrollment
+    // landing page. Empty body falls back to the dispatcher's hard-coded
+    // Fleet-approved copy.
+    sms_template_deny_tech: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
+      "byov_link",
+    ]),
   };
   const ALLOWED_NOTIF_TEMPLATE_KEYS = new Set(Object.keys(NOTIF_TEMPLATE_TOKENS));
 

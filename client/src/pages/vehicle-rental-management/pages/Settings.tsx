@@ -480,16 +480,18 @@ interface NotificationTemplatesResponse {
 }
 
 const TEMPLATE_LABELS: Record<string, string> = {
-  sms_template_deny: "SMS body (Deny)",
+  sms_template_deny: "SMS body (Deny — supervisor)",
   email_subject_template_deny: "Email subject (Deny)",
   email_body_template_deny: "Email body (Deny)",
   sms_template_approve: "SMS body (Approve — tech-facing)",
+  sms_template_deny_tech: "SMS body (Deny — tech-facing)",
 };
 const TEMPLATE_KEYS = [
   "sms_template_deny",
   "email_subject_template_deny",
   "email_body_template_deny",
   "sms_template_approve",
+  "sms_template_deny_tech",
 ] as const;
 
 const TEMPLATE_DEFAULTS: Record<string, string> = {
@@ -501,6 +503,8 @@ const TEMPLATE_DEFAULTS: Record<string, string> = {
     "Hello {{supervisor_first_name}},\n\nA rental vehicle request for {{tech_full_name}} ({{tech_ldap}}) was denied based on the following profitability factors:\n\n{{factors_html}}\n\nBYOV (Bring Your Own Vehicle) is available as an alternative — please discuss the option with {{tech_first_name}} (info: {{byov_link}}).\n\nIf you believe this decision should be revisited, contact the VRM team.\n\n— Sears Home Services Vehicle Rental Management",
   sms_template_approve:
     "Your recent Rental request has been approved, please contact ARI/Holman to confirm the reservation. If this is an error please contact the fleet team ASAP via SHSAI.\n\nRemember that Rentals issued by Fleet are for work use only and off the clock rental usage is not permitted. Any violation to this policy may result in disciplinary action. Stay Safe and thank you for all you do!",
+  sms_template_deny_tech:
+    "Good Morning {{tech_first_name}}, This is the Fleet team. Unfortunately the rental you requested this morning is unable to be approved due to the company's current guidelines. While your vehicle is in the shop you have a couple of options.\n\nEnroll in BYOV to drive your own vehicle to run your route and continue working while ALSO getting paid for every mile driven - you pay for your gas and get a weekly Tax Free reimbursement.\n\nThe only other option in the meantime is you would have your route cleared and be without the ability to run a route until your van is fixed. To enroll your vehicle temporarily simply go to:\n{{byov_link}}\n\nreview the program, enroll using the temporary option in the Enroll section at the upper right side. Note a $100 bonus is available after the first week on BYOV Temporary.",
 };
 
 /** Returns unknown {{tokens}} present in `body` that are NOT in `allowed`. */
@@ -530,7 +534,10 @@ function TemplateEditor({
   const [draft, setDraft] = useState(initialBody);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  const isSms = templateKey === "sms_template_deny" || templateKey === "sms_template_approve";
+  const isSms =
+    templateKey === "sms_template_deny" ||
+    templateKey === "sms_template_approve" ||
+    templateKey === "sms_template_deny_tech";
   const isEmailBody = templateKey === "email_body_template_deny";
 
   const dirty = draft !== initialBody;

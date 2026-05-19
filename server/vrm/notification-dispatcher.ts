@@ -212,8 +212,8 @@ async function getTechPhone(techLdap: string): Promise<string | null> {
  * the tech has an immediate path back to running their route.
  */
 const DENIAL_BYOV_LINK = "https://byov-enrollment.replit.app";
-const DENIAL_SMS_BODY_TEMPLATE =
-  "Good Morning {{first_name}}, This is the Fleet team. Unfortunately the " +
+export const DENIAL_SMS_BODY_TEMPLATE =
+  "Good Morning {{tech_first_name}}, This is the Fleet team. Unfortunately the " +
   "rental you requested this morning is unable to be approved due to the " +
   "company's current guidelines. While your vehicle is in the shop you have " +
   "a couple of options.\n\n" +
@@ -223,7 +223,7 @@ const DENIAL_SMS_BODY_TEMPLATE =
   "The only other option in the meantime is you would have your route " +
   "cleared and be without the ability to run a route until your van is " +
   "fixed. To enroll your vehicle temporarily simply go to:\n" +
-  `${DENIAL_BYOV_LINK}\n\n` +
+  "{{byov_link}}\n\n" +
   "review the program, enroll using the temporary option in the Enroll " +
   "section at the upper right side. Note a $100 bonus is available after " +
   "the first week on BYOV Temporary.";
@@ -253,8 +253,22 @@ export async function enqueueDenialSmsForTech(args: {
     digits(overrideRaw) === digits(trusted);
   const phone = overrideMatches ? overrideRaw : trusted;
 
+  // Resolve template body: custom from vrm_notification_templates if the
+  // operator has saved one on the Settings page, otherwise the hard-coded
+  // Fleet-approved default. Tokens supported: tech_first_name,
+  // tech_full_name, tech_ldap, decision_date, byov_link.
+  const templates = await loadTemplateMap();
+  const customTmpl = templates.sms_template_deny_tech.trim();
+  const tmpl = customTmpl || DENIAL_SMS_BODY_TEMPLATE;
   const first = firstName(args.techName ?? null) || args.techLdap;
-  const body = DENIAL_SMS_BODY_TEMPLATE.replace(/\{\{first_name\}\}/g, first);
+  const vars: Record<string, string> = {
+    tech_first_name: first,
+    tech_full_name: args.techName ?? args.techLdap,
+    tech_ldap: args.techLdap,
+    decision_date: todayLocalDate(),
+    byov_link: DENIAL_BYOV_LINK,
+  };
+  const body = renderTemplate(tmpl, vars);
 
   // Same one-way Twilio sender as approval SMS so tech replies don't land
   // in the shared registration inbox.
@@ -362,7 +376,8 @@ type TemplateKey =
   | "sms_template_deny"
   | "email_subject_template_deny"
   | "email_body_template_deny"
-  | "sms_template_approve";
+  | "sms_template_approve"
+  | "sms_template_deny_tech";
 type TemplateMap = Record<TemplateKey, string>;
 
 /**
@@ -377,6 +392,7 @@ async function loadTemplateMap(): Promise<TemplateMap> {
     email_subject_template_deny: "",
     email_body_template_deny: "",
     sms_template_approve: "",
+    sms_template_deny_tech: "",
   };
   try {
     const rows = await getNotificationTemplates();
