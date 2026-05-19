@@ -585,6 +585,13 @@ export async function initVrmSchema(): Promise<void> {
       END IF;
     END $$;
   `);
+  // Idempotent upgrade for DBs created before 'sms_tech_deny' existed.
+  // Tech-facing denial SMS is enqueued on this dedicated channel so it
+  // coexists with the supervisor 'sms' row for the same decision_id
+  // under UNIQUE(decision_id, channel). ALTER TYPE ... ADD VALUE IF NOT
+  // EXISTS is idempotent and cheap; must live OUTSIDE the DO $$ block
+  // above because ALTER TYPE cannot run inside a transaction in Postgres.
+  await db.execute(sql`ALTER TYPE vrm_notification_channel ADD VALUE IF NOT EXISTS 'sms_tech_deny';`);
 
   // ── Notifications outbound queue (DENY-only) ───────────────────────────────
   await db.execute(sql`

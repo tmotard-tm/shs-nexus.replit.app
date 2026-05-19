@@ -713,6 +713,10 @@ export type InsertVrmRateConfigHistory = z.infer<typeof insertVrmRateConfigHisto
 export const vrmNotificationChannelEnum = pgEnum("vrm_notification_channel", [
   "sms",
   "email",
+  // Tech-facing denial SMS — separate channel so it coexists with the
+  // supervisor "sms" row for the same decision_id under the
+  // UNIQUE(decision_id, channel) constraint.
+  "sms_tech_deny",
 ]);
 
 export const vrmNotificationStatusEnum = pgEnum("vrm_notification_status", [

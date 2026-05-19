@@ -202,6 +202,86 @@ async function getTechPhone(techLdap: string): Promise<string | null> {
   return v || null;
 }
 
+// ─── Denial SMS (tech-facing) ──────────────────────────────────────────────
+
+/**
+ * Fixed-copy SMS sent to the requesting tech when their rental request is
+ * DENIED. Copy is specified verbatim by Fleet leadership — do not template
+ * or personalize beyond the leading "Good Morning {{first_name}}" without
+ * product sign-off. Pushes the BYOV temporary-enrollment landing page so
+ * the tech has an immediate path back to running their route.
+ */
+const DENIAL_BYOV_LINK = "https://byov-enrollment.replit.app";
+const DENIAL_SMS_BODY_TEMPLATE =
+  "Good Morning {{first_name}}, This is the Fleet team. Unfortunately the " +
+  "rental you requested this morning is unable to be approved due to the " +
+  "company's current guidelines. While your vehicle is in the shop you have " +
+  "a couple of options.\n\n" +
+  "Enroll in BYOV to drive your own vehicle to run your route and continue " +
+  "working while ALSO getting paid for every mile driven - you pay for your " +
+  "gas and get a weekly Tax Free reimbursement.\n\n" +
+  "The only other option in the meantime is you would have your route " +
+  "cleared and be without the ability to run a route until your van is " +
+  "fixed. To enroll your vehicle temporarily simply go to:\n" +
+  `${DENIAL_BYOV_LINK}\n\n` +
+  "review the program, enroll using the temporary option in the Enroll " +
+  "section at the upper right side. Note a $100 bonus is available after " +
+  "the first week on BYOV Temporary.";
+
+/**
+ * Called from the /profitability/log route after a Denied decision is
+ * recorded. Enqueues a single SMS to the requesting technician on the
+ * dedicated `sms_tech_deny` channel so it can coexist with the supervisor
+ * "sms" row for the same decision_id (UNIQUE(decision_id, channel)).
+ *
+ * Like the approval flow, `techPhoneOverride` lets the caller pin the
+ * number the agent saw, validated against the Repair Tracker mirror.
+ * If no phone is on file, records a single 'skipped' audit row.
+ */
+export async function enqueueDenialSmsForTech(args: {
+  decisionId: string;
+  techLdap: string;
+  techPhoneOverride?: string | null;
+  techName?: string | null;
+}): Promise<{ smsQueued: boolean; skipped: boolean }> {
+  const trusted = (await getTechPhone(args.techLdap)) ?? "";
+  const overrideRaw = (args.techPhoneOverride ?? "").trim();
+  const digits = (s: string) => s.replace(/\D+/g, "").replace(/^1/, "");
+  const overrideMatches =
+    overrideRaw.length > 0 &&
+    trusted.length > 0 &&
+    digits(overrideRaw) === digits(trusted);
+  const phone = overrideMatches ? overrideRaw : trusted;
+
+  const first = firstName(args.techName ?? null) || args.techLdap;
+  const body = DENIAL_SMS_BODY_TEMPLATE.replace(/\{\{first_name\}\}/g, first);
+
+  // Same one-way Twilio sender as approval SMS so tech replies don't land
+  // in the shared registration inbox.
+  const payload = { subject: null, body, isHtml: false, senderKey: "vrm_approval_oneway" as const };
+
+  if (!phone) {
+    await enqueueNotification({
+      decisionId: args.decisionId,
+      channel: "sms_tech_deny",
+      recipient: "(missing)",
+      payload,
+      status: "skipped",
+      error: "tech has no phone number on file",
+    });
+    return { smsQueued: false, skipped: true };
+  }
+
+  const ins = await enqueueNotification({
+    decisionId: args.decisionId,
+    channel: "sms_tech_deny",
+    recipient: phone,
+    payload,
+    status: "queued",
+  });
+  return { smsQueued: !!ins, skipped: false };
+}
+
 /**
  * Called from the /profitability/log route after an Approved decision is
  * recorded. Enqueues a single SMS to the requesting technician (idempotent
@@ -453,7 +533,7 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
   };
 
   try {
-    if (n.channel === "sms") {
+    if (n.channel === "sms" || n.channel === "sms_tech_deny") {
       if (!n.recipient || n.recipient === "(missing)") {
         await markNotificationSkipped(n.id, "no recipient");
         return;
