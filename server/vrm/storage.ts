@@ -1510,24 +1510,34 @@ export async function listRentalDecisions(limit = 50) {
 
   if (rows.length === 0) return [];
 
-  // Pull supervisor SMS notification status per decision (one row per decision
-  // since UNIQUE(decision_id, channel) is enforced in vrm_notifications).
-  const ids = rows.map((r) => r.id);
-  const smsRows = await db
-    .select({
-      decisionId: vrmNotifications.decisionId,
-      recipient: vrmNotifications.recipient,
-      status: vrmNotifications.status,
-      sentAt: vrmNotifications.sentAt,
-      error: vrmNotifications.error,
-    })
-    .from(vrmNotifications)
-    .where(
-      and(
-        inArray(vrmNotifications.decisionId, ids),
-        eq(vrmNotifications.channel, "sms"),
-      ),
-    );
+  // Pull SMS notification status per decision (one row per decision since
+  // UNIQUE(decision_id, channel) is enforced in vrm_notifications). The
+  // legacy supervisor-SMS UI fields (supervisorSms*) only make sense on
+  // deny decisions, so we ONLY join in deny-row SMS here. Approval rows
+  // now also create an SMS notification (tech-facing approval text) -
+  // those are intentionally not surfaced through the supervisorSms*
+  // fields to avoid mislabeling tech contact info as supervisor contact
+  // info. The approval SMS audit trail still lives in vrm_notifications.
+  const denyIds = rows
+    .filter((r) => String(r.decision).toLowerCase() === "denied")
+    .map((r) => r.id);
+  const smsRows = denyIds.length > 0
+    ? await db
+        .select({
+          decisionId: vrmNotifications.decisionId,
+          recipient: vrmNotifications.recipient,
+          status: vrmNotifications.status,
+          sentAt: vrmNotifications.sentAt,
+          error: vrmNotifications.error,
+        })
+        .from(vrmNotifications)
+        .where(
+          and(
+            inArray(vrmNotifications.decisionId, denyIds),
+            eq(vrmNotifications.channel, "sms"),
+          ),
+        )
+    : [];
   const smsByDecision = new Map(smsRows.map((n) => [n.decisionId, n]));
 
   return rows.map((r) => {

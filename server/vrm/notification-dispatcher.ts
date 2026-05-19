@@ -19,9 +19,10 @@ import { sql } from "drizzle-orm";
 import {
   vrmProfitabilitySnapshot,
   vrmRentalDecisions,
+  vrmRepairTracker,
   type VrmNotification,
 } from "@shared/vrm-schema";
-import { eq } from "drizzle-orm";
+import { eq, desc, isNotNull, and, ne } from "drizzle-orm";
 import {
   enqueueNotification,
   getQueuedNotifications,
@@ -158,6 +159,99 @@ export async function enqueueNotificationsForDeny(args: {
   }
 
   return { smsQueued, emailQueued, skipped: false };
+}
+
+// ─── Approval SMS (tech-facing) ────────────────────────────────────────────
+
+/**
+ * Fixed-copy SMS sent to the requesting tech when their rental request is
+ * approved on the New Rental page. Copy is specified verbatim by Fleet
+ * leadership — do not template/personalize without product sign-off.
+ */
+const APPROVAL_SMS_BODY =
+  "Your recent Rental request has been approved, please contact ARI/Holman " +
+  "to confirm the reservation. If this is an error please contact the fleet " +
+  "team ASAP via SHSAI.\n\n" +
+  "Remember that Rentals issued by Fleet are for work use only and off the " +
+  "clock rental usage is not permitted. Any violation to this policy may " +
+  "result in disciplinary action. Stay Safe and thank you for all you do!";
+
+/**
+ * Lookup the tech's mobile phone from the Repair Tracker mirror. The Repair
+ * Tracker is the same source the New Rental evaluator uses, so the number
+ * matches what the agent saw on screen at decision time. Returns null when
+ * we have no usable number on file.
+ */
+async function getTechPhone(techLdap: string): Promise<string | null> {
+  const upper = techLdap.toUpperCase();
+  // Case-insensitive match: vrm_repair_tracker.tech_ldap casing is not
+  // guaranteed (mirror is populated from multiple upstream sources).
+  const [row] = await db
+    .select({ techPhone: vrmRepairTracker.techPhone })
+    .from(vrmRepairTracker)
+    .where(
+      and(
+        sql`UPPER(${vrmRepairTracker.techLdap}) = ${upper}`,
+        isNotNull(vrmRepairTracker.techPhone),
+        ne(vrmRepairTracker.techPhone, ""),
+      ),
+    )
+    .orderBy(desc(vrmRepairTracker.id))
+    .limit(1);
+  const v = (row?.techPhone ?? "").trim();
+  return v || null;
+}
+
+/**
+ * Called from the /profitability/log route after an Approved decision is
+ * recorded. Enqueues a single SMS to the requesting technician (idempotent
+ * via UNIQUE(decision_id, channel)). If no phone is on file, records a
+ * single 'skipped' audit row so we can see the miss.
+ *
+ * `techPhoneOverride` lets the caller pass the number it already had in
+ * front of the agent (e.g. from the evaluator row) so the SMS goes to
+ * exactly the number the approver saw, even if the Repair Tracker mirror
+ * has since changed.
+ */
+export async function enqueueApprovalSmsForTech(args: {
+  decisionId: string;
+  techLdap: string;
+  techPhoneOverride?: string | null;
+}): Promise<{ smsQueued: boolean; skipped: boolean }> {
+  // The override is ONLY honored if it normalizes to the same digits as
+  // the trusted Repair Tracker lookup for this LDAP. This blocks a
+  // tampered request body from redirecting the approval SMS to an
+  // arbitrary number while still letting the UI pin "the number the
+  // approver saw" in the common case where the mirror hasn't drifted.
+  const trusted = (await getTechPhone(args.techLdap)) ?? "";
+  const overrideRaw = (args.techPhoneOverride ?? "").trim();
+  const digits = (s: string) => s.replace(/\D+/g, "").replace(/^1/, "");
+  const overrideMatches =
+    overrideRaw.length > 0 &&
+    trusted.length > 0 &&
+    digits(overrideRaw) === digits(trusted);
+  const phone = overrideMatches ? overrideRaw : trusted;
+
+  if (!phone) {
+    await enqueueNotification({
+      decisionId: args.decisionId,
+      channel: "sms",
+      recipient: "(missing)",
+      payload: { subject: null, body: APPROVAL_SMS_BODY, isHtml: false },
+      status: "skipped",
+      error: "tech has no phone number on file",
+    });
+    return { smsQueued: false, skipped: true };
+  }
+
+  const ins = await enqueueNotification({
+    decisionId: args.decisionId,
+    channel: "sms",
+    recipient: phone,
+    payload: { subject: null, body: APPROVAL_SMS_BODY, isHtml: false },
+    status: "queued",
+  });
+  return { smsQueued: !!ins, skipped: false };
 }
 
 // ─── Templates ─────────────────────────────────────────────────────────────

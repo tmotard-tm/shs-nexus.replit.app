@@ -79,7 +79,7 @@ import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync"
 import { fetchProfitabilityCheck } from "./snowflake-queries";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
-import { enqueueNotificationsForDeny } from "./notification-dispatcher";
+import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech } from "./notification-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
@@ -1640,6 +1640,11 @@ export function registerVrmRoutes(): Router {
         dailyNetBeforeRental, dailyPptProfit,
         supervisorName, supervisorLdap, supervisorPhone,
         rentalVehicleNumber,
+        // Optional: if the UI already has the tech's phone in front of the
+        // approver (e.g. from the evaluator row), pass it through so the
+        // approval SMS goes to exactly that number — no drift if the
+        // Repair Tracker mirror changes between decision and dispatch.
+        techPhone,
       } = req.body;
       if (!techLdap || !decision || !decidedByName)
         return res.status(400).json({ error: "techLdap, decision, and decidedByName required" });
@@ -1690,6 +1695,16 @@ export function registerVrmRoutes(): Router {
           tenureMonths: tenureMonths ?? null,
         }).catch((err: any) =>
           console.error("[VRM] notification enqueue failed:", err?.message ?? err),
+        );
+      } else if (String(decision).toLowerCase() === "approved") {
+        // Send the tech-facing approval SMS (fixed copy provided by Fleet).
+        // Idempotent via UNIQUE(decision_id, channel); same dispatcher loop.
+        enqueueApprovalSmsForTech({
+          decisionId: row.id,
+          techLdap: String(techLdap).toUpperCase(),
+          techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
+        }).catch((err: any) =>
+          console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err),
         );
       }
 
