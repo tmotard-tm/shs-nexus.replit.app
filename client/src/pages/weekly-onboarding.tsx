@@ -62,16 +62,9 @@ function getOwnerFromDistrict(district: string | null | undefined): string {
   return districtOwnerMap[last4] || '-';
 }
 
-// Tri-state status derivation for Weekly Onboarding only.
-// Status=BYOV is derived from the assigned truck# prefix ("88"). NOT stored,
-// and intentionally not used outside this page.
-type OnboardingStatus = 'assigned' | 'pending' | 'byov';
-function deriveStatus(hire: OnboardingHire): OnboardingStatus {
-  const truck = (hire.assignedTruckNo || '').trim();
-  if (hire.truckAssigned && truck.startsWith('88')) return 'byov';
-  if (hire.truckAssigned) return 'assigned';
-  return 'pending';
-}
+// Tri-state status derivation lives in shared/ so the UI table, filter, and
+// the server-side Excel export all use the same logic.
+import { deriveOnboardingStatus as deriveStatus } from "@shared/onboarding-status";
 
 export default function WeeklyOnboarding() {
   const { toast } = useToast();
@@ -202,7 +195,8 @@ export default function WeeklyOnboarding() {
 
   const byovIntentSyncMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest('POST', '/api/onboarding-hires/sync-byov-intent');
+      const res = await apiRequest('POST', '/api/onboarding-hires/sync-byov-intent');
+      return res.json();
     },
     onSuccess: (data: any) => {
       if (data?.configured === false) {

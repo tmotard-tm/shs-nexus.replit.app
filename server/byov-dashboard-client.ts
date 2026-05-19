@@ -158,7 +158,7 @@ export async function lookupByovIntents(racfidsRaw: string[]): Promise<ByovInten
       failed.push(...batch);
       continue;
     }
-    for (const [k, v] of outcome.results) result.set(k, v);
+    outcome.results.forEach((v, k) => result.set(k, v));
   }
 
   return {

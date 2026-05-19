@@ -9867,20 +9867,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: 'Action Reason', key: 'actionReason', width: 20 },
       ];
 
-      // Status derivation: BYOV when assigned truck# starts with "88", else Assigned/Pending.
-      const deriveStatus = (h: typeof hires[0]): 'Assigned' | 'Pending' | 'BYOV' => {
-        const truck = (h.assignedTruckNo || '').trim();
-        if (h.truckAssigned && truck.startsWith('88')) return 'BYOV';
-        if (h.truckAssigned) return 'Assigned';
-        return 'Pending';
-      };
-      const formatIntent = (h: typeof hires[0]): string => {
-        // Intent only meaningful for Pending rows.
-        if (deriveStatus(h) !== 'Pending') return 'NA';
-        if (h.byovIntent === 'perm') return 'Perm';
-        if (h.byovIntent === 'training') return 'Training';
-        return 'NA';
-      };
+      // Single source of truth for tri-state Status + BYOV Intent — see shared/onboarding-status.ts
+      const { deriveOnboardingStatus, formatByovIntent } = await import("@shared/onboarding-status");
+      const statusLabel = (s: 'assigned' | 'pending' | 'byov') => s === 'byov' ? 'BYOV' : s === 'assigned' ? 'Assigned' : 'Pending';
 
       hires.forEach(hire => {
         worksheet.addRow({
@@ -9888,8 +9877,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           employeeName: hire.employeeName || '',
           employmentStatus: hire.employmentStatus || '',
           enterpriseId: hire.enterpriseId || '',
-          status: deriveStatus(hire),
-          byovIntent: formatIntent(hire),
+          status: statusLabel(deriveOnboardingStatus(hire)),
+          byovIntent: formatByovIntent(hire),
           truckNo: hire.assignedTruckNo || '',
           jobTitle: hire.jobTitle || '',
           district: hire.district || '',
