@@ -141,10 +141,21 @@ export async function sendTwilioMessage(
   to: string,
   body: string,
   mediaUrl?: string[],
+  senderOverride?: {
+    accountSid?: string | undefined;
+    authToken?: string | undefined;
+    from?: string | undefined;
+  },
 ): Promise<string> {
-  const accountSid = process.env.FS_TWILIO_ACCOUNT_SID;
-  const authToken = process.env.FS_TWILIO_AUTH_TOKEN;
-  const from = process.env.FS_TWILIO_PHONE_NUMBER;
+  // Allow callers (e.g. the VRM approval SMS dispatcher) to send from a
+  // dedicated Twilio number instead of the shared registration line. The
+  // override is only honored when ALL THREE creds are present; partial
+  // overrides fall back to the registration sender to avoid mixing.
+  const useOverride =
+    !!senderOverride?.accountSid && !!senderOverride?.authToken && !!senderOverride?.from;
+  const accountSid = useOverride ? senderOverride!.accountSid! : process.env.FS_TWILIO_ACCOUNT_SID;
+  const authToken = useOverride ? senderOverride!.authToken! : process.env.FS_TWILIO_AUTH_TOKEN;
+  const from = useOverride ? senderOverride!.from! : process.env.FS_TWILIO_PHONE_NUMBER;
 
   if (!accountSid || !authToken || !from) {
     throw new Error("Twilio credentials not configured");

@@ -1703,6 +1703,7 @@ export function registerVrmRoutes(): Router {
           decisionId: row.id,
           techLdap: String(techLdap).toUpperCase(),
           techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
+          techName: typeof techName === "string" ? techName : null,
         }).catch((err: any) =>
           console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err),
         );
@@ -2734,6 +2735,12 @@ export function registerVrmRoutes(): Router {
       "supervisor_first_name", "supervisor_full_name",
       "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
       "factors_html", "byov_link",
+    ]),
+    // Tech-facing approval SMS (no supervisor tokens — this goes to the
+    // tech directly). Empty body falls back to the dispatcher's built-in
+    // Fleet-approved default copy.
+    sms_template_approve: new Set([
+      "tech_first_name", "tech_full_name", "tech_ldap", "decision_date",
     ]),
   };
   const ALLOWED_NOTIF_TEMPLATE_KEYS = new Set(Object.keys(NOTIF_TEMPLATE_TOKENS));

@@ -467,7 +467,7 @@ function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
   );
 }
 
-// ─── Deny Notification Templates (configurable copy for SMS + email) ─────────
+// ─── Notification Templates (configurable copy for deny SMS+email and approval SMS) ──
 
 interface NotificationTemplate {
   body: string;
@@ -483,8 +483,14 @@ const TEMPLATE_LABELS: Record<string, string> = {
   sms_template_deny: "SMS body (Deny)",
   email_subject_template_deny: "Email subject (Deny)",
   email_body_template_deny: "Email body (Deny)",
+  sms_template_approve: "SMS body (Approve — tech-facing)",
 };
-const TEMPLATE_KEYS = ["sms_template_deny", "email_subject_template_deny", "email_body_template_deny"] as const;
+const TEMPLATE_KEYS = [
+  "sms_template_deny",
+  "email_subject_template_deny",
+  "email_body_template_deny",
+  "sms_template_approve",
+] as const;
 
 const TEMPLATE_DEFAULTS: Record<string, string> = {
   sms_template_deny:
@@ -493,6 +499,8 @@ const TEMPLATE_DEFAULTS: Record<string, string> = {
     "VRM: Rental request denied for {{tech_full_name}} ({{tech_ldap}})",
   email_body_template_deny:
     "Hello {{supervisor_first_name}},\n\nA rental vehicle request for {{tech_full_name}} ({{tech_ldap}}) was denied based on the following profitability factors:\n\n{{factors_html}}\n\nBYOV (Bring Your Own Vehicle) is available as an alternative — please discuss the option with {{tech_first_name}} (info: {{byov_link}}).\n\nIf you believe this decision should be revisited, contact the VRM team.\n\n— Sears Home Services Vehicle Rental Management",
+  sms_template_approve:
+    "Your recent Rental request has been approved, please contact ARI/Holman to confirm the reservation. If this is an error please contact the fleet team ASAP via SHSAI.\n\nRemember that Rentals issued by Fleet are for work use only and off the clock rental usage is not permitted. Any violation to this policy may result in disciplinary action. Stay Safe and thank you for all you do!",
 };
 
 /** Returns unknown {{tokens}} present in `body` that are NOT in `allowed`. */
@@ -522,7 +530,7 @@ function TemplateEditor({
   const [draft, setDraft] = useState(initialBody);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
-  const isSms = templateKey === "sms_template_deny";
+  const isSms = templateKey === "sms_template_deny" || templateKey === "sms_template_approve";
   const isEmailBody = templateKey === "email_body_template_deny";
 
   const dirty = draft !== initialBody;
@@ -1162,12 +1170,12 @@ export default function Settings() {
 
       <h2 style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink, marginBottom: 12, marginTop: 36, display: "flex", alignItems: "center", gap: 8 }}>
         <MessageSquare size={16} color={colors.accent} />
-        Deny Notification Templates
+        Notification Templates
       </h2>
       <p style={{ fontSize: 13, color: colors.inkMuted, marginTop: 0, marginBottom: 16 }}>
-        Customize the SMS and email copy supervisors receive when a rental request is denied. Click a chip
-        to insert a variable token at the cursor; tokens are replaced at send time. Leaving a template blank
-        falls back to the built-in default.
+        Customize the SMS and email copy sent on rental decisions — deny notifications go to the supervisor (SMS + email),
+        and the approval SMS goes to the technician. Click a chip to insert a variable token at the cursor; tokens are
+        replaced at send time. Leaving a template blank falls back to the built-in default.
       </p>
 
       <div style={cardStyle}>

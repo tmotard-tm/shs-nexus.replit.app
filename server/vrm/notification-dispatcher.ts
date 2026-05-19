@@ -217,6 +217,7 @@ export async function enqueueApprovalSmsForTech(args: {
   decisionId: string;
   techLdap: string;
   techPhoneOverride?: string | null;
+  techName?: string | null;
 }): Promise<{ smsQueued: boolean; skipped: boolean }> {
   // The override is ONLY honored if it normalizes to the same digits as
   // the trusted Repair Tracker lookup for this LDAP. This blocks a
@@ -232,12 +233,33 @@ export async function enqueueApprovalSmsForTech(args: {
     digits(overrideRaw) === digits(trusted);
   const phone = overrideMatches ? overrideRaw : trusted;
 
+  // Resolve the body: use the Settings-configured template if present,
+  // otherwise fall back to the Fleet-approved built-in copy. Tokens are
+  // rendered with the tech's data; unknown tokens are left literal (the
+  // save-time validator already rejected unknown tokens).
+  const tmpl = await loadTemplateMap();
+  const approvalTemplate = tmpl.sms_template_approve.trim();
+  const vars: Record<string, string> = {
+    tech_first_name: firstName(args.techName ?? null) || args.techLdap,
+    tech_full_name: args.techName ?? args.techLdap,
+    tech_ldap: args.techLdap,
+    decision_date: todayLocalDate(),
+  };
+  const body = approvalTemplate
+    ? renderTemplate(approvalTemplate, vars)
+    : APPROVAL_SMS_BODY;
+
+  // Tag the payload so dispatchOne knows to send via the dedicated VRM
+  // one-way Twilio sender (when configured) instead of the shared
+  // registration-line sender. This keeps tech replies off the reg inbox.
+  const payload = { subject: null, body, isHtml: false, senderKey: "vrm_approval_oneway" as const };
+
   if (!phone) {
     await enqueueNotification({
       decisionId: args.decisionId,
       channel: "sms",
       recipient: "(missing)",
-      payload: { subject: null, body: APPROVAL_SMS_BODY, isHtml: false },
+      payload,
       status: "skipped",
       error: "tech has no phone number on file",
     });
@@ -248,7 +270,7 @@ export async function enqueueApprovalSmsForTech(args: {
     decisionId: args.decisionId,
     channel: "sms",
     recipient: phone,
-    payload: { subject: null, body: APPROVAL_SMS_BODY, isHtml: false },
+    payload,
     status: "queued",
   });
   return { smsQueued: !!ins, skipped: false };
@@ -256,7 +278,11 @@ export async function enqueueApprovalSmsForTech(args: {
 
 // ─── Templates ─────────────────────────────────────────────────────────────
 
-type TemplateKey = "sms_template_deny" | "email_subject_template_deny" | "email_body_template_deny";
+type TemplateKey =
+  | "sms_template_deny"
+  | "email_subject_template_deny"
+  | "email_body_template_deny"
+  | "sms_template_approve";
 type TemplateMap = Record<TemplateKey, string>;
 
 /**
@@ -266,24 +292,22 @@ type TemplateMap = Record<TemplateKey, string>;
  * succeeds.
  */
 async function loadTemplateMap(): Promise<TemplateMap> {
+  const empty: TemplateMap = {
+    sms_template_deny: "",
+    email_subject_template_deny: "",
+    email_body_template_deny: "",
+    sms_template_approve: "",
+  };
   try {
     const rows = await getNotificationTemplates();
-    const out: TemplateMap = {
-      sms_template_deny: "",
-      email_subject_template_deny: "",
-      email_body_template_deny: "",
-    };
+    const out: TemplateMap = { ...empty };
     for (const r of rows) {
       if (r.key in out) (out as any)[r.key] = r.body ?? "";
     }
     return out;
   } catch (err: any) {
     console.warn("[VRM Notif] Template lookup failed, falling back to defaults:", err?.message ?? err);
-    return {
-      sms_template_deny: "",
-      email_subject_template_deny: "",
-      email_body_template_deny: "",
-    };
+    return empty;
   }
 }
 
@@ -421,7 +445,12 @@ function buildDefaultEmailBody(ctx: DenyContext, supName: string, techLabel: str
 // ─── Worker ────────────────────────────────────────────────────────────────
 
 async function dispatchOne(n: VrmNotification): Promise<void> {
-  const payload = (n.payload ?? {}) as { subject: string | null; body: string; isHtml?: boolean };
+  const payload = (n.payload ?? {}) as {
+    subject: string | null;
+    body: string;
+    isHtml?: boolean;
+    senderKey?: "vrm_approval_oneway";
+  };
 
   try {
     if (n.channel === "sms") {
@@ -429,7 +458,19 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
         await markNotificationSkipped(n.id, "no recipient");
         return;
       }
-      await sendTwilioMessage(n.recipient, payload.body);
+      // VRM approval SMS uses a dedicated one-way Twilio sender (when
+      // configured) so technician replies don't land in the shared
+      // registration inbox. Falls back to the registration sender if the
+      // VRM_APPROVAL_TWILIO_* env vars are not set.
+      const senderOverride =
+        payload.senderKey === "vrm_approval_oneway"
+          ? {
+              accountSid: process.env.VRM_APPROVAL_TWILIO_ACCOUNT_SID,
+              authToken: process.env.VRM_APPROVAL_TWILIO_AUTH_TOKEN,
+              from: process.env.VRM_APPROVAL_TWILIO_FROM,
+            }
+          : undefined;
+      await sendTwilioMessage(n.recipient, payload.body, undefined, senderOverride);
       await markNotificationSent(n.id);
       console.log(`[VRM Notif] SMS sent to ${n.recipient} (decision ${n.decisionId})`);
     } else if (n.channel === "email") {
