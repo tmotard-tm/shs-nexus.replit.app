@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
-import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car, ChevronDown, ChevronUp } from "lucide-react";
+import { UserPlus, Search, RefreshCw, Clock, Truck, Calendar, CheckCircle2, AlertCircle, Download, Car, ChevronDown, ChevronUp, IdCard } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -61,6 +62,17 @@ function getOwnerFromDistrict(district: string | null | undefined): string {
   return districtOwnerMap[last4] || '-';
 }
 
+// Tri-state status derivation for Weekly Onboarding only.
+// Status=BYOV is derived from the assigned truck# prefix ("88"). NOT stored,
+// and intentionally not used outside this page.
+type OnboardingStatus = 'assigned' | 'pending' | 'byov';
+function deriveStatus(hire: OnboardingHire): OnboardingStatus {
+  const truck = (hire.assignedTruckNo || '').trim();
+  if (hire.truckAssigned && truck.startsWith('88')) return 'byov';
+  if (hire.truckAssigned) return 'assigned';
+  return 'pending';
+}
+
 export default function WeeklyOnboarding() {
   const { toast } = useToast();
   const { lookupCostCenter } = useCostCenters();
@@ -70,6 +82,7 @@ export default function WeeklyOnboarding() {
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [empStatusFilter, setEmpStatusFilter] = useState<string>("all");
   const [ownerFilter, setOwnerFilter] = useState<string>("all");
+  const [byovIntentFilter, setByovIntentFilter] = useState<string>("all");
   const [selectedHire, setSelectedHire] = useState<OnboardingHire | null>(null);
   const [assignDialogOpen, setAssignDialogOpen] = useState(false);
   const [truckNumber, setTruckNumber] = useState("");
@@ -187,6 +200,41 @@ export default function WeeklyOnboarding() {
     }
   };
 
+  const byovIntentSyncMutation = useMutation({
+    mutationFn: async () => {
+      return await apiRequest('POST', '/api/onboarding-hires/sync-byov-intent');
+    },
+    onSuccess: (data: any) => {
+      if (data?.configured === false) {
+        toast({
+          title: "BYOV Dashboard Not Configured",
+          description: "Set BYOV_DASHBOARD_URL and BYOV_DASHBOARD_API_TOKEN to enable intent cross-check.",
+          variant: "destructive",
+        });
+      } else if (data?.success === false || data?.upstreamOk === false) {
+        const skipped = data?.hiresSkippedDueToFailure ?? 0;
+        toast({
+          title: "BYOV Intent Sync Partially Failed",
+          description: `Upstream lookup failed for ${skipped} hires — their previous intent values were preserved. Updated ${data?.recordsUpdated ?? 0} records. ${data?.errors?.[0] ? `Error: ${data.errors[0]}` : ''}`.trim(),
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "BYOV Intent Sync Complete",
+          description: `Checked ${data?.hiresChecked ?? 0} hires, found ${data?.intentsFound ?? 0} enrollments, updated ${data?.recordsUpdated ?? 0} records.`,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "BYOV Intent Sync Failed",
+        description: error.message || "Failed to sync BYOV intent from BYOV Dashboard",
+        variant: "destructive",
+      });
+    },
+  });
+
   const enrichMutation = useMutation({
     mutationFn: async () => {
       return await apiRequest('POST', '/api/snowflake/enrich/onboarding-hires');
@@ -278,8 +326,16 @@ export default function WeeklyOnboarding() {
 
       // Owner filter
       const matchesOwner = ownerFilter === "all" || getOwnerFromDistrict(hire.district) === ownerFilter;
-      
-      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek && matchesEmpStatus && matchesOwner;
+
+      // BYOV Intent filter — only meaningful on Pending rows; "NA" matches everything that isn't perm/training
+      let matchesByovIntent = true;
+      if (byovIntentFilter !== "all") {
+        const status = deriveStatus(hire);
+        const intentValue = status === 'pending' ? (hire.byovIntent ?? 'na') : 'na';
+        matchesByovIntent = intentValue === byovIntentFilter;
+      }
+
+      return matchesSearch && matchesAssigned && matchesUnassigned && matchesWeek && matchesEmpStatus && matchesOwner && matchesByovIntent;
     })
     .sort((a, b) => {
       // Sort by service date ascending (oldest to newest)
@@ -290,6 +346,18 @@ export default function WeeklyOnboarding() {
 
   const assignedCount = hires.filter(h => h.truckAssigned).length;
   const unassignedCount = hires.filter(h => !h.truckAssigned).length;
+
+  // Most-recent BYOV intent check timestamp across the roster (for the "last checked" caption)
+  const latestByovCheck = (() => {
+    let latest: number | null = null;
+    for (const h of hires) {
+      if (h.byovIntentCheckedAt) {
+        const t = new Date(h.byovIntentCheckedAt).getTime();
+        if (latest === null || t > latest) latest = t;
+      }
+    }
+    return latest;
+  })();
 
   // Aggregate PMF available vehicles by state (using license plate state)
   const vehiclesByState = availableVehicles.reduce((acc: Record<string, { count: number; assetIds: string[]; plates: string[] }>, v: any) => {
@@ -401,6 +469,32 @@ export default function WeeklyOnboarding() {
                         </>
                       )}
                     </Button>
+                    <div className="flex flex-col items-end gap-0.5">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => byovIntentSyncMutation.mutate()}
+                        disabled={byovIntentSyncMutation.isPending}
+                        data-testid="button-sync-byov-intent"
+                      >
+                        {byovIntentSyncMutation.isPending ? (
+                          <>
+                            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+                            Syncing BYOV...
+                          </>
+                        ) : (
+                          <>
+                            <IdCard className="h-3 w-3 mr-1" />
+                            Sync BYOV Intent
+                          </>
+                        )}
+                      </Button>
+                      {latestByovCheck && (
+                        <span className="text-[11px] text-muted-foreground" data-testid="text-byov-last-checked">
+                          BYOV checked {formatDistanceToNow(new Date(latestByovCheck), { addSuffix: true })}
+                        </span>
+                      )}
+                    </div>
                     <Button 
                       size="sm" 
                       variant="outline"
@@ -644,6 +738,19 @@ export default function WeeklyOnboarding() {
                           </TableHead>
                           <TableHead className="w-[100px] bg-background sticky top-0">Enterprise ID</TableHead>
                           <TableHead className="w-[90px] bg-background sticky top-0">Status</TableHead>
+                          <TableHead className="w-[110px] bg-background sticky top-0">
+                            <Select value={byovIntentFilter} onValueChange={setByovIntentFilter}>
+                              <SelectTrigger className="h-auto p-0 border-0 bg-transparent shadow-none font-medium text-muted-foreground hover:text-foreground cursor-pointer [&>svg]:ml-1 [&>svg]:h-3 [&>svg]:w-3">
+                                BYOV Intent
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="all">All Intents</SelectItem>
+                                <SelectItem value="perm">Perm</SelectItem>
+                                <SelectItem value="training">Training</SelectItem>
+                                <SelectItem value="na">NA</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableHead>
                           <TableHead className="w-[100px] bg-background sticky top-0">
                             <div className="flex items-center gap-1">
                               <Truck className="h-4 w-4" />
@@ -692,17 +799,54 @@ export default function WeeklyOnboarding() {
                             <TableCell className="text-sm">{hire.employmentStatus || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{hire.enterpriseId?.toUpperCase() || '-'}</TableCell>
                             <TableCell>
-                              {hire.truckAssigned ? (
-                                <Badge variant="default" className="bg-green-600">
-                                  <CheckCircle2 className="h-3 w-3 mr-1" />
-                                  Assigned
-                                </Badge>
-                              ) : (
-                                <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                  <AlertCircle className="h-3 w-3 mr-1" />
-                                  Pending
-                                </Badge>
-                              )}
+                              {(() => {
+                                const s = deriveStatus(hire);
+                                if (s === 'byov') {
+                                  return (
+                                    <Badge variant="default" className="bg-blue-600" data-testid={`badge-status-byov-${hire.id}`}>
+                                      <Car className="h-3 w-3 mr-1" />
+                                      BYOV
+                                    </Badge>
+                                  );
+                                }
+                                if (s === 'assigned') {
+                                  return (
+                                    <Badge variant="default" className="bg-green-600" data-testid={`badge-status-assigned-${hire.id}`}>
+                                      <CheckCircle2 className="h-3 w-3 mr-1" />
+                                      Assigned
+                                    </Badge>
+                                  );
+                                }
+                                return (
+                                  <Badge variant="secondary" className="bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" data-testid={`badge-status-pending-${hire.id}`}>
+                                    <AlertCircle className="h-3 w-3 mr-1" />
+                                    Pending
+                                  </Badge>
+                                );
+                              })()}
+                            </TableCell>
+                            <TableCell>
+                              {(() => {
+                                const s = deriveStatus(hire);
+                                if (s !== 'pending') {
+                                  return <span className="text-xs text-muted-foreground">NA</span>;
+                                }
+                                if (hire.byovIntent === 'perm') {
+                                  return (
+                                    <Badge variant="default" className="bg-indigo-600" data-testid={`badge-intent-perm-${hire.id}`}>
+                                      Perm
+                                    </Badge>
+                                  );
+                                }
+                                if (hire.byovIntent === 'training') {
+                                  return (
+                                    <Badge variant="secondary" className="bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200" data-testid={`badge-intent-training-${hire.id}`}>
+                                      Training
+                                    </Badge>
+                                  );
+                                }
+                                return <span className="text-xs text-muted-foreground" data-testid={`badge-intent-na-${hire.id}`}>NA</span>;
+                              })()}
                             </TableCell>
                             <TableCell>{hire.assignedTruckNo || '-'}</TableCell>
                             <TableCell className="text-sm">{hire.jobTitle || '-'}</TableCell>

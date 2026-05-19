@@ -162,7 +162,15 @@ async function checkAndRunEnrichment(): Promise<void> {
 
       const sepResult = await syncService.enrichOffboardingWithSeparationDetails();
       console.log(`[Scheduler] Separation enrichment complete: ${sepResult.enrichedCount} enriched, ${sepResult.noMatchCount} no match`);
-      
+
+      try {
+        const { syncByovIntentForOnboarding } = await import('./byov-intent-sync');
+        const byovResult = await syncByovIntentForOnboarding();
+        console.log(`[Scheduler] BYOV intent cross-check: configured=${byovResult.configured}, checked=${byovResult.hiresChecked}, found=${byovResult.intentsFound}, updated=${byovResult.recordsUpdated}`);
+      } catch (err) {
+        console.error('[Scheduler] BYOV intent cross-check failed (non-fatal):', err);
+      }
+
       lastEnrichTime = now;
     }
   } catch (error) {

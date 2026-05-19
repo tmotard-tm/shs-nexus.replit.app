@@ -113,6 +113,27 @@ async function runSync(): Promise<void> {
       console.log('[Scheduled Sync] Continuing...');
     }
 
+    // BYOV intent cross-check from BYOV Dashboard (Weekly Onboarding only)
+    console.log('\n--- Cross-checking BYOV Intent for Onboarding Hires ---');
+    console.log('[Scheduled Sync] Looking up enrollment intent from BYOV Dashboard...');
+
+    try {
+      const { syncByovIntentForOnboarding } = await import('./byov-intent-sync');
+      const byovResult = await syncByovIntentForOnboarding();
+      console.log(`[Scheduled Sync] BYOV intent cross-check complete:`);
+      console.log(`  - Configured: ${byovResult.configured}`);
+      console.log(`  - Hires checked: ${byovResult.hiresChecked}`);
+      console.log(`  - Enrollments found: ${byovResult.intentsFound}`);
+      console.log(`  - Records updated: ${byovResult.recordsUpdated}`);
+      if (byovResult.errors && byovResult.errors.length > 0) {
+        console.log(`  - Errors: ${byovResult.errors.length}`);
+        byovResult.errors.slice(0, 5).forEach((err: string) => console.log(`    - ${err}`));
+      }
+    } catch (byovError) {
+      console.error('[Scheduled Sync] BYOV intent cross-check failed (non-fatal):', byovError);
+      console.log('[Scheduled Sync] Continuing...');
+    }
+
     // Rental Ops → Fleet Scope Rentals Dashboard auto-sync
     console.log('\n--- Syncing Rental Ops → Fleet Scope Rentals Dashboard ---');
     console.log('[Scheduled Sync] Syncing open rental vehicles into Fleet Scope...');

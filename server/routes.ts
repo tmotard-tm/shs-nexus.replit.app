@@ -9766,9 +9766,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const syncService = getSnowflakeSyncService();
       const result = await syncService.enrichOnboardingHires();
+
+      // Cross-check BYOV intent right after enrichment (non-fatal if it fails).
+      try {
+        const { syncByovIntentForOnboarding } = await import('./byov-intent-sync');
+        const byovResult = await syncByovIntentForOnboarding();
+        (result as any).byovIntent = byovResult;
+      } catch (err: any) {
+        console.error('[OnboardingHires] BYOV intent cross-check failed during enrich (non-fatal):', err?.message || err);
+      }
+
       res.json(result);
     } catch (error: any) {
       console.error("Error enriching onboarding hires:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Manually re-run only the BYOV Dashboard intent cross-check on the current onboarding roster.
+  // Backs the "Sync BYOV Intent" button on the Weekly Onboarding Truck Assignments page.
+  app.post("/api/onboarding-hires/sync-byov-intent", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer or admin users can trigger BYOV intent sync" });
+      }
+
+      const { syncByovIntentForOnboarding } = await import('./byov-intent-sync');
+      const result = await syncByovIntentForOnboarding();
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error syncing BYOV intent:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
@@ -9825,6 +9853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: 'Emp. Status', key: 'employmentStatus', width: 15 },
         { header: 'Enterprise ID', key: 'enterpriseId', width: 15 },
         { header: 'Status', key: 'status', width: 12 },
+        { header: 'BYOV Intent', key: 'byovIntent', width: 14 },
         { header: 'Truck #', key: 'truckNo', width: 12 },
         { header: 'Job Title', key: 'jobTitle', width: 30 },
         { header: 'District', key: 'district', width: 10 },
@@ -9838,13 +9867,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
         { header: 'Action Reason', key: 'actionReason', width: 20 },
       ];
 
+      // Status derivation: BYOV when assigned truck# starts with "88", else Assigned/Pending.
+      const deriveStatus = (h: typeof hires[0]): 'Assigned' | 'Pending' | 'BYOV' => {
+        const truck = (h.assignedTruckNo || '').trim();
+        if (h.truckAssigned && truck.startsWith('88')) return 'BYOV';
+        if (h.truckAssigned) return 'Assigned';
+        return 'Pending';
+      };
+      const formatIntent = (h: typeof hires[0]): string => {
+        // Intent only meaningful for Pending rows.
+        if (deriveStatus(h) !== 'Pending') return 'NA';
+        if (h.byovIntent === 'perm') return 'Perm';
+        if (h.byovIntent === 'training') return 'Training';
+        return 'NA';
+      };
+
       hires.forEach(hire => {
         worksheet.addRow({
           serviceDate: hire.serviceDate ? new Date(hire.serviceDate).toLocaleDateString() : '',
           employeeName: hire.employeeName || '',
           employmentStatus: hire.employmentStatus || '',
           enterpriseId: hire.enterpriseId || '',
-          status: hire.truckAssigned ? 'Assigned' : 'Pending',
+          status: deriveStatus(hire),
+          byovIntent: formatIntent(hire),
           truckNo: hire.assignedTruckNo || '',
           jobTitle: hire.jobTitle || '',
           district: hire.district || '',

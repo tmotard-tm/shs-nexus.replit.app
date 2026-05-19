@@ -725,6 +725,10 @@ export const onboardingHires = pgTable("onboarding_hires", {
   assignedAt: timestamp("assigned_at"),
   assignedBy: text("assigned_by"),
   notes: text("notes"),
+  // BYOV intent cross-check (from BYOV Dashboard) — RACFID-matched, null = no enrollment found
+  byovIntent: varchar("byov_intent", { length: 20 }), // 'perm' | 'training' | null
+  byovEnrollmentId: varchar("byov_enrollment_id", { length: 100 }),
+  byovIntentCheckedAt: timestamp("byov_intent_checked_at"),
   // Sync tracking
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),

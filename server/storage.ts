@@ -4252,6 +4252,7 @@ export class DatabaseStorage implements IStorage {
     const existing = await this.getOnboardingHireByNameAndDate(hire.employeeName, hire.serviceDate);
     if (existing) {
       // Only update Snowflake-sourced fields, preserve manual assignments (truckAssigned, assignedTruckNo, notes)
+      // and the BYOV intent fields (managed by the BYOV Dashboard cross-check).
       const result = await db.update(onboardingHires)
         .set({ 
           enterpriseId: hire.enterpriseId,
