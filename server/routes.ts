@@ -1215,11 +1215,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { id } = req.params;
       
-      // Protect seed accounts from modification
-      if (id === 'emergency-admin-2025-id') {
-        return res.status(403).json({ message: "Access denied. Cannot modify seed accounts." });
-      }
-      
       // Get the target user first to verify it exists
       const targetUser = await storage.getUser(id);
       if (!targetUser) {
@@ -1319,11 +1314,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const { id } = req.params;
       
-      // Protect seed accounts from deletion
-      if (id === 'emergency-admin-2025-id') {
-        return res.status(403).json({ message: "Access denied. Cannot delete seed accounts." });
-      }
-      
       const user = await storage.getUser(id);
       if (!user) {
         return res.status(404).json({ message: "User not found" });
@@ -1364,11 +1354,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { id } = req.params;
-      
-      // Protect seed accounts from password reset by other users
-      if (id === 'emergency-admin-2025-id' && currentUser.id !== id) {
-        return res.status(403).json({ message: "Access denied. Cannot reset password for seed accounts." });
-      }
       
       const { temporaryPassword } = req.body;
       
@@ -1492,11 +1477,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { id } = req.params;
-      
-      // Protect seed accounts from role changes
-      if (id === 'emergency-admin-2025-id') {
-        return res.status(403).json({ message: "Access denied. Cannot modify role for seed accounts." });
-      }
       
       const { role, departments, isActive } = req.body;
       

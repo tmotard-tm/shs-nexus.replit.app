@@ -531,16 +531,6 @@ export class MemStorage implements IStorage {
     
     // Create Enterprise ID users with simplified role system (developer/agent only)
     const enterpriseUsers: User[] = [
-      // EMERGENCY LOGIN - Use this account if other users can't login due to password requirements
-      {
-        id: "emergency-admin-2025-id",
-        username: "emergency-admin",
-        email: "emergency@sears.com",
-        password: bcrypt.hashSync("emergency-admin-2025-login!", 10),
-        role: "developer",
-        departments: ['NTAO', 'ASSETS', 'INVENTORY', 'FLEET'],
-        createdAt: new Date(),
-      },
       // Demo users - all converted to agent role with department access
       {
         id: randomUUID(),
@@ -6809,4 +6799,21 @@ if (useDatabase) {
   (storage as DatabaseStorage).backfillVehicleReferenceColumns().catch(err => {
     console.error('[Backfill] Error during vehicle reference column backfill:', err);
   });
+
+  // One-time cleanup: remove the retired `emergency-admin` backdoor account if
+  // it is still present in the database. Idempotent — safe to run on every boot.
+  // Can be deleted once confirmed gone from production.
+  (async () => {
+    try {
+      const result = await db
+        .delete(users)
+        .where(or(eq(users.id, 'emergency-admin-2025-id'), eq(users.username, 'emergency-admin')))
+        .returning({ id: users.id, username: users.username });
+      if (result.length > 0) {
+        console.log(`[EmergencyAdminCleanup] Removed retired backdoor account(s): ${result.map(r => r.username).join(', ')}`);
+      }
+    } catch (err) {
+      console.error('[EmergencyAdminCleanup] Failed to remove retired emergency-admin row:', err);
+    }
+  })();
 }
