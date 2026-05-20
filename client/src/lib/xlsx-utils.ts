@@ -91,3 +91,57 @@ export function getCellText(cell: ExcelJS.Cell): string {
   const v = getCellValue(cell);
   return v !== null && v !== undefined ? String(v) : '';
 }
+
+// Returns the cell's displayed value as a string — i.e. what the user sees
+// in Excel. This is the right thing to use when the value is going to be
+// inserted into human-facing text (SMS templates, message previews, etc.)
+// instead of String(value), which produces ugly output for date cells:
+//   String(new Date(...)) === "Thu May 21 2026 20:00:00 GMT-0400 (...)".
+// ExcelJS's `cell.text` gives the rendered string honoring the cell's
+// numFmt — so "5/22/2026" in the spreadsheet comes back as "5/22/2026".
+export function getCellDisplayText(cell: ExcelJS.Cell): string {
+  if (!cell) return '';
+  if (cell.value === null || cell.value === undefined) return '';
+  // ExcelJS exposes .text as the displayed string. For date cells it
+  // returns the formatted date (no timezone artifacts); for numbers it
+  // returns the numeric string; for rich text it returns the joined text.
+  const t = (cell as any).text;
+  if (t !== null && t !== undefined && t !== '') return String(t);
+  // Fall back to the raw value as a string. Dates are handled explicitly
+  // (UTC components) so a sheet whose date cells lack a numFmt still
+  // produces M/D/YYYY instead of the full Date.toString() output.
+  const v = cell.value;
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return `${v.getUTCMonth() + 1}/${v.getUTCDate()}/${v.getUTCFullYear()}`;
+  }
+  return getCellText(cell);
+}
+
+// Read every cell as its displayed string. Use this for batch-text / SMS
+// flows where the user expects the cell text verbatim.
+export async function readExcelFileAsStrings(
+  buffer: ArrayBuffer,
+): Promise<Record<string, string>[]> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buffer);
+  const worksheet = workbook.worksheets[0];
+
+  const headers: string[] = [];
+  const rows: Record<string, string>[] = [];
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) {
+      row.eachCell({ includeEmpty: true }, cell => {
+        headers.push(getCellDisplayText(cell));
+      });
+    } else {
+      const rowData: Record<string, string> = {};
+      headers.forEach((header, i) => {
+        rowData[header] = getCellDisplayText(row.getCell(i + 1));
+      });
+      rows.push(rowData);
+    }
+  });
+
+  return rows;
+}

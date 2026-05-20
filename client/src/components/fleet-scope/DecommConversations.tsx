@@ -27,7 +27,7 @@ import {
   Loader2,
   ChevronDown,
 } from "lucide-react";
-import { readExcelFile } from "@/lib/xlsx-utils";
+import { readExcelFileAsStrings } from "@/lib/xlsx-utils";
 import {
   Dialog,
   DialogContent,
@@ -608,7 +608,11 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
   const handleBatchFileImport = async (file: File) => {
     try {
       const buffer = await file.arrayBuffer();
-      const rows = await readExcelFile(buffer);
+      // readExcelFileAsStrings preserves each cell's *displayed* value so
+      // date cells come back as e.g. "5/22/2026" (what the user typed)
+      // instead of a JS Date that stringifies to
+      // "Thu May 21 2026 20:00:00 GMT-0400 (Eastern Daylight Time)".
+      const rows = await readExcelFileAsStrings(buffer);
       if (rows.length === 0) {
         toast({ title: "Empty file", description: "No data rows found in the spreadsheet.", variant: "destructive" });
         return;
@@ -640,19 +644,9 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           // message template.
           customVars[ldapHeader] = ldap;
           dynamicHeaders.forEach(h => {
-            const cell = row[h];
-            if (cell == null) {
-              customVars[h] = "";
-            } else if (cell instanceof Date && !isNaN(cell.getTime())) {
-              // Excel date cells come back as JS Date objects. Stringifying
-              // a Date with String() emits e.g.
-              //   "Thu May 21 2026 20:00:00 GMT-0400 (Eastern Daylight Time)"
-              // which is not what the user typed into the cell. Format as
-              // M/D/YYYY to match the cell's displayed value (e.g. "5/20/2026").
-              customVars[h] = `${cell.getMonth() + 1}/${cell.getDate()}/${cell.getFullYear()}`;
-            } else {
-              customVars[h] = String(cell);
-            }
+            // Cells are already pre-rendered to their displayed string by
+            // readExcelFileAsStrings — no further formatting needed.
+            customVars[h] = row[h] != null ? String(row[h]) : "";
           });
           // Extract and normalise the truck number (pad to 6 digits) so the
           // resolve call can narrow to the correct vehicle row.
