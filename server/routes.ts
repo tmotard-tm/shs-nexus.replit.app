@@ -11462,6 +11462,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Auto-discovery: refresh data sources from code/db
+  app.post("/api/field-mapping/refresh-discovery", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can refresh discovery" });
+      }
+      const { refreshAllDiscovery } = await import("./field-mapping-discovery");
+      const counts = await refreshAllDiscovery();
+      res.json({ success: true, counts });
+    } catch (error: any) {
+      console.error("Error refreshing discovery:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/field-mapping/discovery-status", requireAuth, async (_req: any, res) => {
+    try {
+      const { getDiscoveryStatus } = await import("./field-mapping-discovery");
+      res.json(getDiscoveryStatus());
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Seed default data sources from known integrations
   app.post("/api/mapping/seed-sources", requireAuth, async (req: any, res) => {
     try {
