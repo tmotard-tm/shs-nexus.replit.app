@@ -301,10 +301,21 @@ interface DecisionRow {
   supervisorLdap: string | null;
   supervisorPhone: string | null;
   // Joined from vrm_notifications (channel='sms') — supervisor SMS status.
+  // Status is the real Twilio delivery lifecycle:
+  //   queued → sent (Twilio accepted) → delivered | undelivered | failed
+  // plus 'skipped' for never-sent rows (e.g. no recipient phone on file).
   supervisorSmsRecipient: string | null;
-  supervisorSmsStatus: string | null; // queued | sent | failed | skipped
+  supervisorSmsStatus: string | null;
   supervisorSmsSentAt: string | null;
   supervisorSmsError: string | null;
+  supervisorSmsTwilioErrorCode: string | null;
+  // Tech-facing SMS — channel='sms' for approved decisions (approval SMS),
+  // channel='sms_tech_deny' for denied decisions (BYOV-pitch denial SMS).
+  techSmsRecipient: string | null;
+  techSmsStatus: string | null;
+  techSmsSentAt: string | null;
+  techSmsError: string | null;
+  techSmsTwilioErrorCode: string | null;
   // DCA Make-Unavailable event (filed to Standard Activities Request
   // Generator API when a rental is denied). Approve rows leave these null.
   dcaEventStatus: string | null; // pending | sent | failed | skipped
@@ -350,59 +361,81 @@ const fmt$ = (v: number | null | undefined) =>
 const fmtInt = (v: number | null | undefined) =>
   v == null ? "—" : v.toLocaleString("en-US");
 
-// Renders the supervisor SMS status pill in the Decision Log.  The status
-// comes from vrm_notifications (channel='sms') joined onto each decision in
-// listRentalDecisions().  Approve decisions never trigger an SMS so we skip
-// the pill there and just render an em-dash.
-function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
-  const isApprove = decision.decision === "approved" || decision.recommendation === "Approve";
-  if (isApprove) {
-    return <span style={{ color: colors.inkMuted }}>—</span>;
+// ─── SMS delivery-state pill ─────────────────────────────────────────────────
+// Drives both the Supervisor-SMS and Tech-SMS cells in the Decision Log.
+// Status reflects the real Twilio lifecycle (queued → sent → delivered |
+// undelivered | failed) — see server/vrm/webhooks.ts. Color choices use the
+// VRM palette so dark mode keeps working.
+//
+// Pill colors:
+//   delivered            → green   (carrier confirmed handset delivery)
+//   sent                 → amber   (Twilio accepted; awaiting carrier callback)
+//   undelivered/failed   → red     (carrier dropped — Twilio error code shown)
+//   queued               → amber   (dispatcher hasn't sent the API call yet)
+//   skipped              → muted   (never sent, e.g. no phone on file)
+function smsBadgeConfig(
+  status: string,
+  sentAt: string | null,
+): { fg: string; bg: string; label: string } {
+  switch (status) {
+    case "delivered":
+      return {
+        fg: colors.green,
+        bg: colors.greenLight,
+        label: sentAt
+          ? `Delivered ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+          : "Delivered",
+      };
+    case "sent":
+      return {
+        fg: colors.amber,
+        bg: colors.amberLight,
+        label: sentAt
+          ? `Sent ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}`
+          : "Sent",
+      };
+    case "undelivered":
+      return { fg: colors.red, bg: colors.redLight, label: "Undelivered" };
+    case "failed":
+      return { fg: colors.red, bg: colors.redLight, label: "Failed" };
+    case "queued":
+      return { fg: colors.amber, bg: colors.amberLight, label: "Queued" };
+    case "skipped":
+      return { fg: colors.inkMuted, bg: colors.surface, label: "Skipped" };
+    default:
+      return { fg: colors.inkMuted, bg: colors.surface, label: status };
   }
-  const status = decision.supervisorSmsStatus;
-  const recipient = decision.supervisorSmsRecipient;
-  const sentAt = decision.supervisorSmsSentAt;
-  const error = decision.supervisorSmsError;
+}
 
-  // No notification row found at all (legacy deny decisions before notifier
-  // existed, or supervisor lookup raced ahead of the snapshot row).
-  if (!status) {
-    if (!decision.supervisorPhone) {
-      return (
-        <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, fontStyle: "italic" }}>
-          No supervisor phone
-        </span>
-      );
-    }
-    return <span style={{ color: colors.inkMuted }}>—</span>;
-  }
-
-  const cfg = ((): { fg: string; bg: string; label: string } => {
-    switch (status) {
-      case "sent":
-        return { fg: "#0D9668", bg: "#ECFDF5", label: sentAt ? `Sent ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Sent" };
-      case "queued":
-        return { fg: "#B45309", bg: "#FEF3C7", label: "Queued" };
-      case "failed":
-        return { fg: colors.red, bg: colors.redLight, label: "Failed" };
-      case "skipped":
-        return { fg: colors.inkMuted, bg: colors.surface, label: "Skipped" };
-      default:
-        return { fg: colors.inkMuted, bg: colors.surface, label: status };
-    }
-  })();
-
+function SmsStatusPill({
+  status,
+  recipient,
+  sentAt,
+  error,
+  errorCode,
+}: {
+  status: string;
+  recipient: string | null;
+  sentAt: string | null;
+  error: string | null;
+  errorCode: string | null;
+}) {
+  const cfg = smsBadgeConfig(status, sentAt);
   const tooltip = [
     recipient ? `To: ${recipient}` : null,
     sentAt ? `Sent: ${new Date(sentAt).toLocaleString()}` : null,
+    errorCode ? `Twilio error code: ${errorCode}` : null,
     error ? `Error: ${error}` : null,
-  ].filter(Boolean).join("\n");
-
+  ]
+    .filter(Boolean)
+    .join("\n");
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }} title={tooltip || undefined}>
       <span
         style={{
-          display: "inline-block",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 4,
           fontFamily: fonts.dmSans,
           fontWeight: 500,
           fontSize: 11,
@@ -415,6 +448,11 @@ function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
         }}
       >
         {cfg.label}
+        {errorCode && (status === "undelivered" || status === "failed") && (
+          <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, opacity: 0.85 }}>
+            {errorCode}
+          </span>
+        )}
       </span>
       {recipient && (
         <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
@@ -422,6 +460,54 @@ function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
         </span>
       )}
     </div>
+  );
+}
+
+// Supervisor-deny SMS cell. Approve decisions never trigger a supervisor
+// SMS, so we render an em-dash there.
+function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
+  const isApprove = decision.decision === "approved" || decision.recommendation === "Approve";
+  if (isApprove) {
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+  const status = decision.supervisorSmsStatus;
+  if (!status) {
+    if (!decision.supervisorPhone) {
+      return (
+        <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, fontStyle: "italic" }}>
+          No supervisor phone
+        </span>
+      );
+    }
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+  return (
+    <SmsStatusPill
+      status={status}
+      recipient={decision.supervisorSmsRecipient}
+      sentAt={decision.supervisorSmsSentAt}
+      error={decision.supervisorSmsError}
+      errorCode={decision.supervisorSmsTwilioErrorCode}
+    />
+  );
+}
+
+// Tech-facing SMS cell — approval text on Approve decisions, BYOV-pitch
+// denial text on Deny decisions. Both flow through vrm_notifications and
+// pick up real Twilio delivery state via the status-callback webhook.
+function TechSmsCell({ decision }: { decision: DecisionRow }) {
+  const status = decision.techSmsStatus;
+  if (!status) {
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+  return (
+    <SmsStatusPill
+      status={status}
+      recipient={decision.techSmsRecipient}
+      sentAt={decision.techSmsSentAt}
+      error={decision.techSmsError}
+      errorCode={decision.techSmsTwilioErrorCode}
+    />
   );
 }
 
@@ -2109,6 +2195,7 @@ export default function NewRentals() {
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <th style={thStyle}>Supervisor</th>
                   <th style={thStyle}>Supervisor SMS</th>
+                  <th style={thStyle} title="Tech-facing SMS: approval text on Approve, BYOV-pitch denial text on Deny. Delivery state is reported by Twilio's status callback (delivered/undelivered/failed).">Tech SMS</th>
                   <th style={thStyle} title="DCA Make-Unavailable event filed to the Standard Activities Request Generator API on Deny">DCA Event</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
@@ -2173,6 +2260,9 @@ export default function NewRentals() {
                       </td>
                       <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
                         <SupervisorSmsCell decision={d} />
+                      </td>
+                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                        <TechSmsCell decision={d} />
                       </td>
                       <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
                         <DcaEventCell decision={d} />

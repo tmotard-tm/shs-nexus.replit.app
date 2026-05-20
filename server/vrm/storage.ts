@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, ilike, or, desc, count, sql, ne, inArray } from "drizzle-orm";
+import { eq, and, ilike, or, desc, count, sql, ne, inArray, isNull } from "drizzle-orm";
 import {
   vrmTechs,
   vrmTechStatusHistory,
@@ -1515,58 +1515,76 @@ export async function listRentalDecisions(limit = 50) {
 
   if (rows.length === 0) return [];
 
-  // Pull SMS notification status per decision (one row per decision since
-  // UNIQUE(decision_id, channel) is enforced in vrm_notifications). The
-  // legacy supervisor-SMS UI fields (supervisorSms*) only make sense on
-  // deny decisions, so we ONLY join in deny-row SMS here. Approval rows
-  // now also create an SMS notification (tech-facing approval text) -
-  // those are intentionally not surfaced through the supervisorSms*
-  // fields to avoid mislabeling tech contact info as supervisor contact
-  // info. The approval SMS audit trail still lives in vrm_notifications.
-  const denyIds = rows
-    .filter((r) => String(r.decision).toLowerCase() === "denied")
-    .map((r) => r.id);
-  const smsRows = denyIds.length > 0
-    ? await db
-        .select({
-          decisionId: vrmNotifications.decisionId,
-          recipient: vrmNotifications.recipient,
-          status: vrmNotifications.status,
-          sentAt: vrmNotifications.sentAt,
-          error: vrmNotifications.error,
-        })
-        .from(vrmNotifications)
-        .where(
-          and(
-            inArray(vrmNotifications.decisionId, denyIds),
-            eq(vrmNotifications.channel, "sms"),
-          ),
-        )
-    : [];
-  const smsByDecision = new Map(smsRows.map((n) => [n.decisionId, n]));
+  // Pull SMS notification status per decision. UNIQUE(decision_id, channel)
+    // guarantees at most one row per (decision, channel), so we can safely
+    // bucket by channel below. We pull ALL SMS rows (channel='sms' AND
+    // 'sms_tech_deny') for every visible decision so the UI can render the
+    // real Twilio delivery state for:
+    //   - supervisor deny SMS  (channel='sms' on denied decisions)
+    //   - tech approval SMS    (channel='sms' on approved decisions)
+    //   - tech denial SMS      (channel='sms_tech_deny' on denied decisions)
+    // The legacy supervisorSms* UI fields are still keyed off the channel='sms'
+    // deny rows only, to preserve the existing column semantics.
+    const decisionIds = rows.map((r) => r.id);
+    const smsRows = decisionIds.length > 0
+      ? await db
+          .select({
+            decisionId: vrmNotifications.decisionId,
+            channel: vrmNotifications.channel,
+            recipient: vrmNotifications.recipient,
+            status: vrmNotifications.status,
+            sentAt: vrmNotifications.sentAt,
+            error: vrmNotifications.error,
+            twilioErrorCode: vrmNotifications.twilioErrorCode,
+          })
+          .from(vrmNotifications)
+          .where(
+            and(
+              inArray(vrmNotifications.decisionId, decisionIds),
+              inArray(vrmNotifications.channel, ["sms", "sms_tech_deny"]),
+            ),
+          )
+      : [];
+    // Bucket by (decisionId, channel).
+    const smsByKey = new Map(
+      smsRows.map((n) => [`${n.decisionId}|${n.channel}`, n] as const),
+    );
 
-  return rows.map((r) => {
-    const sms = smsByDecision.get(r.id);
-    const {
-      decisionSupervisorName, decisionSupervisorLdap, decisionSupervisorPhone,
-      snapshotSupervisorName, snapshotSupervisorLdap, snapshotSupervisorPhone,
-      ...rest
-    } = r;
-    return {
-      ...rest,
-      // Effective supervisor — frozen value wins, snapshot is a fallback so
-      // the very first batch of decisions logged before the column existed
-      // still shows the current supervisor instead of "—".
-      supervisorName: decisionSupervisorName ?? snapshotSupervisorName ?? null,
-      supervisorLdap: decisionSupervisorLdap ?? snapshotSupervisorLdap ?? null,
-      supervisorPhone: decisionSupervisorPhone ?? snapshotSupervisorPhone ?? null,
-      supervisorSmsRecipient: sms?.recipient ?? null,
-      supervisorSmsStatus: sms?.status ?? null,
-      supervisorSmsSentAt: sms?.sentAt ?? null,
-      supervisorSmsError: sms?.error ?? null,
-    };
-  });
-}
+    return rows.map((r) => {
+      const supervisorSms = smsByKey.get(`${r.id}|sms`);
+      const techDenySms = smsByKey.get(`${r.id}|sms_tech_deny`);
+      const isDeny = String(r.decision).toLowerCase() === "denied";
+      // Tech-facing SMS row: for denied decisions it lives on sms_tech_deny;
+      // for approved decisions the channel='sms' row IS the tech approval SMS.
+      const techSms = isDeny ? techDenySms : supervisorSms;
+      // Supervisor SMS row only exists for deny decisions (channel='sms').
+      const supSms = isDeny ? supervisorSms : undefined;
+      const {
+        decisionSupervisorName, decisionSupervisorLdap, decisionSupervisorPhone,
+        snapshotSupervisorName, snapshotSupervisorLdap, snapshotSupervisorPhone,
+        ...rest
+      } = r;
+      return {
+        ...rest,
+        // Effective supervisor — frozen value wins, snapshot is a fallback so
+        // the very first batch of decisions logged before the column existed
+        // still shows the current supervisor instead of "—".
+        supervisorName: decisionSupervisorName ?? snapshotSupervisorName ?? null,
+        supervisorLdap: decisionSupervisorLdap ?? snapshotSupervisorLdap ?? null,
+        supervisorPhone: decisionSupervisorPhone ?? snapshotSupervisorPhone ?? null,
+        supervisorSmsRecipient: supSms?.recipient ?? null,
+        supervisorSmsStatus: supSms?.status ?? null,
+        supervisorSmsSentAt: supSms?.sentAt ?? null,
+        supervisorSmsError: supSms?.error ?? null,
+        supervisorSmsTwilioErrorCode: supSms?.twilioErrorCode ?? null,
+        techSmsRecipient: techSms?.recipient ?? null,
+        techSmsStatus: techSms?.status ?? null,
+        techSmsSentAt: techSms?.sentAt ?? null,
+        techSmsError: techSms?.error ?? null,
+        techSmsTwilioErrorCode: techSms?.twilioErrorCode ?? null,
+      };
+    });
+  }
 
 export async function getRentalDecision(id: string) {
   const [row] = await db
@@ -3024,12 +3042,96 @@ export async function getQueuedNotifications(limit = 50): Promise<VrmNotificatio
     .limit(limit);
 }
 
-export async function markNotificationSent(id: string): Promise<void> {
-  await db
-    .update(vrmNotifications)
-    .set({ status: "sent", sentAt: new Date(), error: null })
-    .where(eq(vrmNotifications.id, id));
-}
+export async function markNotificationSent(
+    id: string,
+    opts?: { twilioSid?: string | null },
+  ): Promise<void> {
+    // Don't regress a terminal carrier-side state (delivered/undelivered/failed)
+    // back to "sent" when this fires after a fast callback has already landed.
+    // Idempotent: re-marking a "sent" row as "sent" is harmless.
+    await db
+      .update(vrmNotifications)
+      .set({
+        status: "sent",
+        sentAt: new Date(),
+        error: null,
+        ...(opts?.twilioSid ? { twilioSid: opts.twilioSid } : {}),
+      })
+      .where(
+        and(
+          eq(vrmNotifications.id, id),
+          inArray(vrmNotifications.status, ["queued", "sent"]),
+        ),
+      );
+    // If a terminal state arrived first, we still want to record the SID so
+    // future callbacks can correlate. Update SID-only when not already set.
+    if (opts?.twilioSid) {
+      await db
+        .update(vrmNotifications)
+        .set({ twilioSid: opts.twilioSid })
+        .where(
+          and(
+            eq(vrmNotifications.id, id),
+            isNull(vrmNotifications.twilioSid),
+          ),
+        );
+    }
+  }
+
+  export async function getNotificationByTwilioSid(sid: string): Promise<VrmNotification | null> {
+    const [row] = await db
+      .select()
+      .from(vrmNotifications)
+      .where(eq(vrmNotifications.twilioSid, sid))
+      .limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Idempotent terminal-state update driven by the Twilio status-callback
+   * webhook. Never downgrades terminal states (delivered / undelivered /
+   * failed are sticky), and a late "sent"/"queued" callback after a terminal
+   * outcome is a no-op. Returns true if the row was actually mutated.
+   */
+  export async function updateNotificationDeliveryState(args: {
+    sid: string;
+    status: "queued" | "sent" | "delivered" | "undelivered" | "failed";
+    errorCode?: string | null;
+    errorMessage?: string | null;
+  }): Promise<boolean> {
+    const existing = await getNotificationByTwilioSid(args.sid);
+    if (!existing) return false;
+
+    const TERMINAL = new Set(["delivered", "undelivered", "failed"]);
+    if (TERMINAL.has(existing.status)) {
+      // Sticky terminal — replay or out-of-order callbacks must not clobber.
+      return false;
+    }
+    // Don't regress a "sent" row back to "queued" if a queued/accepted
+    // callback arrives after the sent acknowledgement.
+    if (existing.status === "sent" && args.status === "queued") {
+      return false;
+    }
+
+    const patch: Record<string, unknown> = { status: args.status };
+    if (args.status === "delivered" || args.status === "undelivered" || args.status === "failed") {
+      if (!existing.sentAt) patch.sentAt = new Date();
+    }
+    if (args.errorCode !== undefined) {
+      patch.twilioErrorCode = args.errorCode || null;
+    }
+    if (args.status === "delivered") {
+      patch.error = null;
+    } else if (args.errorMessage) {
+      patch.error = args.errorMessage;
+    }
+
+    await db
+      .update(vrmNotifications)
+      .set(patch as any)
+      .where(eq(vrmNotifications.id, existing.id));
+    return true;
+  }
 
 export async function markNotificationFailed(id: string, error: string): Promise<void> {
   await db

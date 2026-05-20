@@ -602,6 +602,14 @@ export async function initVrmSchema(): Promise<void> {
   // above because ALTER TYPE cannot run inside a transaction in Postgres.
   await db.execute(sql`ALTER TYPE vrm_notification_channel ADD VALUE IF NOT EXISTS 'sms_tech_deny';`);
 
+  // Twilio delivery-state additions (Task 416): the enum gains two terminal
+  // carrier-side states so we can distinguish "Twilio accepted the API call"
+  // (sent) from "carrier reported success" (delivered) vs "carrier dropped"
+  // (undelivered/failed). ALTER TYPE ... ADD VALUE IF NOT EXISTS is idempotent
+  // and must run OUTSIDE a transaction; it is cheap on subsequent boots.
+  await db.execute(sql`ALTER TYPE vrm_notification_status ADD VALUE IF NOT EXISTS 'delivered';`);
+  await db.execute(sql`ALTER TYPE vrm_notification_status ADD VALUE IF NOT EXISTS 'undelivered';`);
+
   // ── Notifications outbound queue (DENY-only) ───────────────────────────────
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS vrm_notifications (
@@ -612,12 +620,19 @@ export async function initVrmSchema(): Promise<void> {
       payload      JSONB NOT NULL DEFAULT '{}'::jsonb,
       status       vrm_notification_status NOT NULL DEFAULT 'queued',
       error        TEXT,
+      twilio_sid         VARCHAR(64),
+      twilio_error_code  VARCHAR(16),
       created_at   TIMESTAMP DEFAULT NOW() NOT NULL,
       sent_at      TIMESTAMP
     );
   `);
+  // Backfill the new Task 416 columns onto pre-existing DBs that were
+  // created before twilio_sid / twilio_error_code existed.
+  await db.execute(sql`ALTER TABLE vrm_notifications ADD COLUMN IF NOT EXISTS twilio_sid VARCHAR(64);`);
+  await db.execute(sql`ALTER TABLE vrm_notifications ADD COLUMN IF NOT EXISTS twilio_error_code VARCHAR(16);`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS vrm_notifications_decision_channel_uq ON vrm_notifications(decision_id, channel);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_status_idx ON vrm_notifications(status);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_notifications_twilio_sid_idx ON vrm_notifications(twilio_sid);`);
 
   // ── Supervisor contact overrides (phone + email; ≥1 channel required) ──────
   // Fresh-DB shape (final). The CHECK constraint is enforced server-side too,

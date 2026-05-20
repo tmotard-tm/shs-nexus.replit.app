@@ -731,6 +731,8 @@ export const vrmNotificationChannelEnum = pgEnum("vrm_notification_channel", [
 export const vrmNotificationStatusEnum = pgEnum("vrm_notification_status", [
   "queued",
   "sent",
+  "delivered",
+  "undelivered",
   "failed",
   "skipped",
 ]);
@@ -743,11 +745,14 @@ export const vrmNotifications = pgTable("vrm_notifications", {
   payload: jsonb("payload").notNull().default(sql`'{}'::jsonb`),
   status: vrmNotificationStatusEnum("status").notNull().default("queued"),
   error: text("error"),
+  twilioSid: varchar("twilio_sid", { length: 64 }),
+  twilioErrorCode: varchar("twilio_error_code", { length: 16 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   sentAt: timestamp("sent_at"),
 }, (table) => ({
   decisionChannelUq: uniqueIndex("vrm_notifications_decision_channel_uq").on(table.decisionId, table.channel),
   statusIdx: index("vrm_notifications_status_idx").on(table.status),
+  twilioSidIdx: index("vrm_notifications_twilio_sid_idx").on(table.twilioSid),
 }));
 
 export const insertVrmNotificationSchema = createInsertSchema(vrmNotifications).omit({ id: true, createdAt: true, sentAt: true });

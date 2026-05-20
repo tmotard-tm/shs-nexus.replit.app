@@ -5,6 +5,7 @@ import { initVrmSchema } from "./vrm/init-schema";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
 import { startDcaEventDispatcher } from "./vrm/dca-event-dispatcher";
 import { warnIfDcaTaskApiMissing } from "./vrm/dca-task-client";
+import { registerVrmWebhooks } from "./vrm/webhooks";
 import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
@@ -573,6 +574,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Mount VRM (Rental Reduction) routes at /api/vrm/*
   try {
     await initVrmSchema();
+    // Twilio status-callback webhook MUST be registered BEFORE the
+    // session-gated /api/vrm router below, because Twilio cannot present
+    // a session cookie. The webhook authenticates via X-Twilio-Signature.
+    registerVrmWebhooks(app);
     const vrmRouter = registerVrmRoutes();
     // Dispatcher: the consolidated read-only mirror endpoint
     // /api/vrm/repair-tracker/full also accepts a Bearer token via the

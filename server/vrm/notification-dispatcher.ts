@@ -571,9 +571,16 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
               from: process.env.VRM_APPROVAL_TWILIO_FROM,
             }
           : undefined;
-      await sendTwilioMessage(n.recipient, payload.body, undefined, senderOverride);
-      await markNotificationSent(n.id);
-      console.log(`[VRM Notif] SMS sent to ${n.recipient} (decision ${n.decisionId})`);
+      // Build a per-message status callback URL so Twilio POSTs the
+      // delivery lifecycle (queued/sent/delivered/undelivered/failed)
+      // back to /api/vrm/webhooks/twilio-status. If no public base URL
+      // is configured, omit the callback and degrade gracefully — the
+      // SMS still goes out, we just don't get terminal-state updates.
+      const publicBase = (process.env.VRM_PUBLIC_BASE_URL || process.env.SAML_BASE_URL || "").replace(/\/+$/, "");
+      const statusCallback = publicBase ? `${publicBase}/api/vrm/webhooks/twilio-status` : undefined;
+      const twilioSid = await sendTwilioMessage(n.recipient, payload.body, undefined, senderOverride, statusCallback);
+      await markNotificationSent(n.id, { twilioSid });
+      console.log(`[VRM Notif] SMS sent to ${n.recipient} (decision ${n.decisionId}, sid ${twilioSid})`);
     } else if (n.channel === "email") {
       if (!n.recipient || n.recipient === "(missing)") {
         await markNotificationSkipped(n.id, "no recipient");

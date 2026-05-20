@@ -146,6 +146,7 @@ export async function sendTwilioMessage(
     authToken?: string | undefined;
     from?: string | undefined;
   },
+  statusCallback?: string,
 ): Promise<string> {
   // Allow callers (e.g. the VRM approval SMS dispatcher) to send from a
   // dedicated Twilio number instead of the shared registration line. The
@@ -165,6 +166,12 @@ export async function sendTwilioMessage(
   const params: any = { body, to, from };
   if (mediaUrl && mediaUrl.length > 0) {
     params.mediaUrl = mediaUrl;
+  }
+  // Per-message status callback URL — Twilio POSTs delivery lifecycle
+  // updates (queued/sent/delivered/undelivered/failed) here. Optional so
+  // existing callers that don't need delivery tracking keep working.
+  if (statusCallback) {
+    params.statusCallback = statusCallback;
   }
   const message = await client.messages.create(params);
   return message.sid;
