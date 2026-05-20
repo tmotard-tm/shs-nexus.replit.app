@@ -11464,7 +11464,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       try {
         const { refreshRepairTrackerTechContactsFromTpms } = await import("./vrm/storage");
         const result = await refreshRepairTrackerTechContactsFromTpms();
-        console.log(`[Tech Data Scheduler] VRM repair-tracker contact refresh: phoneUpdated=${result.phoneUpdated}, nameUpdated=${result.nameUpdated}, snapshotRows=${result.snapshotRows}`);
+        console.log(`[Tech Data Scheduler] VRM repair-tracker contact refresh: phoneUpdated=${result.phoneUpdated}, nameUpdated=${result.nameUpdated}, supervisorPhoneUpdated=${result.supervisorPhoneUpdated}, supervisorNameUpdated=${result.supervisorNameUpdated}, snapshotRows=${result.snapshotRows}`);
       } catch (vrmErr: any) {
         console.error('[Tech Data Scheduler] VRM repair-tracker contact refresh failed (continuing):', vrmErr?.message || vrmErr);
       }
@@ -12177,7 +12177,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         try {
           const { refreshRepairTrackerTechContactsFromTpms } = await import("./vrm/storage");
           const r = await refreshRepairTrackerTechContactsFromTpms();
-          console.log(`[VRM RepairTracker] Bootstrap contact refresh: phoneUpdated=${r.phoneUpdated}, nameUpdated=${r.nameUpdated}, snapshotRows=${r.snapshotRows}`);
+          console.log(`[VRM RepairTracker] Bootstrap contact refresh: phoneUpdated=${r.phoneUpdated}, nameUpdated=${r.nameUpdated}, supervisorPhoneUpdated=${r.supervisorPhoneUpdated}, supervisorNameUpdated=${r.supervisorNameUpdated}, snapshotRows=${r.snapshotRows}`);
         } catch (vrmErr: any) {
           console.error('[VRM RepairTracker] Bootstrap contact refresh failed:', vrmErr?.message || vrmErr);
         }
