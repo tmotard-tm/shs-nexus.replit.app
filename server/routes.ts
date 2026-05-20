@@ -3,6 +3,8 @@ import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
 import { initVrmSchema } from "./vrm/init-schema";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
+import { startDcaEventDispatcher } from "./vrm/dca-event-dispatcher";
+import { warnIfDcaTaskApiMissing } from "./vrm/dca-task-client";
 import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
@@ -585,6 +587,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
     console.log("[VRM] Routes mounted at /api/vrm/* (session-gated; /repair-tracker/full also accepts Bearer API key)");
     // Start the notification dispatcher loop (drains vrm_notifications.queued every 30s).
     startNotificationDispatcher();
+    // Start the DCA Make-Unavailable dispatcher loop (drains denied decisions every 30s).
+    warnIfDcaTaskApiMissing();
+    startDcaEventDispatcher();
   } catch (e: any) {
     console.error("[VRM] Failed to initialise:", e.message);
   }

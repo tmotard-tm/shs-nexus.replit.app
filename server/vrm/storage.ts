@@ -1490,6 +1490,11 @@ export async function listRentalDecisions(limit = 50) {
       dailyCosts: vrmRentalDecisions.dailyCosts,
       dailyNetBeforeRental: vrmRentalDecisions.dailyNetBeforeRental,
       dailyPptProfit: vrmRentalDecisions.dailyPptProfit,
+      dcaEventStatus: vrmRentalDecisions.dcaEventStatus,
+      dcaEventProjectId: vrmRentalDecisions.dcaEventProjectId,
+      dcaEventSentAt: vrmRentalDecisions.dcaEventSentAt,
+      dcaEventError: vrmRentalDecisions.dcaEventError,
+      dcaEventAttempts: vrmRentalDecisions.dcaEventAttempts,
       // Supervisor: prefer the value frozen on the decision row (set at the
       // moment the decision was logged); fall back to the current snapshot
       // join for legacy rows where the decision-row column is NULL.

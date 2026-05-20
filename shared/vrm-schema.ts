@@ -320,6 +320,15 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   byovEnrolled: boolean("byov_enrolled").notNull().default(false),
   returnedRental: boolean("returned_rental").notNull().default(false),
   rentalReturnDate: date("rental_return_date"),
+  // DCA "Make Unavailable" outbound event tracking (Standard Activities
+  // Request Generator API). Populated by the dca-event-dispatcher after a
+  // Deny is logged. dcaEventProjectId is the upstream project id returned
+  // by the API — needed later if we ever submit a Quick Return.
+  dcaEventStatus: varchar("dca_event_status", { length: 20 }),
+  dcaEventProjectId: varchar("dca_event_project_id", { length: 64 }),
+  dcaEventSentAt: timestamp("dca_event_sent_at"),
+  dcaEventError: text("dca_event_error"),
+  dcaEventAttempts: integer("dca_event_attempts").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 }, (table) => ({
   ldapIdx: index("vrm_rental_decisions_ldap_idx").on(table.techLdap),

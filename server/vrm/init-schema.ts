@@ -314,6 +314,15 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_net_before_rental NUMERIC(10,2);`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS daily_ppt_profit NUMERIC(10,2);`);
 
+  // DCA Make-Unavailable outbound event tracking. Populated after a Deny is
+  // logged — see server/vrm/dca-event-dispatcher.ts. All nullable except
+  // `dca_event_attempts` which defaults to 0; older rows back-fill to 0.
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_status VARCHAR(20);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_project_id VARCHAR(64);`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_sent_at TIMESTAMP;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_error TEXT;`);
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS dca_event_attempts INTEGER NOT NULL DEFAULT 0;`);
+
   // Indexes
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_ldap_idx ON vrm_rental_checks(tech_ldap);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_rental_checks_at_idx ON vrm_rental_checks(checked_at);`);

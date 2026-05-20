@@ -305,6 +305,13 @@ interface DecisionRow {
   supervisorSmsStatus: string | null; // queued | sent | failed | skipped
   supervisorSmsSentAt: string | null;
   supervisorSmsError: string | null;
+  // DCA Make-Unavailable event (filed to Standard Activities Request
+  // Generator API when a rental is denied). Approve rows leave these null.
+  dcaEventStatus: string | null; // pending | sent | failed | skipped
+  dcaEventProjectId: string | null;
+  dcaEventSentAt: string | null;
+  dcaEventError: string | null;
+  dcaEventAttempts: number | null;
 }
 
 interface DecisionAction {
@@ -413,6 +420,108 @@ function SupervisorSmsCell({ decision }: { decision: DecisionRow }) {
         <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
           {recipient}
         </span>
+      )}
+    </div>
+  );
+}
+
+// Renders the DCA Make-Unavailable event status pill in the Decision Log.
+// The DCA event is only filed on Deny decisions — Approve rows render an
+// em-dash. When a status is "failed" we expose a Retry button that resets
+// the attempt counter and flips the row back to "pending" so the worker
+// picks it up on the next 30s tick.
+function DcaEventCell({ decision }: { decision: DecisionRow }) {
+  const qc = useQueryClient();
+  const isApprove = decision.decision === "approved" || decision.recommendation === "Approve";
+  if (isApprove) {
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+  const status = decision.dcaEventStatus;
+  const projectId = decision.dcaEventProjectId;
+  const sentAt = decision.dcaEventSentAt;
+  const error = decision.dcaEventError;
+  const attempts = decision.dcaEventAttempts ?? 0;
+
+  const retryMut = useMutation({
+    mutationFn: async () => {
+      const r = await fetch(`/api/vrm/profitability/log/${decision.id}/dca-event/retry`, {
+        method: "POST",
+      });
+      if (!r.ok) throw new Error("Retry failed");
+      return r.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
+    },
+  });
+
+  if (!status) {
+    return <span style={{ color: colors.inkMuted }}>—</span>;
+  }
+
+  const cfg = ((): { fg: string; bg: string; label: string } => {
+    switch (status) {
+      case "sent":
+        return { fg: "#0D9668", bg: "#ECFDF5", label: sentAt ? `Sent ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Sent" };
+      case "pending":
+        return { fg: "#B45309", bg: "#FEF3C7", label: attempts > 0 ? `Retrying (${attempts})` : "Pending" };
+      case "sending":
+        return { fg: "#1D4ED8", bg: "#DBEAFE", label: "Sending…" };
+      case "failed":
+        return { fg: colors.red, bg: colors.redLight, label: `Failed${attempts ? ` (${attempts}×)` : ""}` };
+      case "skipped":
+        return { fg: colors.inkMuted, bg: colors.surface, label: "Skipped" };
+      default:
+        return { fg: colors.inkMuted, bg: colors.surface, label: status };
+    }
+  })();
+
+  const tooltip = [
+    projectId ? `Project: ${projectId}` : null,
+    sentAt ? `Sent: ${new Date(sentAt).toLocaleString()}` : null,
+    error ? `Error: ${error}` : null,
+    `Attempts: ${attempts}`,
+  ].filter(Boolean).join("\n");
+
+  const canRetry = status === "failed" || status === "skipped";
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }} title={tooltip}>
+      <span
+        style={{
+          display: "inline-block",
+          fontFamily: fonts.dmSans,
+          fontWeight: 500,
+          fontSize: 11,
+          color: cfg.fg,
+          backgroundColor: cfg.bg,
+          padding: "2px 8px",
+          borderRadius: 4,
+          whiteSpace: "nowrap",
+          alignSelf: "flex-start",
+        }}
+      >
+        {cfg.label}
+      </span>
+      {canRetry && (
+        <button
+          type="button"
+          onClick={() => retryMut.mutate()}
+          disabled={retryMut.isPending}
+          style={{
+            fontFamily: fonts.dmSans,
+            fontSize: 10,
+            color: colors.accent,
+            background: "transparent",
+            border: "none",
+            padding: 0,
+            cursor: retryMut.isPending ? "default" : "pointer",
+            textDecoration: "underline",
+            alignSelf: "flex-start",
+          }}
+        >
+          {retryMut.isPending ? "Retrying…" : "Retry"}
+        </button>
       )}
     </div>
   );
@@ -2000,6 +2109,7 @@ export default function NewRentals() {
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <th style={thStyle}>Supervisor</th>
                   <th style={thStyle}>Supervisor SMS</th>
+                  <th style={thStyle} title="DCA Make-Unavailable event filed to the Standard Activities Request Generator API on Deny">DCA Event</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
@@ -2063,6 +2173,9 @@ export default function NewRentals() {
                       </td>
                       <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
                         <SupervisorSmsCell decision={d} />
+                      </td>
+                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                        <DcaEventCell decision={d} />
                       </td>
                       <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
                         {d.state ?? "—"}

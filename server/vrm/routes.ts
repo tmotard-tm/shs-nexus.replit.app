@@ -80,6 +80,7 @@ import { fetchProfitabilityCheck } from "./snowflake-queries";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech } from "./notification-dispatcher";
+import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
@@ -1707,6 +1708,12 @@ export function registerVrmRoutes(): Router {
         }).catch((err: any) =>
           console.error("[VRM] denial tech SMS enqueue failed:", err?.message ?? err),
         );
+        // File a "Make Unavailable" event with the DCA Task API so the
+        // tech's district DCA is notified and the tech is taken off route.
+        // Worker drains every 30s — see startDcaEventDispatcher().
+        enqueueDcaMakeUnavailableForDecision(row.id).catch((err: any) =>
+          console.error("[VRM] DCA make_unavailable enqueue failed:", err?.message ?? err),
+        );
       } else if (String(decision).toLowerCase() === "approved") {
         // Send the tech-facing approval SMS (fixed copy provided by Fleet).
         // Idempotent via UNIQUE(decision_id, channel); same dispatcher loop.
@@ -1795,6 +1802,30 @@ export function registerVrmRoutes(): Router {
       res.json(updated);
     } catch (e: any) {
       console.error("[VRM] profitability/log PATCH error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/profitability/log/:id/dca-event/retry
+   * Operator-initiated retry of the DCA Make-Unavailable event. Resets the
+   * attempt counter and flips status to 'pending' so the worker picks it up
+   * on the next tick. Returns 409 if the decision is already 'sent'.
+   */
+  router.post("/profitability/log/:id/dca-event/retry", async (req, res) => {
+    try {
+      const existing = await getRentalDecision(req.params.id);
+      if (!existing) return res.status(404).json({ error: "Decision not found" });
+      if (String(existing.decision).toLowerCase() !== "denied") {
+        return res.status(400).json({ error: "DCA event only applies to denied decisions" });
+      }
+      const ok = await requestDcaEventRetry(req.params.id);
+      if (!ok) {
+        return res.status(409).json({ error: "Already sent — cannot retry" });
+      }
+      res.json({ ok: true, status: "pending" });
+    } catch (e: any) {
+      console.error("[VRM] dca-event retry error:", e.message);
       res.status(500).json({ error: e.message });
     }
   });
