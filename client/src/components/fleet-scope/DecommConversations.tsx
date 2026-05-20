@@ -640,7 +640,19 @@ export function DecommConversations({ vehicleData, initialTruckNumber }: DecommC
           // message template.
           customVars[ldapHeader] = ldap;
           dynamicHeaders.forEach(h => {
-            customVars[h] = row[h] != null ? String(row[h]) : "";
+            const cell = row[h];
+            if (cell == null) {
+              customVars[h] = "";
+            } else if (cell instanceof Date && !isNaN(cell.getTime())) {
+              // Excel date cells come back as JS Date objects. Stringifying
+              // a Date with String() emits e.g.
+              //   "Thu May 21 2026 20:00:00 GMT-0400 (Eastern Daylight Time)"
+              // which is not what the user typed into the cell. Format as
+              // M/D/YYYY to match the cell's displayed value (e.g. "5/20/2026").
+              customVars[h] = `${cell.getMonth() + 1}/${cell.getDate()}/${cell.getFullYear()}`;
+            } else {
+              customVars[h] = String(cell);
+            }
           });
           // Extract and normalise the truck number (pad to 6 digits) so the
           // resolve call can narrow to the correct vehicle row.
