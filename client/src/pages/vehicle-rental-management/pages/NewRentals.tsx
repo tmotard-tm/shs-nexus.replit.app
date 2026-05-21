@@ -316,6 +316,13 @@ interface DecisionRow {
   techSmsSentAt: string | null;
   techSmsError: string | null;
   techSmsTwilioErrorCode: string | null;
+  // Fix #4 — Override-Overridden Visibility. When the UI passed a
+  // techPhoneOverride that failed the trusted-number digit check, the
+  // dispatcher silently swapped in the trusted number. These fields surface
+  // that swap so the approver can see the recipient was corrected.
+  techSmsUiDisplayedPhone: string | null;
+  techSmsTrustedPhone: string | null;
+  techSmsOverrideOverridden: boolean;
   // DCA Make-Unavailable event (filed to Standard Activities Request
   // Generator API when a rental is denied). Approve rows leave these null.
   dcaEventStatus: string | null; // pending | sent | failed | skipped
@@ -413,12 +420,18 @@ function SmsStatusPill({
   sentAt,
   error,
   errorCode,
+  overrideOverridden = false,
+  uiDisplayedPhone = null,
+  trustedPhone = null,
 }: {
   status: string;
   recipient: string | null;
   sentAt: string | null;
   error: string | null;
   errorCode: string | null;
+  overrideOverridden?: boolean;
+  uiDisplayedPhone?: string | null;
+  trustedPhone?: string | null;
 }) {
   const cfg = smsBadgeConfig(status, sentAt);
   const tooltip = [
@@ -429,6 +442,16 @@ function SmsStatusPill({
   ]
     .filter(Boolean)
     .join("\n");
+  // Fix #4 — Override-Overridden tooltip lists both numbers for the badge.
+  const correctedTooltip = overrideOverridden
+    ? [
+        "The number you saw differed from the number on file.",
+        uiDisplayedPhone ? `You saw: ${uiDisplayedPhone}` : null,
+        trustedPhone ? `Sent to: ${trustedPhone}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 2 }} title={tooltip || undefined}>
       <span
@@ -454,6 +477,26 @@ function SmsStatusPill({
           </span>
         )}
       </span>
+      {overrideOverridden && (
+        <span
+          title={correctedTooltip || undefined}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            fontFamily: fonts.dmSans,
+            fontWeight: 500,
+            fontSize: 10,
+            color: colors.amber,
+            backgroundColor: colors.amberLight,
+            padding: "1px 6px",
+            borderRadius: 4,
+            whiteSpace: "nowrap",
+            alignSelf: "flex-start",
+          }}
+        >
+          Number corrected
+        </span>
+      )}
       {recipient && (
         <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
           {recipient}
@@ -507,6 +550,9 @@ function TechSmsCell({ decision }: { decision: DecisionRow }) {
       sentAt={decision.techSmsSentAt}
       error={decision.techSmsError}
       errorCode={decision.techSmsTwilioErrorCode}
+      overrideOverridden={decision.techSmsOverrideOverridden}
+      uiDisplayedPhone={decision.techSmsUiDisplayedPhone}
+      trustedPhone={decision.techSmsTrustedPhone}
     />
   );
 }

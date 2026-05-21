@@ -692,5 +692,92 @@ export async function initVrmSchema(): Promise<void> {
     ON CONFLICT (key) DO NOTHING;
   `);
 
+  // ── Fix #4: vrm_notifications phone-audit columns ─────────────────────────
+  // Idempotent ALTERs so existing rows survive (defaults to FALSE / NULL).
+  await db.execute(sql`
+    ALTER TABLE vrm_notifications
+      ADD COLUMN IF NOT EXISTS ui_displayed_phone  TEXT,
+      ADD COLUMN IF NOT EXISTS trusted_phone       TEXT,
+      ADD COLUMN IF NOT EXISTS override_overridden BOOLEAN NOT NULL DEFAULT FALSE
+  `);
+
+  // ── Fix #1: vrm_repair_tracker dedup + unique index on UPPER(TRIM(tech_ldap))
+  //
+  // Background: the importer (and historical manual edits) allowed multiple
+  // non-dismissed rows for the same tech LDAP, which let the SMS dispatcher
+  // resolve tech_phone against an arbitrary row — leading to drift between
+  // what the evaluator showed and what got SMS'd.
+  //
+  // Step 1 (one-time): collapse to a single best row per UPPER(TRIM(tech_ldap))
+  // for non-dismissed rows. Priority: has notes > has repair_shop_phone or
+  // repair_shop_address > has truck_number > latest updated_at.
+  // Guarded by a flag table so it only runs once per environment.
+  // Step 2 (every boot): CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS to
+  // prevent regression. CREATE INDEX CONCURRENTLY can't run inside a
+  // transaction; init-schema.ts statements are auto-committed individually,
+  // so we issue it as a standalone statement.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_schema_migration_flags (
+      key VARCHAR(128) PRIMARY KEY,
+      applied_at TIMESTAMP DEFAULT NOW() NOT NULL
+    )
+  `);
+
+  const [dedupApplied] = (await db.execute(sql`
+    SELECT 1 AS applied
+    FROM vrm_schema_migration_flags
+    WHERE key = 'vrm_repair_tracker_dedup_v1'
+    LIMIT 1
+  `)).rows as Array<{ applied: number }>;
+
+  if (!dedupApplied) {
+    // Collapse to a single best row per LDAP. Soft-delete (dismissed=true)
+    // the losers so historical foreign keys (source_decision_id, actions)
+    // stay valid. Guardrail G6: never touch protected_from_dedup rows.
+    await db.execute(sql`
+      UPDATE vrm_repair_tracker rt
+      SET dismissed = TRUE, updated_at = NOW()
+      WHERE rt.id IN (
+        SELECT id FROM (
+          SELECT id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY UPPER(TRIM(tech_ldap))
+                   ORDER BY
+                     CASE WHEN notes IS NOT NULL AND notes <> '' THEN 0 ELSE 1 END,
+                     CASE WHEN (repair_shop_phone IS NOT NULL AND repair_shop_phone <> '')
+                             OR (repair_shop_address IS NOT NULL AND repair_shop_address <> '')
+                          THEN 0 ELSE 1 END,
+                     CASE WHEN truck_number IS NOT NULL AND truck_number <> '' THEN 0 ELSE 1 END,
+                     COALESCE(updated_at, created_at) DESC
+                 ) AS rn
+          FROM vrm_repair_tracker
+          WHERE tech_ldap IS NOT NULL AND TRIM(tech_ldap) <> ''
+            AND dismissed IS NOT TRUE
+            AND (protected_from_dedup IS NULL OR protected_from_dedup = FALSE)
+        ) ranked
+        WHERE rn > 1
+      )
+    `);
+    await db.execute(sql`
+      INSERT INTO vrm_schema_migration_flags (key) VALUES ('vrm_repair_tracker_dedup_v1')
+      ON CONFLICT (key) DO NOTHING
+    `);
+    console.log("[VRM] vrm_repair_tracker_dedup_v1 migration applied.");
+  }
+
+  // Unique index — partial so dismissed rows can coexist for the same LDAP.
+  // CREATE UNIQUE INDEX CONCURRENTLY can't run in a transaction; if a
+  // previous boot crashed mid-build we may have an INVALID index — drop it
+  // first, then rebuild. Wrap in try so concurrent boots don't fight.
+  try {
+    await db.execute(sql`
+      CREATE UNIQUE INDEX IF NOT EXISTS vrm_repair_tracker_tech_ldap_uq
+        ON vrm_repair_tracker (UPPER(TRIM(tech_ldap)))
+        WHERE dismissed IS NOT TRUE AND tech_ldap IS NOT NULL AND TRIM(tech_ldap) <> ''
+    `);
+  } catch (err: any) {
+    console.warn("[VRM] vrm_repair_tracker_tech_ldap_uq creation failed (will retry next boot):", err?.message ?? err);
+  }
+
   console.log("[VRM] Schema initialised");
 }

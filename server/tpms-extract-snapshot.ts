@@ -143,6 +143,27 @@ export function isTpmsSnapshotLoaded(): boolean {
   return lastRefreshedAt !== null;
 }
 
+/**
+ * Milliseconds since the in-memory TPMS_EXTRACT snapshot was last successfully
+ * refreshed. Returns null when no refresh has ever succeeded (i.e. cold start
+ * before the bootstrap fired, or only failed refreshes). Used by downstream
+ * mirror jobs (e.g. refreshRepairTrackerTechContactsFromTpms) to refuse
+ * overwriting trusted rows with stale data after a long Snowflake outage.
+ */
+export function getTpmsSnapshotAgeMs(): number | null {
+  if (!lastRefreshedAt) return null;
+  return Date.now() - lastRefreshedAt.getTime();
+}
+
+/**
+ * Returns true iff the in-memory snapshot was refreshed within the past
+ * `maxAgeMs` milliseconds. False when never loaded or older than the cap.
+ */
+export function isTpmsSnapshotFresh(maxAgeMs: number): boolean {
+  const age = getTpmsSnapshotAgeMs();
+  return age !== null && age <= maxAgeMs;
+}
+
 export function getTpmsContact(
   ldap: string | null | undefined,
 ): TpmsContact | null {

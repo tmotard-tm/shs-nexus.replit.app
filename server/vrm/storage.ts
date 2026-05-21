@@ -1536,6 +1536,9 @@ export async function listRentalDecisions(limit = 50) {
             sentAt: vrmNotifications.sentAt,
             error: vrmNotifications.error,
             twilioErrorCode: vrmNotifications.twilioErrorCode,
+            uiDisplayedPhone: vrmNotifications.uiDisplayedPhone,
+            trustedPhone: vrmNotifications.trustedPhone,
+            overrideOverridden: vrmNotifications.overrideOverridden,
           })
           .from(vrmNotifications)
           .where(
@@ -1582,6 +1585,9 @@ export async function listRentalDecisions(limit = 50) {
         techSmsSentAt: techSms?.sentAt ?? null,
         techSmsError: techSms?.error ?? null,
         techSmsTwilioErrorCode: techSms?.twilioErrorCode ?? null,
+        techSmsUiDisplayedPhone: techSms?.uiDisplayedPhone ?? null,
+        techSmsTrustedPhone: techSms?.trustedPhone ?? null,
+        techSmsOverrideOverridden: techSms?.overrideOverridden ?? false,
       };
     });
   }
@@ -2080,19 +2086,17 @@ export async function createRepairTrackerEntry(data: InsertVrmRepairTracker) {
  * but no truck number, by joining against the TPMS tech profiles cache.
  */
 export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
-  // 1. Fill truck_number + tech_phone from TPMS
+  // 1. Fill truck_number from TPMS. Fix #3 — tech_phone is now owned
+  // exclusively by refreshRepairTrackerTechContactsFromTpms() (single writer
+  // path), so we do NOT touch it here even on first insert.
   const tpmsResult = await db.execute(sql`
     UPDATE vrm_repair_tracker rt
     SET
-      truck_number = COALESCE(NULLIF(rt.truck_number, ''), tp.truck_no),
-      tech_phone   = COALESCE(NULLIF(rt.tech_phone,   ''), tp.mobile_phone)
+      truck_number = COALESCE(NULLIF(rt.truck_number, ''), tp.truck_no)
     FROM tpms_tech_profiles tp
     WHERE UPPER(tp.enterprise_id) = UPPER(rt.tech_ldap)
       AND rt.tech_ldap IS NOT NULL
-      AND (
-        rt.truck_number IS NULL OR rt.truck_number = '' OR
-        rt.tech_phone   IS NULL OR rt.tech_phone   = ''
-      )
+      AND (rt.truck_number IS NULL OR rt.truck_number = '')
   `);
 
   // 2. Fill repair_shop_address and repair_shop_phone from the most-recent Full Log record per LDAP
@@ -2157,6 +2161,7 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
       supervisorPhoneUpdated: number;
       supervisorNameUpdated: number;
       snapshotRows: number;
+      snapshotSkippedStale: boolean;
     }> {
       if (!isTpmsSnapshotLoaded()) {
         console.warn(
@@ -2168,9 +2173,30 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
           supervisorPhoneUpdated: 0,
           supervisorNameUpdated: 0,
           snapshotRows: 0,
+          snapshotSkippedStale: false,
         };
       }
-      const { getTpmsSnapshot } = await import("../tpms-extract-snapshot");
+      // Fix #2 — Stale-snapshot guard. If the last successful TPMS_EXTRACT
+      // refresh is older than 36h, refuse to overwrite trusted mirror rows.
+      // 36h covers a single missed 7:30 AM ET nightly run with margin.
+      const { getTpmsSnapshot, isTpmsSnapshotFresh, getTpmsSnapshotAgeMs } =
+        await import("../tpms-extract-snapshot");
+      const MAX_AGE_MS = 36 * 60 * 60 * 1000;
+      if (!isTpmsSnapshotFresh(MAX_AGE_MS)) {
+        const ageMs = getTpmsSnapshotAgeMs();
+        const ageHours = ageMs != null ? Math.round(ageMs / 3_600_000) : null;
+        console.warn(
+          `[VRM RepairTracker] SKIP tech-contact refresh — TPMS snapshot is stale (age=${ageHours ?? "unknown"}h, max=36h). Will retry next nightly run.`,
+        );
+        return {
+          phoneUpdated: 0,
+          nameUpdated: 0,
+          supervisorPhoneUpdated: 0,
+          supervisorNameUpdated: 0,
+          snapshotRows: 0,
+          snapshotSkippedStale: true,
+        };
+      }
       const snap = getTpmsSnapshot();
 
       type Row = {
@@ -2200,6 +2226,7 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
           supervisorPhoneUpdated: 0,
           supervisorNameUpdated: 0,
           snapshotRows: 0,
+          snapshotSkippedStale: false,
         };
       }
 
@@ -2262,6 +2289,7 @@ export async function backfillRepairTrackerTruckNumbers(): Promise<number> {
         supervisorPhoneUpdated,
         supervisorNameUpdated,
         snapshotRows: rows.length,
+        snapshotSkippedStale: false,
       };
     }
 
@@ -2328,13 +2356,18 @@ function buildRepairTrackerRowsFromDeniedDecisions(
   decisions: Pick<VrmRentalDecision, "id" | "techLdap" | "techName" | "recommendation" | "createdAt" | "notes" | "byovEnrolled">[],
   context: RepairTrackerTpmsContext,
 ): InsertVrmRepairTracker[] {
+  // Fix #3 — single-writer for TPMS-mirrored fields. We intentionally do NOT
+  // seed tech_phone, tech_name, supervisor_phone, supervisor_name here. The
+  // sole writer for those four columns is refreshRepairTrackerTechContactsFromTpms()
+  // (called at the end of the import + on every bootstrap/nightly TPMS refresh).
+  // Leaving them NULL on insert guarantees there is no contention between the
+  // importer and the TPMS-sync overwrite, so a "stale" snapshot can never
+  // ship a number the SMS dispatcher then trusts.
   return decisions.map((decision) => {
     const ldap = normalizeLdap(decision.techLdap);
     return {
       techLdap: decision.techLdap,
-      techName: decision.techName ?? decision.techLdap ?? "Unknown",
       truckNumber: ldap ? context.truckByLdap.get(ldap) ?? null : null,
-      techPhone: ldap ? context.phoneByLdap.get(ldap) ?? null : null,
       mainStatus: "Confirming Status",
       recommendation: decision.recommendation,
       deniedAt: decision.createdAt,
@@ -2342,8 +2375,6 @@ function buildRepairTrackerRowsFromDeniedDecisions(
       notes: decision.notes ?? null,
       byovEnrolled: decision.byovEnrolled ?? false,
       rentalReturned: "No",
-      supervisorName: ldap ? context.mgrNameByLdap.get(ldap) ?? null : null,
-      supervisorPhone: ldap ? context.mgrPhoneByLdap.get(ldap) ?? null : null,
     };
   });
 }
@@ -2405,6 +2436,13 @@ export async function syncDeniedDecisionToRepairTracker(
     .returning({ id: vrmRepairTracker.id });
 
   await backfillRepairTrackerTruckNumbers();
+  // Fix #3 — fill tech_phone/tech_name/supervisor_* from TPMS via the single
+  // writer immediately after insert (build...FromDeniedDecisions leaves them NULL).
+  try {
+    await refreshRepairTrackerTechContactsFromTpms();
+  } catch (err: any) {
+    console.warn("[VRM RepairTracker] post-insert TPMS contact refresh failed:", err?.message ?? err);
+  }
 
   return {
     imported: true,
@@ -2534,13 +2572,28 @@ export async function importDeniedToRepairTracker(): Promise<{ imported: number;
 
   await db.insert(vrmRepairTracker).values(rows);
 
-  // Backfill any rows still missing truck/phone/repair-shop data
+  // Backfill any rows still missing truck/repair-shop data
   await backfillRepairTrackerTruckNumbers();
+  // Fix #3 — fill tech_phone/tech_name/supervisor_* via the single TPMS writer.
+  try {
+    await refreshRepairTrackerTechContactsFromTpms();
+  } catch (err: any) {
+    console.warn("[VRM RepairTracker] post-import TPMS contact refresh failed:", err?.message ?? err);
+  }
 
   return { imported: newDecisions.length, skipped: totalSkipped };
 }
 
 export async function updateRepairTrackerEntry(id: string, data: Partial<InsertVrmRepairTracker>) {
+  // Fix #3 — these four columns are managed exclusively by the TPMS sync
+  // (refreshRepairTrackerTechContactsFromTpms). Reject any manual PATCH so we
+  // can't accidentally re-introduce a second writer that drifts from TPMS.
+  const TPMS_MANAGED_KEYS = ["techPhone", "techName", "supervisorPhone", "supervisorName"] as const;
+  for (const k of TPMS_MANAGED_KEYS) {
+    if (k in data) {
+      throw new Error(`updateRepairTrackerEntry: "${k}" is managed by TPMS sync — cannot be set manually`);
+    }
+  }
   const [row] = await db
     .update(vrmRepairTracker)
     .set({ ...data, updatedAt: new Date() })

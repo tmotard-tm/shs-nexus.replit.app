@@ -2,7 +2,11 @@
 // G4 — Post-Deploy Integrity Check (canonical module)
 // Compares current row counts against the most recent G2 snapshot. Per-table
 // tolerance:
-//   - vrm_repair_tracker: ±20% (legitimate importer churn)
+//   - vrm_repair_tracker: ±50% (one-time bump — the dedup + unique-index
+//     migration in server/vrm/init-schema.ts collapses duplicate rows on
+//     first boot after that change ships, which can exceed the prior ±20%
+//     window. Drop back to ±0.20 in a follow-up deploy once the baseline
+//     reflects the deduped row count.)
 //   - all other tables:   ±2%
 //   - hard-fail at <50% of pre-deploy count on ANY table regardless of tolerance.
 // Writes alert to .local/alerts/post-deploy-<ts>.md on regression. Never
@@ -20,7 +24,7 @@ import pg from "pg";
 
 const SNAPSHOT_PREFIX = "guardrails/snapshots/";
 const HARD_FAIL_FRACTION = 0.50;
-const TOLERANCE: Record<string, number> = { vrm_repair_tracker: 0.20 };
+const TOLERANCE: Record<string, number> = { vrm_repair_tracker: 0.50 };
 const DEFAULT_TOLERANCE = 0.02;
 
 type Snapshot = {

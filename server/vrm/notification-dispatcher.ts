@@ -288,6 +288,16 @@ export async function enqueueDenialSmsForTech(args: {
     trusted.length > 0 &&
     digits(overrideRaw) === digits(trusted);
   const phone = overrideMatches ? overrideRaw : trusted;
+  // Fix #4 — Override-Overridden Visibility. When a non-empty override was
+  // passed but failed digit-match against the trusted lookup, the dispatcher
+  // silently substituted the trusted number. Log loudly and persist the audit
+  // metadata so the UI can render a "Number corrected" badge.
+  const overrideOverridden = overrideRaw.length > 0 && !overrideMatches;
+  if (overrideOverridden) {
+    console.warn(
+      `[VRM SMS] enqueueDenialSmsForTech — override rejected for tech=${args.techLdap}: ui=${digits(overrideRaw) || "(empty)"}, trusted=${digits(trusted) || "(empty)"}. Falling back to trusted.`,
+    );
+  }
 
   // Resolve template body: custom from vrm_notification_templates if the
   // operator has saved one on the Settings page, otherwise the hard-coded
@@ -318,6 +328,9 @@ export async function enqueueDenialSmsForTech(args: {
       payload,
       status: "skipped",
       error: "tech has no phone number on file",
+      uiDisplayedPhone: overrideRaw || null,
+      trustedPhone: trusted || null,
+      overrideOverridden,
     });
     return { smsQueued: false, skipped: true };
   }
@@ -328,6 +341,9 @@ export async function enqueueDenialSmsForTech(args: {
     recipient: phone,
     payload,
     status: "queued",
+    uiDisplayedPhone: overrideOverridden ? overrideRaw : null,
+    trustedPhone: overrideOverridden ? trusted : null,
+    overrideOverridden,
   });
   return { smsQueued: !!ins, skipped: false };
 }
@@ -362,6 +378,13 @@ export async function enqueueApprovalSmsForTech(args: {
     trusted.length > 0 &&
     digits(overrideRaw) === digits(trusted);
   const phone = overrideMatches ? overrideRaw : trusted;
+  // Fix #4 — Override-Overridden Visibility (see enqueueDenialSmsForTech).
+  const overrideOverridden = overrideRaw.length > 0 && !overrideMatches;
+  if (overrideOverridden) {
+    console.warn(
+      `[VRM SMS] enqueueApprovalSmsForTech — override rejected for tech=${args.techLdap}: ui=${digits(overrideRaw) || "(empty)"}, trusted=${digits(trusted) || "(empty)"}. Falling back to trusted.`,
+    );
+  }
 
   // Resolve the body: use the Settings-configured template if present,
   // otherwise fall back to the Fleet-approved built-in copy. Tokens are
@@ -392,6 +415,9 @@ export async function enqueueApprovalSmsForTech(args: {
       payload,
       status: "skipped",
       error: "tech has no phone number on file",
+      uiDisplayedPhone: overrideRaw || null,
+      trustedPhone: trusted || null,
+      overrideOverridden,
     });
     return { smsQueued: false, skipped: true };
   }
@@ -402,6 +428,9 @@ export async function enqueueApprovalSmsForTech(args: {
     recipient: phone,
     payload,
     status: "queued",
+    uiDisplayedPhone: overrideOverridden ? overrideRaw : null,
+    trustedPhone: overrideOverridden ? trusted : null,
+    overrideOverridden,
   });
   return { smsQueued: !!ins, skipped: false };
 }

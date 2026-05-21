@@ -747,6 +747,17 @@ export const vrmNotifications = pgTable("vrm_notifications", {
   error: text("error"),
   twilioSid: varchar("twilio_sid", { length: 64 }),
   twilioErrorCode: varchar("twilio_error_code", { length: 16 }),
+  // SMS phone audit (Fix #4 — Override-Overridden Visibility).
+  // When the caller passed `techPhoneOverride` but it failed digit-match
+  // against the trusted lookup, the dispatcher silently substitutes the
+  // trusted number. Persist both forms so the UI can surface that a
+  // "Number corrected" event happened.
+  //   ui_displayed_phone  — the number the approver saw (passed as override)
+  //   trusted_phone       — the number actually used as recipient
+  //   override_overridden — TRUE iff a non-empty override was rejected
+  uiDisplayedPhone: text("ui_displayed_phone"),
+  trustedPhone: text("trusted_phone"),
+  overrideOverridden: boolean("override_overridden").default(false).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   sentAt: timestamp("sent_at"),
 }, (table) => ({
