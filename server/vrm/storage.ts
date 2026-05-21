@@ -1477,6 +1477,7 @@ export async function listRentalDecisions(limit = 50) {
       notes: vrmRentalDecisions.notes,
       scorecardScore: vrmRentalDecisions.scorecardScore,
       tenureMonths: vrmRentalDecisions.tenureMonths,
+      lastHireDate: vrmRentalDecisions.lastHireDate,
       createdAt: vrmRentalDecisions.createdAt,
       smsSentAt: vrmRentalDecisions.smsSentAt,
       smsResponseStatus: vrmRentalDecisions.smsResponseStatus,
