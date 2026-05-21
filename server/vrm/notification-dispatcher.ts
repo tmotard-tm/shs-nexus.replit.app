@@ -177,15 +177,51 @@ const APPROVAL_SMS_BODY =
   "result in disciplinary action. Stay Safe and thank you for all you do!";
 
 /**
- * Lookup the tech's mobile phone from the Repair Tracker mirror. The Repair
- * Tracker is the same source the New Rental evaluator uses, so the number
- * matches what the agent saw on screen at decision time. Returns null when
- * we have no usable number on file.
+ * Lookup the tech's mobile phone for outbound VRM decision SMS.
+ *
+ * Source-of-truth order (TPMS first — matches replit.md gotcha that
+ * Snowflake TPMS_EXTRACT is the canonical source for tech phone, and
+ * matches the Full Log auto-populate path in upsertFullLogFromDecision
+ * which reads tpms_tech_profiles directly):
+ *
+ *   1. tpms_tech_profiles.mobile_phone   ← primary (in-DB mirror of TPMS_EXTRACT,
+ *                                          refreshed by the nightly Tech Data
+ *                                          Scheduler)
+ *   2. vrm_repair_tracker.tech_phone     ← fallback for the rare case where
+ *                                          TPMS hasn't been refreshed yet but
+ *                                          the tech already has a tracker row
+ *                                          from a prior denial
+ *
+ * The previous implementation only checked vrm_repair_tracker, which is a
+ * denial-only mirror — so first-time approved techs (no prior denial → no
+ * tracker row) had no phone resolved and approval SMS was silently skipped
+ * with "(missing)" even though TPMS had the number on file. Returns null
+ * only when both sources are empty.
  */
 async function getTechPhone(techLdap: string): Promise<string | null> {
   const upper = techLdap.toUpperCase();
-  // Case-insensitive match: vrm_repair_tracker.tech_ldap casing is not
-  // guaranteed (mirror is populated from multiple upstream sources).
+
+  // 1) TPMS profiles — the canonical source. Same query the Full Log
+  //    auto-populate uses (server/vrm/storage.ts upsertFullLogFromDecision).
+  try {
+    const tpmsRes = await db.execute(sql`
+      SELECT mobile_phone
+      FROM tpms_tech_profiles
+      WHERE UPPER(enterprise_id) = ${upper}
+        AND mobile_phone IS NOT NULL
+        AND mobile_phone <> ''
+      LIMIT 1
+    `);
+    const tpmsPhone = (((tpmsRes as any).rows ?? [])[0]?.mobile_phone ?? "").trim();
+    if (tpmsPhone) return tpmsPhone;
+  } catch (e: any) {
+    console.warn(
+      `[VRM SMS] getTechPhone TPMS lookup failed for ${upper}: ${e?.message ?? e} — falling back to repair tracker`,
+    );
+  }
+
+  // 2) Fallback: vrm_repair_tracker (denial-only mirror). Case-insensitive
+  //    match because tech_ldap casing isn't guaranteed across upstream sources.
   const [row] = await db
     .select({ techPhone: vrmRepairTracker.techPhone })
     .from(vrmRepairTracker)
