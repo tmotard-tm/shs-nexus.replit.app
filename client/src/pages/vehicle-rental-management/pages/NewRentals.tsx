@@ -1994,6 +1994,26 @@ export default function NewRentals() {
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
+                          {isNoData && (
+                            <div style={{ marginTop: 4 }}>
+                              <span
+                                title="This tech has no row in the daily profitability snapshot. The decision is logged against TPMS phone/truck only."
+                                style={{
+                                  display: "inline-block",
+                                  fontFamily: fonts.dmSans,
+                                  fontSize: 9,
+                                  fontWeight: 600,
+                                  color: colors.amber,
+                                  backgroundColor: colors.amberLight,
+                                  padding: "1px 6px",
+                                  borderRadius: 4,
+                                  letterSpacing: "0.03em",
+                                }}
+                              >
+                                NO FINANCIAL DATA — TPMS PHONE/TRUCK ONLY
+                              </span>
+                            </div>
+                          )}
                           {row.union_exempt && (() => {
                             // Server (routes.ts ~1106) flags union_exempt true for either:
                             //   • district in UNION_DISTRICTS [6141, 7983, 7323, 8309], or
@@ -2064,10 +2084,14 @@ export default function NewRentals() {
                           )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
-                          {isNoData && !isNewHire ? (
-                            <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>N/A</span>
-                          ) : (
-                            <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
+                          {/* Per Fix #5 (no-data decision recording): always offer
+                              Approve/Deny even when the profitability snapshot
+                              has no row for this tech. The decision is logged
+                              with NULL financials and SMS is dispatched against
+                              the TPMS phone via the standard path. The amber
+                              "NO FINANCIAL DATA" badge in the rec column makes
+                              the missing context visible to the approver. */}
+                          <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                               <button
                                 onClick={() => setFormRow({ ldap: row.tech_ldap, action: "approved" })}
                                 style={{
@@ -2087,10 +2111,7 @@ export default function NewRentals() {
                               >
                                 <CheckCircle size={12} /> Approve
                               </button>
-                              {/* Hide Deny when the only reason data is missing
-                                  is "recent hire" — there's nothing to deny against. */}
-                              {!isNoData && (
-                                <button
+                              <button
                                   onClick={() => setFormRow({ ldap: row.tech_ldap, action: "denied" })}
                                   style={{
                                     fontFamily: fonts.dmSans,
@@ -2109,9 +2130,7 @@ export default function NewRentals() {
                                 >
                                   <XCircle size={12} /> Deny
                                 </button>
-                              )}
                             </div>
-                          )}
                         </td>
                       </tr>
                       {formRow?.ldap === row.tech_ldap && (
