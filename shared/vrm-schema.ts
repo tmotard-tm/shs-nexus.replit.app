@@ -301,6 +301,7 @@ export const vrmRentalDecisions = pgTable("vrm_rental_decisions", {
   tenureMonths: integer("tenure_months"),
   // Snapshot of evaluator inputs/outputs at decision time. All optional so
   // older decisions (pre-snapshot) keep working — UI renders "—" for nulls.
+  lastHireDate: date("last_hire_date"),
   state: text("state"),
   district: text("district"),
   // Supervisor frozen at the moment of decision so the Decision Log keeps
@@ -694,6 +695,7 @@ export const vrmProfitabilitySnapshot = pgTable("vrm_profitability_snapshot", {
   scorecardExempt: boolean("scorecard_exempt").notNull().default(false),
   // Roster-driven snapshot fields (NS_TECH_ACTIVE_ROSTER_DAILY_VW + COMTTU_TECH_UN supervisor join)
   emplStatus: varchar("empl_status", { length: 4 }),
+  lastHireDate: date("last_hire_date"),
   lastDateWorked: date("last_date_worked"),
   expectedReturnDt: date("expected_return_dt"),
   supervisorName: varchar("supervisor_name", { length: 255 }),

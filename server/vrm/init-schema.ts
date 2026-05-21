@@ -306,6 +306,7 @@ export async function initVrmSchema(): Promise<void> {
   // Snapshot of evaluator inputs/outputs at decision time so the Decision Log
   // on /new-rentals can mirror the Evaluation Results table columns. All nullable
   // for backward compatibility with pre-snapshot rows (UI renders "—").
+  await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS last_hire_date DATE;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS state TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS district TEXT;`);
   await db.execute(sql`ALTER TABLE vrm_rental_decisions ADD COLUMN IF NOT EXISTS completes INTEGER;`);
@@ -572,6 +573,7 @@ export async function initVrmSchema(): Promise<void> {
 
   // ── Roster-driven snapshot: new columns added by spec items (1)+(2) ─────────
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS empl_status        VARCHAR(4);`);
+  await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS last_hire_date     DATE;`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS last_date_worked   DATE;`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS expected_return_dt DATE;`);
   await db.execute(sql`ALTER TABLE vrm_profitability_snapshot ADD COLUMN IF NOT EXISTS supervisor_name    VARCHAR(255);`);

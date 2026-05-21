@@ -311,6 +311,7 @@ export async function runProfitabilitySync(): Promise<void> {
       scorecardExempt: r.scorecard_exempt === true,
       // Roster-driven fields (item 1+2)
       emplStatus: r.empl_status ?? null,
+      lastHireDate: r.last_hire_date ?? null,
       lastDateWorked: r.last_date_worked ?? null,
       expectedReturnDt: r.expected_return_dt ?? null,
       supervisorName: r.supervisor_name ?? null,

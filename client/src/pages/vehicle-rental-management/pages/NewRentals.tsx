@@ -255,6 +255,7 @@ interface ProfitRow {
   district: string | null;
   state: string | null;
   empl_status?: string | null;
+  last_hire_date?: string | null;
   last_date_worked?: string | null;
   expected_return_dt?: string | null;
   supervisor_name?: string | null;
@@ -283,6 +284,7 @@ interface DecisionRow {
   tenureMonths: number | null;
   // Snapshot of evaluator context at decision time. Older decisions (pre-snapshot)
   // will be null — UI renders "—" in those cells.
+  lastHireDate: string | null;
   state: string | null;
   district: string | null;
   completes: number | null;
@@ -1941,7 +1943,20 @@ export default function NewRentals() {
                           {row.district ? String(row.district).replace(/^0+/, "") || row.district : "—"}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
-                          {row.tenure_months != null ? `${Math.round(row.tenure_months)} mo` : "—"}
+                          <div>{row.tenure_months != null ? `${Math.round(row.tenure_months)} mo` : "—"}</div>
+                          {row.last_hire_date && (
+                            <div
+                              style={{
+                                fontFamily: fonts.jetbrains,
+                                fontSize: 10,
+                                color: colors.inkMuted,
+                                marginTop: 2,
+                              }}
+                              title={`Last hire date: ${row.last_hire_date}`}
+                            >
+                              since {row.last_hire_date}
+                            </div>
+                          )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           {row.scorecard_score != null ? Number(row.scorecard_score).toFixed(2) : "—"}
@@ -2154,6 +2169,7 @@ export default function NewRentals() {
                               tenureMonths: row.tenure_months,
                               // Snapshot of evaluator inputs/outputs so the
                               // Decision Log can mirror Evaluation Results columns.
+                              lastHireDate: row.last_hire_date ?? null,
                               state: row.state,
                               district: row.district,
                               completes: row.completes,
@@ -2339,7 +2355,20 @@ export default function NewRentals() {
                         {d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}
                       </td>
                       <td style={{ ...tdStyle, textAlign: "center" }}>
-                        {d.tenureMonths != null ? `${Math.round(d.tenureMonths)} mo` : "—"}
+                        <div>{d.tenureMonths != null ? `${Math.round(d.tenureMonths)} mo` : "—"}</div>
+                        {d.lastHireDate && (
+                          <div
+                            style={{
+                              fontFamily: fonts.jetbrains,
+                              fontSize: 10,
+                              color: colors.inkMuted,
+                              marginTop: 2,
+                            }}
+                            title={`Last hire date: ${d.lastHireDate}`}
+                          >
+                            since {d.lastHireDate}
+                          </div>
+                        )}
                       </td>
                       <td style={{ ...tdStyle, textAlign: "center" }}>
                         {scorecard != null ? scorecard.toFixed(2) : "—"}

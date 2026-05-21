@@ -1426,6 +1426,7 @@ export function registerVrmRoutes(): Router {
           scorecard_exempt: s.scorecardExempt ?? false,
           // ── Roster-driven fields (snapshot only) ──────────────────────────
           empl_status: s.emplStatus ?? null,
+          last_hire_date: s.lastHireDate ?? null,
           last_date_worked: s.lastDateWorked ?? null,
           expected_return_dt: s.expectedReturnDt ?? null,
           supervisor_name: s.supervisorName ?? null,
@@ -1513,6 +1514,7 @@ export function registerVrmRoutes(): Router {
             new_hire_exempt: false,
             scorecard_exempt: false,
             empl_status: null,
+            last_hire_date: null,
             last_date_worked: null,
             expected_return_dt: null,
             supervisor_name: null,
@@ -1637,6 +1639,7 @@ export function registerVrmRoutes(): Router {
       const {
         techLdap, techName, dailyNetWithRental, recommendation, decision,
         decidedByName, notes, scorecardScore, tenureMonths,
+        lastHireDate,
         state, district, completes, dailyRevenue, dailyCosts,
         dailyNetBeforeRental, dailyPptProfit,
         supervisorName, supervisorLdap, supervisorPhone,
@@ -1663,6 +1666,7 @@ export function registerVrmRoutes(): Router {
         tenureMonths: tenureMonths ?? null,
         // Snapshot of evaluator context at decision time so the Decision Log
         // can render the same columns as the Evaluation Results table above it.
+        lastHireDate: lastHireDate ?? null,
         state: state ?? null,
         district: district ?? null,
         // Supervisor frozen at decision time. Sourced from the evaluator row

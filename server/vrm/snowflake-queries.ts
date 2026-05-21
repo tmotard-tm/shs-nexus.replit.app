@@ -551,6 +551,7 @@ export interface ProfitabilityRow {
   // ── Roster-driven extensions (populated by fetchAllProfitabilityRows; absent
   //    from the per-tech fetchProfitabilityCheck path which doesn't join roster). ──
   empl_status?: string | null;            // 'A' | 'L' | 'P' | 'S' (NS_TECH_ACTIVE_ROSTER_DAILY_VW)
+  last_hire_date?: string | null;         // YYYY-MM-DD — most-recent hire date from roster
   last_date_worked?: string | null;       // YYYY-MM-DD
   expected_return_dt?: string | null;     // YYYY-MM-DD
   supervisor_name?: string | null;
@@ -779,6 +780,7 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
         UPPER(TRIM(ENTERPRISE_ID))               AS LDAP_ID,
         EMPL_NAME,
         EMPL_STATUS,
+        LAST_HIRE_DATE,
         LAST_DATE_WORKED,
         EXPECTED_RETURN_DT,
         SUPERVISOR_NAME,
@@ -970,6 +972,7 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
       END                                                                  AS "scorecard_exempt",
       -- ── Roster-driven extensions (item 1+2) ────────────────────────────────
       r.EMPL_STATUS                                                      AS "empl_status",
+      TO_CHAR(r.LAST_HIRE_DATE,     'YYYY-MM-DD')                       AS "last_hire_date",
       TO_CHAR(r.LAST_DATE_WORKED,   'YYYY-MM-DD')                       AS "last_date_worked",
       TO_CHAR(r.EXPECTED_RETURN_DT, 'YYYY-MM-DD')                       AS "expected_return_dt",
       COALESCE(r.SUPERVISOR_NAME, supv_tpms.FULL_NAME)                   AS "supervisor_name",
