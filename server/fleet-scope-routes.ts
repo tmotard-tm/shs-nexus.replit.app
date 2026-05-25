@@ -14935,6 +14935,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // as the nearest tech to recover a decommissioning vehicle. Sourced from
     // the same Snowflake roster the Rental Operations dashboard uses
     // (fetchRentalRoster — Enterprise + Holman open-rental reports).
+    //
+    // Fail-closed: if the rental roster query fails we skip the entire pass
+    // rather than risk suggesting a tech who is already in a rental. The
+    // existing nearest-tech values on the vehicles are left untouched until
+    // the next pass can confirm the rental list.
     const rentalLdapSet = new Set<string>();
     try {
       const rentalRoster = await fetchRentalRoster();
@@ -14944,7 +14949,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       console.log(`[Nearest Tech Pass] Excluding ${rentalLdapSet.size} ldaps currently in an open rental`);
     } catch (err: any) {
-      console.warn('[Nearest Tech Pass] Could not load active rental roster — proceeding without rental exclusion:', err?.message || err);
+      console.error('[Nearest Tech Pass] Active rental roster query failed — skipping pass to avoid suggesting a tech who is in a rental:', err?.message || err);
+      return { updated: 0, total: candidates.length };
     }
 
     let byovExcluded = 0;
