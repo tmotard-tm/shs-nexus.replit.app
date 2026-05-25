@@ -14954,15 +14954,20 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
 
     let byovExcluded = 0;
+    let noTruckExcluded = 0;
     let rentalExcluded = 0;
     const techsWithZip: TechInfo[] = [];
     for (const [entId, row] of getTpmsSnapshot()) {
       if (managerEntIdSet.has(entId)) continue;
       if (!row.primaryZip || !row.fullName) continue;
+      // Exclude techs with no current truck assignment in TPMS_EXTRACT
+      // (TRUCK_LU is NULL or blank) — without a known company truck they
+      // aren't a viable nearest-tech candidate to recover a decom vehicle.
+      const truckLu = (row.truckLu || '').trim();
+      if (!truckLu || truckLu.toUpperCase() === 'NULL') { noTruckExcluded++; continue; }
       // Exclude BYOV techs — TRUCK_LU starting with "88" means the tech is
       // driving their own (Bring Your Own Vehicle) truck, so they aren't a
       // candidate to take over a decommissioning company truck.
-      const truckLu = (row.truckLu || '').trim();
       if (truckLu.startsWith('88')) { byovExcluded++; continue; }
       // Exclude techs who are already in an open rental (no company truck to swap).
       if (rentalLdapSet.has(entId)) { rentalExcluded++; continue; }
@@ -14973,7 +14978,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         primaryZip: row.primaryZip,
       });
     }
-    console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers, BYOV(${byovExcluded}), in-rental(${rentalExcluded}) excluded)`);
+    console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers, no-truck(${noTruckExcluded}), BYOV(${byovExcluded}), in-rental(${rentalExcluded}) excluded)`);
 
     if (techsWithZip.length === 0) return { updated: 0, total: candidates.length };
 
