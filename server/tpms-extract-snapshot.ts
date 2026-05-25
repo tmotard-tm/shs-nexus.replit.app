@@ -28,6 +28,7 @@ export type TpmsContact = {
   fullName: string | null;
   managerEntId: string | null;
   primaryZip: string | null;
+  truckLu: string | null;
 };
 
 let snapshot: Map<string, TpmsContact> = new Map();
@@ -70,7 +71,8 @@ export async function refreshTpmsExtractSnapshot(): Promise<RefreshResult> {
                MOBILEPHONENUMBER,
                FULL_NAME,
                UPPER(TRIM(MANAGER_ENT_ID)) AS MGR_ENT_ID,
-               PRIMARYZIP
+               PRIMARYZIP,
+               TRUCK_LU
         FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
         WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) != ''
       `;
@@ -80,6 +82,7 @@ export async function refreshTpmsExtractSnapshot(): Promise<RefreshResult> {
         FULL_NAME: string | null;
         MGR_ENT_ID: string | null;
         PRIMARYZIP: string | null;
+        TRUCK_LU: string | null;
       }>;
 
       const next = new Map<string, TpmsContact>();
@@ -97,6 +100,7 @@ export async function refreshTpmsExtractSnapshot(): Promise<RefreshResult> {
           fullName: row.FULL_NAME ? String(row.FULL_NAME).trim() : null,
           managerEntId: mgr,
           primaryZip: row.PRIMARYZIP ? String(row.PRIMARYZIP).trim() : null,
+          truckLu: row.TRUCK_LU ? String(row.TRUCK_LU).trim() : null,
         });
         if (mgr) mgrSet.add(mgr);
       }

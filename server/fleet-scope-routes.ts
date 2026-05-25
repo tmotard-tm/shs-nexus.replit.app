@@ -22,6 +22,7 @@ import {
   refreshTpmsExtractSnapshot,
 } from "./tpms-extract-snapshot";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
+import { fetchRentalRoster } from "./vrm/snowflake-queries";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
 import { fetchFleetFinderData, fetchFleetFinderVehicleInfo, prewarmFleetFinderCache, type FleetFinderLocationData, type FleetFinderVehicleInfo } from "./fleet-scope-fleet-finder";
@@ -14928,10 +14929,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       return { updated: 0, total: candidates.length };
     }
     const managerEntIdSet = getTpmsManagerEntIds();
+
+    // Build the set of LDAPs currently in an open rental — those techs are
+    // already without their company truck, so they should not be suggested
+    // as the nearest tech to recover a decommissioning vehicle. Sourced from
+    // the same Snowflake roster the Rental Operations dashboard uses
+    // (fetchRentalRoster — Enterprise + Holman open-rental reports).
+    const rentalLdapSet = new Set<string>();
+    try {
+      const rentalRoster = await fetchRentalRoster();
+      for (const r of rentalRoster) {
+        const ldap = (r.ENTERPRISE_ID || '').trim().toUpperCase();
+        if (ldap) rentalLdapSet.add(ldap);
+      }
+      console.log(`[Nearest Tech Pass] Excluding ${rentalLdapSet.size} ldaps currently in an open rental`);
+    } catch (err: any) {
+      console.warn('[Nearest Tech Pass] Could not load active rental roster — proceeding without rental exclusion:', err?.message || err);
+    }
+
+    let byovExcluded = 0;
+    let rentalExcluded = 0;
     const techsWithZip: TechInfo[] = [];
     for (const [entId, row] of getTpmsSnapshot()) {
       if (managerEntIdSet.has(entId)) continue;
       if (!row.primaryZip || !row.fullName) continue;
+      // Exclude BYOV techs — TRUCK_LU starting with "88" means the tech is
+      // driving their own (Bring Your Own Vehicle) truck, so they aren't a
+      // candidate to take over a decommissioning company truck.
+      const truckLu = (row.truckLu || '').trim();
+      if (truckLu.startsWith('88')) { byovExcluded++; continue; }
+      // Exclude techs who are already in an open rental (no company truck to swap).
+      if (rentalLdapSet.has(entId)) { rentalExcluded++; continue; }
       techsWithZip.push({
         enterpriseId: entId,
         fullName: row.fullName,
@@ -14939,7 +14967,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         primaryZip: row.primaryZip,
       });
     }
-    console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers excluded)`);
+    console.log(`[Nearest Tech Pass] Pool of ${techsWithZip.length} candidate techs (managers, BYOV(${byovExcluded}), in-rental(${rentalExcluded}) excluded)`);
 
     if (techsWithZip.length === 0) return { updated: 0, total: candidates.length };
 
