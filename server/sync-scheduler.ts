@@ -212,12 +212,27 @@ async function checkAndRunNotificationBackfill(): Promise<void> {
     if (lastNotificationBackfillTime === null || (now - lastNotificationBackfillTime) >= NOTIFICATION_BACKFILL_INTERVAL_MS) {
       console.log('[Scheduler] Running notification backfill scan (every 6 hours)');
 
-      const { runToolAuditBackfill } = await import('./notification-backfill');
+      // Task #424: refresh tool-audit snapshot before backfills so completion checks are current
+      try {
+        const { refreshToolAuditSnapshot } = await import('./tool-audit-snapshot');
+        await refreshToolAuditSnapshot();
+      } catch (err: any) {
+        console.error('[Scheduler] Tool audit snapshot refresh failed:', err?.message || err);
+      }
+
+      const { runToolAuditBackfill, runOutreachBackfill } = await import('./notification-backfill');
       const result = await runToolAuditBackfill();
 
       lastNotificationBackfillTime = now;
 
       console.log(`[Scheduler] Notification backfill complete: ${result.totalChecked} checked, ${result.newlySent} sent, ${result.alreadySent} already sent, ${result.skippedNoEmail} skipped, ${result.failed} failed`);
+
+      try {
+        const outreach = await runOutreachBackfill();
+        console.log(`[Scheduler] Recovery outreach backfill complete: ${outreach.totalChecked} checked, ${outreach.newlySent} sent, ${outreach.alreadySent} already sent, ${outreach.skippedAuditComplete} audit-complete, ${outreach.failed} failed`);
+      } catch (err: any) {
+        console.error('[Scheduler] Recovery outreach backfill error:', err?.message || err);
+      }
     }
   } catch (error) {
     console.error('[Scheduler] Error during notification backfill:', error);

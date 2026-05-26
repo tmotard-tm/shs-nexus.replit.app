@@ -155,22 +155,18 @@ function getAgingBadge(separationDate: string | null): { label: string; classNam
 }
 
 // SYNC NOTE: This lane logic is duplicated in server/return-token-service.ts getDetectionLane().
-// If lane boundaries change (e.g., WARM extends to 10 days), both copies must be updated.
+// Task #424: simplified to 2 lanes — PRE (before last day) and PAST (on/after).
 function getDetectionLane(item: AssetsQueueItemEnriched): { label: string; className: string } {
   const lastDayWorked = item.techData?.lastDayWorked;
-  // When lastDayWorked is null, fallback to createdAt. Note: freshly created records
-  // will always show WARM because createdAt is recent — this is expected for test data.
   const referenceDate = lastDayWorked || (item.createdAt ? new Date(item.createdAt).toISOString() : null);
-  if (!referenceDate) return { label: "WARM", className: "bg-orange-100 text-orange-700 border-orange-200" };
+  if (!referenceDate) return { label: "PAST", className: "bg-orange-100 text-orange-700 border-orange-200" };
   const ref = new Date(referenceDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   ref.setHours(0, 0, 0, 0);
   const daysSince = Math.floor((today.getTime() - ref.getTime()) / (1000 * 60 * 60 * 24));
   if (daysSince < 0) return { label: "PRE", className: "bg-blue-100 text-blue-700 border-blue-200" };
-  if (daysSince <= 7) return { label: "WARM", className: "bg-orange-100 text-orange-700 border-orange-200" };
-  if (daysSince <= 30) return { label: "LATE", className: "bg-amber-100 text-amber-700 border-amber-200" };
-  return { label: "COLD", className: "bg-slate-200 text-slate-700 border-slate-300" };
+  return { label: "PAST", className: "bg-orange-100 text-orange-700 border-orange-200" };
 }
 
 function getUrgencyLevel(vehicleType: VehicleType, daysUntilSep: number | null): UrgencyLevel {

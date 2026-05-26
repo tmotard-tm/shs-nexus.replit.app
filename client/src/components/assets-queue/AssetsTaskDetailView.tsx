@@ -122,40 +122,50 @@ function SendToolAuditButton({ itemId, techData }: { itemId: string; techData?: 
 
 function SendOutreachButton({ itemId }: { itemId: string }) {
   const { toast } = useToast();
-  const mutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/assets-queue/${itemId}/send-outreach`);
-      return res.json();
-    },
+
+  const runSend = (intent: 'pre' | 'past', forceSend: boolean) =>
+    apiRequest("POST", `/api/assets-queue/${itemId}/send-outreach`, {
+      intent,
+      ...(forceSend ? { forceSend: true } : {}),
+    }).then(res => res.json());
+
+  const handleResponse = (intent: 'pre' | 'past') => ({
     onSuccess: (data: any) => {
+      // Always invalidate queue queries — partial PAST sends (e.g. email sent +
+      // SMS blocked for no phone on file) still persist outreach events on the
+      // server, so the timeline/badges must refresh regardless of overall
+      // success. Without this, an operator sees stale per-channel status.
+      queryClient.invalidateQueries({
+        predicate: (query) => {
+          const key = query.queryKey[0];
+          return typeof key === "string" && key.startsWith("/api/assets-queue");
+        },
+      });
       if (data.success) {
-        const statusLabel = data.status === 'simulated' ? 'simulated' : data.status === 'sent' ? 'sent' : data.status;
+        const parts = (data.results || []).map((r: any) => `${r.channel.toUpperCase()} ${r.status}`);
         toast({
-          title: "Outreach Email Sent",
-          description: `${statusLabel} to ${data.actualRecipient || data.intendedRecipient} (${data.lane} lane)`,
-        });
-        queryClient.invalidateQueries({
-          predicate: (query) => {
-            const key = query.queryKey[0];
-            return typeof key === "string" && key.startsWith("/api/assets-queue");
-          },
+          title: intent === 'pre' ? "Pre-Separation Outreach Sent" : "Past-Separation Outreach Sent",
+          description: `${data.techName}: ${parts.join(' + ')}${data.auditWarning ? ` — ${data.auditWarning}` : ''}`,
         });
       } else {
+        const parts = (data.results || []).map((r: any) => `${r.channel.toUpperCase()} ${r.success ? r.status : (r.error || r.status)}`);
         toast({
-          title: "Outreach Failed",
-          description: data.error || "Unknown error",
+          title: "Outreach Partially Sent",
+          description: `${data.techName || ''}: ${parts.join(' + ')}` || "Unknown error",
           variant: "destructive",
         });
       }
     },
     onError: (error: any) => {
-      let message = "Failed to send outreach email";
+      let message = "Failed to send outreach";
+      let auditComplete = false;
       if (error?.message) {
         const match = error.message.match(/^\d+:\s*(.+)/);
         if (match) {
           try {
             const parsed = JSON.parse(match[1]);
             message = parsed.message || message;
+            auditComplete = !!parsed.auditComplete;
           } catch {
             message = match[1];
           }
@@ -163,33 +173,59 @@ function SendOutreachButton({ itemId }: { itemId: string }) {
           message = error.message;
         }
       }
+      if (auditComplete) {
+        const confirmed = window.confirm(`${message}\n\nSend anyway?`);
+        if (confirmed) {
+          if (intent === 'pre') preMutation.mutate(true);
+          else pastMutation.mutate(true);
+          return;
+        }
+      }
       toast({ title: "Error", description: message, variant: "destructive" });
     },
   });
 
+  const preMutation = useMutation({
+    mutationFn: (forceSend: boolean = false) => runSend('pre', forceSend),
+    ...handleResponse('pre'),
+  });
+  const pastMutation = useMutation({
+    mutationFn: (forceSend: boolean = false) => runSend('past', forceSend),
+    ...handleResponse('past'),
+  });
+
   return (
-    <Button
-      variant="outline"
-      className="w-full justify-start border-orange-200 text-orange-700 hover:bg-orange-50"
-      onClick={() => mutation.mutate()}
-      disabled={mutation.isPending}
-    >
-      {mutation.isPending ? (
-        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-      ) : (
-        <Mail className="h-4 w-4 mr-2" />
-      )}
-      {mutation.isPending ? "Sending Outreach..." : "Send Outreach Email"}
-    </Button>
+    <div className="grid grid-cols-2 gap-2">
+      <Button
+        variant="outline"
+        className="justify-start border-blue-200 text-blue-700 hover:bg-blue-50"
+        onClick={() => preMutation.mutate(false)}
+        disabled={preMutation.isPending || pastMutation.isPending}
+        data-testid="button-send-pre-outreach"
+      >
+        {preMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+        {preMutation.isPending ? "Sending Pre..." : "Send Pre Outreach"}
+      </Button>
+      <Button
+        variant="outline"
+        className="justify-start border-orange-200 text-orange-700 hover:bg-orange-50"
+        onClick={() => pastMutation.mutate(false)}
+        disabled={preMutation.isPending || pastMutation.isPending}
+        data-testid="button-send-past-outreach"
+      >
+        {pastMutation.isPending ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Mail className="h-4 w-4 mr-2" />}
+        {pastMutation.isPending ? "Sending Past..." : "Send Past Outreach"}
+      </Button>
+    </div>
   );
 }
 
 function OutreachTimeline({ outreach }: { outreach?: Array<{ channel: string; templateName: string; lane: string; status: string; sentAt: string; sentBy?: string; error?: string }> }) {
   const laneLabels: Record<string, string> = {
-    'tool-recovery-outreach-pre': 'PRE — Proactive',
-    'tool-recovery-outreach-warm': 'WARM — Prompt',
-    'tool-recovery-outreach-late': 'LATE — Urgent',
-    'tool-recovery-outreach-cold': 'COLD — Final Notice',
+    'recovery-pre-fleet': 'PRE — Fleet (Tool Audit)',
+    'recovery-pre-byov': 'PRE — BYOV/Rental (Return)',
+    'recovery-past-email': 'PAST — Return Everything (Email)',
+    'recovery-past-sms': 'PAST — Return Everything (SMS)',
   };
 
   const statusStyles: Record<string, string> = {
@@ -934,6 +970,28 @@ export function AssetsTaskDetailView({
 
             <SendToolAuditButton itemId={item.id} techData={item.techData} />
 
+            {(item as any).toolAuditStatus?.auditComplete && (
+              <div
+                className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900"
+                data-testid="alert-tool-audit-complete"
+              >
+                <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>
+                  <strong>Tool audit already complete</strong> for this technician in Snowflake. Sending outreach will require an override confirmation.
+                </span>
+              </div>
+            )}
+            {(item as any).toolAuditStatus?.preVariant && (
+              <div
+                className="rounded-md border border-blue-200 bg-blue-50 p-2 text-xs text-blue-900"
+                data-testid="text-pre-variant"
+              >
+                <strong>Pre will send:</strong>{' '}
+                {(item as any).toolAuditStatus.preVariant === 'byov'
+                  ? 'BYOV/Rental Return (tools + iPhone via QR shipping)'
+                  : 'Fleet Tool Audit (company vehicle — audit ask only)'}
+              </div>
+            )}
             <SendOutreachButton itemId={item.id} />
 
             <Button

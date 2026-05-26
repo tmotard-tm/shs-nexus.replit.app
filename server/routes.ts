@@ -2472,6 +2472,34 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!queueItem) {
         return res.status(404).json({ message: "Assets queue item not found" });
       }
+      // Surface tool-audit-complete state proactively so the UI can warn before
+      // the user clicks Send Pre/Past (Task #424).
+      try {
+        const { hasCompletedToolAudit, getToolAuditSnapshotInfo } = await import('./tool-audit-snapshot');
+        const parsed: any = typeof queueItem.data === 'string' ? JSON.parse(queueItem.data) : (queueItem.data || {});
+        const tech = parsed.technician || parsed.employee || {};
+        const ldap = tech.enterpriseId || tech.ldapId || tech.techRacfid || '';
+        const truck = (queueItem as any).truckNumber || tech.truckNumber || null;
+        const auditComplete = !!(ldap || truck) && hasCompletedToolAudit(ldap, truck);
+        const meta = getToolAuditSnapshotInfo();
+        // Compute the same PRE sub-variant the manual + backfill paths will use,
+        // so the UI can preview "Pre will send: Fleet Tool Audit" vs "BYOV/Rental
+        // Return" before the operator clicks Send Pre.
+        const { detectByov, detectRental } = await import('./byov-utils');
+        const rawVt = (queueItem as any).vehicleType || tech.vehicleType || '';
+        let preVariant: 'fleet' | 'byov' = 'fleet';
+        if (rawVt === 'byov' || rawVt === 'rental') preVariant = 'byov';
+        else if (detectByov(truck)) preVariant = 'byov';
+        else if (await detectRental(truck)) preVariant = 'byov';
+        (queueItem as any).toolAuditStatus = {
+          auditComplete,
+          snapshotRefreshedAt: meta?.lastRefreshedAt instanceof Date
+            ? meta.lastRefreshedAt.toISOString()
+            : null,
+          snapshotError: meta?.lastRefreshError || null,
+          preVariant,
+        };
+      } catch {}
       res.json(queueItem);
     } catch (error) {
       res.status(500).json({ message: "Failed to fetch Assets queue item" });
@@ -2780,23 +2808,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const techData = parseTechDataFromQueueItem(typeof queueItem.data === 'string' ? queueItem.data : JSON.stringify(queueItem.data));
       const lane = getDetectionLane(techData.lastDayWorked, queueItem.createdAt ? queueItem.createdAt.toISOString() : null);
 
-      const laneTemplateMap: Record<string, string> = {
-        'PRE': 'tool-recovery-outreach-pre',
-        'WARM': 'tool-recovery-outreach-warm',
-        'LATE': 'tool-recovery-outreach-late',
-        'COLD': 'tool-recovery-outreach-cold',
-      };
-      const templateName = laneTemplateMap[lane] || 'tool-recovery-outreach-warm';
-
-      if (!personalEmail) {
-        const commTemplate = await storage.getCommunicationTemplateByName(templateName);
-        const templateMode = commTemplate?.mode || 'simulated';
-        if (templateMode === 'live') {
-          return res.status(400).json({ message: "No personal email found for this technician. A personal email is required to send outreach in Live mode." });
-        }
-        personalEmail = `no-email-on-file@technician.placeholder`;
-        console.log(`[Outreach] No personal email for ${techName} (${ldapId}). Mode is '${templateMode}' — using placeholder.`);
+      // Task #424: vehicle type drives PRE template branch; PAST is always email+SMS combo.
+      // Use the same detection stack as the backfill so manual + automated routing
+      // agree even when the queue item's vehicleType column is stale or missing.
+      const rawVehicleType = (queueItem as any).vehicleType || tech.vehicleType || parsedData.vehicleType || '';
+      const earlyTruck = (queueItem as any).truckNumber || tech.truckNumber || null;
+      const { detectByov, detectRental } = await import('./byov-utils');
+      let isFleet: boolean;
+      if (rawVehicleType === 'byov' || rawVehicleType === 'rental') {
+        isFleet = false;
+      } else if (detectByov(earlyTruck)) {
+        isFleet = false;
+      } else if (await detectRental(earlyTruck)) {
+        isFleet = false;
+      } else {
+        isFleet = true;
       }
+
+      // Manual sends MUST allow the agent to pick the lane explicitly.
+      // Body { intent: 'pre' | 'past' } overrides the date-derived lane.
+      const requestedIntent = req.body?.intent;
+      const intent: 'pre' | 'past' = requestedIntent === 'pre' || requestedIntent === 'past'
+        ? requestedIntent
+        : (lane === 'PRE' ? 'pre' : 'past');
 
       const returnLink = await generateReturnToken(req.params.id);
       const baseUrl = process.env.APP_BASE_URL || `${req.protocol}://${req.get('host')}`;
@@ -2805,68 +2839,199 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const separationDate = techData.separationDate || lastDay;
       const enterpriseId = techData.enterpriseId || ldapId || 'N/A';
 
-      const toolAuditLink = `${baseUrl}/tool-audit/${req.params.id}`;
-      const qrShippingLink = `${baseUrl}/qr-shipping/${req.params.id}`;
+      const toolAuditLink = ldapId
+        ? `https://tech-tool-audit-checklist-lucabuccilli1.replit.app?ldap=${encodeURIComponent(ldapId)}`
+        : `https://tech-tool-audit-checklist-lucabuccilli1.replit.app`;
+      const qrShippingLink = `https://asset-returns.replit.app/shipping-qr/${encodeURIComponent(enterpriseId)}`;
 
-      let detectionGap = '0';
-      if (separationDate && separationDate !== 'your scheduled last day') {
-        const sepDate = new Date(separationDate);
-        if (!isNaN(sepDate.getTime())) {
-          const today = new Date();
-          sepDate.setHours(0, 0, 0, 0);
-          today.setHours(0, 0, 0, 0);
-          const daysDiff = Math.floor((today.getTime() - sepDate.getTime()) / (1000 * 60 * 60 * 24));
-          detectionGap = String(Math.max(0, daysDiff));
+      // Auto-skip if tool audit already complete; manual sends show warn-only override
+      const { hasCompletedToolAudit } = await import('./tool-audit-snapshot');
+      const truckNumber = (queueItem as any).truckNumber || tech.truckNumber || null;
+      // District is needed in templates for QR-portal password instructions
+      let districtNo: string = '';
+      try {
+        const tpms = ldapId ? await storage.getTpmsCachedAssignmentByEnterpriseId(ldapId) : null;
+        districtNo = (tpms as any)?.districtNo || '';
+      } catch {}
+      if (!districtNo && ldapId) {
+        try {
+          const allTechRow = await storage.getAllTechByTechRacfid(ldapId);
+          districtNo = (allTechRow as any)?.districtNo || (allTechRow as any)?.district || '';
+        } catch {}
+      }
+      const auditComplete = hasCompletedToolAudit(enterpriseId, truckNumber);
+      const forceSend = req.body?.forceSend === true;
+      if (auditComplete && !forceSend) {
+        return res.status(409).json({
+          message: 'Tool audit already completed for this technician. Pass forceSend=true to override.',
+          auditComplete: true,
+        });
+      }
+      const auditWarning = auditComplete && forceSend
+        ? 'Tool audit already completed — sent anyway by manual override.'
+        : undefined;
+
+      const { sendCommunication } = await import("./communication-service");
+      const sharedVars = {
+        firstName,
+        technicianName: techName,
+        lastDay,
+        separationDate,
+        enterpriseId,
+        truckNumber: truckNumber || '',
+        districtNo: districtNo || '',
+        toolAuditLink,
+        qrShippingLink,
+        returnLink: fullReturnLink,
+      };
+
+      type OutreachEventOut = {
+        channel: 'email' | 'sms';
+        templateName: string;
+        lane: string;
+        status: 'sent' | 'simulated' | 'blocked' | 'failed';
+        communicationLogId?: string;
+        sentAt: string;
+        sentBy?: string;
+        error?: string;
+      };
+      const outreachEvents: OutreachEventOut[] = [];
+      const results: Array<{ channel: 'email' | 'sms'; templateName: string; success: boolean; status: string; intendedRecipient: string | null; actualRecipient: string | null; error?: string }> = [];
+
+      if (intent === 'pre') {
+        const templateName = isFleet ? 'recovery-pre-fleet' : 'recovery-pre-byov';
+        const subLane = isFleet ? 'pre-fleet' : 'pre-byov';
+
+        if (!personalEmail) {
+          // No personal email on file — record blocked outcome regardless of
+          // template mode. Placeholder recipients produce misleading
+          // "simulated" success metrics for techs who actually have no contact.
+          outreachEvents.push({
+            channel: 'email', templateName, lane: subLane,
+            status: 'blocked', sentAt: new Date().toISOString(), sentBy: currentUser.username,
+            error: 'No personal email on file',
+          });
+          results.push({ channel: 'email', templateName, success: false, status: 'blocked', intendedRecipient: null, actualRecipient: null, error: 'No personal email on file' });
+          await storage.updateAutomationDetail(req.params.id, { outreach: outreachEvents as any });
+          return res.json({ success: false, intent, lane, results, techName, auditWarning });
+        }
+
+        const r = await sendCommunication({
+          templateName,
+          recipient: personalEmail,
+          variables: sharedVars,
+          metadata: { source: 'recovery-outreach', queueItemId: req.params.id, lane: subLane },
+          sentBy: currentUser.id,
+        });
+        outreachEvents.push({
+          channel: 'email',
+          templateName,
+          lane: subLane,
+          status: r.status,
+          communicationLogId: r.logId,
+          sentAt: new Date().toISOString(),
+          sentBy: currentUser.username,
+          error: r.error,
+        });
+        results.push({ channel: 'email', templateName, success: r.success, status: r.status, intendedRecipient: r.intendedRecipient, actualRecipient: r.actualRecipient, error: r.error });
+      } else {
+        // PAST — send email AND SMS independently. Each channel is skipped
+        // cleanly (blocked + reason) when its contact is missing, regardless of
+        // template mode. No placeholder recipients — those produce misleading
+        // success/simulated metrics for techs with no contact on file.
+        const emailTemplate = 'recovery-past-email';
+        const emailRecipient = personalEmail || '';
+        if (!emailRecipient) {
+          outreachEvents.push({
+            channel: 'email', templateName: emailTemplate, lane: 'past-email',
+            status: 'blocked', sentAt: new Date().toISOString(), sentBy: currentUser.username,
+            error: 'No personal email on file',
+          });
+          results.push({ channel: 'email', templateName: emailTemplate, success: false, status: 'blocked', intendedRecipient: null, actualRecipient: null, error: 'No personal email on file' });
+        }
+        if (emailRecipient) {
+          const r = await sendCommunication({
+            templateName: emailTemplate,
+            recipient: emailRecipient,
+            variables: sharedVars,
+            metadata: { source: 'recovery-outreach', queueItemId: req.params.id, lane: 'past-email' },
+            sentBy: currentUser.id,
+          });
+          outreachEvents.push({
+            channel: 'email', templateName: emailTemplate, lane: 'past-email',
+            status: r.status, communicationLogId: r.logId,
+            sentAt: new Date().toISOString(), sentBy: currentUser.username, error: r.error,
+          });
+          results.push({ channel: 'email', templateName: emailTemplate, success: r.success, status: r.status, intendedRecipient: r.intendedRecipient, actualRecipient: r.actualRecipient, error: r.error });
+        }
+
+        // SMS — look up mobile phone with full fallback chain:
+        // 1) TPMS cached assignment
+        // 2) all_techs roster (cellPhone / mobilePhone / homePhone)
+        // 3) Snowflake getMobilePhoneByLdap (canonical source)
+        // 4) parsed tech/hr blob
+        const smsTemplate = 'recovery-past-sms';
+        let mobilePhone: string | null = null;
+        try {
+          const tpms = ldapId ? await storage.getTpmsCachedAssignmentByEnterpriseId(ldapId) : null;
+          mobilePhone = (tpms as any)?.mobilePhone || (tpms as any)?.phoneNumber || (tpms as any)?.mobile_phone || null;
+        } catch {}
+        if (!mobilePhone && ldapId) {
+          try {
+            const allTechRow = await storage.getAllTechByTechRacfid(ldapId);
+            mobilePhone = (allTechRow as any)?.cellPhone || (allTechRow as any)?.mobilePhone || (allTechRow as any)?.homePhone || null;
+          } catch {}
+        }
+        if (!mobilePhone && ldapId) {
+          try {
+            const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+            const sf = getSnowflakeSyncService();
+            if (sf) {
+              const r2 = await sf.getMobilePhoneByLdap(ldapId);
+              if (r2?.success && r2.phoneNumber) mobilePhone = r2.phoneNumber;
+            }
+          } catch {}
+        }
+        if (!mobilePhone) {
+          mobilePhone = tech.mobilePhone || tech.phone || tech.cellPhone || hr.mobilePhone || null;
+        }
+
+        if (!mobilePhone) {
+          outreachEvents.push({
+            channel: 'sms', templateName: smsTemplate, lane: 'past-sms',
+            status: 'blocked', sentAt: new Date().toISOString(), sentBy: currentUser.username,
+            error: 'No mobile phone on file',
+          });
+          results.push({ channel: 'sms', templateName: smsTemplate, success: false, status: 'blocked', intendedRecipient: null, actualRecipient: null, error: 'No mobile phone on file' });
+        } else {
+          const r = await sendCommunication({
+            templateName: smsTemplate,
+            recipient: mobilePhone,
+            variables: sharedVars,
+            metadata: { source: 'recovery-outreach', queueItemId: req.params.id, lane: 'past-sms' },
+            sentBy: currentUser.id,
+          });
+          outreachEvents.push({
+            channel: 'sms', templateName: smsTemplate, lane: 'past-sms',
+            status: r.status, communicationLogId: r.logId,
+            sentAt: new Date().toISOString(), sentBy: currentUser.username, error: r.error,
+          });
+          results.push({ channel: 'sms', templateName: smsTemplate, success: r.success, status: r.status, intendedRecipient: r.intendedRecipient, actualRecipient: r.actualRecipient, error: r.error });
         }
       }
 
-      const { sendCommunication } = await import("./communication-service");
-      const result = await sendCommunication({
-        templateName,
-        recipient: personalEmail,
-        variables: {
-          firstName,
-          technicianName: techName,
-          lastDay,
-          separationDate,
-          enterpriseId,
-          toolAuditLink,
-          qrShippingLink,
-          detectionGap,
-          returnLink: fullReturnLink,
-        },
-        metadata: {
-          source: 'tool-recovery-outreach',
-          queueItemId: req.params.id,
-          lane,
-        },
-        sentBy: currentUser.id,
-      });
-
-      const outreachEvent = {
-        channel: 'email' as const,
-        templateName,
-        lane,
-        status: result.status,
-        communicationLogId: result.logId,
-        sentAt: new Date().toISOString(),
-        sentBy: currentUser.username,
-        error: result.error,
-      };
-
       await storage.updateAutomationDetail(req.params.id, {
-        outreach: [outreachEvent],
+        outreach: outreachEvents as any,
       });
 
+      const allSuccess = results.every(r => r.success);
       res.json({
-        success: result.success,
-        status: result.status,
+        success: allSuccess,
+        intent,
         lane,
-        templateName,
-        intendedRecipient: result.intendedRecipient,
-        actualRecipient: result.actualRecipient,
+        results,
         techName,
-        error: result.error,
+        auditWarning,
       });
     } catch (error) {
       console.error('Error sending outreach:', error);

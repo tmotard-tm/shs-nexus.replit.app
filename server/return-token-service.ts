@@ -1,22 +1,20 @@
 import crypto from 'crypto';
 import { storage } from './storage';
 
-export type DetectionLane = 'PRE' | 'WARM' | 'LATE' | 'COLD';
+// Task #424: simplified to 2 lanes — PRE (before last day) and PAST (on/after).
+export type DetectionLane = 'PRE' | 'PAST';
 
 // SYNC NOTE: This lane logic is duplicated in client/src/components/assets-queue/AssetsRecoveryQueue.tsx getDetectionLane().
-// If lane boundaries change (e.g., WARM extends to 10 days), both copies must be updated.
+// If lane boundaries change, both copies must be updated.
 export function getDetectionLane(lastDayWorked: string | null, createdAt: string | null): DetectionLane {
   const referenceDate = lastDayWorked || (createdAt ? new Date(createdAt).toISOString() : null);
-  if (!referenceDate) return 'WARM';
+  if (!referenceDate) return 'PAST';
   const ref = new Date(referenceDate);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   ref.setHours(0, 0, 0, 0);
   const daysSince = Math.floor((today.getTime() - ref.getTime()) / (1000 * 60 * 60 * 24));
-  if (daysSince < 0) return 'PRE';
-  if (daysSince <= 7) return 'WARM';
-  if (daysSince <= 30) return 'LATE';
-  return 'COLD';
+  return daysSince < 0 ? 'PRE' : 'PAST';
 }
 
 export async function generateReturnToken(queueItemId: string, ttlDays: number = 30): Promise<string> {

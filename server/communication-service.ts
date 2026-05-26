@@ -1,5 +1,6 @@
 import { storage } from "./storage";
 import { sendEmail } from "./email-service";
+import { sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import type { CommunicationTemplate, CommunicationLog, InsertCommunicationLog } from "@shared/schema";
 
 interface SendResult {
@@ -157,9 +158,16 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
       actualRecipient = result.success ? recipient : null;
       if (!result.success) errorMessage = result.error || 'Email delivery failed';
     } else {
-      console.log(`[COMMUNICATION] SMS not yet implemented`);
-      status = 'simulated';
-      errorMessage = 'SMS not yet implemented';
+      try {
+        const sid = await sendTwilioMessage(recipient, renderedText);
+        status = 'sent';
+        actualRecipient = recipient;
+        console.log(`[COMMUNICATION - LIVE] SMS sent to ${recipient}, sid=${sid}`);
+      } catch (err: any) {
+        status = 'failed';
+        errorMessage = err?.message || 'SMS delivery failed';
+        console.error(`[COMMUNICATION - LIVE] SMS to ${recipient} failed:`, errorMessage);
+      }
     }
   }
 
@@ -386,390 +394,238 @@ This is an automated message from the Nexus Portal.`,
       isActive: true,
     },
     {
-      name: 'tool-recovery-outreach-pre',
-      description: 'Outreach email for PRE lane — proactive/friendly tone, before last day worked',
-      type: 'email',
-      mode: 'simulated',
-      subject: 'Action Required: Return Your Company Tools and Equipment',
-      htmlContent: `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%); padding: 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and Equipment</h1>
-    <p style="color: #dbeafe; margin: 8px 0 0 0; font-size: 14px;">Prepare for your upcoming offboarding</p>
-  </div>
-  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
-    <p>Hi {{firstName}},</p>
-    <p>As you prepare for your last day on <strong>{{separationDate}}</strong>, please complete the steps below to return your company-provided tools and equipment.</p>
+        name: 'recovery-pre-fleet',
+        description: 'Outreach email for techs with company fleet vehicles, sent before last day — asks for tool audit completion',
+        type: 'email',
+        mode: 'simulated',
+        subject: 'Action Required: Return Your Sears Home Services Company Equipment',
+        htmlContent: `<!DOCTYPE html>
+  <html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+      <h1 style="color: white; margin: 0; font-size: 24px;">Complete Your Tool Audit</h1>
+      <p style="color: #dbeafe; margin: 8px 0 0 0; font-size: 14px;">Before your last day on {{separationDate}}</p>
+    </div>
+    <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+      <p>Hi {{firstName}},</p>
+      <p>As you prepare for your last day on <strong>{{separationDate}}</strong>, please complete your <strong>Tool Audit</strong>. Your company vehicle will be retrieved by Fleet, but we need an audit of the tools on board first.</p>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 1: AUDIT YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">You are required to complete a Tool Audit before your last day. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.</p>
-      <div style="text-align: center;">
-        <a href="{{toolAuditLink}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #2563eb;">Complete Your Tool Audit</h3>
+        <p style="margin: 0 0 12px 0;">This audit confirms which company-issued tools are on your truck. Please complete it as soon as possible.</p>
+        <div style="text-align: center;">
+          <a href="{{toolAuditLink}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+        </div>
       </div>
-    </div>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 2: RETURN YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location \u2014 no cost to you.</p>
-      <div style="text-align: center;">
-        <a href="{{qrShippingLink}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+      <p style="background: #f0f9ff; border-left: 4px solid #2563eb; padding: 12px; margin: 20px 0; font-size: 14px;"><strong>If you have already completed your tool audit (or used the QR shipping link if one was provided), please disregard this message.</strong></p>
+
+      <p>Questions? Contact the Tools Recovery team.</p>
+      <p>Thank you,<br>Offboarding Operations</p>
+      <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
+    </div>
+  </body>
+  </html>`,
+        textContent: `Hi {{firstName}},
+
+  As you prepare for your last day on {{separationDate}}, please complete your Tool Audit. Your company vehicle will be retrieved by Fleet, but we need an audit of the tools on board first.
+
+  Complete your Tool Audit:
+  {{toolAuditLink}}
+
+  If you have already completed your tool audit (or used the QR shipping link if one was provided), please disregard this message.
+
+  Questions? Contact the Tools Recovery team.
+
+  Thank you,
+  Offboarding Operations`,
+        variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'toolAuditLink'],
+        isActive: true,
+      },
+      {
+        name: 'recovery-pre-byov',
+        description: 'Outreach email for BYOV/rental techs, sent before last day — asks for tool + iPhone return via QR shipping',
+        type: 'email',
+        mode: 'simulated',
+        subject: 'Action Required: Return Your Sears Home Services Company Equipment',
+        htmlContent: `<!DOCTYPE html>
+  <html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #2563eb 0%, #60a5fa 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+      <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and iPhone</h1>
+      <p style="color: #dbeafe; margin: 8px 0 0 0; font-size: 14px;">Before your last day on {{separationDate}}</p>
+    </div>
+    <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+      <p>Hi {{firstName}},</p>
+      <p>As you prepare for your last day on <strong>{{separationDate}}</strong>, please return your company-provided tools and iPhone using the steps below.</p>
+
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 1: COMPLETE YOUR TOOL AUDIT</h3>
+        <p style="margin: 0 0 12px 0;">Confirm which company tools you currently have in your possession.</p>
+        <div style="text-align: center;">
+          <a href="{{toolAuditLink}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+        </div>
       </div>
-      <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Enter your Enterprise ID: {{enterpriseId}}</p>
-    </div>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 3: RETURN YOUR iPHONE</h3>
-      <p style="margin: 0;">A separate return label has been sent to this email address. Please factory-reset your device and ship it using the enclosed label.</p>
-    </div>
-
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 4: RETURN OTHER COMPANY ITEMS</h3>
-      <p style="margin: 0;">Please also return any company fuel cards, hotspot devices, and other company-provided equipment using the QR shipping process above.</p>
-    </div>
-
-    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 20px; margin: 24px 0;">
-      <h3 style="margin: 0 0 12px 0; color: #92400e;">IMPORTANT POLICY REMINDER</h3>
-      <p style="margin: 0 0 8px 0;">As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).</p>
-      <p style="margin: 0 0 8px 0;">Under the Policy, technicians are responsible for:</p>
-      <ul style="margin: 0 0 8px 0; padding-left: 20px;">
-        <li>Safeguarding company-provided tools</li>
-        <li>Returning all company-provided tools upon separation</li>
-        <li>Notifying their supervisor of any lost or damaged tools</li>
-        <li>Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law</li>
-      </ul>
-      <p style="margin: 0;">Completing the return process helps verify your current inventory and determine whether any follow-up is required under the Policy.</p>
-    </div>
-
-    <p>Questions? Contact the Tools Recovery team.</p>
-    <p>Thank you,<br>Offboarding Operations</p>
-    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
-  </div>
-</body>
-</html>`,
-      textContent: `Hi {{firstName}},
-
-As you prepare for your last day on {{separationDate}}, please complete the steps below to return your company-provided tools and equipment.
-
-STEP 1: AUDIT YOUR TOOLS
-You are required to complete a Tool Audit before your last day. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.
-{{toolAuditLink}}
-
-STEP 2: RETURN YOUR TOOLS
-Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location - no cost to you.
-{{qrShippingLink}}
-(Enter your Enterprise ID: {{enterpriseId}})
-
-STEP 3: RETURN YOUR iPHONE
-A separate return label has been sent to this email address. Please factory-reset your device and ship it using the enclosed label.
-
-STEP 4: RETURN OTHER COMPANY ITEMS
-Please also return any company fuel cards, hotspot devices, and other company-provided equipment using the QR shipping process above.
-
----
-
-IMPORTANT POLICY REMINDER
-
-As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).
-
-Under the Policy, technicians are responsible for:
-- Safeguarding company-provided tools
-- Returning all company-provided tools upon separation
-- Notifying their supervisor of any lost or damaged tools
-- Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law
-
-Completing the return process helps verify your current inventory and determine whether any follow-up is required under the Policy.
-
----
-
-Questions? Contact the Tools Recovery team.
-
-Thank you,
-Offboarding Operations`,
-      variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'toolAuditLink', 'qrShippingLink', 'returnLink'],
-      isActive: true,
-    },
-    {
-      name: 'tool-recovery-outreach-warm',
-      description: 'Outreach email for WARM lane — prompt/helpful tone, within 7 days of last day',
-      type: 'email',
-      mode: 'simulated',
-      subject: 'Action Required: Return Your Company Tools and Equipment',
-      htmlContent: `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%); padding: 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and Equipment</h1>
-    <p style="color: #fed7aa; margin: 8px 0 0 0; font-size: 14px;">Please complete your return promptly</p>
-  </div>
-  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
-    <p>Hi {{firstName}},</p>
-    <p>Your employment with Sears Home Services ended on <strong>{{separationDate}}</strong>. We need your help returning company-provided tools and equipment as soon as possible.</p>
-
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 1: AUDIT YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">You are required to complete a Tool Audit before your last day. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.</p>
-      <div style="text-align: center;">
-        <a href="{{toolAuditLink}}" style="background: #ea580c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #2563eb;">STEP 2: RETURN YOUR TOOLS AND iPHONE</h3>
+        <p style="margin: 0 0 12px 0;">Use the link below to generate prepaid QR shipping labels (sign in at <a href="https://asset-returns.replit.app/shipping-qr/">https://asset-returns.replit.app/shipping-qr/</a>). Drop your packaged tools and iPhone at any UPS location — no cost to you.</p>
+        <div style="text-align: center;">
+          <a href="{{qrShippingLink}}" style="background: #2563eb; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+        </div>
+        <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Sign in with <strong>Username:</strong> your Enterprise ID (<strong>{{enterpriseId}}</strong>) <em>or</em> your truck number (<strong>{{truckNumber}}</strong>) &middot; <strong>Password:</strong> your username followed by your 4-digit district number (e.g. <strong>{{enterpriseId}}{{districtNo}}</strong> or <strong>{{truckNumber}}{{districtNo}}</strong>)</p>
       </div>
-    </div>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 2: RETURN YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location \u2014 no cost to you.</p>
-      <div style="text-align: center;">
-        <a href="{{qrShippingLink}}" style="background: #ea580c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #2563eb;">Before You Ship the iPhone</h3>
+        <ol style="padding-left: 20px; margin: 0;">
+          <li>Open <strong>Settings</strong> &rarr; tap your name at the top &rarr; <strong>Find My</strong> &rarr; turn <strong>OFF</strong> Find My iPhone (enter your Apple ID password).</li>
+          <li>Sign out of iCloud: <strong>Settings</strong> &rarr; tap your name &rarr; <strong>Sign Out</strong>.</li>
+          <li>Erase the device: <strong>Settings</strong> &rarr; <strong>General</strong> &rarr; <strong>Transfer or Reset iPhone</strong> &rarr; <strong>Erase All Content and Settings</strong>.</li>
+        </ol>
+        <p style="margin: 10px 0 0 0; font-size: 13px; color: #64748b;">If Activation Lock is still on when we receive the device we cannot recycle it and you may be charged for the replacement.</p>
       </div>
-      <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Enter your Enterprise ID: {{enterpriseId}}</p>
+
+      <p style="background: #f0f9ff; border-left: 4px solid #2563eb; padding: 12px; margin: 20px 0; font-size: 14px;"><strong>If you have already completed your tool audit, used the QR shipping link, and shipped your tools and iPhone, please disregard this message.</strong></p>
+
+      <p>Questions? Contact the Tools Recovery team.</p>
+      <p>Thank you,<br>Offboarding Operations</p>
+      <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
     </div>
+  </body>
+  </html>`,
+        textContent: `Hi {{firstName}},
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 3: RETURN YOUR iPHONE</h3>
-      <p style="margin: 0;">A return label is attached to this email. Please factory-reset your device and ship it back using the enclosed label.</p>
+  As you prepare for your last day on {{separationDate}}, please return your company-provided tools and iPhone using the steps below.
+
+  STEP 1: COMPLETE YOUR TOOL AUDIT
+  {{toolAuditLink}}
+
+  STEP 2: RETURN YOUR TOOLS AND iPHONE
+  Use the link below to generate prepaid QR shipping labels (sign in at https://asset-returns.replit.app/shipping-qr/). Drop your packaged tools and iPhone at any UPS location - no cost to you.
+  {{qrShippingLink}}
+  Sign in with Username: your Enterprise ID ({{enterpriseId}}) OR your truck number ({{truckNumber}}); Password: your username followed by your 4-digit district number (e.g. {{enterpriseId}}{{districtNo}} or {{truckNumber}}{{districtNo}}).
+
+  Before you ship the iPhone:
+    1. Settings > [your name] > Find My > turn OFF Find My iPhone (enter Apple ID password)
+    2. Settings > [your name] > Sign Out (sign out of iCloud)
+    3. Settings > General > Transfer or Reset iPhone > Erase All Content and Settings
+  If Activation Lock is still on when we receive the device we cannot recycle it and you may be charged for the replacement.
+
+  If you have already completed your tool audit, used the QR shipping link, and shipped your tools and iPhone, please disregard this message.
+
+  Questions? Contact the Tools Recovery team.
+
+  Thank you,
+  Offboarding Operations`,
+        variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'truckNumber', 'districtNo', 'toolAuditLink', 'qrShippingLink'],
+        isActive: true,
+      },
+      {
+        name: 'recovery-past-email',
+        description: 'Consolidated recovery email sent after last day worked — asks tech to return everything',
+        type: 'email',
+        mode: 'simulated',
+        subject: 'Action Required: Return Your Sears Home Services Company Equipment',
+        htmlContent: `<!DOCTYPE html>
+  <html>
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+  <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
+    <div style="background: linear-gradient(135deg, #ea580c 0%, #fb923c 100%); padding: 30px; border-radius: 8px 8px 0 0;">
+      <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and Equipment</h1>
+      <p style="color: #fed7aa; margin: 8px 0 0 0; font-size: 14px;">Please complete your return promptly</p>
     </div>
+    <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
+      <p>Hi {{firstName}},</p>
+      <p>Our records show your employment with Sears Home Services ended on <strong>{{separationDate}}</strong>. Please return your company-provided tools, iPhone, and other equipment as soon as possible using the steps below.</p>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 4: RETURN OTHER COMPANY ITEMS</h3>
-      <p style="margin: 0;">Please also return any company fuel cards, hotspot devices, and other company-provided equipment using the QR shipping process above.</p>
-    </div>
-
-    <p style="font-weight: bold; color: #ea580c;">Please complete these returns within the next 5 business days.</p>
-
-    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 20px; margin: 24px 0;">
-      <h3 style="margin: 0 0 12px 0; color: #92400e;">IMPORTANT POLICY REMINDER</h3>
-      <p style="margin: 0 0 8px 0;">As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).</p>
-      <p style="margin: 0 0 8px 0;">Under the Policy, technicians are responsible for:</p>
-      <ul style="margin: 0 0 8px 0; padding-left: 20px;">
-        <li>Safeguarding company-provided tools</li>
-        <li>Returning all company-provided tools upon separation</li>
-        <li>Notifying their supervisor of any lost or damaged tools</li>
-        <li>Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law</li>
-      </ul>
-      <p style="margin: 0;">Completing the return process helps verify your current inventory and determine whether any follow-up is required under the Policy.</p>
-    </div>
-
-    <p>Questions? Contact the Tools Recovery team.</p>
-    <p>Thank you,<br>Offboarding Operations</p>
-    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
-  </div>
-</body>
-</html>`,
-      textContent: `Hi {{firstName}},
-
-Your employment with Sears Home Services ended on {{separationDate}}. We need your help returning company-provided tools and equipment as soon as possible.
-
-STEP 1: AUDIT YOUR TOOLS
-You are required to complete a Tool Audit before your last day. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.
-{{toolAuditLink}}
-
-STEP 2: RETURN YOUR TOOLS
-Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location - no cost to you.
-{{qrShippingLink}}
-(Enter your Enterprise ID: {{enterpriseId}})
-
-STEP 3: RETURN YOUR iPHONE
-A return label is attached to this email. Please factory-reset your device and ship it back using the enclosed label.
-
-STEP 4: RETURN OTHER COMPANY ITEMS
-Please also return any company fuel cards, hotspot devices, and other company-provided equipment using the QR shipping process above.
-
-Please complete these returns within the next 5 business days.
-
----
-
-IMPORTANT POLICY REMINDER
-
-As a reminder, you acknowledged the Policy and Acknowledgment for Company-Provided Technician Tools, either during onboarding (for technicians hired after policy launch) or via Segno (for incumbents).
-
-Under the Policy, technicians are responsible for:
-- Safeguarding company-provided tools
-- Returning all company-provided tools upon separation
-- Notifying their supervisor of any lost or damaged tools
-- Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law
-
-Completing the return process helps verify your current inventory and determine whether any follow-up is required under the Policy.
-
----
-
-Questions? Contact the Tools Recovery team.
-
-Thank you,
-Offboarding Operations`,
-      variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'toolAuditLink', 'qrShippingLink', 'returnLink'],
-      isActive: true,
-    },
-    {
-      name: 'tool-recovery-outreach-late',
-      description: 'Outreach email for LATE lane — recovery-focused tone, 8-30 days past last day',
-      type: 'email',
-      mode: 'simulated',
-      subject: 'Action Required: Return Your Company Tools and Equipment',
-      htmlContent: `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #dc2626 0%, #f87171 100%); padding: 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and Equipment</h1>
-    <p style="color: #fecaca; margin: 8px 0 0 0; font-size: 14px;">Immediate action required</p>
-  </div>
-  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
-    <p>Hi {{firstName}},</p>
-    <p>Our records show your employment with Sears Home Services ended on <strong>{{separationDate}}</strong>. We have not yet received your company-provided tools and equipment.</p>
-    <p style="font-weight: bold; color: #dc2626;">Please complete the return process within the next 3 business days using the steps below.</p>
-
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #dc2626;">STEP 1: AUDIT YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">You are required to complete a Tool Audit. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.</p>
-      <div style="text-align: center;">
-        <a href="{{toolAuditLink}}" style="background: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 1: COMPLETE YOUR TOOL AUDIT</h3>
+        <p style="margin: 0 0 12px 0;">Confirm which company-issued tools you currently have in your possession.</p>
+        <div style="text-align: center;">
+          <a href="{{toolAuditLink}}" style="background: #ea580c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+        </div>
       </div>
-    </div>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #dc2626;">STEP 2: RETURN YOUR TOOLS AND EQUIPMENT</h3>
-      <p style="margin: 0 0 12px 0;">Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location \u2014 no cost to you.</p>
-      <div style="text-align: center;">
-        <a href="{{qrShippingLink}}" style="background: #dc2626; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #ea580c;">STEP 2: RETURN EVERYTHING</h3>
+        <p style="margin: 0 0 12px 0;">Use the link below to generate prepaid QR shipping labels (sign in at <a href="https://asset-returns.replit.app/shipping-qr/">https://asset-returns.replit.app/shipping-qr/</a>). Ship back your company tools, iPhone, fuel cards, hotspot devices, and any other company-provided equipment. Drop the packages at any UPS location — no cost to you.</p>
+        <div style="text-align: center;">
+          <a href="{{qrShippingLink}}" style="background: #ea580c; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+        </div>
+        <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Sign in with <strong>Username:</strong> your Enterprise ID (<strong>{{enterpriseId}}</strong>) <em>or</em> your truck number (<strong>{{truckNumber}}</strong>) &middot; <strong>Password:</strong> your username followed by your 4-digit district number (e.g. <strong>{{enterpriseId}}{{districtNo}}</strong> or <strong>{{truckNumber}}{{districtNo}}</strong>)</p>
       </div>
-      <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Enter your Enterprise ID: {{enterpriseId}}</p>
-      <p style="margin: 8px 0 0 0; font-size: 13px;">This includes all company tools, your company iPhone (factory-reset), fuel cards, hotspot devices, and any other company-provided equipment.</p>
-    </div>
 
-    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 20px; margin: 24px 0;">
-      <h3 style="margin: 0 0 12px 0; color: #92400e;">POLICY REMINDER</h3>
-      <p style="margin: 0 0 8px 0;">Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for:</p>
-      <ul style="margin: 0 0 8px 0; padding-left: 20px;">
-        <li>Returning all company-provided tools upon separation</li>
-        <li>Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law</li>
-      </ul>
-    </div>
-
-    <p>If you have already returned your equipment or have questions about specific items, please contact the Tools Recovery team so we can update our records.</p>
-    <p>Thank you,<br>Offboarding Operations</p>
-    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
-  </div>
-</body>
-</html>`,
-      textContent: `Hi {{firstName}},
-
-Our records show your employment with Sears Home Services ended on {{separationDate}}. We have not yet received your company-provided tools and equipment.
-
-Please complete the return process within the next 3 business days using the steps below.
-
-STEP 1: AUDIT YOUR TOOLS
-You are required to complete a Tool Audit. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this as soon as possible.
-{{toolAuditLink}}
-
-STEP 2: RETURN YOUR TOOLS AND EQUIPMENT
-Use the link below to generate prepaid QR shipping labels. You can drop your packaged tools at any UPS location - no cost to you.
-{{qrShippingLink}}
-(Enter your Enterprise ID: {{enterpriseId}})
-
-This includes all company tools, your company iPhone (factory-reset), fuel cards, hotspot devices, and any other company-provided equipment.
-
----
-
-POLICY REMINDER
-
-Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for:
-- Returning all company-provided tools upon separation
-- Reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law
-
----
-
-If you have already returned your equipment or have questions about specific items, please contact the Tools Recovery team so we can update our records.
-
-Thank you,
-Offboarding Operations`,
-      variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'toolAuditLink', 'qrShippingLink', 'returnLink'],
-      isActive: true,
-    },
-    {
-      name: 'tool-recovery-outreach-cold',
-      description: 'Outreach email for COLD lane — formal enforcement tone, 30+ days past last day',
-      type: 'email',
-      mode: 'simulated',
-      subject: 'Action Required: Return Your Company Tools and Equipment',
-      htmlContent: `<!DOCTYPE html>
-<html>
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-  <div style="background: linear-gradient(135deg, #1e293b 0%, #475569 100%); padding: 30px; border-radius: 8px 8px 0 0;">
-    <h1 style="color: white; margin: 0; font-size: 24px;">Return Your Company Tools and Equipment</h1>
-    <p style="color: #cbd5e1; margin: 8px 0 0 0; font-size: 14px;">Immediate action required</p>
-  </div>
-  <div style="background: #f8fafc; padding: 30px; border: 1px solid #e2e8f0; border-top: none;">
-    <p>Hi {{firstName}},</p>
-    <p>Our records show your employment with Sears Home Services ended on <strong>{{separationDate}}</strong>. As of today, <strong>{{detectionGap}} days</strong> have passed and we have not received your company-provided tools and equipment.</p>
-
-    <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 16px; margin: 20px 0;">
-      <h3 style="margin: 0; color: #991b1b;">IMMEDIATE ACTION REQUIRED</h3>
-    </div>
-
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #1e293b;">STEP 1: AUDIT YOUR TOOLS</h3>
-      <p style="margin: 0 0 12px 0;">You are required to complete a Tool Audit. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this immediately.</p>
-      <div style="text-align: center;">
-        <a href="{{toolAuditLink}}" style="background: #1e293b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Complete Tool Audit</a>
+      <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
+        <h3 style="margin: 0 0 8px 0; color: #ea580c;">Before You Ship the iPhone</h3>
+        <ol style="padding-left: 20px; margin: 0;">
+          <li>Open <strong>Settings</strong> &rarr; tap your name at the top &rarr; <strong>Find My</strong> &rarr; turn <strong>OFF</strong> Find My iPhone (enter your Apple ID password).</li>
+          <li>Sign out of iCloud: <strong>Settings</strong> &rarr; tap your name &rarr; <strong>Sign Out</strong>.</li>
+          <li>Erase the device: <strong>Settings</strong> &rarr; <strong>General</strong> &rarr; <strong>Transfer or Reset iPhone</strong> &rarr; <strong>Erase All Content and Settings</strong>.</li>
+        </ol>
+        <p style="margin: 10px 0 0 0; font-size: 13px; color: #64748b;">If Activation Lock is still on when we receive the device we cannot recycle it and you may be charged for the replacement.</p>
       </div>
-    </div>
 
-    <div style="background: white; border: 1px solid #e2e8f0; border-radius: 8px; padding: 20px; margin: 20px 0;">
-      <h3 style="margin: 0 0 8px 0; color: #1e293b;">STEP 2: RETURN YOUR TOOLS AND EQUIPMENT</h3>
-      <p style="margin: 0 0 12px 0;">Please use the link below to generate prepaid return shipping labels and return all company tools and equipment within 5 business days:</p>
-      <div style="text-align: center;">
-        <a href="{{qrShippingLink}}" style="background: #1e293b; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">Generate QR Shipping Labels</a>
+      <p style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px; margin: 20px 0; font-size: 14px;"><strong>If you have already completed your tool audit, used the QR shipping link, and returned your equipment, please disregard this message.</strong></p>
+
+      <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 20px; margin: 24px 0;">
+        <h3 style="margin: 0 0 12px 0; color: #92400e;">POLICY REMINDER</h3>
+        <p style="margin: 0;">Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for returning all company-provided tools upon separation and reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.</p>
       </div>
-      <p style="margin: 8px 0 0 0; font-size: 13px; color: #64748b; text-align: center;">Enter your Enterprise ID: {{enterpriseId}}</p>
-      <p style="margin: 8px 0 0 0; font-size: 13px;">This includes all company tools, your company iPhone, fuel cards, hotspot devices, and any other company-provided equipment.</p>
+
+      <p>Questions? Contact the Tools Recovery team.</p>
+      <p>Thank you,<br>Offboarding Operations</p>
+      <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
     </div>
+  </body>
+  </html>`,
+        textContent: `Hi {{firstName}},
 
-    <div style="background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px; padding: 20px; margin: 24px 0;">
-      <p style="margin: 0 0 8px 0;">Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for returning all company-provided tools upon separation and reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.</p>
-    </div>
+  Our records show your employment with Sears Home Services ended on {{separationDate}}. Please return your company-provided tools, iPhone, and other equipment as soon as possible using the steps below.
 
-    <p>If you have already returned your equipment, returned it to a different location, or need to discuss specific items, please contact the Tools Recovery team immediately.</p>
-    <p style="font-weight: bold; color: #991b1b;">Failure to respond may result in further follow-up under the terms of the Policy.</p>
-    <p>Thank you,<br>Offboarding Operations</p>
-    <p style="color: #64748b; font-size: 12px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus Offboarding System.</p>
-  </div>
-</body>
-</html>`,
-      textContent: `Hi {{firstName}},
+  STEP 1: COMPLETE YOUR TOOL AUDIT
+  {{toolAuditLink}}
 
-Our records show your employment with Sears Home Services ended on {{separationDate}}. As of today, {{detectionGap}} days have passed and we have not received your company-provided tools and equipment.
+  STEP 2: RETURN EVERYTHING
+  Use the link below to generate prepaid QR shipping labels (sign in at https://asset-returns.replit.app/shipping-qr/). Ship back your company tools, iPhone, fuel cards, hotspot devices, and any other company-provided equipment. Drop the packages at any UPS location - no cost to you.
+  {{qrShippingLink}}
+  Sign in with Username: your Enterprise ID ({{enterpriseId}}) OR your truck number ({{truckNumber}}); Password: your username followed by your 4-digit district number (e.g. {{enterpriseId}}{{districtNo}} or {{truckNumber}}{{districtNo}}).
 
-IMMEDIATE ACTION REQUIRED
+  Before you ship the iPhone:
+    1. Settings > [your name] > Find My > turn OFF Find My iPhone (enter Apple ID password)
+    2. Settings > [your name] > Sign Out (sign out of iCloud)
+    3. Settings > General > Transfer or Reset iPhone > Erase All Content and Settings
+  If Activation Lock is still on when we receive the device we cannot recycle it and you may be charged for the replacement.
 
-STEP 1: AUDIT YOUR TOOLS
-You are required to complete a Tool Audit. This audit helps us ensure all company-issued tools and equipment are properly accounted for. Please complete this immediately.
-{{toolAuditLink}}
+  If you have already completed your tool audit, used the QR shipping link, and returned your equipment, please disregard this message.
 
-STEP 2: RETURN YOUR TOOLS AND EQUIPMENT
-Please use the link below to generate prepaid return shipping labels and return all company tools and equipment within 5 business days:
-{{qrShippingLink}}
-(Enter your Enterprise ID: {{enterpriseId}})
+  ---
 
-This includes all company tools, your company iPhone, fuel cards, hotspot devices, and any other company-provided equipment.
+  POLICY REMINDER
+  Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for returning all company-provided tools upon separation and reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.
 
----
+  ---
 
-Under the Policy and Acknowledgment for Company-Provided Technician Tools that you acknowledged, technicians are responsible for returning all company-provided tools upon separation and reimbursing the Company for the replacement value of any tools not returned, in accordance with the Policy and applicable state law.
+  Questions? Contact the Tools Recovery team.
 
----
-
-If you have already returned your equipment, returned it to a different location, or need to discuss specific items, please contact the Tools Recovery team immediately.
-
-Failure to respond may result in further follow-up under the terms of the Policy.
-
-Thank you,
-Offboarding Operations`,
-      variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'toolAuditLink', 'qrShippingLink', 'detectionGap', 'returnLink'],
-      isActive: true,
-    },
+  Thank you,
+  Offboarding Operations`,
+        variables: ['firstName', 'technicianName', 'separationDate', 'enterpriseId', 'truckNumber', 'districtNo', 'toolAuditLink', 'qrShippingLink'],
+        isActive: true,
+      },
+      {
+        name: 'recovery-past-sms',
+        description: 'Consolidated recovery SMS sent after last day worked — short text directing tech to return everything',
+        type: 'sms',
+        mode: 'simulated',
+        subject: null,
+        htmlContent: null,
+        textContent: `Hi {{firstName}}, Sears Home Services records show your last day was {{separationDate}}. Complete your tool audit: {{toolAuditLink}} and return your tools, iPhone (sign out of iCloud + turn off Find My iPhone first), and company equipment via prepaid QR labels: {{qrShippingLink}} — sign in with Username = Enterprise ID ({{enterpriseId}}) OR truck # ({{truckNumber}}), Password = username + 4-digit district (e.g. {{enterpriseId}}{{districtNo}} or {{truckNumber}}{{districtNo}}). If you already did this, please disregard. — Offboarding Operations`,
+        variables: ['firstName', 'separationDate', 'enterpriseId', 'truckNumber', 'districtNo', 'toolAuditLink', 'qrShippingLink'],
+        isActive: true,
+      },
     {
       name: 'phase2-tasks-created',
       description: 'Notifies Fleet team when all Day 0 offboarding tasks are completed and Phase 2 tasks have been auto-generated',
@@ -846,11 +702,32 @@ This is an automated message from the Nexus Offboarding System.`,
   ];
 
   const outreachTemplateNames = new Set([
+    'recovery-pre-fleet',
+    'recovery-pre-byov',
+    'recovery-past-email',
+    'recovery-past-sms',
+  ]);
+
+  // Task #424: remove deprecated 4-lane outreach templates from any prior seed
+  const deprecatedTemplateNames = [
     'tool-recovery-outreach-pre',
     'tool-recovery-outreach-warm',
     'tool-recovery-outreach-late',
     'tool-recovery-outreach-cold',
-  ]);
+  ];
+  let removed = 0;
+  for (const name of deprecatedTemplateNames) {
+    const stale = existingTemplates.find(t => t.name === name);
+    if (stale) {
+      try {
+        await storage.deleteCommunicationTemplate(stale.id);
+        removed++;
+        console.log(`[COMMUNICATION] Removed deprecated outreach template: ${name}`);
+      } catch (err: any) {
+        console.warn(`[COMMUNICATION] Failed to remove deprecated template ${name}: ${err?.message || err}`);
+      }
+    }
+  }
 
   let seeded = 0;
   let updated = 0;

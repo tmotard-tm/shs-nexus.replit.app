@@ -438,6 +438,7 @@ export interface IStorage {
   getCommunicationLogsByRecipient(recipient: string): Promise<CommunicationLog[]>;
   createCommunicationLog(log: InsertCommunicationLog): Promise<CommunicationLog>;
   getAssetsQueueItemsForNotificationBackfill(sinceDays: number): Promise<QueueItem[]>;
+  getAssetsQueueItemsForOutreachBackfill(sinceDays: number): Promise<QueueItem[]>;
   getToolAuditNotificationStatus(ldapId: string, sinceDays: number): Promise<{ sent: boolean; lastStatus: string | null; lastSentAt: Date | null }>;
 
   // Vehicle Nexus Data Module (Nexus-specific vehicle data)
@@ -3496,6 +3497,10 @@ export class MemStorage implements IStorage {
   async createCommunicationLog(_log: InsertCommunicationLog): Promise<CommunicationLog> {
     throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
   }
+  async getAssetsQueueItemsForOutreachBackfill(_sinceDays: number): Promise<QueueItem[]> {
+    return [];
+  }
+
   async getAssetsQueueItemsForNotificationBackfill(_sinceDays: number): Promise<QueueItem[]> {
     throw new Error("MemStorage does not support notification backfill. Use DatabaseStorage.");
   }
@@ -6235,6 +6240,17 @@ export class DatabaseStorage implements IStorage {
         eq(queueItems.department, 'Assets Management'),
         sql`${queueItems.createdAt} >= ${sinceDate}`,
         sql`(${queueItems.toolAuditNotificationSent} = false OR ${queueItems.toolAuditNotificationSent} IS NULL)`
+      ))
+      .orderBy(desc(queueItems.createdAt));
+  }
+
+  async getAssetsQueueItemsForOutreachBackfill(sinceDays: number): Promise<QueueItem[]> {
+    const sinceDate = new Date();
+    sinceDate.setDate(sinceDate.getDate() - sinceDays);
+    return await db.select().from(queueItems)
+      .where(and(
+        eq(queueItems.department, 'Assets Management'),
+        sql`${queueItems.createdAt} >= ${sinceDate}`,
       ))
       .orderBy(desc(queueItems.createdAt));
   }

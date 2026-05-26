@@ -1,24 +1,25 @@
 import type { AutomationDetail, OutreachEvent } from "@shared/schema";
 
+// Task #424: simplified to PRE (fleet/byov) and PAST (email/sms) outreaches.
 export const RECOVERY_OUTREACH_TEMPLATES = [
-  "tool-recovery-outreach-pre",
-  "tool-recovery-outreach-warm",
-  "tool-recovery-outreach-late",
-  "tool-recovery-outreach-cold",
+  "recovery-pre-fleet",
+  "recovery-pre-byov",
+  "recovery-past-email",
+  "recovery-past-sms",
 ] as const;
 
 const LANE_LABELS: Record<string, string> = {
-  "tool-recovery-outreach-pre": "PRE — Proactive",
-  "tool-recovery-outreach-warm": "WARM — Prompt",
-  "tool-recovery-outreach-late": "LATE — Urgent",
-  "tool-recovery-outreach-cold": "COLD — Final Notice",
+  "recovery-pre-fleet": "PRE — Fleet (Tool Audit)",
+  "recovery-pre-byov": "PRE — BYOV/Rental (Return)",
+  "recovery-past-email": "PAST — Return Everything (Email)",
+  "recovery-past-sms": "PAST — Return Everything (SMS)",
 };
 
 const LANE_SHORT: Record<string, string> = {
-  "tool-recovery-outreach-pre": "PRE",
-  "tool-recovery-outreach-warm": "WARM",
-  "tool-recovery-outreach-late": "LATE",
-  "tool-recovery-outreach-cold": "COLD",
+  "recovery-pre-fleet": "PRE",
+  "recovery-pre-byov": "PRE",
+  "recovery-past-email": "PAST",
+  "recovery-past-sms": "PAST",
 };
 
 export type RecoveryOutreachKind = "sent" | "simulated" | "failed" | "blocked";
@@ -29,12 +30,9 @@ export interface LatestRecoveryOutreach {
   laneShort: string;
   status: RecoveryOutreachKind;
   sentAt: Date;
+  channel: "email" | "sms";
 }
 
-// The current backend stores a single shared outreach log per queue item that
-// applies to all three email-driven tasks (Tools Return, iPhone Return, Create
-// UPS Shipping Label). `taskKey` is accepted so callers can request the latest
-// outreach per task; if backend later splits by task, filter here.
 export function getLatestRecoveryOutreach(
   automationDetail?: AutomationDetail | null,
   _taskKey?: string,
@@ -59,6 +57,7 @@ export function getLatestRecoveryOutreach(
     laneShort: LANE_SHORT[latest.templateName] || latest.templateName,
     status: latest.status as RecoveryOutreachKind,
     sentAt: new Date(latest.sentAt),
+    channel: (latest.channel as "email" | "sms") || "email",
   };
 }
 
@@ -80,16 +79,17 @@ export function formatRelativeTime(date: Date, now: Date = new Date()): string {
 
 export function buildRecoveryOutreachBadgeText(latest: LatestRecoveryOutreach): string {
   const rel = formatRelativeTime(latest.sentAt);
+  const channelLabel = latest.channel === "sms" ? "SMS" : "email";
   switch (latest.status) {
     case "sent":
-      return `${latest.laneShort} email sent · ${rel}`;
+      return `${latest.laneShort} ${channelLabel} sent · ${rel}`;
     case "simulated":
-      return `${latest.laneShort} email simulated · ${rel}`;
+      return `${latest.laneShort} ${channelLabel} simulated · ${rel}`;
     case "failed":
-      return `${latest.laneShort} email failed · ${rel}`;
+      return `${latest.laneShort} ${channelLabel} failed · ${rel}`;
     case "blocked":
-      return `${latest.laneShort} email blocked · ${rel}`;
+      return `${latest.laneShort} ${channelLabel} blocked · ${rel}`;
     default:
-      return `${latest.laneShort} email · ${rel}`;
+      return `${latest.laneShort} ${channelLabel} · ${rel}`;
   }
 }
