@@ -17,6 +17,11 @@ import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { AssetsTaskDetailView } from "@/components/assets-queue/AssetsTaskDetailView";
 import {
+  getLatestRecoveryOutreach,
+  buildRecoveryOutreachBadgeText,
+  type LatestRecoveryOutreach,
+} from "@/components/assets-queue/outreach-utils";
+import {
   type DataSource,
   type TechData,
   type AssetsQueueItemEnriched,
@@ -97,6 +102,38 @@ function getDaysSinceSeparation(separationDate: string | null): number | null {
   sepDate.setHours(0, 0, 0, 0);
   const diffTime = today.getTime() - sepDate.getTime();
   return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function RecoveryOutreachBadge({ latest }: { latest: LatestRecoveryOutreach | null }) {
+  if (!latest) {
+    return (
+      <Badge
+        className="text-[10px] shrink-0 bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-100"
+        title="No recovery outreach email has been sent yet."
+      >
+        <Clock className="h-3 w-3 mr-1" />Awaiting outreach
+      </Badge>
+    );
+  }
+  const text = buildRecoveryOutreachBadgeText(latest);
+  const fullTimestamp = latest.sentAt.toLocaleString();
+  const className =
+    latest.status === "sent"
+      ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100"
+      : latest.status === "simulated"
+      ? "bg-blue-100 text-blue-800 border-blue-200 hover:bg-blue-100"
+      : latest.status === "failed"
+      ? "bg-red-100 text-red-800 border-red-200 hover:bg-red-100"
+      : "bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100";
+  const Icon =
+    latest.status === "sent" || latest.status === "simulated"
+      ? Mail
+      : AlertTriangle;
+  return (
+    <Badge className={`text-[10px] shrink-0 ${className}`} title={fullTimestamp}>
+      <Icon className="h-3 w-3 mr-1" />{text}
+    </Badge>
+  );
 }
 
 function getDaysUntilSeparation(separationDate: string | null): number | null {
@@ -588,8 +625,8 @@ function ExpandedRowDetails({
     { key: "taskCreateShippingLabel" as TaskKey, label: "Create UPS Shipping Label", desc: "Generate QR code for tech", icon: Package },
   ];
 
-  const AUTOMATED_KEYS: TaskKey[] = ["taskToolsReturn", "taskIphoneReturn", "taskCreateShippingLabel", "taskCloseSegnoOrders"];
-  const HUMAN_KEYS: TaskKey[] = ["taskDisconnectedLine", "taskDisconnectedMPayment"];
+  const AUTOMATED_KEYS: TaskKey[] = ["taskToolsReturn", "taskIphoneReturn", "taskCreateShippingLabel"];
+  const HUMAN_KEYS: TaskKey[] = ["taskDisconnectedLine", "taskDisconnectedMPayment", "taskCloseSegnoOrders"];
   const VENDOR_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
 
   function getAutoStatus(key: TaskKey, done: boolean): "completed" | "processing" | "actionRequired" {
@@ -784,6 +821,10 @@ function ExpandedRowDetails({
               {taskItems.filter(t => AUTOMATED_KEYS.includes(t.key)).map((task) => {
                 const Icon = task.icon;
                 const status = getAutoStatus(task.key, taskState[task.key]);
+                const latestOutreach = getLatestRecoveryOutreach(
+                  item.automationDetail as AutomationDetail | null,
+                  task.key,
+                );
                 return (
                   <div key={task.key} className="space-y-0">
                     <div className={`flex items-center gap-3 p-3 ${
@@ -806,9 +847,7 @@ function ExpandedRowDetails({
                         </Badge>
                       )}
                       {status === "processing" && (
-                        <Badge className="text-[10px] shrink-0 bg-yellow-100 text-yellow-800 border-yellow-200 hover:bg-yellow-100">
-                          <Clock className="h-3 w-3 mr-1" />{task.key === "taskCloseSegnoOrders" ? "System Processing" : "Tool recovery email sent"}
-                        </Badge>
+                        <RecoveryOutreachBadge latest={latestOutreach} />
                       )}
                       {status === "actionRequired" && (
                         <Badge className="text-[10px] shrink-0 bg-red-100 text-red-800 border-red-200 hover:bg-red-100">
@@ -816,12 +855,6 @@ function ExpandedRowDetails({
                         </Badge>
                       )}
                     </div>
-                    {task.key === "taskCloseSegnoOrders" && (
-                      <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border-t border-amber-100">
-                        <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
-                        <p className="text-xs text-amber-800">{VENDOR_ADVISORY}</p>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -839,36 +872,43 @@ function ExpandedRowDetails({
                 const Icon = task.icon;
                 const isChecked = taskState[task.key];
                 return (
-                  <label
-                    key={task.key}
-                    className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 transition-colors ${isChecked ? "bg-slate-50/50" : ""}`}
-                  >
-                    <Checkbox
-                      checked={isChecked}
-                      onCheckedChange={(checked) => handleTaskChange(task.key, !!checked)}
-                      className="mt-1"
-                    />
-                    <div className="flex-1 min-w-0">
-                      <div className={`text-sm font-medium ${isChecked ? "text-slate-500 line-through" : "text-slate-900"}`}>
-                        {task.label}
+                  <div key={task.key}>
+                    <label
+                      className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-slate-50 transition-colors ${isChecked ? "bg-slate-50/50" : ""}`}
+                    >
+                      <Checkbox
+                        checked={isChecked}
+                        onCheckedChange={(checked) => handleTaskChange(task.key, !!checked)}
+                        className="mt-1"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className={`text-sm font-medium ${isChecked ? "text-slate-500 line-through" : "text-slate-900"}`}>
+                          {task.label}
+                        </div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {task.showCarrier && carrier && (
+                            <Badge variant="outline" className="text-[10px] h-4 px-1.5">
+                              {carrier}
+                            </Badge>
+                          )}
+                          <span className="text-xs text-slate-500">{task.desc}</span>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        {task.showCarrier && carrier && (
-                          <Badge variant="outline" className="text-[10px] h-4 px-1.5">
-                            {carrier}
-                          </Badge>
-                        )}
-                        <span className="text-xs text-slate-500">{task.desc}</span>
+                      {isChecked ? (
+                        <Icon className="h-4 w-4 text-slate-300 shrink-0" />
+                      ) : (
+                        <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100">
+                          <Clock className="h-3 w-3 mr-1" />Awaiting Operator
+                        </Badge>
+                      )}
+                    </label>
+                    {task.key === "taskCloseSegnoOrders" && (
+                      <div className="flex items-start gap-2 px-3 py-2 bg-amber-50 border-t border-amber-100">
+                        <Info className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-800">{VENDOR_ADVISORY}</p>
                       </div>
-                    </div>
-                    {isChecked ? (
-                      <Icon className="h-4 w-4 text-slate-300 shrink-0" />
-                    ) : (
-                      <Badge className="text-[10px] shrink-0 bg-orange-100 text-orange-800 border-orange-200 hover:bg-orange-100">
-                        <Clock className="h-3 w-3 mr-1" />Awaiting Operator
-                      </Badge>
                     )}
-                  </label>
+                  </div>
                 );
               })}
             </div>

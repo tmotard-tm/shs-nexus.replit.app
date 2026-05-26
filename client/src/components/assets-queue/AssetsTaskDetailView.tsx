@@ -20,6 +20,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import type { QueueItem, User, AutomationDetail } from "@shared/schema";
+import {
+  getLatestRecoveryOutreach,
+  buildRecoveryOutreachBadgeText,
+  type LatestRecoveryOutreach,
+} from "@/components/assets-queue/outreach-utils";
 import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -272,12 +277,12 @@ const AUTOMATED_TASK_KEYS: TaskKey[] = [
   'taskToolsReturn',
   'taskIphoneReturn',
   'taskCreateShippingLabel',
-  'taskCloseSegnoOrders',
 ];
 
 const HUMAN_TASK_KEYS: TaskKey[] = [
   'taskDisconnectedLine',
   'taskDisconnectedMPayment',
+  'taskCloseSegnoOrders',
 ];
 
 const VENDOR_CHECK_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
@@ -290,7 +295,13 @@ function getAutomationStatus(key: TaskKey, isComplete: boolean, automationDetail
   return 'processing';
 }
 
-function AutomationBadge({ status, taskKey }: { status: AutomationStatus; taskKey?: TaskKey }) {
+function AutomationBadge({
+  status,
+  latestOutreach,
+}: {
+  status: AutomationStatus;
+  latestOutreach?: LatestRecoveryOutreach | null;
+}) {
   switch (status) {
     case 'completed':
       return (
@@ -299,13 +310,39 @@ function AutomationBadge({ status, taskKey }: { status: AutomationStatus; taskKe
           System Completed
         </Badge>
       );
-    case 'processing':
+    case 'processing': {
+      if (!latestOutreach) {
+        return (
+          <Badge
+            className="text-xs font-medium bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100"
+            title="No recovery outreach email has been sent yet."
+          >
+            <Clock className="h-3 w-3 mr-1" />
+            Awaiting outreach
+          </Badge>
+        );
+      }
+      const text = buildRecoveryOutreachBadgeText(latestOutreach);
+      const fullTimestamp = latestOutreach.sentAt.toLocaleString();
+      const className =
+        latestOutreach.status === 'sent'
+          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800 hover:bg-green-100'
+          : latestOutreach.status === 'simulated'
+          ? 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-100'
+          : latestOutreach.status === 'failed'
+          ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-100'
+          : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100';
+      const Icon =
+        latestOutreach.status === 'sent' || latestOutreach.status === 'simulated'
+          ? Mail
+          : AlertTriangle;
       return (
-        <Badge className="text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 hover:bg-yellow-100">
-          <Clock className="h-3 w-3 mr-1" />
-          {taskKey === 'taskCloseSegnoOrders' ? 'System Processing' : 'Tool recovery email sent'}
+        <Badge className={`text-xs font-medium ${className}`} title={fullTimestamp}>
+          <Icon className="h-3 w-3 mr-1" />
+          {text}
         </Badge>
       );
+    }
     case 'actionRequired':
       return (
         <Badge className="text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-100">
@@ -765,6 +802,10 @@ export function AssetsTaskDetailView({
                 const Icon = task.icon;
                 const isChecked = taskState[task.key];
                 const status = getAutomationStatus(task.key, isChecked, item.automationDetail as AutomationDetail | null);
+                const latestOutreach = getLatestRecoveryOutreach(
+                  item.automationDetail as AutomationDetail | null,
+                  task.key,
+                );
                 return (
                   <div key={task.key} className="space-y-1">
                     <div
@@ -783,14 +824,8 @@ export function AssetsTaskDetailView({
                         <span className="text-sm font-medium">{task.label}</span>
                         {task.description && <p className="text-xs text-muted-foreground">{task.description}</p>}
                       </div>
-                      <AutomationBadge status={status} taskKey={task.key} />
+                      <AutomationBadge status={status} latestOutreach={latestOutreach} />
                     </div>
-                    {task.key === 'taskCloseSegnoOrders' && (
-                      <div className="ml-6 flex items-start gap-2 p-2 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
-                        <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-                        <p className="text-xs text-amber-800 dark:text-amber-400">{VENDOR_CHECK_ADVISORY}</p>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -859,6 +894,13 @@ export function AssetsTaskDetailView({
                             {carrier}
                           </Badge>
                         )}
+                      </div>
+                    )}
+
+                    {task.key === 'taskCloseSegnoOrders' && (
+                      <div className="ml-6 flex items-start gap-2 p-2 rounded bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800">
+                        <Info className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                        <p className="text-xs text-amber-800 dark:text-amber-400">{VENDOR_CHECK_ADVISORY}</p>
                       </div>
                     )}
                   </div>
