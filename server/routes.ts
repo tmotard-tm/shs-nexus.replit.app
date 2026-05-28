@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
 import { initVrmSchema } from "./vrm/init-schema";
@@ -14934,6 +14934,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
   }
 
+  // Bounded-wait helper for the three /api/ams/* endpoints that read the truck-status
+  // cache. Behavior:
+  //   1. Hot cache (within TTL) — return immediately.
+  //   2. Cold/stale — join (or kick off) the deduped build promise and await it up
+  //      to AMS_REQUEST_BUDGET_MS. If the build finishes inside the budget, return
+  //      fresh data (200). If the budget elapses while the build is still running,
+  //      return 503 + Retry-After so the edge proxy doesn't time out at ~60-120 s
+  //      with a 502. The build keeps running in the background — the next request
+  //      will either find it hot or join the same in-flight promise.
+  //   3. If the build rejects, return 503 with the underlying error message so the
+  //      client sees a real failure rather than an opaque proxy 502.
+  // NOTE: The project's TanStack QueryClient runs with `retry: false`
+  // (client/src/lib/queryClient.ts), so 503 is a terminal status to the UI today.
+  // The bounded-await path is what protects the common case: as long as the build
+  // can complete within the budget (usually true once the startup warmer has had
+  // a head-start), the user still gets 200 data.
+  const AMS_REQUEST_BUDGET_MS = 45_000;
+  async function getAmsTruckStatusOrServe503(
+    res: Response,
+    logTag: string,
+  ): Promise<NonNullable<typeof amsTruckStatusCache> | null> {
+    const now = Date.now();
+    if (amsTruckStatusCache && (now - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+      return amsTruckStatusCache;
+    }
+    const buildPromise = getOrBuildAmsTruckStatusCache();
+    let timeoutHandle: NodeJS.Timeout | undefined;
+    const timeoutSentinel = Symbol('ams-build-timeout');
+    try {
+      const winner = await Promise.race([
+        buildPromise.then((c) => c),
+        new Promise<typeof timeoutSentinel>((resolve) => {
+          timeoutHandle = setTimeout(() => resolve(timeoutSentinel), AMS_REQUEST_BUDGET_MS);
+        }),
+      ]);
+      if (winner === timeoutSentinel) {
+        console.warn(`[${logTag}] Build still running after ${AMS_REQUEST_BUDGET_MS / 1000}s — returning 503 to prevent proxy timeout (build continues in background)`);
+        // Make sure the unawaited promise's eventual rejection doesn't become an
+        // unhandled rejection — but DO NOT clear amsTruckStatusBuildPromise here,
+        // the .finally() inside getOrBuildAmsTruckStatusCache owns that.
+        buildPromise.catch(() => {});
+        res.setHeader('Retry-After', '30');
+        res.status(503).json({
+          message: 'AMS truck-status cache is still warming. Retry shortly.',
+          retryAfterSeconds: 30,
+          building: true,
+        });
+        return null;
+      }
+      return winner;
+    } catch (err: any) {
+      console.error(`[${logTag}] Underlying build failed:`, err?.message || err);
+      res.setHeader('Retry-After', '60');
+      res.status(503).json({
+        message: 'AMS truck-status cache build failed. Retry shortly.',
+        retryAfterSeconds: 60,
+        error: err?.message || String(err),
+      });
+      return null;
+    } finally {
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+    }
+  }
+
   // Note: A shared cache module (server/ams-truck-status-cache.ts) mirrors this
   // logic so other route files (e.g. fleet-scope-routes) can read the same data.
   async function buildAmsTruckStatusMap(): Promise<{
@@ -15106,14 +15170,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ams/truck-status-map", requireAuth, async (_req, res) => {
     try {
-      const wasCached = !!amsTruckStatusCache &&
-        (Date.now() - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS;
-      await getOrBuildAmsTruckStatusCache();
-      if (wasCached && amsTruckStatusCache) {
-        const ageMin = Math.round((Date.now() - amsTruckStatusCache.builtAt) / 60000);
-        console.log(`[AMS TruckStatusMap] Serving cached map (${Object.keys(amsTruckStatusCache.data).length} vehicles, age ${ageMin}m)`);
-      }
-      res.json(amsTruckStatusCache!.data);
+      const cache = await getAmsTruckStatusOrServe503(res, 'AMS TruckStatusMap');
+      if (!cache) return; // 503 already sent
+      const ageMin = Math.round((Date.now() - cache.builtAt) / 60000);
+      console.log(`[AMS TruckStatusMap] Serving cached map (${Object.keys(cache.data).length} vehicles, age ${ageMin}m)`);
+      res.json(cache.data);
     } catch (error: any) {
       console.error('[AMS TruckStatusMap] Error:', error);
       res.status(500).json({ message: error.message });
@@ -15122,18 +15183,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ams/declined-repair-count", requireAuth, async (_req, res) => {
     try {
-      await getOrBuildAmsTruckStatusCache();
+      const cache = await getAmsTruckStatusOrServe503(res, 'AMS DeclinedRepairCount');
+      if (!cache) return; // 503 already sent
       // Restrict the count to AMS-active vehicles (matches AMS UI's Active count:
       // no SaleDate, no OutofSvcDate, no FinalDisposition). Only trust
       // activeVins when the AMS pagination loop ran to completion — a partial
       // sweep would otherwise silently undercount. Fall back to the full map
       // in that case so the card never silently reads 0.
-      const activeVins = amsTruckStatusCache!.activeVins;
-      const useActiveFilter = amsTruckStatusCache!.activeSweepComplete && activeVins.size > 0;
+      const activeVins = cache.activeVins;
+      const useActiveFilter = cache.activeSweepComplete && activeVins.size > 0;
       let declinedRepairCount = 0;
       let sentToAuctionCount = 0;
       let activeConsidered = 0;
-      for (const [vin, status] of Object.entries(amsTruckStatusCache!.data)) {
+      for (const [vin, status] of Object.entries(cache.data)) {
         if (useActiveFilter && !activeVins.has(vin)) continue;
         activeConsidered++;
         if (!status) continue;
@@ -15161,8 +15223,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Also returns the totals needed by the Total Operational Fleet card.
   app.get("/api/ams/active-scorecard-counts", requireAuth, async (_req, res) => {
     try {
-      await getOrBuildAmsTruckStatusCache();
-      const cache = amsTruckStatusCache!;
+      const cache = await getAmsTruckStatusOrServe503(res, 'AMS ActiveScorecardCounts');
+      if (!cache) return; // 503 already sent
       const useActiveFilter = cache.activeSweepComplete && cache.activeVins.size > 0;
       const isExcluded88 = (vin: string) => {
         const vn = cache.vehicleNumberByVin[vin];
