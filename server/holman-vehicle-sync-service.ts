@@ -670,6 +670,16 @@ class HolmanVehicleSyncService {
 
       if (updated > 0) {
         console.log(`[HolmanSync] Fleet-Scope reconciliation: updated ${updated} truck(s) with Holman data`);
+        // Drop the /api/fs/trucks cache locally + bump cross-replica version
+        // so dashboards see Holman tag-expiry / vehicle-ref updates without
+        // waiting for the 5s TTL. Lazy import keeps this file decoupled from
+        // route registration order; any import failure is non-fatal.
+        try {
+          const { invalidateTrucksCache } = await import('./fleet-scope-routes');
+          invalidateTrucksCache();
+        } catch (invErr: any) {
+          console.warn('[HolmanSync] invalidateTrucksCache failed (non-fatal):', invErr?.message);
+        }
       }
     } catch (err: any) {
       console.error(`[HolmanSync] Fleet-Scope reconciliation error: ${err.message}`);

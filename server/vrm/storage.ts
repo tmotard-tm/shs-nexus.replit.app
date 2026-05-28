@@ -1106,6 +1106,15 @@ export async function syncRepairTrackerToFleetScope(
 
   updates.lastUpdatedBy = "VRM Rental Repair Tracker";
   await fleetScopeStorage.updateTruck(truck.id, updates);
+  // Drop the /api/fs/trucks cache so VRM repair-tracker edits surface on
+  // dashboards immediately instead of waiting for the 5s TTL. Lazy import
+  // to avoid a circular dep (fleet-scope-routes also pulls in vrm).
+  try {
+    const { invalidateTrucksCache } = await import("../fleet-scope-routes");
+    invalidateTrucksCache();
+  } catch (invErr: any) {
+    console.warn("[VRM RepairTracker→FS] invalidateTrucksCache failed (non-fatal):", invErr?.message);
+  }
   return { truckId: truck.id, applied: true };
 }
 
