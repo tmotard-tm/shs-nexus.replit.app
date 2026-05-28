@@ -1346,7 +1346,21 @@ export const fleetOpsService = {
       let log = await storage.createFleetOperationLog(logData);
 
       // If the same tech is already on target truck, skip TPMS assign (avoid 400).
-      const tpmsAlreadyCurrent = normalizedTargetOccupant === normalizedIncoming;
+      //
+      // IMPORTANT: This decision MUST be sourced from the per-tech TPMS lookup
+      // (`currentTruckCanonical`, set above from `resolveCurrentTechTruck` which
+      // calls `tpms.getTechInfo(ldap)` — authoritative). We deliberately do NOT
+      // use `normalizedTargetOccupant === normalizedIncoming` here, because
+      // `resolveTargetTruckOccupant` reads the Holman cache first and can only
+      // "confirm" via TPMS through `lookupByTruckNumber`, which is a cache-only
+      // helper (the TPMS API has no truck-number lookup endpoint — see
+      // `tpms-service.ts` ~line 340). When the TPMS truck-keyed cache has no row
+      // for the target truck, `resolveTargetTruckOccupant` silently falls back
+      // to whatever Holman thinks — so if Holman cache already reflects a prior
+      // attempt's assignment, this skip would fire and the TPMS PUT would never
+      // happen, leaving TPMS permanently out of sync with Holman.
+      // (Post-mortem: truck 46965 / MMOHAM0, 2026-05-28.)
+      const tpmsAlreadyCurrent = currentTruckCanonical !== null && currentTruckCanonical === targetTruck;
 
       const [tpms, holman, ams] = await Promise.all([
         tpmsAlreadyCurrent
