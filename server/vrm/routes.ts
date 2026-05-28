@@ -91,6 +91,44 @@ import {
   insertVrmRepairTrackerSchema,
 } from "../../shared/vrm-schema";
 
+/**
+ * In-process loopback to GET /api/rental-ops/open?includeOos=false.
+ * Returns the same `data[]` rows the Rental Operations UI consumes so that
+ * every VRM Active Rentals derivation (table, KPIs, enrichment) sees the
+ * EXACT Segment 1 + Segment 2 set as Rental Ops. Forwards the caller's
+ * session cookie and bounds the upstream wait at 30s. The `__upstreamStatus`
+ * field on the thrown error lets callers map the failure to the right
+ * HTTP status (504 on timeout, 502 on transport error, upstream status
+ * on a non-2xx body).
+ */
+async function fetchRentalOpsOpenList(req: any): Promise<any[]> {
+  const port = parseInt(process.env.PORT || "5000");
+  const cookie = req.headers?.cookie || "";
+  const ropsRes = await fetch(
+    `http://localhost:${port}/api/rental-ops/open?includeOos=false`,
+    { headers: { cookie }, signal: AbortSignal.timeout(30_000) },
+  ).catch((err: any) => {
+    const isAbort = err?.name === "TimeoutError" || err?.name === "AbortError";
+    const e = new Error(
+      isAbort
+        ? "Upstream /api/rental-ops/open timed out after 30s"
+        : `Upstream fetch failed: ${err?.message ?? err}`,
+    );
+    (e as any).__upstreamStatus = isAbort ? 504 : 502;
+    throw e;
+  });
+  if (!ropsRes.ok) {
+    const body = await ropsRes.text().catch(() => "");
+    const e = new Error(
+      `Upstream /api/rental-ops/open responded ${ropsRes.status}: ${body.slice(0, 200)}`,
+    );
+    (e as any).__upstreamStatus = ropsRes.status;
+    throw e;
+  }
+  const payload = (await ropsRes.json()) as { data?: any[] };
+  return Array.isArray(payload.data) ? payload.data : [];
+}
+
 export function registerVrmRoutes(): Router {
   const router = Router();
 
@@ -884,15 +922,19 @@ export function registerVrmRoutes(): Router {
    * which depended on the now-broken HOLMAN_CLOSED loader, byRegion which used
    * techState) are dropped or reframed against the live roster.
    */
-  router.get("/active-rentals-dashboard/summary", async (_req, res) => {
+  router.get("/active-rentals-dashboard/summary", async (req, res) => {
     try {
-      const roster = await fetchRentalRoster();
-      await resolveRosterLdapsByName(roster);
+      // SOT alignment: KPI counts now derive from the same Rental Ops Segment
+      // 1 + Segment 2 set the table renders, not from fetchRentalRoster (which
+      // applied subtly different filters — no OOS exclusion, no toll-vendor
+      // exclusion, no cross-CTE Holman↔Enterprise dedup — and produced a
+      // count ~10 higher than Rental Ops / Fleet Scope on a typical day).
+      const rows = await fetchRentalOpsOpenList(req);
 
       // Distinct LDAPs for downstream Postgres lookups
       const ldaps = Array.from(new Set(
-        roster
-          .map(r => (r.ENTERPRISE_ID ?? "").toUpperCase())
+        rows
+          .map((r: any) => String(r.enterpriseId ?? "").trim().toUpperCase())
           .filter(Boolean)
       ));
 
@@ -915,7 +957,7 @@ export function registerVrmRoutes(): Router {
         }
       }
 
-      // ── Roster-derived KPIs ──
+      // ── Rental-Ops-derived KPIs ──
       let totalDaysOpen = 0;
       let durationsCount = 0;
       let overdueCount = 0;
@@ -924,19 +966,24 @@ export function registerVrmRoutes(): Router {
       let profitSum = 0;
       let profitCount = 0;
       const recCounts: Record<string, number> = { Approve: 0, Deny: 0, "Manual Review": 0, Other: 0 };
+      // Bucket by district (Rental Ops returns DISTRICT on Holman segment
+      // rows; Enterprise segment is null → "Unknown"). Keeps the legacy
+      // `byMarket` / `byRegion` chart keys populated.
       const byMarket: Record<string, number> = {};
 
-      for (const r of roster) {
-        if (r.DAYS_OPEN != null && r.DAYS_OPEN > 0) {
-          totalDaysOpen += r.DAYS_OPEN;
+      for (const r of rows) {
+        const daysOpen = Number(r.daysOpen ?? 0);
+        if (daysOpen > 0) {
+          totalDaysOpen += daysOpen;
           durationsCount++;
         }
-        if (r.DAYS_BEHIND != null && r.DAYS_BEHIND > 0) overdueCount++;
+        const daysBehind = Number(r.daysBehind ?? 0);
+        if (daysBehind > 0) overdueCount++;
 
-        const market = (r.MARKET ?? "").trim() || "Unknown";
-        byMarket[market] = (byMarket[market] || 0) + 1;
+        const bucket = String(r.district ?? "").trim() || "Unknown";
+        byMarket[bucket] = (byMarket[bucket] || 0) + 1;
 
-        const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase();
+        const ldap = String(r.enterpriseId ?? "").trim().toUpperCase();
         if (ldap) {
           matchedToLdap++;
           const check = latestCheckByLdap.get(ldap);
@@ -953,12 +1000,12 @@ export function registerVrmRoutes(): Router {
       }
 
       res.json({
-        totalActive: roster.length,
+        totalActive: rows.length,
         averageDaysOpen: durationsCount > 0 ? Math.round(totalDaysOpen / durationsCount) : 0,
         overdueCount,
         byMarket,
         // Backward-compat aliases for legacy frontend keys
-        totalRentals: roster.length,
+        totalRentals: rows.length,
         averageDurationDays: durationsCount > 0 ? Math.round(totalDaysOpen / durationsCount) : 0,
         byRegion: byMarket,
         returnedThisWeek: 0, // unsupported until HOLMAN_CLOSED loader is fixed
@@ -971,8 +1018,9 @@ export function registerVrmRoutes(): Router {
         },
       });
     } catch (error: any) {
+      const status = (error as any).__upstreamStatus ?? 500;
       console.error("[VRM active-rentals-dashboard/summary] error:", error.message);
-      res.status(500).json({ error: error.message });
+      res.status(status).json({ error: error.message });
     }
   });
 
@@ -983,31 +1031,35 @@ export function registerVrmRoutes(): Router {
    *                          recommendation, scorecardScore, profitCheckedAt } }
    * Truck # is normalized (leading zeros stripped) on both sides of the join.
    */
-  router.get("/active-rentals-dashboard/enrichment", async (_req, res) => {
+  router.get("/active-rentals-dashboard/enrichment", async (req, res) => {
     try {
-      // ── Step 0: Resolved Snowflake roster is the source of truth ────────────
-      // The Active Rentals page must show the same LDAP/name resolution as the
-      // VRM Dashboard. Both now derive from fetchRentalRoster() +
-      // resolveRosterLdapsByName(). For trucks that appear on fs_trucks but
-      // aren't in the live rental roster (rare sync gap), we fall back to the
-      // legacy TPMS+fs_trucks lookup below so the dashboard still has data.
-      const roster = await fetchRentalRoster();
-      await resolveRosterLdapsByName(roster);
+      // ── Step 0: Rental Ops is the source of truth ───────────────────────────
+      // Identical Segment 1 + Segment 2 set the VRM Dashboard and the Active
+      // Rentals table now consume — guarantees per-row Enterprise ID, District,
+      // Daily Net, Adj Net, and Scorecard cells line up with the table beneath
+      // them. For trucks that appear on fs_trucks but aren't on Rental Ops
+      // (sync gap), we fall back to the legacy TPMS+fs_trucks lookup below so
+      // the dashboard still has data for them.
+      const ropsRows = await fetchRentalOpsOpenList(req);
       type EnrichInfo = { ldap: string | null; name: string; phone: string | null; district: string | null };
       const byTruckResolved = new Map<string, EnrichInfo>();
       const rosterTrucks = new Set<string>();
-      for (const r of roster) {
-        const norm = String(r.VEHICLE_NUMBER ?? "").replace(/^0+/, "");
+      for (const r of ropsRows) {
+        // vehicleNumberPadded is already normalized via toDisplayNumber on the
+        // Rental Ops side; strip any remaining leading zeros so this map keys
+        // match the LTRIM(truck_number, '0') keys built downstream.
+        const norm = String(r.vehicleNumberPadded ?? r.vehicleNumber ?? "").replace(/^0+/, "");
         if (!norm) continue;
         rosterTrucks.add(norm);
-        const ldap = (r.ENTERPRISE_ID ?? "").toUpperCase() || null;
+        const ldap = String(r.enterpriseId ?? "").trim().toUpperCase() || null;
         byTruckResolved.set(norm, {
           ldap,
-          // RENTER_NAME comes from OER and reflects who is actually in the
-          // rental — same field the Dashboard renders. Falls back to HR name.
-          name: (r.RENTER_NAME ?? r.HR_FULL_NAME ?? "").toString(),
+          // renterName comes from Rental Ops (Enterprise OER renter name on
+          // Segment 1; Holman FIRST/LAST on Segment 2) — same field the
+          // Dashboard renders.
+          name: String(r.renterName ?? "").trim(),
           phone: null,                       // populated by TPMS lookup below
-          district: r.DISTRICT ?? null,
+          district: r.district ? String(r.district) : null,
         });
       }
 
@@ -1197,8 +1249,9 @@ export function registerVrmRoutes(): Router {
       }
       res.json({ byNormalizedTruckNumber: map });
     } catch (error: any) {
+      const status = (error as any).__upstreamStatus ?? 500;
       console.error("[VRM active-rentals-dashboard/enrichment] error:", error.message);
-      res.status(500).json({ error: error.message });
+      res.status(status).json({ error: error.message });
     }
   });
 
