@@ -16,10 +16,11 @@ import { format as formatDate } from "date-fns";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-// The Dashboard list now sources from /api/vrm/active-rentals so the set of
-// technicians matches the Active Rentals page (truck# → TPMS → enterprise_id,
-// with multi-tier fuzzy name fallback). Each row carries vrm_techs metrics
-// when a match was found; missing matches fall back to the truck-side fields.
+// The Dashboard list now sources from /api/vrm/dashboard/rental-ops-list
+// (an in-process loopback to /api/rental-ops/open), so the set of trucks
+// shown here matches the Rental Operations dashboard EXACTLY. Each row
+// carries vrm_techs / vrm_rental_checks financial data when a profile
+// exists for the resolved enterpriseId; rows with no profile still show.
 interface ActiveRentalRow {
   id: string | null;          // vrm_techs.id when matched, null otherwise
   truckNumber: string | null;
@@ -43,7 +44,7 @@ interface ActiveRentalRow {
   rentalCheckedAt?: string | null;
   hasFinancialData?: boolean;
   financialSource?: "vrm_techs" | "vrm_rental_checks" | "none";
-  // District/state populated by /api/vrm/active-rentals
+  // District/state populated by /api/vrm/dashboard/rental-ops-list
   district?: string | null;
   state?: string | null;
 }
@@ -322,7 +323,7 @@ export default function Dashboard() {
   };
 
   const invalidateAll = () => {
-    qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
+    qc.invalidateQueries({ queryKey: ["/api/vrm/dashboard/rental-ops-list"] });
     qc.invalidateQueries({ queryKey: ["/api/vrm/dashboard/stats"] });
   };
 
@@ -369,7 +370,7 @@ export default function Dashboard() {
           if (!r.ok) throw new Error(await r.text());
           processed += chunk.length;
           setBulkProgress({ done: processed, total: ldaps.length });
-          qc.invalidateQueries({ queryKey: ["/api/vrm/active-rentals"] });
+          qc.invalidateQueries({ queryKey: ["/api/vrm/dashboard/rental-ops-list"] });
         } catch (e: any) {
           errors.push(`batch ${Math.floor(i / CHUNK) + 1}: ${e.message}`);
         }
@@ -402,12 +403,16 @@ export default function Dashboard() {
     refetchInterval: 60000,
   });
 
-  // Live tech list — ONE source of truth shared with the Active Rentals page.
-  // Returns one row per Fleet Scope rental truck, joined to vrm_techs by
-  // LDAP / fuzzy name / truck#. The set of technicians here therefore matches
-  // the set on Active Rentals exactly — same count, same names.
+  // Live tech list — sourced from the global Rental Operations dashboard
+  // via /api/vrm/dashboard/rental-ops-list, which is itself a loopback to
+  // /api/rental-ops/open. The set of trucks/rentals here therefore matches
+  // the Rental Ops dashboard EXACTLY (same Segment 1 + Segment 2 rows, same
+  // OOS filtering, same order). Per-tech profitability is left-joined from
+  // vrm_techs + vrm_rental_checks (the same financial source the previous
+  // /api/vrm/active-rentals endpoint used), so the displayed numbers are
+  // unchanged for techs that already had a profile.
   const { data: activeRentalsData, isLoading: techsLoading, refetch } = useQuery<ActiveRentalsResponse>({
-    queryKey: ["/api/vrm/active-rentals"],
+    queryKey: ["/api/vrm/dashboard/rental-ops-list"],
     refetchInterval: 60000,
   });
 
@@ -873,7 +878,13 @@ export default function Dashboard() {
                 // a clean LDAP match.
                 const isLowConfidenceMatch = tech.ldapMatchSource === "fuzzy_name" || tech.ldapMatchSource === "truck_number";
                 const isUnmatched = tech.contextStatus !== "matched";
-                const rowKey = tech.id ?? `${tech.ldap ?? "no-ldap"}-${tech.truckNumber ?? idx}`;
+                // Vehicle-number-first key: Rental Ops is keyed by truck, so
+                // a single tech on multiple trucks must render as separate rows
+                // with distinct React keys. Fall back to ldap+idx only when
+                // truckNumber is missing (should be rare).
+                const rowKey = tech.truckNumber
+                  ? `truck-${tech.truckNumber}`
+                  : `${tech.ldap ?? "no-ldap"}-${tech.id ?? idx}`;
 
                 return (
                   <tr

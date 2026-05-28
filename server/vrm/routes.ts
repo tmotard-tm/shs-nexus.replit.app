@@ -233,6 +233,240 @@ export function registerVrmRoutes(): Router {
     }
   });
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // GET /api/vrm/dashboard/rental-ops-list
+  //
+  // SOURCE OF TRUTH ALIGNMENT — the VRM Dashboard table is required to show
+  // EXACTLY the set of trucks/rentals that the global Rental Operations
+  // dashboard shows, in the same order, with the same OOS filtering. To
+  // guarantee zero drift we do not duplicate the Segment 1 + Segment 2
+  // builder here — we make an in-process loopback call to
+  // `/api/rental-ops/open` (the same response the Rental Ops UI consumes)
+  // and then LEFT-JOIN per-tech financial data from the existing VRM
+  // sources (vrm_techs + vrm_rental_checks) keyed by enterpriseId / LDAP.
+  //
+  // This is the SAME loopback pattern already used elsewhere in
+  // server/routes.ts (Fleet CSV → /api/rental-ops/open-vehicle-numbers).
+  //
+  // The /api/rental-ops/* endpoints, the Rental Ops UI, and Fleet Scope are
+  // never touched by this endpoint.
+  // ─────────────────────────────────────────────────────────────────────────
+  router.get("/dashboard/rental-ops-list", async (req, res) => {
+    try {
+      const port = parseInt(process.env.PORT || "5000");
+      const cookie = req.headers.cookie || "";
+      // 30s timeout — if the upstream Rental Ops builder stalls (Holman /
+      // Snowflake slow), we surface a controlled 504 instead of pinning
+      // the VRM request indefinitely.
+      const ropsRes = await fetch(
+        `http://localhost:${port}/api/rental-ops/open?includeOos=false`,
+        { headers: { cookie }, signal: AbortSignal.timeout(30_000) },
+      ).catch((err: any) => {
+        const isAbort = err?.name === "TimeoutError" || err?.name === "AbortError";
+        const e = new Error(isAbort ? "Upstream /api/rental-ops/open timed out after 30s" : `Upstream fetch failed: ${err?.message ?? err}`);
+        (e as any).__upstreamStatus = isAbort ? 504 : 502;
+        throw e;
+      });
+      if (!ropsRes.ok) {
+        const body = await ropsRes.text().catch(() => "");
+        return res.status(ropsRes.status).json({
+          error: `Upstream /api/rental-ops/open responded ${ropsRes.status}`,
+          detail: body.slice(0, 500),
+        });
+      }
+      const ropsPayload = (await ropsRes.json()) as { data?: any[] };
+      const ropsRows = Array.isArray(ropsPayload.data) ? ropsPayload.data : [];
+
+      // Collect distinct LDAPs to drive the financial join. Rows whose
+      // enterpriseId could not be resolved on the Rental Ops side still
+      // appear here — they just won't have financials attached.
+      const ldaps = Array.from(new Set(
+        ropsRows
+          .map((r) => String(r.enterpriseId ?? "").trim().toUpperCase())
+          .filter(Boolean),
+      ));
+
+      // Financial source #1: vrm_techs (Snowflake-synced full profile —
+      // sync/roster + sync/adjusted-net). Same source the dashboard uses
+      // today via listActiveRentalsFromFleetScope.
+      const techByLdap = new Map<string, any>();
+      if (ldaps.length > 0) {
+        const techRows = await db.select().from(vrmTechs);
+        for (const t of techRows) {
+          const k = String(t.ldap ?? "").trim().toUpperCase();
+          if (k) techByLdap.set(k, t);
+        }
+      }
+
+      // Financial source #2: latest vrm_rental_checks per LDAP — same
+      // DISTINCT ON query as listActiveRentalsFromFleetScope so derived
+      // numbers match byte-for-byte when vrm_techs is empty for a tech.
+      const checkByLdap = new Map<string, {
+        techName: string | null;
+        dailyNetWithRental: number | null;
+        dailyNetBeforeRental: number | null;
+        recommendation: string | null;
+        scorecardScore: number | null;
+        tenureMonths: number | null;
+        completes: number | null;
+        lookbackDays: number | null;
+        checkedAt: string | null;
+      }>();
+      if (ldaps.length > 0) {
+        const checksResult = await db.execute(sql`
+          SELECT DISTINCT ON (UPPER(tech_ldap))
+            UPPER(tech_ldap)            AS "ldap",
+            tech_name                   AS "techName",
+            daily_net_with_rental       AS "dailyNetWithRental",
+            daily_net_before_rental     AS "dailyNetBeforeRental",
+            recommendation              AS "recommendation",
+            scorecard_score             AS "scorecardScore",
+            tenure_months               AS "tenureMonths",
+            completes                   AS "completes",
+            lookback_days               AS "lookbackDays",
+            checked_at                  AS "checkedAt"
+          FROM vrm_rental_checks
+          WHERE UPPER(tech_ldap) IN (${sql.join(ldaps.map((l) => sql`${l}`), sql`, `)})
+          ORDER BY UPPER(tech_ldap), checked_at DESC
+        `);
+        for (const r of (((checksResult as any).rows ?? []) as any[])) {
+          checkByLdap.set(String(r.ldap), {
+            techName: r.techName ?? null,
+            dailyNetWithRental: r.dailyNetWithRental != null ? Number(r.dailyNetWithRental) : null,
+            dailyNetBeforeRental: r.dailyNetBeforeRental != null ? Number(r.dailyNetBeforeRental) : null,
+            recommendation: r.recommendation ?? null,
+            scorecardScore: r.scorecardScore != null ? Number(r.scorecardScore) : null,
+            tenureMonths: r.tenureMonths != null ? Number(r.tenureMonths) : null,
+            completes: r.completes != null ? Number(r.completes) : null,
+            lookbackDays: r.lookbackDays != null ? Number(r.lookbackDays) : null,
+            checkedAt: r.checkedAt ? String(r.checkedAt) : null,
+          });
+        }
+      }
+
+      // District / state enrichment by LDAP (same pattern as the existing
+      // /active-rentals endpoint above — keeps the Market/District columns
+      // populated for techs we have a profile for).
+      const dsByLdap = new Map<string, { district: string | null; state: string | null }>();
+      if (ldaps.length > 0) {
+        try {
+          const ldapSql = sql.join(ldaps.map((l) => sql`${l}`), sql`, `);
+          const dsRows = await db.execute(sql`
+            SELECT UPPER(tp.enterprise_id) AS ldap,
+                   tp.district_no          AS district,
+                   at.home_state           AS state
+            FROM tpms_tech_profiles tp
+            LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
+            WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
+            UNION ALL
+            SELECT UPPER(at.tech_racfid) AS ldap,
+                   at.district_no        AS district,
+                   at.home_state         AS state
+            FROM all_techs at
+            WHERE UPPER(at.tech_racfid) IN (${ldapSql})
+              AND UPPER(at.tech_racfid) NOT IN (
+                SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+              )
+          `);
+          for (const r of (((dsRows as any).rows ?? []) as any[])) {
+            if (r.ldap) dsByLdap.set(String(r.ldap).toUpperCase(), {
+              district: r.district ?? null,
+              state: r.state ?? null,
+            });
+          }
+        } catch (err: any) {
+          console.error("[VRM] dashboard/rental-ops-list district lookup failed:", err.message);
+        }
+      }
+
+      // Build the rows in the same order Rental Ops returned them. Shape
+      // matches ActiveRentalRow so the existing Dashboard table renders
+      // without a UI refactor.
+      const rows = ropsRows.map((r) => {
+        const ldap = String(r.enterpriseId ?? "").trim().toUpperCase() || null;
+        const tech = ldap ? techByLdap.get(ldap) ?? null : null;
+        const check = ldap ? checkByLdap.get(ldap) ?? null : null;
+        const ds = ldap ? dsByLdap.get(ldap) ?? null : null;
+
+        // Same Gate-1 derivation rule listActiveRentalsFromFleetScope uses
+        // when vrm_techs is empty but a rental check exists.
+        let derivedAdjustedNet: string | null = null;
+        let derivedClassification: string | null = null;
+        if (!tech && check?.dailyNetWithRental != null && check.lookbackDays) {
+          const adj = check.dailyNetWithRental * check.lookbackDays;
+          derivedAdjustedNet = adj.toFixed(2);
+          derivedClassification = adj < 0 ? "underwater" : adj <= 5000 ? "marginal" : "profitable";
+        }
+
+        const contextStatus: "matched" | "no_vrm_match" | "no_ldap" = !ldap
+          ? "no_ldap"
+          : (tech || check)
+          ? "matched"
+          : "no_vrm_match";
+
+        // ldapMatchSource — derived from the Rental Ops enterpriseIdSource
+        // (it's the same TPMS name-match pipeline used by Rental Ops).
+        const ridSrc = r.enterpriseIdSource as string | null | undefined;
+        const ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null = !ldap
+          ? null
+          : ridSrc === "direct"
+          ? "fleet"
+          : ridSrc === "name_full_unique"
+          ? "exact_name"
+          : ridSrc === "name_last_unique"
+          ? "fuzzy_name"
+          : "fuzzy_name";
+
+        return {
+          id: tech?.id ?? null,
+          truckNumber: r.vehicleNumberPadded ?? r.vehicleNumber ?? null,
+          ldap,
+          name: (r.renterName && String(r.renterName).trim())
+            || tech?.name
+            || check?.techName
+            || ldap
+            || r.vehicleNumberPadded
+            || r.vehicleNumber
+            || "Unknown Active Rental",
+          market: tech?.market ?? null,
+          tenureMonths: tech?.tenureMonths ?? check?.tenureMonths ?? null,
+          gate1AdjustedNet: tech?.gate1AdjustedNet ?? derivedAdjustedNet,
+          gate1Classification: tech?.gate1Classification ?? derivedClassification,
+          dcaReviewOutcome: tech?.dcaReviewOutcome ?? null,
+          currentStatus: tech?.currentStatus ?? "in_rental",
+          hasVrmContext: !!(tech || check),
+          contextStatus,
+          ldapMatchSource,
+          liveTruckStatus: r.mainStatus ?? null,
+          outreachFlagged: tech?.outreachFlagged ?? false,
+          dailyNetWithRental: check?.dailyNetWithRental ?? null,
+          recommendation: check?.recommendation ?? null,
+          scorecardScore: check?.scorecardScore ?? null,
+          rentalCheckedAt: check?.checkedAt ?? null,
+          hasFinancialData: !!(tech || check),
+          financialSource: (tech ? "vrm_techs" : check ? "vrm_rental_checks" : "none") as "vrm_techs" | "vrm_rental_checks" | "none",
+          district: ds?.district ?? r.district ?? null,
+          state: ds?.state ?? null,
+        };
+      });
+
+      const ldapMissing = rows.filter((r) => r.contextStatus === "no_ldap").length;
+      const vrmContextMissing = rows.filter((r) => r.contextStatus === "no_vrm_match").length;
+
+      res.json({
+        rows,
+        total: rows.length,
+        ldapMissing,
+        vrmContextMissing,
+        source: "rental_ops_loopback",
+      });
+    } catch (e: any) {
+      console.error("[VRM] dashboard/rental-ops-list error:", e.message);
+      const status = typeof e?.__upstreamStatus === "number" ? e.__upstreamStatus : 500;
+      res.status(status).json({ error: e.message });
+    }
+  });
+
   // GET /api/vrm/techs/:id
   router.get("/techs/:id", async (req, res) => {
     try {
