@@ -369,7 +369,13 @@ export default function ActiveRentalsDashboard() {
   // Stagger the three 60s queries so they don't all refetch on the same tick.
   // (Cursor stutter was compounded by them all completing in the same task
   // and triggering a render storm.) The 300s queries are left untouched.
-  const trucksRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/fs/trucks"], 60_000, 0);
+  // Tier-1 throttle: bumped from 60s → 5min. The /api/fs/trucks payload is
+  // the entire fleet (multi-MB JSON + UPS tracking join), and every poll
+  // re-parses it on the main thread and re-renders ~14 other components
+  // subscribed to the same cache key. Mutations still invalidateAll
+  // synchronously, so user-initiated edits show up immediately; the poll is
+  // only for picking up other users' changes, where 5 min is plenty.
+  const trucksRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/fs/trucks"], 5 * 60_000, 0);
   const summaryRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/vrm/active-rentals-dashboard/summary"], 60_000, 20_000);
   const shopListRefetchInterval = useStaggeredRefetchInterval(qc, ["/api/fs/shop-list-status"], 60_000, 40_000);
 

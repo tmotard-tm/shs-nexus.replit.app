@@ -2281,27 +2281,60 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   })();
 
-  // GET all trucks (with UPS tracking status)
-  // Default response shape: bare array `Truck[]` (preserved for the 14+ existing
-  // consumers that read /api/fs/trucks).
-  // When `?paginated=1` is set, the response is `{ rows, total, filteredTotal, facets }`
-  // with server-side filtering, sorting (whitelisted columns) and paging applied.
-  // The paginated branch is only opted into by ActiveRentalsDashboard today; if you
-  // wire up another consumer, mind the response-shape switch.
-  app.get("/trucks", async (req, res) => {
-    try {
+  // ── /trucks response cache (Tier-4 perf) ────────────────────────────────
+  // The augmented `trucksWithUps` array (whole-fleet getAllTrucks + full
+  // getTrackingRecords join) is identical for every caller. Caching it for
+  // a short window dedupes burst concurrent reads (multiple users hitting
+  // the dashboard, ARD's 5-min poll, FS Dashboard's mount, etc.) and stops
+  // the per-request DB scans that were the dominant load-time cost.
+  //
+  // TTL is intentionally short (5s) so the staleness window is barely
+  // perceptible. On top of that, the buster middleware below clears the
+  // cache on any non-GET to /trucks*, so a user who edits a truck never
+  // sees their own change disappear behind a stale cache hit. Background
+  // syncs that mutate fs_trucks via fleetScopeStorage directly (rental-ops
+  // sync, Snowflake refresh, etc.) don't go through the HTTP path, so
+  // those rely on the 5s TTL — acceptable since they run out-of-band.
+  //
+  // In-flight `promise` field dedupes parallel cache-miss requests so we
+  // never run two getAllTrucks queries simultaneously.
+  type TrucksCacheEntry = {
+    data: any[] | null;
+    expires: number;
+    promise: Promise<any[]> | null;
+  };
+  let trucksCache: TrucksCacheEntry = { data: null, expires: 0, promise: null };
+  // Generation counter: incremented on every cache bust. An in-flight read
+  // captures the generation at start; if the generation changes mid-flight
+  // (because a write busted the cache while we were querying the DB), the
+  // promise's result is NOT written back to the cache — otherwise the
+  // pre-write snapshot would repopulate the cache and live for another TTL,
+  // silently shadowing the user's edit.
+  let trucksCacheGeneration = 0;
+  const TRUCKS_CACHE_TTL_MS = 5_000;
+
+  function invalidateTrucksCache(): void {
+    trucksCache = { data: null, expires: 0, promise: null };
+    trucksCacheGeneration++;
+  }
+
+  async function getCachedTrucksWithUps(): Promise<any[]> {
+    const now = Date.now();
+    if (trucksCache.data && trucksCache.expires > now) {
+      return trucksCache.data;
+    }
+    if (trucksCache.promise) {
+      return trucksCache.promise;
+    }
+    const startGeneration = trucksCacheGeneration;
+    let promise!: Promise<any[]>;
+    promise = (async () => {
       const trucks = await fleetScopeStorage.getAllTrucks();
-
-      // Fetch all tracking records to augment trucks with UPS status
       const allTrackingRecords = await fleetScopeStorage.getTrackingRecords();
-
-      // Create a map of truckId -> latest tracking record
       const trackingByTruck = new Map<string, { upsStatus: string | null; upsStatusDescription: string | null; upsLastCheckedAt: Date | null }>();
-
       for (const record of allTrackingRecords) {
         if (record.truckId) {
           const existing = trackingByTruck.get(record.truckId);
-          // Use the first (most recent) record for each truck, or one with status if current doesn't have one
           if (!existing || (!existing.upsStatus && record.lastStatus)) {
             trackingByTruck.set(record.truckId, {
               upsStatus: record.lastStatus,
@@ -2311,14 +2344,59 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           }
         }
       }
-
-      // Augment trucks with UPS status
       const trucksWithUps = trucks.map(truck => ({
         ...truck,
         upsStatus: trackingByTruck.get(truck.id)?.upsStatus || null,
         upsStatusDescription: trackingByTruck.get(truck.id)?.upsStatusDescription || null,
         upsLastCheckedAt: trackingByTruck.get(truck.id)?.upsLastCheckedAt || null,
       }));
+      // Only write back if no buster fired while we were querying. If a write
+      // happened mid-flight, the data we just fetched may be pre-write, so we
+      // deliberately let the next caller miss the cache and re-query.
+      if (trucksCacheGeneration === startGeneration) {
+        trucksCache = { data: trucksWithUps, expires: Date.now() + TRUCKS_CACHE_TTL_MS, promise: null };
+      } else if (trucksCache.promise === promise) {
+        // Clear our own in-flight marker without writing back stale data.
+        trucksCache = { data: trucksCache.data, expires: trucksCache.expires, promise: null };
+      }
+      return trucksWithUps;
+    })();
+    // Mark in-flight without overwriting any still-valid cached data.
+    trucksCache = { data: trucksCache.data, expires: trucksCache.expires, promise };
+    try {
+      return await promise;
+    } catch (err) {
+      // On failure, clear the in-flight promise so the next caller retries.
+      if (trucksCache.promise === promise) {
+        trucksCache = { data: null, expires: 0, promise: null };
+      }
+      throw err;
+    }
+  }
+
+  // Buster: any write to /trucks/* (POST/PATCH/PUT/DELETE) immediately
+  // invalidates the cache so the user's next GET sees fresh data. Read-only
+  // methods skip the buster. Mounted BEFORE the GET handler so it runs first
+  // on the same path. Tracking mutations and background fs_trucks writers
+  // (rental-ops sync, Snowflake refresh, shop-list auto-sync, schedulers)
+  // do NOT pass through this middleware — they rely on the 5s TTL instead.
+  app.use("/trucks", (req, _res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
+      invalidateTrucksCache();
+    }
+    next();
+  });
+
+  // GET all trucks (with UPS tracking status)
+  // Default response shape: bare array `Truck[]` (preserved for the 14+ existing
+  // consumers that read /api/fs/trucks).
+  // When `?paginated=1` is set, the response is `{ rows, total, filteredTotal, facets }`
+  // with server-side filtering, sorting (whitelisted columns) and paging applied.
+  // The paginated branch is only opted into by ActiveRentalsDashboard today; if you
+  // wire up another consumer, mind the response-shape switch.
+  app.get("/trucks", async (req, res) => {
+    try {
+      const trucksWithUps = await getCachedTrucksWithUps();
 
       // ── Legacy path — unchanged response shape ──
       if (req.query.paginated !== "1") {
