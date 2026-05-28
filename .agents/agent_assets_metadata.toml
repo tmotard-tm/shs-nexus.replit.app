@@ -84,3 +84,9 @@ id = "NDpjHxpCYr0EarTz_T_ra"
 uri = "file://.local/exports/decommissioning-conversations-recreation-guide.md"
 type = "text"
 title = "Decommissioning Conversations — Recreation Guide"
+
+[[outputs]]
+id = "H3-8LF3FmtXcrA-fV4z9C"
+uri = "file://exports/tech-punch-report.csv"
+type = "table"
+title = "Tech Punch Report - 4 Techs Since Tracker Add Date"
