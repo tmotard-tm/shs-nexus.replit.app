@@ -90,3 +90,9 @@ id = "H3-8LF3FmtXcrA-fV4z9C"
 uri = "file://exports/tech-punch-report.csv"
 type = "table"
 title = "Tech Punch Report - 4 Techs Since Tracker Add Date"
+
+[[outputs]]
+id = "8606xvpLt9N1F7B4RfHE9"
+uri = "file://exports/tech-punch-report-hector-fernandez.csv"
+type = "table"
+title = "Tech Punch Report - Hector Fernandez"
