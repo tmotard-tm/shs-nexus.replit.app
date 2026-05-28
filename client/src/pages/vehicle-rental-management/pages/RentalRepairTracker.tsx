@@ -1701,7 +1701,19 @@ function UnifiedPanel({
         stageOverrideSub: form.stageOverride && form.stageOverrideSub ? form.stageOverrideSub : null,
       };
       if (isEdit) {
-        return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, payload);
+        // techName/techPhone/supervisorName/supervisorPhone are TPMS-managed
+        // on the server (server/vrm/storage.ts updateRepairTrackerEntry).
+        // Including them in a PATCH — even unchanged — throws a 500, which
+        // would block edits to status/contact-notes/van-status. Strip them
+        // from the edit payload; they still flow on POST (create).
+        const {
+          techName: _tn,
+          techPhone: _tp,
+          supervisorName: _sn,
+          supervisorPhone: _sp,
+          ...editPayload
+        } = payload;
+        return apiRequest("PATCH", `/api/vrm/repair-tracker/${entry!.id}`, editPayload);
       }
       return apiRequest("POST", "/api/vrm/repair-tracker", payload);
     },
@@ -1962,12 +1974,12 @@ function UnifiedPanel({
             <input type="text" value={form.truckNumber} onChange={(e) => set("truckNumber", e.target.value)} style={INPUT_STYLE} />
           </div>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Tech Name</label>
-            <input type="text" value={form.techName} onChange={(e) => set("techName", e.target.value)} style={INPUT_STYLE} />
+            <label style={LABEL_STYLE}>Tech Name{isEdit ? " (synced from TPMS)" : ""}</label>
+            <input type="text" value={form.techName} onChange={(e) => set("techName", e.target.value)} style={INPUT_STYLE} disabled={isEdit} />
           </div>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Tech Phone</label>
-            <input type="text" value={form.techPhone} onChange={(e) => set("techPhone", e.target.value)} style={INPUT_STYLE} />
+            <label style={LABEL_STYLE}>Tech Phone{isEdit ? " (synced from TPMS)" : ""}</label>
+            <input type="text" value={form.techPhone} onChange={(e) => set("techPhone", e.target.value)} style={INPUT_STYLE} disabled={isEdit} />
           </div>
 
           {/* ── Supervisor ── */}
@@ -1975,12 +1987,12 @@ function UnifiedPanel({
             Supervisor
           </SectionHeading>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Supervisor Name</label>
-            <input type="text" value={form.supervisorName} onChange={(e) => set("supervisorName", e.target.value)} placeholder={currentEntry?.tpmsManagerName ?? ""} style={INPUT_STYLE} />
+            <label style={LABEL_STYLE}>Supervisor Name{isEdit ? " (synced from TPMS)" : ""}</label>
+            <input type="text" value={form.supervisorName} onChange={(e) => set("supervisorName", e.target.value)} placeholder={currentEntry?.tpmsManagerName ?? ""} style={INPUT_STYLE} disabled={isEdit} />
           </div>
           <div style={{ marginBottom: 14 }}>
-            <label style={LABEL_STYLE}>Supervisor Phone</label>
-            <input type="text" value={form.supervisorPhone} onChange={(e) => set("supervisorPhone", e.target.value)} placeholder={currentEntry?.tpmsManagerPhone ?? ""} style={INPUT_STYLE} />
+            <label style={LABEL_STYLE}>Supervisor Phone{isEdit ? " (synced from TPMS)" : ""}</label>
+            <input type="text" value={form.supervisorPhone} onChange={(e) => set("supervisorPhone", e.target.value)} placeholder={currentEntry?.tpmsManagerPhone ?? ""} style={INPUT_STYLE} disabled={isEdit} />
           </div>
 
           {/* ── Repair Shop ── */}
