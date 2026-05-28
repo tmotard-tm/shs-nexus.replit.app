@@ -14901,6 +14901,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
   } | null = null;
   const AMS_TRUCK_STATUS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
+  // In-flight promise dedupe: when the cache is cold (or stale) and N concurrent
+  // callers arrive, only ONE buildAmsTruckStatusMap() runs — the rest await the
+  // same promise. Without this, the startup warmer plus the first requests from
+  // /api/ams/truck-status-map, /api/ams/declined-repair-count, and
+  // /api/ams/active-scorecard-counts each kick off an independent ~2-minute full
+  // AMS pagination, blowing past Replit's ~60s edge-proxy timeout and surfacing
+  // as 502s on the All Vehicles page.
+  let amsTruckStatusBuildPromise: Promise<typeof amsTruckStatusCache> | null = null;
+  function getOrBuildAmsTruckStatusCache(): Promise<NonNullable<typeof amsTruckStatusCache>> {
+    const now = Date.now();
+    if (amsTruckStatusCache && (now - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+      return Promise.resolve(amsTruckStatusCache);
+    }
+    if (amsTruckStatusBuildPromise) {
+      return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
+    }
+    amsTruckStatusBuildPromise = buildAmsTruckStatusMap()
+      .then((built) => {
+        amsTruckStatusCache = {
+          data: built.map,
+          activeVins: built.activeVins,
+          vehicleNumberByVin: built.vehicleNumberByVin,
+          activeSweepComplete: built.activeSweepComplete,
+          builtAt: Date.now(),
+        };
+        return amsTruckStatusCache;
+      })
+      .finally(() => {
+        amsTruckStatusBuildPromise = null;
+      });
+    return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
+  }
+
   // Note: A shared cache module (server/ams-truck-status-cache.ts) mirrors this
   // logic so other route files (e.g. fleet-scope-routes) can read the same data.
   async function buildAmsTruckStatusMap(): Promise<{
@@ -15073,21 +15106,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ams/truck-status-map", requireAuth, async (_req, res) => {
     try {
-      const now = Date.now();
-      if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
-        const built = await buildAmsTruckStatusMap();
-        amsTruckStatusCache = {
-          data: built.map,
-          activeVins: built.activeVins,
-          vehicleNumberByVin: built.vehicleNumberByVin,
-          activeSweepComplete: built.activeSweepComplete,
-          builtAt: now,
-        };
-      } else {
-        const ageMin = Math.round((now - amsTruckStatusCache.builtAt) / 60000);
+      const wasCached = !!amsTruckStatusCache &&
+        (Date.now() - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS;
+      await getOrBuildAmsTruckStatusCache();
+      if (wasCached && amsTruckStatusCache) {
+        const ageMin = Math.round((Date.now() - amsTruckStatusCache.builtAt) / 60000);
         console.log(`[AMS TruckStatusMap] Serving cached map (${Object.keys(amsTruckStatusCache.data).length} vehicles, age ${ageMin}m)`);
       }
-      res.json(amsTruckStatusCache.data);
+      res.json(amsTruckStatusCache!.data);
     } catch (error: any) {
       console.error('[AMS TruckStatusMap] Error:', error);
       res.status(500).json({ message: error.message });
@@ -15096,28 +15122,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/ams/declined-repair-count", requireAuth, async (_req, res) => {
     try {
-      const now = Date.now();
-      if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
-        const built = await buildAmsTruckStatusMap();
-        amsTruckStatusCache = {
-          data: built.map,
-          activeVins: built.activeVins,
-          vehicleNumberByVin: built.vehicleNumberByVin,
-          activeSweepComplete: built.activeSweepComplete,
-          builtAt: now,
-        };
-      }
+      await getOrBuildAmsTruckStatusCache();
       // Restrict the count to AMS-active vehicles (matches AMS UI's Active count:
       // no SaleDate, no OutofSvcDate, no FinalDisposition). Only trust
       // activeVins when the AMS pagination loop ran to completion — a partial
       // sweep would otherwise silently undercount. Fall back to the full map
       // in that case so the card never silently reads 0.
-      const activeVins = amsTruckStatusCache.activeVins;
-      const useActiveFilter = amsTruckStatusCache.activeSweepComplete && activeVins.size > 0;
+      const activeVins = amsTruckStatusCache!.activeVins;
+      const useActiveFilter = amsTruckStatusCache!.activeSweepComplete && activeVins.size > 0;
       let declinedRepairCount = 0;
       let sentToAuctionCount = 0;
       let activeConsidered = 0;
-      for (const [vin, status] of Object.entries(amsTruckStatusCache.data)) {
+      for (const [vin, status] of Object.entries(amsTruckStatusCache!.data)) {
         if (useActiveFilter && !activeVins.has(vin)) continue;
         activeConsidered++;
         if (!status) continue;
@@ -15145,18 +15161,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Also returns the totals needed by the Total Operational Fleet card.
   app.get("/api/ams/active-scorecard-counts", requireAuth, async (_req, res) => {
     try {
-      const now = Date.now();
-      if (!amsTruckStatusCache || (now - amsTruckStatusCache.builtAt) > AMS_TRUCK_STATUS_CACHE_TTL_MS) {
-        const built = await buildAmsTruckStatusMap();
-        amsTruckStatusCache = {
-          data: built.map,
-          activeVins: built.activeVins,
-          vehicleNumberByVin: built.vehicleNumberByVin,
-          activeSweepComplete: built.activeSweepComplete,
-          builtAt: now,
-        };
-      }
-      const cache = amsTruckStatusCache;
+      await getOrBuildAmsTruckStatusCache();
+      const cache = amsTruckStatusCache!;
       const useActiveFilter = cache.activeSweepComplete && cache.activeVins.size > 0;
       const isExcluded88 = (vin: string) => {
         const vn = cache.vehicleNumberByVin[vin];
@@ -15332,16 +15338,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // first real request is served instantly from cache.
   setImmediate(() => {
     if (!amsTruckStatusCache) {
-      buildAmsTruckStatusMap()
+      // Route through getOrBuildAmsTruckStatusCache so any request that arrives
+      // before the warmer finishes shares the same in-flight pagination instead
+      // of kicking off a duplicate ~2-minute full AMS pull.
+      getOrBuildAmsTruckStatusCache()
         .then(built => {
-          amsTruckStatusCache = {
-            data: built.map,
-            activeVins: built.activeVins,
-            vehicleNumberByVin: built.vehicleNumberByVin,
-            activeSweepComplete: built.activeSweepComplete,
-            builtAt: Date.now(),
-          };
-          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(built.map).length} vehicles, ${built.activeVins.size} active, sweep complete=${built.activeSweepComplete})`);
+          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(built.data).length} vehicles, ${built.activeVins.size} active, sweep complete=${built.activeSweepComplete})`);
         })
         .catch(err => {
           console.warn('[AMS TruckStatusMap] Startup warm-up failed (will retry on first request):', err.message);

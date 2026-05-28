@@ -189,18 +189,38 @@ async function build(): Promise<Record<string, string | null>> {
   return result;
 }
 
+// In-flight promise dedupe: when the cache is cold (or stale) and N concurrent
+// callers arrive, only ONE build() runs — the rest await the same promise.
+// Without this, the startup warmer + the first request from /api/ams/truck-status-map
+// + the first request from /api/fs/all-vehicles would each kick off an independent
+// ~2-minute full AMS pagination, blowing past Replit's ~60s edge-proxy timeout
+// and surfacing as 502s on the All Vehicles page.
+let buildPromise: Promise<Record<string, string | null>> | null = null;
+
+function dedupedBuild(): Promise<Record<string, string | null>> {
+  if (buildPromise) return buildPromise;
+  buildPromise = build()
+    .then((data) => {
+      cache = { data, builtAt: Date.now() };
+      return data;
+    })
+    .finally(() => {
+      buildPromise = null;
+    });
+  return buildPromise;
+}
+
 export async function getAmsTruckStatusMap(): Promise<
   Record<string, string | null>
 > {
   const now = Date.now();
   if (!cache || now - cache.builtAt > TTL_MS) {
-    cache = { data: await build(), builtAt: now };
-  } else {
-    const ageMin = Math.round((now - cache.builtAt) / 60000);
-    console.log(
-      `[AMS TruckStatusMap] Serving cached map (${Object.keys(cache.data).length} vehicles, age ${ageMin}m)`,
-    );
+    return dedupedBuild();
   }
+  const ageMin = Math.round((now - cache.builtAt) / 60000);
+  console.log(
+    `[AMS TruckStatusMap] Serving cached map (${Object.keys(cache.data).length} vehicles, age ${ageMin}m)`,
+  );
   return cache.data;
 }
 
@@ -351,9 +371,10 @@ export function isAmsTruckStatusCacheStale(): boolean {
 }
 
 export function warmAmsTruckStatusCache(): Promise<void> {
-  return build()
+  // Route through dedupedBuild so any concurrent request that arrives before
+  // the warmer finishes shares the same in-flight pagination.
+  return dedupedBuild()
     .then((data) => {
-      cache = { data, builtAt: Date.now() };
       console.log(
         `[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(data).length} vehicles)`,
       );
