@@ -922,6 +922,32 @@ export function registerVrmRoutes(): Router {
    * which depended on the now-broken HOLMAN_CLOSED loader, byRegion which used
    * techState) are dropped or reframed against the live roster.
    */
+  /**
+   * GET /api/vrm/active-rentals-dashboard/rental-ops-truck-numbers
+   * Returns the normalized (leading-zero-stripped) set of truck numbers that
+   * are currently in the live Rental Ops set (Segment 1 + Segment 2 from
+   * /api/rental-ops/open?includeOos=false). The Active Rentals page uses this
+   * as a client-side filter against /api/fs/trucks rows so the table shows
+   * exactly the same trucks as Rental Ops / FS Rentals Dashboard, even when
+   * fs_trucks is lagging between nightly syncRentalOpsToFleetScope runs.
+   * Cheap: just the keys from the loopback, no DB joins.
+   */
+  router.get("/active-rentals-dashboard/rental-ops-truck-numbers", async (req, res) => {
+    try {
+      const rows = await fetchRentalOpsOpenList(req);
+      const set = new Set<string>();
+      for (const r of rows) {
+        const norm = String(r.vehicleNumberPadded ?? r.vehicleNumber ?? "").replace(/^0+/, "");
+        if (norm) set.add(norm);
+      }
+      res.json({ truckNumbers: Array.from(set) });
+    } catch (error: any) {
+      const status = (error as any).__upstreamStatus ?? 500;
+      console.error("[VRM active-rentals-dashboard/rental-ops-truck-numbers] error:", error.message);
+      res.status(status).json({ error: error.message });
+    }
+  });
+
   router.get("/active-rentals-dashboard/summary", async (req, res) => {
     try {
       // SOT alignment: KPI counts now derive from the same Rental Ops Segment

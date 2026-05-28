@@ -354,11 +354,17 @@ export default function ActiveRentalsDashboard() {
   //                                server can't match those without joining
   //                                enrichment, so we fall back to preserve
   //                                full-text parity.
-  const usePaginatedMode =
-    dailyNetSort === null &&
-    adjNetSort === null &&
-    holmanStatusFilter.length === 0 &&
-    debouncedSearch.trim() === "";
+  // SOT alignment: forced to false. With ~325 active rentals the legacy
+  // full-fetch path is plenty fast, and it lets us intersect /api/fs/trucks
+  // rows against the live Rental Ops set BEFORE any pagination math runs —
+  // so "Showing X of Y" and the page count stay correct after the
+  // intersection drops stale fs_trucks rows. Server-side pagination would
+  // pre-slice the page, then we'd filter on top of that and end up with
+  // partial pages and wrong totals.
+  const usePaginatedMode = false;
+  // (Original mode-switch heuristic preserved here for reference. It fell
+  // back to legacy whenever dailyNetSort/adjNetSort were set, holman status
+  // filter was active, or search was non-empty.)
 
   // Stagger the three 60s queries so they don't all refetch on the same tick.
   // (Cursor stutter was compounded by them all completing in the same task
@@ -432,6 +438,14 @@ export default function ActiveRentalsDashboard() {
     queryKey: ["/api/fs/trucks/scraper-status"],
     refetchInterval: 5 * 60_000,
   });
+  // SOT alignment: live Rental Ops truck-number set (Segment 1 + Segment 2).
+  // We intersect /api/fs/trucks rows against this so the table shows exactly
+  // the same trucks as Rental Ops / FS Rentals Dashboard, even when fs_trucks
+  // is lagging between nightly `syncRentalOpsToFleetScope` runs.
+  const rentalOpsTrucksQuery = useQuery<{ truckNumbers: string[] }>({
+    queryKey: ["/api/vrm/active-rentals-dashboard/rental-ops-truck-numbers"],
+    refetchInterval: 60_000,
+  });
   const shopListStatusQuery = useQuery<{
     processedAt: string; rowsProcessed: number; trucksUpdated: number;
     rowsSkipped: number; notFound: string[]; error: string | null;
@@ -443,9 +457,35 @@ export default function ActiveRentalsDashboard() {
   // Unified view of "the trucks for this render". In paginated mode, only the
   // current page is in memory (50 rows); in legacy mode, the whole fleet.
   const paginatedRows = paginatedTrucksQuery.data?.rows ?? [];
-  const trucks: FSTruck[] = usePaginatedMode ? paginatedRows : (legacyTrucksQuery.data ?? []);
-  const trucksLoading = usePaginatedMode ? paginatedTrucksQuery.isLoading : legacyTrucksQuery.isLoading;
-  const trucksError = usePaginatedMode ? paginatedTrucksQuery.error : legacyTrucksQuery.error;
+  const rawTrucks: FSTruck[] = usePaginatedMode ? paginatedRows : (legacyTrucksQuery.data ?? []);
+  // SOT alignment intersection: drop fs_trucks rows whose normalized truck
+  // number is NOT in the live Rental Ops set. This eliminates stale rentals
+  // that linger in fs_trucks between nightly syncRentalOpsToFleetScope runs.
+  // Explicit-failure policy: we do NOT silently fall back to the unfiltered
+  // fs_trucks set when the Rental Ops query is loading, errored, or returns
+  // an empty payload. Either we render the SOT-intersected truth or we
+  // surface a loading/error state — never the lagged fs_trucks-only view,
+  // since that's the exact misalignment we're fixing.
+  const ropsTruckSet = useMemo(() => {
+    // TanStack Query keeps prior `data` populated during a failed background
+    // refetch. Treat any error state as "no SOT available" so we don't
+    // silently render a stale truck set while the user sees an error
+    // indicator.
+    if (rentalOpsTrucksQuery.isError) return null;
+    const arr = rentalOpsTrucksQuery.data?.truckNumbers;
+    if (!arr) return null;
+    return new Set(arr.map((s) => String(s).replace(/^0+/, "")));
+  }, [rentalOpsTrucksQuery.data, rentalOpsTrucksQuery.isError]);
+  const trucks: FSTruck[] = useMemo(() => {
+    if (!ropsTruckSet) return [];
+    return rawTrucks.filter((t) => ropsTruckSet.has(String(t.truckNumber ?? "").replace(/^0+/, "")));
+  }, [rawTrucks, ropsTruckSet]);
+  const trucksLoading =
+    rentalOpsTrucksQuery.isLoading ||
+    (usePaginatedMode ? paginatedTrucksQuery.isLoading : legacyTrucksQuery.isLoading);
+  const trucksError =
+    rentalOpsTrucksQuery.error ??
+    (usePaginatedMode ? paginatedTrucksQuery.error : legacyTrucksQuery.error);
   const summary = summaryQuery.data;
   const enrichmentMap = enrichmentQuery.data?.byNormalizedTruckNumber ?? {};
   const scraperStatusMap = scraperStatusQuery.data ?? {};
@@ -771,9 +811,12 @@ export default function ActiveRentalsDashboard() {
   const filteredCount = usePaginatedMode
     ? (serverFilteredTotal ?? trucks.length)
     : filtered.length;
-  const totalRentalsCount = usePaginatedMode
-    ? (serverTotal ?? trucks.length)
-    : trucks.length;
+  // SOT-aligned "Outstanding Rentals" chip: prefer the live Rental Ops set
+  // size over the (potentially lagged) fs_trucks count so this number matches
+  // Rental Ops / FS Rentals Dashboard exactly.
+  const totalRentalsCount = ropsTruckSet
+    ? ropsTruckSet.size
+    : (usePaginatedMode ? (serverTotal ?? trucks.length) : trucks.length);
   const totalPages = Math.max(1, Math.ceil(filteredCount / ROWS_PER_PAGE));
   const safePage = Math.min(page, totalPages);
   const pageStart = (safePage - 1) * ROWS_PER_PAGE;
