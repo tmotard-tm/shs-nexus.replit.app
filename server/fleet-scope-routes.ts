@@ -11688,6 +11688,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
     }
 
+    // LOA Recovery sync (Task #427): pull active continuous-leave roster from
+    // the external Reports API, cross-check Snowflake, and create/cancel
+    // queue items in the FLEET / Assets Management / Inventory Control lanes.
+    // Runs after the TPMS snapshot so per-tech truck/contact lookups use
+    // fresh data. Failures are logged and never abort the scheduler.
+    try {
+      const { runLoaRecoverySync } = await import("./loa-recovery-sync-service");
+      const loa = await runLoaRecoverySync("scheduler");
+      console.log(`[Tech Data Scheduler] LOA Recovery sync: ok=${loa.ok} api=${loa.apiRowCount} continuous=${loa.continuousCount} deduped=${loa.dedupedCount} qualifying=${loa.qualifyingCount} sfMismatch=${loa.snowflakeMismatchCount} created=${loa.queueItemsCreated} (workflows=${loa.workflowsCreated}) cancelled=${loa.queueItemsCancelled} (workflows=${loa.workflowsCancelled})${loa.error ? ' error=' + loa.error : ''}`);
+    } catch (loaErr: any) {
+      console.error('[Tech Data Scheduler] LOA Recovery sync failed (continuing):', loaErr?.message || loaErr);
+    }
+
     try {
       // Get all trucks from our database
       const allTrucks = await fleetScopeStorage.getAllTrucks();
@@ -12399,6 +12412,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         } catch (vrmErr: any) {
           console.error('[VRM RepairTracker] Bootstrap contact refresh failed:', vrmErr?.message || vrmErr);
         }
+      }
+      // LOA Recovery sync (Task #427) on startup — runs after the TPMS
+      // bootstrap so the per-tech truck/contact lookups see fresh data.
+      try {
+        const { runLoaRecoverySync } = await import("./loa-recovery-sync-service");
+        const loa = await runLoaRecoverySync("startup");
+        console.log(`[LoaRecovery] Bootstrap run: ok=${loa.ok} api=${loa.apiRowCount} continuous=${loa.continuousCount} deduped=${loa.dedupedCount} qualifying=${loa.qualifyingCount} sfMismatch=${loa.snowflakeMismatchCount} created=${loa.queueItemsCreated} (workflows=${loa.workflowsCreated}) cancelled=${loa.queueItemsCancelled} (workflows=${loa.workflowsCancelled})${loa.error ? ' error=' + loa.error : ''}`);
+      } catch (loaErr: any) {
+        console.error('[LoaRecovery] Bootstrap run failed:', loaErr?.message || loaErr);
       }
     } catch (err: any) {
       console.error('[TPMS Snapshot] Bootstrap refresh failed:', err?.message || err);

@@ -19697,6 +19697,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ===== LOA Recovery (Task #427) — read-only diagnostics & snapshot =====
+  app.get("/api/loa-recovery/snapshot", requireAuth, async (_req: any, res) => {
+    try {
+      const { getLatestLoaRecoverySnapshot } = await import("./loa-recovery-sync-service");
+      const snap = await getLatestLoaRecoverySnapshot();
+      return res.json(snap);
+    } catch (err: any) {
+      console.error("[LoaRecovery] GET /snapshot error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load snapshot" });
+    }
+  });
+
+  app.get("/api/loa-recovery/diagnostics", requireAuth, async (_req: any, res) => {
+    try {
+      const { getLastLoaRecoveryRunResult } = await import("./loa-recovery-sync-service");
+      return res.json({ lastRun: getLastLoaRecoveryRunResult() });
+    } catch (err: any) {
+      console.error("[LoaRecovery] GET /diagnostics error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load diagnostics" });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

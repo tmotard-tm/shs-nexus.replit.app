@@ -28,6 +28,7 @@ Nexus is an enterprise task management platform for automating tasks, centralizi
 -   `BYOV_DASHBOARD_URL` (base URL of the BYOV Dashboard service, e.g. `https://byovdashboard.replit.app`, used by the Weekly Onboarding BYOV intent cross-check)
 -   `VRM_APPROVAL_TWILIO_FROM` (E.164 Twilio number used as the sender for tech-facing rental-approval SMS — currently the same 877-327-7826 number used for outbound Repair Shop calls via ElevenLabs. When this is set, approval SMS sends from this number using the existing `FS_TWILIO_ACCOUNT_SID`/`FS_TWILIO_AUTH_TOKEN` creds. If the number lives in a different Twilio account, also set `VRM_APPROVAL_TWILIO_ACCOUNT_SID` and `VRM_APPROVAL_TWILIO_AUTH_TOKEN` to override. When unset, approval SMS falls back to the shared FS registration sender.)
 -   `FS_BYOV_API_KEY` (`X-API-Key` header value for `POST {BYOV_DASHBOARD_URL}/api/v1/roster-check/bulk` — bulk roster check, up to 500 enterprise IDs per request)
+-   `REPORTS_API_KEY` (`X-API-Key` header value for `GET https://employee-search-db-leslieellis.replit.app/api/reports/active-continuous-leaves` — drives the LOA Recovery queue sync that runs on app startup and on the 7:30 AM ET Tech Data Scheduler)
 
 ## Stack
 

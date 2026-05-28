@@ -73,6 +73,7 @@ export interface RolePermissionSettings {
       inventoryQueue: boolean;
       fleetQueue: boolean;
       offboardingQueue: boolean;
+      loaRecovery: boolean;
     };
     management: {
       enabled: boolean;
@@ -515,6 +516,27 @@ export const syncLogs = pgTable("sync_logs", {
   triggeredBy: text("triggered_by"), // scheduler, manual, api
 });
 
+// LOA Recovery snapshot — one row per qualifying tech per sync run.
+// Captures the active continuous-leave roster (>=30 days) used to drive the
+// LOA Recovery queue lane. Append-only audit trail; latest run is identified
+// by syncedAt and used by the read endpoint.
+export const loaRecoverySnapshot = pgTable("loa_recovery_snapshot", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  enterpriseId: varchar("enterprise_id", { length: 20 }).notNull(),
+  employeeNumber: varchar("employee_number", { length: 20 }),
+  sfStatus: varchar("sf_status", { length: 5 }), // L, P, or null when no match in DRIVELINE_ALL_TECHS
+  startDate: date("start_date"),
+  endDate: date("end_date"),
+  days: integer("days").notNull(),
+  source: varchar("source", { length: 16 }).notNull(), // 'api' (always — API is source of truth)
+  syncedAt: timestamp("synced_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    enterpriseIdIdx: index("loa_recovery_snapshot_enterprise_id_idx").on(table.enterpriseId),
+    syncedAtIdx: index("loa_recovery_snapshot_synced_at_idx").on(table.syncedAt),
+  };
+});
+
 // Truck Inventory from Snowflake PISR_SKU_DETAIL - parts/inventory on each truck
 export const truckInventory = pgTable("truck_inventory", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -849,6 +871,14 @@ export const insertSyncLogSchema = createInsertSchema(syncLogs).omit({
   id: true,
   startedAt: true,
 });
+
+export const insertLoaRecoverySnapshotSchema = createInsertSchema(loaRecoverySnapshot).omit({
+  id: true,
+  syncedAt: true,
+});
+
+export type InsertLoaRecoverySnapshot = z.infer<typeof insertLoaRecoverySnapshotSchema>;
+export type LoaRecoverySnapshot = typeof loaRecoverySnapshot.$inferSelect;
 
 export const insertTruckInventorySchema = createInsertSchema(truckInventory).omit({
   id: true,
