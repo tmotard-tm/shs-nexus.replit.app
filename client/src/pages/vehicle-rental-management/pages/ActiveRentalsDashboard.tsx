@@ -472,15 +472,33 @@ export default function ActiveRentalsDashboard() {
   // an empty payload. Either we render the SOT-intersected truth or we
   // surface a loading/error state — never the lagged fs_trucks-only view,
   // since that's the exact misalignment we're fixing.
-  const ropsTruckSet = useMemo(() => {
-    // TanStack Query keeps prior `data` populated during a failed background
-    // refetch. Treat any error state as "no SOT available" so we don't
-    // silently render a stale truck set while the user sees an error
-    // indicator.
-    if (rentalOpsTrucksQuery.isError) return null;
+  // Last-known-good cache (Action 1 from the premortem). On a transient
+  // /rental-ops-truck-numbers failure (5xx/timeout) we keep serving the
+  // most recent successful Set for up to ROPS_LKG_MAX_AGE_MS so the table
+  // doesn't go blank. A small "data may be stale" banner is shown the
+  // whole time we're degraded. If the endpoint stays down past the LKG
+  // window, we fall back to the original explicit-failure behaviour (no
+  // silent stale forever).
+  const ROPS_LKG_MAX_AGE_MS = 10 * 60_000; // 10 minutes
+  const lastGoodRopsRef = useRef<{ set: Set<string>; at: number } | null>(null);
+  const { ropsTruckSet, ropsIsStale } = useMemo<{
+    ropsTruckSet: Set<string> | null;
+    ropsIsStale: boolean;
+  }>(() => {
     const arr = rentalOpsTrucksQuery.data?.truckNumbers;
-    if (!arr) return null;
-    return new Set(arr.map((s) => String(s).replace(/^0+/, "")));
+    if (!rentalOpsTrucksQuery.isError && arr) {
+      const set = new Set(arr.map((s) => String(s).replace(/^0+/, "")));
+      lastGoodRopsRef.current = { set, at: Date.now() };
+      return { ropsTruckSet: set, ropsIsStale: false };
+    }
+    // Errored or no fresh data yet — try last-known-good within the window.
+    if (rentalOpsTrucksQuery.isError && lastGoodRopsRef.current) {
+      const age = Date.now() - lastGoodRopsRef.current.at;
+      if (age <= ROPS_LKG_MAX_AGE_MS) {
+        return { ropsTruckSet: lastGoodRopsRef.current.set, ropsIsStale: true };
+      }
+    }
+    return { ropsTruckSet: null, ropsIsStale: false };
   }, [rentalOpsTrucksQuery.data, rentalOpsTrucksQuery.isError]);
   const trucks: FSTruck[] = useMemo(() => {
     if (!ropsTruckSet) return [];
@@ -489,8 +507,16 @@ export default function ActiveRentalsDashboard() {
   const trucksLoading =
     rentalOpsTrucksQuery.isLoading ||
     (usePaginatedMode ? paginatedTrucksQuery.isLoading : legacyTrucksQuery.isLoading);
+  // When LKG is actively serving a stale Rental Ops set (ropsIsStale &&
+  // ropsTruckSet non-null), suppress the Rental Ops error so the table
+  // renders the cached snapshot + amber "Showing last-known data" badge
+  // instead of the hard "Failed to load" panel. We still surface real
+  // /trucks errors (paginated/legacy) — those are independent and have no
+  // LKG fallback.
+  const ropsErrorForGate =
+    ropsIsStale && ropsTruckSet ? null : rentalOpsTrucksQuery.error;
   const trucksError =
-    rentalOpsTrucksQuery.error ??
+    ropsErrorForGate ??
     (usePaginatedMode ? paginatedTrucksQuery.error : legacyTrucksQuery.error);
   const summary = summaryQuery.data;
   const enrichmentMap = enrichmentQuery.data?.byNormalizedTruckNumber ?? {};
@@ -1107,10 +1133,20 @@ export default function ActiveRentalsDashboard() {
         {/* Outstanding Rentals + filter row */}
         <Card className="p-6">
           <div className="space-y-3 mb-6">
-            <div className="flex items-center gap-2 text-sm">
+            <div className="flex items-center gap-2 text-sm flex-wrap">
               <span className="text-muted-foreground">Outstanding Rentals:</span>
               <Badge variant="secondary" className="font-semibold">{totalRentalsCount}</Badge>
               <span className="text-xs text-muted-foreground italic">(from Fleet Scope — source of truth)</span>
+              {ropsIsStale && (
+                <Badge
+                  variant="outline"
+                  className="text-xs border-amber-500 text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30"
+                  title="The live Rental Ops endpoint is temporarily unreachable. Showing the most recent successful snapshot — counts and rows may be slightly out of date until the connection recovers."
+                  data-testid="badge-rops-stale"
+                >
+                  Showing last-known data
+                </Badge>
+              )}
             </div>
 
             <div className="flex flex-col md:flex-row items-stretch md:items-center gap-3">

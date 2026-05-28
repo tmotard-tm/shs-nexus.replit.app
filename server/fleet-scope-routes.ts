@@ -36,6 +36,221 @@ import multer from "multer";
 import cron from "node-cron";
 import * as XLSX from "xlsx";
 import { randomUUID } from "node:crypto";
+import { pool as fsCachePool } from "./db";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// /api/fs/trucks response cache — MODULE-SCOPED (Tier-4 perf, Actions 2 & 3)
+// ─────────────────────────────────────────────────────────────────────────────
+// Hoisted out of registerFleetScopeRoutes() so background writers in this
+// file (applyShopListRows, /tracking/*, /rental-sync) AND external modules
+// (server/sync-scheduler.ts) can call invalidateTrucksCache() directly.
+//
+// Action 3 — cross-replica invalidation via a tiny DB-backed version counter
+// (`fs_cache_versions` table). Every invalidate locally bumps a row; every
+// replica polls the row every 2s and drops its local cache if the version
+// moved. Purely additive: if the DB is unreachable or the table doesn't
+// exist, we silently fall back to local-only caching (same behaviour as the
+// prior single-replica implementation), so nothing degrades.
+type TrucksCacheEntry = {
+  data: any[] | null;
+  expires: number;
+  promise: Promise<any[]> | null;
+};
+let trucksCache: TrucksCacheEntry = { data: null, expires: 0, promise: null };
+let trucksCacheGeneration = 0;
+const TRUCKS_CACHE_TTL_MS = 5_000;
+const FS_TRUCKS_CACHE_KEY = "fs_trucks";
+
+// Cross-replica state — last value of fs_cache_versions.version we polled.
+// `null` means "haven't polled yet"; first successful poll establishes a
+// baseline without invalidating, so a replica that boots into an already-
+// bumped state doesn't churn its cache for no reason.
+let lastSeenRemoteVersion: string | null = null;
+let crossReplicaWired = false;
+
+async function ensureCacheVersionTable(): Promise<void> {
+  // Raw SQL by design: per replit.md gotcha, drizzle-kit push may conflict
+  // with non-Drizzle-managed tables, so we manage this one via CREATE
+  // TABLE IF NOT EXISTS like the other fs_* helpers.
+  await fsCachePool.query(`
+    CREATE TABLE IF NOT EXISTS fs_cache_versions (
+      cache_key TEXT PRIMARY KEY,
+      version BIGINT NOT NULL DEFAULT 0,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await fsCachePool.query(
+    `INSERT INTO fs_cache_versions (cache_key, version)
+     VALUES ($1, 0)
+     ON CONFLICT (cache_key) DO NOTHING`,
+    [FS_TRUCKS_CACHE_KEY],
+  );
+}
+
+function bumpRemoteCacheVersion(): void {
+  // Fire-and-forget. We never await this — local invalidation already
+  // happened, the remote bump only matters for OTHER replicas. If it
+  // fails (DB down, table missing on a partial deploy), we log and
+  // move on; the local cache is still consistent for this replica.
+  fsCachePool
+    .query(
+      `INSERT INTO fs_cache_versions (cache_key, version, updated_at)
+       VALUES ($1, 1, NOW())
+       ON CONFLICT (cache_key) DO UPDATE SET
+         version = fs_cache_versions.version + 1,
+         updated_at = NOW()
+       RETURNING version`,
+      [FS_TRUCKS_CACHE_KEY],
+    )
+    .then((result) => {
+      const v = result.rows?.[0]?.version;
+      if (v != null) {
+        // Pre-seed lastSeenRemoteVersion so our own poll doesn't echo
+        // back as "another replica changed it" and trigger a redundant
+        // local invalidate.
+        lastSeenRemoteVersion = String(v);
+      }
+    })
+    .catch((err: any) => {
+      console.warn(
+        `[FS Cache] bumpRemoteCacheVersion failed (non-fatal — cross-replica disabled this call): ${err?.message || err}`,
+      );
+    });
+}
+
+async function pollRemoteCacheVersion(): Promise<void> {
+  try {
+    const result = await fsCachePool.query(
+      `SELECT version FROM fs_cache_versions WHERE cache_key = $1`,
+      [FS_TRUCKS_CACHE_KEY],
+    );
+    const v = result.rows?.[0]?.version;
+    if (v == null) return;
+    const remote = String(v);
+    if (lastSeenRemoteVersion === null) {
+      // First successful poll: just establish baseline.
+      lastSeenRemoteVersion = remote;
+      return;
+    }
+    if (remote !== lastSeenRemoteVersion) {
+      lastSeenRemoteVersion = remote;
+      // Another replica (or a local writer that bumped) advanced the
+      // version. Drop our local cache + bump local generation so any
+      // in-flight read won't write back stale data. Do NOT re-bump
+      // remote — that would create an infinite ping-pong across replicas.
+      trucksCache = { data: null, expires: 0, promise: null };
+      trucksCacheGeneration++;
+    }
+  } catch {
+    // Silent: keep local-cache-only mode. The next poll may succeed.
+  }
+}
+
+/**
+ * Exported invalidator — drop the local /api/fs/trucks cache immediately
+ * and (best-effort) bump the cross-replica version. Safe to call from any
+ * mutation path; cheap (~one fire-and-forget UPSERT).
+ */
+export function invalidateTrucksCache(): void {
+  trucksCache = { data: null, expires: 0, promise: null };
+  trucksCacheGeneration++;
+  bumpRemoteCacheVersion();
+}
+
+async function getCachedTrucksWithUps(): Promise<any[]> {
+  const now = Date.now();
+  if (trucksCache.data && trucksCache.expires > now) {
+    return trucksCache.data;
+  }
+  if (trucksCache.promise) {
+    return trucksCache.promise;
+  }
+  const startGeneration = trucksCacheGeneration;
+  let promise!: Promise<any[]>;
+  promise = (async () => {
+    const trucks = await fleetScopeStorage.getAllTrucks();
+    const allTrackingRecords = await fleetScopeStorage.getTrackingRecords();
+    const trackingByTruck = new Map<
+      string,
+      {
+        upsStatus: string | null;
+        upsStatusDescription: string | null;
+        upsLastCheckedAt: Date | null;
+      }
+    >();
+    for (const record of allTrackingRecords) {
+      if (record.truckId) {
+        const existing = trackingByTruck.get(record.truckId);
+        if (!existing || (!existing.upsStatus && record.lastStatus)) {
+          trackingByTruck.set(record.truckId, {
+            upsStatus: record.lastStatus,
+            upsStatusDescription: record.lastStatusDescription,
+            upsLastCheckedAt: record.lastCheckedAt,
+          });
+        }
+      }
+    }
+    const trucksWithUps = trucks.map((truck) => ({
+      ...truck,
+      upsStatus: trackingByTruck.get(truck.id)?.upsStatus || null,
+      upsStatusDescription:
+        trackingByTruck.get(truck.id)?.upsStatusDescription || null,
+      upsLastCheckedAt: trackingByTruck.get(truck.id)?.upsLastCheckedAt || null,
+    }));
+    // Only write back if no buster fired while we were querying. If a write
+    // happened mid-flight (local OR cross-replica via the version poller),
+    // the data we just fetched may be pre-write — let the next caller miss
+    // and re-query rather than poison the cache.
+    if (trucksCacheGeneration === startGeneration) {
+      trucksCache = {
+        data: trucksWithUps,
+        expires: Date.now() + TRUCKS_CACHE_TTL_MS,
+        promise: null,
+      };
+    } else if (trucksCache.promise === promise) {
+      trucksCache = {
+        data: trucksCache.data,
+        expires: trucksCache.expires,
+        promise: null,
+      };
+    }
+    return trucksWithUps;
+  })();
+  trucksCache = {
+    data: trucksCache.data,
+    expires: trucksCache.expires,
+    promise,
+  };
+  try {
+    return await promise;
+  } catch (err) {
+    if (trucksCache.promise === promise) {
+      trucksCache = { data: null, expires: 0, promise: null };
+    }
+    throw err;
+  }
+}
+
+function wireCrossReplicaInvalidation(): void {
+  if (crossReplicaWired) return;
+  crossReplicaWired = true;
+  ensureCacheVersionTable()
+    .then(() => pollRemoteCacheVersion())
+    .then(() => {
+      console.log(
+        "[FS Cache] Cross-replica invalidation wired (fs_cache_versions table ready)",
+      );
+    })
+    .catch((err: any) => {
+      console.warn(
+        `[FS Cache] Could not initialize fs_cache_versions (cross-replica invalidation disabled, local cache still active): ${err?.message || err}`,
+      );
+    });
+  const poller = setInterval(() => {
+    pollRemoteCacheVersion();
+  }, 2_000);
+  poller.unref?.();
+}
 
 // Extract a 5-digit US ZIP code from an address string. Looks for ZIP[+4]
 // at the end of the address first (most reliable), then falls back to the
@@ -439,6 +654,9 @@ async function runShopListAutoSync(): Promise<ShopListRunStatus> {
     const { rows, dateFilteredCount } = await parseShopListBuffer(buffer);
     console.log(`[ShopListSync] Parsed ${rows.length} qualifying rows (${dateFilteredCount} filtered by date)`);
     const result = await applyShopListRows(rows, dateFilteredCount);
+    // Drop the /trucks cache so the freshly-updated rows are visible
+    // immediately (locally AND across replicas via the version bump).
+    if (result.trucksUpdated > 0) invalidateTrucksCache();
     console.log(`[ShopListSync] Done: updated=${result.trucksUpdated} skipped=${result.rowsSkipped} notFound=${result.notFound.length}`);
     return result;
   } catch (err: any) {
@@ -2281,105 +2499,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   })();
 
-  // ── /trucks response cache (Tier-4 perf) ────────────────────────────────
-  // The augmented `trucksWithUps` array (whole-fleet getAllTrucks + full
-  // getTrackingRecords join) is identical for every caller. Caching it for
-  // a short window dedupes burst concurrent reads (multiple users hitting
-  // the dashboard, ARD's 5-min poll, FS Dashboard's mount, etc.) and stops
-  // the per-request DB scans that were the dominant load-time cost.
-  //
-  // TTL is intentionally short (5s) so the staleness window is barely
-  // perceptible. On top of that, the buster middleware below clears the
-  // cache on any non-GET to /trucks*, so a user who edits a truck never
-  // sees their own change disappear behind a stale cache hit. Background
-  // syncs that mutate fs_trucks via fleetScopeStorage directly (rental-ops
-  // sync, Snowflake refresh, etc.) don't go through the HTTP path, so
-  // those rely on the 5s TTL — acceptable since they run out-of-band.
-  //
-  // In-flight `promise` field dedupes parallel cache-miss requests so we
-  // never run two getAllTrucks queries simultaneously.
-  type TrucksCacheEntry = {
-    data: any[] | null;
-    expires: number;
-    promise: Promise<any[]> | null;
-  };
-  let trucksCache: TrucksCacheEntry = { data: null, expires: 0, promise: null };
-  // Generation counter: incremented on every cache bust. An in-flight read
-  // captures the generation at start; if the generation changes mid-flight
-  // (because a write busted the cache while we were querying the DB), the
-  // promise's result is NOT written back to the cache — otherwise the
-  // pre-write snapshot would repopulate the cache and live for another TTL,
-  // silently shadowing the user's edit.
-  let trucksCacheGeneration = 0;
-  const TRUCKS_CACHE_TTL_MS = 5_000;
-
-  function invalidateTrucksCache(): void {
-    trucksCache = { data: null, expires: 0, promise: null };
-    trucksCacheGeneration++;
-  }
-
-  async function getCachedTrucksWithUps(): Promise<any[]> {
-    const now = Date.now();
-    if (trucksCache.data && trucksCache.expires > now) {
-      return trucksCache.data;
-    }
-    if (trucksCache.promise) {
-      return trucksCache.promise;
-    }
-    const startGeneration = trucksCacheGeneration;
-    let promise!: Promise<any[]>;
-    promise = (async () => {
-      const trucks = await fleetScopeStorage.getAllTrucks();
-      const allTrackingRecords = await fleetScopeStorage.getTrackingRecords();
-      const trackingByTruck = new Map<string, { upsStatus: string | null; upsStatusDescription: string | null; upsLastCheckedAt: Date | null }>();
-      for (const record of allTrackingRecords) {
-        if (record.truckId) {
-          const existing = trackingByTruck.get(record.truckId);
-          if (!existing || (!existing.upsStatus && record.lastStatus)) {
-            trackingByTruck.set(record.truckId, {
-              upsStatus: record.lastStatus,
-              upsStatusDescription: record.lastStatusDescription,
-              upsLastCheckedAt: record.lastCheckedAt,
-            });
-          }
-        }
-      }
-      const trucksWithUps = trucks.map(truck => ({
-        ...truck,
-        upsStatus: trackingByTruck.get(truck.id)?.upsStatus || null,
-        upsStatusDescription: trackingByTruck.get(truck.id)?.upsStatusDescription || null,
-        upsLastCheckedAt: trackingByTruck.get(truck.id)?.upsLastCheckedAt || null,
-      }));
-      // Only write back if no buster fired while we were querying. If a write
-      // happened mid-flight, the data we just fetched may be pre-write, so we
-      // deliberately let the next caller miss the cache and re-query.
-      if (trucksCacheGeneration === startGeneration) {
-        trucksCache = { data: trucksWithUps, expires: Date.now() + TRUCKS_CACHE_TTL_MS, promise: null };
-      } else if (trucksCache.promise === promise) {
-        // Clear our own in-flight marker without writing back stale data.
-        trucksCache = { data: trucksCache.data, expires: trucksCache.expires, promise: null };
-      }
-      return trucksWithUps;
-    })();
-    // Mark in-flight without overwriting any still-valid cached data.
-    trucksCache = { data: trucksCache.data, expires: trucksCache.expires, promise };
-    try {
-      return await promise;
-    } catch (err) {
-      // On failure, clear the in-flight promise so the next caller retries.
-      if (trucksCache.promise === promise) {
-        trucksCache = { data: null, expires: 0, promise: null };
-      }
-      throw err;
-    }
-  }
+  // /trucks response cache lives at module scope (see top of file).
+  // Wire up cross-replica invalidation polling here so it starts when the
+  // routes are registered (i.e. after the DB pool is initialized). Safe to
+  // call multiple times — guarded by `crossReplicaWired`.
+  wireCrossReplicaInvalidation();
 
   // Buster: any write to /trucks/* (POST/PATCH/PUT/DELETE) immediately
-  // invalidates the cache so the user's next GET sees fresh data. Read-only
-  // methods skip the buster. Mounted BEFORE the GET handler so it runs first
-  // on the same path. Tracking mutations and background fs_trucks writers
-  // (rental-ops sync, Snowflake refresh, shop-list auto-sync, schedulers)
-  // do NOT pass through this middleware — they rely on the 5s TTL instead.
+  // invalidates the cache locally AND bumps the cross-replica version so
+  // other replicas drop their caches on the next poll (within ~2s). Read-
+  // only methods skip the buster. Background writers (rental-ops sync,
+  // shop-list, tracking refresh) call invalidateTrucksCache() directly.
   app.use("/trucks", (req, _res, next) => {
     if (req.method !== "GET" && req.method !== "HEAD" && req.method !== "OPTIONS") {
       invalidateTrucksCache();
@@ -9865,6 +9995,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       
       const record = await fleetScopeStorage.createTrackingRecord(validatedData);
+      // New tracking record can join into /trucks via truckId — invalidate.
+      invalidateTrucksCache();
       res.status(201).json(record);
     } catch (error: any) {
       console.error("Error creating tracking record:", error);
@@ -9907,7 +10039,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           lastError: trackingResult.error || null,
           errorAt: trackingResult.error ? new Date() : null,
         });
-        
+        // Tracking status flows into /trucks via the in-handler join, so
+        // any change needs to invalidate the cache too.
+        invalidateTrucksCache();
+
         res.json({
           record: updatedRecord,
           activities: trackingResult.activities,
@@ -9943,6 +10078,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.delete("/tracking/:id", async (req, res) => {
     try {
       await fleetScopeStorage.deleteTrackingRecord(req.params.id);
+      // Removing a tracking record drops its UPS status from the /trucks
+      // join output — invalidate so the next read recomputes.
+      invalidateTrucksCache();
       res.json({ message: "Tracking record deleted" });
     } catch (error: any) {
       console.error("Error deleting tracking record:", error);
@@ -10009,7 +10147,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       
       console.log(`[UPS Bulk Refresh] Complete: ${updated} updated, ${failed} failed`);
-      
+      if (updated > 0 || failed > 0) invalidateTrucksCache();
+
       res.json({
         message: `Refreshed ${updated} tracking records`,
         updated,
@@ -16402,6 +16541,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const ext = (req.file.originalname || "").split(".").pop()?.toLowerCase() || req.file.mimetype || "";
       const { rows, dateFilteredCount } = await parseShopListBuffer(req.file.buffer, ext);
       const result = await applyShopListRows(rows, dateFilteredCount);
+      if (result.trucksUpdated > 0) invalidateTrucksCache();
       res.json(result);
     } catch (err: any) {
       console.error("[ShopListImport] Error:", err.message);
@@ -16418,6 +16558,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       const { syncRentalOpsToFleetScope } = await import("./rental-ops-sync");
       const result = await syncRentalOpsToFleetScope();
+      // Manual rental sync rewrote fs_trucks (added/removed/date-filled).
+      // Drop the /trucks cache locally + bump cross-replica version so
+      // every ARD client sees the new SOT on their next refresh.
+      if (result.added.length > 0 || result.removed.length > 0 || result.updated > 0) {
+        invalidateTrucksCache();
+      }
 
       res.json({
         success: true,

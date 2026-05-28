@@ -109,6 +109,17 @@ async function checkAndRunSync(): Promise<void> {
           const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
           console.log('[Scheduler] Starting Rental Ops → Fleet Scope auto-sync...');
           const rentalSyncResult = await syncRentalOpsToFleetScope();
+          // Best-effort cross-replica invalidation. Imported lazily so any
+          // import failure (file rename, etc.) is fully non-fatal — the
+          // sync itself already succeeded.
+          if (rentalSyncResult.added.length > 0 || rentalSyncResult.removed.length > 0 || rentalSyncResult.updated > 0) {
+            try {
+              const { invalidateTrucksCache } = await import('./fleet-scope-routes');
+              invalidateTrucksCache();
+            } catch (invErr: any) {
+              console.warn('[Scheduler] invalidateTrucksCache (post-rental-sync) failed (non-fatal):', invErr?.message);
+            }
+          }
           console.log(`[Scheduler] Rental Ops sync complete — Added: ${rentalSyncResult.added.length}, Removed: ${rentalSyncResult.removed.length}, Date-filled: ${rentalSyncResult.updated}, Unchanged: ${rentalSyncResult.unchanged}`);
         } catch (rentalErr: any) {
           console.error('[Scheduler] Rental Ops → Fleet Scope sync failed (non-fatal):', rentalErr?.message);
@@ -1092,6 +1103,14 @@ async function runCatchUpRentalSyncIfNeeded(): Promise<void> {
     console.log(`[Scheduler] Startup catch-up: last rental sync was ${lastDbSyncDate ?? 'never'}, running now...`);
     const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
     const result = await syncRentalOpsToFleetScope();
+    if (result.added.length > 0 || result.removed.length > 0 || result.updated > 0) {
+      try {
+        const { invalidateTrucksCache } = await import('./fleet-scope-routes');
+        invalidateTrucksCache();
+      } catch (invErr: any) {
+        console.warn('[Scheduler] invalidateTrucksCache (post-startup-catchup) failed (non-fatal):', invErr?.message);
+      }
+    }
     console.log(`[Scheduler] Startup catch-up complete — Added: ${result.added.length}, Removed: ${result.removed.length}, Date-filled: ${result.updated}, Unchanged: ${result.unchanged}`);
   } catch (err: any) {
     console.error('[Scheduler] Startup catch-up rental sync failed (non-fatal):', err?.message);
