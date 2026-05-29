@@ -582,9 +582,9 @@ export default function MetricsDashboard() {
 
 function AmsActiveWeeklyCard() {
   const { data, isLoading } = useQuery<AmsActiveWeekly[]>({
-    queryKey: ["/api/fs/ams/active-weekly", { weeks: 8 }],
+    queryKey: ["/api/fs/ams/active-weekly", { weeks: 4 }],
     queryFn: async () => {
-      const res = await fetch("/api/fs/ams/active-weekly?weeks=8");
+      const res = await fetch("/api/fs/ams/active-weekly?weeks=4");
       if (!res.ok) throw new Error("Failed to fetch AMS active-weekly");
       return res.json();
     },
@@ -671,7 +671,7 @@ function ProcurementWeeklyCard() {
     queryKey: ["/api/fs/decommissioning/procurement-weekly-counts"],
     refetchInterval: 5 * 60 * 1000,
   });
-  const last8 = (data || []).slice(0, 8).filter((r) => isOnOrAfterCutoff(r.weekStart));
+  const last4 = (data || []).slice(0, 4).filter((r) => isOnOrAfterCutoff(r.weekStart));
 
   return (
     <Card>
@@ -691,7 +691,7 @@ function ProcurementWeeklyCard() {
             <Skeleton className="h-10 w-full" />
             <Skeleton className="h-10 w-full" />
           </div>
-        ) : last8.length === 0 ? (
+        ) : last4.length === 0 ? (
           <div className="text-center py-8 text-muted-foreground">
             <ShoppingCart className="w-12 h-12 mx-auto mb-3 opacity-50" />
             <p>No vehicles have been sent to procurement yet.</p>
@@ -705,7 +705,7 @@ function ProcurementWeeklyCard() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {last8.map((row, idx) => (
+              {last4.map((row, idx) => (
                 <TableRow key={row.weekStart} data-testid={`row-procurement-${row.weekStart}`}>
                   <TableCell className="font-medium">
                     {formatWeekRange(row.weekStart, row.weekEnd)}
@@ -736,9 +736,9 @@ function ProcurementWeeklyCard() {
 
 function PmfNewArrivalsWeeklyCard() {
   const { data, isLoading } = useQuery<PmfNewArrivalsWeekly[]>({
-    queryKey: ["/api/fs/pmf/new-arrivals-weekly", { weeks: 8 }],
+    queryKey: ["/api/fs/pmf/new-arrivals-weekly", { weeks: 4 }],
     queryFn: async () => {
-      const res = await fetch("/api/fs/pmf/new-arrivals-weekly?weeks=8");
+      const res = await fetch("/api/fs/pmf/new-arrivals-weekly?weeks=4");
       if (!res.ok) throw new Error("Failed to fetch PMF new arrivals");
       return res.json();
     },
@@ -820,9 +820,9 @@ interface SamsaraPenetrationWeekly {
 
 function SamsaraPenetrationWeeklyCard() {
   const { data, isLoading } = useQuery<SamsaraPenetrationWeekly[]>({
-    queryKey: ["/api/fs/samsara/penetration-weekly", { weeks: 8 }],
+    queryKey: ["/api/fs/samsara/penetration-weekly", { weeks: 4 }],
     queryFn: async () => {
-      const res = await fetch("/api/fs/samsara/penetration-weekly?weeks=8");
+      const res = await fetch("/api/fs/samsara/penetration-weekly?weeks=4");
       if (!res.ok) throw new Error("Failed to fetch Samsara penetration weekly");
       return res.json();
     },
