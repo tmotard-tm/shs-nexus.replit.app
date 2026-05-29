@@ -603,7 +603,7 @@ function AmsActiveWeeklyCard() {
         <p className="text-sm text-muted-foreground">
           Live count of vehicles in AMS with TruckStatus = "Active". Captured
           on each refresh; historical weeks reflect the snapshot taken during
-          that week.
+          that week. Excludes BYOV trucks.
         </p>
       </CardHeader>
       <CardContent>

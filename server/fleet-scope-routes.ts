@@ -14159,8 +14159,35 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           // "Active" = OutOfServiceDate is "Unk/NA" (or empty/null).
           // Vehicles with a real date in OutOfServiceDate are excluded.
           const oosMap = await getAmsOutOfServiceMap();
+
+          // Build the set of BYOV VINs to EXCLUDE from the active count.
+          // BYOV trucks have a vehicle-number prefix of "88". Depending on
+          // zero-padding the Holman number may render as "88…" (e.g. 880012)
+          // or "088…" (e.g. 088001), so we match both prefixes. The OOS map
+          // is keyed by VIN, so we map VIN → Holman vehicle number first.
+          const byovVins = new Set<string>();
+          try {
+            const { holmanVehiclesCache } = await import("@shared/schema");
+            const holmanRows = await getDb()
+              .select({ vin: holmanVehiclesCache.vin })
+              .from(holmanVehiclesCache)
+              .where(
+                sql`${holmanVehiclesCache.holmanVehicleNumber} LIKE '88%' OR ${holmanVehiclesCache.holmanVehicleNumber} LIKE '088%'`,
+              );
+            for (const r of holmanRows) {
+              const vin = (r.vin ?? "").trim().toUpperCase();
+              if (vin) byovVins.add(vin);
+            }
+          } catch (byovErr: any) {
+            console.warn(
+              "[AMS Active Weekly] BYOV exclusion lookup failed (counting all vehicles):",
+              byovErr?.message,
+            );
+          }
+
           let active = 0;
-          for (const oos of Object.values(oosMap)) {
+          for (const [vin, oos] of Object.entries(oosMap)) {
+            if (byovVins.has((vin ?? "").trim().toUpperCase())) continue; // exclude BYOV trucks
             const v = (oos ?? "").toString().trim();
             if (v === "" || v.toLowerCase() === "unk/na") {
               active++;
