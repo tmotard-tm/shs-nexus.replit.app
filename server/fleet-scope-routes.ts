@@ -14161,10 +14161,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           const oosMap = await getAmsOutOfServiceMap();
 
           // Build the set of BYOV VINs to EXCLUDE from the active count.
-          // BYOV trucks have a vehicle-number prefix of "88". Depending on
-          // zero-padding the Holman number may render as "88…" (e.g. 880012)
-          // or "088…" (e.g. 088001), so we match both prefixes. The OOS map
-          // is keyed by VIN, so we map VIN → Holman vehicle number first.
+          // The exclusion criterion is the TRUCK NUMBER (not the VIN): BYOV
+          // trucks are the 5- or 6-digit Holman vehicle numbers that start
+          // with "88" (e.g. 88025 / 880123) or "088" (zero-padded, e.g.
+          // 088025). We match those truck numbers in SQL, then translate them
+          // to VINs because the AMS out-of-service map is keyed by VIN.
           const byovVins = new Set<string>();
           try {
             const { holmanVehiclesCache } = await import("@shared/schema");
@@ -14172,7 +14173,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               .select({ vin: holmanVehiclesCache.vin })
               .from(holmanVehiclesCache)
               .where(
-                sql`${holmanVehiclesCache.holmanVehicleNumber} LIKE '88%' OR ${holmanVehiclesCache.holmanVehicleNumber} LIKE '088%'`,
+                sql`${holmanVehiclesCache.holmanVehicleNumber} ~ '^(88|088)[0-9]+$'`,
               );
             for (const r of holmanRows) {
               const vin = (r.vin ?? "").trim().toUpperCase();

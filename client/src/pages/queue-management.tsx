@@ -44,6 +44,7 @@ import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { QueueItemDataTemplate } from "@/components/queue-item-data-template";
 import { AssetsRecoveryQueue } from "@/components/assets-queue/AssetsRecoveryQueue";
 import { PhoneRecoveryDashboard } from "@/pages/phone-recovery";
+import { LoaRecoveryTable } from "@/components/loa-recovery/LoaRecoveryTable";
 import { TechCombobox, TechRosterEntry } from "@/components/ui/tech-combobox";
 import { usePreviewRole } from "@/hooks/use-preview-role";
 import type { QueueItem, CombinedQueueItem, QueueModule, User as UserType } from "@shared/schema";
@@ -1027,6 +1028,7 @@ export default function UnifiedQueueManagement() {
                       <SelectItem value="onboarding">Onboarding</SelectItem>
                       <SelectItem value="storage_request">Storage Request</SelectItem>
                       <SelectItem value="vehicle_assignment">Vehicle Assignment</SelectItem>
+                      <SelectItem value="loa_recovery">LOA Recovery</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1191,13 +1193,21 @@ export default function UnifiedQueueManagement() {
                       </CardHeader>
                       {isExpanded && (
                         <CardContent className="p-6">
-                          <AssetsRecoveryQueue />
+                          {selectedWorkflowType === 'loa_recovery' ? (
+                            <LoaRecoveryTable
+                              items={filteredItems.filter(i => i.module === module && i.workflowType === 'loa_recovery')}
+                              module={module}
+                              allItems={queueItems.filter(i => i.workflowType === 'loa_recovery')}
+                            />
+                          ) : (
+                            <AssetsRecoveryQueue />
+                          )}
                         </CardContent>
                       )}
                     </Card>
                   );
                 }
-                
+
                 let moduleItems = filteredItems.filter(item => item.module === module);
                 if (module === 'inventory') {
                   moduleItems = moduleItems.filter(item => !isPhoneRecoveryTask(item));
@@ -1277,7 +1287,13 @@ export default function UnifiedQueueManagement() {
                             </button>
                           </div>
                         )}
-                        {module === 'inventory' && inventoryTab === 'phoneRecovery' ? (
+                        {selectedWorkflowType === 'loa_recovery' ? (
+                          <LoaRecoveryTable
+                            items={filteredItems.filter(i => i.module === module && i.workflowType === 'loa_recovery')}
+                            module={module}
+                            allItems={queueItems.filter(i => i.workflowType === 'loa_recovery')}
+                          />
+                        ) : module === 'inventory' && inventoryTab === 'phoneRecovery' ? (
                           <PhoneRecoveryDashboard />
                         ) : moduleItems.length === 0 ? (
                           <div className="text-center py-8">

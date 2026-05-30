@@ -5029,31 +5029,33 @@ export class DatabaseStorage implements IStorage {
 
   // Unified Queue Aggregator
   async getUnifiedQueueItems(modules: QueueModule[], status?: string): Promise<CombinedQueueItem[]> {
-    const departmentMap: Record<QueueModule, string> = {
-      'ntao': 'NTAO',
-      'assets': 'Assets Management', 
-      'inventory': 'Inventory Control',
-      'fleet': 'Fleet Management',
+    const departmentMap: Record<QueueModule, string[]> = {
+      'ntao': ['NTAO'],
+      'assets': ['Assets Management'],
+      'inventory': ['Inventory Control'],
+      // Include both 'Fleet Management' (standard) and 'FLEET' (used by loa-recovery-sync-service)
+      'fleet': ['Fleet Management', 'FLEET'],
     };
 
-    const departments = modules.map(m => departmentMap[m]);
-    
+    const departments = modules.flatMap(m => departmentMap[m]);
+
     let whereCondition = inArray(queueItems.department, departments);
-    
+
     if (status) {
       whereCondition = and(inArray(queueItems.department, departments), eq(queueItems.status, status)) ?? whereCondition;
     }
-    
+
     const items = await db.select().from(queueItems)
       .where(whereCondition)
       .orderBy(desc(queueItems.createdAt));
-    
-    return items.map(item => ({
-      ...item,
-      module: Object.keys(departmentMap).find(key => 
-        departmentMap[key as QueueModule] === item.department
-      ) as QueueModule
-    }));
+
+    // Map each item's department back to its canonical module key
+    return items.map(item => {
+      const mod = Object.keys(departmentMap).find(key =>
+        departmentMap[key as QueueModule].includes(item.department ?? '')
+      ) as QueueModule;
+      return { ...item, module: mod };
+    });
   }
 
   async getUnifiedQueueStats(modules: QueueModule[]): Promise<{

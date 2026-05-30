@@ -19698,6 +19698,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ===== LOA Recovery (Task #427) — read-only diagnostics & snapshot =====
+
+  // Update LOA recovery item: checklist tasks, status, vehicle override, notes
+  app.patch("/api/loa-recovery/:id/update", requireAuth, async (req: any, res) => {
+    try {
+      const { id } = req.params;
+      const { loaTasks, status, vehicleTypeOverride, notes } = req.body as {
+        loaTasks?: Record<string, boolean>;
+        status?: string;
+        vehicleTypeOverride?: string;
+        notes?: string;
+      };
+
+      // Fetch existing item — must exist and be an LOA recovery item
+      const existing = await db.select().from(queueItems)
+        .where(and(eq(queueItems.id, id), eq(queueItems.workflowType, 'loa_recovery')))
+        .limit(1);
+
+      if (!existing[0]) {
+        return res.status(404).json({ message: "LOA recovery item not found" });
+      }
+
+      // Parse existing data JSON and merge in the updates
+      let dataObj: Record<string, unknown> = {};
+      try {
+        dataObj = existing[0].data ? JSON.parse(existing[0].data) : {};
+      } catch {
+        dataObj = {};
+      }
+
+      if (loaTasks !== undefined) {
+        dataObj.loaTasks = { ...(dataObj.loaTasks as Record<string, boolean> || {}), ...loaTasks };
+      }
+      if (vehicleTypeOverride !== undefined) {
+        dataObj.vehicleTypeOverride = vehicleTypeOverride;
+      }
+
+      const updates: Record<string, unknown> = {
+        data: JSON.stringify(dataObj),
+        updatedAt: new Date(),
+      };
+      if (status !== undefined) updates.status = status;
+      if (notes !== undefined) updates.notes = notes;
+
+      const result = await db.update(queueItems)
+        .set(updates as any)
+        .where(and(eq(queueItems.id, id), eq(queueItems.workflowType, 'loa_recovery')))
+        .returning();
+
+      return res.json(result[0]);
+    } catch (err: any) {
+      console.error("[LoaRecovery] PATCH /update error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to update LOA recovery item" });
+    }
+  });
+
   app.get("/api/loa-recovery/snapshot", requireAuth, async (_req: any, res) => {
     try {
       const { getLatestLoaRecoverySnapshot } = await import("./loa-recovery-sync-service");
