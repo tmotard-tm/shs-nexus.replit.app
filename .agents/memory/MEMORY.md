@@ -1,0 +1,1 @@
+- [LOA Recovery department scoping](loa-recovery-scoping.md) — agent visibility rides on department/queue access (no flag); cross-queue strip must filter to accessible modules; LOA `department` labels need substring→module mapping, not `departmentToQueueModule`.

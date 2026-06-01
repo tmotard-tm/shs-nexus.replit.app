@@ -36,7 +36,6 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       inventoryQueue: true,
       fleetQueue: true,
       offboardingQueue: true,
-      loaRecovery: true,
     },
     management: {
       enabled: true,
@@ -171,7 +170,6 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       inventoryQueue: true,
       fleetQueue: true,
       offboardingQueue: true,
-      loaRecovery: true,
     },
     management: {
       enabled: true,
@@ -305,7 +303,6 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       inventoryQueue: true,
       fleetQueue: true,
       offboardingQueue: true,
-      loaRecovery: false,
     },
     management: {
       enabled: false,

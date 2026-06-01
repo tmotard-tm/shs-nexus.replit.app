@@ -19719,6 +19719,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "LOA recovery item not found" });
       }
 
+      // Enforce department/queue access: an agent may only update LOA items in
+      // a department they have access to (Admin/Developer keep full access).
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser) {
+        return res.status(401).json({ message: "Invalid user" });
+      }
+      const accessibleModules = getAccessibleQueueModules(currentUser);
+      // LOA lane departments are stored as "FLEET" / "Assets Management" /
+      // "Inventory Control", so match on substring rather than exact label.
+      const itemModule: QueueModule | null = (() => {
+        const d = (existing[0].department || "").toUpperCase();
+        if (d.includes("FLEET")) return "fleet";
+        if (d.includes("ASSET")) return "assets";
+        if (d.includes("INVENTORY")) return "inventory";
+        if (d.includes("NTAO")) return "ntao";
+        return null;
+      })();
+      if (!itemModule || !accessibleModules.includes(itemModule)) {
+        return res.status(403).json({ message: "Access denied to this LOA recovery item" });
+      }
+
       // Parse existing data JSON and merge in the updates
       let dataObj: Record<string, unknown> = {};
       try {

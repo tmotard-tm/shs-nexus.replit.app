@@ -73,7 +73,6 @@ export interface RolePermissionSettings {
       inventoryQueue: boolean;
       fleetQueue: boolean;
       offboardingQueue: boolean;
-      loaRecovery: boolean;
     };
     management: {
       enabled: boolean;

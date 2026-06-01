@@ -1197,7 +1197,7 @@ export default function UnifiedQueueManagement() {
                             <LoaRecoveryTable
                               items={filteredItems.filter(i => i.module === module && i.workflowType === 'loa_recovery')}
                               module={module}
-                              allItems={queueItems.filter(i => i.workflowType === 'loa_recovery')}
+                              allItems={queueItems.filter(i => i.workflowType === 'loa_recovery' && accessibleModules.includes(i.module as QueueModule))}
                             />
                           ) : (
                             <AssetsRecoveryQueue />
@@ -1291,7 +1291,7 @@ export default function UnifiedQueueManagement() {
                           <LoaRecoveryTable
                             items={filteredItems.filter(i => i.module === module && i.workflowType === 'loa_recovery')}
                             module={module}
-                            allItems={queueItems.filter(i => i.workflowType === 'loa_recovery')}
+                            allItems={queueItems.filter(i => i.workflowType === 'loa_recovery' && accessibleModules.includes(i.module as QueueModule))}
                           />
                         ) : module === 'inventory' && inventoryTab === 'phoneRecovery' ? (
                           <PhoneRecoveryDashboard />
