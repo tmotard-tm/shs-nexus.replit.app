@@ -32,6 +32,42 @@ const SYSTEM_REQUESTER_ID = "system:loa_recovery";
 const MIN_DAYS = 30;
 const FETCH_TIMEOUT_MS = 30_000;
 
+/**
+ * Ensure the `loa_recovery_snapshot` table (and its two indexes) exist.
+ *
+ * This table is defined in `shared/schema.ts` but is part of the main Drizzle
+ * schema, which is normally applied via `drizzle-kit push`. Because
+ * `drizzle-kit push` can conflict with the externally-managed `fs_*` tables
+ * (see replit.md gotcha), we create this single table idempotently with raw
+ * SQL at the start of every sync run — mirroring the `initFleetScopeSchema()`
+ * / `initVrmSchema()` startup pattern. Without this, the sync crashes with
+ * `relation "loa_recovery_snapshot" does not exist` before any queue items are
+ * created, so LOA Recovery cases never appear in any queue.
+ */
+async function ensureLoaRecoverySchema(): Promise<void> {
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "loa_recovery_snapshot" (
+      "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "enterprise_id" varchar(20) NOT NULL,
+      "employee_number" varchar(20),
+      "sf_status" varchar(5),
+      "start_date" date,
+      "end_date" date,
+      "days" integer NOT NULL,
+      "source" varchar(16) NOT NULL,
+      "synced_at" timestamp DEFAULT now() NOT NULL
+    );
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "loa_recovery_snapshot_enterprise_id_idx"
+      ON "loa_recovery_snapshot" ("enterprise_id");
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "loa_recovery_snapshot_synced_at_idx"
+      ON "loa_recovery_snapshot" ("synced_at");
+  `);
+}
+
 type ApiLeaveRow = {
   enterprise_id?: string | null;
   employee_number?: string | number | null;
@@ -183,6 +219,9 @@ export async function runLoaRecoverySync(
 
   let syncLogId: string | null = null;
   try {
+    // Make sure the snapshot table exists before any reads/writes touch it.
+    await ensureLoaRecoverySchema();
+
     const log = await storage.createSyncLog({
       syncType: "loa_recovery",
       status: "running",

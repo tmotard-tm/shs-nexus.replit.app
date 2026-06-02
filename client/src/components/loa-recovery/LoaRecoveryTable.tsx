@@ -5,7 +5,6 @@ import type { LoaQueueName } from './loa-types';
 import {
   parseLoaData,
   inferVehicleType,
-  daysOnLoa,
   getLastDayInfo,
   LOA_QUEUE_META,
   type LoaVehicleType,
@@ -136,7 +135,7 @@ function QueueRow({
 }) {
   const data = parseLoaData(item);
   const vehicle = inferVehicleType(item);
-  const days = daysOnLoa(data?.leave?.startDate);
+  const days = data?.leave?.days ?? 0;
   const activeItems = activeItemsForQueue(vehicle, queue);
   const loaTasks: Record<string, boolean> = data?.loaTasks || {};
   const done = activeItems.filter((it) => loaTasks[it.id]).length;

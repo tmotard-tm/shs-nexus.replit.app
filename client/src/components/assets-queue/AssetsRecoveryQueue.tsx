@@ -16,6 +16,8 @@ import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { AssetsTaskDetailView } from "@/components/assets-queue/AssetsTaskDetailView";
+import { LoaDetailView } from "@/components/loa-recovery/LoaDetailView";
+import type { CombinedQueueItem } from "@shared/schema";
 import {
   getLatestRecoveryOutreach,
   buildRecoveryOutreachBadgeText,
@@ -70,6 +72,7 @@ import {
   Bot,
   Info,
   AlertCircle,
+  ArrowLeft,
 } from "lucide-react";
 
 type VehicleType = "company" | "byov" | "rental";
@@ -190,6 +193,12 @@ function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; to
 
 function isItemFromSync(item: QueueItem): boolean {
   try {
+    // LOA Recovery cases are created by the automated LOA sync service
+    // (workflowType "loa_recovery", requesterId "system:loa_recovery"), so they
+    // are always "from sync" and should not be hidden when "Include Manual" is off.
+    if (item.workflowType === "loa_recovery" || item.requesterId === "system:loa_recovery") {
+      return true;
+    }
     const parsed = item.data ? JSON.parse(item.data) : {};
     const source = parsed.source || "";
     if (
@@ -208,6 +217,10 @@ function isItemFromSync(item: QueueItem): boolean {
     }
   } catch {}
   return false;
+}
+
+function isLoaRecoveryItem(item: { workflowType?: string | null; requesterId?: string | null }): boolean {
+  return item.workflowType === "loa_recovery" || item.requesterId === "system:loa_recovery";
 }
 
 function getStatusBadgeVariant(status: string): "default" | "secondary" | "destructive" | "outline" {
@@ -1330,8 +1343,27 @@ export function AssetsRecoveryQueue() {
   }
 
   if (detailViewItem) {
+    const loaAllItems = (rawQueueItems as QueueItem[]).filter(isLoaRecoveryItem) as unknown as CombinedQueueItem[];
     return (
       <>
+        {isLoaRecoveryItem(detailViewItem) ? (
+          <div className="space-y-4">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setDetailViewItem(null)}
+              className="text-slate-600 hover:text-slate-900"
+            >
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Back to queue
+            </Button>
+            <LoaDetailView
+              item={detailViewItem as unknown as CombinedQueueItem}
+              queue="assets"
+              allItems={loaAllItems}
+            />
+          </div>
+        ) : (
         <AssetsTaskDetailView
           item={detailViewItem}
           currentUser={user ?? undefined}
@@ -1343,6 +1375,7 @@ export function AssetsRecoveryQueue() {
           isCompletePending={completeMutation.isPending}
           isAssignPending={assignMutation.isPending}
         />
+        )}
         <AlertDialog open={showIncompleteWarning} onOpenChange={setShowIncompleteWarning}>
           <AlertDialogContent aria-describedby="incomplete-tasks-description">
             <AlertDialogHeader>
@@ -1454,6 +1487,11 @@ export function AssetsRecoveryQueue() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
                           <div className="font-medium text-slate-900">{row.techData?.techName || row.title || "Unknown"}</div>
+                          {isLoaRecoveryItem(row) && (
+                            <Badge className="text-[10px] px-1.5 py-0 h-4 w-fit font-semibold border bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100">
+                              LOA
+                            </Badge>
+                          )}
                           <button
                             onClick={(e) => { e.stopPropagation(); setDetailViewItem(row); }}
                             className="opacity-0 group-hover:opacity-100 transition-opacity p-0.5 hover:bg-slate-200 rounded"
@@ -1543,6 +1581,13 @@ export function AssetsRecoveryQueue() {
                     {isExpanded && (
                       <tr>
                         <td colSpan={8} className="p-0">
+                          {isLoaRecoveryItem(row) ? (
+                            <LoaDetailView
+                              item={row as unknown as CombinedQueueItem}
+                              queue="assets"
+                              allItems={(rawQueueItems as QueueItem[]).filter(isLoaRecoveryItem) as unknown as CombinedQueueItem[]}
+                            />
+                          ) : (
                           <ExpandedRowDetails
                             item={row}
                             currentUser={user ?? undefined}
@@ -1561,6 +1606,7 @@ export function AssetsRecoveryQueue() {
                             isCompletePending={completeMutation.isPending}
                             isAssignFailed={assignMutation.isError}
                           />
+                          )}
                         </td>
                       </tr>
                     )}

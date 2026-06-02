@@ -92,6 +92,50 @@ export function pickSourced(sepVal: string | null | undefined, rosterVal: string
 export function parseTechData(item: QueueItem): TechData | undefined {
   try {
     const parsed = item.data ? JSON.parse(item.data) : {};
+
+    // LOA Recovery items use a flat shape ({ enterpriseId, techName, leave, tech })
+    // produced by the LOA sync service, not the { technician } / { employee }
+    // wrapper used by offboarding items. Handle that shape explicitly so these
+    // cases are searchable by name/ID and render their leave details.
+    if (parsed.leave && (parsed.enterpriseId || parsed.techName)) {
+      const addr = parsed.tech?.address || {};
+      const addressStr =
+        [addr.homeAddr1, addr.homeAddr2, addr.homeCity, addr.homeState, addr.homePostal]
+          .map((s: unknown) => (s ? String(s).trim() : ""))
+          .filter(Boolean)
+          .join(", ") || null;
+      const leaveStart = parsed.leave.startDate || null;
+      const truck = parsed.tech?.lastKnownTruck || null;
+      const phone = parsed.tech?.phone || null;
+      return {
+        techName: parsed.techName || "Unknown",
+        enterpriseId: parsed.enterpriseId || "",
+        district: null,
+        separationDate: leaveStart,
+        lastDayWorked: leaveStart,
+        mobilePhone: phone,
+        personalPhone: null,
+        homePhone: null,
+        contactNumber: phone,
+        email: null,
+        personalEmail: null,
+        address: addressStr,
+        fleetPickupAddress: null,
+        hrTruckNumber: truck,
+        separationCategory: null,
+        fromSnowflake: undefined,
+        sources: {
+          personalPhone: null,
+          email: null,
+          address: addressStr ? "roster" : null,
+          fleetPickupAddress: null,
+          hrTruckNumber: truck ? "roster" : null,
+          separationCategory: null,
+          lastDayWorked: leaveStart ? "roster" : null,
+        },
+      };
+    }
+
     const tech = parsed.technician || parsed.employee || {};
     if (!tech || Object.keys(tech).length === 0) return undefined;
     const hr = parsed.hrSeparation || {};

@@ -1,1 +1,2 @@
 - [LOA Recovery department scoping](loa-recovery-scoping.md) — agent visibility rides on department/queue access (no flag); cross-queue strip must filter to accessible modules; LOA `department` labels need substring→module mapping, not `departmentToQueueModule`.
+- [LOA queue-item data shape](loa-queue-item-shape.md) — LOA items use a flat data shape (no `data.source`/`technician` wrapper); Assets queue UI silently drops them unless `isItemFromSync()` + `parseTechData()` are taught the shape.

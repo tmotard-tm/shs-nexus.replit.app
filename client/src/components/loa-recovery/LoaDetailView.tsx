@@ -8,7 +8,6 @@ import type { LoaQueueName, LoaTaskState } from './loa-types';
 import {
   parseLoaData,
   inferVehicleType,
-  daysOnLoa,
   LOA_QUEUE_META,
   type LoaVehicleType,
 } from './loa-types';
@@ -57,14 +56,6 @@ const VEHICLE_DESC: Record<LoaVehicleType, string> = {
   BYOV:    'Bring-Your-Own-Vehicle. No vehicle recovery; non-vehicle assets follow the SOP.',
   Unknown: 'Vehicle type not yet confirmed. Determine before proceeding.',
 };
-
-function VehiclePill({ type }: { type: LoaVehicleType }) {
-  return (
-    <span className={`inline-block border rounded-full px-3 py-0.5 text-sm font-bold bg-white dark:bg-gray-900 ${VEHICLE_COLORS[type]}`}>
-      {type}
-    </span>
-  );
-}
 
 // ---- status pill ----
 const STATUS_STYLE: Record<string, string> = {
@@ -266,7 +257,7 @@ export function LoaDetailView({
     }, 800);
   };
 
-  const days = daysOnLoa(data?.leave?.startDate);
+  const days = data?.leave?.days ?? 0;
   const activeItems = activeItemsForQueue(vehicle, queue);
   const doneTasks = activeItems.filter((it) => taskState[it.id]).length;
 
@@ -290,15 +281,6 @@ export function LoaDetailView({
           {days} days
         </span>
       </Field>
-      <div className="border-t border-gray-100 dark:border-gray-800 my-2" />
-      <Field label="Owner Team">
-        <span className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-bold px-2 py-0.5 rounded-full">
-          {meta.label}
-        </span>
-      </Field>
-      <p className="text-xs text-gray-400 italic mt-3 leading-snug">
-        Leave reason & medical details restricted to HR / Leave Admin.
-      </p>
     </InfoCard>
   );
 
@@ -310,7 +292,6 @@ export function LoaDetailView({
         {/* Vehicle disposition sub-section */}
         <p className="text-xs font-bold tracking-widest text-gray-400 uppercase mb-1.5">Vehicle Disposition</p>
         <div className="flex items-center gap-2 mb-1">
-          <VehiclePill type={vehicle} />
           <Select value={vehicle} onValueChange={onVehicleOverride}>
             <SelectTrigger className="h-7 text-xs border-dashed w-auto min-w-[90px]">
               <SelectValue placeholder="Override" />
@@ -346,11 +327,6 @@ export function LoaDetailView({
           ))}
         </div>
         <Field label="Disposition"><span className="italic text-gray-500 text-xs">Pending</span></Field>
-        <Field label="Owner Team">
-          <span className="bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-xs font-bold px-2 py-0.5 rounded-full">
-            {meta.label}
-          </span>
-        </Field>
       </div>
     </InfoCard>
   );
