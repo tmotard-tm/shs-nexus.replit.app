@@ -1512,6 +1512,46 @@ export const insertFieldMappingSchema = createInsertSchema(fieldMappings).omit({
   createdAt: true 
 });
 
+// Logical Entities - real-world concepts (Vehicle, Technician, etc.) backed by
+// one or more physical data sources. Live alongside the physical lineage and
+// are NOT touched by "Refresh from code".
+export const logicalEntities = pgTable("logical_entities", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  kind: text("kind").notNull().default("domain"), // 'domain' | 'reference' | 'workflow'
+  metadata: text("metadata"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+// Join table: which physical data sources back a logical entity, and what role
+// each plays ('canonical' | 'cache' | 'extension' | 'snapshot').
+export const entityTableMembers = pgTable("entity_table_members", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  entityId: varchar("entity_id").notNull().references(() => logicalEntities.id, { onDelete: 'cascade' }),
+  dataSourceId: varchar("data_source_id").notNull().references(() => integrationDataSources.id, { onDelete: 'cascade' }),
+  role: text("role").notNull().default("cache"),
+  notes: text("notes"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const insertLogicalEntitySchema = createInsertSchema(logicalEntities).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export const insertEntityTableMemberSchema = createInsertSchema(entityTableMembers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type LogicalEntity = typeof logicalEntities.$inferSelect;
+export type InsertLogicalEntity = z.infer<typeof insertLogicalEntitySchema>;
+export type EntityTableMember = typeof entityTableMembers.$inferSelect;
+export type InsertEntityTableMember = z.infer<typeof insertEntityTableMemberSchema>;
+
 // Field Mapping Types
 export type IntegrationDataSource = typeof integrationDataSources.$inferSelect;
 export type InsertIntegrationDataSource = z.infer<typeof insertIntegrationDataSourceSchema>;

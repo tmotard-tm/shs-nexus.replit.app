@@ -43,8 +43,10 @@ import {
   Server,
   Snowflake,
   FileUp,
+  AlertTriangle,
+  Network,
 } from 'lucide-react';
-import type { IntegrationDataSource, DataSourceField, MappingSet } from '@shared/schema';
+import type { IntegrationDataSource, DataSourceField, MappingSet, LogicalEntity } from '@shared/schema';
 
 const sourceTypeIcons: Record<string, typeof Database> = {
   snowflake: Cloud,
@@ -178,9 +180,145 @@ function DataSourceNode({ data }: { data: NodeData }) {
   );
 }
 
-const nodeTypes = { dataSource: DataSourceNode };
+// ============================================
+// Logical-entity node (Lineage canvas, logical view)
+// ============================================
+type EntityFieldContributor = {
+  sourceId: string;
+  fieldId: string;
+  fieldName: string;
+  dataType: string;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+};
+type EntityField = {
+  key: string;
+  displayName: string;
+  dataTypes: string[];
+  hasTypeConflict: boolean;
+  isPrimaryKey: boolean;
+  isForeignKey: boolean;
+  contributors: EntityFieldContributor[];
+};
+type EntitySourceRef = {
+  id: string;
+  name: string;
+  displayName: string;
+  sourceType: string;
+  role: string;
+};
+type LogicalNodeData = {
+  entity: LogicalEntity;
+  sources: EntitySourceRef[];
+  fields: EntityField[];
+  dimmed?: boolean;
+};
 
-type AppNode = Node<NodeData>;
+// Short, stable label for a physical source badge inside a logical node.
+function shortSourceLabel(s: EntitySourceRef): string {
+  // db_holman_vehicles_cache → holman_vehicles_cache
+  return s.name.replace(/^db_/, '').replace(/^snowflake_/, 'sf:').replace(/^tpms_/, 'tpms:');
+}
+
+function LogicalEntityNode({ data }: { data: LogicalNodeData }) {
+  return (
+    <div
+      className={`bg-card border-2 border-primary/40 rounded-lg shadow-lg min-w-[340px] max-w-[420px] transition-opacity ${
+        data.dimmed ? 'opacity-30' : 'opacity-100'
+      }`}
+    >
+      <div className="bg-primary text-primary-foreground px-3 py-2 rounded-t-lg flex items-center gap-2">
+        <Network className="h-4 w-4" />
+        <span className="font-semibold text-sm truncate flex-1">{data.entity.displayName}</span>
+        <Badge variant="outline" className="text-[10px] bg-primary-foreground/10 text-primary-foreground border-primary-foreground/30">
+          logical
+        </Badge>
+      </div>
+      {data.sources.length > 0 && (
+        <div className="px-3 py-1.5 border-b border-border bg-muted/30 flex flex-wrap gap-1">
+          {data.sources.map((s) => (
+            <Badge
+              key={s.id}
+              variant={s.role === 'canonical' ? 'default' : 'secondary'}
+              className="text-[10px] px-1.5 py-0"
+              title={`${s.displayName} — role: ${s.role}`}
+            >
+              {shortSourceLabel(s)}
+              {s.role === 'canonical' && <span className="ml-1 opacity-80">★</span>}
+            </Badge>
+          ))}
+        </div>
+      )}
+      <div className="p-2 space-y-0.5 max-h-[420px] overflow-y-auto">
+        {data.fields.length === 0 ? (
+          <p className="text-xs text-muted-foreground px-2 py-1">No fields yet — add members or define fields on the physical sources.</p>
+        ) : (
+          data.fields.map((field) => (
+            <div
+              key={field.key}
+              className="relative flex items-center gap-2 px-4 py-1.5 text-xs hover:bg-muted/50 rounded-sm group transition-colors"
+            >
+              <Handle
+                type="target"
+                position={Position.Left}
+                id={`${field.key}-target`}
+                isConnectable={true}
+                className="!w-3 !h-3 !bg-primary !border-2 !border-background hover:!bg-primary/80 hover:!scale-125 transition-transform !-left-1.5"
+                style={{ pointerEvents: 'auto' }}
+              />
+              <div className="flex items-center gap-1.5 flex-1 min-w-0 pointer-events-none select-none">
+                {field.isPrimaryKey && <Key className="h-3 w-3 text-yellow-500 flex-shrink-0" />}
+                {field.isForeignKey && <Link2 className="h-3 w-3 text-blue-500 flex-shrink-0" />}
+                <span className="truncate font-medium">{field.displayName}</span>
+                {field.hasTypeConflict && (
+                  <span title={`Type conflict: ${field.dataTypes.join(' / ')}`} className="flex-shrink-0">
+                    <AlertTriangle
+                      className="h-3 w-3 text-amber-500"
+                      aria-label={`Type conflict: ${field.dataTypes.join(' / ')}`}
+                    />
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-0.5 flex-shrink-0 pointer-events-none">
+                {field.contributors.length > 1 && (
+                  <Badge variant="outline" className="text-[9px] px-1 py-0 mr-1" title="Appears in multiple physical sources">
+                    ×{field.contributors.length}
+                  </Badge>
+                )}
+                {field.contributors.slice(0, 3).map((c) => {
+                  const src = data.sources.find((s) => s.id === c.sourceId);
+                  const color = sourceTypeColors[src?.sourceType || ''] || 'bg-gray-500';
+                  return (
+                    <span
+                      key={c.fieldId}
+                      className={`w-2 h-2 rounded-full ${color}`}
+                      title={src ? `${src.displayName} · ${c.fieldName}` : c.fieldName}
+                    />
+                  );
+                })}
+              </div>
+              <Badge variant="outline" className="text-[10px] px-1.5 py-0 flex-shrink-0 pointer-events-none">
+                {field.dataTypes.join('/')}
+              </Badge>
+              <Handle
+                type="source"
+                position={Position.Right}
+                id={`${field.key}-source`}
+                isConnectable={true}
+                className="!w-3 !h-3 !bg-primary !border-2 !border-background hover:!bg-primary/80 hover:!scale-125 transition-transform !-right-1.5"
+                style={{ pointerEvents: 'auto' }}
+              />
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+const nodeTypes = { dataSource: DataSourceNode, logicalEntity: LogicalEntityNode };
+
+type AppNode = Node<NodeData> | Node<LogicalNodeData>;
 type AppEdge = Edge;
 
 const ALL_FILTER_TYPES = ['db_table', 'api_endpoint', 'snowflake_query', 'file_import', 'snowflake', 'holman', 'internal', 'page_object', 'tpms'];
@@ -196,6 +334,13 @@ export default function FieldMapping() {
 
   const [searchText, setSearchText] = useState('');
   const [enabledTypes, setEnabledTypes] = useState<Set<string>>(new Set(ALL_FILTER_TYPES));
+  const [viewMode, setViewMode] = useState<'physical' | 'logical'>('physical');
+  const [pickerState, setPickerState] = useState<null | {
+    sourceContribs: EntityFieldContributor[];
+    targetContribs: EntityFieldContributor[];
+    pickedSource: string | null;
+    pickedTarget: string | null;
+  }>(null);
 
   const { data: sources = [] } = useQuery<IntegrationDataSource[]>({
     queryKey: ['/api/mapping/sources'],
@@ -208,6 +353,12 @@ export default function FieldMapping() {
   const { data: currentSet } = useQuery<MappingSet & { nodes: any[]; mappings: any[] }>({
     queryKey: ['/api/mapping/sets', selectedMappingSet],
     enabled: !!selectedMappingSet,
+  });
+
+  type EntityWithMembers = LogicalEntity & { members: Array<{ id: string; entityId: string; dataSourceId: string; role: string; notes: string | null }> };
+  const { data: logicalEntities = [] } = useQuery<EntityWithMembers[]>({
+    queryKey: ['/api/field-mapping/entities'],
+    enabled: viewMode === 'logical',
   });
 
   const refreshDiscoveryMutation = useMutation({
@@ -356,10 +507,51 @@ export default function FieldMapping() {
     refetchOnWindowFocus: false,
   });
 
+  const persistMapping = useCallback(
+    (sourceFieldId: string, targetFieldId: string) => {
+      if (!selectedMappingSet) {
+        toast({ title: 'Select a mapping set first to persist mappings', variant: 'destructive' });
+        return;
+      }
+      createMappingMutation.mutate({ sourceFieldId, targetFieldId, direction: 'push' });
+    },
+    [selectedMappingSet, createMappingMutation, toast]
+  );
+
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
       if (!connection.sourceHandle || !connection.targetHandle) return;
+
+      // In logical view, handles are keyed by the normalized field key
+      // (e.g. "trucknumber-source"), not by a physical field ID. We need to
+      // resolve them to a concrete physical source_field_id / target_field_id
+      // before persisting.
+      if (viewMode === 'logical') {
+        const sourceKey = connection.sourceHandle.replace(/-source$/, '');
+        const targetKey = connection.targetHandle.replace(/-target$/, '');
+        const srcNode = nodes.find((n) => n.id === connection.source) as Node<LogicalNodeData> | undefined;
+        const tgtNode = nodes.find((n) => n.id === connection.target) as Node<LogicalNodeData> | undefined;
+        const srcField = srcNode?.data?.fields?.find((f) => f.key === sourceKey);
+        const tgtField = tgtNode?.data?.fields?.find((f) => f.key === targetKey);
+        if (!srcField || !tgtField) return;
+
+        const srcContribs = srcField.contributors;
+        const tgtContribs = tgtField.contributors;
+        if (srcContribs.length === 1 && tgtContribs.length === 1) {
+          persistMapping(srcContribs[0].fieldId, tgtContribs[0].fieldId);
+          return;
+        }
+        // Ambiguous on at least one side — open the picker.
+        setPickerState({
+          sourceContribs: srcContribs,
+          targetContribs: tgtContribs,
+          pickedSource: srcContribs.length === 1 ? srcContribs[0].fieldId : null,
+          pickedTarget: tgtContribs.length === 1 ? tgtContribs[0].fieldId : null,
+        });
+        return;
+      }
+
       const sourceFieldId = connection.sourceHandle.replace(/-source$/, '');
       const targetFieldId = connection.targetHandle.replace(/-target$/, '');
       if (!sourceFieldId || !targetFieldId) return;
@@ -377,13 +569,9 @@ export default function FieldMapping() {
         )
       );
 
-      if (selectedMappingSet) {
-        createMappingMutation.mutate({ sourceFieldId, targetFieldId, direction: 'push' });
-      } else {
-        toast({ title: 'Select a mapping set first to persist mappings', variant: 'destructive' });
-      }
+      persistMapping(sourceFieldId, targetFieldId);
     },
-    [setEdges, selectedMappingSet, createMappingMutation, toast]
+    [setEdges, viewMode, nodes, persistMapping]
   );
 
   const loadSourceFields = async (sourceId: string): Promise<DataSourceField[]> => {
@@ -396,8 +584,10 @@ export default function FieldMapping() {
     return [];
   };
 
-  // Auto-populate canvas with all sources when a mapping set is loaded
+  // Auto-populate canvas with all sources when a mapping set is loaded.
+  // Only runs in physical view. The logical-view loader is a separate effect below.
   useEffect(() => {
+    if (viewMode !== 'physical') return;
     const loadSetData = async () => {
       if (!currentSet || sources.length === 0) return;
 
@@ -436,8 +626,8 @@ export default function FieldMapping() {
 
       const loadedEdges: AppEdge[] = (currentSet.mappings || [])
         .map((mapping: any, i: number) => {
-          const sourceNode = loadedNodes.find((n) => n.data.fields?.some((f) => f.id === mapping.sourceFieldId));
-          const targetNode = loadedNodes.find((n) => n.data.fields?.some((f) => f.id === mapping.targetFieldId));
+          const sourceNode = loadedNodes.find((n) => (n.data as NodeData).fields?.some((f: DataSourceField) => f.id === mapping.sourceFieldId));
+          const targetNode = loadedNodes.find((n) => (n.data as NodeData).fields?.some((f: DataSourceField) => f.id === mapping.targetFieldId));
           if (!sourceNode || !targetNode) return null;
           return {
             id: `edge-${mapping.id || i}`,
@@ -458,33 +648,124 @@ export default function FieldMapping() {
 
     loadSetData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentSet, sources, enabledTypes]);
+  }, [currentSet, sources, enabledTypes, viewMode]);
 
-  // Apply search filter via dimming
+  // Logical-view loader: one node per logical entity, fields = union across members.
+  // Mappings persisted in this mapping set are rendered as edges between the
+  // appropriate entity-field handles when the underlying physical field belongs
+  // to one of the entity's members.
+  useEffect(() => {
+    if (viewMode !== 'logical') return;
+    const load = async () => {
+      if (logicalEntities.length === 0) {
+        setNodes([]);
+        setEdges([]);
+        return;
+      }
+      const loadedNodes: AppNode[] = [];
+      const fieldKeyByPhysicalId = new Map<string, { entityId: string; fieldKey: string }>();
+      let idx = 0;
+      for (const entity of logicalEntities) {
+        try {
+          const resp = await fetch(`/api/field-mapping/entities/${entity.id}/fields`, { credentials: 'include' });
+          if (!resp.ok) continue;
+          const payload = await resp.json();
+          const data: LogicalNodeData = {
+            entity: payload.entity,
+            sources: payload.sources || [],
+            fields: payload.fields || [],
+          };
+          for (const f of data.fields) {
+            for (const c of f.contributors) {
+              fieldKeyByPhysicalId.set(c.fieldId, { entityId: entity.id, fieldKey: f.key });
+            }
+          }
+          loadedNodes.push({
+            id: `entity-${entity.id}`,
+            type: 'logicalEntity',
+            position: { x: 80 + (idx % 3) * 460, y: 80 + Math.floor(idx / 3) * 520 },
+            data,
+          } as Node<LogicalNodeData>);
+          idx++;
+        } catch (e) {
+          console.error('Error loading logical entity fields:', e);
+        }
+      }
+      setNodes(loadedNodes);
+
+      // Build edges from current mapping set's mappings, but only where BOTH
+      // endpoints resolve to a field that lives inside a logical entity.
+      const mapEdges: AppEdge[] = [];
+      for (const m of (currentSet?.mappings || []) as any[]) {
+        const srcRef = fieldKeyByPhysicalId.get(m.sourceFieldId);
+        const tgtRef = fieldKeyByPhysicalId.get(m.targetFieldId);
+        if (!srcRef || !tgtRef) continue;
+        mapEdges.push({
+          id: `edge-${m.id}`,
+          source: `entity-${srcRef.entityId}`,
+          target: `entity-${tgtRef.entityId}`,
+          sourceHandle: `${srcRef.fieldKey}-source`,
+          targetHandle: `${tgtRef.fieldKey}-target`,
+          type: 'smoothstep',
+          animated: true,
+          markerEnd: { type: MarkerType.ArrowClosed },
+          style: { stroke: 'hsl(var(--primary))' },
+          data: { mappingId: m.id, direction: m.direction },
+        } as AppEdge);
+      }
+      setEdges(mapEdges);
+    };
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewMode, logicalEntities, currentSet]);
+
+  // Apply search filter via dimming. Works for both physical and logical nodes.
   const dimmedNodes = useMemo(() => {
     const q = searchText.trim().toLowerCase();
     if (!q) return nodes;
     return nodes.map((n) => {
-      const match =
-        n.data.source.name.toLowerCase().includes(q) ||
-        n.data.source.displayName.toLowerCase().includes(q) ||
-        n.data.fields.some(
-          (f) => f.fieldName.toLowerCase().includes(q) || f.displayName.toLowerCase().includes(q)
-        );
-      return { ...n, data: { ...n.data, dimmed: !match } };
+      let match = false;
+      const d: any = n.data;
+      if (d?.entity) {
+        match =
+          d.entity.name.toLowerCase().includes(q) ||
+          d.entity.displayName.toLowerCase().includes(q) ||
+          (d.fields as EntityField[]).some(
+            (f) =>
+              f.displayName.toLowerCase().includes(q) ||
+              f.contributors.some((c) => c.fieldName.toLowerCase().includes(q))
+          );
+      } else if (d?.source) {
+        match =
+          d.source.name.toLowerCase().includes(q) ||
+          d.source.displayName.toLowerCase().includes(q) ||
+          d.fields.some(
+            (f: DataSourceField) =>
+              f.fieldName.toLowerCase().includes(q) || f.displayName.toLowerCase().includes(q)
+          );
+      }
+      return { ...n, data: { ...d, dimmed: !match } };
     });
   }, [nodes, searchText]);
 
   const saveLayout = useCallback(() => {
     if (!selectedMappingSet) return;
-    const nodesToSave = nodes.map((node) => ({
-      sourceId: node.data.source.id,
-      positionX: node.position.x.toString(),
-      positionY: node.position.y.toString(),
-      isExpanded: true,
-    }));
+    // Layout persistence is keyed by physical source IDs and only applies in
+    // physical view. Logical-view node positions are derived each load.
+    if (viewMode !== 'physical') {
+      toast({ title: 'Layout save only applies in Physical view' });
+      return;
+    }
+    const nodesToSave = nodes
+      .filter((node) => (node.data as any)?.source)
+      .map((node) => ({
+        sourceId: (node.data as any).source.id,
+        positionX: node.position.x.toString(),
+        positionY: node.position.y.toString(),
+        isExpanded: true,
+      }));
     saveNodesMutation.mutate({ nodes: nodesToSave });
-  }, [selectedMappingSet, nodes, saveNodesMutation]);
+  }, [selectedMappingSet, nodes, saveNodesMutation, viewMode, toast]);
 
   const toggleType = (t: string) => {
     setEnabledTypes((prev) => {
@@ -600,9 +881,32 @@ export default function FieldMapping() {
           />
         </div>
 
+        <div className="flex items-center gap-1 border rounded-md p-0.5 bg-muted/30">
+          <Button
+            variant={viewMode === 'physical' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('physical')}
+            data-testid="button-view-physical"
+            className="h-7 px-3"
+          >
+            <Table className="h-3.5 w-3.5 mr-1.5" />
+            Physical
+          </Button>
+          <Button
+            variant={viewMode === 'logical' ? 'default' : 'ghost'}
+            size="sm"
+            onClick={() => setViewMode('logical')}
+            data-testid="button-view-logical"
+            className="h-7 px-3"
+          >
+            <Network className="h-3.5 w-3.5 mr-1.5" />
+            Logical
+          </Button>
+        </div>
+
         <div className="flex-1" />
 
-        <Button onClick={saveLayout} disabled={!selectedMappingSet || saveNodesMutation.isPending} variant="outline" data-testid="button-save-layout">
+        <Button onClick={saveLayout} disabled={!selectedMappingSet || saveNodesMutation.isPending || viewMode !== 'physical'} variant="outline" data-testid="button-save-layout">
           <Save className="h-4 w-4 mr-2" />
           Save Layout
         </Button>
@@ -696,6 +1000,69 @@ export default function FieldMapping() {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog open={!!pickerState} onOpenChange={(o) => !o && setPickerState(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Pick the physical fields</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2 text-sm">
+            <p className="text-muted-foreground text-xs">
+              This logical field is contributed by multiple physical sources. Choose which physical fields to link — the mapping is persisted to the underlying physical fields.
+            </p>
+            <div className="space-y-2">
+              <Label>Source physical field</Label>
+              <Select
+                value={pickerState?.pickedSource || ''}
+                onValueChange={(v) => setPickerState((s) => (s ? { ...s, pickedSource: v } : s))}
+              >
+                <SelectTrigger data-testid="select-picker-source">
+                  <SelectValue placeholder="Choose a source field" />
+                </SelectTrigger>
+                <SelectContent>
+                  {pickerState?.sourceContribs.map((c) => (
+                    <SelectItem key={c.fieldId} value={c.fieldId}>
+                      {c.fieldName} <span className="opacity-60">({c.dataType})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Target physical field</Label>
+              <Select
+                value={pickerState?.pickedTarget || ''}
+                onValueChange={(v) => setPickerState((s) => (s ? { ...s, pickedTarget: v } : s))}
+              >
+                <SelectTrigger data-testid="select-picker-target">
+                  <SelectValue placeholder="Choose a target field" />
+                </SelectTrigger>
+                <SelectContent>
+                  {pickerState?.targetContribs.map((c) => (
+                    <SelectItem key={c.fieldId} value={c.fieldId}>
+                      {c.fieldName} <span className="opacity-60">({c.dataType})</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPickerState(null)} data-testid="button-picker-cancel">Cancel</Button>
+            <Button
+              onClick={() => {
+                if (!pickerState?.pickedSource || !pickerState?.pickedTarget) return;
+                persistMapping(pickerState.pickedSource, pickerState.pickedTarget);
+                setPickerState(null);
+              }}
+              disabled={!pickerState?.pickedSource || !pickerState?.pickedTarget}
+              data-testid="button-picker-confirm"
+            >
+              Create Mapping
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!editingEdge} onOpenChange={(o) => !o && setEditingEdge(null)}>
         <DialogContent>

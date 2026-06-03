@@ -2,6 +2,7 @@ import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
 import { initVrmSchema } from "./vrm/init-schema";
+import { initLogicalEntitiesSchema, seedLogicalEntities } from "./logical-entities-init";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
 import { startDcaEventDispatcher } from "./vrm/dca-event-dispatcher";
 import { warnIfDcaTaskApiMissing } from "./vrm/dca-task-client";
@@ -11646,6 +11647,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const { refreshAllDiscovery } = await import("./field-mapping-discovery");
       const counts = await refreshAllDiscovery();
+      // Re-run the logical-entities seed so any newly-discovered physical
+      // sources get linked to their entity (idempotent — existing memberships
+      // are preserved via the ON CONFLICT clause).
+      try {
+        const seed = await seedLogicalEntities();
+        console.log(`[LogicalEntities] Post-discovery seed: linked ${seed.linked} new member(s)`);
+      } catch (e: any) {
+        console.error("[LogicalEntities] Post-discovery seed failed:", e?.message || e);
+      }
       res.json({ success: true, counts });
     } catch (error: any) {
       console.error("Error refreshing discovery:", error);
@@ -11658,6 +11668,192 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const { getDiscoveryStatus } = await import("./field-mapping-discovery");
       res.json(getDiscoveryStatus());
     } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ============================================
+  // Logical Entities (Lineage Canvas — logical view)
+  // ============================================
+  // Init + seed at startup. Idempotent; safe to run on every boot.
+  try {
+    await initLogicalEntitiesSchema();
+    const seedResult = await seedLogicalEntities();
+    console.log(
+      `[LogicalEntities] Init OK — created ${seedResult.created} entities, linked ${seedResult.linked} members (${seedResult.skipped} member refs skipped — source not yet discovered)`
+    );
+  } catch (e: any) {
+    console.error("[LogicalEntities] Init failed:", e?.message || e);
+  }
+
+  app.get("/api/field-mapping/entities", requireAuth, async (_req: any, res) => {
+    try {
+      const entities = await storage.getLogicalEntities();
+      const withMembers = await Promise.all(
+        entities.map(async (e) => ({ ...e, members: await storage.getEntityMembers(e.id) }))
+      );
+      res.json(withMembers);
+    } catch (error: any) {
+      console.error("Error getting logical entities:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/field-mapping/entities", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create logical entities" });
+      }
+      const created = await storage.createLogicalEntity(req.body);
+      res.status(201).json(created);
+    } catch (error: any) {
+      console.error("Error creating logical entity:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/field-mapping/entities/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can update logical entities" });
+      }
+      const updated = await storage.updateLogicalEntity(req.params.id, req.body);
+      if (!updated) return res.status(404).json({ message: "Logical entity not found" });
+      res.json(updated);
+    } catch (error: any) {
+      console.error("Error updating logical entity:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/field-mapping/entities/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can delete logical entities" });
+      }
+      const deleted = await storage.deleteLogicalEntity(req.params.id);
+      if (!deleted) return res.status(404).json({ message: "Logical entity not found" });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting logical entity:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/field-mapping/entities/:id/members", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can add entity members" });
+      }
+      const member = await storage.addEntityMember({
+        ...req.body,
+        entityId: req.params.id,
+      });
+      res.status(201).json(member);
+    } catch (error: any) {
+      console.error("Error adding entity member:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/field-mapping/entities/:id/members/:memberId", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can remove entity members" });
+      }
+      const ok = await storage.removeEntityMember(req.params.memberId);
+      if (!ok) return res.status(404).json({ message: "Member not found" });
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error removing entity member:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Aggregator: union of fields across an entity's physical members.
+  // Each returned row carries the contributing physical source(s) and a
+  // conflict flag set when members disagree on data type.
+  app.get("/api/field-mapping/entities/:id/fields", requireAuth, async (req: any, res) => {
+    try {
+      const entity = await storage.getLogicalEntity(req.params.id);
+      if (!entity) return res.status(404).json({ message: "Logical entity not found" });
+      const members = await storage.getEntityMembers(entity.id);
+      const sourceById = new Map<string, { id: string; name: string; displayName: string; sourceType: string; role: string }>();
+      const fieldsBySource: Record<string, any[]> = {};
+      for (const m of members) {
+        const src = await storage.getIntegrationDataSource(m.dataSourceId);
+        if (!src) continue;
+        sourceById.set(src.id, {
+          id: src.id,
+          name: src.name,
+          displayName: src.displayName,
+          sourceType: src.sourceType,
+          role: m.role,
+        });
+        fieldsBySource[src.id] = await storage.getDataSourceFields(src.id);
+      }
+
+      // Union by normalized field name (case-insensitive, common separators
+      // collapsed) so `truck_number` / `truckNumber` / `TruckNumber` are
+      // treated as the same logical field.
+      const normalize = (s: string) => s.toLowerCase().replace(/[\s_\-.]+/g, '');
+      const grouped = new Map<string, {
+        key: string;
+        displayName: string;
+        contributors: Array<{ sourceId: string; fieldId: string; fieldName: string; dataType: string; isPrimaryKey: boolean; isForeignKey: boolean }>;
+      }>();
+
+      for (const [sourceId, fields] of Object.entries(fieldsBySource)) {
+        for (const f of fields) {
+          const key = normalize(f.fieldName);
+          if (!grouped.has(key)) {
+            grouped.set(key, { key, displayName: f.displayName || f.fieldName, contributors: [] });
+          }
+          grouped.get(key)!.contributors.push({
+            sourceId,
+            fieldId: f.id,
+            fieldName: f.fieldName,
+            dataType: f.dataType,
+            isPrimaryKey: !!f.isPrimaryKey,
+            isForeignKey: !!f.isForeignKey,
+          });
+        }
+      }
+
+      const rows = Array.from(grouped.values()).map((g) => {
+        const types = new Set(g.contributors.map((c) => c.dataType));
+        const hasConflict = types.size > 1;
+        const anyPk = g.contributors.some((c) => c.isPrimaryKey);
+        const anyFk = g.contributors.some((c) => c.isForeignKey);
+        return {
+          key: g.key,
+          displayName: g.displayName,
+          dataTypes: Array.from(types),
+          hasTypeConflict: hasConflict,
+          isPrimaryKey: anyPk,
+          isForeignKey: anyFk,
+          contributors: g.contributors,
+        };
+      });
+
+      // Sort: PKs first, then alphabetical
+      rows.sort((a, b) => {
+        if (a.isPrimaryKey !== b.isPrimaryKey) return a.isPrimaryKey ? -1 : 1;
+        return a.displayName.localeCompare(b.displayName);
+      });
+
+      res.json({
+        entity,
+        sources: Array.from(sourceById.values()),
+        fields: rows,
+      });
+    } catch (error: any) {
+      console.error("Error aggregating entity fields:", error);
       res.status(500).json({ message: error.message });
     }
   });

@@ -48,6 +48,10 @@ import {
   type InsertMappingNode,
   type FieldMapping,
   type InsertFieldMapping,
+  type LogicalEntity,
+  type InsertLogicalEntity,
+  type EntityTableMember,
+  type InsertEntityTableMember,
   type RolePermission,
   type InsertRolePermission,
   type RolePermissionSettings,
@@ -100,6 +104,8 @@ import {
   mappingSets,
   mappingNodes,
   fieldMappings,
+  logicalEntities,
+  entityTableMembers,
   rolePermissions,
   rentalSnapshots,
   communicationTemplates,
@@ -404,6 +410,16 @@ export interface IStorage {
   updateFieldMapping(id: string, updates: Partial<FieldMapping>): Promise<FieldMapping | undefined>;
   deleteFieldMapping(id: string): Promise<boolean>;
   upsertFieldMappings(mappingSetId: string, mappings: InsertFieldMapping[]): Promise<FieldMapping[]>;
+
+  // Logical Entities (Lineage Canvas — logical view)
+  getLogicalEntities(): Promise<LogicalEntity[]>;
+  getLogicalEntity(id: string): Promise<LogicalEntity | undefined>;
+  createLogicalEntity(entity: InsertLogicalEntity): Promise<LogicalEntity>;
+  updateLogicalEntity(id: string, updates: Partial<LogicalEntity>): Promise<LogicalEntity | undefined>;
+  deleteLogicalEntity(id: string): Promise<boolean>;
+  getEntityMembers(entityId: string): Promise<EntityTableMember[]>;
+  addEntityMember(member: InsertEntityTableMember): Promise<EntityTableMember>;
+  removeEntityMember(id: string): Promise<boolean>;
 
   // Role Permissions Module
   getRolePermission(role: string): Promise<RolePermission | undefined>;
@@ -3417,6 +3433,31 @@ export class MemStorage implements IStorage {
     throw new Error("MemStorage does not support field mapping. Use DatabaseStorage.");
   }
 
+  async getLogicalEntities(): Promise<LogicalEntity[]> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async getLogicalEntity(_id: string): Promise<LogicalEntity | undefined> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async createLogicalEntity(_entity: InsertLogicalEntity): Promise<LogicalEntity> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async updateLogicalEntity(_id: string, _updates: Partial<LogicalEntity>): Promise<LogicalEntity | undefined> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async deleteLogicalEntity(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async getEntityMembers(_entityId: string): Promise<EntityTableMember[]> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async addEntityMember(_member: InsertEntityTableMember): Promise<EntityTableMember> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+  async removeEntityMember(_id: string): Promise<boolean> {
+    throw new Error("MemStorage does not support logical entities. Use DatabaseStorage.");
+  }
+
   // Role Permissions Module
   async getRolePermission(_role: string): Promise<RolePermission | undefined> {
     throw new Error("MemStorage does not support role permissions. Use DatabaseStorage.");
@@ -5597,6 +5638,59 @@ export class DatabaseStorage implements IStorage {
       }))
     ).returning();
     return created;
+  }
+
+  // ============================================
+  // Logical Entities (Lineage Canvas — logical view)
+  // ============================================
+  async getLogicalEntities(): Promise<LogicalEntity[]> {
+    return await db.select().from(logicalEntities).orderBy(logicalEntities.displayName);
+  }
+
+  async getLogicalEntity(id: string): Promise<LogicalEntity | undefined> {
+    const [row] = await db.select().from(logicalEntities).where(eq(logicalEntities.id, id));
+    return row;
+  }
+
+  async createLogicalEntity(entity: InsertLogicalEntity): Promise<LogicalEntity> {
+    const [created] = await db.insert(logicalEntities).values({
+      ...entity,
+      id: randomUUID(),
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async updateLogicalEntity(id: string, updates: Partial<LogicalEntity>): Promise<LogicalEntity | undefined> {
+    const [updated] = await db.update(logicalEntities)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(logicalEntities.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteLogicalEntity(id: string): Promise<boolean> {
+    const result = await db.delete(logicalEntities).where(eq(logicalEntities.id, id));
+    return (result.rowCount ?? 0) > 0;
+  }
+
+  async getEntityMembers(entityId: string): Promise<EntityTableMember[]> {
+    return await db.select().from(entityTableMembers).where(eq(entityTableMembers.entityId, entityId));
+  }
+
+  async addEntityMember(member: InsertEntityTableMember): Promise<EntityTableMember> {
+    const [created] = await db.insert(entityTableMembers).values({
+      ...member,
+      id: randomUUID(),
+      createdAt: new Date(),
+    }).returning();
+    return created;
+  }
+
+  async removeEntityMember(id: string): Promise<boolean> {
+    const result = await db.delete(entityTableMembers).where(eq(entityTableMembers.id, id));
+    return (result.rowCount ?? 0) > 0;
   }
 
   // Role Permissions Module
