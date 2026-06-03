@@ -1,0 +1,155 @@
+Context:
+You are building LOA (Leave of Absence) asset recovery communications and automation logic inside the Nexus app. The LOA Recovery Queue (v1) already exists. This prompt covers the email templates, SMS template, and two pieces of automation logic that need to be wired into that queue. All emails are sent via SendGrid. Do not build an LOA intake form or return notice form — those are handled by an external system that feeds data into Nexus.
+
+The triggering data you will receive per tech record:
+
+tech_name, tech_first_name, tech_phone
+loa_start_date, loa_expected_return_date, loa_duration_days
+van_number (may be null — display "Not on file")
+is_rental (boolean)
+Artifact 1 — Email: Fleet/Assets/Inventory Notification
+Trigger: Automatically send 3 working days before loa_start_date.
+Recipients: Fleet team, Assets team, Inventory team (use configured internal distribution list).
+SendGrid template ID: (assign new template)
+
+Subject: LOA Notice – {tech_name} | Starts {loa_start_date}
+
+Body:
+
+
+{tech_name} has filed a leave of absence beginning {loa_start_date}.
+
+Leave details:
+- Start date: {loa_start_date}
+- Expected return: {loa_expected_return_date} (approximate — subject to change)
+- Duration: {loa_duration_days} calendar days
+
+Asset information:
+- Van number: {van_number}
+- Tech phone: {tech_phone}
+- Rental vehicle: {is_rental}
+
+Required actions by your team:
+
+| Action                          | Timing                              | Team   |
+|---------------------------------|-------------------------------------|--------|
+| Cancel open orders              | Day 1 of LOA                        | Assets |
+| Suspend phone / cell plan       | Day 1 of LOA                        | Assets |
+| Initiate vehicle recovery       | Day 1 of LOA [LOA ≥ 30 days only]   | Fleet  |
+| Suspend P-card                  | Day 1 of LOA [LOA ≥ 30 days only]   | Assets |
+
+The two rows marked "LOA ≥ 30 days only" should only appear in the email when
+loa_duration_days >= 30. Suppress those rows entirely when loa_duration_days < 30.
+
+This notification is for fleet and asset planning purposes only. Please do not
+contact the associate directly regarding their leave. For leave-related questions,
+contact the Employee Leave Management Team.
+
+Employee Leave Management Team
+Artifact 2 — Email: Technician LOA Letter
+Trigger: Automatically send 3 working days before loa_start_date.
+Recipient: Tech's personal or company email on file.
+SendGrid template ID: (assign new template)
+
+Subject: Important: What to Expect During Your Leave of Absence
+
+Body:
+
+
+Hi {tech_first_name},
+
+We've received notice that your leave of absence begins on {loa_start_date}.
+This letter outlines what you need to do before your leave starts and what to
+expect with your company-issued equipment.
+
+Before Day 1 — Action required from you:
+Please remove all personal tools from your company vehicle before your leave
+begins on {loa_start_date}. Anything left behind after Day 1 will be stored
+and held for your return.
+
+What happens to your company equipment:
+Your company phone will be suspended during your leave. Your P-card will remain active.
+
+[INCLUDE THE FOLLOWING PARAGRAPH ONLY IF loa_duration_days >= 30:]
+Because your leave is expected to be 30 days or longer, a member of our Fleet
+team will coordinate pickup of your assigned vehicle and will reach out
+separately to arrange logistics. Your P-card will also be suspended during your
+leave. Any open service orders in your name will be cancelled on Day 1.
+
+When you're ready to return:
+Please notify us 5–7 business days before your return date so we can have a
+vehicle and equipment ready for you on your first day back.
+
+Employee Leave Management Team
+Artifact 3 — Email: Return Notification to Fleet/Assets
+Trigger: Automatically send 3 working days before loa_expected_return_date (or updated confirmed return date if modified).
+Recipients: Fleet team, Assets team (same distribution list as Artifact 1).
+SendGrid template ID: (assign new template)
+
+Subject: LOA Return Notice – {tech_name} | Returns {loa_expected_return_date}
+
+Body:
+
+
+{tech_name} is confirmed to return from leave of absence on {loa_expected_return_date}.
+
+Leave details:
+- Return date: {loa_expected_return_date}
+- Total leave duration: {loa_duration_days} calendar days
+
+Asset information:
+- Van number: {van_number}
+- Tech phone: {tech_phone}
+- Rental vehicle: {is_rental}
+
+Required actions by your team:
+
+| Action                                              | Timing               | Team   |
+|-----------------------------------------------------|----------------------|--------|
+| Reactivate phone / cell plan                        | By return date       | Assets |
+| Reactivate P-card (if suspended)                    | By return date       | Assets |
+| Confirm vehicle availability (company or rental)    | By return date       | Fleet  |
+| Reassign or return original vehicle (if recovered)  | By return date       | Fleet  |
+
+Goal: every returning LOA tech has a vehicle and active equipment on their Day 1 back.
+For employees returning from protected leave, reinstatement must not be delayed
+pending asset reissuance.
+
+Employee Leave Management Team
+Artifact 4 — SMS: Technician Summary
+Trigger: Send at the same time as Artifact 2 (3 working days before loa_start_date), via SendGrid SMS.
+Recipient: tech_phone
+
+Message — under 30 days (loa_duration_days < 30):
+
+
+Hi {tech_first_name}, your LOA starts {loa_start_date}. Please remove personal
+tools from your vehicle by Day 1. Your company phone will be suspended. Your
+P-card stays active. Notify us 5-7 days before your return. – Leave Mgmt Team
+Message — 30+ days (loa_duration_days >= 30):
+
+
+Hi {tech_first_name}, your LOA starts {loa_start_date}. Please remove personal
+tools from your vehicle by Day 1. Your vehicle will be picked up, and your phone
+and P-card will be suspended. Notify us 5-7 days before your return. – Leave Mgmt Team
+Artifact 5 — Day 30 Pause Toggle (LOA Queue UI)
+In the LOA Recovery Queue, for each active tech record where loa_duration_days >= 30:
+
+Display a "Pause Recovery" button that becomes active when the current date is within 7 calendar days of Day 30 (i.e., today >= loa_start_date + 23 days).
+When toggled ON: set recovery_paused = true on that record, suppress vehicle recovery actions, and log a timestamped note: "Recovery paused — return confirmed within 7 days of Day 30."
+When toggled OFF: revert recovery_paused = false and resume normal recovery flow.
+Surface the pause state visibly in the queue row (e.g., a "Paused" status badge).
+Artifact 6 — LOA Extension Re-trigger Logic
+When a tech record is updated and loa_duration_days changes from a value under 30 to 30 or more:
+
+Immediately trigger the 30+ day actions as if it were Day 1 of that LOA:
+Fire an updated Artifact 1 email to Fleet/Assets noting the extension and the new expected return date.
+Queue vehicle recovery and P-card suspension actions in the asset checklist.
+Log a timestamped note on the tech record: "LOA extended past 30 days — 30-day recovery actions initiated on {today}."
+Do not re-send the technician email (Artifact 2) or SMS (Artifact 4) on extension — those were already sent at LOA start.
+Notes for implementation:
+
+All date math should use working days for send triggers (Artifacts 1, 2, 3) and calendar days for the 30-day threshold.
+van_number should display as "Not on file" if null.
+All email sends should be logged in the tech's LOA record with timestamp and SendGrid message ID.
+Suppress Artifact 3 if the LOA record is closed before the return date trigger fires.
