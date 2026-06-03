@@ -82,6 +82,11 @@ type UrgencyLevel = "CRITICAL" | "HIGH" | "STANDARD";
 
 type TaskKey = 'taskToolsReturn' | 'taskIphoneReturn' | 'taskDisconnectedLine' | 'taskDisconnectedMPayment' | 'taskCloseSegnoOrders' | 'taskCreateShippingLabel';
 
+// The manual recovery tasks operators complete by hand (the rest are automated).
+// Drives the dynamic Tasks progress denominator — add/remove a key here and the
+// "x/N" count follows automatically.
+const MANUAL_TASK_KEYS: TaskKey[] = ['taskDisconnectedLine', 'taskDisconnectedMPayment', 'taskCloseSegnoOrders'];
+
 function getVehicleType(item: AssetsQueueItemEnriched): VehicleType {
   if ((item as any).vehicleType === "byov" || (item as any).isByov) return "byov";
   if ((item as any).vehicleType === "rental") return "rental";
@@ -99,15 +104,6 @@ function getVehicleType(item: AssetsQueueItemEnriched): VehicleType {
 }
 
 
-function getDaysSinceSeparation(separationDate: string | null): number | null {
-  if (!separationDate) return null;
-  const sepDate = new Date(separationDate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  sepDate.setHours(0, 0, 0, 0);
-  const diffTime = today.getTime() - sepDate.getTime();
-  return Math.floor(diffTime / (1000 * 60 * 60 * 24));
-}
 
 function RecoveryOutreachBadge({ latest }: { latest: LatestRecoveryOutreach | null }) {
   if (!latest) {
@@ -150,14 +146,6 @@ function getDaysUntilSeparation(separationDate: string | null): number | null {
   return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 }
 
-function getAgingBadge(separationDate: string | null): { label: string; className: string } | null {
-  const daysSince = getDaysSinceSeparation(separationDate);
-  if (daysSince === null) return null;
-  if (daysSince < 0) return { label: "Upcoming", className: "bg-blue-100 text-blue-700 border-blue-200" };
-  if (daysSince <= 7) return { label: "New", className: "bg-green-100 text-green-700 border-green-200" };
-  if (daysSince <= 30) return { label: "Active", className: "bg-amber-100 text-amber-700 border-amber-200" };
-  return { label: "Overdue", className: "bg-red-100 text-red-700 border-red-200" };
-}
 
 // SYNC NOTE: This lane logic is duplicated in server/return-token-service.ts getDetectionLane().
 // Task #424: simplified to 2 lanes — PRE (before last day) and PAST (on/after).
@@ -195,14 +183,12 @@ function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; to
     const total = active.length;
     return { completed, total, percentage: total > 0 ? (completed / total) * 100 : 0 };
   }
-  // Only the 2 manual tasks count toward operator progress — the other 4 are automated.
-  const manualTasks = [
-    item.taskDisconnectedLine,
-    item.taskDisconnectedMPayment,
-  ];
-  const completed = manualTasks.filter(Boolean).length;
-  const total = manualTasks.length;
-  return { completed, total, percentage: (completed / total) * 100 };
+  // Manual tasks count toward operator progress — the automated tasks don't.
+  // Derive both counts from the full set of manual task keys so the denominator
+  // always equals the number of manual tasks (currently 3).
+  const completed = MANUAL_TASK_KEYS.filter((key) => Boolean(item[key])).length;
+  const total = MANUAL_TASK_KEYS.length;
+  return { completed, total, percentage: total > 0 ? (completed / total) * 100 : 0 };
 }
 
 function isItemFromSync(item: QueueItem): boolean {
@@ -665,7 +651,7 @@ function ExpandedRowDetails({
   ];
 
   const AUTOMATED_KEYS: TaskKey[] = ["taskToolsReturn", "taskIphoneReturn", "taskCreateShippingLabel"];
-  const HUMAN_KEYS: TaskKey[] = ["taskDisconnectedLine", "taskDisconnectedMPayment", "taskCloseSegnoOrders"];
+  const HUMAN_KEYS: TaskKey[] = MANUAL_TASK_KEYS;
   const VENDOR_ADVISORY = "Segno orders will be cancelled automatically. Check vendor portals (Amazon, FedEx, etc.) for any orders already in transit.";
 
   function getAutoStatus(key: TaskKey, done: boolean): "completed" | "processing" | "actionRequired" {
@@ -1564,17 +1550,6 @@ export function AssetsRecoveryQueue() {
                               : "N/A"}
                           </span>
                           <div className="flex items-center gap-1">
-                            {(() => {
-                              const aging = getAgingBadge(sepDate);
-                              // LOA rows don't surface the offboarding-centric "Upcoming"
-                              // pre-start badge; offboarding rows keep it.
-                              if (!aging || (isLoaRecoveryItem(row) && aging.label === "Upcoming")) return null;
-                              return (
-                                <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${aging.className}`}>
-                                  {aging.label}
-                                </Badge>
-                              );
-                            })()}
                             {(() => {
                               const lane = getDetectionLane(row);
                               // LOA rows don't surface the "PRE" detection-lane badge;
