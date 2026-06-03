@@ -96,3 +96,9 @@ id = "8606xvpLt9N1F7B4RfHE9"
 uri = "file://exports/tech-punch-report-hector-fernandez.csv"
 type = "table"
 title = "Tech Punch Report - Hector Fernandez"
+
+[[outputs]]
+id = "5EQUYczTXAl1012IvH2fe"
+uri = "file://docs/assign-unassign-tech-flowcharts.md"
+type = "text"
+title = "Assign / Unassign Tech — Flowcharts & Data Sources"
