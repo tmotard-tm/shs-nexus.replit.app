@@ -66,6 +66,63 @@ async function ensureLoaRecoverySchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS "loa_recovery_snapshot_synced_at_idx"
       ON "loa_recovery_snapshot" ("synced_at");
   `);
+
+  // Remove any pre-existing duplicate open LOA Recovery items BEFORE creating
+  // the unique index (the index creation would otherwise fail while dups exist),
+  // then install a partial unique index that guarantees at most one open
+  // (pending/in_progress) LOA item per (workflow_id, department). This is the
+  // database-level guard that prevents the startup-vs-scheduler race from ever
+  // double-writing again — the creation path uses ON CONFLICT DO NOTHING.
+  await dedupeOpenLoaItems();
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "loa_recovery_open_workflow_dept_uniq"
+      ON "queue_items" ("workflow_id", "department")
+      WHERE "workflow_type" = 'loa_recovery'
+        AND "status" IN ('pending', 'in_progress')
+        AND "workflow_id" IS NOT NULL;
+  `);
+}
+
+/**
+ * One-time (and idempotent) cleanup of duplicate open LOA Recovery items.
+ *
+ * For each (workflow_id, department) that has more than one open
+ * (pending/in_progress) `loa_recovery` item, keep a single canonical row and
+ * delete the redundant extras. The canonical row is the one that has progressed
+ * furthest so any work already done is preserved: in_progress beats pending,
+ * an assigned/started/responded row beats an untouched one, and ties fall back
+ * to the earliest-created row (then id for stability). No-op when there are no
+ * duplicates, so it is safe to run on every sync.
+ */
+async function dedupeOpenLoaItems(): Promise<number> {
+  const deleted = await db.execute(sql`
+    DELETE FROM "queue_items" q
+    USING (
+      SELECT id, ROW_NUMBER() OVER (
+        PARTITION BY workflow_id, department
+        ORDER BY
+          (status = 'in_progress') DESC,
+          (assigned_to IS NOT NULL) DESC,
+          (started_at IS NOT NULL) DESC,
+          (first_response_at IS NOT NULL) DESC,
+          created_at ASC,
+          id ASC
+      ) AS rn
+      FROM "queue_items"
+      WHERE workflow_type = ${WORKFLOW_TYPE}
+        AND status IN ('pending', 'in_progress')
+        AND workflow_id IS NOT NULL
+    ) ranked
+    WHERE q.id = ranked.id AND ranked.rn > 1
+    RETURNING q.id;
+  `);
+  const count = Array.isArray(deleted)
+    ? deleted.length
+    : ((deleted as any)?.rowCount ?? (deleted as any)?.rows?.length ?? 0);
+  if (count > 0) {
+    console.log(`[LoaRecovery] Deduped ${count} redundant open LOA queue item(s).`);
+  }
+  return count;
 }
 
 type ApiLeaveRow = {
@@ -197,7 +254,30 @@ function dedupe(rows: ParsedLeave[]): ParsedLeave[] {
   return Array.from(best.values());
 }
 
-export async function runLoaRecoverySync(
+// In-process serialization guard. The startup and 7:30 AM scheduler triggers
+// both fire inside the same Node process, so if a run is already in flight when
+// another is triggered we coalesce onto the existing run rather than racing it.
+// This is a cheap first line of defense; the partial unique index + ON CONFLICT
+// DO NOTHING in the creation path is the durable guarantee that holds even if a
+// future overlap escapes this guard (e.g. across processes).
+let runInFlight: Promise<LoaRecoveryRunResult> | null = null;
+
+export function runLoaRecoverySync(
+  triggeredBy: "scheduler" | "startup" | "manual" = "manual",
+): Promise<LoaRecoveryRunResult> {
+  if (runInFlight) {
+    console.log(
+      `[LoaRecovery] trigger=${triggeredBy} coalesced onto in-flight run.`,
+    );
+    return runInFlight;
+  }
+  runInFlight = runLoaRecoverySyncInner(triggeredBy).finally(() => {
+    runInFlight = null;
+  });
+  return runInFlight;
+}
+
+async function runLoaRecoverySyncInner(
   triggeredBy: "scheduler" | "startup" | "manual" = "manual",
 ): Promise<LoaRecoveryRunResult> {
   const startedAt = new Date();
@@ -457,56 +537,71 @@ async function createLoaRecoveryWorkflow(
     leaveDays: q.days,
   };
 
+  // `dbDepartment` is the value written to the queue_items.department column
+  // (must match what the storage create* helpers historically forced, so the
+  // partial unique index and the per-queue UI keep working). `laneLabel` is the
+  // value embedded in data.lane / metadata.lane, preserved exactly as it was
+  // (the Fleet lane historically stored "FLEET" in data.lane while its column
+  // read "Fleet Management").
   const lanes: Array<{
     title: string;
     description: string;
-    department: "FLEET" | "Assets Management" | "Inventory Control";
+    dbDepartment: "Fleet Management" | "Assets Management" | "Inventory Control";
+    laneLabel: "FLEET" | "Assets Management" | "Inventory Control";
     step: number;
-    creator: (item: any) => Promise<any>;
   }> = [
     {
       title: `LOA Recovery — Vehicle (${techName})`,
       description: `Recover assigned vehicle from ${techName} (${q.enterpriseId}). On continuous leave ${q.days} days (started ${q.startDate || "unknown"}).`,
-      department: "FLEET",
+      dbDepartment: "Fleet Management",
+      laneLabel: "FLEET",
       step: 1,
-      creator: (item) => storage.createFleetQueueItem(item),
     },
     {
       title: `LOA Recovery — Tools (${techName})`,
       description: `Recover company tools from ${techName} (${q.enterpriseId}). On continuous leave ${q.days} days (started ${q.startDate || "unknown"}).`,
-      department: "Assets Management",
+      dbDepartment: "Assets Management",
+      laneLabel: "Assets Management",
       step: 2,
-      creator: (item) => storage.createAssetsQueueItem(item),
     },
     {
       title: `LOA Recovery — Parts (${techName})`,
       description: `Recover parts inventory from ${techName} (${q.enterpriseId}). On continuous leave ${q.days} days (started ${q.startDate || "unknown"}).`,
-      department: "Inventory Control",
+      dbDepartment: "Inventory Control",
+      laneLabel: "Inventory Control",
       step: 3,
-      creator: (item) => storage.createInventoryQueueItem(item),
     },
   ];
 
   let created = 0;
   for (const lane of lanes) {
     try {
-      await lane.creator({
-        workflowType: WORKFLOW_TYPE,
-        title: lane.title,
-        description: lane.description,
-        status: "pending",
-        priority: "medium",
-        requesterId: SYSTEM_REQUESTER_ID,
-        department: lane.department,
-        workflowId,
-        workflowStep: lane.step,
-        data: JSON.stringify({ ...sharedData, lane: lane.department }),
-        metadata: JSON.stringify({ ...baseMetadata, lane: lane.department }),
-      });
-      created += 1;
+      // Insert directly with ON CONFLICT DO NOTHING so that if two sync runs
+      // race against a clean state, the partial unique index lets only one row
+      // win per (workflow_id, department) — the loser is silently skipped
+      // instead of throwing. `.returning()` is empty on conflict, so `created`
+      // counts only rows actually written.
+      const inserted = await db
+        .insert(queueItems)
+        .values({
+          workflowType: WORKFLOW_TYPE,
+          title: lane.title,
+          description: lane.description,
+          status: "pending",
+          priority: "medium",
+          requesterId: SYSTEM_REQUESTER_ID,
+          department: lane.dbDepartment,
+          workflowId,
+          workflowStep: lane.step,
+          data: JSON.stringify({ ...sharedData, lane: lane.laneLabel }),
+          metadata: JSON.stringify({ ...baseMetadata, lane: lane.laneLabel }),
+        })
+        .onConflictDoNothing()
+        .returning({ id: queueItems.id });
+      if (inserted.length > 0) created += 1;
     } catch (e: any) {
       console.error(
-        `[LoaRecovery] Failed to create ${lane.department} item for ${q.enterpriseId}:`,
+        `[LoaRecovery] Failed to create ${lane.dbDepartment} item for ${q.enterpriseId}:`,
         e?.message || e,
       );
     }
