@@ -146,15 +146,145 @@ function CrossQueueStrip({
   );
 }
 
-// ---- SOP timeline (read-only) ----
-function SopTimeline({ accentColor }: { accentColor: string }) {
-  const steps = [
-    { when: '3 working days before start', what: 'Notify Inventory & Assets teams (dates, duration, return).' },
-    { when: 'Pre Day 1', what: 'Send LOA letter to tech via email + SMS reminder.' },
-    { when: 'Day 1', what: 'Tech removes personal tools. If LOA >30d, vehicle recovery initiated.' },
-    { when: 'Ongoing', what: 'Monitor return-date changes. Pause recovery if return is within 7d of Day 30.' },
-    { when: '3 working days before end', what: 'Notify teams of confirmed return; restore assets by Day 1 back.' },
+// ---- SOP timeline (live, status-aware) ----
+// SOP step status tones. "Sent"/"Complete" share the green treatment because
+// there is no per-step outreach signal for LOA cases yet (no LOA SMS/letter
+// sender exists), so steps that depend on an outbound action fall back to
+// date-driven Pending → Due states rather than ever claiming "Sent".
+type SopTone = 'pending' | 'due' | 'sent' | 'active' | 'recovery' | 'monitoring' | 'paused' | 'complete';
+const SOP_TONE_STYLE: Record<SopTone, string> = {
+  pending:    'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400',
+  due:        'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+  sent:       'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
+  complete:   'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-400',
+  active:     'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-400',
+  recovery:   'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-400',
+  monitoring: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-400',
+  paused:     'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400',
+};
+const SOP_TONE_DOT: Record<SopTone, string> = {
+  pending: '#9CA3AF', due: '#D97706', sent: '#16A34A', complete: '#16A34A',
+  active: '#2563EB', recovery: '#EA580C', monitoring: '#4F46E5', paused: '#D97706',
+};
+
+function parseYmd(s?: string | null): Date | null {
+  if (!s) return null;
+  const m = String(s).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+function startOfToday(): Date {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+// N working days (Mon–Fri) before a target date.
+function subBusinessDays(d: Date, n: number): Date {
+  const r = new Date(d);
+  let counted = 0;
+  while (counted < n) {
+    r.setDate(r.getDate() - 1);
+    const dow = r.getDay();
+    if (dow !== 0 && dow !== 6) counted++;
+  }
+  return r;
+}
+
+interface SopStep {
+  when: string;
+  what: string;
+  tone: SopTone;
+  label: string;
+}
+
+function computeSopSteps({
+  startDate,
+  endDate,
+  days,
+  recoveryInitiated,
+  recoveryPaused,
+}: {
+  startDate: string | null;
+  endDate: string | null;
+  days: number;
+  recoveryInitiated: boolean;
+  recoveryPaused: boolean;
+}): SopStep[] {
+  const today = startOfToday();
+  const start = parseYmd(startDate);
+  const end = parseYmd(endDate);
+
+  // Step 1 — notify teams 3 working days before the leave start.
+  // No outbound-notify signal exists, so this is date-driven Pending → Due.
+  let s1: { tone: SopTone; label: string };
+  if (!start) {
+    s1 = { tone: 'pending', label: 'Pending' };
+  } else {
+    s1 = today < subBusinessDays(start, 3) ? { tone: 'pending', label: 'Pending' } : { tone: 'due', label: 'Due' };
+  }
+
+  // Step 2 — Pre Day 1 SMS reminder. No send signal for LOA, so always Pending.
+  const s2: { tone: SopTone; label: string } = { tone: 'pending', label: 'Pending' };
+
+  // Step 3 — Day 1. Active once the leave has started; flips to "Recovery
+  // initiated" for company vehicles past Day 30 with an open Fleet recovery.
+  let s3: { tone: SopTone; label: string };
+  if (!start || today < start) {
+    s3 = { tone: 'pending', label: 'Pending' };
+  } else if (days > 30 && recoveryInitiated) {
+    s3 = { tone: 'recovery', label: 'Recovery initiated' };
+  } else {
+    s3 = { tone: 'active', label: 'Active' };
+  }
+
+  // Step 4 — Ongoing monitoring. "Paused" reflects the real, operator-controlled
+  // pause signal (data.recoveryPaused, toggled from this view) — NOT a date guess.
+  // While the leave is active it is Paused when that flag is set, otherwise
+  // Monitoring; before the leave starts it is still Pending.
+  let s4: { tone: SopTone; label: string };
+  if (!start || today < start) {
+    s4 = { tone: 'pending', label: 'Pending' };
+  } else {
+    s4 = recoveryPaused
+      ? { tone: 'paused', label: 'Paused' }
+      : { tone: 'monitoring', label: 'Monitoring' };
+  }
+
+  // Step 5 — notify teams 3 working days before the confirmed return.
+  // Date-driven Pending → Due (no send signal). TBD return stays Pending.
+  let s5: { tone: SopTone; label: string };
+  if (!end) {
+    s5 = { tone: 'pending', label: 'Pending' };
+  } else {
+    s5 = today < subBusinessDays(end, 3) ? { tone: 'pending', label: 'Pending' } : { tone: 'due', label: 'Due' };
+  }
+
+  return [
+    { when: '3 working days before start', what: 'Notify Inventory & Assets teams (dates, duration, return).', ...s1 },
+    { when: 'Pre Day 1', what: 'Send LOA reminder to tech via SMS.', ...s2 },
+    { when: 'Day 1', what: 'Tech removes personal tools. If LOA >30d, vehicle recovery initiated.', ...s3 },
+    { when: 'Ongoing', what: 'Monitor return-date changes. Pause recovery if return is within 7d of Day 30.', ...s4 },
+    { when: '3 working days before end', what: 'Notify teams of confirmed return; restore assets by Day 1 back.', ...s5 },
   ];
+}
+
+function SopTimeline({
+  startDate,
+  endDate,
+  days,
+  recoveryInitiated,
+  recoveryPaused,
+}: {
+  startDate: string | null;
+  endDate: string | null;
+  days: number;
+  recoveryInitiated: boolean;
+  recoveryPaused: boolean;
+}) {
+  const steps = computeSopSteps({ startDate, endDate, days, recoveryInitiated, recoveryPaused });
   return (
     <InfoCard>
       <SectionTitle>SOP Timeline</SectionTitle>
@@ -162,11 +292,16 @@ function SopTimeline({ accentColor }: { accentColor: string }) {
         {steps.map((s, i) => (
           <li key={i} className="flex gap-3">
             <div className="flex flex-col items-center">
-              <span className="w-3 h-3 rounded-full flex-none mt-0.5" style={{ background: accentColor }} />
+              <span className="w-3 h-3 rounded-full flex-none mt-0.5" style={{ background: SOP_TONE_DOT[s.tone] }} />
               {i < steps.length - 1 && <span className="w-0.5 flex-1 mt-1" style={{ background: '#E5E7EB' }} />}
             </div>
-            <div className="pb-2">
-              <div className="text-xs font-bold text-gray-800 dark:text-gray-200">{s.when}</div>
+            <div className="pb-2 flex-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-xs font-bold text-gray-800 dark:text-gray-200">{s.when}</div>
+                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold flex-none ${SOP_TONE_STYLE[s.tone]}`}>
+                  {s.label}
+                </span>
+              </div>
               <div className="text-xs text-gray-500 leading-snug mt-0.5">{s.what}</div>
             </div>
           </li>
@@ -271,6 +406,19 @@ export function LoaDetailView({
   const pauseEligible = canPauseRecovery(data?.leave?.startDate, days);
   const activeItems = activeItemsForQueue(vehicle, queue);
   const doneTasks = activeItems.filter((it) => taskState[it.id]).length;
+
+  // Vehicle recovery is "initiated" only when the sibling Fleet Management LOA
+  // item (same workflowId, created by the recovery sync at Day 30+) exists and is
+  // not cancelled. This is the source of truth — callers must pass the cross-lane
+  // LOA items in `allItems` (the Assets queue does so via /api/loa-recovery/items).
+  // If no fleet sibling is found, recovery is NOT initiated (show "Active").
+  const fleetSibling = allItems.find((i) => {
+    if (!i.workflowId || i.workflowId !== item.workflowId || i.id === item.id) return false;
+    const mod = String(i.module || '').toLowerCase();
+    const dept = String(i.department || '').toUpperCase();
+    return mod === 'fleet' || dept.includes('FLEET');
+  });
+  const recoveryInitiated = !!fleetSibling && fleetSibling.status !== 'cancelled';
 
   // ---- cards ----
   const loaDetailsCard = (
@@ -388,11 +536,13 @@ export function LoaDetailView({
       <SectionTitle>Contact Details</SectionTitle>
       <Field label="Mobile Phone">{data?.tech?.phone || '—'}</Field>
       <Field label="Email">
-        {data?.enterpriseId ? (
-          <a href={`mailto:${data.enterpriseId.toLowerCase()}@sears.com`} className="text-blue-600 hover:underline text-xs">
-            {data.enterpriseId.toLowerCase()}@sears.com
+        {data?.tech?.email ? (
+          <a href={`mailto:${data.tech.email}`} className="text-blue-600 hover:underline text-xs">
+            {data.tech.email}
           </a>
-        ) : '—'}
+        ) : (
+          <span className="text-gray-400 italic">No email on file</span>
+        )}
       </Field>
       <Field label="Address">
         <span className="text-right text-xs leading-snug">{fullAddress}</span>
@@ -465,7 +615,13 @@ export function LoaDetailView({
       </div>
 
       {/* SOP Timeline */}
-      <SopTimeline accentColor={meta.color} />
+      <SopTimeline
+        startDate={data?.leave?.startDate ?? null}
+        endDate={data?.leave?.endDate ?? null}
+        days={days}
+        recoveryInitiated={recoveryInitiated}
+        recoveryPaused={recoveryPaused}
+      />
     </div>
   );
 }

@@ -17,6 +17,8 @@ import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { AssetsTaskDetailView } from "@/components/assets-queue/AssetsTaskDetailView";
 import { LoaDetailView } from "@/components/loa-recovery/LoaDetailView";
+import { inferVehicleType, parseLoaData } from "@/components/loa-recovery/loa-types";
+import { activeItemsForQueue } from "@/components/loa-recovery/loa-checklist-config";
 import type { CombinedQueueItem } from "@shared/schema";
 import {
   getLatestRecoveryOutreach,
@@ -181,6 +183,18 @@ function getUrgencyLevel(vehicleType: VehicleType, daysUntilSep: number | null):
 }
 
 function getTaskProgress(item: AssetsQueueItemEnriched): { completed: number; total: number; percentage: number } {
+  // LOA Recovery cases use the LOA checklist (vehicle-dependent) rather than the
+  // offboarding manual tasks. Mirror LoaDetailView's progress ring exactly:
+  // total = active Assets-queue checklist items for the resolved vehicle type,
+  // completed = items toggled in the item's saved loaTasks state.
+  if (isLoaRecoveryItem(item)) {
+    const vehicle = inferVehicleType(item);
+    const active = activeItemsForQueue(vehicle, "assets");
+    const taskState = parseLoaData(item)?.loaTasks || {};
+    const completed = active.filter((it) => taskState[it.id]).length;
+    const total = active.length;
+    return { completed, total, percentage: total > 0 ? (completed / total) * 100 : 0 };
+  }
   // Only the 2 manual tasks count toward operator progress — the other 4 are automated.
   const manualTasks = [
     item.taskDisconnectedLine,
@@ -247,6 +261,7 @@ interface FilterState {
   incompleteOnly: boolean;
   includeManual: boolean;
   daysBack: number;
+  caseType: "all" | "offboarding" | "loa";
 }
 
 function AssetsRecoveryFilterBar({
@@ -268,6 +283,7 @@ function AssetsRecoveryFilterBar({
     activeFilters.status.length > 0 ||
     activeFilters.vehicleType.length > 0 ||
     activeFilters.district.length > 0 ||
+    activeFilters.caseType !== "all" ||
     activeFilters.incompleteOnly ||
     activeFilters.includeManual ||
     activeFilters.daysBack !== 30 ||
@@ -313,6 +329,20 @@ function AssetsRecoveryFilterBar({
           <SelectItem value="company">Company</SelectItem>
           <SelectItem value="byov">BYOV</SelectItem>
           <SelectItem value="rental">Rental</SelectItem>
+        </SelectContent>
+      </Select>
+
+      <Select
+        value={activeFilters.caseType}
+        onValueChange={(val) => onFilterChange("caseType", val)}
+      >
+        <SelectTrigger className="w-[150px]">
+          <SelectValue placeholder="All Case Types" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">All Case Types</SelectItem>
+          <SelectItem value="offboarding">Offboarding</SelectItem>
+          <SelectItem value="loa">LOA</SelectItem>
         </SelectContent>
       </Select>
 
@@ -1085,6 +1115,7 @@ export function AssetsRecoveryQueue() {
     incompleteOnly: false,
     includeManual: false,
     daysBack: 30,
+    caseType: "all",
   });
   const [expandedRowId, setExpandedRowId] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -1106,6 +1137,16 @@ export function AssetsRecoveryQueue() {
   });
 
   const queueItems = useMemo(() => rawQueueItems.map(enrichItem), [rawQueueItems]);
+
+  // Cross-lane LOA Recovery items (Fleet/Assets/Inventory) for the same cases.
+  // The Assets feed (`/api/assets-queue`) only returns Assets-lane rows, so the
+  // detail view cannot see a case's sibling Fleet Management item from it. This
+  // feed supplies those siblings so the SOP timeline can tell whether vehicle
+  // recovery has been initiated (sibling Fleet item exists and is not cancelled).
+  const { data: loaCrossLaneItems = [] } = useQuery<CombinedQueueItem[]>({
+    queryKey: ["/api/loa-recovery/items"],
+    refetchInterval: 30000,
+  });
 
   useEffect(() => {
     if (detailViewItem) {
@@ -1232,6 +1273,11 @@ export function AssetsRecoveryQueue() {
         filters.district.length === 0 ||
         (techData?.district && filters.district.includes(techData.district));
 
+      const itemIsLoa = isLoaRecoveryItem(item);
+      const matchesCaseType =
+        filters.caseType === "all" ||
+        (filters.caseType === "loa" ? itemIsLoa : !itemIsLoa);
+
       const taskProgress = getTaskProgress(item);
       const matchesIncomplete = !filters.incompleteOnly || taskProgress.completed < taskProgress.total;
 
@@ -1241,7 +1287,7 @@ export function AssetsRecoveryQueue() {
       const isOrphan = techData?.techName === "Unknown" && !techData?.enterpriseId;
       const matchesNotOrphan = !isOrphan;
 
-      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesIncomplete && matchesSource && matchesNotOrphan;
+      return matchesSearch && matchesStatus && matchesVehicle && matchesDistrict && matchesCaseType && matchesIncomplete && matchesSource && matchesNotOrphan;
     });
   }, [queueItems, searchQuery, filters]);
 
@@ -1312,7 +1358,7 @@ export function AssetsRecoveryQueue() {
 
   const handleClearFilters = () => {
     setSearchQuery("");
-    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, includeManual: false, daysBack: 30 });
+    setFilters({ status: [], vehicleType: [], district: [], incompleteOnly: false, includeManual: false, daysBack: 30, caseType: "all" });
     setCurrentPage(1);
   };
 
@@ -1343,7 +1389,7 @@ export function AssetsRecoveryQueue() {
   }
 
   if (detailViewItem) {
-    const loaAllItems = (rawQueueItems as QueueItem[]).filter(isLoaRecoveryItem) as unknown as CombinedQueueItem[];
+    const loaAllItems = loaCrossLaneItems;
     return (
       <>
         {isLoaRecoveryItem(detailViewItem) ? (
@@ -1520,14 +1566,20 @@ export function AssetsRecoveryQueue() {
                           <div className="flex items-center gap-1">
                             {(() => {
                               const aging = getAgingBadge(sepDate);
-                              return aging ? (
+                              // LOA rows don't surface the offboarding-centric "Upcoming"
+                              // pre-start badge; offboarding rows keep it.
+                              if (!aging || (isLoaRecoveryItem(row) && aging.label === "Upcoming")) return null;
+                              return (
                                 <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${aging.className}`}>
                                   {aging.label}
                                 </Badge>
-                              ) : null;
+                              );
                             })()}
                             {(() => {
                               const lane = getDetectionLane(row);
+                              // LOA rows don't surface the "PRE" detection-lane badge;
+                              // offboarding rows keep it.
+                              if (isLoaRecoveryItem(row) && lane.label === "PRE") return null;
                               return (
                                 <Badge className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${lane.className}`}>
                                   {lane.label}
@@ -1585,7 +1637,7 @@ export function AssetsRecoveryQueue() {
                             <LoaDetailView
                               item={row as unknown as CombinedQueueItem}
                               queue="assets"
-                              allItems={(rawQueueItems as QueueItem[]).filter(isLoaRecoveryItem) as unknown as CombinedQueueItem[]}
+                              allItems={loaCrossLaneItems}
                             />
                           ) : (
                           <ExpandedRowDetails

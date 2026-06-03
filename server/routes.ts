@@ -2399,7 +2399,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
               personalPhone: hrRecord?.contactNumber || tech.cellPhone || tech.homePhone || null,
               homePhone: tech.homePhone || null,
               contactNumber: hrRecord?.contactNumber || null,
-              email: hrRecord?.personalEmail || parsedData?.employee?.email || `${tech.techRacfid?.toLowerCase()}@sears.com`,
+              email: hrRecord?.personalEmail || parsedData?.employee?.email || null,
               personalEmail: hrRecord?.personalEmail || null,
               address: addressParts.length > 0 ? addressParts.join(', ') : null,
               fleetPickupAddress: hrRecord?.fleetPickupAddress || null,
@@ -20037,6 +20037,39 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error("[LoaRecovery] GET /diagnostics error:", err.message);
       return res.status(500).json({ message: err.message || "Failed to load diagnostics" });
+    }
+  });
+
+  // All LOA Recovery queue items across the Fleet/Assets/Inventory lanes, each
+  // tagged with its canonical `module`. The Assets queue detail view uses this
+  // to find a case's sibling Fleet Management item (same workflowId) so the SOP
+  // timeline can determine whether vehicle recovery has been initiated — a
+  // single-department queue feed cannot see its cross-lane siblings on its own.
+  //
+  // Authorization: gated to users with access to at least one LOA lane (parity
+  // with the other queue routes, which use hasQueueAccess). We do NOT filter the
+  // result down to only the caller's accessible modules because the three lane
+  // items for a given case are created in lockstep from identical shared case
+  // data (same tech, dates, enterprise ID) — so the sibling rows expose no tech
+  // data the caller can't already see for that case in their own lane, and the
+  // SOP "recovery initiated" signal specifically requires the Fleet sibling.
+  app.get("/api/loa-recovery/items", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      const loaModules: QueueModule[] = ["fleet", "assets", "inventory"];
+      const hasAnyLoaAccess =
+        !!currentUser && loaModules.some((m) => hasQueueAccess(currentUser, m));
+      if (!hasAnyLoaAccess) {
+        return res.status(403).json({ message: "Access denied to LOA Recovery queues" });
+      }
+      const items = await storage.getUnifiedQueueItems(loaModules);
+      const loaItems = items.filter(
+        (i) => i.workflowType === "loa_recovery" || i.requesterId === "system:loa_recovery",
+      );
+      return res.json(loaItems);
+    } catch (err: any) {
+      console.error("[LoaRecovery] GET /items error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load LOA items" });
     }
   });
 

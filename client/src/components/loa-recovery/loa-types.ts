@@ -17,6 +17,10 @@ export interface LoaTechInfo {
   phone: string | null;
   primaryZip: string | null;
   address: LoaAddress;
+  // Real email when one is known. The LOA sync does not populate this today, so
+  // it is normally absent — the detail view shows "No email on file" rather than
+  // fabricating a racfid@sears.com address.
+  email?: string | null;
 }
 
 export interface LoaLeaveInfo {
