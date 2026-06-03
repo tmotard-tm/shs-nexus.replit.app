@@ -26,7 +26,7 @@ import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
 import { sql, eq, and, or, gte, lte, lt, inArray, asc, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
-import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit, amsVehiclesCache } from "@shared/schema";
+import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit, amsVehiclesCache, loaLeaves } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
 const amsApiService = new AmsApiService();
@@ -19703,11 +19703,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.patch("/api/loa-recovery/:id/update", requireAuth, async (req: any, res) => {
     try {
       const { id } = req.params;
-      const { loaTasks, status, vehicleTypeOverride, notes } = req.body as {
+      const { loaTasks, status, vehicleTypeOverride, notes, recoveryPaused } = req.body as {
         loaTasks?: Record<string, boolean>;
         status?: string;
         vehicleTypeOverride?: string;
         notes?: string;
+        recoveryPaused?: boolean;
       };
 
       // Fetch existing item — must exist and be an LOA recovery item
@@ -19755,17 +19756,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
         dataObj.vehicleTypeOverride = vehicleTypeOverride;
       }
 
+      // Day-30 recovery pause (Task #437). Stored in the queue-item data JSON
+      // (NOT the queue status) so the sync idempotency index stays intact. The
+      // toggle propagates across every sibling item in the workflow and onto
+      // the loa_leaves row so the table badge + checklist suppression agree.
+      let pauseChanged = false;
+      let pauseNote: string | null = null;
+      if (recoveryPaused !== undefined) {
+        const nowIso = new Date().toISOString();
+        dataObj.recoveryPaused = recoveryPaused;
+        dataObj.recoveryPausedAt = recoveryPaused ? nowIso : null;
+        pauseChanged = true;
+        if (recoveryPaused) {
+          pauseNote = "Recovery paused — return confirmed within 7 days of Day 30.";
+        }
+      }
+
       const updates: Record<string, unknown> = {
         data: JSON.stringify(dataObj),
         updatedAt: new Date(),
       };
       if (status !== undefined) updates.status = status;
       if (notes !== undefined) updates.notes = notes;
+      if (pauseNote) {
+        const prevNotes = existing[0].notes || "";
+        updates.notes = prevNotes ? `${prevNotes}\n${pauseNote}` : pauseNote;
+      }
 
       const result = await db.update(queueItems)
         .set(updates as any)
         .where(and(eq(queueItems.id, id), eq(queueItems.workflowType, 'loa_recovery')))
         .returning();
+
+      // Propagate the pause flag to the rest of the workflow + the leave row.
+      if (pauseChanged && existing[0].workflowId) {
+        const wfId = existing[0].workflowId;
+        const siblings = await db.select().from(queueItems)
+          .where(and(eq(queueItems.workflowId, wfId), eq(queueItems.workflowType, 'loa_recovery')));
+        for (const sib of siblings) {
+          if (sib.id === id) continue;
+          let sibData: Record<string, unknown> = {};
+          try { sibData = sib.data ? JSON.parse(sib.data) : {}; } catch { sibData = {}; }
+          sibData.recoveryPaused = recoveryPaused;
+          sibData.recoveryPausedAt = recoveryPaused ? new Date().toISOString() : null;
+          await db.update(queueItems)
+            .set({ data: JSON.stringify(sibData), updatedAt: new Date() } as any)
+            .where(eq(queueItems.id, sib.id));
+        }
+        try {
+          await db.update(loaLeaves)
+            .set({
+              recoveryPaused: !!recoveryPaused,
+              recoveryPausedAt: recoveryPaused ? new Date() : null,
+              updatedAt: new Date(),
+            })
+            .where(eq(loaLeaves.workflowId, wfId));
+        } catch (e: any) {
+          console.warn("[LoaRecovery] pause: loa_leaves update failed (non-fatal):", e?.message || e);
+        }
+      }
 
       return res.json(result[0]);
     } catch (err: any) {
@@ -19792,6 +19841,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error("[LoaRecovery] GET /diagnostics error:", err.message);
       return res.status(500).json({ message: err.message || "Failed to load diagnostics" });
+    }
+  });
+
+  // LOA team distribution list (Task #437). GET is available to any
+  // authenticated user (so the agent UI can render recipients), edits are
+  // restricted to admin/developer.
+  app.get("/api/loa/distribution-list", requireAuth, async (_req: any, res) => {
+    try {
+      const rows = await storage.getLoaTeamRecipients();
+      return res.json(rows);
+    } catch (err: any) {
+      console.error("[LoaRecovery] GET /distribution-list error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to load distribution list" });
+    }
+  });
+
+  app.put("/api/loa/distribution-list", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Access denied. Editing the LOA distribution list requires developer or admin role." });
+      }
+
+      const { team, emails } = req.body as { team?: string; emails?: unknown };
+      const VALID_TEAMS = ["fleet", "assets", "inventory"];
+      if (!team || !VALID_TEAMS.includes(team)) {
+        return res.status(400).json({ message: "team must be one of fleet, assets, inventory" });
+      }
+      if (!Array.isArray(emails)) {
+        return res.status(400).json({ message: "emails must be an array of strings" });
+      }
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      const cleaned: string[] = [];
+      for (const e of emails) {
+        const trimmed = String(e || "").trim();
+        if (!trimmed) continue;
+        if (!emailRe.test(trimmed)) {
+          return res.status(400).json({ message: `Invalid email address: ${trimmed}` });
+        }
+        if (!cleaned.includes(trimmed)) cleaned.push(trimmed);
+      }
+
+      const saved = await storage.upsertLoaTeamRecipient(team, cleaned, currentUser.id);
+      return res.json(saved);
+    } catch (err: any) {
+      console.error("[LoaRecovery] PUT /distribution-list error:", err.message);
+      return res.status(500).json({ message: err.message || "Failed to update distribution list" });
     }
   });
 

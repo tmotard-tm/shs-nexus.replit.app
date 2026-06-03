@@ -550,6 +550,15 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "byovBulkUpload",
   },
   {
+    key: "loaDistributionList",
+    label: "LOA Distribution List",
+    description: "Manage the LOA team email recipients for automated leave notices",
+    path: "/loa-distribution-list",
+    icon: Mail,
+    category: "management",
+    permissionKey: "communicationHub",
+  },
+  {
     key: "wmsEngine",
     label: "WMS Engine",
     description: "Warehouse Management System — NetSuite truck locations and tech-to-truck assignments",

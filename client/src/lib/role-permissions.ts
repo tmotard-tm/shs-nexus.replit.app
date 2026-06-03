@@ -494,6 +494,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/tpms-integration': () => perms.sidebar.management.integrations,
     '/wms-engine': () => perms.sidebar.management.wmsEngine,
     '/byov-bulk-upload': () => perms.sidebar.management.byovBulkUpload,
+    '/loa-distribution-list': () => perms.sidebar.management.communicationHub,
   };
 
   // Check exact route match

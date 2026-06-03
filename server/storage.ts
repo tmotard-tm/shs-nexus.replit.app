@@ -55,6 +55,7 @@ import {
   type InsertRentalSnapshot,
   type CommunicationTemplate,
   type InsertCommunicationTemplate,
+  type LoaTeamRecipients,
   type CommunicationWhitelistEntry,
   type InsertCommunicationWhitelist,
   type CommunicationLog,
@@ -102,6 +103,7 @@ import {
   rolePermissions,
   rentalSnapshots,
   communicationTemplates,
+  loaTeamRecipients,
   communicationWhitelist,
   communicationLogs,
   vehicleNexusData,
@@ -426,6 +428,10 @@ export interface IStorage {
   createCommunicationTemplate(template: InsertCommunicationTemplate): Promise<CommunicationTemplate>;
   updateCommunicationTemplate(id: string, updates: Partial<CommunicationTemplate>): Promise<CommunicationTemplate | undefined>;
   deleteCommunicationTemplate(id: string): Promise<boolean>;
+
+  // LOA team distribution list (Task #437)
+  getLoaTeamRecipients(): Promise<LoaTeamRecipients[]>;
+  upsertLoaTeamRecipient(team: string, emails: string[], updatedBy?: string | null): Promise<LoaTeamRecipients>;
 
   getWhitelistEntries(): Promise<CommunicationWhitelistEntry[]>;
   getWhitelistEntriesByType(type: 'email' | 'phone'): Promise<CommunicationWhitelistEntry[]>;
@@ -3458,6 +3464,12 @@ export class MemStorage implements IStorage {
   async getCommunicationTemplateByName(_name: string): Promise<CommunicationTemplate | undefined> {
     throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
   }
+  async getLoaTeamRecipients(): Promise<LoaTeamRecipients[]> {
+    throw new Error("MemStorage does not support LOA distribution list. Use DatabaseStorage.");
+  }
+  async upsertLoaTeamRecipient(_team: string, _emails: string[], _updatedBy?: string | null): Promise<LoaTeamRecipients> {
+    throw new Error("MemStorage does not support LOA distribution list. Use DatabaseStorage.");
+  }
   async getCommunicationTemplates(): Promise<CommunicationTemplate[]> {
     throw new Error("MemStorage does not support communication hub. Use DatabaseStorage.");
   }
@@ -6183,6 +6195,22 @@ export class DatabaseStorage implements IStorage {
   async deleteCommunicationTemplate(id: string): Promise<boolean> {
     const result = await db.delete(communicationTemplates).where(eq(communicationTemplates.id, id)).returning();
     return result.length > 0;
+  }
+
+  async getLoaTeamRecipients(): Promise<LoaTeamRecipients[]> {
+    return await db.select().from(loaTeamRecipients).orderBy(loaTeamRecipients.team);
+  }
+
+  async upsertLoaTeamRecipient(team: string, emails: string[], updatedBy?: string | null): Promise<LoaTeamRecipients> {
+    const result = await db
+      .insert(loaTeamRecipients)
+      .values({ team, emails, updatedBy: updatedBy || null })
+      .onConflictDoUpdate({
+        target: loaTeamRecipients.team,
+        set: { emails, updatedBy: updatedBy || null, updatedAt: new Date() },
+      })
+      .returning();
+    return result[0];
   }
 
   async getWhitelistEntries(): Promise<CommunicationWhitelistEntry[]> {

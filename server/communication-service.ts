@@ -10,6 +10,7 @@ interface SendResult {
   error?: string;
   intendedRecipient: string;
   actualRecipient?: string;
+  providerMessageId?: string;
 }
 
 interface SendOptions {
@@ -22,6 +23,23 @@ interface SendOptions {
 
 function renderTemplate(content: string, variables: Record<string, string>): string {
   let rendered = content;
+
+  // Conditional blocks: {{#if key}}...{{/if}} — the inner content is kept only
+  // when the variable is "truthy" (non-empty and not 'false'/'0'/'no'). Used by
+  // the LOA team-notice template to render the 30+ day rows only when the leave
+  // duration qualifies. Process these before plain token replacement so tokens
+  // inside surviving blocks still get substituted.
+  const ifRegex = /\{\{\s*#if\s+([a-zA-Z0-9_]+)\s*\}\}([\s\S]*?)\{\{\s*\/if\s*\}\}/g;
+  rendered = rendered.replace(ifRegex, (_match, key: string, inner: string) => {
+    const raw = variables[key];
+    const truthy =
+      raw !== undefined &&
+      raw !== null &&
+      String(raw).trim() !== '' &&
+      !['false', '0', 'no'].includes(String(raw).trim().toLowerCase());
+    return truthy ? inner : '';
+  });
+
   for (const [key, value] of Object.entries(variables)) {
     const regex = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}|\\$\\{${key}\\}|\\[${key}\\]`, 'gi');
     rendered = rendered.replace(regex, value || '');
@@ -95,6 +113,7 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
   let status: 'sent' | 'simulated' | 'blocked' | 'failed' = 'simulated';
   let actualRecipient: string | null = null;
   let errorMessage: string | null = null;
+  let providerMessageId: string | null = null;
 
   if (mode === 'simulated') {
     console.log(`[COMMUNICATION - SIMULATED] Would send ${template.type} to: ${recipient}`);
@@ -156,12 +175,14 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
       });
       status = result.success ? 'sent' : 'failed';
       actualRecipient = result.success ? recipient : null;
+      if (result.success) providerMessageId = result.messageId || null;
       if (!result.success) errorMessage = result.error || 'Email delivery failed';
     } else {
       try {
         const sid = await sendTwilioMessage(recipient, renderedText);
         status = 'sent';
         actualRecipient = recipient;
+        providerMessageId = sid || null;
         console.log(`[COMMUNICATION - LIVE] SMS sent to ${recipient}, sid=${sid}`);
       } catch (err: any) {
         status = 'failed';
@@ -194,6 +215,7 @@ export async function sendCommunication(options: SendOptions): Promise<SendResul
     error: errorMessage || undefined,
     intendedRecipient: recipient,
     actualRecipient: actualRecipient || undefined,
+    providerMessageId: providerMessageId || undefined,
   };
 }
 
@@ -699,6 +721,175 @@ This is an automated message from the Nexus Offboarding System.`,
       variables: ['techName', 'employeeId', 'vehicleNumber', 'vehicleType'],
       isActive: true,
     },
+    // ==================== LOA Communications (Task #437) ====================
+    {
+      name: 'loa-team-notice',
+      description: 'Team LOA notice (start) emailed to Fleet/Assets/Inventory 3 working days before leave start. Also reused for the extension re-trigger (isExtension flag). The vehicle-recovery and P-card rows render only when is30Plus is set.',
+      type: 'email',
+      mode: 'live',
+      subject: 'LOA Notice – {{tech_name}} | Starts {{loa_start_date}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 640px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #2563eb 0%, #3b82f6 100%); padding: 28px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 22px;">Leave of Absence Notice</h1>
+    <p style="color: #dbeafe; margin: 8px 0 0 0; font-size: 14px;">Action required before the leave start date</p>
+  </div>
+  <div style="background: #f8fafc; padding: 28px; border: 1px solid #e2e8f0; border-top: none;">
+    {{#if isExtension}}<div style="background: #fffbeb; border-left: 4px solid #f59e0b; padding: 12px 16px; margin: 0 0 20px 0; font-size: 14px;"><strong>Leave extended past 30 days.</strong> This leave now qualifies for 30-day recovery actions. The new expected return date is <strong>{{loa_expected_return_date}}</strong>.</div>{{/if}}
+    <p>A technician on your team is going on a continuous leave of absence. Please review the details and complete the required actions below before the leave start date.</p>
+
+    <h3 style="color: #2563eb; margin: 24px 0 8px 0;">Leave Details</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0; width: 45%;">Technician</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{tech_name}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Enterprise ID</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{enterprise_id}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Leave Start Date</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_start_date}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Expected Return Date</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_expected_return_date}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Leave Duration</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_duration_days}} days</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Van Number</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{van_number}}</td></tr>
+    </table>
+
+    <h3 style="color: #2563eb; margin: 24px 0 8px 0;">Required Actions</h3>
+    <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
+      <tr style="background: #eff6ff;"><th style="padding: 8px 10px; text-align: left; border-bottom: 2px solid #bfdbfe;">Team</th><th style="padding: 8px 10px; text-align: left; border-bottom: 2px solid #bfdbfe;">Action</th></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Inventory</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Cancel open parts orders / pending shipments effective Day 1.</td></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Assets</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Suspend the phone line / cell plan (handset stays with the technician).</td></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Fleet</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Confirm the technician has removed personal tools from the vehicle.</td></tr>
+      {{#if is30Plus}}<tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Fleet</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;"><strong>Initiate vehicle recovery</strong> (leave is 30+ days).</td></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Assets</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;"><strong>Suspend the P-card</strong> (leave is 30+ days).</td></tr>{{/if}}
+    </table>
+
+    <p style="background: #f1f5f9; border-left: 4px solid #94a3b8; padding: 12px 16px; margin: 24px 0; font-size: 13px;">Please do not contact the associate directly regarding their leave. Route any questions through the Employee Leave Management Team.</p>
+
+    <p style="margin-top: 24px;">Thank you,<br><strong>Employee Leave Management Team</strong></p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus LOA system.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Leave of Absence Notice
+
+{{#if isExtension}}LEAVE EXTENDED PAST 30 DAYS. This leave now qualifies for 30-day recovery actions. New expected return date: {{loa_expected_return_date}}.
+
+{{/if}}A technician on your team is going on a continuous leave of absence. Please review the details and complete the required actions below before the leave start date.
+
+LEAVE DETAILS
+Technician: {{tech_name}}
+Enterprise ID: {{enterprise_id}}
+Leave Start Date: {{loa_start_date}}
+Expected Return Date: {{loa_expected_return_date}}
+Leave Duration: {{loa_duration_days}} days
+Van Number: {{van_number}}
+
+REQUIRED ACTIONS
+- Inventory: Cancel open parts orders / pending shipments effective Day 1.
+- Assets: Suspend the phone line / cell plan (handset stays with the technician).
+- Fleet: Confirm the technician has removed personal tools from the vehicle.
+{{#if is30Plus}}- Fleet: Initiate vehicle recovery (leave is 30+ days).
+- Assets: Suspend the P-card (leave is 30+ days).
+{{/if}}
+Please do not contact the associate directly regarding their leave. Route any questions through the Employee Leave Management Team.
+
+Thank you,
+Employee Leave Management Team`,
+      variables: ['tech_name', 'enterprise_id', 'loa_start_date', 'loa_expected_return_date', 'loa_duration_days', 'van_number', 'is30Plus', 'isExtension'],
+      isActive: true,
+    },
+    {
+      name: 'loa-return-notice',
+      description: 'Return notice emailed to Fleet/Assets 3 working days before the expected return date (suppressed if the LOA record was closed).',
+      type: 'email',
+      mode: 'live',
+      subject: 'LOA Return Notice – {{tech_name}} | Returns {{loa_expected_return_date}}',
+      htmlContent: `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"></head>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 640px; margin: 0 auto; padding: 20px;">
+  <div style="background: linear-gradient(135deg, #059669 0%, #10b981 100%); padding: 28px; border-radius: 8px 8px 0 0;">
+    <h1 style="color: white; margin: 0; font-size: 22px;">Leave of Absence — Return Notice</h1>
+    <p style="color: #d1fae5; margin: 8px 0 0 0; font-size: 14px;">Prepare for the technician's return</p>
+  </div>
+  <div style="background: #f8fafc; padding: 28px; border: 1px solid #e2e8f0; border-top: none;">
+    <p>A technician on your team is returning from a continuous leave of absence. Please complete the reactivation actions below so they are ready for Day 1 back.</p>
+
+    <h3 style="color: #059669; margin: 24px 0 8px 0;">Return Details</h3>
+    <table style="border-collapse: collapse; width: 100%;">
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0; width: 45%;">Technician</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{tech_name}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Enterprise ID</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{enterprise_id}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Expected Return Date</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_expected_return_date}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Van Number</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{van_number}}</td></tr>
+    </table>
+
+    <h3 style="color: #059669; margin: 24px 0 8px 0;">Required Actions</h3>
+    <table style="border-collapse: collapse; width: 100%; font-size: 14px;">
+      <tr style="background: #ecfdf5;"><th style="padding: 8px 10px; text-align: left; border-bottom: 2px solid #a7f3d0;">Team</th><th style="padding: 8px 10px; text-align: left; border-bottom: 2px solid #a7f3d0;">Action</th></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Fleet</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Confirm a vehicle (or rental) is available for the technician's Day 1 return.</td></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Assets</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Reactivate the phone line / cell plan and the P-card.</td></tr>
+      <tr><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Inventory</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">Restock parts / tools as needed for Day 1.</td></tr>
+    </table>
+
+    <p style="background: #f0fdf4; border-left: 4px solid #34d399; padding: 12px 16px; margin: 24px 0; font-size: 13px;">For protected leaves, the technician must be reinstated to their same or an equivalent position upon return, in accordance with applicable law and company policy.</p>
+
+    <p style="margin-top: 24px;">Thank you,<br><strong>Employee Leave Management Team</strong></p>
+    <p style="color: #64748b; font-size: 12px; margin-top: 24px; padding-top: 16px; border-top: 1px solid #e2e8f0;">This is an automated message from the Nexus LOA system.</p>
+  </div>
+</body>
+</html>`,
+      textContent: `Leave of Absence — Return Notice
+
+A technician on your team is returning from a continuous leave of absence. Please complete the reactivation actions below so they are ready for Day 1 back.
+
+RETURN DETAILS
+Technician: {{tech_name}}
+Enterprise ID: {{enterprise_id}}
+Expected Return Date: {{loa_expected_return_date}}
+Van Number: {{van_number}}
+
+REQUIRED ACTIONS
+- Fleet: Confirm a vehicle (or rental) is available for the technician's Day 1 return.
+- Assets: Reactivate the phone line / cell plan and the P-card.
+- Inventory: Restock parts / tools as needed for Day 1.
+
+For protected leaves, the technician must be reinstated to their same or an equivalent position upon return, in accordance with applicable law and company policy.
+
+Thank you,
+Employee Leave Management Team`,
+      variables: ['tech_name', 'enterprise_id', 'loa_expected_return_date', 'van_number'],
+      isActive: true,
+    },
+    {
+      name: 'loa-tech-sms-under30',
+      description: 'Technician LOA SMS for leaves under 30 days (single message), sent 3 working days before leave start.',
+      type: 'sms',
+      mode: 'live',
+      subject: null,
+      htmlContent: null,
+      textContent: `Hi {{first_name}}, your leave starts {{loa_start_date}}. Please clear all personal tools out of your work van before Day 1 — anything left behind we'll store safely for you. Heads up: your company phone gets shut off during leave, but your P-card stays active. When you're ready to come back, give us 5-7 business days' notice so your van and gear are set for Day 1.`,
+      variables: ['first_name', 'loa_start_date'],
+      isActive: true,
+    },
+    {
+      name: 'loa-tech-sms-30plus-1',
+      description: 'Technician LOA SMS for 30+ day leaves — part 1 of 2, sent 3 working days before leave start.',
+      type: 'sms',
+      mode: 'live',
+      subject: null,
+      htmlContent: null,
+      textContent: `(1/2) Hi {{first_name}}, your leave starts {{loa_start_date}}. Please clear ALL personal tools out of your work van before Day 1 — anything left behind we'll store safely until you're back.`,
+      variables: ['first_name', 'loa_start_date'],
+      isActive: true,
+    },
+    {
+      name: 'loa-tech-sms-30plus-2',
+      description: 'Technician LOA SMS for 30+ day leaves — part 2 of 2, sent 3 working days before leave start.',
+      type: 'sms',
+      mode: 'live',
+      subject: null,
+      htmlContent: null,
+      textContent: `(2/2) Since your leave is 30+ days: Fleet will arrange to pick up your van and reach out to coordinate. Your company phone and P-card will both be paused, and any open service orders are cancelled on Day 1. Give us 5-7 business days' notice before you return.`,
+      variables: ['first_name', 'loa_start_date'],
+      isActive: true,
+    },
   ];
 
   const outreachTemplateNames = new Set([
@@ -706,6 +897,11 @@ This is an automated message from the Nexus Offboarding System.`,
     'recovery-pre-byov',
     'recovery-past-email',
     'recovery-past-sms',
+    'loa-team-notice',
+    'loa-return-notice',
+    'loa-tech-sms-under30',
+    'loa-tech-sms-30plus-1',
+    'loa-tech-sms-30plus-2',
   ]);
 
   // Task #424: remove deprecated 4-lane outreach templates from any prior seed

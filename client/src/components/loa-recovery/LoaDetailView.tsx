@@ -8,9 +8,11 @@ import type { LoaQueueName, LoaTaskState } from './loa-types';
 import {
   parseLoaData,
   inferVehicleType,
+  canPauseRecovery,
   LOA_QUEUE_META,
   type LoaVehicleType,
 } from './loa-types';
+import { PauseCircle, PlayCircle } from 'lucide-react';
 import { activeItemsForQueue } from './loa-checklist-config';
 import { LoaChecklist } from './LoaChecklist';
 
@@ -196,6 +198,7 @@ export function LoaDetailView({
   });
   const [notes, setNotes] = useState(item.notes || '');
   const notesTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [recoveryPaused, setRecoveryPaused] = useState<boolean>(!!data?.recoveryPaused);
 
   // Task states for cross-queue strip — need per-item states from all LOA items
   // We simplify by using each item's data.loaTasks directly from the allItems prop
@@ -213,6 +216,7 @@ export function LoaDetailView({
       status?: string;
       vehicleTypeOverride?: LoaVehicleType;
       notes?: string;
+      recoveryPaused?: boolean;
     }) => {
       const res = await apiRequest('PATCH', `/api/loa-recovery/${item.id}/update`, patch);
       return res.json();
@@ -257,7 +261,14 @@ export function LoaDetailView({
     }, 800);
   };
 
+  const onTogglePause = () => {
+    const next = !recoveryPaused;
+    setRecoveryPaused(next);
+    updateMutation.mutate({ recoveryPaused: next });
+  };
+
   const days = data?.leave?.days ?? 0;
+  const pauseEligible = canPauseRecovery(data?.leave?.startDate, days);
   const activeItems = activeItemsForQueue(vehicle, queue);
   const doneTasks = activeItems.filter((it) => taskState[it.id]).length;
 
@@ -327,6 +338,40 @@ export function LoaDetailView({
           ))}
         </div>
         <Field label="Disposition"><span className="italic text-gray-500 text-xs">Pending</span></Field>
+
+        <div className="border-t border-gray-100 dark:border-gray-800 my-2" />
+
+        {/* Day-30 recovery pause */}
+        <p className="text-xs font-bold tracking-widest text-gray-400 uppercase mb-2">Day-30 Recovery</p>
+        <button
+          type="button"
+          onClick={onTogglePause}
+          disabled={!pauseEligible && !recoveryPaused}
+          className={`w-full flex items-center justify-center gap-2 py-2 px-3 rounded-lg text-xs font-bold border transition-colors ${
+            recoveryPaused
+              ? 'bg-amber-500 border-amber-500 text-white hover:bg-amber-600'
+              : pauseEligible
+              ? 'bg-white dark:bg-gray-800 border-amber-300 text-amber-700 dark:text-amber-400 hover:border-amber-500'
+              : 'bg-gray-50 dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-400 cursor-not-allowed'
+          }`}
+        >
+          {recoveryPaused ? (
+            <>
+              <PlayCircle className="w-4 h-4" /> Resume recovery
+            </>
+          ) : (
+            <>
+              <PauseCircle className="w-4 h-4" /> Pause recovery
+            </>
+          )}
+        </button>
+        <p className="text-xs text-gray-500 mt-1.5 leading-snug">
+          {recoveryPaused
+            ? 'Recovery paused — return confirmed within 7 days of Day 30.'
+            : pauseEligible
+            ? 'Pause if the tech confirms a return within 7 days of Day 30.'
+            : 'Available within 7 days of Day 30 (30+ day leaves).'}
+        </p>
       </div>
     </InfoCard>
   );
@@ -395,6 +440,7 @@ export function LoaDetailView({
         onToggle={onToggleTask}
         queue={queue}
         compact
+        recoveryPaused={recoveryPaused}
       />
       <CrossQueueStrip item={item} allItems={allItems} queue={queue} taskStates={taskStates} />
     </InfoCard>

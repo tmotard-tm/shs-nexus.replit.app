@@ -35,6 +35,10 @@ export interface LoaItemData {
   lane: string;
   loaTasks?: LoaTaskState;
   vehicleTypeOverride?: LoaVehicleType;
+  // Day-30 recovery pause (Task #437). Stored in the queue-item data JSON so
+  // the sync idempotency index (which keys on queue status) stays intact.
+  recoveryPaused?: boolean;
+  recoveryPausedAt?: string | null;
 }
 
 export interface LastDayBadge {
@@ -93,6 +97,27 @@ export function daysOnLoa(startDate: string | null | undefined): number {
     return Math.max(0, Math.floor((today.getTime() - start.getTime()) / 86400000));
   } catch {
     return 0;
+  }
+}
+
+/**
+ * Whether the Day-30 recovery pause toggle may be used for this case. Per spec
+ * the toggle is only available once the leave is 30+ days AND we are within 7
+ * days of Day 30 — i.e. today is on or after start + 23 calendar days. This is
+ * the "return confirmed within 7 days of Day 30" window.
+ */
+export function canPauseRecovery(startDate: string | null | undefined, days: number): boolean {
+  if (days < 30) return false;
+  if (!startDate) return false;
+  try {
+    const start = new Date(startDate);
+    start.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const elapsed = Math.floor((today.getTime() - start.getTime()) / 86400000);
+    return elapsed >= 23;
+  } catch {
+    return false;
   }
 }
 

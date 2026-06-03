@@ -1,6 +1,10 @@
-import { CheckCircle2, MinusCircle, Zap, Hand } from 'lucide-react';
+import { CheckCircle2, MinusCircle, Zap, Hand, PauseCircle } from 'lucide-react';
 import type { LoaVehicleType, LoaTaskState, LoaQueueName } from './loa-types';
 import { itemsForQueue, getHint, type ChecklistItem } from './loa-checklist-config';
+
+// Day-30 recovery actions that are held when the case is paused (return
+// confirmed within 7 days of Day 30) — see Task #437.
+export const PAUSABLE_TASK_IDS = new Set<string>(['recover_company', 'suspend_card']);
 
 // ---- single checklist item ----
 function ChecklistRow({
@@ -9,16 +13,39 @@ function ChecklistRow({
   days,
   checked,
   onToggle,
+  recoveryPaused = false,
 }: {
   item: ChecklistItem;
   vehicle: LoaVehicleType;
   days: number;
   checked: boolean;
   onToggle: (id: string) => void;
+  recoveryPaused?: boolean;
 }) {
   const state = item.applies(vehicle);
   const gate = item.gate ? item.gate(vehicle, days) : null;
   const hint = getHint(item, vehicle);
+
+  // When paused, hold the 30-day recovery actions: show them as paused and
+  // non-actionable until recovery resumes.
+  if (recoveryPaused && state === 'active' && PAUSABLE_TASK_IDS.has(item.id)) {
+    return (
+      <div className="flex items-start gap-3 py-2.5 px-3 rounded-lg bg-amber-50 dark:bg-amber-950/20">
+        <span className="w-5 h-5 flex-none flex items-center justify-center mt-0.5">
+          <PauseCircle className="w-5 h-5 text-amber-500" />
+        </span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">{item.label}</p>
+          <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5 leading-snug">
+            Recovery paused — return confirmed within 7 days of Day 30.
+          </p>
+        </div>
+        <span className="flex-none text-xs font-bold text-amber-700 bg-amber-100 dark:bg-amber-900/40 px-2 py-0.5 rounded-full self-center whitespace-nowrap">
+          Paused
+        </span>
+      </div>
+    );
+  }
 
   if (state === 'na') {
     return (
@@ -134,6 +161,7 @@ export function LoaChecklist({
   onToggle,
   queue,
   compact = false,
+  recoveryPaused = false,
 }: {
   vehicle: LoaVehicleType;
   days: number;
@@ -141,6 +169,7 @@ export function LoaChecklist({
   onToggle: (id: string) => void;
   queue: LoaQueueName;
   compact?: boolean;
+  recoveryPaused?: boolean;
 }) {
   const items = itemsForQueue(queue);
   const autoItems = items.filter((it) => it.lane === 'auto');
@@ -159,6 +188,7 @@ export function LoaChecklist({
             days={days}
             checked={!!taskState[it.id]}
             onToggle={onToggle}
+            recoveryPaused={recoveryPaused}
           />
         ))}
       </div>

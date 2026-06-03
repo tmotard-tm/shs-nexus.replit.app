@@ -11697,6 +11697,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const { runLoaRecoverySync } = await import("./loa-recovery-sync-service");
       const loa = await runLoaRecoverySync("scheduler");
       console.log(`[Tech Data Scheduler] LOA Recovery sync: ok=${loa.ok} api=${loa.apiRowCount} continuous=${loa.continuousCount} deduped=${loa.dedupedCount} qualifying=${loa.qualifyingCount} sfMismatch=${loa.snowflakeMismatchCount} created=${loa.queueItemsCreated} (workflows=${loa.workflowsCreated}) cancelled=${loa.queueItemsCancelled} (workflows=${loa.workflowsCancelled})${loa.error ? ' error=' + loa.error : ''}`);
+
+      // Task #437: daily LOA communications sweep. Runs immediately after the
+      // LOA Recovery sync so the loa_leaves rows (send-state, dates, duration)
+      // are fresh. Sends team-notice/tech-SMS 3 working days before start and
+      // the return notice 3 working days before the expected return. Idempotent
+      // — per-notification send-state guarantees exactly-once delivery.
+      try {
+        const { runLoaNotificationSweep } = await import("./loa-notifications");
+        const sweep = await runLoaNotificationSweep();
+        console.log(`[Tech Data Scheduler] LOA notification sweep: ok=${sweep.ok} team=${sweep.teamNoticesSent} sms=${sweep.techSmsSent} return=${sweep.returnNoticesSent}${sweep.error ? ' error=' + sweep.error : ''}`);
+      } catch (sweepErr: any) {
+        console.error('[Tech Data Scheduler] LOA notification sweep failed (continuing):', sweepErr?.message || sweepErr);
+      }
     } catch (loaErr: any) {
       console.error('[Tech Data Scheduler] LOA Recovery sync failed (continuing):', loaErr?.message || loaErr);
     }

@@ -19,10 +19,11 @@
  * `refreshTpmsExtractSnapshot()` — see wiring in `server/fleet-scope-routes.ts`.
  */
 import { db } from "./db";
-import { queueItems, allTechs, loaRecoverySnapshot } from "@shared/schema";
+import { queueItems, allTechs, loaRecoverySnapshot, loaLeaves } from "@shared/schema";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getTpmsContact } from "./tpms-extract-snapshot";
 import { storage } from "./storage";
+import { handleLoaExtension } from "./loa-notifications";
 
 const LEAVES_ENDPOINT =
   "https://employee-search-db-leslieellis.replit.app/api/reports/active-continuous-leaves";
@@ -81,6 +82,190 @@ async function ensureLoaRecoverySchema(): Promise<void> {
         AND "status" IN ('pending', 'in_progress')
         AND "workflow_id" IS NOT NULL;
   `);
+
+  // Task #437: persistent per-leave tracking + editable team distribution list.
+  // Created idempotently here (like loa_recovery_snapshot) to avoid drizzle-kit
+  // push conflicts with the externally-managed fs_* tables.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "loa_leaves" (
+      "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "workflow_id" varchar NOT NULL UNIQUE,
+      "enterprise_id" varchar(20) NOT NULL,
+      "employee_number" varchar(20),
+      "tech_name" text,
+      "first_name" text,
+      "phone" varchar(32),
+      "van_number" varchar(32),
+      "is_rental" boolean NOT NULL DEFAULT false,
+      "start_date" date,
+      "expected_return_date" date,
+      "duration_days" integer NOT NULL DEFAULT 0,
+      "sf_status" varchar(5),
+      "team_notice_sent_at" timestamp,
+      "team_notice_msg_id" text,
+      "return_notice_sent_at" timestamp,
+      "return_notice_msg_id" text,
+      "tech_sms_sent_at" timestamp,
+      "tech_sms_msg_id" text,
+      "extension_triggered" boolean NOT NULL DEFAULT false,
+      "extension_triggered_at" timestamp,
+      "extension_notice_sent_at" timestamp,
+      "extension_notice_msg_id" text,
+      "recovery_paused" boolean NOT NULL DEFAULT false,
+      "recovery_paused_at" timestamp,
+      "closed" boolean NOT NULL DEFAULT false,
+      "closed_at" timestamp,
+      "created_at" timestamp DEFAULT now() NOT NULL,
+      "updated_at" timestamp DEFAULT now() NOT NULL,
+      "last_synced_at" timestamp DEFAULT now() NOT NULL
+    );
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "loa_leaves_enterprise_id_idx"
+      ON "loa_leaves" ("enterprise_id");
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS "loa_leaves_start_date_idx"
+      ON "loa_leaves" ("start_date");
+  `);
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS "loa_team_recipients" (
+      "id" varchar PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+      "team" varchar(20) NOT NULL UNIQUE,
+      "emails" text[] NOT NULL DEFAULT ARRAY[]::text[],
+      "updated_at" timestamp DEFAULT now() NOT NULL,
+      "updated_by" varchar
+    );
+  `);
+  // Seed the three team rows (empty email lists) so the settings page always
+  // has all three to edit. ON CONFLICT keeps existing rows untouched.
+  await db.execute(sql`
+    INSERT INTO "loa_team_recipients" ("team", "emails")
+    VALUES ('fleet', ARRAY[]::text[]),
+           ('assets', ARRAY[]::text[]),
+           ('inventory', ARRAY[]::text[])
+    ON CONFLICT ("team") DO NOTHING;
+  `);
+}
+
+/** Best-effort first name from a TPMS full name ("LAST, FIRST" or "First Last"). */
+function firstNameOf(fullName: string): string {
+  const s = fullName.trim();
+  if (!s) return s;
+  if (s.includes(",")) {
+    const after = s.split(",")[1]?.trim() || "";
+    return (after.split(/\s+/)[0] || s).trim();
+  }
+  return s.split(/\s+/)[0] || s;
+}
+
+/**
+ * Task #437: upsert one `loa_leaves` row per active continuous leave (ALL
+ * leaves, not just 30+), so short leaves still get start-time notifications and
+ * every notification has a durable send-state. Never clobbers send-state /
+ * paused / extension flags. Detects the sub-30 -> 30+ extension crossing and
+ * returns the workflowIds that newly crossed so the caller can fire the
+ * extension actions after the recovery queue items exist. Also closes any
+ * previously-open leave row that is no longer in the active roster.
+ */
+async function syncLoaLeaves(
+  deduped: ParsedLeave[],
+  sfMap: Map<string, string | null>,
+): Promise<{ extensionWorkflowIds: string[] }> {
+  const extensionWorkflowIds: string[] = [];
+  const currentWorkflowIds = deduped.map((r) =>
+    workflowIdFor(r.enterpriseId, r.startDate),
+  );
+
+  const existingRows = currentWorkflowIds.length
+    ? await db
+        .select({
+          workflowId: loaLeaves.workflowId,
+          durationDays: loaLeaves.durationDays,
+          extensionTriggered: loaLeaves.extensionTriggered,
+        })
+        .from(loaLeaves)
+        .where(inArray(loaLeaves.workflowId, currentWorkflowIds))
+    : [];
+  const existingByWf = new Map(existingRows.map((r) => [r.workflowId, r]));
+
+  for (const r of deduped) {
+    const wfId = workflowIdFor(r.enterpriseId, r.startDate);
+    const tpms = getTpmsContact(r.enterpriseId);
+    const nameCand = tpms?.fullName || null;
+    const firstCand = nameCand ? firstNameOf(nameCand) : null;
+    const phoneCand = tpms?.mobilePhone || null;
+    const vanCand = tpms?.truckLu || null;
+    const sfStatus = sfMap.get(r.enterpriseId) ?? null;
+
+    const prev = existingByWf.get(wfId);
+    if (
+      prev &&
+      (prev.durationDays ?? 0) < MIN_DAYS &&
+      r.days >= MIN_DAYS &&
+      !prev.extensionTriggered
+    ) {
+      extensionWorkflowIds.push(wfId);
+    }
+
+    await db
+      .insert(loaLeaves)
+      .values({
+        workflowId: wfId,
+        enterpriseId: r.enterpriseId,
+        employeeNumber: r.employeeNumber,
+        techName: nameCand || r.enterpriseId,
+        firstName: firstCand,
+        phone: phoneCand,
+        vanNumber: vanCand,
+        isRental: false,
+        startDate: r.startDate,
+        expectedReturnDate: r.endDate,
+        durationDays: r.days,
+        sfStatus,
+      })
+      .onConflictDoUpdate({
+        target: loaLeaves.workflowId,
+        set: {
+          enterpriseId: r.enterpriseId,
+          employeeNumber: r.employeeNumber,
+          // Keep the existing values when the snapshot lookup is empty (the
+          // TPMS mirror is a backstop, not source of truth — see replit.md).
+          techName: sql`COALESCE(${nameCand}, ${loaLeaves.techName})`,
+          firstName: sql`COALESCE(${firstCand}, ${loaLeaves.firstName})`,
+          phone: sql`COALESCE(${phoneCand}, ${loaLeaves.phone})`,
+          vanNumber: sql`COALESCE(${vanCand}, ${loaLeaves.vanNumber})`,
+          startDate: r.startDate,
+          expectedReturnDate: r.endDate,
+          durationDays: r.days,
+          sfStatus,
+          // Reopen — the tech is back on the active roster.
+          closed: false,
+          closedAt: null,
+          updatedAt: new Date(),
+          lastSyncedAt: new Date(),
+        },
+      });
+  }
+
+  // Close any open leave row no longer present in the active roster.
+  const currentSet = new Set(currentWorkflowIds);
+  const openRows = await db
+    .select({ workflowId: loaLeaves.workflowId })
+    .from(loaLeaves)
+    .where(eq(loaLeaves.closed, false));
+  const toClose = openRows
+    .map((r) => r.workflowId)
+    .filter((w) => !currentSet.has(w));
+  if (toClose.length > 0) {
+    const now = new Date();
+    await db
+      .update(loaLeaves)
+      .set({ closed: true, closedAt: now, updatedAt: now })
+      .where(inArray(loaLeaves.workflowId, toClose));
+  }
+
+  return { extensionWorkflowIds };
 }
 
 /**
@@ -388,6 +573,16 @@ async function runLoaRecoverySyncInner(
       );
     }
 
+    // 6b. Task #437: upsert per-leave tracking rows for ALL continuous leaves
+    //     (not just 30+) and detect sub-30 -> 30+ extension crossings.
+    let extensionWorkflowIds: string[] = [];
+    try {
+      const leaveResult = await syncLoaLeaves(deduped, sfMap);
+      extensionWorkflowIds = leaveResult.extensionWorkflowIds;
+    } catch (e: any) {
+      console.warn("[LoaRecovery] syncLoaLeaves failed (continuing):", e?.message || e);
+    }
+
     // 7. Idempotency: find existing open LOA Recovery workflowIds.
     const openExisting = await db
       .select({
@@ -439,6 +634,25 @@ async function runLoaRecoverySyncInner(
       );
       result.queueItemsCancelled = cancelled;
       result.workflowsCancelled = workflowsToCancel.size;
+    }
+
+    // 10. Task #437: fire extension re-trigger for leaves that just crossed
+    //     sub-30 -> 30+. Runs after queue items exist so the recovery note can
+    //     be appended onto them. Each is guarded by extension_triggered.
+    for (const wfId of extensionWorkflowIds) {
+      try {
+        const [leave] = await db
+          .select()
+          .from(loaLeaves)
+          .where(eq(loaLeaves.workflowId, wfId))
+          .limit(1);
+        if (leave) await handleLoaExtension(leave);
+      } catch (e: any) {
+        console.warn(
+          `[LoaRecovery] extension re-trigger failed for ${wfId}:`,
+          e?.message || e,
+        );
+      }
     }
 
     result.ok = true;

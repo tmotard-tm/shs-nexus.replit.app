@@ -40,6 +40,15 @@ LOA items directly (bypassing the storage helpers to add ON CONFLICT), keep this
 exact split — set the column to `'Fleet Management'` but keep the embedded lane
 label `'FLEET'`, or downstream consumers that key on either value break.
 
+## Per-case LOA toggles must NOT change queue status
+Any per-case LOA flag (e.g. the Day-30 recovery pause) must be stored in the
+queue-item `data` JSON (and mirrored on the `loa_leaves` row), never by mutating
+the queue item's `status`. **Why:** the open-status partial unique index above
+keys on `status IN ('pending','in_progress')`; using status to represent "paused"
+would drop the row out of the dedup window and let the next sync re-create a
+duplicate. **How to apply:** model new LOA states as data fields the UI reads,
+leave `status` for the open/closed lifecycle only.
+
 ## Dedup keep-priority
 When collapsing duplicate open items, keep the most-progressed row so work is
 preserved: `in_progress` > assigned (`assigned_to` not null) > started

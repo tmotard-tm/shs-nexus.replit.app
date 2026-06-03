@@ -536,6 +536,81 @@ export const loaRecoverySnapshot = pgTable("loa_recovery_snapshot", {
   };
 });
 
+// LOA leave tracking (Task #437) — one persistent row per leave (ALL leaves,
+// not just 30+). Keyed by workflowId (`loa-{ent}-{startDate}`) so it lines up
+// with the recovery queue workflow. Holds the fields needed to drive and audit
+// the automated notifications independently of whether a 30+ recovery queue
+// item exists. Created idempotently via raw SQL in the sync service (like
+// loa_recovery_snapshot) to avoid drizzle-kit push conflicts with fs_* tables.
+export const loaLeaves = pgTable("loa_leaves", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  workflowId: varchar("workflow_id").notNull().unique(),
+  enterpriseId: varchar("enterprise_id", { length: 20 }).notNull(),
+  employeeNumber: varchar("employee_number", { length: 20 }),
+  techName: text("tech_name"),
+  firstName: text("first_name"),
+  phone: varchar("phone", { length: 32 }),
+  vanNumber: varchar("van_number", { length: 32 }),
+  isRental: boolean("is_rental").notNull().default(false),
+  startDate: date("start_date"),
+  expectedReturnDate: date("expected_return_date"),
+  durationDays: integer("duration_days").notNull().default(0),
+  sfStatus: varchar("sf_status", { length: 5 }),
+  // Per-notification send-state (timestamp + provider message id)
+  teamNoticeSentAt: timestamp("team_notice_sent_at"),
+  teamNoticeMsgId: text("team_notice_msg_id"),
+  returnNoticeSentAt: timestamp("return_notice_sent_at"),
+  returnNoticeMsgId: text("return_notice_msg_id"),
+  techSmsSentAt: timestamp("tech_sms_sent_at"),
+  techSmsMsgId: text("tech_sms_msg_id"),
+  // Extension re-trigger marker (sub-30 -> 30+)
+  extensionTriggered: boolean("extension_triggered").notNull().default(false),
+  extensionTriggeredAt: timestamp("extension_triggered_at"),
+  extensionNoticeSentAt: timestamp("extension_notice_sent_at"),
+  extensionNoticeMsgId: text("extension_notice_msg_id"),
+  // Day-30 recovery pause
+  recoveryPaused: boolean("recovery_paused").notNull().default(false),
+  recoveryPausedAt: timestamp("recovery_paused_at"),
+  // Closed = tech returned / no longer in the active leave roster. Suppresses
+  // the return-notice send.
+  closed: boolean("closed").notNull().default(false),
+  closedAt: timestamp("closed_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  lastSyncedAt: timestamp("last_synced_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    enterpriseIdIdx: index("loa_leaves_enterprise_id_idx").on(table.enterpriseId),
+    startDateIdx: index("loa_leaves_start_date_idx").on(table.startDate),
+  };
+});
+
+export const insertLoaLeaveSchema = createInsertSchema(loaLeaves).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  lastSyncedAt: true,
+});
+export type InsertLoaLeave = z.infer<typeof insertLoaLeaveSchema>;
+export type LoaLeave = typeof loaLeaves.$inferSelect;
+
+// LOA internal team distribution list (Task #437) — editable Fleet/Assets/
+// Inventory recipient addresses managed from a settings page. One row per team.
+export const loaTeamRecipients = pgTable("loa_team_recipients", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  team: varchar("team", { length: 20 }).notNull().unique(), // 'fleet' | 'assets' | 'inventory'
+  emails: text("emails").array().notNull().default(sql`ARRAY[]::text[]`),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: varchar("updated_by").references(() => users.id),
+});
+
+export const insertLoaTeamRecipientsSchema = createInsertSchema(loaTeamRecipients).omit({
+  id: true,
+  updatedAt: true,
+});
+export type InsertLoaTeamRecipients = z.infer<typeof insertLoaTeamRecipientsSchema>;
+export type LoaTeamRecipients = typeof loaTeamRecipients.$inferSelect;
+
 // Truck Inventory from Snowflake PISR_SKU_DETAIL - parts/inventory on each truck
 export const truckInventory = pgTable("truck_inventory", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),

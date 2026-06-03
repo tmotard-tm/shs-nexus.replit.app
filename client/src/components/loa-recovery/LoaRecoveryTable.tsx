@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ChevronRight, AlertTriangle } from 'lucide-react';
+import { ChevronRight, AlertTriangle, PauseCircle } from 'lucide-react';
 import type { CombinedQueueItem, QueueModule } from '@shared/schema';
 import type { LoaQueueName } from './loa-types';
 import {
@@ -174,8 +174,13 @@ function QueueRow({
 
         {/* Technician */}
         <div className="px-3 py-3">
-          <div className="font-bold text-gray-900 dark:text-gray-100 text-sm leading-tight">
+          <div className="font-bold text-gray-900 dark:text-gray-100 text-sm leading-tight flex items-center gap-1.5">
             {data?.techName || item.title}
+            {data?.recoveryPaused && (
+              <span className="flex-none inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-amber-700 bg-amber-100 dark:bg-amber-900/40 dark:text-amber-300 px-1.5 py-0.5 rounded-full">
+                <PauseCircle className="w-3 h-3" /> Paused
+              </span>
+            )}
           </div>
           <div className="text-xs text-gray-500 mt-0.5 font-medium tracking-wide">
             {data?.enterpriseId || '—'}

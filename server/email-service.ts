@@ -39,6 +39,7 @@ interface EmailParams {
 export interface EmailResult {
   success: boolean;
   error?: string;
+  messageId?: string;
 }
 
 interface MailPayload {
@@ -90,9 +91,15 @@ export async function sendEmail(params: EmailParams): Promise<EmailResult> {
   }
 
   try {
-    await sgMail.send(msg);
+    const [response] = await sgMail.send(msg);
+    // SendGrid returns the provider message id in the x-message-id response
+    // header. Capture it so callers can record it on their audit records.
+    const headerMessageId = response?.headers?.['x-message-id'];
+    const messageId = Array.isArray(headerMessageId)
+      ? headerMessageId[0]
+      : (headerMessageId as string | undefined);
     console.log(`Email sent successfully to ${params.to}: ${params.subject}`);
-    return { success: true };
+    return { success: true, messageId: messageId || undefined };
   } catch (error: any) {
     console.error('SendGrid email error:', error);
     let errorDetail = 'Unknown SendGrid error';
