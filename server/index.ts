@@ -5,6 +5,8 @@
 import { assertProdDatabaseHost } from "./guardrails/g8-env-drift-check";
 import express, { type Request, Response, NextFunction } from "express";
 import { createServer } from "http";
+import path from "path";
+import fs from "fs";
 import { registerRoutes } from "./routes";
 import { elevenLabsWebhookHandler } from "./fleet-scope-routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -488,6 +490,26 @@ async function runStartupBootstrap() {
   // phase would otherwise leave a "healthy port, unhealthy app" instance that
   // autoscale could promote — so fail-fast (exit 1) if route/static wiring
   // throws, letting the previous good build keep serving.
+  // Serve the built frontend EARLY (production only), BEFORE the slow route
+  // registration. registerRoutes() mounts many API routers and serveStatic()'s
+  // SPA catch-all is only added AFTER it returns; if that takes too long the
+  // autoscale health-check on `/` fails and the instance is recycled in a crash
+  // loop ("Cannot GET /"). express.static serves index.html for `/` and the
+  // hashed assets immediately, and calls next() for unmatched paths (e.g.
+  // /api/*), so it does NOT shadow the API routes registered afterward. The SPA
+  // catch-all for deep links still goes last via serveStatic(app) below.
+  if (app.get("env") !== "development") {
+    try {
+      const earlyDist = path.resolve(import.meta.dirname, "public");
+      if (fs.existsSync(earlyDist)) {
+        app.use(express.static(earlyDist));
+        log("early static frontend mounted (pre-route-registration)");
+      }
+    } catch (e) {
+      console.warn("[Startup] Early static mount skipped:", e instanceof Error ? e.message : e);
+    }
+  }
+
   try {
     await registerRoutes(app, server);
 
@@ -506,6 +528,7 @@ async function runStartupBootstrap() {
     } else {
       serveStatic(app);
     }
+    log("route registration + static wiring complete — `/` and all routes are live");
   } catch (err) {
     console.error("[Startup] FATAL: route/static wiring failed after port open — exiting:", err);
     process.exit(1);

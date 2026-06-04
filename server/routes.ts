@@ -582,15 +582,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
     // Schema init is idempotent (CREATE TABLE IF NOT EXISTS) and the fs_ tables
-    // already exist in any real environment. Bound it with a timeout so a flaky
-    // Neon WebSocket at boot can't hang it forever — which would otherwise stall
-    // ALL downstream route mounting and serveStatic, leaving the app a zombie
-    // (port open, every route 404). Mount the routes regardless of the result.
-    try {
-      await withTimeout(initFleetScopeSchema(), 20000, "Fleet-Scope schema init");
-    } catch (e: any) {
-      console.error("[Fleet-Scope] schema init failed/timed out — mounting routes anyway (tables expected to already exist):", e?.message || e);
-    }
+    // already exist in any real environment.
+    // Fire the idempotent schema init in the BACKGROUND (do NOT await). Awaiting it
+    // serialized stacked 20s timeouts (Fleet-Scope + VRM + byov = 60-100s) before
+    // serveStatic could mount, so autoscale's health-check on `/` failed and the
+    // instance crash-looped ("Cannot GET /"). The fs_ tables already exist in prod,
+    // so mount the routes immediately and let the init reconcile in the background.
+    initFleetScopeSchema().catch((e: any) => {
+      console.error("[Fleet-Scope] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
+    });
     const fsRouter = registerFleetScopeRoutes(requireAuth);
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
@@ -600,13 +600,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Mount VRM (Rental Reduction) routes at /api/vrm/*
   try {
-    // Same rationale as Fleet-Scope above: bound the idempotent schema init so a
-    // hung Neon WebSocket can't stall route mounting; mount VRM routes regardless.
-    try {
-      await withTimeout(initVrmSchema(), 20000, "VRM schema init");
-    } catch (e: any) {
-      console.error("[VRM] schema init failed/timed out — mounting routes anyway (tables expected to already exist):", e?.message || e);
-    }
+    // Background (non-awaited) idempotent init — see Fleet-Scope note above. Mount
+    // VRM routes immediately; the vrm_ tables already exist in prod.
+    initVrmSchema().catch((e: any) => {
+      console.error("[VRM] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
+    });
     // Twilio status-callback webhook MUST be registered BEFORE the
     // session-gated /api/vrm router below, because Twilio cannot present
     // a session cookie. The webhook authenticates via X-Twilio-Signature.
@@ -632,6 +630,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     console.error("[VRM] Failed to initialise:", e.message);
   }
 
+  // BYOV table inits run in the BACKGROUND (non-awaited) — same rationale as the
+  // Fleet-Scope/VRM inits above: never block route mounting / serveStatic on a
+  // flaky Neon WebSocket. These tables already exist in prod.
+  void (async () => {
   // BYOV Creation Audit — idempotent table init (Task 293)
   try {
     await withTimeout(db.execute(sql`
@@ -705,6 +707,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_drift_checks table:", e.message);
   }
+  })();
 
   // Mount WMS Engine routes at /api/wms/*
   const wmsRouter = registerWmsRoutes(requireAuth);
