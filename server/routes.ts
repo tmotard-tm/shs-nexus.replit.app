@@ -9310,7 +9310,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await db
             .update(holmanVehiclesCache)
             .set({
-              district: district,
+              district: paddedDistrict,
               division: holmanPrefix,
               region: "890",
               lastLocalUpdateAt: new Date(),
