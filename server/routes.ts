@@ -9227,9 +9227,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // --- District-derived values (mirror the Create Vehicle flow) ---
       const tpmsDistNo = paddedDistrict;                 // padded to 7
-      // Use the authoritative 5-char cost center from the District Cost Centers
-      // mapping. The district from the picker is 7-digit canonical, so padStart(5)
-      // would not truncate it — the mapping is the source of truth for cost center.
+      // Cost center comes from the District Cost Centers cross-reference, NOT a
+      // formula. It cannot be derived from the district digits (e.g. district
+      // 0007084 does not map to "07084"), so the editable mapping row is the
+      // source of truth.
       const wmsCostCenter = matchedCostCenter.costCenter;
       const wmsRegionNo = "890".padStart(7, "0");        // 0000890
       const holmanPrefix = paddedDistrict.slice(-4);     // last 4 of padded district
@@ -18545,10 +18546,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Block an assignment that would silently change the vehicle's district.
+      // Resolve the tech's district from a TRUSTED server-side source — the synced
+      // TPMS tech profile, keyed by enterprise/LDAP id — and only fall back to the
+      // client-supplied districtNo when no profile exists. This prevents a caller
+      // from bypassing the block by omitting or forging districtNo in the body.
       // A vehicle in a different district than the tech must be unassigned and have
       // its district changed explicitly (Update District), not changed during assign.
-      const reqDistrict = padDistrictForApi(String(districtNo ?? ""));
-      if (reqDistrict) {
+      const { tpmsTechProfiles: tpmsTechProfilesTbl } = await import("@shared/schema");
+      const techProfileRows = await db
+        .select({ districtNo: tpmsTechProfilesTbl.districtNo })
+        .from(tpmsTechProfilesTbl)
+        .where(eq(tpmsTechProfilesTbl.enterpriseId, String(ldapId).trim()))
+        .limit(1);
+      const techDistrict = padDistrictForApi(
+        String(techProfileRows[0]?.districtNo ?? districtNo ?? ""),
+      );
+      if (techDistrict) {
         const districtCandidates = Array.from(new Set(
           [truckNumber, toHolmanRef(truckNumber), toDisplayNumber(truckNumber), toCanonical(truckNumber)]
             .map((c) => String(c || "").trim())
@@ -18560,7 +18573,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           .where(inArray(holmanVehiclesCache.holmanVehicleNumber, districtCandidates))
           .limit(1);
         const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
-        if (vehicleDistrict && vehicleDistrict !== reqDistrict) {
+        if (vehicleDistrict && vehicleDistrict !== techDistrict) {
           return res.status(409).json({
             message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
           });
