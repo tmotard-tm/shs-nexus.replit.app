@@ -496,7 +496,7 @@ async function createInWms(payload: VehiclePayload): Promise<{ success: boolean;
     isActive:    true,
     costCenter:  wmsCostCenter,
     regionNo:    wmsRegionNo,
-    spareTruck:  false,
+    spareTruck:  true,
     useCaseId:   "Nexus",
   };
 
