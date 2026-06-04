@@ -10335,6 +10335,79 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // POST /api/snowflake/reinitialize — force a re-init using current env vars.
+  // Useful when the service is null because secrets weren't available at startup
+  // (e.g. secrets were added after the last deployment). Auth-required.
+  app.post("/api/snowflake/reinitialize", requireAuth, async (req: any, res) => {
+    try {
+      const { initializeSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+
+      const account    = process.env.SNOWFLAKE_ACCOUNT;
+      const username   = process.env.SNOWFLAKE_USER;
+      const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+
+      const missing: string[] = [];
+      if (!account)    missing.push('SNOWFLAKE_ACCOUNT');
+      if (!username)   missing.push('SNOWFLAKE_USER');
+      if (!privateKey) missing.push('SNOWFLAKE_PRIVATE_KEY');
+
+      if (missing.length > 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Missing required credentials: ${missing.join(', ')}`,
+          envVars: {
+            SNOWFLAKE_ACCOUNT:    account    ? 'set' : 'MISSING',
+            SNOWFLAKE_USER:       username   ? 'set' : 'MISSING',
+            SNOWFLAKE_PRIVATE_KEY: privateKey ? `set (${privateKey.length} chars)` : 'MISSING',
+            SNOWFLAKE_DATABASE:   process.env.SNOWFLAKE_DATABASE   ? 'set' : 'not set (optional)',
+            SNOWFLAKE_WAREHOUSE:  process.env.SNOWFLAKE_WAREHOUSE  ? 'set' : 'not set (optional)',
+            SNOWFLAKE_ROLE:       process.env.SNOWFLAKE_ROLE       ? 'set' : 'not set (optional)',
+            SNOWFLAKE_SCHEMA:     process.env.SNOWFLAKE_SCHEMA     ? 'set' : 'not set (optional)',
+          },
+        });
+      }
+
+      console.log('[Snowflake/reinit] Attempting re-initialization via API endpoint...');
+      console.log(`[Snowflake/reinit] account=${account.length} chars, user=${username.length} chars, key=${privateKey.length} chars`);
+
+      initializeSnowflakeService({
+        account,
+        username,
+        privateKey,
+        database:  process.env.SNOWFLAKE_DATABASE,
+        schema:    process.env.SNOWFLAKE_SCHEMA,
+        warehouse: process.env.SNOWFLAKE_WAREHOUSE,
+        role:      process.env.SNOWFLAKE_ROLE,
+      });
+
+      console.log('[Snowflake/reinit] ✅ Re-initialization succeeded');
+
+      return res.json({
+        success: true,
+        configured: isSnowflakeConfigured(),
+        message: 'Snowflake service re-initialized successfully. Data should load normally now.',
+        envVars: {
+          SNOWFLAKE_ACCOUNT:    'set',
+          SNOWFLAKE_USER:       'set',
+          SNOWFLAKE_PRIVATE_KEY: `set (${privateKey.length} chars)`,
+          SNOWFLAKE_DATABASE:   process.env.SNOWFLAKE_DATABASE   ? 'set' : 'not set (optional)',
+          SNOWFLAKE_WAREHOUSE:  process.env.SNOWFLAKE_WAREHOUSE  ? 'set' : 'not set (optional)',
+          SNOWFLAKE_ROLE:       process.env.SNOWFLAKE_ROLE       ? 'set' : 'not set (optional)',
+          SNOWFLAKE_SCHEMA:     process.env.SNOWFLAKE_SCHEMA     ? 'set' : 'not set (optional)',
+        },
+      });
+    } catch (error: any) {
+      console.error('[Snowflake/reinit] ❌ Re-initialization failed:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: error.message,
+        hint: error.message.includes('private key') || error.message.includes('Invalid')
+          ? 'The private key format may be incorrect. Ensure SNOWFLAKE_PRIVATE_KEY is a valid PKCS#8 PEM key (-----BEGIN PRIVATE KEY-----). Re-enter it in Secrets and redeploy.'
+          : 'Check deployment logs for more details.',
+      });
+    }
+  });
+
   // Sprint 11: Diagnostic endpoint for testing separation data lookup
   app.get("/api/test-separation/:identifier", requireAuth, async (req: any, res) => {
     try {

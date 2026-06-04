@@ -240,9 +240,10 @@ async function initializeSnowflake() {
     
     log("✅ Snowflake service initialized successfully");
   } catch (error: any) {
-    console.error("❌ Failed to initialize Snowflake service:", error);
+    console.error("[SNOWFLAKE_INIT_FAILED] ❌ Failed to initialize Snowflake service:", error.message);
+    console.error("[SNOWFLAKE_INIT_FAILED] Full error:", error);
     log(`⚠️ Snowflake initialization failed: ${error.message}`);
-    log("⚠️ Snowflake integration will be unavailable");
+    log("⚠️ Snowflake integration will be unavailable. Use POST /api/snowflake/reinitialize to retry without a full redeploy.");
   }
 }
 
