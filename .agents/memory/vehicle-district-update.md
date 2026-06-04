@@ -29,3 +29,8 @@ A district change on an UNASSIGNED vehicle fans out to all three systems of reco
 ## Partial-failure / local-cache rule
 **Rule:** only mirror the new district into `holman_vehicles_cache` (district/division/region) when **all three** systems succeed (skipped-because-not-configured counts as success). On any partial failure, leave the cache showing the old district.
 **Why:** the fleet card district is read from the Holman cache mirror. Writing it on partial success would imply a change one of TPMS/WMS/Holman never made, misleading operators. The endpoint returns per-system success/error so the dialog can show badges and prompt a retry.
+
+## Update District dialog must allow same-value (forced re-sync)
+**Rule:** the "Update in All Systems" button is gated only by `!districtChoice || mutation.isPending` — do NOT re-add a `padDistrict(choice) === padDistrict(vehicle.district)` no-op guard, and initialize `districtChoice` to `""` when opening (not the current district).
+**Why:** the dialog exists to fix mismatches where Holman/Nexus already shows the target district but TPMS is stale; a no-op guard traps the operator (button never enables) and the server endpoint has no same-value rejection, so a forced re-push is valid and intended. Pre-filling the current district also mismatched the zero-padded dropdown values, confusing selection.
+**How to apply:** keep same-value pushes allowed; treat them as deliberate re-syncs.

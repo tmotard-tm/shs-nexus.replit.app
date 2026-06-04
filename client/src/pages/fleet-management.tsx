@@ -2630,7 +2630,7 @@ export default function FleetManagement() {
                       className="w-full"
                       onClick={() => {
                         setDistrictResult(null);
-                        setDistrictChoice(selectedVehicle.district || "");
+                        setDistrictChoice("");
                         setShowDistrictDialog(true);
                       }}
                       data-testid="button-update-district"
@@ -3683,8 +3683,7 @@ export default function FleetManagement() {
                 <Button
                   disabled={
                     !districtChoice ||
-                    districtMutation.isPending ||
-                    padDistrict(districtChoice) === padDistrict(selectedVehicle?.district)
+                    districtMutation.isPending
                   }
                   onClick={() => selectedVehicle && districtMutation.mutate({ truckNo: selectedVehicle.vehicleNumber, district: districtChoice })}
                   data-testid="button-confirm-district"
