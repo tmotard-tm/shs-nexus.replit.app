@@ -9171,8 +9171,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // truck is assigned to a tech. District-derived values mirror the Create Vehicle flow.
   app.post("/api/fleet/vehicle/:truckNo/district", requireAuth, async (req, res) => {
     try {
-      const user = req.user as User | undefined;
-      if (!(await userCanUpdateDistricts(user))) {
+      // Fetch the full user so per-user permission overrides are honored — req.user
+      // from requireAuth only carries id/username/role/departments (no overrides).
+      const user = await storage.getUserByUsername((req.user as any)?.username);
+      if (!(await userCanUpdateDistricts(user ?? undefined))) {
         return res.status(403).json({ error: "You don't have permission to update vehicle districts." });
       }
 
@@ -9225,7 +9227,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // --- District-derived values (mirror the Create Vehicle flow) ---
       const tpmsDistNo = paddedDistrict;                 // padded to 7
-      const wmsCostCenter = district.padStart(5, "0");   // padded to 5
+      // Use the authoritative 5-char cost center from the District Cost Centers
+      // mapping. The district from the picker is 7-digit canonical, so padStart(5)
+      // would not truncate it — the mapping is the source of truth for cost center.
+      const wmsCostCenter = matchedCostCenter.costCenter;
       const wmsRegionNo = "890".padStart(7, "0");        // 0000890
       const holmanPrefix = paddedDistrict.slice(-4);     // last 4 of padded district
 
