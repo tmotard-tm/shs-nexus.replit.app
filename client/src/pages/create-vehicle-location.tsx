@@ -732,11 +732,9 @@ export default function CreateVehicle() {
                       <Label htmlFor="modelYear">Model Year <span className="text-destructive">*</span></Label>
                       <Input
                         id="modelYear"
-                        type="number"
+                        type="text"
                         value={form.modelYear}
                         onChange={set("modelYear")}
-                        min="1990"
-                        max={new Date().getFullYear() + 2}
                         placeholder={String(new Date().getFullYear())}
                       />
                     </div>
