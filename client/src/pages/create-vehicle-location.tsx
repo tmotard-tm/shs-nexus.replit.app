@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { TopBar } from "@/components/layout/top-bar";
@@ -194,6 +194,62 @@ export default function CreateVehicle() {
 
   const setSelect = (field: keyof FormState) => (value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  // Auto-fill Model Year, Make, Model, and Asset Type from the VIN.
+  const [decodingVin, setDecodingVin] = useState(false);
+  const lastDecodedVinRef = useRef<string>("");
+  const decodeSeqRef = useRef(0);
+  useEffect(() => {
+    const vin = form.vin.trim().toUpperCase();
+    if (vin.length !== 17) {
+      setDecodingVin(false);
+      return;
+    }
+    if (lastDecodedVinRef.current === vin) return;
+    lastDecodedVinRef.current = vin;
+    const seq = ++decodeSeqRef.current;
+    const isCurrent = () => decodeSeqRef.current === seq;
+    (async () => {
+      setDecodingVin(true);
+      try {
+        const resp = await apiRequest("GET", `/api/vin/decode/${encodeURIComponent(vin)}`);
+        const data = await resp.json();
+        if (!isCurrent()) return;
+        if (data?.decoded) {
+          setForm((prev) => ({
+            ...prev,
+            make: data.make || prev.make,
+            model: data.model || prev.model,
+            modelYear: data.modelYear || prev.modelYear,
+            assetType: data.assetType || prev.assetType,
+          }));
+          toast({
+            title: "Details filled from VIN",
+            description: data.assetType
+              ? "Model year, make, model, and asset type were auto-filled."
+              : "Model year, make, and model were auto-filled — please pick the asset type.",
+          });
+        } else {
+          toast({
+            title: "Couldn't read this VIN",
+            description: data?.error || "Please enter the vehicle details manually.",
+            variant: "destructive",
+          });
+        }
+      } catch {
+        if (isCurrent()) {
+          lastDecodedVinRef.current = ""; // allow a retry
+          toast({
+            title: "VIN lookup failed",
+            description: "Could not reach the VIN service. Please enter the details manually.",
+            variant: "destructive",
+          });
+        }
+      } finally {
+        if (isCurrent()) setDecodingVin(false);
+      }
+    })();
+  }, [form.vin]);
 
   useEffect(() => {
     const allowedKeys = [
@@ -644,7 +700,15 @@ export default function CreateVehicle() {
 
                     <div className="space-y-2">
                       <Label htmlFor="vin">VIN <span className="text-destructive">*</span></Label>
-                      <Input id="vin" value={form.vin} onChange={set("vin")} placeholder="17-character VIN" maxLength={17} className="uppercase" />
+                      <div className="relative">
+                        <Input id="vin" value={form.vin} onChange={set("vin")} placeholder="17-character VIN" maxLength={17} className={`uppercase ${decodingVin ? "pr-9" : ""}`} />
+                        {decodingVin && (
+                          <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Enter all 17 characters to auto-fill model year, make, model, and asset type.
+                      </p>
                     </div>
                   </div>
 

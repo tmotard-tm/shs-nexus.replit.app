@@ -8497,6 +8497,91 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return byovReservationIndexReady;
   };
 
+  // --- VIN decode (NHTSA vPIC, free, no API key) ---
+  // Maps NHTSA body class / vehicle type / GVWR onto the six Create Vehicle asset
+  // types: CAR, SUV, TRUCK LD, TRUCK MD, TRUCK HD, VAN. Returns "" when uncertain
+  // so the UI leaves the dropdown for the user to confirm.
+  function parseGvwrClass(gvwr: string): number | null {
+    const m = String(gvwr || "").match(/class\s*(\d+)/i);
+    return m ? parseInt(m[1], 10) : null;
+  }
+  function mapVinAssetType(vehicleType: string, bodyClass: string, gvwr: string): string {
+    const bc = (bodyClass || "").toLowerCase();
+    const vt = (vehicleType || "").toLowerCase();
+    if (bc.includes("van")) return "VAN";
+    if (bc.includes("suv") || bc.includes("sport utility")) return "SUV";
+    if (vt.includes("passenger car") || /sedan|coupe|hatchback|convertible|wagon|saloon/.test(bc)) return "CAR";
+    const isTruck = vt.includes("truck") || /pickup|truck|cab|chassis/.test(bc);
+    if (isTruck) {
+      const cls = parseGvwrClass(gvwr);
+      if (cls != null) {
+        if (cls <= 2) return "TRUCK LD";
+        if (cls <= 6) return "TRUCK MD";
+        return "TRUCK HD";
+      }
+      return ""; // truck weight class unknown — let the user pick LD/MD/HD
+    }
+    if (vt.includes("multipurpose") || vt.includes("mpv")) return "SUV";
+    return "";
+  }
+
+  app.get("/api/vin/decode/:vin", requireAuth, async (req: any, res) => {
+    const vin = String(req.params.vin || "").trim().toUpperCase();
+    // VINs are exactly 17 chars and never use I, O, or Q.
+    if (!/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+      return res.status(400).json({ error: "Invalid VIN format." });
+    }
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const url = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValues/${encodeURIComponent(vin)}?format=json`;
+      const r = await fetch(url, { signal: controller.signal, headers: { Accept: "application/json" } });
+      if (!r.ok) {
+        return res.status(502).json({ error: `VIN service returned ${r.status}.` });
+      }
+      const data: any = await r.json();
+      const row = Array.isArray(data?.Results) ? data.Results[0] : null;
+      if (!row) {
+        return res.status(502).json({ error: "VIN service returned no data." });
+      }
+      const clean = (v: unknown): string => {
+        const s = String(v ?? "").trim();
+        return s && s.toLowerCase() !== "not applicable" ? s : "";
+      };
+      const titleCase = (s: string): string =>
+        s.replace(/\w\S*/g, (w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase());
+
+      const rawMake = clean(row.Make);
+      const make = rawMake ? titleCase(rawMake) : "";
+      const model = clean(row.Model);
+      const modelYear = clean(row.ModelYear);
+      const bodyClass = clean(row.BodyClass);
+      const vehicleType = clean(row.VehicleType);
+      const gvwr = clean(row.GVWR) || clean(row.GrossVehicleWeightRating);
+      const assetType = mapVinAssetType(vehicleType, bodyClass, gvwr);
+      const decoded = !!(make || model || modelYear);
+
+      res.json({
+        vin,
+        decoded,
+        make,
+        model,
+        modelYear,
+        assetType,
+        bodyClass,
+        error: decoded ? undefined : (clean(row.ErrorText) || "VIN could not be decoded."),
+      });
+    } catch (err: any) {
+      if (err?.name === "AbortError") {
+        return res.status(504).json({ error: "VIN lookup timed out." });
+      }
+      console.error("[VIN] decode error:", err);
+      res.status(500).json({ error: "Failed to decode VIN." });
+    } finally {
+      clearTimeout(timer);
+    }
+  });
+
   // Suggest the next available vehicle number for a given class.
   // Classes:
   //   byov       → next 088xxx  (canonical band 88000–88999)
