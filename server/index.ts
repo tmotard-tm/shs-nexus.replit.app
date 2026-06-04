@@ -282,12 +282,21 @@ async function patchStoredRolePermissions() {
   }
 }
 
-(async () => {
+/**
+ * Heavy startup bootstrap — runs AFTER the HTTP port is open so the autoscale
+ * health-check probe (GET / must return 200 within ~60s) can never be blocked
+ * by slow/flaky database or Snowflake work. A deploy once failed with
+ * "the required port was never opened, expected port 5000" because all of this
+ * was awaited BEFORE server.listen(): a transient Neon WebSocket hiccup stalled
+ * seedTemplatesOnStartup() past the probe window and the promote was rejected.
+ *
+ * Everything here is idempotent and individually wrapped in try/catch, and route
+ * handlers read their data from storage per-request, so running it a moment after
+ * the server starts listening is safe.
+ */
+async function runStartupBootstrap() {
   // Patch stored role permissions — fill in any keys added since the record was created
-  // Must run before routes are registered so the fix is live immediately
   await patchStoredRolePermissions();
-
-  const server = await registerRoutes(app);
 
   // Seed templates during startup
   await seedTemplatesOnStartup();
@@ -441,6 +450,13 @@ async function patchStoredRolePermissions() {
   } catch (error) {
     console.error("⚠️ TPMS snapshot startup priming failed:", error);
   }
+}
+
+(async () => {
+  // Register routes first so the HTTP server exists, then open the port as fast
+  // as possible. Heavy DB/Snowflake bootstrap is deferred to runStartupBootstrap()
+  // which fires AFTER listen — see that function's comment for why.
+  const server = await registerRoutes(app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -469,6 +485,14 @@ async function patchStoredRolePermissions() {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
+
+    // Kick off heavy startup bootstrap (permission patch, template seeding,
+    // Snowflake init, schedulers) AFTER the port is open so the autoscale
+    // health-check probe is never blocked by slow DB/Snowflake work.
+    runStartupBootstrap().catch((e: unknown) => {
+      console.error("[Startup] Background bootstrap error (non-fatal):", e instanceof Error ? e.message : e);
+    });
+
     // Guardrail G4 — fire post-deploy integrity check non-blocking.
     // Compares current row counts against the latest G2 snapshot in object
     // storage. Fails open (no-baseline / network errors) so it can never

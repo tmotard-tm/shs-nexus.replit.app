@@ -127,5 +127,59 @@
       "0007_add_byov_intent_to_onboarding_hires.sql"
     ],
     "fingerprint": "b1f63a523561"
+  },
+  {
+    "deployedAt": "2026-06-04T04:29:34.754Z",
+    "bundleHash": "BP9-Js6X",
+    "gitSha": "4481b14c",
+    "snapshotKey": null,
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "98dc92bcaf29"
+  },
+  {
+    "deployedAt": "2026-06-04T04:33:08.344Z",
+    "bundleHash": "BP9-Js6X",
+    "gitSha": "4481b14c",
+    "snapshotKey": null,
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "d68db8d5fc7e"
+  },
+  {
+    "deployedAt": "2026-06-04T04:41:23.388Z",
+    "bundleHash": "BP9-Js6X",
+    "gitSha": "4481b14c",
+    "snapshotKey": null,
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "579c01a5c0c1"
   }
 ]
