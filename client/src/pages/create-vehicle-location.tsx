@@ -54,6 +54,8 @@ interface FormState {
   model: string;
   district: string;
   deliveryAddress: string;
+  deliveryAddress2: string;
+  deliveryAddress3: string;
   city: string;
   state: string;
   zip: string;
@@ -86,6 +88,8 @@ const emptyForm: FormState = {
   model: "",
   district: "",
   deliveryAddress: "",
+  deliveryAddress2: "",
+  deliveryAddress3: "",
   city: "",
   state: "",
   zip: "",
@@ -189,7 +193,7 @@ export default function CreateVehicle() {
   useEffect(() => {
     const allowedKeys = [
       "vehicleNumber","vin","assetType","modelYear","make","model",
-      "district","deliveryAddress","city","state","zip",
+      "district","deliveryAddress","deliveryAddress2","deliveryAddress3","city","state","zip",
       "deliveryDate","onRoadDate",
       "firstName","lastName","enterpriseId","phone",
       "licensePlate","plateState","plateType","regRenewalDate",
@@ -215,6 +219,8 @@ export default function CreateVehicle() {
       if (prefill.model) processed.model = prefill.model;
       if (prefill.district) processed.district = prefill.district;
       if (prefill.deliveryAddress) processed.deliveryAddress = prefill.deliveryAddress;
+      if (prefill.deliveryAddress2) processed.deliveryAddress2 = prefill.deliveryAddress2;
+      if (prefill.deliveryAddress3) processed.deliveryAddress3 = prefill.deliveryAddress3;
       if (prefill.city) processed.city = prefill.city;
       if (prefill.plateType) processed.plateType = prefill.plateType;
       if (prefill.enterpriseId) processed.enterpriseId = prefill.enterpriseId;
@@ -546,10 +552,12 @@ export default function CreateVehicle() {
                       <Select value={form.assetType} onValueChange={setSelect("assetType")}>
                         <SelectTrigger><SelectValue placeholder="Select type" /></SelectTrigger>
                         <SelectContent>
+                          <SelectItem value="CAR">CAR</SelectItem>
                           <SelectItem value="SUV">SUV</SelectItem>
-                          <SelectItem value="Truck">Truck</SelectItem>
-                          <SelectItem value="Van">Van</SelectItem>
-                          <SelectItem value="Sedan">Sedan</SelectItem>
+                          <SelectItem value="TRUCK LD">TRUCK LD</SelectItem>
+                          <SelectItem value="TRUCK MD">TRUCK MD</SelectItem>
+                          <SelectItem value="TRUCK HD">TRUCK HD</SelectItem>
+                          <SelectItem value="VAN">VAN</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -588,7 +596,18 @@ export default function CreateVehicle() {
 
                   <div className="space-y-2">
                     <Label htmlFor="deliveryAddress">Delivery Address <span className="text-destructive">*</span></Label>
-                    <Input id="deliveryAddress" value={form.deliveryAddress} onChange={set("deliveryAddress")} placeholder="Street address" />
+                    <Input id="deliveryAddress" value={form.deliveryAddress} onChange={set("deliveryAddress")} placeholder="Street address (line 1)" />
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryAddress2">Address Line 2</Label>
+                      <Input id="deliveryAddress2" value={form.deliveryAddress2} onChange={set("deliveryAddress2")} placeholder="Apt, suite, unit (optional)" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="deliveryAddress3">Address Line 3</Label>
+                      <Input id="deliveryAddress3" value={form.deliveryAddress3} onChange={set("deliveryAddress3")} placeholder="Additional address info (optional)" />
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

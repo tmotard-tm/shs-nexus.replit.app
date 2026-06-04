@@ -8456,7 +8456,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const {
         vehicleNumber, vin, assetType, modelYear, make, model,
         firstName, lastName, enterpriseId, phone,
-        deliveryAddress, city, state, zip, district,
+        deliveryAddress, deliveryAddress2, deliveryAddress3, city, state, zip, district,
         deliveryDate, onRoadDate,
         licensePlate, plateState, plateType, regRenewalDate,
         createInHolman: createInHolmanRaw,
@@ -8584,8 +8584,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const clientData4 = isUnknown ? NULL_VAL : (enterpriseId || null);
       const auxData7 = zip || null;
       const todayStr = new Date().toISOString().split("T")[0];
-      const finalDeliveryDate = deliveryDate || todayStr;
-      const finalOnRoadDate = onRoadDate || todayStr;
+      // Holman expects dates as MM/DD/YYYY; HTML date inputs (and todayStr) are YYYY-MM-DD.
+      const toHolmanDate = (d: string | null | undefined): string | null => {
+        if (!d) return null;
+        const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[2]}/${m[3]}/${m[1]}` : String(d);
+      };
+      const finalDeliveryDate = toHolmanDate(deliveryDate || todayStr);
+      const finalOnRoadDate = toHolmanDate(onRoadDate || todayStr);
 
       // prefix is the full district number (not sliced)
       const districtStr = String(district || "").trim();
@@ -8600,38 +8606,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let holmanResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
       if (createInHolman) {
         const holmanPayload = {
+          assetAction: "ADD",
           lesseeCode: "2B56",
           holmanVehicleNumber: paddedVehicle,
-          vendorCode: "OTH",
           vin: vin || null,
-          modelYear: modelYear ? Number(modelYear) : null,
-          makeVin: make || null,
-          modelVin: model || null,
-          assetType: assetType || null,
+          division: "01",
           firstName: firstName || null,
           lastName: lastName || null,
-          email: "FLEET_SUPPORT@TRANSFORMCO.COM",
+          addressLine1: deliveryAddress || null,
+          addressLine2: deliveryAddress2 || null,
+          addressLine3: deliveryAddress3 || null,
+          city: city || null,
+          stateProvince: state || null,
+          zipPostalCode: zip || null,
+          assetType: assetType || null,
+          vendorCode: "OTH",
+          modelYear: modelYear ? Number(modelYear) : null,
+          makeClient: make || null,
+          modelClient: model || null,
+          deliveryDate: finalDeliveryDate,
+          prefix,
           clientData1,
           clientData2,
           clientData3: "890",
           clientData4,
+          auxData7,
+          workPhone: phone || null,
+          email: "FLEET_SUPPORT@TRANSFORMCO.COM",
           assignedStatusCode: "D",
           driverClass: "N",
-          prefix,
-          addressLine1: deliveryAddress || null,
-          city: city || null,
-          stateProvince: state || null,
-          zipPostalCode: zip || null,
-          auxData7,
-          licensePlate: licensePlate || null,
-          licenseState: plateState || null,
-          licensePlateType: plateType || null,
-          regRenewalDate: regRenewalDate || null,
-          deliveryDate: finalDeliveryDate,
           onRoadDate: finalOnRoadDate,
-          workPhone: phone || null,
-          isActive: true,
-          spareTruck: false,
+          licensePlate: licensePlate || null,
+          tagStateProvince: plateState || null,
+          plateType: plateType || null,
+          renewalDate: toHolmanDate(regRenewalDate),
         };
         // Pre-check: if the vehicle already exists in Holman (live lookup), treat as success
         // immediately — idempotent retry guard for cases where Holman creation succeeded
@@ -8731,7 +8739,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           isActive: true,
           costCenter: wmsCostCenter,
           regionNo: wmsRegionNo,
-          spareTruck: false,
+          spareTruck: true,
           useCaseId: "Nexus",
         };
 
@@ -8813,7 +8821,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: true,
         costCenter: wmsCostCenter,
         regionNo: wmsRegionNo,
-        spareTruck: false,
+        spareTruck: true,
         useCaseId: "Nexus",
       };
 
