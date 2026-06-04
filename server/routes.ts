@@ -496,6 +496,23 @@ const upload = multer({
 // In-memory cache for ZIP code coordinates (per server session)
 const zipCoordsCache = new Map<string, { lat: number; lng: number } | null>();
 
+// Bound an awaited startup step so a hung DB call (e.g. a Neon serverless
+// WebSocket that drops mid-query — there is no statement timeout on the pool)
+// can never stall route registration forever. On timeout we reject so the
+// caller can log and proceed; the underlying query keeps running harmlessly.
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () => reject(new Error(`${label} timed out after ${ms}ms`)),
+      ms,
+    );
+    p.then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
 export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
 
@@ -564,7 +581,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Mount Fleet-Scope module routes at /api/fs/*
   if (fsDb) {
-    await initFleetScopeSchema();
+    // Schema init is idempotent (CREATE TABLE IF NOT EXISTS) and the fs_ tables
+    // already exist in any real environment. Bound it with a timeout so a flaky
+    // Neon WebSocket at boot can't hang it forever — which would otherwise stall
+    // ALL downstream route mounting and serveStatic, leaving the app a zombie
+    // (port open, every route 404). Mount the routes regardless of the result.
+    try {
+      await withTimeout(initFleetScopeSchema(), 20000, "Fleet-Scope schema init");
+    } catch (e: any) {
+      console.error("[Fleet-Scope] schema init failed/timed out — mounting routes anyway (tables expected to already exist):", e?.message || e);
+    }
     const fsRouter = registerFleetScopeRoutes(requireAuth);
     app.use("/api/fs", fsRouter);
     console.log("[Fleet-Scope] Routes mounted at /api/fs/*");
@@ -574,7 +600,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Mount VRM (Rental Reduction) routes at /api/vrm/*
   try {
-    await initVrmSchema();
+    // Same rationale as Fleet-Scope above: bound the idempotent schema init so a
+    // hung Neon WebSocket can't stall route mounting; mount VRM routes regardless.
+    try {
+      await withTimeout(initVrmSchema(), 20000, "VRM schema init");
+    } catch (e: any) {
+      console.error("[VRM] schema init failed/timed out — mounting routes anyway (tables expected to already exist):", e?.message || e);
+    }
     // Twilio status-callback webhook MUST be registered BEFORE the
     // session-gated /api/vrm router below, because Twilio cannot present
     // a session cookie. The webhook authenticates via X-Twilio-Signature.
@@ -602,7 +634,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // BYOV Creation Audit — idempotent table init (Task 293)
   try {
-    await db.execute(sql`
+    await withTimeout(db.execute(sql`
       CREATE TABLE IF NOT EXISTS byov_creation_audit (
         id serial PRIMARY KEY,
         vehicle_number varchar(20) NOT NULL,
@@ -620,12 +652,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         wms_error text,
         blocked_source varchar(10)
       )
-    `);
+    `), 20000, "byov_creation_audit init");
     // Migrate existing tables that predate the blocked_source column (Task 361)
-    await db.execute(sql`
+    await withTimeout(db.execute(sql`
       ALTER TABLE byov_creation_audit
         ADD COLUMN IF NOT EXISTS blocked_source varchar(10)
-    `);
+    `), 20000, "byov_creation_audit migrate");
     console.log("[BYOV] byov_creation_audit table ready");
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_creation_audit table:", e.message);
@@ -633,7 +665,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // BYOV Enrollments — idempotent table init
   try {
-    await db.execute(sql`
+    await withTimeout(db.execute(sql`
       CREATE TABLE IF NOT EXISTS byov_enrollments (
         enterprise_id text PRIMARY KEY,
         full_name text,
@@ -646,7 +678,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         created_at timestamp DEFAULT NOW(),
         updated_at timestamp DEFAULT NOW()
       )
-    `);
+    `), 20000, "byov_enrollments init");
     console.log("[BYOV] byov_enrollments table ready");
     const byovWebhookSecret = process.env.FS_BYOV_WEBHOOK_SECRET ? '(configured)' : '(NOT SET — set FS_BYOV_WEBHOOK_SECRET)';
     console.log(`[BYOV] Webhook receiver: POST /public/byov-enrollment-webhook  |  x-api-key: FS_BYOV_WEBHOOK_SECRET ${byovWebhookSecret}`);
@@ -657,7 +689,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // BYOV Drift Check history — idempotent table init (Task 327)
   try {
-    await db.execute(sql`
+    await withTimeout(db.execute(sql`
       CREATE TABLE IF NOT EXISTS byov_drift_checks (
         id serial PRIMARY KEY,
         run_at timestamp NOT NULL DEFAULT NOW(),
@@ -668,7 +700,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         mismatches jsonb NOT NULL DEFAULT '[]'::jsonb,
         duration_ms integer NOT NULL DEFAULT 0
       )
-    `);
+    `), 20000, "byov_drift_checks init");
     console.log("[BYOV] byov_drift_checks table ready");
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_drift_checks table:", e.message);
