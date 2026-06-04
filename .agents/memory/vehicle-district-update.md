@@ -34,3 +34,8 @@ A district change on an UNASSIGNED vehicle fans out to all three systems of reco
 **Rule:** the "Update in All Systems" button is gated only by `!districtChoice || mutation.isPending` — do NOT re-add a `padDistrict(choice) === padDistrict(vehicle.district)` no-op guard, and initialize `districtChoice` to `""` when opening (not the current district).
 **Why:** the dialog exists to fix mismatches where Holman/Nexus already shows the target district but TPMS is stale; a no-op guard traps the operator (button never enables) and the server endpoint has no same-value rejection, so a forced re-push is valid and intended. Pre-filling the current district also mismatched the zero-padded dropdown values, confusing selection.
 **How to apply:** keep same-value pushes allowed; treat them as deliberate re-syncs.
+
+## TPMS/WMS district update requires 6-digit padded truck number
+**Rule:** in `POST /api/fleet/vehicle/:truckNo/district`, always derive `paddedVehicle` via `toHolmanRef(vehicle.holmanVehicleNumber)` — never use the raw cache value directly.
+**Why:** `holman_vehicles_cache.holman_vehicle_number` is stored unpadded for some vehicles (e.g. "61063"). TPMS rejects unpadded numbers with "Invalid truck and/or dist passed" (400). The fix is one line — `toHolmanRef()` / `toTpmsRef()` both pad to 6 digits and are already imported in routes.ts.
+**How to apply:** any future addition that reads `vehicle.holmanVehicleNumber` and passes it to TPMS or WMS must wrap it with `toTpmsRef()` / `toHolmanRef()` first.

@@ -9336,7 +9336,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!vehicle) {
         return res.status(404).json({ error: `Vehicle ${rawTruck} not found.` });
       }
-      const paddedVehicle = vehicle.holmanVehicleNumber;
+      // toHolmanRef / toTpmsRef both pad to 6 digits (e.g. "61063" → "061063").
+      // TPMS rejects unpadded numbers with "Invalid truck and/or dist passed".
+      const paddedVehicle = toHolmanRef(vehicle.holmanVehicleNumber);
 
       // Reject if assigned in either system — TPMS forbids a district change while assigned.
       const tpmsAssigned = !!String(vehicle.tpmsAssignedTechId || "").trim();
