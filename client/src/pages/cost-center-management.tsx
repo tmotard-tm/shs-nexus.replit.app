@@ -61,6 +61,7 @@ import { z } from "zod";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useHasPermission } from "@/hooks/use-permissions";
 import { useLocation, useSearch } from "wouter";
 import {
   AlertDialog,
@@ -312,6 +313,7 @@ export default function CostCenterManagement() {
 
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [deleting, setDeleting] = useState<DistrictCostCenter | null>(null);
+  const canUpdateDistricts = useHasPermission("pageFeatures.createVehicle.updateDistricts");
   const [editingDistrict, setEditingDistrict] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
   const [editingError, setEditingError] = useState<string | null>(null);
@@ -975,27 +977,31 @@ export default function CostCenterManagement() {
             <History className="mr-2 h-4 w-4" />
             Change History
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => triggerAutoSeedMutation.mutate()}
-            disabled={triggerAutoSeedMutation.isPending}
-            data-testid="button-trigger-auto-seed"
-            title="Run the same daily auto-seed job now"
-          >
-            <RefreshCw
-              className={`mr-2 h-4 w-4 ${triggerAutoSeedMutation.isPending ? "animate-spin" : ""}`}
-            />
-            {triggerAutoSeedMutation.isPending ? "Running..." : "Run auto-seed now"}
-          </Button>
-          <Button
-            variant="outline"
-            onClick={() => seedMutation.mutate()}
-            disabled={seedMutation.isPending}
-            data-testid="button-init-defaults"
-          >
-            <Sparkles className="mr-2 h-4 w-4" />
-            {seedMutation.isPending ? "Initializing..." : "Initialize Defaults"}
-          </Button>
+          {canUpdateDistricts && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => triggerAutoSeedMutation.mutate()}
+                disabled={triggerAutoSeedMutation.isPending}
+                data-testid="button-trigger-auto-seed"
+                title="Run the same daily auto-seed job now"
+              >
+                <RefreshCw
+                  className={`mr-2 h-4 w-4 ${triggerAutoSeedMutation.isPending ? "animate-spin" : ""}`}
+                />
+                {triggerAutoSeedMutation.isPending ? "Running..." : "Run auto-seed now"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => seedMutation.mutate()}
+                disabled={seedMutation.isPending}
+                data-testid="button-init-defaults"
+              >
+                <Sparkles className="mr-2 h-4 w-4" />
+                {seedMutation.isPending ? "Initializing..." : "Initialize Defaults"}
+              </Button>
+            </>
+          )}
           <Button
             variant="outline"
             onClick={handleDownloadCsv}
@@ -1013,12 +1019,14 @@ export default function CostCenterManagement() {
               if (!open) resetBulk();
             }}
           >
-            <DialogTrigger asChild>
-              <Button variant="outline" data-testid="button-open-bulk-import">
-                <Upload className="mr-2 h-4 w-4" />
-                Bulk Import
-              </Button>
-            </DialogTrigger>
+            {canUpdateDistricts && (
+              <DialogTrigger asChild>
+                <Button variant="outline" data-testid="button-open-bulk-import">
+                  <Upload className="mr-2 h-4 w-4" />
+                  Bulk Import
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent className="sm:max-w-[820px] max-h-[90vh] overflow-hidden flex flex-col">
               <DialogHeader>
                 <DialogTitle>Bulk Import Cost Centers</DialogTitle>
@@ -1250,12 +1258,14 @@ export default function CostCenterManagement() {
               }
             }}
           >
-            <DialogTrigger asChild>
-              <Button data-testid="button-create-cost-center">
-                <Plus className="mr-2 h-4 w-4" />
-                Add District
-              </Button>
-            </DialogTrigger>
+            {canUpdateDistricts && (
+              <DialogTrigger asChild>
+                <Button data-testid="button-create-cost-center">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add District
+                </Button>
+              </DialogTrigger>
+            )}
             <DialogContent className="sm:max-w-[440px]">
               <DialogHeader>
                 <DialogTitle>Add District Cost Center</DialogTitle>
@@ -1601,7 +1611,7 @@ export default function CostCenterManagement() {
                                 <span className="text-xs text-destructive">{editingError}</span>
                               )}
                             </div>
-                          ) : (
+                          ) : canUpdateDistricts ? (
                             <button
                               type="button"
                               className="font-mono text-left hover:underline flex items-center gap-2"
@@ -1616,6 +1626,15 @@ export default function CostCenterManagement() {
                               )}
                               <Pencil className="h-3 w-3 opacity-40" />
                             </button>
+                          ) : (
+                            <span className="font-mono flex items-center gap-2">
+                              <span>{row.costCenter}</span>
+                              {isCustom && (
+                                <span className="text-[10px] uppercase tracking-wide text-amber-600 dark:text-amber-400">
+                                  override
+                                </span>
+                              )}
+                            </span>
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
@@ -1638,15 +1657,17 @@ export default function CostCenterManagement() {
                             >
                               <History className="h-4 w-4 text-muted-foreground" />
                             </Button>
-                            <Button
-                              type="button"
-                              size="icon"
-                              variant="ghost"
-                              onClick={() => setDeleting(row)}
-                              data-testid={`button-delete-${row.district}`}
-                            >
-                              <Trash2 className="h-4 w-4 text-destructive" />
-                            </Button>
+                            {canUpdateDistricts && (
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setDeleting(row)}
+                                data-testid={`button-delete-${row.district}`}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
                           </div>
                         </TableCell>
                       </TableRow>

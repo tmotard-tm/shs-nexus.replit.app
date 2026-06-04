@@ -12,8 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useHasPermission } from "@/hooks/use-permissions";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
-import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert } from "lucide-react";
+import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   Dialog,
@@ -46,6 +47,7 @@ const US_STATES = [
 const PLATE_TYPES = ["Standard", "Commercial", "Government", "Personalized", "Dealer", "Other"];
 
 interface FormState {
+  vehicleClass: string;
   vehicleNumber: string;
   vin: string;
   assetType: string;
@@ -81,6 +83,7 @@ interface SubmitResult {
 const today = new Date().toISOString().split("T")[0];
 
 const emptyForm: FormState = {
+  vehicleClass: "byov",
   vehicleNumber: "",
   vin: "",
   assetType: "",
@@ -256,6 +259,55 @@ export default function CreateVehicle() {
     }
   };
 
+  const canManualNumber = useHasPermission("pageFeatures.createVehicle.manualVehicleNumberEntry");
+  const [loadingNextNumber, setLoadingNextNumber] = useState(false);
+
+  const classLabel =
+    form.vehicleClass === "enterprise" ? "Enterprise" : form.vehicleClass === "holman" ? "Holman" : "BYOV";
+
+  const fetchNextNumber = async (cls: string) => {
+    setLoadingNextNumber(true);
+    try {
+      const resp = await fetch(`/api/byov/next-number?class=${encodeURIComponent(cls)}`, {
+        credentials: "include",
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.padded) {
+          setForm((prev) => ({ ...prev, vehicleNumber: data.padded }));
+          setVehicleExistsWarning(null);
+        }
+      } else {
+        toast({
+          title: "Could not get next number",
+          description: "Please try again or enter a number manually.",
+          variant: "destructive",
+        });
+      }
+    } catch {
+      toast({
+        title: "Could not get next number",
+        description: "Please check your connection and try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingNextNumber(false);
+    }
+  };
+
+  const handleVehicleClassChange = (value: string) => {
+    setForm((prev) => ({ ...prev, vehicleClass: value }));
+    fetchNextNumber(value);
+  };
+
+  // Auto-suggest a number for the default class on first load, unless a number was prefilled via URL.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("vehicleNumber")) return;
+    fetchNextNumber(emptyForm.vehicleClass);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const createMutation = useMutation({
     mutationFn: async (payload: FormState) => {
       const resp = await apiRequest("POST", "/api/byov/create", payload);
@@ -274,7 +326,7 @@ export default function CreateVehicle() {
       toast({
         title: allOk ? "Vehicle Created" : "Partial Success",
         description: allOk
-          ? "BYOV vehicle submitted successfully — see per-system results below."
+          ? `${classLabel} vehicle submitted successfully — see per-system results below.`
           : "One or more systems had an error — see results below.",
         variant: allOk ? "default" : "destructive",
       });
@@ -419,18 +471,19 @@ export default function CreateVehicle() {
 
   return (
     <MainContent>
-      <TopBar title="Create BYOV Vehicle" breadcrumbs={["Home", "Create BYOV Vehicle"]} />
+      <TopBar title="Create Vehicle" breadcrumbs={["Home", "Create Vehicle"]} />
 
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm BYOV Submission</AlertDialogTitle>
+            <AlertDialogTitle>Confirm {classLabel} Submission</AlertDialogTitle>
             <AlertDialogDescription>
               Review the details below before submitting to Holman and WMS. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
           <div className="my-2 rounded-lg border bg-muted/40 divide-y text-sm">
+            <ConfirmRow label="Vehicle Class" value={classLabel} />
             <ConfirmRow label="Vehicle Number" value={paddedVehicleNumber} note="zero-padded 6-digit" />
             <ConfirmRow label="VIN" value={form.vin.toUpperCase()} />
             <ConfirmRow label="Make / Model" value={`${form.modelYear} ${form.make} ${form.model}`} />
@@ -460,9 +513,9 @@ export default function CreateVehicle() {
             <CardHeader>
               <div className="flex items-start justify-between">
                 <div className="space-y-1">
-                  <CardTitle>New BYOV Vehicle</CardTitle>
+                  <CardTitle>New Vehicle</CardTitle>
                   <CardDescription>
-                    Creates the vehicle record in both Holman and WMS. Vehicle type is fixed to BYOV.
+                    Creates the vehicle record in Holman, WMS, and TPMS. Pick a vehicle class to auto-assign the next number.
                   </CardDescription>
                 </div>
                 <CopyLinkButton variant="icon" preserveQuery preserveHash className="shrink-0" />
@@ -513,24 +566,59 @@ export default function CreateVehicle() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
+                      <Label>Vehicle Class <span className="text-destructive">*</span></Label>
+                      <Select value={form.vehicleClass} onValueChange={handleVehicleClassChange}>
+                        <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="byov">BYOV</SelectItem>
+                          <SelectItem value="holman">Holman</SelectItem>
+                          <SelectItem value="enterprise">Enterprise</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        Picks the recommended next number automatically
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
                       <Label htmlFor="vehicleNumber">
                         Vehicle Number <span className="text-destructive">*</span>
                       </Label>
-                      <div className="relative">
-                        <Input
-                          id="vehicleNumber"
-                          value={form.vehicleNumber}
-                          onChange={(e) => {
-                            setForm((prev) => ({ ...prev, vehicleNumber: e.target.value }));
-                            setVehicleExistsWarning(null);
-                          }}
-                          onBlur={(e) => checkVehicleExists(e.target.value)}
-                          placeholder="e.g. 88095"
-                          className={vehicleExistsWarning ? "border-destructive pr-9" : checkingVehicle ? "pr-9" : ""}
-                        />
-                        {checkingVehicle && (
-                          <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
-                        )}
+                      <div className="flex gap-2">
+                        <div className="relative flex-1">
+                          <Input
+                            id="vehicleNumber"
+                            value={form.vehicleNumber}
+                            onChange={
+                              canManualNumber
+                                ? (e) => {
+                                    setForm((prev) => ({ ...prev, vehicleNumber: e.target.value }));
+                                    setVehicleExistsWarning(null);
+                                  }
+                                : undefined
+                            }
+                            onBlur={canManualNumber ? (e) => checkVehicleExists(e.target.value) : undefined}
+                            readOnly={!canManualNumber}
+                            placeholder="e.g. 088095"
+                            className={`${vehicleExistsWarning ? "border-destructive pr-9" : checkingVehicle ? "pr-9" : ""} ${!canManualNumber ? "bg-muted cursor-not-allowed" : ""}`}
+                          />
+                          {checkingVehicle && (
+                            <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
+                          )}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          className="shrink-0"
+                          onClick={() => fetchNextNumber(form.vehicleClass)}
+                          disabled={loadingNextNumber}
+                          title="Get next available number"
+                        >
+                          {loadingNextNumber ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                        </Button>
                       </div>
                       {vehicleExistsWarning && (
                         <Alert variant="destructive" className="py-2">
@@ -539,7 +627,9 @@ export default function CreateVehicle() {
                         </Alert>
                       )}
                       <p className="text-xs text-muted-foreground">
-                        Will be zero-padded to 6 digits (e.g. 88095 → 088095)
+                        {canManualNumber
+                          ? "Auto-assigned from the selected class — edit if needed. Zero-padded to 6 digits."
+                          : "Auto-assigned from the selected class. Zero-padded to 6 digits."}
                       </p>
                     </div>
 
@@ -725,7 +815,7 @@ export default function CreateVehicle() {
                       aria-describedby={showConfirmDialog ? "confirm-dialog-hint" : undefined}
                     >
                       {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {createMutation.isPending ? "Submitting…" : "Create BYOV Vehicle"}
+                      {createMutation.isPending ? "Submitting…" : "Create Vehicle"}
                     </Button>
                   </span>
                   <Button type="button" variant="outline" onClick={handleReset}>

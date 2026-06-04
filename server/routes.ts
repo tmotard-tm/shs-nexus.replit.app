@@ -8446,6 +8446,111 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Suggest the next available vehicle number for a given class.
+  // Classes:
+  //   byov       → next 088xxx  (canonical band 88000–88999)
+  //   holman     → next 0-prefixed 6-digit (canonical 1–99999), excluding the 088 BYOV band
+  //   enterprise → next >= 260000 (start 260000)
+  // "Used" numbers are gathered from the Holman cache, the local BYOV creation audit,
+  // and live WMS trucks so a suggestion never collides with any of the three systems.
+  app.get("/api/byov/next-number", requireAuth, async (req: any, res) => {
+    try {
+      const vehicleClass = String(req.query.class || "byov").toLowerCase();
+      if (!["byov", "holman", "enterprise"].includes(vehicleClass)) {
+        return res.status(400).json({ error: "Invalid vehicle class. Expected byov, holman, or enterprise." });
+      }
+
+      const used = new Set<number>();
+      const addUsed = (raw: unknown) => {
+        const c = toCanonical(raw as any);
+        if (!c) return;
+        const n = Number(c);
+        if (Number.isFinite(n)) used.add(n);
+      };
+
+      // 1) Holman cache (6-digit padded numbers)
+      try {
+        const rows = await db
+          .select({ n: holmanVehiclesCache.holmanVehicleNumber })
+          .from(holmanVehiclesCache);
+        for (const r of rows) addUsed(r.n);
+      } catch (e) {
+        console.warn("[BYOV] next-number: Holman cache scan failed (non-fatal):", e);
+      }
+
+      // 2) Local BYOV creation audit — reserves numbers we just created even before caches refresh
+      try {
+        const rows = await db
+          .select({ n: byovCreationAudit.vehicleNumber })
+          .from(byovCreationAudit);
+        for (const r of rows) addUsed(r.n);
+      } catch (e) {
+        console.warn("[BYOV] next-number: audit scan failed (non-fatal):", e);
+      }
+
+      // 3) Live WMS trucks
+      try {
+        const trucks = await wmsEngineService.getAllTrucks();
+        for (const t of trucks) {
+          addUsed(t?.name);
+          addUsed(t?.externalId);
+          addUsed(t?.locationId);
+        }
+      } catch (e) {
+        console.warn("[BYOV] next-number: WMS scan failed (non-fatal):", e);
+      }
+
+      const inByovBand = (n: number) => n >= 88000 && n <= 88999;
+
+      // Allocate the next number for a class band [start, end].
+      // Prefer max(used-in-band)+1 (always-increasing — never re-picks a number
+      // that may still be referenced in a system we cannot enumerate, e.g. TPMS).
+      // Only when that would overflow the band do we fall back to the lowest free
+      // gap. Returns null when the band is fully exhausted.
+      const allocate = (
+        start: number,
+        end: number,
+        excluded: (n: number) => boolean = () => false,
+      ): number | null => {
+        const inBand = Array.from(used).filter((n) => n >= start && n <= end && !excluded(n));
+        let candidate = inBand.length ? Math.max(...inBand) + 1 : start;
+        while (candidate <= end && excluded(candidate)) candidate++;
+        if (candidate >= start && candidate <= end) return candidate;
+        // Overflowed the band — scan for the lowest free gap instead.
+        const taken = new Set(inBand);
+        for (let n = start; n <= end; n++) {
+          if (taken.has(n) || excluded(n)) continue;
+          return n;
+        }
+        return null;
+      };
+
+      let recommended: number | null;
+      if (vehicleClass === "byov") {
+        recommended = allocate(88000, 88999);
+      } else if (vehicleClass === "enterprise") {
+        recommended = allocate(260000, 999999);
+      } else {
+        // holman: 0-prefixed 6-digit (canonical 1..99999), excluding the 088 BYOV band
+        recommended = allocate(1, 99999, inByovBand);
+      }
+
+      if (recommended === null) {
+        return res.status(409).json({
+          error: `No available vehicle number remaining for class "${vehicleClass}".`,
+          vehicleClass,
+        });
+      }
+
+      const canonical = String(recommended);
+      const padded = canonical.padStart(6, "0");
+      return res.json({ vehicleClass, recommended: canonical, padded });
+    } catch (error: any) {
+      console.error("[BYOV] next-number error:", error);
+      return res.status(500).json({ error: error.message || "Failed to compute next number" });
+    }
+  });
+
   // BYOV vehicle creation — submits to Holman and/or WMS based on caller intent.
   // Optional flags `createInHolman` (default true) and `createInWms` (default true)
   // let callers target only the system(s) that are missing for a given vehicle.
@@ -8459,9 +8564,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         deliveryAddress, deliveryAddress2, deliveryAddress3, city, state, zip, district,
         deliveryDate, onRoadDate,
         licensePlate, plateState, plateType, regRenewalDate,
+        vehicleClass: vehicleClassRaw,
         createInHolman: createInHolmanRaw,
         createInWms: createInWmsRaw,
       } = req.body;
+
+      // Vehicle class is informational (drives the description label only).
+      // All three classes create across Holman, WMS, and TPMS the same way.
+      const vehicleClass = String(vehicleClassRaw || "byov").toLowerCase();
+      const classLabel = vehicleClass === "enterprise" ? "Enterprise" : vehicleClass === "holman" ? "Holman" : "BYOV";
 
       // Default both flags to true when omitted so existing callers are unaffected.
       const createInHolman = createInHolmanRaw !== false && createInHolmanRaw !== "false";
@@ -8735,7 +8846,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
           name: paddedVehicle,
           locationId: paddedVehicle,
           externalId: paddedVehicle,
-          description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+          description: `${classLabel} ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
           isActive: true,
           costCenter: wmsCostCenter,
           regionNo: wmsRegionNo,
@@ -8842,9 +8953,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const {
         vehicleNumber, make, model, modelYear, district,
+        vehicleClass: vehicleClassRaw,
       } = req.body;
 
       if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+
+      const vehicleClass = String(vehicleClassRaw || "byov").toLowerCase();
+      const classLabel = vehicleClass === "enterprise" ? "Enterprise" : vehicleClass === "holman" ? "Holman" : "BYOV";
 
       const paddedVehicle = toHolmanRef(vehicleNumber);
       const districtStr = String(district || "").trim();
@@ -8856,7 +8971,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         name: paddedVehicle,
         locationId: paddedVehicle,
         externalId: paddedVehicle,
-        description: `BYOV ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
+        description: `${classLabel} ${make || ""} ${model || ""} ${modelYear || ""}`.trim(),
         isActive: true,
         costCenter: wmsCostCenter,
         regionNo: wmsRegionNo,

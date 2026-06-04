@@ -172,6 +172,11 @@ export interface RolePermissionSettings {
       manageWhitelist: boolean;
       viewLogs: boolean;
     };
+    createVehicle: {
+      enabled: boolean;
+      manualVehicleNumberEntry: boolean;
+      updateDistricts: boolean;
+    };
   };
 }
 

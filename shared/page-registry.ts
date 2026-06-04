@@ -341,6 +341,20 @@ export const PAGES: PageDefinition[] = [
     ],
   },
   {
+    key: "createVehicle",
+    label: "Create Vehicle Page",
+    description: "Per-user options for the Create Vehicle page",
+    path: "/create-vehicle-location",
+    icon: Truck,
+    category: "management",
+    permissionKey: "fleetManagement",
+    hideFromNav: true,
+    features: [
+      { key: "manualVehicleNumberEntry", label: "Manual Vehicle Number Entry", description: "Allow typing the vehicle number by hand instead of using the auto-assigned number" },
+      { key: "updateDistricts", label: "Update Districts", description: "Allow editing district cost-center mappings" },
+    ],
+  },
+  {
     key: "weeklyOnboarding",
     label: "Weekly Onboarding",
     description: "Track new tech hires and assign trucks for weekly onboarding",

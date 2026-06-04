@@ -131,6 +131,11 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       manageWhitelist: true,
       viewLogs: true,
     },
+    createVehicle: {
+      enabled: true,
+      manualVehicleNumberEntry: true,
+      updateDistricts: true,
+    },
   },
 };
 
@@ -265,6 +270,11 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       manageWhitelist: true,
       viewLogs: true,
     },
+    createVehicle: {
+      enabled: true,
+      manualVehicleNumberEntry: false,
+      updateDistricts: true,
+    },
   },
 };
 
@@ -397,6 +407,11 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       changeMode: false,
       manageWhitelist: false,
       viewLogs: false,
+    },
+    createVehicle: {
+      enabled: false,
+      manualVehicleNumberEntry: false,
+      updateDistricts: false,
     },
   },
 };
