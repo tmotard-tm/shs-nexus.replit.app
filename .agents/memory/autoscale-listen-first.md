@@ -40,3 +40,8 @@ Once the port-first fix lets the deploy **promote**, a second failure mode appea
 **Distinguish the two layers of `db.execute` DDL in `routes.ts`:** only the calls at the **top level of `registerRoutes`** (the fleet-scope/vrm inits + the `byov_*` table inits right after the VRM block) block startup and need bounding. The many other `await db.execute(...)` calls scattered deeper in the file live INSIDE per-request `app.get/post(...)` handler callbacks — they run per-request, not at boot, so they don't need the timeout wrapper.
 
 **Note:** a Postgres server-side `statement_timeout` would NOT fix this — when the WS is dead the server never responds, so only a client-side timeout (the `withTimeout` wrapper / a race against a timer) breaks the hang.
+
+## Snowflake re-unavailable after every deploy
+**Rule:** `getSnowflakeService()` must lazy-init from env vars if the instance is null but credentials are present. Do not rely solely on startup bootstrap for initialization.
+**Why:** On fresh containers, even though `runStartupBootstrap()` calls `initializeSnowflake()`, the startup window can be tight and any timing issue leaves `snowflakeServiceInstance = null`. Every request then throws "not initialized" until a manual reinitialize call. The lazy-init in `getSnowflakeService()` / `tryLazyInit()` is the authoritative safety net — it constructs the singleton on first use when all three env vars (SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, SNOWFLAKE_PRIVATE_KEY) are present.
+**How to apply:** `isSnowflakeConfigured()` also returns true when credentials are present (not just when the instance exists), so startup guards that skip Snowflake-dependent syncs don't silently no-op on fresh containers.

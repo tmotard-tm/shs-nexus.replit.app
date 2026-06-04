@@ -264,7 +264,28 @@ export function initializeSnowflakeService(config: SnowflakeConfig): void {
   snowflakeServiceInstance = new SnowflakeService(config);
 }
 
+function tryLazyInit(): void {
+  const account = process.env.SNOWFLAKE_ACCOUNT;
+  const username = process.env.SNOWFLAKE_USER;
+  const privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+  if (account && username && privateKey) {
+    console.log('[Snowflake] Lazy-initializing from environment variables');
+    snowflakeServiceInstance = new SnowflakeService({
+      account,
+      username,
+      privateKey,
+      database: process.env.SNOWFLAKE_DATABASE,
+      schema: process.env.SNOWFLAKE_SCHEMA,
+      warehouse: process.env.SNOWFLAKE_WAREHOUSE,
+      role: process.env.SNOWFLAKE_ROLE,
+    });
+  }
+}
+
 export function getSnowflakeService(): SnowflakeService {
+  if (!snowflakeServiceInstance) {
+    tryLazyInit();
+  }
   if (!snowflakeServiceInstance) {
     throw new Error('Snowflake service not initialized. Please configure Snowflake credentials first.');
   }
@@ -272,5 +293,8 @@ export function getSnowflakeService(): SnowflakeService {
 }
 
 export function isSnowflakeConfigured(): boolean {
-  return snowflakeServiceInstance !== null;
+  if (snowflakeServiceInstance !== null) return true;
+  // Return true when credentials are present so callers that guard with
+  // isSnowflakeConfigured() will attempt the lazy-init path instead of skipping.
+  return !!(process.env.SNOWFLAKE_ACCOUNT && process.env.SNOWFLAKE_USER && process.env.SNOWFLAKE_PRIVATE_KEY);
 }
