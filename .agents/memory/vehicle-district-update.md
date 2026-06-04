@@ -8,7 +8,7 @@ description: How a per-vehicle district change fans out to TPMS/WMS/Holman, and 
 A district change on an UNASSIGNED vehicle fans out to all three systems of record. The district-derived values must match what these systems expect:
 
 - TPMS `distNo` = district padded to 7 (`updatetruckdist` endpoint).
-- WMS `costCenter` = district padded to 5; WMS `regionNo` = `0000890`. Preserve the truck's other existing fields (read with getTruck first, then updateTruck).
+- WMS `costCenter` = looked up from the District Cost Centers cross-reference (see "Cost center is a CROSS-REFERENCE, not a formula" below), NOT `padStart(5)`; WMS `regionNo` = `0000890`. Preserve the truck's other existing fields (read with getTruck first, then updateTruck).
 - Holman `prefix` = **last 4 digits of the padded district**.
 
 ## Why Holman prefix is last-4, not the full district

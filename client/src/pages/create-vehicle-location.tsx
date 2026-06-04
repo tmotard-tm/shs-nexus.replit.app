@@ -13,6 +13,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
 import { useHasPermission } from "@/hooks/use-permissions";
+import { useCostCenters } from "@/hooks/use-cost-centers";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Car, User, FileText, CheckCircle2, XCircle, AlertTriangle, Loader2, History, Download, Eye, ClipboardCheck, ExternalLink, ShieldAlert, RefreshCw } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -221,7 +222,12 @@ export default function CreateVehicle() {
       if (prefill.assetType) processed.assetType = prefill.assetType;
       if (prefill.make) processed.make = prefill.make;
       if (prefill.model) processed.model = prefill.model;
-      if (prefill.district) processed.district = prefill.district;
+      if (prefill.district) {
+        // Normalize to the natural district number (strip leading zeros) so a known
+        // district pre-selects in the dropdown, whose option values are natural numbers.
+        const normalized = String(prefill.district).replace(/\D/g, "").replace(/^0+/, "");
+        processed.district = normalized || String(prefill.district);
+      }
       if (prefill.deliveryAddress) processed.deliveryAddress = prefill.deliveryAddress;
       if (prefill.deliveryAddress2) processed.deliveryAddress2 = prefill.deliveryAddress2;
       if (prefill.deliveryAddress3) processed.deliveryAddress3 = prefill.deliveryAddress3;
@@ -260,6 +266,7 @@ export default function CreateVehicle() {
   };
 
   const canManualNumber = useHasPermission("pageFeatures.createVehicle.manualVehicleNumberEntry");
+  const { items: costCenters, lookupCostCenter } = useCostCenters();
   const [loadingNextNumber, setLoadingNextNumber] = useState(false);
 
   const classLabel =
@@ -467,7 +474,9 @@ export default function CreateVehicle() {
   };
 
   const paddedVehicleNumber = form.vehicleNumber.trim().padStart(6, "0");
-  const paddedCostCenter = form.district.trim().padStart(5, "0");
+  // Cost center comes from the District Cost Centers cross-reference, not a formula.
+  // Fall back to a 5-digit pad only if the district has no mapping yet.
+  const wmsCostCenter = lookupCostCenter(form.district) ?? (form.district.trim() ? form.district.trim().padStart(5, "0") : "");
 
   return (
     <MainContent>
@@ -491,7 +500,7 @@ export default function CreateVehicle() {
             <ConfirmRow label="Tech Name" value={`${form.firstName} ${form.lastName}`} />
             <ConfirmRow label="Enterprise ID" value={form.enterpriseId} />
             <ConfirmRow label="District" value={form.district} />
-            <ConfirmRow label="WMS Cost Center" value={paddedCostCenter} note="5-digit" />
+            <ConfirmRow label="WMS Cost Center" value={wmsCostCenter} note="from District Cost Centers" />
             <ConfirmRow label="Delivery Date" value={form.deliveryDate} />
             <ConfirmRow label="License Plate" value={`${form.licensePlate.toUpperCase()} (${form.plateState})`} />
           </div>
@@ -682,8 +691,24 @@ export default function CreateVehicle() {
 
                     <div className="space-y-2">
                       <Label htmlFor="district">District <span className="text-destructive">*</span></Label>
-                      <Input id="district" value={form.district} onChange={set("district")} placeholder="e.g. 8206" />
-                      <p className="text-xs text-muted-foreground">Used as prefix and WMS cost center</p>
+                      <Select value={form.district} onValueChange={setSelect("district")}>
+                        <SelectTrigger id="district" data-testid="select-district">
+                          <SelectValue placeholder="Select a district…" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
+                          {[...costCenters]
+                            .sort((a, b) => a.district.localeCompare(b.district, undefined, { numeric: true }))
+                            .map((item) => {
+                              const natural = item.district.replace(/^0+/, "") || item.district;
+                              return (
+                                <SelectItem key={item.district} value={natural}>
+                                  {natural} · CC {item.costCenter}
+                                </SelectItem>
+                              );
+                            })}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Cost center is set automatically from the District Cost Centers list.</p>
                     </div>
                   </div>
 

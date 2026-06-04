@@ -7646,15 +7646,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // GET /api/cost-centers - list all
-  app.get("/api/cost-centers", requireAuth, async (req: any, res) => {
+  app.get("/api/cost-centers", requireAuth, async (_req: any, res) => {
     try {
-      const currentUser = await storage.getUserByUsername(req.user.username);
-      // Read access: anyone who can manage cost centers OR update vehicle districts.
-      // The Update District picker needs the known-district list even for users who
-      // can't manage the cost-center mappings themselves.
-      if (!(await userCanManageCostCenters(currentUser)) && !(await userCanUpdateDistricts(currentUser))) {
-        return res.status(403).json({ message: "Access denied. You do not have permission to view District Cost Centers." });
-      }
+      // Read access: any authenticated user. The list is low-sensitivity reference
+      // data (district number -> cost center) consumed by the Update District picker
+      // AND the Create Vehicle district dropdown. The Create Vehicle page is itself
+      // only auth-gated, so the dropdown must load for any authenticated user.
+      // Write operations (POST/PATCH/DELETE) remain gated by userCanManageCostCenters.
       const items = await storage.listDistrictCostCenters();
       res.json(items);
     } catch (error) {
@@ -8889,8 +8887,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const districtStr = String(district || "").trim();
       const prefix = districtStr || null;
 
-      // WMS paddings
-      const wmsCostCenter = districtStr ? districtStr.padStart(5, "0") : undefined;
+      // WMS cost center comes from the District Cost Centers cross-reference
+      // (matched by canonical 7-digit district), NOT a padStart formula. Fall back
+      // to a 5-digit pad only when the district has no mapping yet.
+      const wmsCostCenter = districtStr
+        ? ((await storage.getDistrictCostCenter(padDistrictForApi(districtStr)))?.costCenter || districtStr.padStart(5, "0"))
+        : undefined;
       const regionRaw = "890";
       const wmsRegionNo = regionRaw.padStart(7, "0");
 
@@ -9351,7 +9353,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const paddedVehicle = toHolmanRef(vehicleNumber);
       const districtStr = String(district || "").trim();
-      const wmsCostCenter = districtStr ? districtStr.padStart(5, "0") : undefined;
+      // WMS cost center comes from the District Cost Centers cross-reference, not a
+      // padStart formula. Fall back to a 5-digit pad only when no mapping exists.
+      const wmsCostCenter = districtStr
+        ? ((await storage.getDistrictCostCenter(padDistrictForApi(districtStr)))?.costCenter || districtStr.padStart(5, "0"))
+        : undefined;
       const regionRaw = "890";
       const wmsRegionNo = regionRaw.padStart(7, "0");
 
