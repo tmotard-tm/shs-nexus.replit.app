@@ -538,6 +538,51 @@ class TPMSService {
     return data;
   }
 
+  // Update a truck's district in TPMS (POST /updatetruckdist)
+  // Body per Postman collection:
+  //   { "truckNo": "061765", "distNo": "0006141", "updatedBy": "NEXUS" }
+  // Note: TPMS rejects a district change while the truck is assigned to a tech,
+  // so callers must confirm the vehicle is unassigned before invoking this.
+  async updateTruckDist(params: {
+    truckNo: string;
+    distNo: string;
+    updatedBy: string;
+  }): Promise<any> {
+    const token = await this.getToken();
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const url = `${baseUrl}/updatetruckdist`;
+
+    const requestBody = {
+      truckNo: params.truckNo,
+      distNo: params.distNo,
+      updatedBy: params.updatedBy,
+    };
+    const bodyStr = JSON.stringify(requestBody);
+    console.log(`[TPMS] POST ${url} body: ${bodyStr}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: bodyStr,
+    });
+
+    const rawText = await response.text();
+    console.log(`[TPMS] updatetruckdist response: ${response.status} ${rawText}`);
+
+    if (!response.ok) {
+      throw new Error(`Update truck district request failed: ${response.status} - ${rawText}`);
+    }
+
+    let data: any;
+    try { data = JSON.parse(rawText); } catch { data = rawText; }
+    console.log(`[TPMS] Truck district updated successfully: ${params.truckNo} → ${params.distNo}`);
+    return data;
+  }
+
   // Temporary truck assignment (POST /temptruckassign)
   async tempTruckAssign(ldapId: string, distNo: string, truckNo: string): Promise<any> {
     const token = await this.getToken();

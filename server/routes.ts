@@ -7594,6 +7594,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return !!effective?.sidebar?.management?.costCenterManagement;
   }
 
+  // Mirrors the frontend gate at pageFeatures.createVehicle.updateDistricts:
+  // defaults -> stored role row -> per-user overrides.
+  async function userCanUpdateDistricts(user: User | undefined): Promise<boolean> {
+    if (!user || !user.role) return false;
+
+    const defaults = getServerDefaultPermissions(user.role);
+    const stored = await storage.getRolePermission(user.role);
+    const merged = deepMergePermissions(
+      defaults,
+      stored?.permissions ?? null,
+    ) as RolePermissionSettings;
+
+    const overrides = user.permissionOverrides as
+      | Partial<RolePermissionSettings>
+      | null
+      | undefined;
+    const effective = (
+      overrides
+        ? deepMergePermissions(merged, overrides)
+        : merged
+    ) as RolePermissionSettings;
+
+    return !!(effective as any)?.pageFeatures?.createVehicle?.updateDistricts;
+  }
+
   function padDistrictForApi(input: string | undefined | null): string {
     const digits = String(input ?? "").trim().replace(/\D/g, "");
     if (!digits) return "";
@@ -9134,6 +9159,170 @@ export async function registerRoutes(app: Express): Promise<Server> {
           console.error("[BYOV] create: failed to release reservation after error:", releaseErr);
         }
       }
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // ─── Update a vehicle's district across TPMS, WMS, and Holman (Task #453) ───
+  // Only offered for UNASSIGNED vehicles — TPMS forbids a district change while the
+  // truck is assigned to a tech. District-derived values mirror the Create Vehicle flow.
+  app.post("/api/fleet/vehicle/:truckNo/district", requireAuth, async (req, res) => {
+    try {
+      const user = req.user as User | undefined;
+      if (!(await userCanUpdateDistricts(user))) {
+        return res.status(403).json({ error: "You don't have permission to update vehicle districts." });
+      }
+
+      const rawTruck = String(req.params.truckNo || "").trim();
+      const district = String((req.body?.district ?? "")).trim();
+      if (!rawTruck) {
+        return res.status(400).json({ error: "Vehicle number is required." });
+      }
+      if (!/^\d{4,7}$/.test(district)) {
+        return res.status(400).json({ error: "District must be 4 to 7 digits." });
+      }
+
+      // Validate that the chosen district is a known cost-center district.
+      const { districtCostCenters } = await import("@shared/schema");
+      const paddedDistrict = district.padStart(7, "0").slice(-7);
+      const knownDistricts = await db.select().from(districtCostCenters);
+      const matchedCostCenter = knownDistricts.find(
+        (d) => padDistrictForApi(d.district) === paddedDistrict,
+      );
+      if (!matchedCostCenter) {
+        return res.status(400).json({ error: "That district isn't in the known cost-center list." });
+      }
+
+      // Resolve the vehicle from the Holman cache using all known number formats.
+      const candidates = Array.from(
+        new Set(
+          [rawTruck, toHolmanRef(rawTruck), toDisplayNumber(rawTruck), toCanonical(rawTruck)]
+            .map((c) => String(c || "").trim())
+            .filter(Boolean),
+        ),
+      );
+      const cacheRows = await db
+        .select()
+        .from(holmanVehiclesCache)
+        .where(inArray(holmanVehiclesCache.holmanVehicleNumber, candidates));
+      const vehicle = cacheRows[0];
+      if (!vehicle) {
+        return res.status(404).json({ error: `Vehicle ${rawTruck} not found.` });
+      }
+      const paddedVehicle = vehicle.holmanVehicleNumber;
+
+      // Reject if assigned in either system — TPMS forbids a district change while assigned.
+      const tpmsAssigned = !!String(vehicle.tpmsAssignedTechId || "").trim();
+      const holmanAssigned = !!String(vehicle.holmanTechAssigned || "").trim();
+      if (tpmsAssigned || holmanAssigned) {
+        return res.status(409).json({
+          error: "This vehicle is assigned to a tech. Unassign it before changing its district.",
+        });
+      }
+
+      // --- District-derived values (mirror the Create Vehicle flow) ---
+      const tpmsDistNo = paddedDistrict;                 // padded to 7
+      const wmsCostCenter = district.padStart(5, "0");   // padded to 5
+      const wmsRegionNo = "890".padStart(7, "0");        // 0000890
+      const holmanPrefix = paddedDistrict.slice(-4);     // last 4 of padded district
+
+      // --- TPMS updatetruckdist ---
+      let tpms: { success: boolean; skipped?: boolean; error?: string } = { success: false };
+      try {
+        const { getTPMSService } = await import("./tpms-service");
+        const tpmsService = getTPMSService();
+        if (!tpmsService.isConfigured()) {
+          tpms = { success: true, skipped: true };
+        } else {
+          await tpmsService.updateTruckDist({ truckNo: paddedVehicle, distNo: tpmsDistNo, updatedBy: "NEXUS" });
+          tpms = { success: true };
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "TPMS district update failed";
+        console.error("[District] TPMS updatetruckdist error:", err);
+        tpms = { success: false, error: msg };
+      }
+
+      // --- WMS update-truck (preserve existing fields, change only district-derived ones) ---
+      let wms: { success: boolean; skipped?: boolean; error?: string } = { success: false };
+      try {
+        const existing = await wmsEngineService.getTruck(paddedVehicle);
+        if (!existing) {
+          wms = { success: false, error: "Truck not found in WMS." };
+        } else {
+          await wmsEngineService.updateTruck(paddedVehicle, {
+            name: existing.name ?? paddedVehicle,
+            locationId: existing.locationId ?? paddedVehicle,
+            externalId: existing.externalId ?? paddedVehicle,
+            description: existing.description ?? "",
+            isActive: existing.isActive ?? true,
+            subsidiary: existing.subsidiary,
+            parentLocation: existing.parentLocation,
+            spareTruck: existing.spareTruck ?? true,
+            costCenter: wmsCostCenter,
+            regionNo: wmsRegionNo,
+          });
+          wms = { success: true };
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "WMS district update failed";
+        console.error("[District] WMS update-truck error:", err);
+        wms = { success: false, error: msg };
+      }
+
+      // --- Holman submit (change the prefix only; vehicle is unassigned) ---
+      let holman: { success: boolean; skipped?: boolean; error?: string } = { success: false };
+      try {
+        const holmanPayload: Record<string, any> = {
+          lesseeCode: "2B56",
+          holmanVehicleNumber: paddedVehicle,
+          prefix: holmanPrefix,
+          clientData3: "890",
+        };
+        if (vehicle.holmanAssignedStatusCd) {
+          holmanPayload.assignedStatusCode = vehicle.holmanAssignedStatusCd;
+        }
+        const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
+        console.log("[District] Holman submit response:", holmanResp);
+        holman = { success: true };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : "Holman district update failed";
+        console.error("[District] Holman submit error:", err);
+        holman = { success: false, error: msg };
+      }
+
+      // --- Update the local Holman cache row so the card reflects the change ---
+      // Only mirror the new district locally when every system of record changed.
+      // On a partial failure we leave the card showing the old district so it never
+      // implies a successful change that one of TPMS/WMS/Holman did not actually make.
+      const allOk = tpms.success && wms.success && holman.success;
+      if (allOk) {
+        try {
+          await db
+            .update(holmanVehiclesCache)
+            .set({
+              district: district,
+              division: holmanPrefix,
+              region: "890",
+              lastLocalUpdateAt: new Date(),
+            })
+            .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle));
+        } catch (cacheErr) {
+          console.warn("[District] failed to update holman_vehicles_cache:", cacheErr);
+        }
+      }
+
+      return res.json({
+        success: allOk,
+        district,
+        costCenter: matchedCostCenter.costCenter,
+        tpms,
+        wms,
+        holman,
+      });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "District update failed";
+      console.error("[District] update error:", error);
       return res.status(500).json({ error: msg });
     }
   });

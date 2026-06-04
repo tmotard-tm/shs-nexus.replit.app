@@ -33,7 +33,8 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
-import { useCostCenters } from "@/hooks/use-cost-centers";
+import { useCostCenters, padDistrict } from "@/hooks/use-cost-centers";
+import { useHasPermission } from "@/hooks/use-permissions";
 import { type FleetVehicle } from "@/data/fleetData";
 import { getVehicleOwnership } from "@/lib/vehicle-utils";
 import { DataSourceIndicator, calculateZipDistance, fetchZipCoords, haversineDistance, getDistanceLabel, AssignmentHistoryDialog } from "@/components/fleet";
@@ -209,7 +210,8 @@ export default function FleetManagement() {
   const { toast } = useToast();
   const { user } = useAuth();
   const isSuperAdmin = user?.role === 'developer' || user?.role === 'admin';
-  const { lookupCostCenter } = useCostCenters();
+  const { lookupCostCenter, items: costCenterItems } = useCostCenters();
+  const canUpdateDistricts = useHasPermission("pageFeatures.createVehicle.updateDistricts");
   
   // Search and filters state
   const [searchQuery, setSearchQuery] = useState("");
@@ -513,6 +515,11 @@ export default function FleetManagement() {
   const [showNameDropdown, setShowNameDropdown] = useState(false);
   const nameDropdownRef = useRef<HTMLDivElement>(null);
   const assignAutoFilledRef = useRef(false); // prevents search firing when we auto-fill name
+
+  // Update-district dialog (Task #453)
+  const [showDistrictDialog, setShowDistrictDialog] = useState(false);
+  const [districtChoice, setDistrictChoice] = useState("");
+  const [districtResult, setDistrictResult] = useState<any>(null);
 
   // Reset all assign form fields when modal opens or closes
   useEffect(() => {
@@ -1151,6 +1158,32 @@ export default function FleetManagement() {
     },
     onError: (err: any) => {
       toast({ title: "Operation failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  // Update-district mutation (Task #453) — fans out to TPMS, WMS, and Holman.
+  const districtMutation = useMutation({
+    mutationFn: async ({ truckNo, district }: { truckNo: string; district: string }) => {
+      const res = await apiRequest("POST", `/api/fleet/vehicle/${encodeURIComponent(truckNo)}/district`, { district });
+      return res.json();
+    },
+    onSuccess: (data: any, variables) => {
+      setDistrictResult(data);
+      const vNum = selectedVehicle?.vehicleNumber;
+      if (vNum && data?.success) {
+        const applyPatch = (v: FleetVehicle): FleetVehicle =>
+          v.vehicleNumber === vNum
+            ? { ...v, district: variables.district, division: data.district?.slice(-4) ?? v.division, region: "890" }
+            : v;
+        queryClient.setQueryData<FleetVehiclesResponse>(['/api/holman/fleet-vehicles'], (old) =>
+          old ? { ...old, vehicles: old.vehicles.map(applyPatch) } : old,
+        );
+        setSelectedVehicle(prev => prev ? applyPatch(prev) : prev);
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/holman/fleet-vehicles"] });
+    },
+    onError: (err: any) => {
+      toast({ title: "District update failed", description: err.message, variant: "destructive" });
     },
   });
 
@@ -2590,6 +2623,21 @@ export default function FleetManagement() {
                       <Users className="h-4 w-4 mr-1.5" />Ops Review
                     </Button>
                   )}
+                  {canUpdateDistricts && !selectedVehicle.tpmsAssignedTechId?.trim() && !selectedVehicle.holmanTechAssigned?.trim() && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        setDistrictResult(null);
+                        setDistrictChoice(selectedVehicle.district || "");
+                        setShowDistrictDialog(true);
+                      }}
+                      data-testid="button-update-district"
+                    >
+                      <MapPin className="h-4 w-4 mr-1.5" />Update District
+                    </Button>
+                  )}
                 </div>
 
                 <Separator />
@@ -3510,6 +3558,22 @@ export default function FleetManagement() {
                   <Input className="mt-1" value={assignDistrict} onChange={e => setAssignDistrict(e.target.value)} placeholder="e.g. 123" />
                 </div>
               </div>
+              {(() => {
+                const techDist = padDistrict(assignDistrict);
+                const vehicleDist = padDistrict(selectedVehicle?.district);
+                if (!techDist || !vehicleDist || techDist === vehicleDist) return null;
+                return (
+                  <div className="rounded-md bg-amber-50 border border-amber-300 px-3 py-2 text-sm text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300" data-testid="assign-district-mismatch">
+                    <p className="font-medium flex items-center gap-1.5">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      This vehicle is in a different district
+                    </p>
+                    <p className="mt-1 text-xs">
+                      The vehicle is in district <strong>{selectedVehicle?.district}</strong>, but the tech is in district <strong>{assignDistrict}</strong>. A vehicle's district can't be changed while it's assigned. To move it to the tech's district, unassign the vehicle first and use <strong>Update District</strong>.
+                    </p>
+                  </div>
+                );
+              })()}
               <div>
                 <Label className="text-xs">Tech Name (for log)</Label>
                 <Input
@@ -3547,6 +3611,82 @@ export default function FleetManagement() {
                 >
                   {fleetOpMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
                   Assign to All Systems
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Update District Modal (Task #453) */}
+      <Dialog open={showDistrictDialog} onOpenChange={(o) => { if (!o) { setShowDistrictDialog(false); setDistrictResult(null); } }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><MapPin className="h-4 w-4" />Update District — Vehicle #{selectedVehicle?.vehicleNumber}</DialogTitle>
+            <DialogDescription>
+              Changes the district in TPMS, WMS, and Holman at once. Only available for unassigned vehicles.
+            </DialogDescription>
+          </DialogHeader>
+          {districtResult ? (
+            <div className="space-y-3">
+              <p className="text-sm font-medium">
+                {districtResult.success
+                  ? `District updated to ${districtResult.district}${districtResult.costCenter ? ` (CC ${districtResult.costCenter})` : ""}.`
+                  : "District update finished with some problems."}
+              </p>
+              {(["tpms", "wms", "holman"] as const).map(sys => (
+                <div key={sys} className="flex items-center justify-between">
+                  <span className="text-sm uppercase font-mono">{sys}</span>
+                  <div className="flex items-center gap-2">
+                    <SystemStatusBadge status={districtResult?.[sys]?.skipped ? "skipped" : districtResult?.[sys]?.success ? "success" : "failed"} />
+                    {districtResult?.[sys]?.error && (
+                      <span className="text-xs text-muted-foreground max-w-[220px] truncate" title={districtResult[sys].error}>{districtResult[sys].error}</span>
+                    )}
+                  </div>
+                </div>
+              ))}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setShowDistrictDialog(false); setDistrictResult(null); }}>Close</Button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="text-sm text-muted-foreground">
+                Current district: <strong className="text-foreground">{selectedVehicle?.district || "—"}</strong>
+                {selectedVehicle?.district && lookupCostCenter(selectedVehicle.district) && (
+                  <span> · CC {lookupCostCenter(selectedVehicle.district)}</span>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs mb-1 block">New District</Label>
+                <Select value={districtChoice} onValueChange={setDistrictChoice}>
+                  <SelectTrigger data-testid="select-new-district">
+                    <SelectValue placeholder="Pick a district…" />
+                  </SelectTrigger>
+                  <SelectContent className="max-h-72">
+                    {[...costCenterItems]
+                      .sort((a, b) => a.district.localeCompare(b.district, undefined, { numeric: true }))
+                      .map(item => (
+                        <SelectItem key={item.district} value={item.district}>
+                          {item.district} · CC {item.costCenter}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setShowDistrictDialog(false)}>Cancel</Button>
+                <Button
+                  disabled={
+                    !districtChoice ||
+                    districtMutation.isPending ||
+                    padDistrict(districtChoice) === padDistrict(selectedVehicle?.district)
+                  }
+                  onClick={() => selectedVehicle && districtMutation.mutate({ truckNo: selectedVehicle.vehicleNumber, district: districtChoice })}
+                  data-testid="button-confirm-district"
+                >
+                  {districtMutation.isPending ? <Loader2 className="h-4 w-4 mr-1.5 animate-spin" /> : <CheckCircle className="h-4 w-4 mr-1.5" />}
+                  Update in All Systems
                 </Button>
               </DialogFooter>
             </div>
