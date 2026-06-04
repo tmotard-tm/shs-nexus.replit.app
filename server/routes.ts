@@ -8789,8 +8789,47 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // --- TPMS truck registration (conditional, best-effort) ---
+      // Register the new truck in TPMS so it exists in the tech-profile system too.
+      // Only runs when WMS creation succeeded, to avoid registering a truck in TPMS
+      // while it failed in WMS. Failures are non-fatal and reported separately.
+      let tpmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
+      if (createInWms && wmsResult.success) {
+        try {
+          const { getTPMSService } = await import("./tpms-service");
+          const tpmsService = getTPMSService();
+          if (!tpmsService.isConfigured()) {
+            console.warn("[BYOV] create: TPMS not configured — skipping addtruck for", paddedVehicle);
+            tpmsResult = { success: true, skipped: true };
+          } else {
+            const u = req.user as any;
+            const updatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
+            const truckName = `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle;
+            await tpmsService.addTruck({
+              truckNo: paddedVehicle,
+              truckName,
+              regionNo: wmsRegionNo,
+              distNo: districtStr ? districtStr.padStart(7, "0") : "",
+              spareTruck: true,
+              updatedBy,
+            });
+            tpmsResult = { success: true };
+          }
+        } catch (tpmsErr: unknown) {
+          const tpmsMsg = tpmsErr instanceof Error ? tpmsErr.message : "TPMS addtruck failed";
+          // Treat "already exists"/duplicate as success — idempotent retry guard.
+          if (/already.?exists/i.test(tpmsMsg) || /duplicate/i.test(tpmsMsg)) {
+            console.log("[BYOV] create: truck already exists in TPMS, treating as success:", paddedVehicle);
+            tpmsResult = { success: true };
+          } else {
+            console.error("[BYOV] TPMS addtruck error:", tpmsErr);
+            tpmsResult = { success: false, error: tpmsMsg };
+          }
+        }
+      }
+
       const holmanOnly = holmanResult.success && !wmsResult.success;
-      return res.json({ holman: holmanResult, wms: wmsResult, holmanOnly });
+      return res.json({ holman: holmanResult, wms: wmsResult, tpms: tpmsResult, holmanOnly });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "BYOV creation failed";
       console.error("[BYOV] create error:", error);
@@ -8872,7 +8911,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      return res.json({ wms: wmsResult });
+      // --- TPMS truck registration (best-effort, only after WMS success) ---
+      let tpmsResult: { success: boolean; skipped?: boolean; error?: string } = { success: true, skipped: true };
+      if (wmsResult.success) {
+        try {
+          const { getTPMSService } = await import("./tpms-service");
+          const tpmsService = getTPMSService();
+          if (!tpmsService.isConfigured()) {
+            console.warn("[BYOV] WMS-only retry: TPMS not configured — skipping addtruck for", paddedVehicle);
+            tpmsResult = { success: true, skipped: true };
+          } else {
+            const u = req.user as any;
+            const updatedBy: string = String(u?.username || u?.email || u?.id || "NEXUS").toUpperCase();
+            const truckName = `${modelYear || ""} ${make || ""} ${model || ""}`.trim() || paddedVehicle;
+            await tpmsService.addTruck({
+              truckNo: paddedVehicle,
+              truckName,
+              regionNo: wmsRegionNo,
+              distNo: districtStr ? districtStr.padStart(7, "0") : "",
+              spareTruck: true,
+              updatedBy,
+            });
+            tpmsResult = { success: true };
+          }
+        } catch (tpmsErr: unknown) {
+          const tpmsMsg = tpmsErr instanceof Error ? tpmsErr.message : "TPMS addtruck failed";
+          if (/already.?exists/i.test(tpmsMsg) || /duplicate/i.test(tpmsMsg)) {
+            console.log("[BYOV] WMS-only retry: truck already exists in TPMS, treating as success:", paddedVehicle);
+            tpmsResult = { success: true };
+          } else {
+            console.error("[BYOV] WMS-only retry: TPMS addtruck error:", tpmsErr);
+            tpmsResult = { success: false, error: tpmsMsg };
+          }
+        }
+      }
+
+      return res.json({ wms: wmsResult, tpms: tpmsResult });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "WMS-only creation failed";
       console.error("[BYOV] create-wms-only error:", error);

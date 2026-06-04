@@ -74,6 +74,7 @@ interface FormState {
 interface SubmitResult {
   holman: { success: boolean; error?: string };
   wms: { success: boolean; error?: string };
+  tpms?: { success: boolean; skipped?: boolean; error?: string };
   holmanOnly?: boolean;
 }
 
@@ -267,13 +268,15 @@ export default function CreateVehicle() {
       }
       setLastSubmittedForm(payload);
       setSubmitResult(data as SubmitResult);
-      const bothOk = data.holman?.success && data.wms?.success;
+      const coreOk = data.holman?.success && data.wms?.success;
+      const tpmsFailed = data.tpms && !data.tpms.skipped && !data.tpms.success;
+      const allOk = coreOk && !tpmsFailed;
       toast({
-        title: bothOk ? "Vehicle Created" : "Partial Success",
-        description: bothOk
-          ? "BYOV vehicle submitted to Holman and WMS successfully."
+        title: allOk ? "Vehicle Created" : "Partial Success",
+        description: allOk
+          ? "BYOV vehicle submitted successfully — see per-system results below."
           : "One or more systems had an error — see results below.",
-        variant: bothOk ? "default" : "destructive",
+        variant: allOk ? "default" : "destructive",
       });
       queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
     },
@@ -289,7 +292,7 @@ export default function CreateVehicle() {
   const retryWmsMutation = useMutation({
     mutationFn: async (payload: FormState) => {
       const resp = await apiRequest("POST", "/api/byov/create-wms-only", payload);
-      return (await resp.json()) as { wms: { success: boolean; error?: string }; error?: string };
+      return (await resp.json()) as { wms: { success: boolean; error?: string }; tpms?: { success: boolean; skipped?: boolean; error?: string }; error?: string };
     },
     onSuccess: (data) => {
       if ("error" in data && data.error) {
@@ -297,7 +300,7 @@ export default function CreateVehicle() {
         return;
       }
       setSubmitResult((prev) =>
-        prev ? { ...prev, wms: data.wms, holmanOnly: !data.wms.success } : prev
+        prev ? { ...prev, wms: data.wms, tpms: data.tpms ?? prev.tpms, holmanOnly: !data.wms.success } : prev
       );
       if (data.wms.success) {
         toast({ title: "WMS Retry Succeeded", description: "Truck record created in WMS successfully." });
@@ -743,6 +746,9 @@ export default function CreateVehicle() {
               <CardContent className="space-y-3">
                 <SystemResultRow system="Holman" result={submitResult.holman} />
                 <SystemResultRow system="WMS" result={submitResult.wms} />
+                {submitResult.tpms && !submitResult.tpms.skipped && (
+                  <SystemResultRow system="TPMS" result={submitResult.tpms} />
+                )}
                 {submitResult.holmanOnly && lastSubmittedForm && (
                   <Alert className="border-amber-400 dark:border-amber-500">
                     <AlertTriangle className="h-4 w-4 text-amber-500" />

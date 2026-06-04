@@ -488,6 +488,56 @@ class TPMSService {
     return data;
   }
 
+  // Add a truck to TPMS (POST /addtruck)
+  // Body per Postman collection:
+  //   { "truckNo": "088274", "truckName": "2019 FORD F-150", "regionNo": "0000890",
+  //     "distNo": "0007088", "spareTruck": true, "updatedBy": "NEXUS" }
+  async addTruck(params: {
+    truckNo: string;
+    truckName: string;
+    regionNo: string;
+    distNo: string;
+    spareTruck?: boolean;
+    updatedBy: string;
+  }): Promise<any> {
+    const token = await this.getToken();
+    const baseUrl = this.apiEndpoint.endsWith('/') ? this.apiEndpoint.slice(0, -1) : this.apiEndpoint;
+    const url = `${baseUrl}/addtruck`;
+
+    const requestBody = {
+      truckNo: params.truckNo,
+      truckName: params.truckName,
+      regionNo: params.regionNo,
+      distNo: params.distNo,
+      spareTruck: params.spareTruck ?? true,
+      updatedBy: params.updatedBy,
+    };
+    const bodyStr = JSON.stringify(requestBody);
+    console.log(`[TPMS] POST ${url} body: ${bodyStr}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: bodyStr,
+    });
+
+    const rawText = await response.text();
+    console.log(`[TPMS] addtruck response: ${response.status} ${rawText}`);
+
+    if (!response.ok) {
+      throw new Error(`Add truck request failed: ${response.status} - ${rawText}`);
+    }
+
+    let data: any;
+    try { data = JSON.parse(rawText); } catch { data = rawText; }
+    console.log(`[TPMS] Truck added successfully: ${params.truckNo}`);
+    return data;
+  }
+
   // Temporary truck assignment (POST /temptruckassign)
   async tempTruckAssign(ldapId: string, distNo: string, truckNo: string): Promise<any> {
     const token = await this.getToken();
