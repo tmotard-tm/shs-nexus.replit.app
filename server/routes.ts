@@ -7649,8 +7649,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/cost-centers", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);
-      if (!(await userCanManageCostCenters(currentUser))) {
-        return res.status(403).json({ message: "Access denied. You do not have permission to manage District Cost Centers." });
+      // Read access: anyone who can manage cost centers OR update vehicle districts.
+      // The Update District picker needs the known-district list even for users who
+      // can't manage the cost-center mappings themselves.
+      if (!(await userCanManageCostCenters(currentUser)) && !(await userCanUpdateDistricts(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to view District Cost Centers." });
       }
       const items = await storage.listDistrictCostCenters();
       res.json(items);
@@ -18535,6 +18538,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!truckNumber || !ldapId) {
         return res.status(400).json({ message: "truckNumber and ldapId are required" });
       }
+
+      // Block an assignment that would silently change the vehicle's district.
+      // A vehicle in a different district than the tech must be unassigned and have
+      // its district changed explicitly (Update District), not changed during assign.
+      const reqDistrict = padDistrictForApi(String(districtNo ?? ""));
+      if (reqDistrict) {
+        const districtCandidates = Array.from(new Set(
+          [truckNumber, toHolmanRef(truckNumber), toDisplayNumber(truckNumber), toCanonical(truckNumber)]
+            .map((c) => String(c || "").trim())
+            .filter(Boolean),
+        ));
+        const districtRows = await db
+          .select({ district: holmanVehiclesCache.district })
+          .from(holmanVehiclesCache)
+          .where(inArray(holmanVehiclesCache.holmanVehicleNumber, districtCandidates))
+          .limit(1);
+        const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
+        if (vehicleDistrict && vehicleDistrict !== reqDistrict) {
+          return res.status(409).json({
+            message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
+          });
+        }
+      }
+
       const requestedBy = req.user?.username || "unknown";
       const result = await fleetOpsService.assignTech({ truckNumber, ldapId, districtNo, techName: techName || ldapId, requestedBy, notes, assignmentType, amsStatusId: amsStatusId ? Number(amsStatusId) : undefined, repairData });
       if ('locked' in result && result.locked) {

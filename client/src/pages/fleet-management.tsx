@@ -3569,7 +3569,7 @@ export default function FleetManagement() {
                       This vehicle is in a different district
                     </p>
                     <p className="mt-1 text-xs">
-                      The vehicle is in district <strong>{selectedVehicle?.district}</strong>, but the tech is in district <strong>{assignDistrict}</strong>. A vehicle's district can't be changed while it's assigned. To move it to the tech's district, unassign the vehicle first and use <strong>Update District</strong>.
+                      The vehicle is in district <strong>{selectedVehicle?.district}</strong>, but the tech is in district <strong>{assignDistrict}</strong>. This assignment is blocked because a vehicle's district can't be changed while it's assigned. To move it to the tech's district, unassign the vehicle first and use <strong>Update District</strong>.
                     </p>
                   </div>
                 );
@@ -3594,7 +3594,11 @@ export default function FleetManagement() {
                   disabled={!assignLdap.trim() || fleetOpMutation.isPending || !!(assignVehicleStatus && (() => {
                     const sc = assignVehicleStatus.holmanAssignedStatusCd;
                     return sc && ['L','B','W','T'].includes(sc);
-                  })()) || assignVehicleStatus?.isLocked}
+                  })()) || assignVehicleStatus?.isLocked || (() => {
+                    const td = padDistrict(assignDistrict);
+                    const vd = padDistrict(selectedVehicle?.district);
+                    return !!td && !!vd && td !== vd;
+                  })()}
                   onClick={() => fleetOpMutation.mutate({
                     endpoint: "/api/fleet-ops/assign",
                     body: {
