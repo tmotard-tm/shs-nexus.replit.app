@@ -571,8 +571,8 @@ export default function CreateVehicle() {
                         <SelectTrigger><SelectValue placeholder="Select class" /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="byov">BYOV</SelectItem>
-                          <SelectItem value="holman">Holman</SelectItem>
-                          <SelectItem value="enterprise">Enterprise</SelectItem>
+                          <SelectItem value="holman" disabled>Holman (coming soon)</SelectItem>
+                          <SelectItem value="enterprise" disabled>Enterprise (coming soon)</SelectItem>
                         </SelectContent>
                       </Select>
                       <p className="text-xs text-muted-foreground">
