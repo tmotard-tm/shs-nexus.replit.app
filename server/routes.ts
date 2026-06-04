@@ -8446,6 +8446,31 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Reservation guard (Task #450): a partial unique index on byov_creation_audit
+  // ensures at most one ACTIVE (non-blocked) row per vehicle number. The create
+  // path inserts an active row with ON CONFLICT DO NOTHING before any external
+  // fan-out, so two concurrent creates can never both allocate the same number.
+  // Created idempotently here (like the LOA recovery index) to avoid drizzle-kit
+  // push churn. Memoized so the DDL only runs once per process.
+  let byovReservationIndexReady: Promise<void> | null = null;
+  const ensureByovReservationIndex = (): Promise<void> => {
+    if (!byovReservationIndexReady) {
+      byovReservationIndexReady = db
+        .execute(sql`
+          CREATE UNIQUE INDEX IF NOT EXISTS "byov_creation_audit_active_vehicle_uq"
+            ON "byov_creation_audit" ("vehicle_number")
+            WHERE "blocked_source" IS NULL;
+        `)
+        .then(() => undefined)
+        .catch((e) => {
+          // Allow a retry on the next request if the DDL failed.
+          byovReservationIndexReady = null;
+          throw e;
+        });
+    }
+    return byovReservationIndexReady;
+  };
+
   // Suggest the next available vehicle number for a given class.
   // Classes:
   //   byov       → next 088xxx  (canonical band 88000–88999)
@@ -8557,6 +8582,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // When createInHolman is false the Holman duplicate-gate is skipped entirely so
   // WMS-only rows are not incorrectly blocked by the 409 guard.
   app.post("/api/byov/create", requireAuth, async (req: any, res) => {
+    // Reservation state hoisted so the outer catch can release a stranded number.
+    let reservationId: number | null = null;
+    let reservationFreshlyInserted = false;
+    let priorHolmanSuccess = false;
+    let priorWmsSuccess = false;
     try {
       const {
         vehicleNumber, vin, assetType, modelYear, make, model,
@@ -8682,6 +8712,129 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(409).json({
             error: `Vehicle ${paddedVehicle} already exists in Holman. Use a different vehicle number.`,
           });
+        }
+      }
+
+      // --- Atomic number reservation (Task #450) ---
+      // Claim this vehicle number locally BEFORE any external fan-out so two
+      // concurrent creates can never both allocate the same recommended number.
+      // The partial unique index lets only one ACTIVE (non-blocked) audit row
+      // exist per number; the loser of the race falls into the conflict branch.
+      // A retry of the SAME vehicle (matching VIN) is allowed through so the
+      // existing idempotent per-system guards can finish a partial create; a
+      // DIFFERENT vehicle hitting the same number is a genuine collision (409).
+      // A stale active row (older than the TTL with nothing created) is treated
+      // as abandoned and reclaimed so a crash between reserve and finalize can
+      // never permanently burn a number.
+      const RESERVATION_STALE_MS = 15 * 60 * 1000; // 15 minutes
+      {
+        const ru = req.user as any;
+        const reservedBy: string = String(ru?.username || ru?.email || ru?.id || "unknown");
+        const normVin = String(vin ?? "").trim().toUpperCase();
+        try {
+          await ensureByovReservationIndex();
+        } catch (idxErr) {
+          console.error("[BYOV] create: failed to ensure reservation index:", idxErr);
+          return res.status(500).json({ error: "Could not prepare vehicle number reservation. Please try again." });
+        }
+        const inserted = await db
+          .insert(byovCreationAudit)
+          .values({
+            vehicleNumber: paddedVehicle,
+            vin: vin ?? null,
+            make: make ?? null,
+            model: model ?? null,
+            modelYear: modelYear ? String(modelYear) : null,
+            assetType: assetType ?? null,
+            district: district ? String(district) : null,
+            submittedBy: reservedBy,
+            holmanSuccess: false,
+            wmsSuccess: false,
+            blockedSource: null,
+          })
+          .onConflictDoNothing()
+          .returning({ id: byovCreationAudit.id });
+
+        if (inserted.length > 0) {
+          reservationId = inserted[0].id;
+          reservationFreshlyInserted = true;
+        } else {
+          // An active (non-blocked) row already exists for this number.
+          const existing = await db
+            .select({
+              id: byovCreationAudit.id,
+              vin: byovCreationAudit.vin,
+              holmanSuccess: byovCreationAudit.holmanSuccess,
+              wmsSuccess: byovCreationAudit.wmsSuccess,
+              submittedAt: byovCreationAudit.submittedAt,
+            })
+            .from(byovCreationAudit)
+            .where(and(eq(byovCreationAudit.vehicleNumber, paddedVehicle), isNull(byovCreationAudit.blockedSource)))
+            .limit(1);
+          const row = existing[0];
+          const sameVehicle = !!row && String(row.vin ?? "").trim().toUpperCase() === normVin;
+          const submittedAtMs = row?.submittedAt ? new Date(row.submittedAt).getTime() : 0;
+          const isStale =
+            !!row &&
+            !row.holmanSuccess &&
+            !row.wmsSuccess &&
+            Number.isFinite(submittedAtMs) &&
+            Date.now() - submittedAtMs > RESERVATION_STALE_MS;
+          if (row && !sameVehicle && !isStale) {
+            return res.status(409).json({
+              error: `Vehicle number ${paddedVehicle} is already assigned to a different vehicle${row.vin ? ` (VIN ${row.vin})` : ""}. Pick a different number.`,
+            });
+          }
+          if (row && !sameVehicle && isStale) {
+            // Abandoned reservation from a crashed/aborted create — reclaim it for
+            // this vehicle. Compare-and-swap: the UPDATE is guarded by the exact
+            // stale state we observed (same id, still un-blocked, both flags false,
+            // and the SAME submitted_at we read). Only one of N concurrent requests
+            // can win the swap; losers get 0 rows back and fall through to 409 so
+            // they never proceed to fan-out on a row someone else just claimed.
+            const reclaimed = await db
+              .update(byovCreationAudit)
+              .set({
+                vin: vin ?? null,
+                make: make ?? null,
+                model: model ?? null,
+                modelYear: modelYear ? String(modelYear) : null,
+                assetType: assetType ?? null,
+                district: district ? String(district) : null,
+                submittedBy: reservedBy,
+                submittedAt: new Date(),
+                holmanSuccess: false,
+                holmanError: null,
+                wmsSuccess: false,
+                wmsError: null,
+              })
+              .where(
+                and(
+                  eq(byovCreationAudit.id, row.id),
+                  isNull(byovCreationAudit.blockedSource),
+                  eq(byovCreationAudit.holmanSuccess, false),
+                  eq(byovCreationAudit.wmsSuccess, false),
+                  eq(byovCreationAudit.submittedAt, row.submittedAt),
+                ),
+              )
+              .returning({ id: byovCreationAudit.id });
+            if (reclaimed.length === 0) {
+              // Another request won the reclaim (or the row changed under us).
+              return res.status(409).json({
+                error: `Vehicle number ${paddedVehicle} was just claimed by another vehicle. Pick a different number.`,
+              });
+            }
+            console.warn(
+              `[BYOV] create: reclaimed stale reservation for ${paddedVehicle} (was VIN ${row.vin ?? "(none)"}, age ${Math.round((Date.now() - submittedAtMs) / 60000)}m).`,
+            );
+            reservationId = row.id;
+            reservationFreshlyInserted = true; // we now own this row; release on failure
+          } else {
+            // Same vehicle → reuse the existing reservation row and finish the create idempotently.
+            reservationId = row?.id ?? null;
+            priorHolmanSuccess = !!row?.holmanSuccess;
+            priorWmsSuccess = !!row?.wmsSuccess;
+          }
         }
       }
 
@@ -8939,11 +9092,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
+      // --- Finalize reservation (Task #450) ---
+      // Record the outcome on the reserved audit row. If nothing was actually
+      // created in ANY system (and no prior attempt had succeeded either),
+      // release the number by deleting the row so a later create can reuse it.
+      const finalHolmanSuccess = priorHolmanSuccess || (createInHolman && holmanResult.success);
+      const finalWmsSuccess = priorWmsSuccess || (createInWms && wmsResult.success);
+      if (reservationId !== null) {
+        try {
+          if (finalHolmanSuccess || finalWmsSuccess) {
+            await db
+              .update(byovCreationAudit)
+              .set({
+                holmanSuccess: finalHolmanSuccess,
+                holmanError: holmanResult.error ?? null,
+                wmsSuccess: finalWmsSuccess,
+                wmsError: wmsResult.error ?? null,
+              })
+              .where(eq(byovCreationAudit.id, reservationId));
+          } else {
+            await db.delete(byovCreationAudit).where(eq(byovCreationAudit.id, reservationId));
+          }
+        } catch (finalizeErr) {
+          console.error("[BYOV] create: failed to finalize reservation audit row:", finalizeErr);
+        }
+      }
+
       const holmanOnly = holmanResult.success && !wmsResult.success;
       return res.json({ holman: holmanResult, wms: wmsResult, tpms: tpmsResult, holmanOnly });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "BYOV creation failed";
       console.error("[BYOV] create error:", error);
+      // Release a number we reserved in THIS request if the create blew up before
+      // finalize, so an unexpected exception never permanently burns the number.
+      // Only delete rows we freshly own with nothing yet created (never a reused
+      // row that may carry a prior system success).
+      if (reservationId !== null && reservationFreshlyInserted && !priorHolmanSuccess && !priorWmsSuccess) {
+        try {
+          await db.delete(byovCreationAudit).where(eq(byovCreationAudit.id, reservationId));
+        } catch (releaseErr) {
+          console.error("[BYOV] create: failed to release reservation after error:", releaseErr);
+        }
+      }
       return res.status(500).json({ error: msg });
     }
   });
