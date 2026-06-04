@@ -45,7 +45,7 @@ const US_STATES = [
   "VA","WA","WV","WI","WY","DC",
 ];
 
-const PLATE_TYPES = ["Standard", "Commercial", "Government", "Personalized", "Dealer", "Other"];
+const PLATE_TYPES = ["PAS", "COM"];
 
 interface FormState {
   vehicleClass: string;
