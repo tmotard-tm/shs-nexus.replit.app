@@ -39,3 +39,8 @@ A district change on an UNASSIGNED vehicle fans out to all three systems of reco
 **Rule:** in `POST /api/fleet/vehicle/:truckNo/district`, always derive `paddedVehicle` via `toHolmanRef(vehicle.holmanVehicleNumber)` — never use the raw cache value directly.
 **Why:** `holman_vehicles_cache.holman_vehicle_number` is stored unpadded for some vehicles (e.g. "61063"). TPMS rejects unpadded numbers with "Invalid truck and/or dist passed" (400). The fix is one line — `toHolmanRef()` / `toTpmsRef()` both pad to 6 digits and are already imported in routes.ts.
 **How to apply:** any future addition that reads `vehicle.holmanVehicleNumber` and passes it to TPMS or WMS must wrap it with `toTpmsRef()` / `toHolmanRef()` first.
+
+## Cache UPDATE must use the raw stored key, not the padded key
+**Rule:** in the `allOk` cache-mirror block, the WHERE clause must use `vehicle.holmanVehicleNumber` (the exact value retrieved from the DB), not `paddedVehicle` (the 6-digit padded form).
+**Why:** `holman_vehicles_cache` rows are stored with unpadded numbers (e.g. "37251"). After introducing `paddedVehicle = toHolmanRef(...)` = "037251", the UPDATE WHERE matched 0 rows — silently leaving the cached district stale. The assign guard then read the old district, found a mismatch against the tech's district, and fired 409 even immediately after a successful district update.
+**How to apply:** any future UPDATE to `holman_vehicles_cache` keyed by truck number must use the raw `holmanVehicleNumber` from the fetched row, not a padded/formatted variant. The multi-format `inArray` lookup is fine for reads; for the subsequent write use the stored key directly.

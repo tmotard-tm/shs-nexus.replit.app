@@ -9439,7 +9439,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
               region: "890",
               lastLocalUpdateAt: new Date(),
             })
-            .where(eq(holmanVehiclesCache.holmanVehicleNumber, paddedVehicle));
+            // Use the raw stored key (vehicle.holmanVehicleNumber), not paddedVehicle.
+          // paddedVehicle = "037251" but the row is stored as "37251"; the padded
+          // WHERE hits 0 rows and the cache stays stale, causing a 409 on the next assign.
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.holmanVehicleNumber));
         } catch (cacheErr) {
           console.warn("[District] failed to update holman_vehicles_cache:", cacheErr);
         }
