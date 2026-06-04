@@ -496,7 +496,7 @@ const upload = multer({
 // In-memory cache for ZIP code coordinates (per server session)
 const zipCoordsCache = new Map<string, { lat: number; lng: number } | null>();
 
-export async function registerRoutes(app: Express): Promise<Server> {
+export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
 
   // Lightweight ZIP → lat/lng lookup using the Zippopotam API (same as fleet-scope-distance-calculator)
@@ -20841,7 +20841,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       console.log(`  ${methods} ${layer.route.path}`);
     });
 
-  const httpServer = createServer(app);
+  // Reuse the server the caller already opened the port on (so the autoscale
+  // probe can't be blocked by the heavy DB schema init above); only create one
+  // here as a fallback when called without a pre-created server.
+  const httpServer = existingServer ?? createServer(app);
 
   if (fsDb) {
     initFsWebSocket(httpServer);

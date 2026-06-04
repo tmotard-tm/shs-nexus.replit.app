@@ -4,6 +4,7 @@
 // assertion runs before any database connection can be opened.
 import { assertProdDatabaseHost } from "./guardrails/g8-env-drift-check";
 import express, { type Request, Response, NextFunction } from "express";
+import { createServer } from "http";
 import { registerRoutes } from "./routes";
 import { elevenLabsWebhookHandler } from "./fleet-scope-routes";
 import { setupVite, serveStatic, log } from "./vite";
@@ -453,58 +454,81 @@ async function runStartupBootstrap() {
 }
 
 (async () => {
-  // Register routes first so the HTTP server exists, then open the port as fast
-  // as possible. Heavy DB/Snowflake bootstrap is deferred to runStartupBootstrap()
-  // which fires AFTER listen — see that function's comment for why.
-  const server = await registerRoutes(app);
+  // Open the TCP port FIRST — before registerRoutes() runs, before any DB schema
+  // init, before Snowflake. The autoscale promote probe only needs port 5000 to
+  // be open; deploys were failing with "the required port was never opened,
+  // expected port 5000" because registerRoutes() awaits ~27 idempotent DB schema
+  // inits (initFleetScopeSchema/initVrmSchema + CREATE TABLE IF NOT EXISTS …) and
+  // a transient Neon WebSocket hiccup at boot stalled those past the probe window.
+  // We create the http server here, start listening immediately, then register
+  // routes onto it (initFsWebSocket attaches to this same server).
+  const server = createServer(app);
+  const port = parseInt(process.env.PORT || '5000', 10);
 
-  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
-    console.error(`[Express] Error handler: ${status} — ${message}`, err.stack || '');
-    res.status(status).json({ message });
+  // AWAIT the 'listening' event before registering routes. Awaiting here yields
+  // to the event loop so libuv actually binds the TCP socket and fires the
+  // callback BEFORE registerRoutes() runs. (Without the await, the immediately
+  // following `await registerRoutes()` saturates the loop with DB-init work and
+  // the real port bind is postponed until startup finishes — which is exactly
+  // the "port never opened" deploy failure we are fixing.)
+  await new Promise<void>((resolve) => {
+    server.listen({
+      port,
+      host: "0.0.0.0",
+      reusePort: true,
+    }, () => {
+      log(`serving on port ${port}`);
+      resolve();
+    });
   });
 
-  // importantly only setup vite in development and after
-  // setting up all the other routes so the catch-all route
-  // doesn't interfere with the other routes
-  if (app.get("env") === "development") {
-    await setupVite(app, server);
-  } else {
-    serveStatic(app);
-  }
+  // Register routes on the already-listening server. The heavy DB schema init
+  // inside here now runs with the port already open, so it can never block the
+  // health-check probe. Because the port is already open, a failure in this
+  // phase would otherwise leave a "healthy port, unhealthy app" instance that
+  // autoscale could promote — so fail-fast (exit 1) if route/static wiring
+  // throws, letting the previous good build keep serving.
+  try {
+    await registerRoutes(app, server);
 
-  // ALWAYS serve the app on the port specified in the environment variable PORT
-  // Other ports are firewalled. Default to 5000 if not specified.
-  // this serves both the API and the client.
-  // It is the only port that is not firewalled.
-  const port = parseInt(process.env.PORT || '5000', 10);
-  server.listen({
-    port,
-    host: "0.0.0.0",
-    reusePort: true,
-  }, () => {
-    log(`serving on port ${port}`);
-
-    // Kick off heavy startup bootstrap (permission patch, template seeding,
-    // Snowflake init, schedulers) AFTER the port is open so the autoscale
-    // health-check probe is never blocked by slow DB/Snowflake work.
-    runStartupBootstrap().catch((e: unknown) => {
-      console.error("[Startup] Background bootstrap error (non-fatal):", e instanceof Error ? e.message : e);
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      const status = err.status || err.statusCode || 500;
+      const message = err.message || "Internal Server Error";
+      console.error(`[Express] Error handler: ${status} — ${message}`, err.stack || '');
+      res.status(status).json({ message });
     });
 
-    // Guardrail G4 — fire post-deploy integrity check non-blocking.
-    // Compares current row counts against the latest G2 snapshot in object
-    // storage. Fails open (no-baseline / network errors) so it can never
-    // block server startup. Output is prefixed `[G4]`.
-    if (process.env.NODE_ENV === "production") {
-      import("./guardrails/g4-post-deploy-integrity")
-        .then((m) => m.runIntegrityCheck?.().catch((e: unknown) => {
-          console.warn("[G4] Integrity check threw (non-fatal):", e instanceof Error ? e.message : e);
-        }))
-        .catch((e: unknown) => {
-          console.warn("[G4] Integrity module failed to load (non-fatal):", e instanceof Error ? e.message : e);
-        });
+    // importantly only setup vite in development and after
+    // setting up all the other routes so the catch-all route
+    // doesn't interfere with the other routes
+    if (app.get("env") === "development") {
+      await setupVite(app, server);
+    } else {
+      serveStatic(app);
     }
+  } catch (err) {
+    console.error("[Startup] FATAL: route/static wiring failed after port open — exiting:", err);
+    process.exit(1);
+  }
+
+  // Kick off heavy startup bootstrap (permission patch, template seeding,
+  // Snowflake init, schedulers) AFTER routes are ready and the port is open so
+  // the autoscale health-check probe is never blocked by slow DB/Snowflake work.
+  runStartupBootstrap().catch((e: unknown) => {
+    console.error("[Startup] Background bootstrap error (non-fatal):", e instanceof Error ? e.message : e);
   });
+
+  // Guardrail G4 — fire post-deploy integrity check non-blocking.
+  // Compares current row counts against the latest G2 snapshot in object
+  // storage. Fails open (no-baseline / network errors) so it can never
+  // block server startup. Output is prefixed `[G4]`.
+  if (process.env.NODE_ENV === "production") {
+    import("./guardrails/g4-post-deploy-integrity")
+      .then((m) => m.runIntegrityCheck?.().catch((e: unknown) => {
+        console.warn("[G4] Integrity check threw (non-fatal):", e instanceof Error ? e.message : e);
+      }))
+      .catch((e: unknown) => {
+        console.warn("[G4] Integrity module failed to load (non-fatal):", e instanceof Error ? e.message : e);
+      });
+  }
 })();
