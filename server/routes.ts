@@ -9035,7 +9035,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           zipPostalCode: zip || null,
           assetType: assetType || null,
           vendorCode: "OTH",
-          modelYear: modelYear ? Number(modelYear) : null,
+          modelYear: modelYear ? String(modelYear) : null,
           makeClient: make || null,
           modelClient: model || null,
           deliveryDate: finalDeliveryDate,
