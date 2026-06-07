@@ -153,6 +153,34 @@ export default function PMF() {
     queryKey: ['/api/fs/pmf/summary'],
   });
 
+  // Processing Pipeline data. Prefer the server summary, but fall back to a
+  // client-derived computation from the already-loaded rows so the frame still
+  // renders if the lightweight summary query ever fails or goes stale (the
+  // shared queryClient uses staleTime: Infinity + retry: false, so a single
+  // failed fetch would otherwise hide the frame for the whole session). The
+  // bucketing below mirrors the server's /pmf/summary logic exactly.
+  const pipelineFlow = useMemo<{ status: string; count: number; filterStatuses?: string[] }[]>(() => {
+    if (pmfSummary?.pipelineFlow && pmfSummary.pipelineFlow.length > 0) {
+      return pmfSummary.pipelineFlow;
+    }
+    if (pmfData.length === 0) return [];
+    const byStatus: Record<string, number> = {};
+    for (const row of pmfData) {
+      const status = row.status || 'Unknown';
+      byStatus[status] = (byStatus[status] || 0) + 1;
+    }
+    const inProcessCount = (byStatus["Locked Down Local"] || 0) + (byStatus["Locked down local"] || 0) + (byStatus["Locked down off lot"] || 0);
+    const approvedPickupCount = (byStatus["Approved to Pick Up"] || 0) + (byStatus["Pending Pickup"] || 0);
+    return [
+      { status: "Pending Arrival", count: byStatus["Pending Arrival"] || 0 },
+      { status: "In Process", count: inProcessCount, filterStatuses: ["Locked Down Local", "Locked down local", "Locked down off lot"] },
+      { status: "Available", count: byStatus["Available"] || 0 },
+      { status: "Approved for Pick Up", count: approvedPickupCount, filterStatuses: ["Approved to Pick Up", "Pending Pickup"] },
+      { status: "Deployed", count: byStatus["Unavailable"] || 0, filterStatuses: ["Unavailable"] },
+      { status: "Reserved", count: byStatus["Reserved"] || 0 },
+    ];
+  }, [pmfSummary, pmfData]);
+
   // Sync activity logs mutation
   const syncActivityMutation = useMutation({
     mutationFn: async () => {
@@ -689,7 +717,7 @@ export default function PMF() {
       } else if (column === "Status") {
         if (filterValue.startsWith("__pipeline__")) {
           const pipelineName = filterValue.replace("__pipeline__", "");
-          const pipelineStep = pmfSummary?.pipelineFlow?.find(s => s.status === pipelineName);
+          const pipelineStep = pipelineFlow.find(s => s.status === pipelineName);
           if (pipelineStep?.filterStatuses) {
             filtered = filtered.filter(asset => pipelineStep.filterStatuses!.includes(asset.status));
           } else {
@@ -717,7 +745,7 @@ export default function PMF() {
     }
     
     return filtered;
-  }, [aggregatedAssets, columnFilters, sortColumn, sortDirection, daysInStatusData]);
+  }, [aggregatedAssets, columnFilters, sortColumn, sortDirection, daysInStatusData, pipelineFlow]);
 
   const toggleSort = (column: string) => {
     if (sortColumn === column) {
@@ -870,7 +898,7 @@ export default function PMF() {
         <h1 className="text-xl font-semibold" data-testid="text-page-title">Park My Fleet</h1>
       </div>
 
-      {pmfSummary && pmfSummary.pipelineFlow && pmfSummary.pipelineFlow.length > 0 && (
+      {pipelineFlow.length > 0 && (
         <div className="px-4 pt-4">
           <Card>
             <CardContent className="py-3 px-4">
@@ -879,7 +907,7 @@ export default function PMF() {
                 Processing Pipeline
               </h3>
               <div className="flex items-center gap-1 overflow-x-auto">
-                {pmfSummary.pipelineFlow.map((step, index) => {
+                {pipelineFlow.map((step, index) => {
                   const stepStyle = statusConfig[step.status] || defaultConfig;
                   return (
                     <div key={step.status} className="flex items-center" data-testid={`pipeline-step-${index}`}>
@@ -904,7 +932,7 @@ export default function PMF() {
                         <span className="text-xs font-medium mt-1 whitespace-nowrap">{step.status}</span>
                         <span className={`text-lg font-bold ${stepStyle.color}`}>{step.count}</span>
                       </button>
-                      {index < pmfSummary.pipelineFlow.length - 1 && (
+                      {index < pipelineFlow.length - 1 && (
                         <ChevronRight className="w-4 h-4 text-muted-foreground flex-shrink-0 mx-1" />
                       )}
                     </div>
