@@ -9941,15 +9941,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       if (!row) return res.status(404).json({ error: "Audit row not found." });
 
-      const { canonicalVehicleNumber } = req.body ?? {};
+      const { canonicalVehicleNumber, presentInSystems } = req.body ?? {};
+
+      // Build a note that accurately names which systems the duplicate actually landed in.
+      // presentInSystems is a free-text string supplied by the admin (e.g. "TPMS, WMS").
+      // Defaults to "any systems it was registered in" when not provided.
+      const systemsPhrase = presentInSystems
+        ? `Remove it from: ${presentInSystems}.`
+        : "Check and remove it from any systems it was registered in (TPMS, WMS, Holman).";
+      const byClause = `Marked by ${currentUser.username || currentUser.email || "admin"}.`;
+      const canonicalClause = canonicalVehicleNumber
+        ? `VIN duplicate of ${canonicalVehicleNumber} — `
+        : "VIN duplicate — ";
 
       await db
         .update(byovCreationAudit)
         .set({
           blockedSource: "vin_duplicate",
-          holmanError: canonicalVehicleNumber
-            ? `VIN duplicate of ${canonicalVehicleNumber} — marked by ${currentUser.username || currentUser.email || "admin"}. Retire this vehicle in Holman and WMS.`
-            : `VIN duplicate — marked by ${currentUser.username || currentUser.email || "admin"}. Retire this vehicle in Holman and WMS.`,
+          holmanError: `${canonicalClause}${byClause} ${systemsPhrase}`,
         })
         .where(eq(byovCreationAudit.id, id));
 

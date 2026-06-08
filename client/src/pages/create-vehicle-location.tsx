@@ -1194,7 +1194,7 @@ export default function CreateVehicle() {
                               <td className="py-2 pr-4" colSpan={2}>
                                 <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
                                   <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                                  VIN duplicate — retire in Holman &amp; WMS
+                                  VIN duplicate — retire in affected systems
                                 </span>
                               </td>
                             ) : (
@@ -1326,7 +1326,7 @@ export default function CreateVehicle() {
                       <div>
                         <div className="text-xs font-semibold text-orange-800 dark:text-orange-300">VIN duplicate — external action required</div>
                         <div className="text-xs text-orange-700 dark:text-orange-400">
-                          This vehicle shares its VIN with another. It was created in Holman and WMS before the duplicate guard existed. Someone must retire it in Holman and remove it from WMS.
+                          This vehicle number shares its VIN with another. It must be retired from any downstream systems it was registered in before the VIN guard existed.
                         </div>
                         {selectedAuditEntry.holmanError && (
                           <div className="text-xs text-orange-700 dark:text-orange-400 mt-1 font-mono">{selectedAuditEntry.holmanError}</div>
@@ -1443,22 +1443,32 @@ function MarkVinDuplicateButton({
 
   const handleClick = async () => {
     const canonical = prompt(
-      `Mark ${vehicleNumber} as a VIN duplicate.\n\nEnter the canonical vehicle number (the one to keep), or leave blank:`,
+      `Mark ${vehicleNumber} as a VIN duplicate.\n\nStep 1 of 2 — Enter the canonical vehicle number (the real one to keep), or leave blank:`,
     );
     if (canonical === null) return; // user cancelled
+
+    const systems = prompt(
+      `Step 2 of 2 — Which systems did ${vehicleNumber} actually register in?\n\nExamples: "TPMS, WMS"  |  "Holman, WMS"  |  "TPMS only"\nLeave blank if unknown:`,
+    );
+    if (systems === null) return; // user cancelled
+
     setLoading(true);
     try {
       const resp = await fetch(`/api/byov/audit-log/${auditId}/mark-vin-duplicate`, {
         method: "PATCH",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ canonicalVehicleNumber: canonical || undefined }),
+        body: JSON.stringify({
+          canonicalVehicleNumber: canonical || undefined,
+          presentInSystems: systems || undefined,
+        }),
       });
       const data = await resp.json();
       if (!resp.ok) {
         toast({ title: "Failed", description: data.error || "Could not mark row", variant: "destructive" });
       } else {
-        toast({ title: "Marked as VIN duplicate", description: `${vehicleNumber} is now flagged. Retire it in Holman and WMS.` });
+        const where = systems ? ` Remove it from: ${systems}.` : "";
+        toast({ title: "Marked as VIN duplicate", description: `${vehicleNumber} is now flagged.${where}` });
         onSuccess();
       }
     } catch {
