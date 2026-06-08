@@ -9646,14 +9646,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (fromParam) {
         const fromDate = new Date(fromParam);
         if (!isNaN(fromDate.getTime())) {
-          conditions.push(gte(byovCreationAudit.submittedAt, fromDate.toISOString()));
+          conditions.push(gte(byovCreationAudit.submittedAt, fromDate));
         }
       }
       if (toParam) {
         const toDate = new Date(toParam);
         if (!isNaN(toDate.getTime())) {
           toDate.setUTCHours(23, 59, 59, 999);
-          conditions.push(lte(byovCreationAudit.submittedAt, toDate.toISOString()));
+          conditions.push(lte(byovCreationAudit.submittedAt, toDate));
         }
       }
 
@@ -9687,7 +9687,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const fromDate = new Date(fromParam);
         if (!isNaN(fromDate.getTime())) {
           validFromStr = fromDate.toISOString().slice(0, 10);
-          conditions.push(gte(byovCreationAudit.submittedAt, fromDate.toISOString()));
+          conditions.push(gte(byovCreationAudit.submittedAt, fromDate));
         }
       }
       if (toParam) {
@@ -9695,7 +9695,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         if (!isNaN(toDate.getTime())) {
           validToStr = toDate.toISOString().slice(0, 10);
           toDate.setUTCHours(23, 59, 59, 999);
-          conditions.push(lte(byovCreationAudit.submittedAt, toDate.toISOString()));
+          conditions.push(lte(byovCreationAudit.submittedAt, toDate));
         }
       }
 
