@@ -299,6 +299,41 @@ async function patchStoredRolePermissions() {
  * the server starts listening is safe.
  */
 async function runStartupBootstrap() {
+  // ONE-TIME DATA PATCH — 088279 VIN duplicate fix
+  // 088279 (VIN 1G1ZD5ST1RF136317) registered in TPMS and WMS but NOT in Holman.
+  // 088277 is the canonical vehicle. This patch marks the 088279 audit row as
+  // 'vin_duplicate' and corrects the holman_success flag (was mistakenly true).
+  // Guard: only runs if blocked_source IS NULL — permanently a no-op after first run.
+  try {
+    const { db } = await import("./db");
+    const { byovCreationAudit } = await import("@shared/schema");
+    const { eq, and, isNull } = await import("drizzle-orm");
+    const rows = await db
+      .select({ id: byovCreationAudit.id })
+      .from(byovCreationAudit)
+      .where(
+        and(
+          eq(byovCreationAudit.vehicleNumber, "088279"),
+          isNull(byovCreationAudit.blockedSource),
+        ),
+      )
+      .limit(1);
+    if (rows.length > 0) {
+      await db
+        .update(byovCreationAudit)
+        .set({
+          blockedSource: "vin_duplicate",
+          holmanSuccess: false,
+          holmanError:
+            "VIN duplicate of 088277 — Marked by admin. Remove it from: TPMS, WMS. Note: vehicle did NOT register in Holman despite holman_success=true on original submission.",
+        })
+        .where(eq(byovCreationAudit.id, rows[0].id));
+      log("✅ [Patch] 088279 audit row marked as vin_duplicate (TPMS+WMS only, not Holman)");
+    }
+  } catch (patchErr: any) {
+    console.error("⚠️ [Patch] 088279 vin_duplicate fix failed:", patchErr.message);
+  }
+
   // Patch stored role permissions — fill in any keys added since the record was created
   await patchStoredRolePermissions();
 
