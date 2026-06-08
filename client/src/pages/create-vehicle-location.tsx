@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { useHasPermission } from "@/hooks/use-permissions";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
@@ -113,10 +114,14 @@ const emptyForm: FormState = {
 export default function CreateVehicle() {
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const { user } = useAuth();
+  const canBackfill = user?.role === "developer" || user?.role === "admin";
+  const [backfilling, setBackfilling] = useState(false);
   const [navigatingTo, setNavigatingTo] = useState<string | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
   const [vehicleExistsWarning, setVehicleExistsWarning] = useState<string | null>(null);
   const [checkingVehicle, setCheckingVehicle] = useState(false);
+  const [vinDuplicateWarning, setVinDuplicateWarning] = useState<string | null>(null);
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
@@ -203,6 +208,7 @@ export default function CreateVehicle() {
     const vin = form.vin.trim().toUpperCase();
     if (vin.length !== 17) {
       setDecodingVin(false);
+      setVinDuplicateWarning(null);
       return;
     }
     if (lastDecodedVinRef.current === vin) return;
@@ -211,9 +217,13 @@ export default function CreateVehicle() {
     const isCurrent = () => decodeSeqRef.current === seq;
     (async () => {
       setDecodingVin(true);
+      setVinDuplicateWarning(null);
       try {
-        const resp = await apiRequest("GET", `/api/vin/decode/${encodeURIComponent(vin)}`);
-        const data = await resp.json();
+        const [decodeResp, vinCheckResp] = await Promise.all([
+          apiRequest("GET", `/api/vin/decode/${encodeURIComponent(vin)}`),
+          fetch(`/api/byov/check-vin/${encodeURIComponent(vin)}`, { credentials: "include" }),
+        ]);
+        const data = await decodeResp.json();
         if (!isCurrent()) return;
         if (data?.decoded) {
           setForm((prev) => ({
@@ -235,6 +245,16 @@ export default function CreateVehicle() {
             description: data?.error || "Please enter the vehicle details manually.",
             variant: "destructive",
           });
+        }
+        if (vinCheckResp.ok && isCurrent()) {
+          const vinData = await vinCheckResp.json();
+          if (vinData?.exists && vinData.matches?.length > 0) {
+            const first = vinData.matches[0];
+            const label = [first.modelYear, first.make, first.model].filter(Boolean).join(" ");
+            setVinDuplicateWarning(
+              `This VIN is already registered as vehicle ${first.vehicleNumber}${label ? ` (${label})` : ""}. Submitting will be blocked unless this is intentional.`
+            );
+          }
         }
       } catch {
         if (isCurrent()) {
@@ -701,14 +721,31 @@ export default function CreateVehicle() {
                     <div className="space-y-2">
                       <Label htmlFor="vin">VIN <span className="text-destructive">*</span></Label>
                       <div className="relative">
-                        <Input id="vin" value={form.vin} onChange={set("vin")} placeholder="17-character VIN" maxLength={17} className={`uppercase ${decodingVin ? "pr-9" : ""}`} />
+                        <Input
+                          id="vin"
+                          value={form.vin}
+                          onChange={(e) => {
+                            set("vin")(e);
+                            setVinDuplicateWarning(null);
+                          }}
+                          placeholder="17-character VIN"
+                          maxLength={17}
+                          className={`uppercase ${decodingVin ? "pr-9" : ""} ${vinDuplicateWarning ? "border-amber-500" : ""}`}
+                        />
                         {decodingVin && (
                           <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Enter all 17 characters to auto-fill model year, make, model, and asset type.
-                      </p>
+                      {vinDuplicateWarning ? (
+                        <Alert className="py-2 border-amber-300 bg-amber-50 dark:border-amber-700 dark:bg-amber-950/30">
+                          <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                          <AlertDescription className="text-sm text-amber-800 dark:text-amber-300">{vinDuplicateWarning}</AlertDescription>
+                        </Alert>
+                      ) : (
+                        <p className="text-xs text-muted-foreground">
+                          Enter all 17 characters to auto-fill model year, make, model, and asset type.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -1015,6 +1052,46 @@ export default function CreateVehicle() {
                     <Download className="h-4 w-4 mr-1.5" />
                     Export
                   </Button>
+                  {canBackfill && (
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={backfilling}
+                            onClick={async () => {
+                              if (!confirm("This will create historical audit records for all BYOV vehicles that existed before the audit log was introduced (~180 vehicles). Rows will be labeled 'Pre-audit' and marked as unverified in WMS. Run once — it is idempotent. Proceed?")) return;
+                              setBackfilling(true);
+                              try {
+                                const resp = await fetch("/api/byov/audit-log/backfill", {
+                                  method: "POST",
+                                  credentials: "include",
+                                });
+                                const data = await resp.json();
+                                if (!resp.ok) {
+                                  toast({ title: "Backfill failed", description: data.error || "Unknown error", variant: "destructive" });
+                                } else {
+                                  toast({ title: "Backfill complete", description: data.message });
+                                  queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
+                                }
+                              } catch {
+                                toast({ title: "Backfill failed", description: "Network error", variant: "destructive" });
+                              } finally {
+                                setBackfilling(false);
+                              }
+                            }}
+                          >
+                            {backfilling ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" /> : <History className="h-4 w-4 mr-1.5" />}
+                            Backfill History
+                          </Button>
+                        </TooltipTrigger>
+                        <TooltipContent className="max-w-xs text-xs">
+                          Admin only: stamps pre-audit records for all ~180 BYOV vehicles that existed before the audit log was deployed.
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1058,8 +1135,11 @@ export default function CreateVehicle() {
                     <tbody>
                       {auditLogQuery.data.map((row) => {
                         const isBlocked = !!row.blockedSource;
+                        const isBackfill = row.blockedSource === "backfill";
+                        const isFailed = row.blockedSource === "failed";
+                        const isDuplicate = isBlocked && !isBackfill && !isFailed;
                         return (
-                          <tr key={row.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors${isBlocked ? " bg-amber-50/40 dark:bg-amber-950/20" : ""}`}>
+                          <tr key={row.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors${isDuplicate ? " bg-amber-50/40 dark:bg-amber-950/20" : isFailed ? " bg-red-50/30 dark:bg-red-950/10" : isBackfill ? " bg-blue-50/20 dark:bg-blue-950/10" : ""}`}>
                             <td className="py-2 pr-4 whitespace-nowrap">
                               <button
                                 type="button"
@@ -1088,11 +1168,25 @@ export default function CreateVehicle() {
                                 minute: "2-digit",
                               })}
                             </td>
-                            {isBlocked ? (
+                            {isDuplicate ? (
                               <td className="py-2 pr-4" colSpan={2}>
                                 <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
                                   <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
                                   Blocked — duplicate ({row.blockedSource === "live" ? "live lookup" : "cache"})
+                                </span>
+                              </td>
+                            ) : isBackfill ? (
+                              <td className="py-2 pr-4" colSpan={2}>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/40 dark:text-blue-300">
+                                  <History className="h-3.5 w-3.5 shrink-0" />
+                                  Pre-audit (Holman ✓ · WMS unverified)
+                                </span>
+                              </td>
+                            ) : isFailed ? (
+                              <td className="py-2 pr-4" colSpan={2}>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300">
+                                  <XCircle className="h-3.5 w-3.5 shrink-0" />
+                                  Failed — not created in any system
                                 </span>
                               </td>
                             ) : (
@@ -1198,15 +1292,37 @@ export default function CreateVehicle() {
 
               {selectedAuditEntry.blockedSource && (
                 <div className="border-t pt-3">
-                  <div className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
-                    <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                    <div>
-                      <div className="text-xs font-semibold text-amber-800 dark:text-amber-300">Submission blocked — duplicate vehicle</div>
-                      <div className="text-xs text-amber-700 dark:text-amber-400">
-                        Detected via: {selectedAuditEntry.blockedSource === "live" ? "live Holman API lookup" : "local Holman cache"}
+                  {selectedAuditEntry.blockedSource === "backfill" ? (
+                    <div className="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 dark:border-blue-700 dark:bg-blue-950/30">
+                      <History className="h-4 w-4 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold text-blue-800 dark:text-blue-300">Pre-audit record (historical backfill)</div>
+                        <div className="text-xs text-blue-700 dark:text-blue-400">
+                          This vehicle existed before the audit log was introduced. Holman status is confirmed. Run the BYOV Drift Check to verify WMS.
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  ) : selectedAuditEntry.blockedSource === "failed" ? (
+                    <div className="inline-flex items-center gap-2 rounded-lg border border-red-300 bg-red-50 px-3 py-2 dark:border-red-700 dark:bg-red-950/30">
+                      <XCircle className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold text-red-800 dark:text-red-300">Submission failed — not created in any system</div>
+                        <div className="text-xs text-red-700 dark:text-red-400">
+                          Both Holman and WMS returned errors. The vehicle number was released for reuse.
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
+                      <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <div>
+                        <div className="text-xs font-semibold text-amber-800 dark:text-amber-300">Submission blocked — duplicate vehicle</div>
+                        <div className="text-xs text-amber-700 dark:text-amber-400">
+                          Detected via: {selectedAuditEntry.blockedSource === "live" ? "live Holman API lookup" : "local Holman cache"}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 

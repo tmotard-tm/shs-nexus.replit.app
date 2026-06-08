@@ -26,7 +26,7 @@ import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-
 import ExcelJS from "exceljs";
 import { stringify as csvStringify } from "csv-stringify";
 import { db } from "./db";
-import { sql, eq, and, or, gte, lte, lt, inArray, asc, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
+import { sql, eq, and, or, gte, lte, lt, like, inArray, asc, desc, isNotNull, isNull, ilike, SQL } from "drizzle-orm";
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit, amsVehiclesCache, loaLeaves } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
@@ -8793,6 +8793,44 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         });
       }
 
+      // VIN duplicate guard — check that this VIN is not already registered under a
+      // DIFFERENT vehicle number in our local Holman cache. Catches cases like the
+      // 088277/088279 dual-registration where the same physical car was submitted twice
+      // with different numbers. Only runs when a full 17-char VIN is provided.
+      if (vin && createInHolman) {
+        const normVinCheck = String(vin).trim().toUpperCase();
+        if (normVinCheck.length === 17) {
+          try {
+            const vinRows = await db
+              .select({
+                holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+                makeName: holmanVehiclesCache.makeName,
+                modelName: holmanVehiclesCache.modelName,
+              })
+              .from(holmanVehiclesCache)
+              .where(eq(holmanVehiclesCache.vin, normVinCheck));
+            const vinConflict = vinRows.find(
+              (r) => toCanonical(r.holmanVehicleNumber) !== toCanonical(vehicleNumber),
+            );
+            if (vinConflict) {
+              const conflictLabel = [vinConflict.makeName, vinConflict.modelName]
+                .filter(Boolean)
+                .join(" ");
+              return res.status(409).json({
+                error: `VIN ${normVinCheck} is already registered under vehicle ${vinConflict.holmanVehicleNumber}${conflictLabel ? ` (${conflictLabel})` : ""}. Check for a duplicate before proceeding.`,
+                vinConflict: {
+                  vehicleNumber: vinConflict.holmanVehicleNumber,
+                  make: vinConflict.makeName,
+                  model: vinConflict.modelName,
+                },
+              });
+            }
+          } catch (vinCheckErr) {
+            console.warn("[BYOV] create: VIN duplicate check failed (non-fatal):", vinCheckErr);
+          }
+        }
+      }
+
       // Holman duplicate guard — only enforced when we are actually creating in Holman.
       // Skipping this check for WMS-only rows avoids a spurious 409 for vehicles that
       // already exist in Holman (by design) but are missing in WMS.
@@ -9243,26 +9281,26 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       // --- Finalize reservation (Task #450) ---
-      // Record the outcome on the reserved audit row. If nothing was actually
-      // created in ANY system (and no prior attempt had succeeded either),
-      // release the number by deleting the row so a later create can reuse it.
+      // Record the outcome on the reserved audit row. Rows are always kept — even
+      // for fully-failed creates — so the history panel shows what was attempted.
+      // When both systems fail we set blockedSource='failed' which releases the
+      // partial unique index (it only covers WHERE blocked_source IS NULL) so the
+      // number can be reused, while the row itself stays visible in the audit log.
       const finalHolmanSuccess = priorHolmanSuccess || (createInHolman && holmanResult.success);
       const finalWmsSuccess = priorWmsSuccess || (createInWms && wmsResult.success);
       if (reservationId !== null) {
         try {
-          if (finalHolmanSuccess || finalWmsSuccess) {
-            await db
-              .update(byovCreationAudit)
-              .set({
-                holmanSuccess: finalHolmanSuccess,
-                holmanError: holmanResult.error ?? null,
-                wmsSuccess: finalWmsSuccess,
-                wmsError: wmsResult.error ?? null,
-              })
-              .where(eq(byovCreationAudit.id, reservationId));
-          } else {
-            await db.delete(byovCreationAudit).where(eq(byovCreationAudit.id, reservationId));
-          }
+          const fullyFailed = !finalHolmanSuccess && !finalWmsSuccess;
+          await db
+            .update(byovCreationAudit)
+            .set({
+              holmanSuccess: finalHolmanSuccess,
+              holmanError: holmanResult.error ?? null,
+              wmsSuccess: finalWmsSuccess,
+              wmsError: wmsResult.error ?? null,
+              ...(fullyFailed ? { blockedSource: "failed" } : {}),
+            })
+            .where(eq(byovCreationAudit.id, reservationId));
         } catch (finalizeErr) {
           console.error("[BYOV] create: failed to finalize reservation audit row:", finalizeErr);
         }
@@ -9279,9 +9317,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // row that may carry a prior system success).
       if (reservationId !== null && reservationFreshlyInserted && !priorHolmanSuccess && !priorWmsSuccess) {
         try {
-          await db.delete(byovCreationAudit).where(eq(byovCreationAudit.id, reservationId));
+          // Mark as 'failed' rather than deleting — keeps the row visible in the
+          // audit log and releases the partial unique index so the number is reusable.
+          await db
+            .update(byovCreationAudit)
+            .set({
+              holmanSuccess: false,
+              holmanError: "Submission aborted — unexpected server error",
+              wmsSuccess: false,
+              wmsError: null,
+              blockedSource: "failed",
+            })
+            .where(eq(byovCreationAudit.id, reservationId));
         } catch (releaseErr) {
-          console.error("[BYOV] create: failed to release reservation after error:", releaseErr);
+          console.error("[BYOV] create: failed to mark reservation as failed after error:", releaseErr);
         }
       }
       return res.status(500).json({ error: msg });
@@ -9740,6 +9789,133 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to load audit summary";
       console.error("[BYOV] audit-log/summary error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // POST /api/byov/audit-log/backfill — admin-only one-shot endpoint to stamp
+  // synthetic audit records for all BYOV (088xxx) vehicles that entered the
+  // holman_vehicles_cache via the Holman sync BEFORE the audit table existed.
+  // Each backfilled row uses blockedSource='backfill' so it appears in the history
+  // panel but does NOT occupy the partial unique index (which only covers rows
+  // WHERE blocked_source IS NULL), leaving the number reservation system intact.
+  // Holman status is marked true (confirmed by the sync that brought it in);
+  // WMS status is marked false / "unverified" until a BYOV Drift Check is run.
+  // Idempotent: vehicles that already have any audit row are skipped.
+  app.post("/api/byov/audit-log/backfill", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ error: "Admin or developer role required." });
+      }
+
+      // Find all 088xxx/88xxx vehicles in the Holman cache that have no audit row at all.
+      const cacheRows = await db
+        .select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          vin: holmanVehiclesCache.vin,
+          makeName: holmanVehiclesCache.makeName,
+          modelName: holmanVehiclesCache.modelName,
+          modelYear: holmanVehiclesCache.modelYear,
+          district: holmanVehiclesCache.district,
+          createdAt: holmanVehiclesCache.createdAt,
+        })
+        .from(holmanVehiclesCache)
+        .where(
+          or(
+            like(holmanVehiclesCache.holmanVehicleNumber, "088%"),
+            like(holmanVehiclesCache.holmanVehicleNumber, "88%"),
+          ),
+        );
+
+      // Collect vehicle numbers that already have at least one audit row.
+      const existingAuditRows = await db
+        .select({ vehicleNumber: byovCreationAudit.vehicleNumber })
+        .from(byovCreationAudit);
+      const auditedNumbers = new Set(existingAuditRows.map((r) => r.vehicleNumber));
+
+      const toBackfill = cacheRows.filter((r) => !auditedNumbers.has(r.holmanVehicleNumber));
+
+      if (toBackfill.length === 0) {
+        return res.json({ inserted: 0, skipped: cacheRows.length, message: "All BYOV vehicles already have audit records." });
+      }
+
+      const requestedBy = String(currentUser.username || currentUser.email || currentUser.id || "admin");
+      let inserted = 0;
+      let failed = 0;
+
+      for (const vehicle of toBackfill) {
+        try {
+          await db.insert(byovCreationAudit).values({
+            vehicleNumber: vehicle.holmanVehicleNumber,
+            vin: vehicle.vin ?? null,
+            make: vehicle.makeName ?? null,
+            model: vehicle.modelName ?? null,
+            modelYear: vehicle.modelYear ? String(vehicle.modelYear) : null,
+            district: vehicle.district ?? null,
+            submittedBy: `holman-sync-backfill (requested by ${requestedBy})`,
+            submittedAt: vehicle.createdAt ?? new Date(),
+            holmanSuccess: true,
+            holmanError: null,
+            wmsSuccess: false,
+            wmsError: "Pre-audit vehicle — WMS status unverified. Run BYOV Drift Check to confirm.",
+            blockedSource: "backfill",
+          });
+          inserted++;
+        } catch (rowErr) {
+          console.error(`[BYOV] backfill: failed to insert row for ${vehicle.holmanVehicleNumber}:`, rowErr);
+          failed++;
+        }
+      }
+
+      console.log(`[BYOV] audit-log backfill complete: ${inserted} inserted, ${cacheRows.length - toBackfill.length} skipped (already had records), ${failed} errors`);
+      return res.json({
+        inserted,
+        skipped: cacheRows.length - toBackfill.length,
+        failed,
+        message: `Backfill complete. ${inserted} historical records created. Run BYOV Drift Check to verify WMS status for each vehicle.`,
+      });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Backfill failed";
+      console.error("[BYOV] audit-log backfill error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
+  // GET /api/byov/check-vin/:vin — lightweight VIN duplicate check against the
+  // local Holman cache. Used by the create-vehicle-location form to warn the
+  // dispatcher before submission when a VIN is already registered.
+  app.get("/api/byov/check-vin/:vin", requireAuth, async (req, res) => {
+    try {
+      const rawVin = String(req.params.vin || "").trim().toUpperCase();
+      if (rawVin.length !== 17) {
+        return res.json({ exists: false });
+      }
+      const rows = await db
+        .select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          makeName: holmanVehiclesCache.makeName,
+          modelName: holmanVehiclesCache.modelName,
+          modelYear: holmanVehiclesCache.modelYear,
+        })
+        .from(holmanVehiclesCache)
+        .where(eq(holmanVehiclesCache.vin, rawVin))
+        .limit(5);
+      if (rows.length === 0) {
+        return res.json({ exists: false });
+      }
+      return res.json({
+        exists: true,
+        matches: rows.map((r) => ({
+          vehicleNumber: r.holmanVehicleNumber,
+          make: r.makeName,
+          model: r.modelName,
+          modelYear: r.modelYear,
+        })),
+      });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "VIN check failed";
+      console.error("[BYOV] check-vin error:", error);
       return res.status(500).json({ error: msg });
     }
   });
