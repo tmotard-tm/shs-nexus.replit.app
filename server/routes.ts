@@ -9920,6 +9920,48 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // PATCH /api/byov/audit-log/:id/mark-vin-duplicate — admin-only.
+  // Sets blocked_source='vin_duplicate' on the specified audit row, flagging it
+  // as a vehicle number whose VIN was already registered under another number.
+  // This does NOT touch Holman or WMS — external system cleanup is still required.
+  app.patch("/api/byov/audit-log/:id/mark-vin-duplicate", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = req.user as any;
+      if (!currentUser || (currentUser.role !== "developer" && currentUser.role !== "admin")) {
+        return res.status(403).json({ error: "Admin or developer role required." });
+      }
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ error: "Invalid audit row ID." });
+
+      const [row] = await db
+        .select({ id: byovCreationAudit.id, vehicleNumber: byovCreationAudit.vehicleNumber, blockedSource: byovCreationAudit.blockedSource })
+        .from(byovCreationAudit)
+        .where(eq(byovCreationAudit.id, id))
+        .limit(1);
+
+      if (!row) return res.status(404).json({ error: "Audit row not found." });
+
+      const { canonicalVehicleNumber } = req.body ?? {};
+
+      await db
+        .update(byovCreationAudit)
+        .set({
+          blockedSource: "vin_duplicate",
+          holmanError: canonicalVehicleNumber
+            ? `VIN duplicate of ${canonicalVehicleNumber} — marked by ${currentUser.username || currentUser.email || "admin"}. Retire this vehicle in Holman and WMS.`
+            : `VIN duplicate — marked by ${currentUser.username || currentUser.email || "admin"}. Retire this vehicle in Holman and WMS.`,
+        })
+        .where(eq(byovCreationAudit.id, id));
+
+      console.log(`[BYOV] audit row ${id} (${row.vehicleNumber}) marked as vin_duplicate by ${currentUser.username || currentUser.email}`);
+      return res.json({ ok: true, vehicleNumber: row.vehicleNumber });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to mark audit row";
+      console.error("[BYOV] mark-vin-duplicate error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
   app.get("/api/byov/audit-log/:vehicleNumber", requireAuth, async (req, res) => {
     try {
       const { vehicleNumber } = req.params;

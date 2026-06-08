@@ -1137,9 +1137,10 @@ export default function CreateVehicle() {
                         const isBlocked = !!row.blockedSource;
                         const isBackfill = row.blockedSource === "backfill";
                         const isFailed = row.blockedSource === "failed";
-                        const isDuplicate = isBlocked && !isBackfill && !isFailed;
+                        const isVinDuplicate = row.blockedSource === "vin_duplicate";
+                        const isDuplicate = isBlocked && !isBackfill && !isFailed && !isVinDuplicate;
                         return (
-                          <tr key={row.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors${isDuplicate ? " bg-amber-50/40 dark:bg-amber-950/20" : isFailed ? " bg-red-50/30 dark:bg-red-950/10" : isBackfill ? " bg-blue-50/20 dark:bg-blue-950/10" : ""}`}>
+                          <tr key={row.id} className={`border-b last:border-0 hover:bg-muted/30 transition-colors${isDuplicate ? " bg-amber-50/40 dark:bg-amber-950/20" : isFailed ? " bg-red-50/30 dark:bg-red-950/10" : isBackfill ? " bg-blue-50/20 dark:bg-blue-950/10" : isVinDuplicate ? " bg-orange-50/40 dark:bg-orange-950/20" : ""}`}>
                             <td className="py-2 pr-4 whitespace-nowrap">
                               <button
                                 type="button"
@@ -1187,6 +1188,13 @@ export default function CreateVehicle() {
                                 <span className="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800 dark:bg-red-900/40 dark:text-red-300">
                                   <XCircle className="h-3.5 w-3.5 shrink-0" />
                                   Failed — not created in any system
+                                </span>
+                              </td>
+                            ) : isVinDuplicate ? (
+                              <td className="py-2 pr-4" colSpan={2}>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-800 dark:bg-orange-900/40 dark:text-orange-300">
+                                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                                  VIN duplicate — retire in Holman &amp; WMS
                                 </span>
                               </td>
                             ) : (
@@ -1290,7 +1298,7 @@ export default function CreateVehicle() {
                 </div>
               </div>
 
-              {selectedAuditEntry.blockedSource && (
+              {selectedAuditEntry.blockedSource ? (
                 <div className="border-t pt-3">
                   {selectedAuditEntry.blockedSource === "backfill" ? (
                     <div className="inline-flex items-center gap-2 rounded-lg border border-blue-300 bg-blue-50 px-3 py-2 dark:border-blue-700 dark:bg-blue-950/30">
@@ -1312,6 +1320,19 @@ export default function CreateVehicle() {
                         </div>
                       </div>
                     </div>
+                  ) : selectedAuditEntry.blockedSource === "vin_duplicate" ? (
+                    <div className="flex items-start gap-2 rounded-lg border border-orange-300 bg-orange-50 px-3 py-2 dark:border-orange-700 dark:bg-orange-950/30">
+                      <AlertTriangle className="h-4 w-4 text-orange-600 dark:text-orange-400 shrink-0 mt-0.5" />
+                      <div>
+                        <div className="text-xs font-semibold text-orange-800 dark:text-orange-300">VIN duplicate — external action required</div>
+                        <div className="text-xs text-orange-700 dark:text-orange-400">
+                          This vehicle shares its VIN with another. It was created in Holman and WMS before the duplicate guard existed. Someone must retire it in Holman and remove it from WMS.
+                        </div>
+                        {selectedAuditEntry.holmanError && (
+                          <div className="text-xs text-orange-700 dark:text-orange-400 mt-1 font-mono">{selectedAuditEntry.holmanError}</div>
+                        )}
+                      </div>
+                    </div>
                   ) : (
                     <div className="inline-flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30">
                       <ShieldAlert className="h-4 w-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -1324,7 +1345,18 @@ export default function CreateVehicle() {
                     </div>
                   )}
                 </div>
-              )}
+              ) : canBackfill ? (
+                <div className="border-t pt-3">
+                  <MarkVinDuplicateButton
+                    auditId={selectedAuditEntry.id}
+                    vehicleNumber={selectedAuditEntry.vehicleNumber}
+                    onSuccess={() => {
+                      setSelectedAuditEntry(null);
+                      queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
+                    }}
+                  />
+                </div>
+              ) : null}
 
               <div className="border-t pt-3 space-y-2">
                 <div className="text-muted-foreground text-xs font-medium uppercase tracking-wide">System Results</div>
@@ -1394,6 +1426,53 @@ function AuditBadge({ success, error }: { success: boolean; error?: string | nul
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  );
+}
+
+function MarkVinDuplicateButton({
+  auditId,
+  vehicleNumber,
+  onSuccess,
+}: {
+  auditId: number;
+  vehicleNumber: string;
+  onSuccess: () => void;
+}) {
+  const [loading, setLoading] = useState(false);
+  const { toast } = useToast();
+
+  const handleClick = async () => {
+    const canonical = prompt(
+      `Mark ${vehicleNumber} as a VIN duplicate.\n\nEnter the canonical vehicle number (the one to keep), or leave blank:`,
+    );
+    if (canonical === null) return; // user cancelled
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/byov/audit-log/${auditId}/mark-vin-duplicate`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ canonicalVehicleNumber: canonical || undefined }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        toast({ title: "Failed", description: data.error || "Could not mark row", variant: "destructive" });
+      } else {
+        toast({ title: "Marked as VIN duplicate", description: `${vehicleNumber} is now flagged. Retire it in Holman and WMS.` });
+        onSuccess();
+      }
+    } catch {
+      toast({ title: "Network error", description: "Could not reach the server.", variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Button variant="outline" size="sm" className="text-xs border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-700 dark:text-orange-400" disabled={loading} onClick={handleClick}>
+      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />}
+      Mark as VIN duplicate
+    </Button>
   );
 }
 
