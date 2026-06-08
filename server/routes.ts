@@ -9637,6 +9637,190 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // POST /api/byov/create-holman-only — retry Holman registration for a vehicle that
+  // already exists in WMS/TPMS but was never successfully registered in Holman
+  // (e.g. due to a Holman API failure during the original create).
+  // Mirrors create-wms-only but targets Holman. On success, upserts the vehicle into
+  // holman_vehicles_cache and stamps the existing audit row with holman_success=true.
+  app.post("/api/byov/create-holman-only", requireAuth, async (req, res) => {
+    try {
+      const {
+        vehicleNumber, vin, assetType, modelYear, make, model,
+        firstName, lastName, enterpriseId, phone,
+        deliveryAddress, deliveryAddress2, deliveryAddress3, city, state, zip, district,
+        deliveryDate, onRoadDate,
+        licensePlate, plateState, plateType, regRenewalDate,
+      } = req.body;
+
+      if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+
+      const paddedVehicle = toHolmanRef(vehicleNumber);
+      const districtStr = String(district || "").trim();
+      const prefix = districtStr || null;
+
+      const NULL_VAL = "^null^";
+      const isUnknown = (lastName || "").trim().toUpperCase() === "UNKNOWN";
+      const clientData1 = isUnknown ? NULL_VAL : (lastName ? String(lastName) : null);
+      const clientData2 = isUnknown ? NULL_VAL : (enterpriseId || null);
+      const clientData4 = isUnknown ? NULL_VAL : (enterpriseId || null);
+      const auxData7 = zip || null;
+
+      const toHolmanDate = (d: string | null | undefined): string | null => {
+        if (!d) return null;
+        const m = String(d).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        return m ? `${m[2]}/${m[3]}/${m[1]}` : String(d);
+      };
+      const todayStr = new Date().toISOString().split("T")[0];
+      const finalDeliveryDate = toHolmanDate(deliveryDate || todayStr);
+      const finalOnRoadDate = toHolmanDate(onRoadDate || todayStr);
+
+      const holmanPayload = {
+        assetAction: "ADD",
+        lesseeCode: "2B56",
+        holmanVehicleNumber: paddedVehicle,
+        vin: vin || null,
+        division: "01",
+        firstName: firstName || null,
+        lastName: lastName || null,
+        addressLine1: deliveryAddress || null,
+        addressLine2: deliveryAddress2 || null,
+        addressLine3: deliveryAddress3 || null,
+        city: city || null,
+        stateProvince: state || null,
+        zipPostalCode: zip || null,
+        assetType: assetType || null,
+        vendorCode: "OTH",
+        modelYear: modelYear ? String(modelYear) : null,
+        makeClient: make || null,
+        modelClient: model || null,
+        deliveryDate: finalDeliveryDate,
+        prefix,
+        clientData1,
+        clientData2,
+        clientData3: "890",
+        clientData4,
+        auxData7,
+        workPhone: phone || null,
+        email: "FLEET_SUPPORT@TRANSFORMCO.COM",
+        assignedStatusCode: "D",
+        driverClass: "N",
+        onRoadDate: finalOnRoadDate,
+        licensePlate: licensePlate || null,
+        tagStateProvince: plateState || null,
+        plateType: plateType || null,
+        renewalDate: toHolmanDate(regRenewalDate),
+      };
+
+      let holmanResult: { success: boolean; error?: string } = { success: false };
+
+      // Pre-check: if vehicle already exists in Holman, treat as success (idempotent retry)
+      let holmanAlreadyExists = false;
+      try {
+        const holmanLookup = await holmanApiService.findVehicleByNumber(paddedVehicle);
+        if (holmanLookup.success && holmanLookup.vehicle) {
+          console.log("[BYOV] Holman-only retry: vehicle already in Holman, skipping submit:", paddedVehicle);
+          holmanAlreadyExists = true;
+        }
+      } catch (holmanLookupErr) {
+        console.warn("[BYOV] Holman-only retry: pre-check lookup error (non-fatal):", holmanLookupErr);
+      }
+
+      if (holmanAlreadyExists) {
+        holmanResult = { success: true };
+      } else {
+        try {
+          const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
+          console.log("[BYOV] Holman-only retry submit response:", holmanResp);
+          holmanResult = { success: true };
+        } catch (holmanErr: unknown) {
+          const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
+          const isHolmanDuplicate =
+            /already.?exists/i.test(holmanMsg) ||
+            /duplicate/i.test(holmanMsg) ||
+            /conflict/i.test(holmanMsg);
+          if (isHolmanDuplicate) {
+            console.log("[BYOV] Holman-only retry: already exists (race), treating as success:", holmanMsg);
+            holmanResult = { success: true };
+          } else {
+            console.error("[BYOV] Holman-only retry error:", holmanErr);
+            holmanResult = { success: false, error: holmanMsg };
+          }
+        }
+      }
+
+      if (holmanResult.success) {
+        // Upsert into holman_vehicles_cache so Fleet Management can find the vehicle
+        try {
+          const now = new Date();
+          const cacheValues = {
+            holmanVehicleNumber: paddedVehicle,
+            vin: vin ? String(vin) : null,
+            modelYear: modelYear ? Number(modelYear) : null,
+            makeName: make ? String(make) : null,
+            modelName: model ? String(model) : null,
+            licensePlate: licensePlate ? String(licensePlate) : null,
+            licenseState: plateState ? String(plateState) : null,
+            city: city ? String(city) : null,
+            state: state ? String(state) : null,
+            region: "890",
+            division: prefix,
+            district: districtStr || null,
+            holmanTechAssigned: enterpriseId ? String(enterpriseId) : null,
+            holmanTechName:
+              firstName && lastName && String(lastName).toUpperCase() !== "UNKNOWN"
+                ? `${String(firstName)} ${String(lastName)}`.trim()
+                : null,
+            regRenewalDate: regRenewalDate ? String(regRenewalDate) : null,
+            holmanAssignedStatusCd: "D",
+            statusCode: 1,
+            isActive: true,
+            byovVinMissing: !vin,
+            lastLocalUpdateAt: now,
+          };
+          await db
+            .insert(holmanVehiclesCache)
+            .values(cacheValues)
+            .onConflictDoUpdate({
+              target: holmanVehiclesCache.holmanVehicleNumber,
+              set: { ...cacheValues, updatedAt: now },
+            });
+          console.log("[BYOV] Holman-only retry: upserted into holman_vehicles_cache:", paddedVehicle);
+        } catch (cacheErr) {
+          console.warn("[BYOV] Holman-only retry: holman_vehicles_cache upsert failed (non-fatal):", cacheErr);
+        }
+
+        // Stamp the existing audit row holman_success=true so the history panel reflects reality.
+        // Targets only unblocked rows with holman_success=false (partial-failure rows).
+        try {
+          const stamped = await db
+            .update(byovCreationAudit)
+            .set({ holmanSuccess: true, holmanError: null })
+            .where(
+              and(
+                eq(byovCreationAudit.vehicleNumber, paddedVehicle),
+                eq(byovCreationAudit.holmanSuccess, false),
+                isNull(byovCreationAudit.blockedSource),
+              ),
+            )
+            .returning({ id: byovCreationAudit.id });
+          if (stamped.length > 0) {
+            console.log("[BYOV] Holman-only retry: stamped audit row holman_success=true for", paddedVehicle);
+          } else {
+            console.log("[BYOV] Holman-only retry: no matching unblocked audit row found for", paddedVehicle, "(may already be stamped)");
+          }
+        } catch (auditErr) {
+          console.warn("[BYOV] Holman-only retry: audit stamp failed (non-fatal):", auditErr);
+        }
+      }
+
+      return res.json({ holman: holmanResult });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Holman-only creation failed";
+      console.error("[BYOV] create-holman-only error:", error);
+      return res.status(500).json({ error: msg });
+    }
+  });
+
   app.get("/api/byov/audit-log", requireAuth, async (req, res) => {
     try {
       const { from: fromParam, to: toParam } = req.query as { from?: string; to?: string };

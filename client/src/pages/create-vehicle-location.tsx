@@ -125,6 +125,7 @@ export default function CreateVehicle() {
   const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
   const [lastSubmittedForm, setLastSubmittedForm] = useState<FormState | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
+  const [holmanOnlyMode, setHolmanOnlyMode] = useState(false);
 
   const [exportFrom, setExportFrom] = useState(() => {
     try { return localStorage.getItem("byov-export-from") ?? ""; } catch { return ""; }
@@ -448,6 +449,55 @@ export default function CreateVehicle() {
     },
   });
 
+  const retryHolmanMutation = useMutation({
+    mutationFn: async (payload: FormState) => {
+      const resp = await apiRequest("POST", "/api/byov/create-holman-only", payload);
+      return (await resp.json()) as { holman: { success: boolean; error?: string }; error?: string };
+    },
+    onSuccess: (data) => {
+      if ("error" in data && data.error) {
+        toast({ title: "Holman Retry Failed", description: data.error, variant: "destructive" });
+        return;
+      }
+      setSubmitResult((prev) =>
+        prev ? { ...prev, holman: data.holman } : prev
+      );
+      if (data.holman.success) {
+        toast({ title: "Holman Retry Succeeded", description: "Vehicle registered in Holman successfully. Fleet Management will reflect this on the next sync." });
+        queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
+      } else {
+        toast({ title: "Holman Retry Failed", description: data.holman.error || "Holman submission failed.", variant: "destructive" });
+      }
+    },
+    onError: (err: Error) => {
+      toast({ title: "Holman Retry Failed", description: err.message || "An unexpected error occurred.", variant: "destructive" });
+    },
+  });
+
+  const holmanOnlyMutation = useMutation({
+    mutationFn: async (payload: FormState) => {
+      const resp = await apiRequest("POST", "/api/byov/create-holman-only", payload);
+      return (await resp.json()) as { holman: { success: boolean; error?: string }; error?: string };
+    },
+    onSuccess: (data, payload) => {
+      if ("error" in data && data.error) {
+        toast({ title: "Holman Submission Blocked", description: data.error, variant: "destructive" });
+        return;
+      }
+      setLastSubmittedForm(payload);
+      setSubmitResult({ holman: data.holman, wms: { success: true, error: undefined } });
+      if (data.holman.success) {
+        toast({ title: "Holman Registration Complete", description: "Vehicle submitted to Holman. Fleet Management will reflect this on the next sync." });
+      } else {
+        toast({ title: "Holman Submission Failed", description: data.holman.error || "Holman submission failed.", variant: "destructive" });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/byov/audit-log"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Holman Submission Failed", description: err.message || "An unexpected error occurred.", variant: "destructive" });
+    },
+  });
+
   const REQUIRED_FIELDS: { key: keyof FormState; label: string }[] = [
     { key: "vehicleNumber", label: "Vehicle number" },
     { key: "vin", label: "VIN" },
@@ -490,7 +540,11 @@ export default function CreateVehicle() {
   const handleConfirm = () => {
     setShowConfirmDialog(false);
     setSubmitResult(null);
-    createMutation.mutate(form);
+    if (holmanOnlyMode) {
+      holmanOnlyMutation.mutate(form);
+    } else {
+      createMutation.mutate(form);
+    }
   };
 
   const handleReset = () => {
@@ -498,6 +552,7 @@ export default function CreateVehicle() {
     setSubmitResult(null);
     setVehicleExistsWarning(null);
     setLastSubmittedForm(null);
+    setHolmanOnlyMode(false);
   };
 
   const applyExportPreset = (preset: string) => {
@@ -561,9 +616,11 @@ export default function CreateVehicle() {
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>
         <AlertDialogContent className="max-w-lg">
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirm {classLabel} Submission</AlertDialogTitle>
+            <AlertDialogTitle>Confirm {holmanOnlyMode ? "Holman-Only" : classLabel} Submission</AlertDialogTitle>
             <AlertDialogDescription>
-              Review the details below before submitting to Holman and WMS. This action cannot be undone.
+              {holmanOnlyMode
+                ? "Review the details below. Only Holman will be updated — WMS and TPMS will not be touched."
+                : "Review the details below before submitting to Holman and WMS. This action cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -583,10 +640,10 @@ export default function CreateVehicle() {
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={createMutation.isPending}>Go Back &amp; Edit</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm} disabled={createMutation.isPending}>
-              {createMutation.isPending
+            <AlertDialogAction onClick={handleConfirm} disabled={createMutation.isPending || holmanOnlyMutation.isPending}>
+              {(createMutation.isPending || holmanOnlyMutation.isPending)
                 ? <><Loader2 className="mr-2 h-4 w-4 animate-spin inline" />Submitting…</>
-                : "Submit to Holman & WMS"}
+                : holmanOnlyMode ? "Submit to Holman Only" : "Submit to Holman & WMS"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -909,6 +966,32 @@ export default function CreateVehicle() {
                   </div>
                 </div>
 
+                {/* Holman-only mode toggle — for vehicles already in WMS/TPMS that need Holman registration */}
+                <div className="pt-2">
+                  <label className="flex items-start gap-3 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 h-4 w-4 rounded border-gray-300 text-primary cursor-pointer"
+                      checked={holmanOnlyMode}
+                      onChange={(e) => setHolmanOnlyMode(e.target.checked)}
+                    />
+                    <div className="space-y-0.5">
+                      <div className="text-sm font-medium group-hover:text-primary transition-colors">Holman-only mode</div>
+                      <div className="text-xs text-muted-foreground">
+                        Vehicle already exists in WMS/TPMS — submit to Holman only. Use this to register a vehicle that was missed in Holman during the original creation.
+                      </div>
+                    </div>
+                  </label>
+                  {holmanOnlyMode && (
+                    <Alert className="mt-2 border-amber-400 dark:border-amber-500">
+                      <AlertTriangle className="h-4 w-4 text-amber-500" />
+                      <AlertDescription className="text-xs">
+                        <strong>Holman-only mode active.</strong> WMS and TPMS will not be modified. The vehicle must already exist in both systems.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </div>
+
                 <div className="flex gap-3 pt-2">
                   {showConfirmDialog && (
                     <span id="confirm-dialog-hint" className="sr-only">
@@ -920,7 +1003,7 @@ export default function CreateVehicle() {
                     aria-atomic="true"
                     className="sr-only"
                   >
-                    {createMutation.isPending ? "Submitting vehicle, please wait…" : ""}
+                    {(createMutation.isPending || holmanOnlyMutation.isPending) ? "Submitting vehicle, please wait…" : ""}
                   </div>
                   <span
                     className="flex-1"
@@ -935,11 +1018,11 @@ export default function CreateVehicle() {
                     <Button
                       type="submit"
                       className="w-full"
-                      disabled={createMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
+                      disabled={createMutation.isPending || holmanOnlyMutation.isPending || showConfirmDialog || !!vehicleExistsWarning}
                       aria-describedby={showConfirmDialog ? "confirm-dialog-hint" : undefined}
                     >
-                      {createMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                      {createMutation.isPending ? "Submitting…" : "Create Vehicle"}
+                      {(createMutation.isPending || holmanOnlyMutation.isPending) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                      {(createMutation.isPending || holmanOnlyMutation.isPending) ? "Submitting…" : holmanOnlyMode ? "Register in Holman" : "Create Vehicle"}
                     </Button>
                   </span>
                   <Button type="button" variant="outline" onClick={handleReset}>
@@ -979,6 +1062,26 @@ export default function CreateVehicle() {
                       >
                         {retryWmsMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         Retry WMS only
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                )}
+                {!submitResult.holman?.success && submitResult.wms?.success && lastSubmittedForm && (
+                  <Alert className="border-amber-400 dark:border-amber-500">
+                    <AlertTriangle className="h-4 w-4 text-amber-500" />
+                    <AlertDescription className="flex items-center justify-between gap-4">
+                      <span>
+                        WMS succeeded but Holman failed. You can retry just the Holman step — WMS and TPMS won't be touched.
+                      </span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="shrink-0"
+                        disabled={retryHolmanMutation.isPending}
+                        onClick={() => retryHolmanMutation.mutate(lastSubmittedForm)}
+                      >
+                        {retryHolmanMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                        Retry Holman only
                       </Button>
                     </AlertDescription>
                   </Alert>
@@ -1376,6 +1479,36 @@ export default function CreateVehicle() {
                     <span className="text-xs text-muted-foreground">{selectedAuditEntry.wmsError}</span>
                   )}
                 </div>
+                {!selectedAuditEntry.holmanSuccess && selectedAuditEntry.wmsSuccess && !selectedAuditEntry.blockedSource && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 dark:border-amber-700 dark:bg-amber-950/30 mt-2">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                      <span className="text-xs font-semibold text-amber-800 dark:text-amber-300">Holman registration incomplete</span>
+                    </div>
+                    <div className="text-xs text-amber-700 dark:text-amber-400">
+                      This vehicle is in WMS/TPMS but missing from Holman and Fleet Management. To fix: go to{" "}
+                      <button
+                        type="button"
+                        className="underline font-medium hover:text-amber-900 dark:hover:text-amber-200"
+                        onClick={() => {
+                          setSelectedAuditEntry(null);
+                          const params = new URLSearchParams();
+                          if (selectedAuditEntry.vehicleNumber) params.set("vehicleNumber", selectedAuditEntry.vehicleNumber);
+                          if (selectedAuditEntry.vin) params.set("vin", selectedAuditEntry.vin);
+                          if (selectedAuditEntry.make) params.set("make", selectedAuditEntry.make);
+                          if (selectedAuditEntry.model) params.set("model", selectedAuditEntry.model);
+                          if (selectedAuditEntry.modelYear) params.set("modelYear", selectedAuditEntry.modelYear);
+                          if (selectedAuditEntry.assetType) params.set("assetType", selectedAuditEntry.assetType);
+                          if (selectedAuditEntry.district) params.set("district", selectedAuditEntry.district);
+                          window.location.href = `/create-vehicle-location?${params.toString()}`;
+                        }}
+                      >
+                        Create Vehicle
+                      </button>
+                      , enable <strong>Holman-only mode</strong>, fill in the remaining fields, and submit.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}
