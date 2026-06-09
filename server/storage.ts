@@ -6363,7 +6363,13 @@ export class DatabaseStorage implements IStorage {
       .where(and(
         eq(queueItems.department, 'Assets Management'),
         sql`${queueItems.createdAt} >= ${sinceDate}`,
-        sql`(${queueItems.toolAuditNotificationSent} = false OR ${queueItems.toolAuditNotificationSent} IS NULL)`
+        sql`(${queueItems.toolAuditNotificationSent} = false OR ${queueItems.toolAuditNotificationSent} IS NULL)`,
+        // LOA Recovery — Tools items live in the Assets Management department but
+        // use a different (flat) data shape and have their own notification
+        // system (server/loa-notifications.ts). Exclude them so the offboarding
+        // tool-audit scanner never mis-parses them as "blocked — No LDAP ID".
+        sql`${queueItems.workflowType} <> 'loa_recovery'`,
+        sql`(${queueItems.requesterId} <> 'system:loa_recovery' OR ${queueItems.requesterId} IS NULL)`
       ))
       .orderBy(desc(queueItems.createdAt));
   }
