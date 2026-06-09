@@ -17,9 +17,13 @@ per (workflow_id, department).
   `(workflow_id, department)` WHERE `workflow_type='loa_recovery' AND status IN
   ('pending','in_progress')`. This is the real guarantee — it survives the
   startup-vs-scheduler race and even cross-process overlap.
-- The creation path inserts with **ON CONFLICT DO NOTHING** so a racing loser is
-  silently skipped (not thrown). `.returning()` is empty on conflict, so the
-  created-count stays accurate.
+- The creation path inserts with **ON CONFLICT DO UPDATE** against that partial
+  index (drizzle needs `targetWhere` matching the index predicate exactly, else
+  it can't infer the partial index). On conflict it **refreshes the tech name**
+  (title/description + `data.techName` via `jsonb_set(data::jsonb,...)::text` —
+  `data` is a text column, not jsonb), guarded by `setWhere` so the update only
+  fires when the TPMS snapshot returned a real full name. A racing loser whose
+  name is null is a no-op (DO NOTHING) and returns no row.
 - An in-process coalescing guard (a `runInFlight` promise) is only a cheap first
   line of defense; do not rely on it alone.
 

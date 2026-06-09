@@ -695,7 +695,13 @@ async function createLoaRecoveryWorkflow(
   workflowId: string,
 ): Promise<number> {
   const tpms = getTpmsContact(q.enterpriseId);
-  const techName = tpms?.fullName || q.enterpriseId;
+  // `realName` is a genuine snapshot hit (full name) or null when the snapshot
+  // doesn't yet know this tech. `techName` falls back to the enterprise ID as a
+  // display placeholder. The on-conflict refresh below only fires when
+  // `realName` is non-null so a stored real name is never downgraded back to the
+  // login-ID placeholder (mirrors the COALESCE pattern used for loa_leaves).
+  const realName = tpms?.fullName || null;
+  const techName = realName || q.enterpriseId;
   const lastKnownTruck = tpms?.truckLu || null;
   const phone = tpms?.mobilePhone || null;
   const primaryZip = tpms?.primaryZip || null;
@@ -790,11 +796,23 @@ async function createLoaRecoveryWorkflow(
   let created = 0;
   for (const lane of lanes) {
     try {
-      // Insert directly with ON CONFLICT DO NOTHING so that if two sync runs
-      // race against a clean state, the partial unique index lets only one row
-      // win per (workflow_id, department) — the loser is silently skipped
-      // instead of throwing. `.returning()` is empty on conflict, so `created`
-      // counts only rows actually written.
+      // Insert with an upsert against the partial unique index
+      // (loa_recovery_open_workflow_dept_uniq on open loa_recovery rows). If two
+      // sync runs race against a clean state, only one row wins per
+      // (workflow_id, department) instead of throwing. On conflict against an
+      // existing open row we *refresh the technician name* (title/description and
+      // data.techName) so a row first written with the login-ID placeholder
+      // (snapshot was cold) gets upgraded to the real full name on a later run.
+      //
+      // The `setWhere` guard fires the refresh ONLY when the snapshot returned a
+      // genuine full name (`realName` non-null). When the snapshot still has no
+      // name, the conflict is a no-op (DO NOTHING) and the stored value is left
+      // untouched, so a real name is never downgraded to the placeholder.
+      //
+      // `(xmax = 0)` is true only for a brand-new INSERT and false for an
+      // ON CONFLICT update, so `created` keeps counting only genuinely new rows
+      // (refreshes don't inflate the count). A skipped no-op conflict returns no
+      // row at all.
       const inserted = await db
         .insert(queueItems)
         .values({
@@ -810,9 +828,21 @@ async function createLoaRecoveryWorkflow(
           data: JSON.stringify({ ...sharedData, lane: lane.laneLabel }),
           metadata: JSON.stringify({ ...baseMetadata, lane: lane.laneLabel }),
         })
-        .onConflictDoNothing()
-        .returning({ id: queueItems.id });
-      if (inserted.length > 0) created += 1;
+        .onConflictDoUpdate({
+          target: [queueItems.workflowId, queueItems.department],
+          targetWhere: sql`"workflow_type" = 'loa_recovery' AND "status" IN ('pending', 'in_progress') AND "workflow_id" IS NOT NULL`,
+          set: {
+            title: lane.title,
+            description: lane.description,
+            data: sql`jsonb_set(${queueItems.data}::jsonb, '{techName}', to_jsonb(${techName}::text))::text`,
+          },
+          setWhere: sql`${realName}::text IS NOT NULL`,
+        })
+        .returning({
+          id: queueItems.id,
+          inserted: sql<boolean>`(xmax = 0)`,
+        });
+      if (inserted.length > 0 && inserted[0].inserted) created += 1;
     } catch (e: any) {
       console.error(
         `[LoaRecovery] Failed to create ${lane.dbDepartment} item for ${q.enterpriseId}:`,
