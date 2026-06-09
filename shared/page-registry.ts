@@ -29,6 +29,7 @@ import {
   FileBarChart,
   LayoutDashboard,
   Upload,
+  GitBranch,
   type LucideIcon
 } from "lucide-react";
 
@@ -436,6 +437,15 @@ export const PAGES: PageDefinition[] = [
     icon: Info,
     category: "helpAndTutorial",
     permissionKey: "about",
+  },
+  {
+    key: "flowcharts",
+    label: "Flowcharts",
+    description: "Interactive architecture flowchart diagrams",
+    path: "/flowcharts",
+    icon: GitBranch,
+    category: "helpAndTutorial",
+    permissionKey: "flowcharts",
   },
   {
     key: "fleetScope",

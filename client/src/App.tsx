@@ -65,6 +65,7 @@ import Reporting from "@/pages/reporting";
 import CommunicationHub from "@/pages/communication-hub";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
+import NexusFlowcharts from "@/pages/nexus-flowcharts";
 import { BackButton } from "@/components/ui/back-button";
 import { MainContent } from "@/components/layout/main-content";
 import { PermissionProtectedRoute } from "@/components/permission-protected-route";
@@ -484,6 +485,12 @@ function Router() {
       <Route path="/about">
         <ProtectedRoute>
           <About />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/flowcharts">
+        <ProtectedRoute>
+          <NexusFlowcharts />
         </ProtectedRoute>
       </Route>
       

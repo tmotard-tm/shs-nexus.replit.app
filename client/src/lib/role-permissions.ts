@@ -67,6 +67,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       enabled: true,
       tutorial: true,
       about: true,
+      flowcharts: true,
     },
   },
   pageFeatures: {
@@ -206,6 +207,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       enabled: true,
       tutorial: true,
       about: true,
+      flowcharts: true,
     },
   },
   pageFeatures: {
@@ -344,6 +346,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       enabled: true,
       tutorial: true,
       about: true,
+      flowcharts: true,
     },
   },
   pageFeatures: {
@@ -496,6 +499,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/help': () => perms.sidebar.helpAndTutorial.tutorial,
     '/about': () => perms.sidebar.helpAndTutorial.about,
     '/tutorial': () => perms.sidebar.helpAndTutorial.tutorial,
+    '/flowcharts': () => perms.sidebar.helpAndTutorial.flowcharts,
     '/fleet-distribution': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,

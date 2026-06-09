@@ -21356,6 +21356,140 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // ── Flowcharts ──────────────────────────────────────────────────────────────
+  // GET /api/flowcharts — parse exports/Nexus_Flowcharts.vsdx and return all
+  // diagrams as React-Flow-ready node/edge arrays.
+  const FLOWCHARTS_VSDX_PATH = "exports/Nexus_Flowcharts.vsdx";
+  app.get("/api/flowcharts", requireAuth, async (_req: any, res) => {
+    try {
+      const fs = await import("fs");
+      const path = await import("path");
+      const AdmZip = (await import("adm-zip")).default;
+      const { XMLParser } = await import("fast-xml-parser");
+
+      const vsdxPath = path.resolve(FLOWCHARTS_VSDX_PATH);
+      if (!fs.existsSync(vsdxPath)) {
+        return res.status(404).json({ message: "Flowchart file not found" });
+      }
+
+      const zip = new AdmZip(vsdxPath);
+
+      // Helper: read a zip entry as a string
+      const readEntry = (name: string): string | null => {
+        const entry = zip.getEntry(name);
+        return entry ? entry.getData().toString("utf-8") : null;
+      };
+
+      const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: "@_" });
+
+      // 1. Page names from pages.xml
+      const pagesXml = readEntry("visio/pages/pages.xml");
+      if (!pagesXml) return res.status(500).json({ message: "Missing pages.xml" });
+      const pagesDoc = parser.parse(pagesXml);
+      const rawPages: any[] = Array.isArray(pagesDoc?.Pages?.Page)
+        ? pagesDoc.Pages.Page
+        : pagesDoc?.Pages?.Page
+        ? [pagesDoc.Pages.Page]
+        : [];
+
+      const pages = rawPages.map((p: any, idx: number) => ({
+        id: String(p["@_ID"] ?? idx + 1),
+        name: String(p["@_NameU"] ?? `Page ${idx + 1}`),
+        pageFile: `visio/pages/page${p["@_ID"] ?? idx + 1}.xml`,
+      }));
+
+      // 2. Parse each page
+      const diagrams = pages.map(({ id, name, pageFile }) => {
+        const xml = readEntry(pageFile);
+        if (!xml) return { id, name, nodes: [], edges: [] };
+
+        const doc = parser.parse(xml);
+        const rawShapes: any[] = Array.isArray(doc?.PageContents?.Shapes?.Shape)
+          ? doc.PageContents.Shapes.Shape
+          : doc?.PageContents?.Shapes?.Shape
+          ? [doc.PageContents.Shapes.Shape]
+          : [];
+
+        // Connectors have <Connect> child elements; regular shapes do not.
+        const isConnector = (s: any) => !!(s.Connect || (Array.isArray(s.Connect) && s.Connect.length > 0));
+        const shapeNodes = rawShapes.filter((s: any) => s["@_ID"] && !isConnector(s));
+
+        // Determine node type from geometry and text
+        const detectType = (shape: any): "terminal" | "decision" | "process" => {
+          const text = String(shape.Text ?? "").trim();
+          if (text === "Start" || /\b(Return|Error)\b/i.test(text)) return "terminal";
+          if (text.endsWith("?")) return "decision";
+          // Geometry hint: EllipticalArcTo → terminal, diamond (first geom point mid) → decision
+          const geomStr = JSON.stringify(shape.Geom ?? "");
+          if (geomStr.includes("EllipticalArcTo")) return "terminal";
+          // Diamond: MoveTo X != 0 (starts at midpoint)
+          const moveToX = shape.Geom?.MoveTo?.Cell?.find?.((c: any) => c["@_N"] === "X");
+          if (moveToX && parseFloat(String(moveToX["@_V"] ?? "0")) > 0) return "decision";
+          return "process";
+        };
+
+        // Extract PinX/PinY for rough positioning
+        const getCell = (shape: any, name: string): number => {
+          const cells: any[] = Array.isArray(shape.Cell) ? shape.Cell : shape.Cell ? [shape.Cell] : [];
+          const cell = cells.find((c: any) => c["@_N"] === name);
+          return cell ? parseFloat(String(cell["@_V"] ?? "0")) * 96 : 0;
+        };
+
+        const nodes = shapeNodes.map((s: any) => {
+          const label = String(s.Text ?? "").trim();
+          const type = detectType(s);
+          return {
+            id: String(s["@_ID"]),
+            label,
+            type,
+            x: getCell(s, "PinX"),
+            y: getCell(s, "PinY"),
+          };
+        });
+
+        // Build edges from connector shapes (shapes that have Connect elements)
+        const edges: Array<{ id: string; source: string; target: string; label: string }> = [];
+        const allConnectors = rawShapes.filter(isConnector);
+        const nodeIds = new Set(nodes.map((n) => n.id));
+
+        for (const conn of allConnectors) {
+          const connects: any[] = Array.isArray(conn.Connect)
+            ? conn.Connect
+            : conn.Connect
+            ? [conn.Connect]
+            : [];
+
+          let source: string | null = null;
+          let target: string | null = null;
+
+          for (const c of connects) {
+            const fromCell = String(c["@_FromCell"] ?? "");
+            const toSheet = String(c["@_ToSheet"] ?? "");
+            if (fromCell === "BeginX") source = toSheet;
+            else if (fromCell === "EndX") target = toSheet;
+          }
+
+          if (source && target && nodeIds.has(source) && nodeIds.has(target)) {
+            const label = String(conn.Text ?? "").trim();
+            edges.push({
+              id: `e${conn["@_ID"]}`,
+              source,
+              target,
+              label,
+            });
+          }
+        }
+
+        return { id, name, nodes, edges };
+      });
+
+      return res.json({ diagrams });
+    } catch (err: any) {
+      console.error("[flowcharts] parse error:", err);
+      return res.status(500).json({ message: err.message ?? "Failed to parse flowcharts" });
+    }
+  });
+
   console.log("=== ROUTE REGISTRATION COMPLETED ===");
   console.log("Registered API routes:");
   app._router.stack

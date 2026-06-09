@@ -104,6 +104,7 @@ export interface RolePermissionSettings {
       enabled: boolean;
       tutorial: boolean;
       about: boolean;
+      flowcharts: boolean;
     };
   };
   // Page-level feature permissions - granular control over elements within each page
