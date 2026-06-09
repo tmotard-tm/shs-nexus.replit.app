@@ -19402,7 +19402,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         h.byov_vin_missing,
         t.district_no
       FROM holman_vehicles_cache h
-      LEFT JOIN tpms_latest t ON t.canonical_truck = h.holman_vehicle_number
+      LEFT JOIN tpms_latest t ON t.canonical_truck = LTRIM(h.holman_vehicle_number, '0')
       LEFT JOIN ams_vehicles_cache a ON a.vin = h.vin
       WHERE h.is_active = true
         AND (h.status_code != 2 OR h.status_code IS NULL)
