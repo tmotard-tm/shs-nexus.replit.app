@@ -14173,7 +14173,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const tpmsService = getTPMSService();
         if (existing.enterpriseId) {
           const updatedBy = (username || "NEXUS").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 9) || "NEXUS";
-          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates, updatedBy });
+          // TPMS API uses "contactNo" for the phone field — remap from local "mobilePhone" before sending
+          const tpmsPayload: Record<string, any> = { ...updates };
+          if ('mobilePhone' in tpmsPayload) {
+            tpmsPayload.contactNo = tpmsPayload.mobilePhone;
+            delete tpmsPayload.mobilePhone;
+          }
+          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...tpmsPayload, updatedBy });
           tpmsSyncSent = true;
         }
       } catch (apiErr: any) {
