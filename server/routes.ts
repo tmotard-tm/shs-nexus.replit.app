@@ -19168,10 +19168,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // A vehicle in a different district than the tech must be unassigned and have
       // its district changed explicitly (Update District), not changed during assign.
       const { tpmsTechProfiles: tpmsTechProfilesTbl } = await import("@shared/schema");
+      const _ldapNorm = String(ldapId).trim().toUpperCase();
       const techProfileRows = await db
         .select({ districtNo: tpmsTechProfilesTbl.districtNo })
         .from(tpmsTechProfilesTbl)
-        .where(eq(tpmsTechProfilesTbl.enterpriseId, String(ldapId).trim()))
+        .where(sql`UPPER(${tpmsTechProfilesTbl.enterpriseId}) = UPPER(${_ldapNorm})`)
         .limit(1);
       const techDistrict = padDistrictForApi(
         String(techProfileRows[0]?.districtNo ?? districtNo ?? ""),

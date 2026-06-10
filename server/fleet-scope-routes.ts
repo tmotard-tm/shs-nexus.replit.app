@@ -11714,6 +11714,299 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.error('[Tech Data Scheduler] LOA Recovery sync failed (continuing):', loaErr?.message || loaErr);
     }
 
+    // ── Step 1: Refresh tpms_tech_profiles from live TPMS API ─────────────────
+    // Iterates all enterprise IDs in tpms_cached_assignments, calls getTechInfo
+    // for each in rate-limited batches, and upserts results into tpms_tech_profiles.
+    // Gated on snapshotOk: if the nightly snapshot failed, skip to avoid thrashing
+    // the TPMS API with potentially stale IDs.
+    if (!snapshotOk) {
+      console.warn('[Tech Data Scheduler] Skipping tpms_tech_profiles refresh — TPMS snapshot did not refresh successfully tonight.');
+    } else {
+      try {
+        const { db: dbInstance } = await import("./db");
+        const { tpmsCachedAssignments: cacheTable, tpmsTechProfiles: profilesTable } = await import("@shared/schema");
+        const { getTpmsApiService } = await import("./tpms-api-service");
+        const { eq: eqOp, isNotNull: isNotNullOp } = await import("drizzle-orm");
+
+        const tpmsApi = getTpmsApiService();
+        const cacheRows = await dbInstance.select({
+          enterpriseId: cacheTable.enterpriseId,
+        }).from(cacheTable).where(isNotNullOp(cacheTable.enterpriseId));
+
+        const enterpriseIds = [...new Set(
+          cacheRows.map((r: any) => (r.enterpriseId || "").trim().toUpperCase()).filter(Boolean)
+        )];
+
+        let profilesUpdated = 0;
+        let profilesErrored = 0;
+        const syncTime = new Date();
+
+        for (const eid of enterpriseIds) {
+          try {
+            const techInfo = await tpmsApi.getTechById(eid).catch(() => null);
+            if (!techInfo) { profilesErrored++; continue; }
+            const data = {
+              techId: techInfo.techId?.trim() || null,
+              enterpriseId: eid,
+              firstName: techInfo.firstName || null,
+              lastName: techInfo.lastName || null,
+              districtNo: techInfo.districtNo || null,
+              pdcNo: (techInfo as any).pdcNo || null,
+              techManagerLdapId: (techInfo.techManagerLdapId || (techInfo as any).managerEntId || "").trim() || null,
+              techManagerName: (techInfo as any).techManagerName || (techInfo as any).managerName || null,
+              truckNo: techInfo.truckNo?.trim() || null,
+              mobilePhone: (techInfo as any).contactNo || (techInfo as any).mobilePhone || null,
+              email: (techInfo as any).email || null,
+              shippingAddresses: (techInfo as any).addresses || [],
+              shippingSchedule: (techInfo as any).shippingSchedule || {},
+              techReplenishment: (techInfo as any).techReplenishment || {},
+              rawResponse: JSON.stringify(techInfo),
+              lastTpmsUpdatedAt: syncTime,
+              syncedAt: syncTime,
+            };
+            await dbInstance.insert(profilesTable).values(data).onConflictDoUpdate({
+              target: profilesTable.enterpriseId,
+              set: { ...data, updatedAt: new Date() },
+            });
+            profilesUpdated++;
+          } catch {
+            profilesErrored++;
+          }
+          // Rate-limit: 200ms between TPMS API calls
+          await new Promise(r => setTimeout(r, 200));
+        }
+        console.log(`[Tech Data Scheduler] tpms_tech_profiles nightly refresh: updated=${profilesUpdated}, errored=${profilesErrored}, total=${enterpriseIds.length}`);
+      } catch (profileErr: any) {
+        console.error('[Tech Data Scheduler] tpms_tech_profiles refresh failed (continuing):', profileErr?.message || profileErr);
+      }
+    }
+
+    // ── Step 4: Auto-remediate stale tech ID mismatches ───────────────────────
+    // Finds tpms_cached_assignments entries where the tech has a non-active
+    // employment status (terminated/rehired). For each stale row:
+    //   1. Evict the stale cache entry (terminated tech's enterprise_id).
+    //   2. Build a reverse truck→enterpriseId map from the freshly-loaded TPMS
+    //      snapshot (which has truckLu per enterprise ID).
+    //   3. If the snapshot shows a DIFFERENT tech now on that truck, call the
+    //      TPMS API live for that new enterprise ID and upsert the current
+    //      assignment into tpms_cached_assignments (re-populate by truck).
+    //   4. Log evicted / repopulated / errored counts.
+    try {
+      const { db: dbInstance } = await import("./db");
+      const { tpmsCachedAssignments: cacheTable } = await import("@shared/schema");
+      const { getTpmsApiService } = await import("./tpms-api-service");
+      const { getTpmsSnapshot } = await import("./tpms-extract-snapshot");
+      const { sql: sqlRaw, eq: eqOp } = await import("drizzle-orm");
+
+      const staleResult = await dbInstance.execute(sqlRaw`
+        SELECT tca.enterprise_id, tca.truck_no, dat.employment_status
+        FROM tpms_cached_assignments tca
+        JOIN all_techs dat ON UPPER(dat.tech_racfid) = UPPER(tca.enterprise_id)
+        WHERE tca.enterprise_id IS NOT NULL
+          AND dat.employment_status != 'A'
+      `);
+      const staleRows: Array<{ enterprise_id: string; truck_no: string; employment_status: string }> =
+        (staleResult as any).rows ?? (Array.isArray(staleResult) ? staleResult : []);
+
+      let staleEvicted = 0;
+      let staleRepopulated = 0;
+      let staleErrored = 0;
+
+      if (staleRows.length > 0) {
+        const tpmsApi = getTpmsApiService();
+
+        // Build a reverse map: normalised truckLu → current enterpriseId
+        // from the TPMS snapshot that was just refreshed in Step 1.
+        const truckToEntId = new Map<string, string>();
+        for (const [entId, contact] of getTpmsSnapshot()) {
+          const t = (contact.truckLu ?? "").trim().toUpperCase();
+          if (t) truckToEntId.set(t, entId);
+        }
+
+        for (const row of staleRows) {
+          try {
+            const staleEntId = (row.enterprise_id ?? "").trim().toUpperCase();
+            const truck = (row.truck_no ?? "").trim().toUpperCase();
+
+            // Step 4a: evict the stale cache entry
+            await dbInstance.delete(cacheTable).where(eqOp(cacheTable.enterpriseId, row.enterprise_id));
+            staleEvicted++;
+
+            // Step 4b: find who is NOW on the truck according to the snapshot
+            const currentEntId = truck ? truckToEntId.get(truck) : undefined;
+
+            if (currentEntId && currentEntId !== staleEntId) {
+              // Step 4c: call TPMS live for the current tech and re-populate
+              const live = await tpmsApi.getTechById(currentEntId).catch(() => null);
+              if (live && ((live as any)?.truckNo ?? "").trim()) {
+                const liveTruckNo: string = (live as any).truckNo ?? truck;
+                await dbInstance
+                  .insert(cacheTable)
+                  .values({
+                    lookupKey: currentEntId,
+                    lookupType: "enterprise_id",
+                    enterpriseId: currentEntId,
+                    truckNo: liveTruckNo,
+                    districtNo: (live as any)?.districtNo || null,
+                    firstName: (live as any)?.firstName || null,
+                    lastName: (live as any)?.lastName || null,
+                    rawResponse: JSON.stringify(live),
+                    lastSuccessAt: new Date(),
+                    lastAttemptAt: new Date(),
+                    updatedAt: new Date(),
+                    status: "live",
+                    failureCount: 0,
+                  } as any)
+                  .onConflictDoUpdate({
+                    target: cacheTable.lookupKey,
+                    set: {
+                      enterpriseId: currentEntId,
+                      truckNo: liveTruckNo,
+                      districtNo: (live as any)?.districtNo || null,
+                      firstName: (live as any)?.firstName || null,
+                      lastName: (live as any)?.lastName || null,
+                      rawResponse: JSON.stringify(live),
+                      lastSuccessAt: new Date(),
+                      lastAttemptAt: new Date(),
+                      updatedAt: new Date(),
+                      status: "live",
+                      failureCount: 0,
+                    },
+                  });
+                staleRepopulated++;
+              }
+              // Rate-limit TPMS calls
+              await new Promise(r => setTimeout(r, 200));
+            }
+          } catch (evictErr: any) {
+            staleErrored++;
+            console.warn(`[Tech Data Scheduler] Stale tech remediation failed for ${row.enterprise_id}:`, evictErr?.message);
+          }
+        }
+      }
+      console.log(`[Tech Data Scheduler] Stale tech ID remediation: evicted=${staleEvicted}, repopulated=${staleRepopulated}, errored=${staleErrored}, found=${staleRows.length}`);
+    } catch (staleErr: any) {
+      console.error('[Tech Data Scheduler] Stale tech ID remediation failed (continuing):', staleErr?.message || staleErr);
+    }
+
+    // ── Step 5: Auto-remediate unexplained drift mismatches ───────────────────
+    // Finds cross-system mismatches that classify as unexplained_drift with
+    // bulkFixEligible=true and executes the suggested fix via the fleet ops service.
+    // TPMS is system-of-record: assigns TPMS tech to Holman+AMS when TPMS wins,
+    // or pushes to Holman when it's blank. Does NOT auto-fix Holman-assigned /
+    // TPMS-blank (silent unassign risk) or AMS-only mismatches.
+    try {
+      const { db: dbInstance } = await import("./db");
+      const { analyzeAlignment } = await import("./alignment-analysis-service");
+      const { fleetOpsService } = await import("./fleet-operations-service");
+      const { sql: sqlRaw } = await import("drizzle-orm");
+
+      const driftResult = await dbInstance.execute(sqlRaw`
+        WITH tpms_latest AS (
+          SELECT DISTINCT ON (truck_no)
+            LTRIM(truck_no, '0') AS canonical_truck,
+            enterprise_id AS tpms_id,
+            TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS tpms_name,
+            district_no
+          FROM tpms_cached_assignments
+          WHERE truck_no IS NOT NULL AND truck_no != ''
+          ORDER BY truck_no, last_success_at DESC
+        )
+        SELECT
+          h.holman_vehicle_number AS truck_number,
+          h.holman_tech_assigned AS holman_tech_id,
+          COALESCE(t.tpms_id, '') AS tpms_tech_id,
+          a.ams_assigned_ldap AS ams_tech_id,
+          h.vin,
+          h.holman_assigned_status_cd AS holman_status_cd,
+          h.byov_vin_missing,
+          t.district_no,
+          COALESCE(t.tpms_name, '') AS tpms_tech_name,
+          h.holman_tech_name AS holman_tech_name
+        FROM holman_vehicles_cache h
+        LEFT JOIN tpms_latest t ON t.canonical_truck = LTRIM(h.holman_vehicle_number, '0')
+        LEFT JOIN ams_vehicles_cache a ON a.vin = h.vin
+        WHERE h.is_active = true
+          AND (h.status_code != 2 OR h.status_code IS NULL)
+          AND h.out_of_service_date IS NULL
+          AND (
+            (COALESCE(TRIM(t.tpms_id), '') != '' AND COALESCE(TRIM(h.holman_tech_assigned), '') = '')
+            OR (
+              COALESCE(LOWER(TRIM(h.holman_tech_assigned)), '') != ''
+              AND COALESCE(LOWER(TRIM(t.tpms_id)), '') != ''
+              AND LOWER(TRIM(h.holman_tech_assigned)) != LOWER(TRIM(t.tpms_id))
+            )
+          )
+        ORDER BY h.holman_vehicle_number
+      `);
+      const driftRows: Array<Record<string, string | null>> =
+        (driftResult as any).rows ?? (Array.isArray(driftResult) ? driftResult : []);
+
+      let driftFixed = 0;
+      let driftSkipped = 0;
+      let driftErrored = 0;
+
+      for (const row of driftRows) {
+        try {
+          const analysis = await analyzeAlignment(
+            row.truck_number || "",
+            row.holman_tech_id || null,
+            row.holman_tech_name || null,
+            row.tpms_tech_id || null,
+            row.tpms_tech_name || null,
+            row.ams_tech_id || null,
+            row.vin || null,
+            row.holman_status_cd || null,
+            !!row.byov_vin_missing,
+            row.district_no || null,
+          );
+
+          if (analysis.rootCause !== "unexplained_drift" || !analysis.bulkFixEligible) {
+            driftSkipped++;
+            continue;
+          }
+
+          const tpmsId = (row.tpms_tech_id || "").trim();
+          const holmanId = (row.holman_tech_id || "").trim();
+          const truckNumber = row.truck_number || "";
+
+          // TPMS assigned, Holman blank → push TPMS tech to Holman + AMS
+          // Both assigned, different techs → push TPMS tech to Holman + AMS (TPMS wins)
+          // Holman assigned, TPMS blank → skip (manual review, avoid silent unassign)
+          if (!tpmsId) {
+            driftSkipped++;
+            continue;
+          }
+
+          const result = await fleetOpsService.assignTech({
+            truckNumber,
+            ldapId: tpmsId,
+            districtNo: row.district_no || undefined,
+            techName: tpmsId,
+            requestedBy: "nightly-drift-remediation",
+            notes: holmanId
+              ? `Auto-remediation: TPMS (${tpmsId}) overrides Holman (${holmanId})`
+              : `Auto-remediation: TPMS assigned, pushing to Holman+AMS`,
+          });
+          if ('locked' in result) {
+            driftSkipped++;
+          } else if (result.overallSuccess || result.partialSuccess) {
+            driftFixed++;
+          } else {
+            driftErrored++;
+          }
+        } catch (fixErr: any) {
+          driftErrored++;
+          console.warn(`[Tech Data Scheduler] Drift remediation failed for ${row.truck_number}:`, fixErr?.message);
+        }
+        // Brief pause to avoid overwhelming downstream APIs
+        await new Promise(r => setTimeout(r, 300));
+      }
+      console.log(`[Tech Data Scheduler] Unexplained drift remediation: fixed=${driftFixed}, skipped=${driftSkipped}, errored=${driftErrored}, candidates=${driftRows.length}`);
+    } catch (driftErr: any) {
+      console.error('[Tech Data Scheduler] Unexplained drift remediation failed (continuing):', driftErr?.message || driftErr);
+    }
+
     try {
       // Get all trucks from our database
       const allTrucks = await fleetScopeStorage.getAllTrucks();

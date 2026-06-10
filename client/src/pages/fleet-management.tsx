@@ -586,7 +586,23 @@ export default function FleetManagement() {
             setAssignLookupStatus("found");
             assignAutoFilledRef.current = true;
             setAssignTechName(json.techName || `${json.firstName ?? ""} ${json.lastName ?? ""}`.trim());
-            if (!assignDistrict && json.districtNo) setAssignDistrict(String(json.districtNo));
+
+            // Prefer TPMS profile district over HR all_techs district — TPMS is the
+            // system of record for district assignment. Fall back to all_techs only
+            // when no TPMS profile exists for this enterprise ID.
+            let districtToSet = json.districtNo ? String(json.districtNo) : "";
+            try {
+              const tpmsRes = await fetch(`/api/tpms/techs?enterpriseId=${encodeURIComponent(q.toUpperCase())}&limit=1`, { credentials: "include" });
+              if (tpmsRes.ok) {
+                const tpmsData = await tpmsRes.json();
+                const tpmsProfile = Array.isArray(tpmsData) ? tpmsData[0] : null;
+                if (tpmsProfile?.districtNo) districtToSet = String(tpmsProfile.districtNo);
+              }
+            } catch {
+              // Non-fatal — keep the all_techs district as fallback
+            }
+            if (!assignDistrict && districtToSet) setAssignDistrict(districtToSet);
+
             // Exact match found — collapse the name suggestions
             setShowNameDropdown(false);
             setTechNameSuggestions([]);
@@ -605,15 +621,30 @@ export default function FleetManagement() {
     return () => timers.forEach(clearTimeout);
   }, [assignLdap]);
 
-  function selectTechSuggestion(tech: any) {
+  async function selectTechSuggestion(tech: any) {
     assignAutoFilledRef.current = true;
     const id = (tech.techRacfid || tech.racfId || tech.ldapId || "").toUpperCase();
     setAssignLdap(id);
     setAssignTechName(tech.techName || `${tech.firstName ?? ""} ${tech.lastName ?? ""}`.trim());
-    setAssignDistrict(tech.districtNo ? String(tech.districtNo) : "");
     setAssignLookupStatus(id ? "found" : "idle");
     setShowNameDropdown(false);
     setTechNameSuggestions([]);
+
+    // Prefer TPMS profile district over HR district for the same reason as the ID lookup path
+    let districtToSet = tech.districtNo ? String(tech.districtNo) : "";
+    if (id) {
+      try {
+        const tpmsRes = await fetch(`/api/tpms/techs?enterpriseId=${encodeURIComponent(id)}&limit=1`, { credentials: "include" });
+        if (tpmsRes.ok) {
+          const tpmsData = await tpmsRes.json();
+          const tpmsProfile = Array.isArray(tpmsData) ? tpmsData[0] : null;
+          if (tpmsProfile?.districtNo) districtToSet = String(tpmsProfile.districtNo);
+        }
+      } catch {
+        // Non-fatal — keep the all_techs district as fallback
+      }
+    }
+    setAssignDistrict(districtToSet);
   }
 
 
