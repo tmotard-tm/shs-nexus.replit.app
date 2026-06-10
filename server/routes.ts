@@ -11095,6 +11095,79 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Force-refresh tpms_tech_profiles from the live TPMS API for specific (or all) enterprise IDs
+  app.post("/api/admin/tpms-tech-profiles/refresh", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || (currentUser.role !== 'developer' && currentUser.role !== 'admin')) {
+        return res.status(403).json({ message: "Only developer or admin users can refresh tech profiles" });
+      }
+
+      const { getTpmsApiService } = await import("./tpms-api-service");
+      const { tpmsCachedAssignments, tpmsTechProfiles } = await import("@shared/schema");
+      const { isNotNull } = await import("drizzle-orm");
+
+      const tpmsApi = getTpmsApiService();
+      const syncTime = new Date();
+
+      // If enterpriseIds provided in body, refresh only those; otherwise refresh all known IDs
+      let enterpriseIds: string[] = [];
+      const bodyIds: unknown = req.body?.enterpriseIds;
+      if (Array.isArray(bodyIds) && bodyIds.length > 0) {
+        enterpriseIds = bodyIds.map((id: any) => String(id).trim().toUpperCase()).filter(Boolean);
+      } else {
+        const cacheRows = await db.select({ enterpriseId: tpmsCachedAssignments.enterpriseId })
+          .from(tpmsCachedAssignments)
+          .where(isNotNull(tpmsCachedAssignments.enterpriseId));
+        enterpriseIds = [...new Set(
+          cacheRows.map((r: any) => (r.enterpriseId || "").trim().toUpperCase()).filter(Boolean)
+        )];
+      }
+
+      let updated = 0, errored = 0;
+      for (const eid of enterpriseIds) {
+        try {
+          const techInfo = await tpmsApi.getTechById(eid).catch(() => null);
+          if (!techInfo) { errored++; continue; }
+          const data = {
+            techId: techInfo.techId?.trim() || null,
+            enterpriseId: eid,
+            firstName: techInfo.firstName || null,
+            lastName: techInfo.lastName || null,
+            districtNo: techInfo.districtNo || null,
+            pdcNo: (techInfo as any).pdcNo || null,
+            techManagerLdapId: (techInfo.techManagerLdapId || (techInfo as any).managerEntId || "").trim() || null,
+            techManagerName: (techInfo as any).techManagerName || (techInfo as any).managerName || null,
+            truckNo: techInfo.truckNo?.trim() || null,
+            mobilePhone: (techInfo as any).contactNo || (techInfo as any).mobilePhone || null,
+            email: (techInfo as any).email || null,
+            shippingAddresses: (techInfo as any).addresses || [],
+            shippingSchedule: (techInfo as any).shippingSchedule || {},
+            techReplenishment: (techInfo as any).techReplenishment || {},
+            rawResponse: JSON.stringify(techInfo),
+            lastTpmsUpdatedAt: syncTime,
+            syncedAt: syncTime,
+          };
+          await db.insert(tpmsTechProfiles).values(data).onConflictDoUpdate({
+            target: tpmsTechProfiles.enterpriseId,
+            set: { ...data, updatedAt: new Date() },
+          });
+          updated++;
+        } catch {
+          errored++;
+        }
+        // Rate-limit: 150ms between calls
+        await new Promise(r => setTimeout(r, 150));
+      }
+
+      console.log(`[Admin] tpms_tech_profiles manual refresh by ${currentUser.username}: updated=${updated}, errored=${errored}, total=${enterpriseIds.length}`);
+      res.json({ success: true, updated, errored, total: enterpriseIds.length });
+    } catch (error: any) {
+      console.error("Error refreshing tpms_tech_profiles:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Sync onboarding hires from Snowflake HR roster view
   app.post("/api/snowflake/sync/onboarding-hires", requireAuth, async (req: any, res) => {
     try {
