@@ -14168,17 +14168,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         .where(eq(tpmsTechProfiles.techId, techId));
       
       let tpmsSyncSent = false;
+      let tpmsSyncError: string | null = null;
       try {
         const tpmsService = getTPMSService();
         if (existing.enterpriseId) {
-          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates });
+          const updatedBy = (username || "NEXUS").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 9) || "NEXUS";
+          await tpmsService.updateTechInfo({ ldapId: existing.enterpriseId, ...updates, updatedBy });
           tpmsSyncSent = true;
         }
       } catch (apiErr: any) {
         console.warn(`[TPMS] API update failed for ${techId}:`, apiErr.message);
+        tpmsSyncError = apiErr.message || "TPMS API rejected the update";
       }
       
-      res.json({ success: true, changes: changeEntries.length, tpmsSyncSent });
+      res.json({ success: true, changes: changeEntries.length, tpmsSyncSent, tpmsSyncError });
     } catch (error: any) {
       console.error("Error updating TPMS tech profile:", error);
       res.status(500).json({ message: error.message });

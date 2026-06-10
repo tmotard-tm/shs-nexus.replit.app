@@ -189,8 +189,18 @@ export default function TechProfiles() {
       const res = await apiRequest("PUT", `/api/tpms/techs/${data.techId}`, data.updates);
       return res.json();
     },
-    onSuccess: () => {
-      toast({ title: "Profile updated", description: "Changes saved and sent to TPMS." });
+    onSuccess: (result: any) => {
+      if (result?.tpmsSyncSent === false) {
+        toast({
+          title: "Saved locally — TPMS update failed",
+          description: result?.tpmsSyncError
+            ? `Changes saved to Nexus but TPMS rejected the update: ${result.tpmsSyncError}`
+            : "Changes saved to Nexus but could not be sent to TPMS. Try again or contact support.",
+          variant: "destructive",
+        });
+      } else {
+        toast({ title: "Profile updated", description: "Changes saved and sent to TPMS." });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/tpms/techs"] });
       setEditMode(false);
     },
