@@ -6,3 +6,4 @@
 - [VIN auto-decode on Create Vehicle](vin-decode-create-vehicle.md) — NHTSA vPIC fills Year/Make/Model/AssetType; AssetType is a constrained-6 heuristic that returns "" when uncertain; spinner uses a seq ref, not a cancelled flag.
 - [Vehicle district update](vehicle-district-update.md) — per-vehicle district fan-out to TPMS/WMS/Holman; Holman prefix=last-4 on UPDATE (not create-flow's full district); only mirror cache when all 3 succeed.
 - [BYOV/vehicle number reservation](byov-number-reservation.md) — create reserves number via active-row + partial-unique-index before fan-out; VIN discriminates retry vs collision; stale reclaim MUST be CAS, not blind id update.
+- [Neon HTTP driver boolean pitfall](neon-http-driver-boolean-pitfall.md) — one-shot neon() HTTP queries mis-read boolean columns (caused a false "account deactivated" diagnosis); use the app's WebSocket pool driver (server/db.ts) for DB ground truth.
