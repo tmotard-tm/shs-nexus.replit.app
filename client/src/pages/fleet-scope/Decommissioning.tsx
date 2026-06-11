@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw, Lock } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw, Lock, Plus } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocation } from "wouter";
 import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
@@ -104,6 +104,8 @@ export default function Decommissioning() {
   const [tableTab, setTableTab] = useState<"active" | "decommissioned" | "oldDeclines">("active");
   const [oldDeclinesDialogOpen, setOldDeclinesDialogOpen] = useState(false);
   const [oldDeclinesPaste, setOldDeclinesPaste] = useState("");
+  const [addTruckDialogOpen, setAddTruckDialogOpen] = useState(false);
+  const [addTruckPaste, setAddTruckPaste] = useState("");
 
   // Column filters
   const [dateFilter, setDateFilter] = useState<string>("");
@@ -291,6 +293,68 @@ export default function Decommissioning() {
       return;
     }
     importOldDeclinesMutation.mutate(rows);
+  };
+
+  const addManualMutation = useMutation({
+    mutationFn: async (rows: { truckNumber: string; address: string | null }[]) => {
+      const res = await apiRequest("POST", "/api/fs/decommissioning/add-manual", { rows });
+      return res.json();
+    },
+    onSuccess: (result: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/decommissioning"] });
+      const parts = [`Added: ${result.added}`];
+      if (result.skippedExisting) parts.push(`Already present: ${result.skippedExisting}`);
+      if (result.invalidRows) parts.push(`Invalid: ${result.invalidRows}`);
+      toast({
+        title: "Trucks Added",
+        description: parts.join(", "),
+      });
+      setAddTruckDialogOpen(false);
+      setAddTruckPaste("");
+      setTableTab("active");
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Add Error",
+        description: error.message || "Failed to add trucks",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleAddManual = () => {
+    const text = addTruckPaste.trim();
+    if (!text) {
+      toast({
+        title: "Error",
+        description: "Please enter at least one truck number",
+        variant: "destructive",
+      });
+      return;
+    }
+    // Each non-empty line is "<truck#>" or "<truck#><whitespace><address...>".
+    // The address may contain commas, so we split on the first run of whitespace.
+    const rows: { truckNumber: string; address: string | null }[] = [];
+    for (const rawLine of text.split(/\r?\n/)) {
+      const line = rawLine.trim();
+      if (!line) continue;
+      const match = line.match(/^(\S+)\s+(.*)$/);
+      if (match) {
+        const [, truckNumber, address] = match;
+        rows.push({ truckNumber, address: address.trim() || null });
+      } else {
+        rows.push({ truckNumber: line, address: null });
+      }
+    }
+    if (rows.length === 0) {
+      toast({
+        title: "Error",
+        description: "No valid truck numbers found",
+        variant: "destructive",
+      });
+      return;
+    }
+    addManualMutation.mutate(rows);
   };
 
   const importMutation = useMutation({
@@ -893,6 +957,57 @@ export default function Decommissioning() {
                       <Upload className="h-4 w-4 mr-2" />
                     )}
                     Import Old Declines
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={addTruckDialogOpen} onOpenChange={setAddTruckDialogOpen}>
+            <DialogTrigger asChild>
+              <Button variant="outline" data-testid="button-add-truck">
+                <Plus className="h-4 w-4 mr-2" />
+                Add Truck
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>Add Truck(s) to Decommissions</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Enter one truck number per line (e.g. <code className="bg-muted px-1 rounded">47230</code>). You can
+                  optionally add an address after the truck number, separated by a space
+                  (<code className="bg-muted px-1 rounded">47230&nbsp;123 MAIN ST, COLUMBUS, OH, 43004</code>). Numbers
+                  without leading zeros are accepted and padded to 6 digits. Trucks already in the list are skipped.
+                  Newly added trucks are enriched with tech, VIN, parts, and distance data automatically.
+                </p>
+                <Textarea
+                  placeholder={"47230\n61330\n22311"}
+                  value={addTruckPaste}
+                  onChange={(e) => setAddTruckPaste(e.target.value)}
+                  className="min-h-[200px] font-mono text-sm"
+                  data-testid="textarea-add-truck"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setAddTruckDialogOpen(false)}
+                    data-testid="button-cancel-add-truck"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleAddManual}
+                    disabled={addManualMutation.isPending || !addTruckPaste.trim()}
+                    data-testid="button-confirm-add-truck"
+                  >
+                    {addManualMutation.isPending ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4 mr-2" />
+                    )}
+                    Add Truck(s)
                   </Button>
                 </div>
               </div>

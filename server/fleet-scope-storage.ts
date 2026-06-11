@@ -1727,6 +1727,62 @@ export class DatabaseStorage implements IStorage {
     return { added, skippedExistingStandard, skippedExistingOldDecline, addedTruckNumbers };
   }
 
+  // Manual add: insert trucks into the MAIN (category 'standard') decommissioning
+  // list — identical to how PO-auto-added trucks land. Only inserts trucks not
+  // already present (any category). Each submitted truck is first removed from the
+  // PO-sync exclusion list, so a previously-deleted truck can be re-added and stays
+  // (and a later matching PO simply sees it as already-present, never re-excluded).
+  async insertManualDecommissioningVehicles(rows: {
+    truckNumber: string;
+    address: string | null;
+    zipCode?: string | null;
+    phone?: string | null;
+    comments?: string | null;
+  }[]): Promise<{
+    added: number;
+    skippedExisting: number;
+    addedTruckNumbers: string[];
+  }> {
+    let added = 0;
+    let skippedExisting = 0;
+    const addedTruckNumbers: string[] = [];
+
+    for (const row of rows) {
+      // Clear any prior exclusion so the manual add persists.
+      await this.removeExcludedDecommTruck(row.truckNumber);
+
+      const existing = await this.getDecommissioningVehicle(row.truckNumber);
+      if (existing) {
+        skippedExisting++;
+        continue;
+      }
+      // Use RETURNING + onConflictDoNothing so we only count rows actually
+      // inserted (concurrent adds of the same truck# won't double-count).
+      const inserted = await getDb()
+        .insert(decommissioningVehicles)
+        .values({
+          truckNumber: row.truckNumber,
+          address: row.address,
+          zipCode: row.zipCode ?? null,
+          phone: row.phone ?? null,
+          comments: row.comments ?? null,
+          stillNotSold: true,
+          category: "standard",
+        })
+        .onConflictDoNothing({ target: decommissioningVehicles.truckNumber })
+        .returning({ truckNumber: decommissioningVehicles.truckNumber });
+
+      if (inserted.length > 0) {
+        added++;
+        addedTruckNumbers.push(row.truckNumber);
+      } else {
+        skippedExisting++;
+      }
+    }
+
+    return { added, skippedExisting, addedTruckNumbers };
+  }
+
   async updateDecommissioningVehicleDistance(
     id: number, 
     managerDistance: number | null, 

@@ -14992,6 +14992,118 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // Manually add one or more truck numbers to the MAIN decommissioning list
+  // (category 'standard' — identical to PO-auto-added trucks). This is the only
+  // way to add trucks that have no PO with a "Decline and Submit for Sale" final
+  // approval (e.g. 47230, 61330, 22311). Truck numbers are stripped to digits and
+  // padded to 6. Already-present trucks are skipped. After insert we run the same
+  // tech-data + parts-count + distance enrichment so new rows populate immediately.
+  // The PO auto-add flow is untouched: it only ever ADDS, so manual rows are never
+  // removed, and a later matching PO sees the truck already present (no duplicate).
+  // Body: { rows: [{ truckNumber, address?, zipCode?, phone?, comments? }] }
+  app.post("/decommissioning/add-manual", async (req, res) => {
+    try {
+      const { rows } = req.body as {
+        rows?: {
+          truckNumber?: string;
+          address?: string | null;
+          zipCode?: string | null;
+          phone?: string | null;
+          comments?: string | null;
+        }[];
+      };
+
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No rows provided" });
+      }
+
+      let invalidRows = 0;
+      const normalized: {
+        truckNumber: string;
+        address: string | null;
+        zipCode: string | null;
+        phone: string | null;
+        comments: string | null;
+      }[] = [];
+      const seenInBatch = new Set<string>();
+
+      for (const row of rows) {
+        const rawTruck = (row.truckNumber ?? "").toString();
+        const digits = rawTruck.replace(/\D/g, "");
+        if (!digits) {
+          invalidRows++;
+          continue;
+        }
+        const truckNumber = digits.padStart(6, "0");
+        if (truckNumber === "000000") {
+          invalidRows++;
+          continue;
+        }
+        if (seenInBatch.has(truckNumber)) continue;
+        seenInBatch.add(truckNumber);
+
+        const address = row.address && row.address.toString().trim() ? row.address.toString().trim() : null;
+        // Prefer an explicit ZIP; otherwise auto-extract from the address tail.
+        const zipCode =
+          row.zipCode && row.zipCode.toString().trim()
+            ? row.zipCode.toString().trim()
+            : extractZipFromAddress(address);
+        const phone = row.phone && row.phone.toString().trim() ? row.phone.toString().trim() : null;
+        const comments = row.comments && row.comments.toString().trim() ? row.comments.toString().trim() : null;
+        normalized.push({ truckNumber, address, zipCode, phone, comments });
+      }
+
+      if (normalized.length === 0) {
+        return res.json({
+          success: true,
+          added: 0,
+          skippedExisting: 0,
+          addedTruckNumbers: [],
+          invalidRows,
+          total: rows.length,
+        });
+      }
+
+      const result = await fleetScopeStorage.insertManualDecommissioningVehicles(normalized);
+
+      console.log(
+        `[Decommissioning Manual Add] Added: ${result.added}, Already present: ${result.skippedExisting}, Invalid: ${invalidRows}`
+      );
+
+      // Best-effort enrichment for the rows we just added. Run sequentially and
+      // non-fatally so a Snowflake/distance hiccup doesn't fail the add response.
+      if (result.added > 0) {
+        try {
+          await syncDecommissioningTechData();
+        } catch (err) {
+          console.error("[Decommissioning Manual Add] Tech-data enrichment failed (non-fatal):", err);
+        }
+        try {
+          await syncDecommissioningPartsCount();
+        } catch (err) {
+          console.error("[Decommissioning Manual Add] Parts-count enrichment failed (non-fatal):", err);
+        }
+        try {
+          await calculateDecommissioningDistances();
+        } catch (err) {
+          console.error("[Decommissioning Manual Add] Distance calc failed (non-fatal):", err);
+        }
+      }
+
+      res.json({
+        success: true,
+        added: result.added,
+        skippedExisting: result.skippedExisting,
+        addedTruckNumbers: result.addedTruckNumbers,
+        invalidRows,
+        total: rows.length,
+      });
+    } catch (error: any) {
+      console.error("[Decommissioning Manual Add] Error:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Helper function to sync decommissioning tech data from Snowflake
   async function syncDecommissioningTechData(): Promise<{ synced: number; preserved: number; total: number }> {
     let vehicles = await fleetScopeStorage.getAllDecommissioningVehicles();
