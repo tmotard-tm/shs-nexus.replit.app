@@ -173,8 +173,36 @@ export async function sendTwilioMessage(
   if (statusCallback) {
     params.statusCallback = statusCallback;
   }
-  const message = await client.messages.create(params);
+  // Bound the outbound send so a hung Twilio HTTP request can never block the
+  // caller indefinitely. Without this, a single stuck client.messages.create()
+  // would freeze the VRM notification dispatcher's drain loop (the await never
+  // resolves, the in-flight guard never clears). On timeout we throw so the
+  // caller can mark the row failed/for-retry instead of wedging. The
+  // underlying HTTP request may still complete server-side, but our queue
+  // idempotency (UNIQUE(decision_id, channel) + status transitions) keeps a
+  // late success from causing a duplicate send.
+  const SEND_TIMEOUT_MS = Number(process.env.TWILIO_SEND_TIMEOUT_MS) || 15_000;
+  const message = await withSendTimeout(
+    client.messages.create(params),
+    SEND_TIMEOUT_MS,
+  );
   return message.sid;
+}
+
+/**
+ * Reject with a clear, identifiable error if the wrapped promise does not
+ * settle within `ms`. The original promise is left to settle on its own
+ * (its result is ignored) — we only stop *waiting* on it.
+ */
+function withSendTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`Twilio send timed out after ${ms}ms`)),
+      ms,
+    );
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
 }
 
 // Process scheduled messages that are due — run every 30 minutes

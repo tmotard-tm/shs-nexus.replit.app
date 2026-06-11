@@ -79,7 +79,7 @@ import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync"
 import { fetchProfitabilityCheck } from "./snowflake-queries";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
-import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech } from "./notification-dispatcher";
+import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
 import { sql as drizzleSql } from "drizzle-orm";
@@ -2011,9 +2011,11 @@ export function registerVrmRoutes(): Router {
           dailyNetWithRental: dailyNetWithRental ?? null,
           scorecardScore: scorecardScore ?? null,
           tenureMonths: tenureMonths ?? null,
-        }).catch((err: any) =>
-          console.error("[VRM] notification enqueue failed:", err?.message ?? err),
-        );
+        })
+          .then(() => triggerImmediateDispatch(`denial supervisor decision ${row.id}`))
+          .catch((err: any) =>
+            console.error("[VRM] notification enqueue failed:", err?.message ?? err),
+          );
         // Tech-facing denial SMS (fixed copy w/ first-name + BYOV link). Sent
         // on the dedicated sms_tech_deny channel so it coexists with the
         // supervisor SMS row (UNIQUE(decision_id, channel)).
@@ -2022,9 +2024,11 @@ export function registerVrmRoutes(): Router {
           techLdap: String(techLdap).toUpperCase(),
           techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
           techName: typeof techName === "string" ? techName : null,
-        }).catch((err: any) =>
-          console.error("[VRM] denial tech SMS enqueue failed:", err?.message ?? err),
-        );
+        })
+          .then(() => triggerImmediateDispatch(`denial decision ${row.id}`))
+          .catch((err: any) =>
+            console.error("[VRM] denial tech SMS enqueue failed:", err?.message ?? err),
+          );
         // File a "Make Unavailable" event with the DCA Task API so the
         // tech's district DCA is notified and the tech is taken off route.
         // Worker drains every 30s — see startDcaEventDispatcher().
@@ -2039,9 +2043,11 @@ export function registerVrmRoutes(): Router {
           techLdap: String(techLdap).toUpperCase(),
           techPhoneOverride: typeof techPhone === "string" ? techPhone : null,
           techName: typeof techName === "string" ? techName : null,
-        }).catch((err: any) =>
-          console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err),
-        );
+        })
+          .then(() => triggerImmediateDispatch(`approval decision ${row.id}`))
+          .catch((err: any) =>
+            console.error("[VRM] approval SMS enqueue failed:", err?.message ?? err),
+          );
       }
 
       // ── Auto-populate the New Rental Full Log ───────────────────────────

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, ilike, or, desc, count, sql, ne, inArray, isNull } from "drizzle-orm";
+import { eq, and, ilike, or, asc, desc, count, sql, ne, inArray, isNull } from "drizzle-orm";
 import {
   vrmTechs,
   vrmTechStatusHistory,
@@ -3155,10 +3155,14 @@ export async function enqueueNotification(
 }
 
 export async function getQueuedNotifications(limit = 50): Promise<VrmNotification[]> {
+  // Stable oldest-first ordering so the queue drains FIFO. Tie-break on id so a
+  // single repeatedly-failing "poison" row at the head cannot starve the rest of
+  // the batch by reappearing in a non-deterministic position each tick.
   return db
     .select()
     .from(vrmNotifications)
     .where(eq(vrmNotifications.status, "queued"))
+    .orderBy(asc(vrmNotifications.createdAt), asc(vrmNotifications.id))
     .limit(limit);
 }
 

@@ -675,20 +675,110 @@ async function dispatchOne(n: VrmNotification): Promise<void> {
 
 let dispatcherStarted = false;
 let dispatcherInFlight = false;
+// Wall-clock time the in-flight guard was taken, used by the watchdog to
+// force-clear a tick that has run impossibly long (a self-heal so a future
+// stall doesn't require a server restart).
+let inFlightSince = 0;
+// Set when a dispatch is requested while a tick is already running. The
+// active tick re-checks this after draining so a row enqueued mid-tick (after
+// the queue snapshot was taken) is still picked up immediately, instead of
+// waiting for the next 30s poll.
+let rerunRequested = false;
+
+// A single dispatchOne should never run longer than this. dispatchOne already
+// wraps its Twilio send in a timeout, but this is a belt-and-suspenders bound
+// so a hang anywhere else in dispatchOne (e.g. a stuck DB write) can't wedge
+// the drain loop either.
+const PER_MESSAGE_TIMEOUT_MS = 30_000;
+// If the in-flight guard has been held longer than this, assume the tick is
+// wedged and force-clear it so the next trigger can proceed. Must be safely
+// larger than one full batch of per-message timeouts in practice.
+const TICK_WATCHDOG_MS = 90_000;
+
+/**
+ * Reject if `promise` doesn't settle within `ms`. Used to bound a single
+ * dispatchOne so one slow/stuck message can't freeze the whole drain loop.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer)) as Promise<T>;
+}
 
 async function dispatchTick(): Promise<void> {
-  if (dispatcherInFlight) return;
-  dispatcherInFlight = true;
-  try {
-    const queued = await getQueuedNotifications(50);
-    for (const n of queued) {
-      await dispatchOne(n);
+  if (dispatcherInFlight) {
+    // Watchdog: a tick that has been "in flight" for far too long is assumed
+    // wedged. Force-clear the guard so this run (and future ones) can proceed
+    // — the system self-heals without a restart.
+    if (inFlightSince && Date.now() - inFlightSince > TICK_WATCHDOG_MS) {
+      console.warn(
+        `[VRM Notif] Watchdog force-clearing stuck in-flight guard (held ${Date.now() - inFlightSince}ms)`,
+      );
+      dispatcherInFlight = false;
+    } else {
+      // A tick is genuinely running. Ask it to re-drain once it finishes so a
+      // row enqueued after its snapshot isn't stranded until the next poll.
+      rerunRequested = true;
+      console.log("[VRM Notif] Tick skipped (already running); requested rerun");
+      return;
     }
+  }
+
+  dispatcherInFlight = true;
+  inFlightSince = Date.now();
+  try {
+    do {
+      rerunRequested = false;
+      const queued = await getQueuedNotifications(50);
+      for (const n of queued) {
+        try {
+          await withTimeout(dispatchOne(n), PER_MESSAGE_TIMEOUT_MS, `dispatchOne(id=${n.id})`);
+        } catch (perMsgErr: any) {
+          // A bounded failure of a single message must not abort the batch —
+          // mark it failed (best-effort) and keep draining the rest so one
+          // poison/slow row can't block the queue.
+          console.error(
+            `[VRM Notif] Per-message timeout/error (id=${n.id}, decision ${n.decisionId}):`,
+            perMsgErr?.message ?? perMsgErr,
+          );
+          try {
+            await markNotificationFailed(n.id, perMsgErr?.message ?? String(perMsgErr));
+          } catch (markErr: any) {
+            console.error(
+              `[VRM Notif] Failed to mark notification ${n.id} as failed:`,
+              markErr?.message ?? markErr,
+            );
+          }
+        }
+      }
+    } while (rerunRequested);
   } catch (err: any) {
     console.error("[VRM Notif] Dispatcher tick error:", err?.message ?? err);
   } finally {
     dispatcherInFlight = false;
+    inFlightSince = 0;
   }
+}
+
+/**
+ * Fire-and-forget immediate drain, called right after a decision enqueues its
+ * notification rows so SMS goes out within a second or two instead of waiting
+ * for the next 30s poll. Shares dispatchTick (and therefore the same send +
+ * idempotency code) with the background worker, so the two can never
+ * double-send a row: dispatchTick's in-flight guard serializes them, and the
+ * UNIQUE(decision_id, channel) index plus queued→sent transitions prevent a
+ * row already sent from being picked up again.
+ *
+ * Never throws into the caller — a failed immediate send leaves the row
+ * `queued` for the backstop worker to retry.
+ */
+export function triggerImmediateDispatch(reason: string): void {
+  console.log(`[VRM Notif] Immediate dispatch requested (${reason})`);
+  dispatchTick().catch((err: any) =>
+    console.error("[VRM Notif] Immediate dispatch error:", err?.message ?? err),
+  );
 }
 
 /**
