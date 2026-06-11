@@ -1232,6 +1232,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "Email already exists" });
       }
 
+      // NIST compliance: screen password (parity with /api/auth/register).
+      if (!validatePasswordRequirements(userData.password)) {
+        return res.status(400).json({
+          message: "Password does not meet security requirements. Please use a password with at least 8 characters."
+        });
+      }
+
+      const screeningResult = await checkPasswordCompromised(userData.password);
+      if (screeningResult.isCompromised) {
+        return res.status(400).json({
+          message: "This password has been found in data breaches and cannot be used. Please choose a different password."
+        });
+      }
+
+      // Log if screening service had issues (but password was allowed through)
+      if (screeningResult.error) {
+        console.warn('Password screening service issue during user creation:', screeningResult.error);
+      }
+
       // Always hash the password before storing. Without this, accounts created
       // through this admin route had plaintext passwords and could never pass the
       // bcrypt.compare check at login (manual login silently impossible).
