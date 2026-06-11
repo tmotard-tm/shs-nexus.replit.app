@@ -48,14 +48,20 @@ export default function ManualLogin() {
     setIsLoading(true);
 
     try {
-      const success = await login(enterpriseId, password);
-      if (success) {
+      const result = await login(enterpriseId, password);
+      if (result.success) {
         const nextUrl = urlParams.get('next');
         setLocation(validateNextUrl(nextUrl));
       } else {
+        const title =
+          result.status === 429
+            ? "Too Many Attempts"
+            : result.status === 403
+            ? "Account Deactivated"
+            : "Login Failed";
         toast({
-          title: "Login Failed",
-          description: "Invalid username or password",
+          title,
+          description: result.message || "Invalid username or password",
           variant: "destructive",
         });
       }

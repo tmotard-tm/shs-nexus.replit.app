@@ -1,9 +1,15 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { User } from "@shared/schema";
 
+interface LoginResult {
+  success: boolean;
+  message?: string;
+  status?: number;
+}
+
 interface AuthContextType {
   user: User | null;
-  login: (enterpriseId: string, password: string) => Promise<boolean>;
+  login: (enterpriseId: string, password: string) => Promise<LoginResult>;
   logout: () => void;
   isLoading: boolean;
   requiresSecurityQuestions: boolean;
@@ -94,7 +100,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     verifySession();
   }, []);
 
-  const login = async (enterpriseId: string, password: string): Promise<boolean> => {
+  const login = async (enterpriseId: string, password: string): Promise<LoginResult> => {
     try {
       const response = await fetch("/api/auth/login", {
         method: "POST",
@@ -111,13 +117,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         
         await new Promise(resolve => setTimeout(resolve, 100));
         
-        return true;
+        return { success: true };
       } else {
-        return false;
+        let message: string | undefined;
+        try {
+          const data = await response.json();
+          message = data?.message;
+        } catch {}
+        return { success: false, message, status: response.status };
       }
     } catch (error) {
       console.error("Login error:", error);
-      return false;
+      return { success: false };
     }
   };
 

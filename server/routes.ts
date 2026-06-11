@@ -1232,7 +1232,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "Email already exists" });
       }
 
-      const user = await storage.createUser(userData);
+      // Always hash the password before storing. Without this, accounts created
+      // through this admin route had plaintext passwords and could never pass the
+      // bcrypt.compare check at login (manual login silently impossible).
+      const hashedPassword = await bcrypt.hash(userData.password, 10);
+      const user = await storage.createUser({ ...userData, password: hashedPassword });
       
       // Log activity
       await storage.createActivityLog({
