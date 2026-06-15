@@ -102,3 +102,9 @@ id = "5EQUYczTXAl1012IvH2fe"
 uri = "file://docs/assign-unassign-tech-flowcharts.md"
 type = "text"
 title = "Assign / Unassign Tech — Flowcharts & Data Sources"
+
+[[outputs]]
+id = "IGHR3CFqHHedEeohpBwrg"
+uri = "file://open_pos_export.csv"
+type = "table"
+title = "Open POs (incl. rentals) — Snowflake export"
