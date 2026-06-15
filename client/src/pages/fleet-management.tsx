@@ -3667,13 +3667,15 @@ export default function FleetManagement() {
               <p className="text-sm font-medium">
                 {districtResult.success
                   ? `District updated to ${districtResult.district}${districtResult.costCenter ? ` (CC ${districtResult.costCenter})` : ""}.`
-                  : "District update finished with some problems."}
+                  : districtResult.accepted
+                    ? `TPMS & WMS updated to ${districtResult.district}${districtResult.costCenter ? ` (CC ${districtResult.costCenter})` : ""}. Holman accepted the change and is confirming it — the card updates on the next fleet sync.`
+                    : "District update finished with some problems."}
               </p>
               {(["tpms", "wms", "holman"] as const).map(sys => (
                 <div key={sys} className="flex items-center justify-between">
                   <span className="text-sm uppercase font-mono">{sys}</span>
                   <div className="flex items-center gap-2">
-                    <SystemStatusBadge status={districtResult?.[sys]?.skipped ? "skipped" : districtResult?.[sys]?.success ? "success" : "failed"} />
+                    <SystemStatusBadge status={districtResult?.[sys]?.skipped ? "skipped" : districtResult?.[sys]?.pending ? "pending" : districtResult?.[sys]?.success ? "success" : "failed"} />
                     {districtResult?.[sys]?.error && (
                       <span className="text-xs text-muted-foreground max-w-[220px] truncate" title={districtResult[sys].error}>{districtResult[sys].error}</span>
                     )}

@@ -38,14 +38,28 @@ newer than its `last_holman_sync_at` — that's the optimistic write, not Holman
 `holman_submissions` history before touching code. If a 202 with errorCount 0 is followed by `UNKNOWN` in the next
 sync, the bug is in Holman's processing, not the submit path — don't "fix" the (correct) assignment code.
 
-## The district change can silently fail too — and Nexus reports false success
-The `/api/fleet/vehicle/:truckNo/district` endpoint submits the new prefix to Holman with
-`submitVehicleArray([{ holmanVehicleNumber, prefix }])` and then sets `holman = { success: true }`
-**solely because the call didn't throw (202)** — there is NO verification loop and NO `holman_submissions`
-audit row for district changes (it only `console.log`s). So "Update District succeeded on all 3 platforms"
-can be a lie: Holman accepts the prefix change (202, 0 errors) and silently never applies it, leaving the
-vehicle at its old prefix. This is the assign-flow's "202 ≠ applied" problem, but worse — district changes
-aren't even tracked or polled.
+## District changes now use the same async verification as assign (false-success FIXED)
+`/api/fleet/vehicle/:truckNo/district` used to set `holman = { success: true }` on the bare 202 with no
+tracking — a lie when Holman silently dropped the change. It now mirrors the assign flow: it records a
+`holman_submissions` row with `action='district'` + `scheduleVerification`, returns
+`holman={success:false, pending:true}` (response `success` = `tpms && wms && holman.success`, plus an
+`accepted` flag = `tpms && wms && holmanPending`), and only reports success once the prefix is confirmed in
+fresh fleet data. Durable constraints a future edit must NOT break:
+- **The sync FREEZES `cache.district` on conflict** (the `onConflictDoUpdate` in
+  `holman-vehicle-sync-service.ts` re-sets `district` to its own current value via `sql`). So
+  `verifyFromFleetData` is the ONLY authoritative place that persists a Nexus-initiated district change to
+  `holman_vehicles_cache.district`. **Never** re-add an optimistic district mirror in the route — the sync
+  freeze overwrites it and the card stays stale. (Assign's optimistic-mirror trick does NOT work for district.)
+- **Submission key = RAW un-padded `holmanVehicleNumber`** (the cache row key, e.g. `"37251"`), NOT
+  `paddedVehicle` (`"037251"`). It must equal the `verifyFromFleetData` lookup-map key, which uses the same
+  fallback chain as the cache writer: `holmanVehicleNumber || clientVehicleNumber || vehicleNumber`.
+- **In the fleet-sync GET response, `v.prefix` is the 4-digit district prefix** (it populates
+  `cache.district` at `district: v.prefix || v.district`). `v.division` is the division (`01`/`RF`) — do not
+  confuse them when verifying. Compare `normalizePrefix(targetPrefix)` to `normalizePrefix(vehicle.prefix ?? vehicle.district)`.
+- **`normalizePrefix` must return `''` for no-digit input** (then last-4 + `padStart(4,'0')`). If it padded
+  `''` to `'0000'`, the empty-target guard would pass and a malformed payload could false-match a real `0000`.
+- If `createSubmission`/`scheduleVerification` throws after the 202, return `holman={success:false, pending:false, error}`
+  — never `pending:true` without a durable verifier, or the card freezes forever.
 
 **Why this breaks the downstream assign:** if the district move to the new prefix never lands in Holman, the
 vehicle is still in its OLD prefix. Assigning a tech whose district = the NEW prefix is then dropped by Holman,

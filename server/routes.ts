@@ -9476,7 +9476,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       // --- Holman submit (change the prefix only; vehicle is unassigned) ---
-      let holman: { success: boolean; skipped?: boolean; error?: string } = { success: false };
+      // Holman returns 202 Accepted (async queue) — that is NOT confirmation the
+      // prefix actually changed. Holman can accept the request and silently never
+      // apply it. So we record a pending submission and verify the change landed
+      // against fresh fleet-sync data (verifyFromFleetData) before the card reflects
+      // the new district — never on the bare 202.
+      let holman: {
+        success: boolean;
+        pending?: boolean;
+        skipped?: boolean;
+        error?: string;
+        submissionId?: string;
+        message?: string;
+      } = { success: false };
       try {
         const holmanPayload: Record<string, any> = {
           lesseeCode: "2B56",
@@ -9489,39 +9501,62 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
         const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
         console.log("[District] Holman submit response:", holmanResp);
-        holman = { success: true };
+
+        // 202 accepted → record a pending submission and verify asynchronously.
+        // Store the RAW cache key (vehicle.holmanVehicleNumber, e.g. "37251") — it
+        // matches both the verifyFromFleetData vehicle map and the cache row, so the
+        // confirmation can find the vehicle and update the card. targetPrefix is the
+        // 4-digit prefix we expect Holman to report once it applies the change.
+        try {
+          const { holmanSubmissionService } = await import("./holman-submission-service");
+          const submission = await holmanSubmissionService.createSubmission({
+            holmanVehicleNumber: vehicle.holmanVehicleNumber,
+            action: "district",
+            payload: { ...holmanPayload, targetPrefix: holmanPrefix, targetDistrict: paddedDistrict },
+            response: holmanResp,
+            createdBy: (req.user as any)?.username ?? null,
+          });
+          // First check at 60s, up to 5 retry attempts with back-off.
+          holmanSubmissionService.scheduleVerification(submission.id, 60_000, 5);
+          holman = {
+            success: false,
+            pending: true,
+            submissionId: submission.id,
+            message: "Holman accepted the change — confirming on the next fleet sync.",
+          };
+        } catch (subErr) {
+          // Holman accepted the 202 but we couldn't persist a durable verification
+          // record. Without a verifier the card would never update (the sync freezes
+          // cache.district on conflict), so we must NOT claim pending — surface a
+          // failure so the operator knows the change is unconfirmed and can retry.
+          console.error("[District] Failed to create Holman verification submission:", subErr);
+          const subMsg = subErr instanceof Error ? subErr.message : "verification record failed";
+          holman = {
+            success: false,
+            pending: false,
+            error: `Holman accepted the change but it could not be tracked for confirmation (${subMsg}). Please retry so the district can be verified.`,
+          };
+        }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Holman district update failed";
         console.error("[District] Holman submit error:", err);
         holman = { success: false, error: msg };
       }
 
-      // --- Update the local Holman cache row so the card reflects the change ---
-      // Only mirror the new district locally when every system of record changed.
-      // On a partial failure we leave the card showing the old district so it never
-      // implies a successful change that one of TPMS/WMS/Holman did not actually make.
-      const allOk = tpms.success && wms.success && holman.success;
-      if (allOk) {
-        try {
-          await db
-            .update(holmanVehiclesCache)
-            .set({
-              district: paddedDistrict,
-              division: holmanPrefix,
-              region: "890",
-              lastLocalUpdateAt: new Date(),
-            })
-            // Use the raw stored key (vehicle.holmanVehicleNumber), not paddedVehicle.
-          // paddedVehicle = "037251" but the row is stored as "37251"; the padded
-          // WHERE hits 0 rows and the cache stays stale, causing a 409 on the next assign.
-          .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicle.holmanVehicleNumber));
-        } catch (cacheErr) {
-          console.warn("[District] failed to update holman_vehicles_cache:", cacheErr);
-        }
-      }
+      // NOTE: we intentionally do NOT optimistically mirror the new district into
+      // holman_vehicles_cache here. The card's district reflects Holman's real
+      // prefix; the sync freezes cache.district on conflict, so the cache is only
+      // updated once verifyFromFleetData confirms Holman actually applied the change
+      // (it writes the confirmed 4-digit prefix). TPMS/WMS apply synchronously
+      // above; Holman is confirmed asynchronously.
 
+      const holmanPending = !!holman.pending;
       return res.json({
-        success: allOk,
+        // success === every system of record confirmed. Holman is async, so a
+        // freshly-submitted district change is "accepted", not yet "success".
+        success: tpms.success && wms.success && holman.success,
+        accepted: tpms.success && wms.success && holmanPending,
+        holmanPending,
         district,
         costCenter: matchedCostCenter.costCenter,
         tpms,

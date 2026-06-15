@@ -10,7 +10,7 @@ const POST_EXPIRY_BUFFER_MS = 2 * 60 * 1000; // 2 minutes after expiry
 export class HolmanSubmissionService {
   async createSubmission(data: {
     holmanVehicleNumber: string;
-    action: 'assign' | 'unassign' | 'field_test';
+    action: 'assign' | 'unassign' | 'field_test' | 'district';
     enterpriseId?: string | null;
     submissionId?: string | null;
     correlationId?: string | null;
@@ -97,6 +97,23 @@ export class HolmanSubmissionService {
     return updated || null;
   }
 
+  // Normalize a district/prefix value to its last 4 digits for comparison.
+  // Holman stores the prefix as a 4-digit string (e.g. "7670"); local district
+  // values may be zero-padded to 7 ("0007670"). Compare on the last 4 digits.
+  private normalizePrefix(value: any): string {
+    // Holman district prefixes are 4-digit, zero-padded (e.g. "0890"). Strip any
+    // non-digits; return '' when there are none so the empty-target guard in the
+    // district branches still fires (otherwise padStart would turn "" into "0000"
+    // and a malformed payload could false-match a real district of "0000"). When
+    // digits exist, take the last 4 and left-pad to 4 so an unpadded Holman value
+    // like "890" still compares equal to a padded target "0890" (avoids a false
+    // "not yet applied" that would leave the card frozen). Padding can't create a
+    // false positive — distinct 4-digit prefixes stay distinct.
+    const digits = String(value ?? '').replace(/\D/g, '');
+    if (!digits) return '';
+    return digits.slice(-4).padStart(4, '0');
+  }
+
   // ─── Vehicle-lookup verification (primary strategy) ──────────────────────────
   // Holman's batch submission API returns 202 Accepted (async queue).
   // There is no per-vehicle status endpoint.  Holman's basic-query GET does not
@@ -159,6 +176,19 @@ export class HolmanSubmissionService {
         return { verified: false, newStatus: 'pending', message: `Cache tech="${techInCache}", expected="${expectedTech}" — not yet matched` };
       }
 
+      if (submission.action === 'district') {
+        const target = this.normalizePrefix((submission.payload as any)?.targetPrefix ?? (submission.payload as any)?.prefix);
+        if (!target) {
+          return { verified: false, newStatus: 'pending', message: 'District submission missing target prefix — cannot verify' };
+        }
+        const current = this.normalizePrefix(cached.district);
+        if (current && current === target) {
+          console.log(`[HolmanVerify] Submission ${submission.id} — confirmed district ${target} from cache`);
+          return { verified: true, newStatus: 'completed', message: `Confirmed district ${target} via cache`, rawVehicle: cached };
+        }
+        return { verified: false, newStatus: 'pending', message: `Cache district="${cached.district ?? ''}" (last4=${current || '—'}), expected "${target}" — not yet applied` };
+      }
+
       return { verified: false, newStatus: 'pending', message: 'Awaiting fleet sync for verification' };
     } catch (err: any) {
       console.warn(`[HolmanVerify] Cache lookup failed for ${vehicleNumber}:`, err.message);
@@ -173,10 +203,15 @@ export class HolmanSubmissionService {
     const pending = await this.getAllPendingSubmissions();
     if (pending.length === 0) return;
 
-    // Build a fast lookup map keyed by holmanVehicleNumber
+    // Build a fast lookup map keyed by the vehicle number. Use the SAME fallback
+    // chain the cache writer uses (holmanVehicleNumber || clientVehicleNumber ||
+    // vehicleNumber) so the key here matches the key a submission was stored under
+    // (submission.holmanVehicleNumber == the cache row key). If we only keyed by
+    // holmanVehicleNumber, a vehicle Holman returns under a fallback field would
+    // never be found and its pending submission could never be verified.
     const vehicleMap = new Map<string, any>();
     for (const v of holmanVehicles) {
-      const num = (v.holmanVehicleNumber || '').trim();
+      const num = (v.holmanVehicleNumber || v.clientVehicleNumber || v.vehicleNumber || '').toString().trim();
       if (num) vehicleMap.set(num, v);
     }
 
@@ -212,6 +247,13 @@ export class HolmanSubmissionService {
         } else {
           message = `Fleet sync shows "${vehicle.assignedStatus}" (tech="${techInHolman}") — Holman may still be processing`;
         }
+      } else if (action === 'district') {
+        const target = this.normalizePrefix((submission.payload as any)?.targetPrefix ?? (submission.payload as any)?.prefix);
+        const currentPrefix = this.normalizePrefix(vehicle.prefix ?? vehicle.district);
+        success = !!target && currentPrefix === target;
+        message = success
+          ? `Confirmed district ${target} via fleet sync (Holman prefix="${vehicle.prefix ?? ''}")`
+          : `Fleet sync shows Holman prefix="${vehicle.prefix ?? ''}" (last4=${currentPrefix || '—'}), expected "${target || '—'}" — Holman may not have applied the change`;
       } else {
         // field_test or other — just finding the vehicle is enough
         success = true;
@@ -222,6 +264,21 @@ export class HolmanSubmissionService {
         console.log(`[HolmanVerify] Fleet sync verified submission ${submission.id} (vehicle ${vehicleNumber}, ${action}): ${message}`);
         await this.updateSubmissionStatus(submission.id, 'completed');
         await this.propagateStatusToFleetLog(submission, 'completed', message);
+        // District changes are confirmed here (raw Holman prefix is the source of
+        // truth). The fleet sync freezes cache.district on conflict, so this is the
+        // only place the card's district is updated for a Nexus-initiated change.
+        if (action === 'district') {
+          const confirmedPrefix = String(vehicle.prefix ?? vehicle.district ?? '').trim();
+          if (confirmedPrefix) {
+            try {
+              await db.update(holmanVehiclesCache)
+                .set({ district: confirmedPrefix, lastLocalUpdateAt: new Date() })
+                .where(eq(holmanVehiclesCache.holmanVehicleNumber, submission.holmanVehicleNumber));
+            } catch (cacheErr: any) {
+              console.warn(`[HolmanVerify] Failed to update cache district for ${vehicleNumber}:`, cacheErr.message);
+            }
+          }
+        }
       } else {
         console.log(`[HolmanVerify] Fleet sync: submission ${submission.id} not yet confirmed: ${message}`);
         // Persist the last observed tech so timeout/expiry messages can include actual vs expected
@@ -464,7 +521,7 @@ export class HolmanSubmissionService {
       return { checked: true, newStatus: 'completed', message: 'No submission ID' };
     }
     // For assign/unassign use vehicle lookup; for field_test keep legacy path
-    if (submission.action === 'assign' || submission.action === 'unassign') {
+    if (submission.action === 'assign' || submission.action === 'unassign' || submission.action === 'district') {
       const r = await this.verifyByVehicleLookup(submission);
       return { checked: r.verified, newStatus: r.newStatus === 'pending' ? 'processing' : r.newStatus, message: r.message };
     }
