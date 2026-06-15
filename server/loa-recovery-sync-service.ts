@@ -96,6 +96,7 @@ async function ensureLoaRecoverySchema(): Promise<void> {
       "first_name" text,
       "phone" varchar(32),
       "van_number" varchar(32),
+      "district" varchar(16),
       "is_rental" boolean NOT NULL DEFAULT false,
       "start_date" date,
       "expected_return_date" date,
@@ -127,6 +128,12 @@ async function ensureLoaRecoverySchema(): Promise<void> {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS "loa_leaves_start_date_idx"
       ON "loa_leaves" ("start_date");
+  `);
+  // Raw-SQL migration for the district column (CREATE TABLE IF NOT EXISTS above
+  // does not add columns to a pre-existing table). fs_*-style raw SQL is used
+  // here to avoid drizzle-kit push conflicts — see replit.md gotcha.
+  await db.execute(sql`
+    ALTER TABLE "loa_leaves" ADD COLUMN IF NOT EXISTS "district" varchar(16);
   `);
   await db.execute(sql`
     CREATE TABLE IF NOT EXISTS "loa_team_recipients" (
@@ -189,6 +196,49 @@ async function syncLoaLeaves(
     : [];
   const existingByWf = new Map(existingRows.map((r) => [r.workflowId, r]));
 
+  // Carry send-state forward when a leave's start date shifts. The workflowId is
+  // `loa-{enterpriseId}-{startDate}`, so a corrected start date yields a brand
+  // new workflowId whose row has empty send-state — the daily sweep would then
+  // re-notify even though the same leave was already announced. We treat any
+  // still-OPEN row for the same enterpriseId (different workflowId) as the same
+  // leave episode and copy its send-state onto the new row. A genuinely new
+  // leave taken after a return finds only a CLOSED prior row, so it is not
+  // matched here and notifies normally. The old open row is closed at the end of
+  // this sync by the roster-reconciliation step below.
+  const entIds = Array.from(new Set(deduped.map((r) => r.enterpriseId)));
+  const priorOpenRows = entIds.length
+    ? await db
+        .select({
+          workflowId: loaLeaves.workflowId,
+          enterpriseId: loaLeaves.enterpriseId,
+          startDate: loaLeaves.startDate,
+          durationDays: loaLeaves.durationDays,
+          teamNoticeSentAt: loaLeaves.teamNoticeSentAt,
+          teamNoticeMsgId: loaLeaves.teamNoticeMsgId,
+          returnNoticeSentAt: loaLeaves.returnNoticeSentAt,
+          returnNoticeMsgId: loaLeaves.returnNoticeMsgId,
+          techSmsSentAt: loaLeaves.techSmsSentAt,
+          techSmsMsgId: loaLeaves.techSmsMsgId,
+          extensionTriggered: loaLeaves.extensionTriggered,
+          extensionTriggeredAt: loaLeaves.extensionTriggeredAt,
+          extensionNoticeSentAt: loaLeaves.extensionNoticeSentAt,
+          extensionNoticeMsgId: loaLeaves.extensionNoticeMsgId,
+          recoveryPaused: loaLeaves.recoveryPaused,
+          recoveryPausedAt: loaLeaves.recoveryPausedAt,
+        })
+        .from(loaLeaves)
+        .where(
+          and(inArray(loaLeaves.enterpriseId, entIds), eq(loaLeaves.closed, false)),
+        )
+    : [];
+  const priorOpenByEnt = new Map<string, (typeof priorOpenRows)[number]>();
+  for (const row of priorOpenRows) {
+    const cur = priorOpenByEnt.get(row.enterpriseId);
+    if (!cur || (row.startDate || "") > (cur.startDate || "")) {
+      priorOpenByEnt.set(row.enterpriseId, row);
+    }
+  }
+
   for (const r of deduped) {
     const wfId = workflowIdFor(r.enterpriseId, r.startDate);
     const tpms = getTpmsContact(r.enterpriseId);
@@ -208,6 +258,26 @@ async function syncLoaLeaves(
       extensionWorkflowIds.push(wfId);
     }
 
+    // Only carry forward for a brand-new workflowId (no existing row) whose
+    // enterpriseId has a still-open prior row under a different workflowId — i.e.
+    // a start-date shift of the same leave episode.
+    const carry =
+      !existingByWf.has(wfId) ? priorOpenByEnt.get(r.enterpriseId) : undefined;
+    const carryFwd = carry && carry.workflowId !== wfId ? carry : undefined;
+
+    // A start-date shift produces a new workflowId, so the same-workflowId
+    // crossing check above (using `prev`) never fires for it. If the carried
+    // episode was sub-30 and the corrected dates now cross to 30+, surface the
+    // extension once here so the 30+ notice/checklist still goes out.
+    if (
+      carryFwd &&
+      (carryFwd.durationDays ?? 0) < MIN_DAYS &&
+      r.days >= MIN_DAYS &&
+      !carryFwd.extensionTriggered
+    ) {
+      extensionWorkflowIds.push(wfId);
+    }
+
     await db
       .insert(loaLeaves)
       .values({
@@ -223,6 +293,22 @@ async function syncLoaLeaves(
         expectedReturnDate: r.endDate,
         durationDays: r.days,
         sfStatus,
+        ...(carryFwd
+          ? {
+              teamNoticeSentAt: carryFwd.teamNoticeSentAt,
+              teamNoticeMsgId: carryFwd.teamNoticeMsgId,
+              returnNoticeSentAt: carryFwd.returnNoticeSentAt,
+              returnNoticeMsgId: carryFwd.returnNoticeMsgId,
+              techSmsSentAt: carryFwd.techSmsSentAt,
+              techSmsMsgId: carryFwd.techSmsMsgId,
+              extensionTriggered: carryFwd.extensionTriggered,
+              extensionTriggeredAt: carryFwd.extensionTriggeredAt,
+              extensionNoticeSentAt: carryFwd.extensionNoticeSentAt,
+              extensionNoticeMsgId: carryFwd.extensionNoticeMsgId,
+              recoveryPaused: carryFwd.recoveryPaused,
+              recoveryPausedAt: carryFwd.recoveryPausedAt,
+            }
+          : {}),
       })
       .onConflictDoUpdate({
         target: loaLeaves.workflowId,
@@ -265,7 +351,63 @@ async function syncLoaLeaves(
       .where(inArray(loaLeaves.workflowId, toClose));
   }
 
+  await enrichLoaLeavesVanDistrict();
+
   return { extensionWorkflowIds };
+}
+
+/**
+ * Backfill blank `van_number` / `district` on `loa_leaves` rows from persistent
+ * last-known sources. The live TPMS_EXTRACT mirror (getTpmsContact) blanks a
+ * technician's truck and district as soon as they go on LOA, so the leave row
+ * captured at sync time is often empty. This fills from durable tables instead.
+ *
+ *   van:      tpms_tech_profiles.truck_no  ->  all_techs.last_known_truck_lu
+ *   district: tpms_tech_profiles.district_no -> all_techs.district_no
+ *
+ * Fill-blank-only: the WHERE clause never touches a row that already has a value
+ * (COALESCE-style), so a known van/district is never clobbered with a blank.
+ * Idempotent — safe to run on every sync.
+ */
+async function enrichLoaLeavesVanDistrict(): Promise<void> {
+  await db.execute(sql`
+    UPDATE "loa_leaves" l
+    SET "van_number" = v.van, "updated_at" = now()
+    FROM (
+      SELECT ids.eid,
+        COALESCE(
+          NULLIF((SELECT t.truck_no FROM "tpms_tech_profiles" t
+                  WHERE upper(t.enterprise_id) = ids.eid
+                    AND coalesce(t.truck_no, '') <> '' LIMIT 1), ''),
+          NULLIF((SELECT a.last_known_truck_lu FROM "all_techs" a
+                  WHERE upper(a.tech_racfid) = ids.eid
+                    AND coalesce(a.last_known_truck_lu, '') <> '' LIMIT 1), '')
+        ) AS van
+      FROM (SELECT DISTINCT upper("enterprise_id") AS eid FROM "loa_leaves") ids
+    ) v
+    WHERE upper(l."enterprise_id") = v.eid
+      AND (l."van_number" IS NULL OR l."van_number" = '')
+      AND v.van IS NOT NULL AND v.van <> '';
+  `);
+  await db.execute(sql`
+    UPDATE "loa_leaves" l
+    SET "district" = d.district, "updated_at" = now()
+    FROM (
+      SELECT ids.eid,
+        COALESCE(
+          NULLIF((SELECT t.district_no FROM "tpms_tech_profiles" t
+                  WHERE upper(t.enterprise_id) = ids.eid
+                    AND coalesce(t.district_no, '') <> '' LIMIT 1), ''),
+          NULLIF((SELECT a.district_no FROM "all_techs" a
+                  WHERE upper(a.tech_racfid) = ids.eid
+                    AND coalesce(a.district_no, '') <> '' LIMIT 1), '')
+        ) AS district
+      FROM (SELECT DISTINCT upper("enterprise_id") AS eid FROM "loa_leaves") ids
+    ) d
+    WHERE upper(l."enterprise_id") = d.eid
+      AND (l."district" IS NULL OR l."district" = '')
+      AND d.district IS NOT NULL AND d.district <> '';
+  `);
 }
 
 /**

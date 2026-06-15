@@ -748,6 +748,7 @@ This is an automated message from the Nexus Offboarding System.`,
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Expected Return Date</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_expected_return_date}}</td></tr>
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Leave Duration</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_duration_days}} days</td></tr>
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Van Number</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{van_number}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">District</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{district}}</td></tr>
     </table>
 
     <h3 style="color: #2563eb; margin: 24px 0 8px 0;">Required Actions</h3>
@@ -780,6 +781,7 @@ Leave Start Date: {{loa_start_date}}
 Expected Return Date: {{loa_expected_return_date}}
 Leave Duration: {{loa_duration_days}} days
 Van Number: {{van_number}}
+District: {{district}}
 
 REQUIRED ACTIONS
 - Inventory: Cancel open parts orders / pending shipments effective Day 1.
@@ -792,7 +794,7 @@ Please do not contact the associate directly regarding their leave. Route any qu
 
 Thank you,
 Employee Leave Management Team`,
-      variables: ['tech_name', 'enterprise_id', 'loa_start_date', 'loa_expected_return_date', 'loa_duration_days', 'van_number', 'is30Plus', 'isExtension'],
+      variables: ['tech_name', 'enterprise_id', 'loa_start_date', 'loa_expected_return_date', 'loa_duration_days', 'van_number', 'district', 'is30Plus', 'isExtension'],
       isActive: true,
     },
     {
@@ -818,6 +820,7 @@ Employee Leave Management Team`,
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Enterprise ID</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{enterprise_id}}</td></tr>
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Expected Return Date</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{loa_expected_return_date}}</td></tr>
       <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">Van Number</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{van_number}}</td></tr>
+      <tr><td style="padding: 8px 10px; font-weight: bold; border-bottom: 1px solid #e2e8f0;">District</td><td style="padding: 8px 10px; border-bottom: 1px solid #e2e8f0;">{{district}}</td></tr>
     </table>
 
     <h3 style="color: #059669; margin: 24px 0 8px 0;">Required Actions</h3>
@@ -844,6 +847,7 @@ Technician: {{tech_name}}
 Enterprise ID: {{enterprise_id}}
 Expected Return Date: {{loa_expected_return_date}}
 Van Number: {{van_number}}
+District: {{district}}
 
 REQUIRED ACTIONS
 - Fleet: Confirm a vehicle (or rental) is available for the technician's Day 1 return.
@@ -854,7 +858,7 @@ For protected leaves, the technician must be reinstated to their same or an equi
 
 Thank you,
 Employee Leave Management Team`,
-      variables: ['tech_name', 'enterprise_id', 'loa_expected_return_date', 'van_number'],
+      variables: ['tech_name', 'enterprise_id', 'loa_expected_return_date', 'van_number', 'district'],
       isActive: true,
     },
     {

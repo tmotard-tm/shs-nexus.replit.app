@@ -557,6 +557,7 @@ export const loaLeaves = pgTable("loa_leaves", {
   firstName: text("first_name"),
   phone: varchar("phone", { length: 32 }),
   vanNumber: varchar("van_number", { length: 32 }),
+  district: varchar("district", { length: 16 }),
   isRental: boolean("is_rental").notNull().default(false),
   startDate: date("start_date"),
   expectedReturnDate: date("expected_return_date"),

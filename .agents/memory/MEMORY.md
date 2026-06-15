@@ -7,3 +7,4 @@
 - [Vehicle district update](vehicle-district-update.md) — per-vehicle district fan-out to TPMS/WMS/Holman; Holman prefix=last-4 on UPDATE (not create-flow's full district); only mirror cache when all 3 succeed.
 - [BYOV/vehicle number reservation](byov-number-reservation.md) — create reserves number via active-row + partial-unique-index before fan-out; VIN discriminates retry vs collision; stale reclaim MUST be CAS, not blind id update.
 - [Neon HTTP driver boolean pitfall](neon-http-driver-boolean-pitfall.md) — one-shot neon() HTTP queries mis-read booleans; use the app's pool driver (server/db.ts) for DB ground truth.
+- [communication_logs.sent_by FK trap](communication-logs-sentby-fk.md) — system sends must pass sentBy=null (actor→metadata.sender); a non-user string throws after the email sent, silently losing the log + *_sent_at → daily re-fire.

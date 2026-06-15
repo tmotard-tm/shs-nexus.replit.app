@@ -85,6 +85,10 @@ function fmtVan(v: string | null | undefined): string {
   return v && v.trim() ? v.trim() : "Not on file";
 }
 
+function fmtDistrict(d: string | null | undefined): string {
+  return d && d.trim() ? d.trim() : "Unknown";
+}
+
 function todayStr(): string {
   return startOfUtcDay(new Date()).toISOString().slice(0, 10);
 }
@@ -113,6 +117,7 @@ function teamNoticeVariables(leave: LoaLeave, isExtension: boolean): Record<stri
     loa_expected_return_date: leave.expectedReturnDate || "TBD",
     loa_duration_days: String(leave.durationDays || 0),
     van_number: fmtVan(leave.vanNumber),
+    district: fmtDistrict(leave.district),
     is30Plus: is30Plus ? "yes" : "",
     isExtension: isExtension ? "yes" : "",
   };
@@ -147,9 +152,15 @@ export async function sendTeamNotice(
       templateName: TEAM_NOTICE_TEMPLATE,
       recipient,
       variables,
-      sentBy: SYSTEM_SENDER,
+      // sentBy must be a real users.id or null — communication_logs.sent_by has
+      // an FK to users.id. Passing the system marker here threw inside
+      // createCommunicationLog AFTER the live email already went out, so no log
+      // row was written and the leave's *_sent_at never persisted, re-firing
+      // daily. System attribution lives in metadata.sender instead.
+      sentBy: null,
       metadata: {
         kind: opts.isExtension ? "loa_extension_notice" : "loa_team_notice",
+        sender: SYSTEM_SENDER,
         workflowId: leave.workflowId,
         enterpriseId: leave.enterpriseId,
       },
@@ -176,6 +187,7 @@ export async function sendReturnNotice(leave: LoaLeave): Promise<string | null> 
     enterprise_id: leave.enterpriseId,
     loa_expected_return_date: leave.expectedReturnDate || "TBD",
     van_number: fmtVan(leave.vanNumber),
+    district: fmtDistrict(leave.district),
   };
   let firstMsgId: string | null = null;
   let anySent = false;
@@ -184,9 +196,11 @@ export async function sendReturnNotice(leave: LoaLeave): Promise<string | null> 
       templateName: RETURN_NOTICE_TEMPLATE,
       recipient,
       variables,
-      sentBy: SYSTEM_SENDER,
+      // sentBy must be null (or a real users.id) — see sendTeamNotice note.
+      sentBy: null,
       metadata: {
         kind: "loa_return_notice",
+        sender: SYSTEM_SENDER,
         workflowId: leave.workflowId,
         enterpriseId: leave.enterpriseId,
       },
@@ -228,9 +242,11 @@ export async function sendTechSms(leave: LoaLeave): Promise<string | null> {
       templateName,
       recipient: phone,
       variables,
-      sentBy: SYSTEM_SENDER,
+      // sentBy must be null (or a real users.id) — see sendTeamNotice note.
+      sentBy: null,
       metadata: {
         kind: "loa_tech_sms",
+        sender: SYSTEM_SENDER,
         workflowId: leave.workflowId,
         enterpriseId: leave.enterpriseId,
       },
@@ -326,8 +342,10 @@ export async function runLoaNotificationSweep(): Promise<LoaSweepResult> {
       const start = parseDateUtc(leave.startDate);
       const startDue = isWithinSendWindow(today, start);
 
-      // Start-time notifications.
-      if (startDue) {
+      // Start-time notifications — suppressed if the leave is closed (e.g. the
+      // leave was cancelled / the tech dropped off the active roster before it
+      // started).
+      if (startDue && !leave.closed) {
         if (!leave.teamNoticeSentAt) {
           const msgId = await sendTeamNotice(leave);
           if (msgId) {
