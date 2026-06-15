@@ -37,3 +37,36 @@ newer than its `last_holman_sync_at` — that's the optimistic write, not Holman
 **How to apply:** When a user reports an assignment that "won't take," verify against post-sync cache + the
 `holman_submissions` history before touching code. If a 202 with errorCount 0 is followed by `UNKNOWN` in the next
 sync, the bug is in Holman's processing, not the submit path — don't "fix" the (correct) assignment code.
+
+## The district change can silently fail too — and Nexus reports false success
+The `/api/fleet/vehicle/:truckNo/district` endpoint submits the new prefix to Holman with
+`submitVehicleArray([{ holmanVehicleNumber, prefix }])` and then sets `holman = { success: true }`
+**solely because the call didn't throw (202)** — there is NO verification loop and NO `holman_submissions`
+audit row for district changes (it only `console.log`s). So "Update District succeeded on all 3 platforms"
+can be a lie: Holman accepts the prefix change (202, 0 errors) and silently never applies it, leaving the
+vehicle at its old prefix. This is the assign-flow's "202 ≠ applied" problem, but worse — district changes
+aren't even tracked or polled.
+
+**Why this breaks the downstream assign:** if the district move to the new prefix never lands in Holman, the
+vehicle is still in its OLD prefix. Assigning a tech whose district = the NEW prefix is then dropped by Holman,
+while a tech in the OLD prefix assigns fine. So "changed district, now can't assign the tech" is often really
+"the district change never applied in Holman" — verify the live prefix first.
+
+## Read Holman's live ground truth (don't trust the Nexus cache)
+The cache `district`/`holman_tech_assigned` is an optimistic mirror. To get Holman's real current record, query
+the live API by paginating **basic-query GET** (`/vehicles/basic-query?lesseeCodes=2B56&statusCodes=1&pageSize=1000&pageNumber=N`)
+and match `holmanVehicleNumber`. Read `prefix` (=district last-4), `division`, `clientData3` (region),
+`assignedStatus`, `assignedStatusCode`, `clientData2` (assigned tech ent id), `firstName/lastName`, city/state.
+NOTE: `/vehicles/custom-query` POST currently 400s with `"The statusCode field is required."` — the
+`{lesseeCodes, additionalFilters, paging}` body is rejected; `findVehicleByNumber` only works because it falls
+back to basic-query pagination. Use basic-query for live lookups.
+
+## Case study (truck 36177 → district 7670, tech mschae2)
+Live Holman showed 36177 stuck at `prefix=7084` (Chambersburg PA), Unassigned, driver UNKNOWN — the district
+move to 7670 never applied despite Nexus reporting success. Ruled OUT data-validity causes by scanning live
+Holman: 7670 is a valid, common prefix (143 active vehicles; 60 with the SAME `div=RF`+`region=890` as this
+truck), so it's not "unknown prefix" or "prefix/region mismatch." Every submission moving THIS vehicle to 7670
+is captured (202/0 errors) then silently dropped; submissions keeping 7084 apply. **Conclusion: a Holman-side
+processing issue specific to this vehicle's transition to 7670 (e.g. a stuck/quarantined change record for
+vehicle 36177, lessee 2B56) — only Holman support can clear it. The fixable Nexus side is the false-success
+district endpoint above.**
