@@ -1,5 +1,5 @@
 import memoize from 'memoizee';
-import { toHolmanRef, toCanonical } from './vehicle-number-utils';
+import { toHolmanRef, toCanonical, toDisplayNumber } from './vehicle-number-utils';
 
 interface HolmanAuthResponse {
   access_token: string;
@@ -479,14 +479,20 @@ export class HolmanApiService {
     error?: string;
   }> {
     try {
-      // Holman stores numbers unpadded ("36177") and the current custom-query schema is
-      // { lesseeCodes, additionalFilters:[{name,values}], paging } with statusCode required.
-      const canonical = toCanonical(vehicleNumber);
-      console.log(`[HolmanVerify] custom-query POST for vehicle ${canonical}`);
+      // Holman number formats are INCONSISTENT: most are 5-digit zero-padded ("06121"),
+      // some 6-digit ("088232"), some unpadded ("36177"). Pass every variant in one call
+      // (Holman ORs the values) and let the canonical items.find() below pick the match.
+      const numVariants = [...new Set([
+        toCanonical(vehicleNumber),
+        toDisplayNumber(vehicleNumber),
+        toHolmanRef(vehicleNumber),
+        String(vehicleNumber).trim(),
+      ])].filter(Boolean);
+      console.log(`[HolmanVerify] custom-query POST for vehicle variants ${numVariants.join(',')}`);
       const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
         lesseeCodes: ['2B56'],
         additionalFilters: [
-          { name: 'holmanVehicleNumber', values: [canonical] },
+          { name: 'holmanVehicleNumber', values: numVariants },
           { name: 'statusCode', values: ['0', '1', '2'] },
         ],
         paging: { pageNumber: 1, pageSize: 5 },
