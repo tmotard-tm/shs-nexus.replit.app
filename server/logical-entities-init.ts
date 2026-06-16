@@ -8,32 +8,68 @@
 import { db } from "./db";
 import { sql } from "drizzle-orm";
 
+// Hard bounds so this startup work can never hold a pooled connection (or a
+// table lock) indefinitely. `entity_table_members` declares a FK to
+// `integration_data_sources`; creating that FK needs a lock on
+// integration_data_sources that conflicts with the writes field-mapping
+// discovery performs on the same table. On autoscale, instances boot while
+// discovery is mutating that table, so the first creation could block on the
+// lock forever. With these timeouts a blocked statement aborts fast, the
+// transaction rolls back, and the connection returns to the pool instead of
+// leaking across restarts. (These are static literals — SET cannot be
+// parameterized.)
+const LOCK_TIMEOUT = "5s";
+const STATEMENT_TIMEOUT = "15s";
+
+// Have the two logical-entity tables already been created? A single cheap
+// catalog lookup (AccessShareLock only — never conflicts with discovery writes)
+// that lets steady-state boots skip the DDL — and therefore the FK lock —
+// entirely.
+async function logicalEntityTablesExist(): Promise<boolean> {
+  const r = await db.execute(sql`
+    SELECT to_regclass('public.logical_entities')     AS le,
+           to_regclass('public.entity_table_members') AS etm
+  `);
+  const row = r.rows[0] as any;
+  return !!row?.le && !!row?.etm;
+}
+
 export async function initLogicalEntitiesSchema(): Promise<void> {
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS logical_entities (
-      id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      name         TEXT NOT NULL UNIQUE,
-      display_name TEXT NOT NULL,
-      description  TEXT,
-      kind         TEXT NOT NULL DEFAULT 'domain',
-      metadata     TEXT,
-      created_at   TIMESTAMP NOT NULL DEFAULT now(),
-      updated_at   TIMESTAMP NOT NULL DEFAULT now()
-    );
-  `);
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS entity_table_members (
-      id             VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      entity_id      VARCHAR NOT NULL REFERENCES logical_entities(id) ON DELETE CASCADE,
-      data_source_id VARCHAR NOT NULL REFERENCES integration_data_sources(id) ON DELETE CASCADE,
-      role           TEXT NOT NULL DEFAULT 'cache',
-      notes          TEXT,
-      created_at     TIMESTAMP NOT NULL DEFAULT now(),
-      UNIQUE (entity_id, data_source_id)
-    );
-  `);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_entity_table_members_entity ON entity_table_members(entity_id);`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_entity_table_members_source ON entity_table_members(data_source_id);`);
+  // Fast path: once both tables exist we never run the DDL again, so later boots
+  // never touch the integration_data_sources FK lock that caused the hang.
+  if (await logicalEntityTablesExist()) return;
+
+  // First-ever creation: bound it. A lock conflict now fails within LOCK_TIMEOUT
+  // (rolling back + freeing the connection) instead of hanging the boot forever.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`));
+    await tx.execute(sql`
+      CREATE TABLE IF NOT EXISTS logical_entities (
+        id           VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        name         TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        description  TEXT,
+        kind         TEXT NOT NULL DEFAULT 'domain',
+        metadata     TEXT,
+        created_at   TIMESTAMP NOT NULL DEFAULT now(),
+        updated_at   TIMESTAMP NOT NULL DEFAULT now()
+      );
+    `);
+    await tx.execute(sql`
+      CREATE TABLE IF NOT EXISTS entity_table_members (
+        id             VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
+        entity_id      VARCHAR NOT NULL REFERENCES logical_entities(id) ON DELETE CASCADE,
+        data_source_id VARCHAR NOT NULL REFERENCES integration_data_sources(id) ON DELETE CASCADE,
+        role           TEXT NOT NULL DEFAULT 'cache',
+        notes          TEXT,
+        created_at     TIMESTAMP NOT NULL DEFAULT now(),
+        UNIQUE (entity_id, data_source_id)
+      );
+    `);
+    await tx.execute(sql`CREATE INDEX IF NOT EXISTS idx_entity_table_members_entity ON entity_table_members(entity_id);`);
+    await tx.execute(sql`CREATE INDEX IF NOT EXISTS idx_entity_table_members_source ON entity_table_members(data_source_id);`);
+  });
 }
 
 type SeedMember = { sourceName: string; role: 'canonical' | 'cache' | 'extension' | 'snapshot'; notes?: string };
@@ -106,40 +142,50 @@ export async function seedLogicalEntities(): Promise<{ created: number; linked: 
   let linked = 0;
   let skipped = 0;
 
-  for (const entity of SEED_ENTITIES) {
-    const existing = await db.execute(sql`
-      SELECT id FROM logical_entities WHERE name = ${entity.name} LIMIT 1
-    `);
-    let entityId: string | undefined = (existing.rows[0] as any)?.id;
-    if (!entityId) {
-      const ins = await db.execute(sql`
-        INSERT INTO logical_entities (name, display_name, description, kind)
-        VALUES (${entity.name}, ${entity.displayName}, ${entity.description}, ${entity.kind})
-        RETURNING id
-      `);
-      entityId = (ins.rows[0] as any)?.id;
-      created++;
-    }
-    if (!entityId) continue;
+  // One bounded transaction (one pooled connection, released on commit/rollback)
+  // instead of dozens of independent checkouts. The seed only SELECTs
+  // integration_data_sources (AccessShareLock — never conflicts with discovery
+  // writes) and writes our own tables, so the lock_timeout mainly guards against
+  // a pile-up of concurrent boots; statement_timeout caps any single statement.
+  await db.transaction(async (tx) => {
+    await tx.execute(sql.raw(`SET LOCAL lock_timeout = '${LOCK_TIMEOUT}'`));
+    await tx.execute(sql.raw(`SET LOCAL statement_timeout = '${STATEMENT_TIMEOUT}'`));
 
-    for (const m of entity.members) {
-      const src = await db.execute(sql`
-        SELECT id FROM integration_data_sources WHERE name = ${m.sourceName} LIMIT 1
+    for (const entity of SEED_ENTITIES) {
+      const existing = await tx.execute(sql`
+        SELECT id FROM logical_entities WHERE name = ${entity.name} LIMIT 1
       `);
-      const sourceId: string | undefined = (src.rows[0] as any)?.id;
-      if (!sourceId) {
-        skipped++;
-        continue;
+      let entityId: string | undefined = (existing.rows[0] as any)?.id;
+      if (!entityId) {
+        const ins = await tx.execute(sql`
+          INSERT INTO logical_entities (name, display_name, description, kind)
+          VALUES (${entity.name}, ${entity.displayName}, ${entity.description}, ${entity.kind})
+          RETURNING id
+        `);
+        entityId = (ins.rows[0] as any)?.id;
+        created++;
       }
-      const linkRes = await db.execute(sql`
-        INSERT INTO entity_table_members (entity_id, data_source_id, role, notes)
-        VALUES (${entityId}, ${sourceId}, ${m.role}, ${m.notes ?? null})
-        ON CONFLICT (entity_id, data_source_id) DO NOTHING
-        RETURNING id
-      `);
-      if (linkRes.rows.length > 0) linked++;
+      if (!entityId) continue;
+
+      for (const m of entity.members) {
+        const src = await tx.execute(sql`
+          SELECT id FROM integration_data_sources WHERE name = ${m.sourceName} LIMIT 1
+        `);
+        const sourceId: string | undefined = (src.rows[0] as any)?.id;
+        if (!sourceId) {
+          skipped++;
+          continue;
+        }
+        const linkRes = await tx.execute(sql`
+          INSERT INTO entity_table_members (entity_id, data_source_id, role, notes)
+          VALUES (${entityId}, ${sourceId}, ${m.role}, ${m.notes ?? null})
+          ON CONFLICT (entity_id, data_source_id) DO NOTHING
+          RETURNING id
+        `);
+        if (linkRes.rows.length > 0) linked++;
+      }
     }
-  }
+  });
 
   return { created, linked, skipped };
 }
