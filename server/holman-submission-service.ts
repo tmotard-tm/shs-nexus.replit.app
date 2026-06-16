@@ -132,6 +132,31 @@ export class HolmanSubmissionService {
   }> {
     const vehicleNumber = submission.holmanVehicleNumber;
     try {
+      // Live Holman re-query FIRST (authoritative + immediate). Only confirms on a
+      // positive match; on error or inconclusive result it falls through to the
+      // cache-based check below. This stops good assigns/unassigns from timing out
+      // into a false "failed" when no fleet sync happens to run in the window.
+      if (submission.action === 'assign' || submission.action === 'unassign') {
+        try {
+          const live = await holmanApiService.getVehicleAssignedStatus(vehicleNumber);
+          if (live.found) {
+            const techInHolman = (live.techAssigned || '').trim();
+            const expectedTech = (submission.enterpriseId || '').trim();
+            if (submission.action === 'assign') {
+              if (expectedTech && techInHolman.toLowerCase().includes(expectedTech.toLowerCase())) {
+                return { verified: true, newStatus: 'completed', message: `Confirmed assigned via live Holman (tech="${techInHolman}")`, rawVehicle: live.rawVehicle };
+              }
+            } else {
+              const cd = (live.assignedStatusCode || '').toUpperCase();
+              if (cd === 'U' || !techInHolman) {
+                return { verified: true, newStatus: 'completed', message: `Confirmed unassigned via live Holman (status=${live.assignedStatus})`, rawVehicle: live.rawVehicle };
+              }
+            }
+          }
+        } catch (liveErr: any) {
+          console.warn(`[HolmanVerify] Live re-query failed for ${vehicleNumber}, falling back to cache:`, liveErr?.message);
+        }
+      }
       const [cached] = await db.select()
         .from(holmanVehiclesCache)
         .where(eq(holmanVehiclesCache.holmanVehicleNumber, vehicleNumber))

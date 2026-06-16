@@ -479,24 +479,17 @@ export class HolmanApiService {
     error?: string;
   }> {
     try {
-      const holmanRef = toHolmanRef(vehicleNumber) || vehicleNumber;
-      console.log(`[HolmanVerify] custom-query POST for vehicle ${holmanRef}`);
+      // Holman stores numbers unpadded ("36177") and the current custom-query schema is
+      // { lesseeCodes, additionalFilters:[{name,values}], paging } with statusCode required.
+      const canonical = toCanonical(vehicleNumber);
+      console.log(`[HolmanVerify] custom-query POST for vehicle ${canonical}`);
       const data = await this.makeRequest<any>('/vehicles/custom-query', 'POST', {
-        lesseeCode: '2B56',
-        properties: [
-          'holmanVehicleNumber',
-          'clientVehicleNumber',
-          'assignedStatus',
-          'assignedStatusCode',
-          'clientData2',
-          'firstName',
-          'lastName',
+        lesseeCodes: ['2B56'],
+        additionalFilters: [
+          { name: 'holmanVehicleNumber', values: [canonical] },
+          { name: 'statusCode', values: ['0', '1', '2'] },
         ],
-        filters: {
-          holmanVehicleNumber: holmanRef,
-        },
-        pageNumber: 1,
-        pageSize: 5,
+        paging: { pageNumber: 1, pageSize: 5 },
       });
       const items = data?.items || [];
       const item = items.find((v: any) => {
