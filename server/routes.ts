@@ -19465,11 +19465,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // (clientData2/clientData4 === to_ldap AND status Assigned/code D), corrects the
   // newest-across-number-formats log row to 'success' so the card pill matches reality.
   // It NEVER submits to Holman, NEVER flips a truck Holman shows unassigned or assigned to
-  // a different tech, preserves the original failure text, and matches rows by CANONICAL
-  // truck number so it targets the same row the pill (recent-op) reads. dryRun defaults
-  // TRUE; pass dryRun:false (boolean or "false") to write. Admin/developer only. Small
-  // batches (default 25, max 50) stay under the proxy timeout; re-run until reconciled=0
-  // (idempotent — reconciled rows no longer match the failed+signature filter).
+  // a different tech, preserves the original failure text + completedAt, and matches rows by
+  // CANONICAL truck number so it targets the same row the pill (recent-op) reads.
+  // WRITES require BOTH dryRun:false (boolean) AND confirm:true; anything else is a dry-run.
+  // Admin/developer only. Small batches (default 25, max 50); re-run until reconciled=0.
   app.post("/api/fleet-ops/reverify-stale-holman", requireAuth, async (req, res) => {
     try {
       const u: any = req.user;
@@ -19480,43 +19479,52 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (typeof svc.hasCredentials === 'function' && !svc.hasCredentials()) {
         return res.status(503).json({ message: "Holman API not configured (no credentials)" });
       }
-      // Write only on an explicit false (boolean OR string "false"); anything else stays dry.
-      const dryRun = !(req.body?.dryRun === false || req.body?.dryRun === 'false');
+      // Write ONLY on an explicit boolean dryRun:false AND confirm:true. A string "false", a
+      // missing confirm, or anything else stays a safe dry-run (prevents tooling footguns).
+      const wantsWrite = req.body?.dryRun === false;
+      const confirmed = req.body?.confirm === true;
+      const dryRun = !(wantsWrite && confirmed);
+      const writeBlockedNote = (wantsWrite && !confirmed)
+        ? 'dryRun:false requires confirm:true to apply; ran as dry-run.' : undefined;
       const truckFilter = (req.body?.truckNumber || '').toString().trim();
       const limit = Math.min(Math.max(Number(req.body?.limit) || 25, 1), 50);
       const dbHost = ((process.env.DATABASE_URL || '').split('@')[1] || '').split('/')[0] || 'unknown';
 
-      // Newest op per CANONICAL truck (leading zeros stripped — mirrors the pill's recent-op
-      // multi-format lookup) whose Holman step is a stale verification-timeout failure.
+      // Newest op per CANONICAL truck (leading zeros stripped — mirrors recent-op's multi-format
+      // read), deterministic on ties via id DESC, all-zero numbers excluded (LTRIM -> '').
       const candRes: any = await db.execute(sql`
         WITH latest AS (
           SELECT DISTINCT ON (LTRIM(truck_number, '0'))
-            id, truck_number, to_ldap, to_tech_name, holman_status, holman_message, created_at
+            id, truck_number, to_ldap, to_tech_name, holman_status, holman_message, created_at, completed_at
           FROM fleet_operation_log
-          WHERE truck_number IS NOT NULL AND truck_number <> ''
-          ORDER BY LTRIM(truck_number, '0'), created_at DESC
+          WHERE truck_number IS NOT NULL AND truck_number <> '' AND LTRIM(truck_number, '0') <> ''
+          ORDER BY LTRIM(truck_number, '0'), created_at DESC, id DESC
         )
-        SELECT id, truck_number, to_ldap, to_tech_name, holman_message, created_at
+        SELECT id, truck_number, to_ldap, to_tech_name, holman_message, created_at, completed_at
         FROM latest
         WHERE holman_status = 'failed'
           AND (holman_message ILIKE '%Verification expired%' OR holman_message ILIKE '%not yet matched%')
           AND (${truckFilter === ''} OR LTRIM(truck_number, '0') = LTRIM(${truckFilter}, '0'))
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC, id DESC
         LIMIT ${limit}
       `);
       const candidates: any[] = (candRes && candRes.rows) ? candRes.rows : (Array.isArray(candRes) ? candRes : []);
 
+      // getVehicleAssignedStatus returns {found:false,error} on a thrown Holman error (it never
+      // re-throws), so retry by inspecting that error and only re-trying transient/auth failures.
+      const isTransient = (e: any) => /timeout|timed out|429|408|50\d|socket|network|econn|fetch failed|token|401|403/i.test(String(e || ''));
+      const lookupOnce = (tn: string) => svc.getVehicleAssignedStatus(tn).catch((e: any) => ({ found: false, error: e?.message || 'lookup error' }));
       const lookupWithRetry = async (tn: string): Promise<any> => {
-        try { return await svc.getVehicleAssignedStatus(tn); }
-        catch {
-          await new Promise((r) => setTimeout(r, 600));
-          try { return await svc.getVehicleAssignedStatus(tn); }
-          catch (e2: any) { return { found: false, error: e2?.message || 'lookup error' }; }
+        let r = await lookupOnce(tn);
+        if (!r.found && isTransient(r.error)) {
+          await new Promise((res2) => setTimeout(res2, 600));
+          r = await lookupOnce(tn);
         }
+        return r;
       };
 
       const details: any[] = [];
-      let reconciled = 0, keptFailed = 0, notFound = 0, otherTech = 0, unassigned = 0, noTarget = 0;
+      let reconciled = 0, keptFailed = 0, notFound = 0, lookupErr = 0, otherTech = 0, unassigned = 0, noTarget = 0;
 
       for (const row of candidates) {
         const expected = (row.to_ldap || '').toString().trim().toLowerCase();
@@ -19535,24 +19543,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const matches = holmanAssigned && (c2 === expected || c4 === expected);
 
         let decision: string;
-        if (!live.found) { decision = 'holman_not_found'; notFound++; keptFailed++; }
+        if (!live.found) {
+          if (live.error && isTransient(live.error)) { decision = 'lookup_error'; lookupErr++; }
+          else { decision = 'holman_not_found'; notFound++; }
+          keptFailed++;
+        }
         else if (!holmanAssigned) { decision = 'holman_unassigned'; unassigned++; keptFailed++; }
         else if (!matches) { decision = 'holman_other_tech'; otherTech++; keptFailed++; }
         else {
           decision = dryRun ? 'would_reconcile' : 'reconciled';
           if (!dryRun) {
-            const orig = (row.holman_message || '').toString().slice(0, 160);
-            const msg = `Reconciled ${new Date().toISOString()}: live Holman confirms ${live.techAssigned || c4} assigned (assignedStatus=${live.assignedStatus || 'Assigned'}). Auto-corrected stale verification-timeout. [was: ${orig}]`;
+            const orig = (row.holman_message || '').toString().slice(0, 280);
+            const wasCompleted = row.completed_at ? new Date(row.completed_at).toISOString() : 'n/a';
+            const msg = `Reconciled ${new Date().toISOString()}: live Holman confirms ${live.techAssigned || c4} assigned (assignedStatus=${live.assignedStatus || 'Assigned'}). Auto-corrected stale verification-timeout. [was: failed completed=${wasCompleted} msg="${orig}"]`;
             await storage.updateFleetOperationLog(Number(row.id), { holmanStatus: 'success', holmanMessage: msg });
           }
           reconciled++;
         }
-        details.push({ id: row.id, truck: row.truck_number, expectedTech: row.to_ldap, holmanTech: live.techAssigned || live.rawVehicle?.clientData4 || null, holmanAssignedStatus: live.assignedStatus || null, decision });
+        details.push({ id: row.id, truck: row.truck_number, expectedTech: row.to_ldap, holmanTech: live.techAssigned || live.rawVehicle?.clientData4 || null, holmanAssignedStatus: live.assignedStatus || null, decision, error: live.found ? undefined : (live.error || null) });
       }
 
       res.json({ dryRun, dbHost, scanned: candidates.length, reconciled, keptFailed,
-        breakdown: { holmanNotFound: notFound, holmanUnassigned: unassigned, holmanOtherTech: otherTech, noTargetRecorded: noTarget },
-        limit, truckFilter: truckFilter || null, details });
+        breakdown: { holmanNotFound: notFound, lookupError: lookupErr, holmanUnassigned: unassigned, holmanOtherTech: otherTech, noTargetRecorded: noTarget },
+        limit, truckFilter: truckFilter || null, note: writeBlockedNote, details });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }
