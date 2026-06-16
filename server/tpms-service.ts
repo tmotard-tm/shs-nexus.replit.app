@@ -1,6 +1,6 @@
 import { storage } from './storage';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
-import { toTpmsRef, toCanonical, normalizeEnterpriseId } from './vehicle-number-utils';
+import { toCanonical, normalizeEnterpriseId } from './vehicle-number-utils';
 
 interface TPMSToken {
   token: string;
@@ -366,24 +366,22 @@ class TPMSService {
     
     // First, get all cached data
     const allCached = await storage.getAllTpmsCachedAssignments();
-    const cacheByTruck = new Map<string, typeof allCached[0]>();
+    const cacheByCanonical = new Map<string, typeof allCached[0]>();
     
-    // allCached is ordered lastSuccessAt DESC — most recent entry wins for every key variant.
-    // Use has() on ALL keys so the first-seen (most recent) is never overwritten by older entries.
+    // Key the cache by the CANONICAL truck number (leading zeros stripped, whitespace
+    // trimmed) so padded/space-padded TPMS values (e.g. "036177 ") match the unpadded
+    // Holman numbers ("36177") regardless of formatting on either side.
+    // allCached is ordered lastSuccessAt DESC — most recent entry wins per canonical key.
     for (const cached of allCached) {
-      if (cached.truckNo) {
-        const raw = cached.truckNo;
-        const stripped = toCanonical(raw);
-        const padded = toTpmsRef(raw);
-        if (!cacheByTruck.has(raw)) cacheByTruck.set(raw, cached);
-        if (!cacheByTruck.has(stripped)) cacheByTruck.set(stripped, cached);
-        if (!cacheByTruck.has(padded)) cacheByTruck.set(padded, cached);
-      }
+      const canon = toCanonical(cached.truckNo);
+      if (canon && !cacheByCanonical.has(canon)) cacheByCanonical.set(canon, cached);
     }
     
-    // For each truck number, return cached data if available
+    // For each requested truck number, look it up canonically too. The results map stays
+    // keyed by the original input string so callers can resolve by whichever variation
+    // they passed in.
     for (const truckNo of truckNumbers) {
-      const cached = cacheByTruck.get(truckNo);
+      const cached = cacheByCanonical.get(toCanonical(truckNo));
       
       if (cached && cached.rawResponse) {
         try {

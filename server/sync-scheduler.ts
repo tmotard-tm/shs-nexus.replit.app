@@ -3,7 +3,8 @@ import { isSnowflakeConfigured } from './snowflake-service';
 import { db } from './db';
 import { queueItems, amsVehiclesCache, externalWatermarkState, fleetOperationLog, operationEvents, holmanVehiclesCache, tpmsCachedAssignments } from '@shared/schema';
 import { rentalImports } from '@shared/fleet-scope-schema';
-import { eq, and, isNotNull, desc, gte } from 'drizzle-orm';
+import { eq, and, isNotNull, desc, gte, sql } from 'drizzle-orm';
+import { toCanonical } from './vehicle-number-utils';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
 import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
@@ -550,20 +551,29 @@ async function checkAndRunTpmsPoll(): Promise<void> {
           },
         });
 
-        // Also update holman_vehicles_cache.tpmsAssignedTechId for any matching truck
-        if (truckNo) {
+        // Also update holman_vehicles_cache.tpmsAssignedTechId for any matching truck.
+        // TPMS truck numbers arrive zero-padded and sometimes space-padded (e.g. "036177 "),
+        // while holman_vehicles_cache stores them unpadded ("36177"). Match on the CANONICAL
+        // number (leading zeros stripped, whitespace trimmed) on BOTH sides so the formats
+        // line up. We canonicalize holman_vehicle_number in SQL (always present) rather than
+        // the derived tpms_vehicle_ref column, which can be stale/null on older rows.
+        const canonicalTruckNo = toCanonical(truckNo);
+        if (canonicalTruckNo) {
           try {
             await db.update(holmanVehiclesCache)
               .set({ tpmsAssignedTechId: enterpriseId, tpmsAssignedTechName: [tech.firstName, tech.lastName].filter(Boolean).join(' ') || null, tpmsLastSyncAt: pollTime, updatedAt: pollTime })
-              .where(eq(holmanVehiclesCache.tpmsVehicleRef, truckNo));
+              .where(sql`regexp_replace(btrim(${holmanVehiclesCache.holmanVehicleNumber}), '^0+', '') = ${canonicalTruckNo}`);
           } catch { /* non-fatal */ }
         } else if (prevTruckNo) {
           // Tech was unassigned — clear the holman cache entry for the old truck
-          try {
-            await db.update(holmanVehiclesCache)
-              .set({ tpmsAssignedTechId: null, tpmsAssignedTechName: null, tpmsLastSyncAt: pollTime, updatedAt: pollTime })
-              .where(eq(holmanVehiclesCache.tpmsVehicleRef, prevTruckNo));
-          } catch { /* non-fatal */ }
+          const canonicalPrev = toCanonical(prevTruckNo);
+          if (canonicalPrev) {
+            try {
+              await db.update(holmanVehiclesCache)
+                .set({ tpmsAssignedTechId: null, tpmsAssignedTechName: null, tpmsLastSyncAt: pollTime, updatedAt: pollTime })
+                .where(sql`regexp_replace(btrim(${holmanVehiclesCache.holmanVehicleNumber}), '^0+', '') = ${canonicalPrev}`);
+            } catch { /* non-fatal */ }
+          }
         }
 
         upserted++;
