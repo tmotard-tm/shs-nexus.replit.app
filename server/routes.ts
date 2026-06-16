@@ -13007,6 +13007,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Logical Entities (Lineage Canvas — logical view)
   // ============================================
   // Init + seed at startup. Idempotent; safe to run on every boot.
+  // Detached so a hang here can never block route registration (was killing all /api/fleet-ops/*).
+  void (async () => {
   try {
     await initLogicalEntitiesSchema();
     const seedResult = await seedLogicalEntities();
@@ -13016,6 +13018,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   } catch (e: any) {
     console.error("[LogicalEntities] Init failed:", e?.message || e);
   }
+  })();
 
   app.get("/api/field-mapping/entities", requireAuth, async (_req: any, res) => {
     try {
