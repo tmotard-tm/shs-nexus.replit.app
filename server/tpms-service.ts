@@ -374,7 +374,15 @@ class TPMSService {
     // allCached is ordered lastSuccessAt DESC — most recent entry wins per canonical key.
     for (const cached of allCached) {
       const canon = toCanonical(cached.truckNo);
-      if (canon && !cacheByCanonical.has(canon)) cacheByCanonical.set(canon, cached);
+      if (!canon) continue;
+      // Prefer a real cached TPMS pull (has rawResponse) over an optimistic stub
+      // (rawResponse null, written by assign actions). Same-timestamp ties would
+      // otherwise let a stub shadow the real entry, leaving the truck falsely
+      // TPMS-unassigned and showing a false Holman/TPMS mismatch on the card.
+      const existing = cacheByCanonical.get(canon);
+      if (!existing || (!existing.rawResponse && cached.rawResponse)) {
+        cacheByCanonical.set(canon, cached);
+      }
     }
     
     // For each requested truck number, look it up canonically too. The results map stays
