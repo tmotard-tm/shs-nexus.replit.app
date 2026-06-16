@@ -123,7 +123,7 @@ export function PuertoRicoMap({ filteredVehicles }: PuertoRicoMapProps) {
       
       marker.bindPopup(`
         <div style="font-family: system-ui, sans-serif; min-width: 180px;">
-          <strong>${vehicle.modelYear} ${vehicle.makeName}</strong><br/>
+          <strong>${vehicle.modelYear ?? ''} ${vehicle.makeName}</strong><br/>
           <strong>VIN:</strong> ${vehicle.vin}<br/>
           <strong>Location:</strong> ${vehicle.city}, PR<br/>
           <strong>Status:</strong> ${vehicle.branding}

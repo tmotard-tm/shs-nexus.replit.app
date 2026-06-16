@@ -15,7 +15,7 @@ interface FleetVehicle {
   vehicleNumber: string;
   makeName: string;
   modelName: string;
-  modelYear: number;
+  modelYear: number | null;
   color: string;
   licensePlate: string;
   licenseState: string;
@@ -262,7 +262,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
                   border: 1px solid #333;
                 ">
                   <strong style="color: ${status.color};">${vehicle.vin}</strong><br/>
-                  <strong>Year:</strong> ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}<br/>
+                  <strong>Year:</strong> ${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}<br/>
                   <strong>Status:</strong> ${status.label}<br/>
                   <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
                   <strong>Mileage:</strong> ${vehicle.odometerDelivery?.toLocaleString() || 'N/A'} miles<br/>
@@ -379,7 +379,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
               border: 1px solid #333;
             ">
               <strong style="color: ${status.color};">${vehicle.vin}</strong><br/>
-              <strong>Year:</strong> ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}<br/>
+              <strong>Year:</strong> ${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}<br/>
               <strong>Status:</strong> ${status.label}<br/>
               <strong>Location:</strong> ${vehicle.city}, ${vehicle.state}<br/>
               <small style="opacity: 0.7;">Click for more details</small>
@@ -586,7 +586,7 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
                   <Car className="h-5 w-5 text-primary" />
-                  {selectedVehicle.modelYear} {selectedVehicle.makeName} {selectedVehicle.modelName}
+                  {selectedVehicle.modelYear || ''} {selectedVehicle.makeName} {selectedVehicle.modelName}
                 </DialogTitle>
                 <DialogDescription>
                   Vehicle details and current status

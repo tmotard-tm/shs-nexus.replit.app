@@ -5528,7 +5528,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         action: "vehicle_created",
         entityType: "vehicle",
         entityId: vehicle.id,
-        details: `Anonymous vehicle submission: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
+        details: `Anonymous vehicle submission: ${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
       });
 
       // Return minimal response (no sensitive data)
@@ -5554,7 +5554,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const vehiclesToInsert = activeVehicles.map(fleetVehicle => ({
         vin: fleetVehicle.vin,
         vehicleNumber: fleetVehicle.vehicleNumber,
-        modelYear: fleetVehicle.modelYear,
+        modelYear: fleetVehicle.modelYear ?? 0,
         makeName: fleetVehicle.makeName,
         modelName: fleetVehicle.modelName,
         color: fleetVehicle.color,
@@ -5622,7 +5622,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         action: "vehicle_updated",
         entityType: "vehicle",
         entityId: req.params.id,
-        details: `Updated vehicle: ${updatedVehicle.modelYear} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`,
+        details: `Updated vehicle: ${updatedVehicle.modelYear ?? ''} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`,
       });
 
       // Log assignment history if this vehicle is assigned to a technician
@@ -5633,7 +5633,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           await vehicleAssignmentService.logVehicleInfoUpdate(
             updatedVehicle.vehicleNumber,
             changedByUser,
-            `Vehicle info updated: ${updatedVehicle.modelYear} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`
+            `Vehicle info updated: ${updatedVehicle.modelYear ?? ''} ${updatedVehicle.makeName} ${updatedVehicle.modelName}`
           );
         } catch (historyErr) {
           console.error("[Routes] Failed to log assignment history for vehicle update:", historyErr);
@@ -5667,7 +5667,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         action: "vehicle_deleted",
         entityType: "vehicle",
         entityId: req.params.id,
-        details: `Deleted vehicle: ${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
+        details: `Deleted vehicle: ${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName} (VIN: ${vehicle.vin})`,
       });
 
       res.json({ message: "Vehicle deleted successfully" });

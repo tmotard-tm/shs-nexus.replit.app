@@ -5,7 +5,7 @@ export interface FleetVehicle {
   deliveryDate: string;
   outOfServiceDate: string;
   saleDate: string;
-  modelYear: number;
+  modelYear: number | null;
   makeName: string;
   modelName: string;
   licenseState: string;
@@ -65561,6 +65561,6 @@ export const getRegionOptions = () => Array.from(new Set(activeVehicles.map(v =>
 
 export const getDistrictOptions = () => Array.from(new Set(activeVehicles.map(v => v.district))).filter(Boolean).sort();
 
-export const getYearOptions = () => Array.from(new Set(activeVehicles.map(v => v.modelYear))).filter(Boolean).sort((a, b) => b - a);
+export const getYearOptions = () => Array.from(new Set(activeVehicles.map(v => v.modelYear))).filter((y): y is number => y != null && y > 0).sort((a, b) => b - a);
 
 export const getCityOptions = () => Array.from(new Set(activeVehicles.map(v => v.city))).filter(Boolean).sort();

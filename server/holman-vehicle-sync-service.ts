@@ -9,6 +9,16 @@ const ALLOWED_DIVISIONS = ['01', 'RF'];
 import { holmanApiService } from "./holman-api-service";
 import { getTPMSService } from "./tpms-service";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
+import { decodeModelYearFromVin } from "@shared/vin-year";
+
+// Resolve a model year, preferring the Holman-supplied value and falling back
+// to the VIN-derived year. Returns null when neither yields a usable year so we
+// never persist/display a misleading 0.
+function resolveModelYear(holmanYear: unknown, vin: string | null | undefined): number | null {
+  const y = Number(holmanYear);
+  if (Number.isFinite(y) && y > 0) return y;
+  return decodeModelYearFromVin(vin);
+}
 
 interface FleetVehicle {
   id: string;
@@ -18,7 +28,7 @@ interface FleetVehicle {
   licenseState: string;
   makeName: string;
   modelName: string;
-  modelYear: number;
+  modelYear: number | null;
   color: string;
   fuelType: string;
   engineSize: string;
@@ -256,7 +266,7 @@ class HolmanVehicleSyncService {
         licenseState: v.tagStateProvince || v.licenseState,
         makeName: v.makeVin || v.makeClient || v.makeName,
         modelName: v.modelVin || v.modelClient || v.modelName,
-        modelYear: v.modelYear || v.year,
+        modelYear: resolveModelYear(v.modelYear || v.year, v.vin),
         color: v.exteriorColor || v.color,
         fuelType: v.fuelType || v.fuelTypeDescription,
         engineSize: v.engineType || v.engineSize,
@@ -566,7 +576,7 @@ class HolmanVehicleSyncService {
         licenseState: v.tagStateProvince || v.licenseState,
         makeName: v.makeVin || v.makeClient || v.makeName,
         modelName: v.modelVin || v.modelClient || v.modelName,
-        modelYear: v.modelYear || v.year,
+        modelYear: resolveModelYear(v.modelYear || v.year, v.vin),
         color: v.exteriorColor || v.color,
         fuelType: v.fuelType || v.fuelTypeDescription,
         engineSize: v.engineType || v.engineSize,
@@ -945,6 +955,41 @@ class HolmanVehicleSyncService {
     }
   }
 
+  // One-time/idempotent backfill: recompute the model year from the VIN for any
+  // cache rows currently holding a blank/0 year but a valid (decodable) VIN.
+  // Safe to run on every startup — it only touches rows that need correcting.
+  async backfillModelYearsFromVin(): Promise<{ scanned: number; updated: number }> {
+    try {
+      const rows = await db
+        .select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          vin: holmanVehiclesCache.vin,
+        })
+        .from(holmanVehiclesCache)
+        .where(and(
+          sql`${holmanVehiclesCache.vin} IS NOT NULL AND ${holmanVehiclesCache.vin} != ''`,
+          sql`(${holmanVehiclesCache.modelYear} IS NULL OR ${holmanVehiclesCache.modelYear} <= 0)`
+        ));
+
+      let updated = 0;
+      const now = new Date();
+      for (const row of rows) {
+        const year = decodeModelYearFromVin(row.vin);
+        if (year == null) continue;
+        await db
+          .update(holmanVehiclesCache)
+          .set({ modelYear: year, updatedAt: now })
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, row.holmanVehicleNumber));
+        updated++;
+      }
+
+      return { scanned: rows.length, updated };
+    } catch (error) {
+      console.error('[HolmanSync] Model-year VIN backfill failed:', error);
+      return { scanned: 0, updated: 0 };
+    }
+  }
+
   async getSyncStatus(): Promise<HolmanSyncStatus> {
     const pendingCount = await this.getPendingChangeCount();
     
@@ -983,7 +1028,7 @@ class HolmanVehicleSyncService {
       licenseState: v.tagStateProvince || v.licenseState || '',
       makeName: v.makeVin || v.makeClient || v.make || '',
       modelName: v.modelVin || v.modelClient || v.model || '',
-      modelYear: v.modelYear || v.year || 0,
+      modelYear: resolveModelYear(v.modelYear || v.year, v.vin),
       color: v.exteriorColor || v.color || '',
       fuelType: v.fuelType || v.fuelTypeDescription || '',
       engineSize: v.engineType || v.engineSize || '',
@@ -1020,7 +1065,7 @@ class HolmanVehicleSyncService {
       licenseState: v.licenseState || '',
       makeName: v.makeName || '',
       modelName: v.modelName || '',
-      modelYear: v.modelYear || 0,
+      modelYear: resolveModelYear(v.modelYear, v.vin),
       color: v.color || '',
       fuelType: v.fuelType || '',
       engineSize: v.engineSize || '',

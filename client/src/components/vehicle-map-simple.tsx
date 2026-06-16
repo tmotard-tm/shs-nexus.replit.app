@@ -119,7 +119,7 @@ export function SimpleMap({ isOpen }: SimpleMapProps) {
         // Add popup with vehicle details
         marker.bindPopup(`
           <div style="font-family: system-ui, sans-serif; min-width: 200px;">
-            <strong>${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}</strong><br/>
+            <strong>${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}</strong><br/>
             <strong>VIN:</strong> ${vehicle.vin}<br/>
             <strong>Vehicle #:</strong> ${vehicle.vehicleNumber}<br/>
             <strong>Status:</strong> ${vehicle.branding}<br/>

@@ -109,7 +109,7 @@ export default function ActiveVehicles() {
   // Generate filter options dynamically from the loaded data
   const filterOptions = useMemo(() => {
     const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
-    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    const uniqueNum = (arr: (number | null)[]) => Array.from(new Set(arr.filter((n): n is number => n != null && n > 0))).sort((a, b) => b - a);
     
     return {
       makes: unique(allVehicles.map(v => v.makeName)),
@@ -141,7 +141,7 @@ export default function ActiveVehicles() {
       (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
       vehicleNumNoLeadingZeros.includes(searchNoLeadingZeros) ||
       (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
-      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
+      `${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
       (vehicle.city || '').toLowerCase().includes(searchLower) ||
       (vehicle.deliveryAddress || '').toLowerCase().includes(searchLower);
     
@@ -156,7 +156,7 @@ export default function ActiveVehicles() {
     const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
     const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
-    const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
+    const matchesYear = yearFilter === "all" || (vehicle.modelYear ?? '').toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
     // Assignment status is determined by TPMS, not Holman
     const matchesAssignmentStatus = assignmentStatusFilter === "all" || 

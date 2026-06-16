@@ -25,7 +25,7 @@ import { useCostCenters } from "@/hooks/use-cost-centers";
 interface FleetVehicle {
   vin: string;
   vehicleNumber: string;
-  modelYear: number;
+  modelYear: number | null;
   makeName: string;
   modelName: string;
   licensePlate: string;
@@ -290,7 +290,7 @@ export default function UpdateVehicle() {
   // Generate filter options dynamically from the loaded data
   const filterOptions = useMemo(() => {
     const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
-    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    const uniqueNum = (arr: (number | null)[]) => Array.from(new Set(arr.filter((n): n is number => n != null && n > 0))).sort((a, b) => b - a);
     
     return {
       makes: unique(holmanVehicles.map(v => v.makeName)),
@@ -414,7 +414,7 @@ export default function UpdateVehicle() {
       (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
       vehicleNumNoLeadingZeros.includes(searchNoLeadingZeros) ||
       (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
-      `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
+      `${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
       (vehicle.city || '').toLowerCase().includes(searchLower) ||
       (vehicle.deliveryAddress || '').toLowerCase().includes(searchLower);
     
@@ -429,7 +429,7 @@ export default function UpdateVehicle() {
     const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
     const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
     const matchesDistrict = districtFilter === "all" || vehicle.district === districtFilter;
-    const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
+    const matchesYear = yearFilter === "all" || (vehicle.modelYear ?? '').toString() === yearFilter;
     const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
     
     // Assignment status is determined by TPMS, not Holman
@@ -492,7 +492,7 @@ export default function UpdateVehicle() {
 
     toast({
       title: "Vehicle Updated",
-      description: `${selectedVehicle.modelYear} ${selectedVehicle.makeName} ${selectedVehicle.modelName} (${selectedVehicle.vin}) has been updated successfully`,
+      description: `${selectedVehicle.modelYear ?? ''} ${selectedVehicle.makeName} ${selectedVehicle.modelName} (${selectedVehicle.vin}) has been updated successfully`,
     });
 
     setIsUpdateDialogOpen(false);

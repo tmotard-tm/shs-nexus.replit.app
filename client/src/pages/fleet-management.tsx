@@ -1321,7 +1321,7 @@ export default function FleetManagement() {
   // ─── Generate filter options from data ────────────────────────────────────
   const filterOptions = useMemo(() => {
     const unique = (arr: string[]) => Array.from(new Set(arr.filter(Boolean))).sort();
-    const uniqueNum = (arr: number[]) => Array.from(new Set(arr.filter(n => n > 0))).sort((a, b) => b - a);
+    const uniqueNum = (arr: (number | null)[]) => Array.from(new Set(arr.filter((n): n is number => n != null && n > 0))).sort((a, b) => b - a);
     
     return {
       makes: unique(allVehicles.map(v => v.makeName)),
@@ -1376,7 +1376,7 @@ export default function FleetManagement() {
         (vehicle.vehicleNumber || '').toLowerCase().includes(searchLower) ||
         vehicleNumNoLeadingZeros.includes(searchNoLeadingZeros) ||
         (vehicle.licensePlate || '').toLowerCase().includes(searchLower) ||
-        `${vehicle.modelYear} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
+        `${vehicle.modelYear ?? ''} ${vehicle.makeName} ${vehicle.modelName}`.toLowerCase().includes(searchLower) ||
         (vehicle.tpmsAssignedTechId || '').toLowerCase().includes(searchLower) ||
         (vehicle.tpmsAssignedTechName || '').toLowerCase().includes(searchLower) ||
         (vehicle.holmanTechAssigned || '').toLowerCase().includes(searchLower) ||
@@ -1386,7 +1386,7 @@ export default function FleetManagement() {
       // Vehicle Details filters
       const matchesMake = makeFilter === "all" || vehicle.makeName === makeFilter;
       const matchesModel = modelFilter === "all" || vehicle.modelName === modelFilter;
-      const matchesYear = yearFilter === "all" || vehicle.modelYear.toString() === yearFilter;
+      const matchesYear = yearFilter === "all" || (vehicle.modelYear ?? '').toString() === yearFilter;
       const matchesColor = colorFilter === "all" || vehicle.color === colorFilter;
       
       // Configuration filters

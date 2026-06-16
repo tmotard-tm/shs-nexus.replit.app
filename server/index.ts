@@ -468,6 +468,22 @@ async function runStartupBootstrap() {
     console.error("❌ Failed to start MMS media-failed sweep scheduler:", error);
   }
 
+  // Backfill model years from VIN for any cached Holman rows that are sitting
+  // with a blank/0 year but a decodable VIN (e.g. 088264 → 2026). Idempotent and
+  // only touches rows that need correcting.
+  try {
+    const { holmanVehicleSyncService } = await import("./holman-vehicle-sync-service");
+    holmanVehicleSyncService.backfillModelYearsFromVin().then(r => {
+      if (r.updated > 0) {
+        log(`✅ Model-year VIN backfill: corrected ${r.updated}/${r.scanned} cache rows`);
+      }
+    }).catch(err => {
+      console.error("❌ Model-year VIN backfill error:", err?.message || err);
+    });
+  } catch (error) {
+    console.error("⚠️ Model-year VIN backfill failed to start:", error);
+  }
+
   // Task #221: prime the in-process TPMS snapshot in the background so the
   // first decommissioning batch SMS / rental-enrichment / manager-phone caller
   // doesn't pay the full Snowflake scan latency. Non-blocking: failures are
