@@ -143,7 +143,8 @@ export class HolmanSubmissionService {
             const techInHolman = (live.techAssigned || '').trim();
             const expectedTech = (submission.enterpriseId || '').trim();
             if (submission.action === 'assign') {
-              if (expectedTech && techInHolman.toLowerCase().includes(expectedTech.toLowerCase())) {
+              const cd = (live.assignedStatusCode || '').toUpperCase();
+              if (expectedTech && cd !== 'U' && techInHolman.toLowerCase() === expectedTech.toLowerCase()) {
                 return { verified: true, newStatus: 'completed', message: `Confirmed assigned via live Holman (tech="${techInHolman}")`, rawVehicle: live.rawVehicle };
               }
             } else {
