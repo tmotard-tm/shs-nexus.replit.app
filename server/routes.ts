@@ -19646,7 +19646,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           district_no
         FROM tpms_cached_assignments
         WHERE truck_no IS NOT NULL AND truck_no != ''
-        ORDER BY truck_no, last_success_at DESC
+        -- Prefer a real cached TPMS pull (raw_response present) over an optimistic stub
+        -- (raw_response NULL, written by assign actions). SQL analog of the tpms-service
+        -- batchLookupByTruckNumbers fix (5e2a226e), so stubs do not shadow real TPMS state
+        -- in the cross-system mismatch panel. Falls back to a stub only if no real row exists.
+        ORDER BY truck_no, (raw_response IS NOT NULL) DESC, last_success_at DESC
       )
       SELECT
         h.holman_vehicle_number AS truck_number,
