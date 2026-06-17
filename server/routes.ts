@@ -9136,7 +9136,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         } else {
           try {
             const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-            console.log("[BYOV] Holman submit response:", holmanResp);
+            console.log("[BYOV] Holman submit response:", JSON.stringify(holmanResp, null, 2));
             holmanResult = { success: true };
           } catch (holmanErr: unknown) {
             const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
@@ -9505,7 +9505,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // prefix never applies. Holman treats omitted fields as no-change (partial
         // upsert), so the vehicle's assignment status is preserved untouched.
         const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-        console.log("[District] Holman submit response:", holmanResp);
+        console.log("[District] Holman submit response:", JSON.stringify(holmanResp, null, 2));
 
         // Holman validates synchronously and returns { errors: [...] } on rejection.
         // A non-empty errors array means the change was NOT accepted, so throw to
@@ -9806,7 +9806,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       } else {
         try {
           const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
-          console.log("[BYOV] Holman-only retry submit response:", holmanResp);
+          console.log("[BYOV] Holman-only retry submit response:", JSON.stringify(holmanResp, null, 2));
           holmanResult = { success: true };
         } catch (holmanErr: unknown) {
           const holmanMsg = holmanErr instanceof Error ? holmanErr.message : "Holman submission failed";
@@ -17084,7 +17084,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           diag.push(`Holman no match (tried LTRIM='${normalized}')`);
         }
       } catch (hErr: any) {
-        diag.push(`Holman error: ${hErr.message?.slice(0, 80) ?? ""}`);
+        diag.push(`Holman error: ${hErr.message ?? ""}`);
         console.warn(`[AMS by-truck] Holman VIN lookup failed for ${truckNumber}:`, hErr.message);
       }
 

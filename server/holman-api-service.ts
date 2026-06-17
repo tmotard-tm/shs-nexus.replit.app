@@ -110,9 +110,9 @@ export class HolmanApiService {
       console.error('[Holman] Authentication failed:', {
         status: response.status,
         statusText: response.statusText,
-        errorPreview: errorText.substring(0, 500)
+        error: errorText
       });
-      throw new Error(`Holman authentication failed: ${response.status} - ${response.statusText}`);
+      throw new Error(`Holman authentication failed: ${response.status} - ${response.statusText} - ${errorText}`);
     }
 
     const data: HolmanAuthResponse = await response.json();
@@ -177,16 +177,16 @@ export class HolmanApiService {
         url,
         status: response.status,
         statusText: response.statusText,
-        errorPreview: errorText.substring(0, 500)
+        error: errorText
       });
-      throw new Error(`Holman API request failed: ${response.status} ${response.statusText}`);
+      throw new Error(`Holman API request failed: ${response.status} ${response.statusText} - ${errorText}`);
     }
 
     const contentType = response.headers.get('content-type');
     if (!contentType || !contentType.includes('application/json')) {
       const text = await response.text();
-      console.error('[Holman] Expected JSON but got:', contentType, 'Preview:', text.substring(0, 500));
-      throw new Error(`Holman API returned non-JSON response: ${contentType}`);
+      console.error('[Holman] Expected JSON but got:', contentType, 'Body:', text);
+      throw new Error(`Holman API returned non-JSON response: ${contentType} - ${text}`);
     }
 
     return response.json();
@@ -665,7 +665,7 @@ export class HolmanApiService {
         'GET'
       );
       
-      console.log('[Holman] Submission status response:', response);
+      console.log('[Holman] Submission status response:', JSON.stringify(response, null, 2));
       
       return {
         success: true,
