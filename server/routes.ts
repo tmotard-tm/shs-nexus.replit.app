@@ -9497,11 +9497,28 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           prefix: holmanPrefix,
           clientData3: "890",
         };
-        if (vehicle.holmanAssignedStatusCd) {
-          holmanPayload.assignedStatusCode = vehicle.holmanAssignedStatusCd;
-        }
+        // A district change is PREFIX-ONLY. We intentionally do NOT send
+        // assignedStatusCode: holman_assigned_status_cd stores a DESCRIPTIVE value
+        // ("Unassigned", "Assigned", "Auction", ...) but Holman requires a 1-char
+        // code, so sending it makes Holman reject the whole record
+        // ("assignedStatusCode field cannot be longer than 1 characters") and the
+        // prefix never applies. Holman treats omitted fields as no-change (partial
+        // upsert), so the vehicle's assignment status is preserved untouched.
         const holmanResp = await holmanApiService.submitVehicleArray([holmanPayload]);
         console.log("[District] Holman submit response:", holmanResp);
+
+        // Holman validates synchronously and returns { errors: [...] } on rejection.
+        // A non-empty errors array means the change was NOT accepted, so throw to
+        // surface the real failure and never record a phantom "pending" submission
+        // (which would spin forever in the UI and never actually apply).
+        const holmanErrors = Array.isArray((holmanResp as any)?.errors) ? (holmanResp as any).errors : [];
+        if (holmanErrors.length > 0) {
+          const errMsg = holmanErrors
+            .flatMap((e: any) => e?.errorMessages ?? [])
+            .join("; ") || "Holman rejected the district change";
+          console.error("[District] Holman rejected district change:", errMsg);
+          throw new Error(errMsg);
+        }
 
         // 202 accepted → record a pending submission and verify asynchronously.
         // Store the RAW cache key (vehicle.holmanVehicleNumber, e.g. "37251") — it
