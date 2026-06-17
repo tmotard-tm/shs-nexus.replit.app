@@ -826,6 +826,10 @@ export interface WriteThroughCacheArgs {
    * (legacy behaviour).
    */
   fleetOpLogId?: number;
+  /** Real TPMS TechInfo confirmed at assign time; when present, the assign
+   * cache upsert stores it as rawResponse (a REAL row, not an optimistic stub)
+   * so the card flips to synced without waiting for the watermark poll. */
+  tpmsTechInfo?: any;
 }
 
 /**
@@ -991,6 +995,7 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
           lookupType: u.lookupType,
           truckNo: u.truckNo,
           enterpriseId: u.enterpriseId,
+          rawResponse: args.tpmsTechInfo ? JSON.stringify(args.tpmsTechInfo) : null,
           firstName: (params.firstName as string) || null,
           lastName: (params.lastName as string) || null,
           districtNo: (params.districtNo as string) || null,
@@ -1004,6 +1009,7 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
             lookupType: u.lookupType,
             truckNo: u.truckNo,
             enterpriseId: u.enterpriseId,
+            rawResponse: args.tpmsTechInfo ? JSON.stringify(args.tpmsTechInfo) : sql`${tpmsCachedAssignments.rawResponse}`,
             districtNo: (params.districtNo as string) || sql`${tpmsCachedAssignments.districtNo}`,
             status: "live",
             lastSuccessAt: now,
@@ -1371,6 +1377,7 @@ export const fleetOpsService = {
       ]);
 
       // Synchronous TPMS post-assignment verification
+      let confirmedTpmsTechInfo: any = null;
       if (!tpmsAlreadyCurrent && tpms.status === "success") {
         try {
           const { getTPMSService } = await import("./tpms-service");
@@ -1383,6 +1390,9 @@ export const fleetOpsService = {
               console.warn(`[FleetOps-TPMS] Post-assign verification mismatch for ${params.ldapId}: expected truck ${targetTruck}, TPMS shows ${postTruckNo}`);
             } else {
               console.log(`[FleetOps-TPMS] Post-assign verification OK for ${params.ldapId}: truck=${postTruckNo}`);
+              // TPMS confirmed the tech is on this truck. Cache the REAL TechInfo
+              // (not an optimistic stub) so the card resolves the match at once.
+              confirmedTpmsTechInfo = postTechInfo;
             }
           }
         } catch (verifyErr: any) {
@@ -1396,6 +1406,7 @@ export const fleetOpsService = {
       // never claims success while caches are stale.
       await writeThroughCaches({
         action: "assign",
+        tpmsTechInfo: confirmedTpmsTechInfo,
         params,
         tpms,
         holman,
