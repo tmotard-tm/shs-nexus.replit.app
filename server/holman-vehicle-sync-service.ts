@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { fsDb } from "./fleet-scope-db";
-import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, holmanSubmissions, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
+import { holmanVehiclesCache, vehicleChangeLog, holmanSyncState, holmanSubmissions, amsVehiclesCache, HolmanVehicleCache, InsertHolmanVehicleCache, VehicleChangeLog, HolmanSyncStatus, HolmanSyncState } from "@shared/schema";
 import { trucks } from "@shared/fleet-scope-schema";
 import { eq, sql, and, desc, inArray, gte, isNotNull } from "drizzle-orm";
 
@@ -55,6 +55,7 @@ interface FleetVehicle {
   dataSource: string;
   tpmsAssignedTechId?: string;
   tpmsAssignedTechName?: string;
+  amsTechId?: string;
 }
 
 interface SyncResult {
@@ -429,9 +430,10 @@ class HolmanVehicleSyncService {
 
       // Enrich with TPMS tech assignment data before caching so every cached response
       // is already enriched — callers no longer need a separate enrichWithTPMSData call.
-      const fleetVehicles = rawFleetVehicles.length > 0
+      const tpmsEnriched = rawFleetVehicles.length > 0
         ? await this.enrichWithTPMSData(rawFleetVehicles)
         : rawFleetVehicles;
+      const fleetVehicles = await this.enrichWithAMSData(tpmsEnriched);
 
       this.lastSuccessfulSync = new Date();
 
@@ -1124,6 +1126,30 @@ class HolmanVehicleSyncService {
   }
 
   // Enrich vehicles with TPMS assigned tech info - uses cached data first to avoid rate limiting
+  /**
+   * Enrich each vehicle with its AMS-assigned tech (ams_vehicles_cache.ams_assigned_ldap,
+   * keyed by VIN) so the per-card AMS pill reflects real AMS state for every truck, not just
+   * the ones in the mismatch panel. Non-fatal: on error or no AMS row, amsTechId stays "".
+   */
+  async enrichWithAMSData(vehicles: FleetVehicle[]): Promise<FleetVehicle[]> {
+    const vins = Array.from(new Set(vehicles.map(v => (v.vin || "").trim()).filter(Boolean)));
+    if (vins.length === 0) return vehicles;
+    const byVin = new Map<string, string>();
+    try {
+      const rows = await db
+        .select({ vin: amsVehiclesCache.vin, ldap: amsVehiclesCache.amsAssignedLdap })
+        .from(amsVehiclesCache)
+        .where(inArray(amsVehiclesCache.vin, vins));
+      for (const r of rows) {
+        if (r.vin) byVin.set(r.vin.trim(), (r.ldap || "").trim());
+      }
+    } catch (err) {
+      console.warn("[HolmanSync-AMS] enrichWithAMSData failed:", err instanceof Error ? err.message : String(err));
+      return vehicles;
+    }
+    return vehicles.map(v => ({ ...v, amsTechId: (v.vin ? byVin.get(v.vin.trim()) : "") || "" }));
+  }
+
   async enrichWithTPMSData(vehicles: FleetVehicle[]): Promise<FleetVehicle[]> {
     const tpmsService = getTPMSService();
     
