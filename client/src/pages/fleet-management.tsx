@@ -324,10 +324,10 @@ export default function FleetManagement() {
   });
 
   // Full mismatch truck list — used to power the stat card filter accurately
-  const { data: alignmentListData } = useQuery<{ data: { truckNumber: string }[] }>({
+  const { data: alignmentListData } = useQuery<{ data: any[] }>({
     queryKey: ['/api/fleet-ops/mismatches', 'list'],
     queryFn: async () => {
-      const res = await fetch('/api/fleet-ops/mismatches', { credentials: 'include' });
+      const res = await fetch('/api/fleet-ops/mismatches?all=true', { credentials: 'include' });
       if (!res.ok) return { data: [] };
       return res.json();
     },
@@ -341,6 +341,15 @@ export default function FleetManagement() {
       const n = r.truckNumber?.replace(/^0+/, '') || '';
       return n ? [n, n.padStart(5, '0'), r.truckNumber] : [];
     })
+  );
+
+  // Canonical truck number -> Tim's alignment record (rootCause + per-system tech ids).
+  // Badge and pills derive from this so they agree with the mismatch count/filter/panel.
+  // A truck absent from the map is in sync per Tim's engine.
+  const alignmentMap = new Map<string, any>(
+    (alignmentListData?.data ?? [])
+      .filter((r: any) => r && r.truckNumber)
+      .map((r: any) => [(r.truckNumber as string).replace(/^0+/, ''), r] as [string, any])
   );
 
   // Fetch vehicles from Holman API with TPMS enrichment.
@@ -1637,22 +1646,34 @@ export default function FleetManagement() {
   };
 
   const getAssignmentStatus = (vehicle: FleetVehicle) => {
+    const SYNCED = { status: 'synced', label: 'Synced', color: 'bg-blue-100 text-blue-800 border-blue-300', cardBorder: 'border-blue-500', cardBg: 'bg-blue-50 dark:bg-blue-950/20' };
+    const UNASSIGNED = { status: 'unassigned', label: 'Unassigned', color: 'bg-green-100 text-green-800 border-green-300', cardBorder: 'border-green-500', cardBg: 'bg-green-50 dark:bg-green-950/20' };
+    const MISMATCH = { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
+    const PENDING = { status: 'pending', label: 'Sync In Progress', color: 'bg-amber-100 text-amber-800 border-amber-300', cardBorder: 'border-amber-500', cardBg: 'bg-amber-50 dark:bg-amber-950/20' };
+    const BYOV = { status: 'byov', label: 'BYOV VIN Missing', color: 'bg-slate-100 text-slate-700 border-slate-300', cardBorder: 'border-slate-400', cardBg: 'bg-slate-50 dark:bg-slate-900/20' };
+    const BLOCKED = { status: 'blocked', label: 'Status Blocked', color: 'bg-gray-100 text-gray-700 border-gray-300', cardBorder: 'border-gray-400', cardBg: 'bg-gray-50 dark:bg-gray-900/20' };
+
     const holmanId = vehicle.holmanTechAssigned?.trim();
     const tpmsId = vehicle.tpmsAssignedTechId?.trim();
-    
-    if (tpmsId && holmanId && tpmsId.toLowerCase() === holmanId.toLowerCase()) {
-      return { status: 'synced', label: 'Synced', color: 'bg-blue-100 text-blue-800 border-blue-300', cardBorder: 'border-blue-500', cardBg: 'bg-blue-50 dark:bg-blue-950/20' };
+    const assigned = !!(holmanId || tpmsId);
+
+    // Source of truth = Tim's alignment engine. A truck is in the mismatch list only
+    // when the engine flags a real disagreement; absence = in sync. Inline TPMS-vs-Holman
+    // compare is only a transient fallback while the alignment list is still loading.
+    if (alignmentListData) {
+      const rec = alignmentMap.get((vehicle.vehicleNumber || '').replace(/^0+/, ''));
+      if (!rec) return assigned ? SYNCED : UNASSIGNED;
+      if (rec.rootCause === 'pending') return PENDING;
+      if (rec.rootCause === 'byov_vin_missing') return BYOV;
+      if (rec.rootCause === 'status_blocked') return BLOCKED;
+      return MISMATCH;
     }
-    if (tpmsId && !holmanId) {
-      return { status: 'pending', label: 'Pending Sync', color: 'bg-blue-100 text-blue-800 border-blue-300', cardBorder: 'border-blue-500', cardBg: 'bg-blue-50 dark:bg-blue-950/20' };
-    }
-    if (holmanId && !tpmsId) {
-      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
-    }
-    if (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) {
-      return { status: 'mismatch', label: 'Mismatch', color: 'bg-red-100 text-red-800 border-red-300', cardBorder: 'border-red-500', cardBg: 'bg-red-50 dark:bg-red-950/20' };
-    }
-    return { status: 'unassigned', label: 'Unassigned', color: 'bg-green-100 text-green-800 border-green-300', cardBorder: 'border-green-500', cardBg: 'bg-green-50 dark:bg-green-950/20' };
+
+    if (tpmsId && holmanId && tpmsId.toLowerCase() === holmanId.toLowerCase()) return SYNCED;
+    if (tpmsId && !holmanId) return PENDING;
+    if (holmanId && !tpmsId) return MISMATCH;
+    if (holmanId && tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase()) return MISMATCH;
+    return UNASSIGNED;
   };
 
   // Stats - vehicle is assigned if it has a TPMS tech (source of truth for assignments)
@@ -2435,8 +2456,10 @@ export default function FleetManagement() {
                           {/* Last sync status badges */}
                           <VehicleRowSyncBadges
                             truckNumber={vehicle.vehicleNumber}
-                            tpmsAssignedTechId={vehicle.tpmsAssignedTechId}
-                            holmanTechAssigned={vehicle.holmanTechAssigned}
+                            tpmsTechId={vehicle.tpmsAssignedTechId}
+                            holmanTechId={vehicle.holmanTechAssigned}
+                            amsTechId={(vehicle as any).amsTechId}
+                            alignRec={alignmentMap.get((vehicle.vehicleNumber || '').replace(/^0+/, '')) ?? null}
                             onOpenHistory={() => setOpLogDialogTruck(vehicle.vehicleNumber)}
                           />
 
