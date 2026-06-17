@@ -1,0 +1,18 @@
+---
+name: Fleet Ops pre-mortem risks
+description: Non-obvious systemic failure modes in Fleet Management assign/unassign, district change, and sync — for hardening work.
+---
+
+Forward-looking risk surface for the Fleet Management module. These are the gaps that are NOT obvious without deep cross-file tracing (the rest are derivable from code):
+
+- **Downstream-applied-but-local-failed divergence**: cross-system writes (TPMS/Holman/AMS) fan out in parallel BEFORE the atomic `writeThroughCaches` DB tx. If that tx throws (e.g. a real value over a `varchar(50)` limit — narrowly the TPMS / tech-profile ID fields, since the log/holman/ams cache cols are `text`), the external systems are already changed but Nexus records the op as failed. There is no reconciliation queue to heal it.
+- **Asymmetry — district SURFACES a submission-persist failure, assign/unassign SWALLOWS it.** The district route returns failure if the `holman_submissions` verify record can't persist; the assign/unassign path swallows that same failure → Holman can be marked `pending` with NO verifier and NO submissionDbId, so it never gets confirmed and never expires. This asymmetry is the single most important non-obvious finding.
+- **No idempotency key on Holman submissions.** Duplicate clicks / retries enqueue multiple 202s; the verifier matches by truck/op/time-window, so duplicates can confirm against the wrong submission.
+- **Sync clobbers assignment fields; only `district` is frozen.** Post-response background `updateCache` (`Promise.resolve().then(...)`) + `onConflictDoUpdate` can overwrite `holman_tech_assigned` / `tpms_assigned_tech_id` that a concurrent user op just set. District is the only field protected via `sql\`${cache.district}\``.
+- **Frozen-district deadlock**: cache.district stays frozen until `verifyFromFleetData` unlocks it; if the verify record never persists/matches, district is stuck at the old value forever (no audit / unfreeze path).
+- **TPMS stale sweep does not mirror back to `holman_vehicles_cache`.** The 4h/50-row sweep updates/evicts `tpms_cached_assignments` only; the fleet cache the UI reads can stay stale. Plus ~25% of tpms rows have empty `raw_response` and can't be enriched.
+- **propagateStatusToFleetLog only flips the log status** — it does NOT roll back the optimistic Holman cache written on `pending`. A later `failed` leaves the cache still showing the tech.
+- **Lock is target-row-only + 2-min.** Auto-unassign/displacement touches the old/displaced truck without separately locking it; a slow Holman op can outlive the 2-min lease.
+
+**Why:** the user ran a pre-mortem on Fleet Management (sync / district / assign-unassign) to prioritize hardening.
+**How to apply:** when touching fleet ops, prioritize Holman verifier durability + idempotency, protect locally-updated assignment fields from sync clobber, and add stuck-operation / district / TPMS-drift visibility before adding features.
