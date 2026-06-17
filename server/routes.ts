@@ -19705,13 +19705,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           enterprise_id AS tpms_id,
           TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS tpms_name,
           district_no
-        FROM tpms_cached_assignments
+        FROM tpms_tech_profiles
         WHERE truck_no IS NOT NULL AND truck_no != '' AND LTRIM(truck_no, '0') != ''
-        -- Prefer a real cached TPMS pull (raw_response present) over an optimistic stub
-        -- (raw_response NULL, written by assign actions). SQL analog of the tpms-service
-        -- batchLookupByTruckNumbers fix (5e2a226e), so stubs do not shadow real TPMS state
-        -- in the cross-system mismatch panel. Falls back to a stub only if no real row exists.
-        ORDER BY LTRIM(truck_no, '0'), (raw_response IS NOT NULL) DESC, last_success_at DESC
+        -- Source: tpms_tech_profiles (the FRESH TPMS roster, synced in prod every few
+        -- hours via the Tech Data Scheduler) instead of the legacy tpms_cached_assignments,
+        -- whose prod refresh is dev-only/disabled and went stale (April-3 import). That
+        -- staleness produced the BYOV "Unassigned in TPMS" false positives. Validated
+        -- 2026-06-17: re-point fixes 204 falsely-unassigned, correctly flips 53 stale rows
+        -- (tech moved to a BYOV truck / unassigned), 8 to fresher tech. Most recent wins.
+        ORDER BY LTRIM(truck_no, '0'), updated_at DESC
       )
       SELECT
         h.holman_vehicle_number AS truck_number,
