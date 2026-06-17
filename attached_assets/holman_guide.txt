@@ -1,0 +1,2038 @@
+Holman Client-Facing
+Application Programming
+Interface (API)
+Developer Guide
+
+
+
+May 2025
+
+Prepared by: Holman’s Client Technology Team
+(This document is subject to change)
+Table of Contents
+INTRODUCTION ........................................................................................................................................................ 3
+IMPORTANT CONCEPTS ......................................................................................................................................... 4
+GETTING STARTED ................................................................................................................................................. 6
+CONTACT .................................................................................................................................................................. 8
+     QUERY CONTACT DATA (BASIC & CUSTOM) ENDPOINTS .......................................................................... 8
+     SUBMIT ADD NEW OR UPDATE EXISTING CONTACTS ENDPOINT ........................................................... 11
+MAINTENANCE ....................................................................................................................................................... 17
+     QUERY MAINTENANCE PURCHASE ORDER DATA (BASIC & CUSTOM) ENDPOINTS ............................ 17
+     SUBMIT ADD NEW OR UPDATE EXISTING MAINTENANCE ENDPOINT .................................................... 21
+ODOMETER ............................................................................................................................................................. 24
+     QUERY ODOMETER DATA (BASIC & CUSTOM) ENDPOINTS ..................................................................... 24
+     SUBMIT ADD NEW OR UPDATE EXISTING ODOMETER ENDPOINT .......................................................... 26
+VEHICLE .................................................................................................................................................................. 28
+     QUERY VEHICLE DATA (BASIC & CUSTOM) ENDPOINTS .......................................................................... 28
+     SUBMIT ADD NEW OR UPDATE EXISTING VEHICLES ENDPOINT ............................................................. 34
+
+
+
+
+          2              2
+Introduction
+Holman’s API Developer Guide provides you with an overview on development procedures to integrate various data endpoints with
+your in-house platforms. Specifically, it will outline how to connect, retrieve (Basic & Custom Query endpoints), and send (Submit
+endpoints) data via Holman’s API.
+
+Holman’s API solution is designed to be flexible and versatile. It allows clients to query and submit raw data, which can then be
+integrated with any software that supports API interactions. Essentially, our API provides the data, and the integration with specific
+software would be handled on the client’s end, ensuring compatibility with their existing systems.
+
+Holman’s Application Programming Interface (API) was designed using principles of RESTful APIs.
+
+Holman’s API connection currently offers scalable data for the endpoints listed in the Table of Contents.
+
+Here are some common fleet functions you can automate via our API solution:
+    ✓ Add/edit/remove Contacts via the Contacts endpoint directly from your HRIM system.
+    ✓ Store contact-based information such as reporting hierarchy, cost centers, hire date, etc.
+    ✓ Automatically qualify contacts for Holman’s Safety program to issue them relevant safety modules, training, motor vehicle
+        record checks, etc.
+    ✓ Grant contacts immediate access to the Holman’s Insights Mobile App where they can report mileage, request roadside
+        assistance, find nearby vendors, etc.
+             o For more information about our Holman Insights Mobile App:
+                   Fleet Manager & Driver Canada
+                   Fleet Manager & Driver US
+    ✓ Add/edit/remove vehicles from your inventory via the Vehicles endpoint.
+    ✓ Assign contacts to vehicles and maintain inventory with other vehicle-based elements such as project GL codes, location,
+        usage identifiers, etc.
+    ✓ Generate WEX fuel PINs (US clients only).
+    ✓ Automatically qualify drivers for Holman’s Fringe/Taxable Benefits program so that they can begin reporting their mileage.
+    ✓ Load fuel, maintenance and accident transaction history that occurred outside of Holman’s programs to Holman Insights so
+        that it is available for vehicle-level history and comprehensive TCO fleet reporting.
+    ✓ Provide odometer and engine hour readings to be incorporated into Holman’s algorithms where they are validated and used
+        for analytics such as preventive maintenance reminders.
+    ✓ Create user IDs for fleet administrators who should have access to Holman Insights and the Fleet Manager App.
+    ✓ Ability to add/edit/delete maintenance and ordering approvers.
+    ✓ Extract data on a variety of endpoints for your own internal reporting and analytics.
+
+Here are some features we are actively working on to serve you better:
+    ✓ A user registration process that will give clients greater control over their API users.
+    ✓ Greater historic data reporting periods.
+    ✓ Third party access so that your other fleet partners can exchange data with us easily on your behalf.
+    ✓ New endpoints for:
+            o Holman Safety program and Driver Scorecard information to monitor driver risk and compliance.
+            o EV data to help you work towards your sustainability goals.
+            o Licensing and Remarketing to be able to monitor statuses and get more in-depth reporting.
+    ✓ Data connectors to PowerBI, Excel, Business Objects and Tableau.
+    ✓ API Runners to help you manage errors and exceptions more easily.
+    ✓ API code library that will make it easier for a clients’ development team to integrate with Holman.
+
+If you have any feedback about our API offering we would love to hear it here as we are always looking for ways to improve this
+experience for you!
+
+
+
+
+       3          3
+Important Concepts
+Please familiarize yourself with the below universal concepts which you will encounter throughout the documentation as it
+will impact how you make your calls and interpret the results.
+
+QUERY and SUBMIT Actions
+As per standard REST API conventions:
+o Basic-query endpoints use GET method to return information.
+o Custom-query endpoints (because they require a body in the API call) use POST method to return information.
+    o We allow for selecting properties, filtering, pagination and delta data retrieval.
+    o Examples of how to structure the custom requests are provided with each of the endpoints.
+o Submit endpoints use POST method to send information.
+
+ENDPOINT URL
+URLs are provided within this document for each endpoint. The URL is to be entered into your User Interface of choice
+that you will use to make the API calls, not your web browser.
+
+HEADER
+x-correlation-id
+Holman can use this to trace your request through our system. If you get an error with a call and need Holman to help
+troubleshoot, please engage Holman's Client Technology team for support via this form Request for Technical API
+Support (2.0). A member of Holman’s Client Technology team will contact you to help resolve your issue. This form will
+require you to supply at minimum the environment you are working in (QA/Prod) and this x-correlation-id.
+
+RESPONSE BODY
+For Basic and Custom query endpoints, you will return the following:
+totalCount – total number of records from the call
+pageInfo – the node that contains the following
+        pageNumber – current page number
+        pageSize – number of records on the current page
+        totalPages – total number of pages
+        lastChangeRecordId – if you want delta data, you need to specify this in the request
+
+lesseeCode
+A 4-character alphanumeric code that identifies the client in Holman’s system. Clients can have more than one
+lesseeCode for their fleet. LesseeCode is a critical component to each endpoint as it is used to help validate your calls.
+Your Holman Representative can provide this information to you.
+
+VEHICLE IDENTIFIERS
+Each asset in Holman’s database is identified by a holmanVehicleNumber. Some clients also utilize a
+clientVehicleNumber for their own unique numbering sequence.
+holmanVehicleNumber and clientVehicleNumber are unique within a lesseeCode but not across lesseeCode. A vehicle’s
+vin number is also unique within a lesseeCode but not across lesseeCode. Together with the lesseeCode, these
+identifiers are unique to the asset. This is why on vehicle-based endpoints, we require a combination of any of the below
+to identify the record:
+          1. lesseeCode & holmanVehicleNumber
+          2. lesseeCode & clientVehicleNumber
+          3. lesseeCode & vin
+
+If you do not know the lesseeCode, holmanVehicleNumber, clientVehicleNumber or vin, you can use the ‘QUERY Vehicle
+Data (Basic & Custom) Endpoints’ to retrieve this information and return it in any SUBMIT calls where it is required.
+
+You can only submit one of the three identifying combinations for a given record. For example if you submit lesseeCode &
+
+
+      4          4
+holmanVehicleNumber, then if lesseeCode & clientVehicleNumber or lesseeCode & vin are also provided, the call will fail
+because we will not know exactly which identifier you would like us to use to verify the record. Specifically, you will see
+error: "Vehicle identifiers are mutually exclusive. Only one field may be populated: `holmanVehicleNumber`,
+`clientVehicleNumber`, or `vin`."
+
+CLIENT-DEFINED CUSTOM FIELDS
+Holman offers clients a variety of client-defined fields they can use to store information unique to their fleet and contacts.
+Information may include cost centers, reporting managers, business units, etc. Each client’s use of these fields is unique.
+Your Holman Representative can provide you information on how the client’s terminology maps to Holman’s fields and
+how that data is maintained. On the ‘SUBMIT Add new or update existing Vehicles Endpoint’ for example, if the data
+passed exceeds the allowed character limit, an error will be generated in the Status endpoint.
+
+
+
+
+      5          5
+Getting Started
+To begin leveraging Holman’s API solution:
+
+  1. Your organization’s IT Contact must complete the API User Setup (2.0) form to obtain credentials
+      o Tell us which endpoints (Basic/Custom and/or Submit) you need access to as endpoints are issued upon request.
+      o Note: We do not offer third party access at this time (we are actively working on a solution). If this is a roadblock
+           for you, please engage your Holman Account Representative and we can explore alternate solutions.
+
+  2.   Holman’s Client Technology team will issue you credentials
+               o You will receive an email with a link to a secure SFTP where you can access a file with your API Client ID
+                   (aka User ID/Key) and Secret (aka Password).
+               o The link will expire after 14 calendar days.
+        o For Basic/Custom Query endpoints, you will be given production credentials immediately.
+        o For Submit endpoints, we will send you QA credentials first followed by production credentials once you have
+            completed your testing.
+
+  3. To make API requests, you must begin by authenticating your account.
+
+               Postman
+
+           1. POST Request to:
+              QA: https://api.stg.holman.solutions/sso/sts/connect/token
+              PROD: https://api.holman.solutions/sso/sts/connect/token
+
+           2. Select Body request format x-www-form-urlencoded
+
+           3. In Body properties, enter the following
+              grant_type: client_credentials
+              client_id: <as provided in your credential email>
+              client_secret: <as provided in your credential email>
+
+
+           4. Successful authentication will return an Access token. Unsuccessful authentication will return an error (i.e.
+              invalid client). Access token will need to be used as Bearer Token authentication for all other endpoints.
+
+
+
+
+       6           6
+          5. Use this Postman collection to help you authenticate.
+                a. Go to Import and select this file.
+                b. Go to the Auth endpoint and enter your Client ID and Secret into the respective variables.
+                c. Click Send.
+                d. There is a post response script that takes the value from Access Token and sets a token variable to
+                     the collection.
+                e. Authentication will then expire every hour; you will need to refresh your Token accordingly. The
+                     response body will tell you the expiration time; expires_in is in seconds.
+                f. Note: this collection is built on our QA (stg) environment. In order to use the collection for PROD:
+                           i. Go to collection variables.
+                          ii. Under the auth_endpoint and api_endpoint variables, enter the PROD URL
+                              https://api.holman.solutions/sso/sts/connect/token (which removes the .stg).
+                         iii. Enter your PROD Client Id and Secret.
+                         iv. Click Save.
+                g. The collection contains example objects that you can customize. For example:
+                           i. In the Basic query endpoint there is a URL parameter for lesseeCodes
+                          ii. In Custom query, in the body of the request, there is an array of strings for lesseeCodes
+                         iii. In Submit endpoints there is a property in the request body called lesseeCode
+
+   6. Begin making calls
+       o You can make as many calls to any endpoints as needed while the token is active. You may need to send
+            multiple calls to an endpoint depending on the amount of data being requested or pushed into the system.
+
+           Postman
+           a. For the Basic query endpoints, go to Params in Postman
+           b. For Custom query and Submit endpoints, use the samples in our documentation to help get you started.
+
+
+  7. For Submit calls, please retrieve submission results in the Status endpoint. Submission calls may not return
+     immediate results. You should ping the Status endpoint until result_text in response object reflects Complete. If
+     any errors occurred, you will see it in this response.
+QA URL: https://api.stg.holman.solutions/CustomerDataAPI/submission/status
+PROD URL: https://api.holman.solutions/CustomerDataAPI/submission/status
+
+   8. For Submit endpoints, once you have made at least 3 successful calls in QA and validated that the data you are
+      posting conforms to the existing data structure for your fleet, you can request production credentials, via this form:
+      Request Production Credentials - API Submit Endpoints (2.0).
+
+
+API TECHNICAL SUPPORT
+If you need technical support, please engage Holman's Client Technology team for support via this form and a member of
+our Client Technology team will contact you to help resolve your issue: Request for Technical API Support (2.0).
+
+API FEEDBACK
+If there are any features, data points or endpoints that we currently do not offer, please submit that feedback here: API
+Feedback.
+
+
+
+
+      7           7
+CONTACT
+ QUERY Contact Data (Basic & Custom)
+ Endpoints
+Both the basic and custom query endpoints are used to return information about your contact database. These endpoints are
+commonly used for contact information (i.e. contactLastName, contactAddressLine1), employment dates (i.e. contactHireDate),
+and client-defined fields (i.e. contactClientData1, contactAuxData1).
+
+Basic Query Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/contacts/basic-query
+PROD: https://api.holman.solutions/CustomerDataAPI/contacts/basic-query
+
+Custom Query Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/contacts/custom-query
+PROD: https://api.holman.solutions/CustomerDataAPI/contacts/custom-query
+
+Input Parameters
+                                      CUSTOM
+    PARAMETER           DATA TYPE                          DEFINITION                                 NOTES
+                                       FILTER
+                                      Y          A 4-character alphanumeric code   User can filter on specific lesseeCode(s)
+                                                 that identifies the client in     within their user restrictions.
+ lesseeCode             string(4)                Holman’s system.                  Multiple inputs separated by comma ‘,’
+ terminationDateCode    integer(1)    Y          Termination date of employee.     (Blank) – Null
+ deactivationDateCode   integer(1)    Y          Deactivation date of employee.    1 – Previous day
+                                      Y                                            2 – Previous week
+                                                                                   3 – Previous month
+ activactionDateCode    integer(1)               Activation date of employee.      4 – Previous three months
+ pageNumber             integer                  Page of return Json.
+                                                                                   This input parameter allows you to pull any
+                                                                                   proceeding records from the
+                                                                                   lastChangeRecordId entered. This property
+                                                                                   can be used to order a data set by change
+                                                                                   history. If omitted, you will not receive delta
+ lastChangeRecordId     integer                  A unique ID for each record.      records only.
+                                                                                   This input parameter allows you to pull any
+                                                                                   proceeding records from the
+                        string                                                     lastChangeDate entered. This property can
+                        (mm/dd/yyyy              Enables delta API feature to      be used to order a data set by change
+                        hh:mm:ss                 return records based on last      history. If omitted, you will not receive delta
+ lastChangeDate         AM/PM)                   change date                       records only.
+                                                                                   Default page limit set to 200. Max 1000.
+                                                 The number of records to be       When a page is first retrieved it will contain
+ pageSize               integer                  returned per page.                total number of pages that are included.
+
+
+
+
+      8           8
+Available Parameters
+                                                       CUSTOM
+          PARAMETER                DATA TYPE                                              DEFINITION
+                                                        FILTER
+
+ contactActivationDate       string (mm/dd/yyyy)       Y         Date contact is activated within the Holman Contact database
+                                                                 and can access driver features including the mobile app.
+
+ contactTerminationDate      string (mm/dd/yyyy)       Y         Date contact is terminated within Holman Contact database
+                                                                 and will no longer be able to access driver features including
+                                                                 the mobile app.
+ contactDeactivationDate     string (mm/dd/yyyy)       Y         Date contact is deactivated within the Holman Contact
+                                                                 database and will no longer be able to access driver features
+                                                                 including the mobile app. This is used when an employee is
+                                                                 on temporary leave with the company and does not need
+                                                                 access to Holman systems but is not fully terminated.
+ contactHireDate             string (mm/dd/yyyy)       Y         Date contact is hired with their company.
+ contactFirstName            string(20)                Y         Contact first name.
+ contactMiddleName           string(30)                          Contact middle name.
+ contactLastName             string(30)                Y         Contact last name.
+ contactEmployeeId           string(9)                 Y         Contact employee ID. Used as a unique identifier for
+                                                                 employee.
+ contactEmail                string(50)                Y         Contact email address. Email must be unique per contact.
+ contactCellPhone            string(10) Format: ####   Y         Contact cell phone number.
+ contactCellAcceptsText      string(1)                           Y/N indicator. Indicates whether the contact will be able to
+                                                                 receive text messages through cell phone. This supports
+                                                                 SMS messaging from the Holman mobile app.
+ contactWorkPhone            string(10) Format: ####             Contact work phone.
+ contactWorkPhoneExtension   string(6)                           Contact work phone extension.
+ contactHomePhone            string(10) Format: ####             Contact home phone.
+ contactAddress1             string(40)                          Contact address line 1.
+ contactAddress2             string(40)                          Contact address line 2.
+ contactAddress3             string(40)                          Contact address line 3.
+ city                        string(40)                          Contact city.
+ stateProvince               string(2)                           Contact state/province.
+ zipPostalCode               string(10)                          Contact zip/postal code.
+ country                     string(2)                           Contact country of residence.
+ languagePreference          string(10)                          Language preference for the Holman mobile app.
+ contactData1                string(100)                         A client-defined custom field.
+ contactData2                string(100)                         A client-defined custom field.
+ contactData3                string(100)                         A client-defined custom field.
+ contactData4                string(100)                         A client-defined custom field.
+ contactData5                string(100)                         A client-defined custom field.
+ contactData6                string(100)                         A client-defined custom field.
+ contactData7                string(100)                         A client-defined custom field.
+ contactAuxData1             string(100)                         A client-defined custom field.
+ contactAuxData2             string(100)                         A client-defined custom field.
+ contactAuxData3             string(100)                         A client-defined custom field.
+ contactAuxData4             string(100)                         A client-defined custom field.
+ contactAuxData5             string(100)                         A client-defined custom field.
+ contactAuxData6             string(100)                         A client-defined custom field.
+ contactAuxData7             string(100)                         A client-defined custom field.
+ contactAuxData8             string(100)                         A client-defined custom field.
+ contactAuxData9             string(100)                         A client-defined custom field.
+ contactAuxData10            string(100)                         A client-defined custom field.
+
+
+
+      9          9
+contactAuxData11                 string(100)                    A client-defined custom field.
+contactAuxData12                 string(100)                    A client-defined custom field.
+contactAuxData13                 string(100)                    A client-defined custom field.
+contactAuxData14                 string(100)                    A client-defined custom field.
+contactAuxDate1                  string(mm/dd/yyyy)             A client-defined custom field.
+contactAuxDate2                  string(mm/dd/yyyy)             A client-defined custom field.
+contactAuxDate3                  string(mm/dd/yyyy)             A client-defined custom field.
+contactAuxDate4                  string(mm/dd/yyyy)             A client-defined custom field.
+
+
+
+JSON Sample                                                          Custom Query Body Sample:
+    {                                                                {
+        "pageNumber": "1",                                               "additionalFilters": [
+        "totalPages": "7",                                                   {
+        "person": [                                                             "name": "terminationDateCode",
+          {                                                                     "values": [
+            "contactActivationDate": "8/16/2021 12:00:00 AM",                     "1"
+            "contactTerminationDate": "",                                       ]
+            "contactDeactivationDate": "",                                   },
+            "contactHireDate": "",                                           {
+            "contactFirstName": "JOHN",                                         "name": "deactivationDateCode",
+            "contactMiddleName": "",                                            "values": [
+            "contactLastName": "SMITH",                                           "1"
+            "contactEmployeeId": "0240066",                                     ]
+            "contactEmail": "TRPZYY@COMPANYABC.COM",                         },
+            "contactCellPhone": "",                                          {
+            "contactCellAcceptsText": "Y",                                      "name": "activationDateCode",
+            "contactWorkPhone": "",                                             "values": [
+            "contactWorkPhoneExtension": "",                                      "1"
+            "contactHomePhone": "",                                             ]
+            "contactAddress1": "123 AVENUE",                                 },
+            "contactAddress2": "",                                        ]
+            "contactAddress3": "",                                       "paging": {
+            "city": "MOUNT LAUREL",                                         "pageNumber": 1,
+            "stateProvince": "NJ",                                          "pageSize": 1
+            "zipPostalCode": "08054",                                    },
+            "country": "US",                                             "lesseeCodes": ["9010"]
+            "languagePreference": "en-US"                            }
+           "contactData1": "",
+           "contactData3": "",
+           "contactData4": "",
+           "contactData5": "",
+           "contactData6": "",
+           "contactData7": "",
+           "contactAuxData1": "",
+           "contactAuxData14": "",
+           "contactAuxDate1": "",
+           "contactAuxDate2": "",
+           "contactAuxDate3": "",
+           "contactAuxDate4": ""
+          },
+    }
+
+
+
+
+     10           10
+SUBMIT Add new or update existing
+Contacts Endpoint
+This endpoint uses POST method to add and update your fleet contact details into Holman systems. These endpoints are
+commonly used for contact information (i.e. contactLastName, contactAddressLine1), employment dates (i.e.
+contactHireDate), and client-defined fields (i.e. contactClientData1, contactAuxData1).
+
+There are different required fields depending on if you are adding a new contact to the database or updating an existing
+contact.
+
+Please consult your Holman Representative to understand how this data needs to be maintained, especially for the client-
+defined fields. The data entered via this endpoint can affect reporting and program qualifications.
+
+Field Requirement “Add” refers to adding a new contact to Holman’s system.
+
+Field Requirement “Update” refers to updating the data for an existing contact in Holman’s system.
+
+Field Requirement “Safety” refers to when you are enrolling/terminating the contact from the Holman Safety program.
+
+Field Requirement “Asset Assign” refers to when you are assigning a contact to an asset in the inventory. In this scenario,
+you must identify the asset record with one of the following combinations of unique identifiers. If you don’t have this
+information in your database, you can retrieve it from the VEHICLE – BASIC or CUSTOM QUERRY endpoint.
+
+        1. lesseeCode & holmanVehicleNumber
+        2. lesseeCode & clientVehicleNumber
+        3. lesseeCode & vin
+        4. lesseeCode & licensePlate
+
+Submit Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/contacts/submit
+PROD: https://api.holman.solutions/CustomerDataAPI/contacts/submit
+
+Status Result Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/submission/status
+PROD: https://api.holman.solutions/CustomerDataAPI/submission/status
+
+
+
+
+      11        11
+Available Fields
+        PARAMETER               DATA TYPE                            DEFINITION                           FIELD REQUIREMENT
+ contactActivationDate       string(mm/dd/yyyy)   Date in which contact is activated within the         Add: REQUIRED
+                                                  Holman Contact database and can access driver         If not provided, it will default
+                                                  features including the mobile app.                    to sysdate.
+ contactTerminationDate      string(mm/dd/yyyy)   Date in which contact is terminated within the
+                                                  Holman Contact database and will no longer be
+                                                  able to access driver features including the mobile
+                                                  app.
+
+                                                  Must be <= Today.
+                                                  Cannot accept future dates.
+ contactDeactivationDate     string(mm/dd/yyyy)   This date parameter is used when an employee is
+                                                  on temporary leave with the company and does
+                                                  not need access to Holman systems but is not fully
+                                                  terminated. The contact is deactivated within the
+                                                  Holman Contact database and will no longer be
+                                                  able to access driver features including the mobile
+                                                  app.
+
+                                                  Must be <= Today.
+                                                  Cannot accept future dates.
+ contactHireDate             string(mm/dd/yyyy)   Date in which contact is hired with their company.
+
+                                                  Must be <= Today.
+                                                  Cannot accept future dates.
+ contactFirstName                                 Contact first name.                                   Add: REQUIRED
+                             string(20)                                                                 Update: REQUIRED
+
+ contactMiddleName           string(20)           Contact middle name.
+ contactLastName                                  Contact last name.                                    Add: REQUIRED
+                             string(30)
+                                                                                                        Update: REQUIRED
+ contactEmployeeId                                Contact employee ID. Used as a unique identifier      Add: REQUIRED
+                             string(9)
+                                                  for employee. Include leading zeros if applicable.    Update: REQUIRED
+ contactEmail                                     Contact email address. Email must be unique per       Add: REQUIRED
+                             string(50)           contact. Company email address is preferred over      Update: REQUIRED
+                                                  personal email address.
+ contactCellPhone            string(10)        Contact cell phone number. Contact cell phone            Add: REQUIRED
+                             Format: ######### number must be unique per contact.                       Update: REQUIRED
+
+ contactCellAcceptsText      integer(1)           Will the contact be able to receive text messages
+                                                  through cell phone? This supports SMS messaging
+                                                  from Holman mobile app.
+                                                  Y/N indicator
+ contactWorkPhone            string(10)        Contact work phone.
+                             Format: #########
+ contactWorkPhoneExtension   string(6)            Contact work phone extension.
+ contactHomePhone            string(10)        Contact home phone.
+                             Format: #########
+ contactAddress1             string(40)           Contact address line 1.
+ contactAddress2             string(40)           Contact address line 2.
+ contactAddress3             string(40)           Contact address line 3.
+ city                        string(40)           Contact city.
+ stateProvince               string(2)            Contact state/province.
+ zipPostalCode               string(10)           Contact zip/postal code.
+ country                     string(2)            Contact country of residence.
+
+
+        12         12
+                                            Allowable values are US, CA.
+languagePreference     string(10)           Language preference for the Holman mobile app.
+                                            Allowable values are ENGLISH, FRENCH,
+                                            SPANISH.
+supervisorEmail        string(50)           Contact’s supervisor’s email.
+contactData1           String(100)          A client-defined custom field.
+contactData2           string(100)          A client-defined custom field.
+contactData3           string(100)          A client-defined custom field.
+contactData4           string(100)          A client-defined custom field.
+contactData5           string(100)          A client-defined custom field.
+contactData6           string(100)          A client-defined custom field.
+contactData7           string(100)          A client-defined custom field.
+contactAuxData1        string(50)           A client-defined custom field.
+contactAuxData2        string(50)           A client-defined custom field.
+contactAuxData3        string(50)           A client-defined custom field.
+contactAuxData4        string(50)           A client-defined custom field.
+contactAuxData5        string(50)           A client-defined custom field.
+contactAuxData6        string(50)           A client-defined custom field.
+contactAuxData7        string(50)           A client-defined custom field.
+contactAuxData8        string(50)           A client-defined custom field.
+contactAuxData9        string(50)           A client-defined custom field.
+contactAuxData10       string(50)           A client-defined custom field.
+contactAuxData11       string(50)           A client-defined custom field.
+contactAuxData12       string(50)           A client-defined custom field.
+contactAuxData13       string(50)           A client-defined custom field.
+contactAuxData14       string(50)           A client-defined custom field.
+contactAuxDate1        string(mm/dd/yyyy)   A client-defined custom field.
+contactAuxDate2        string(mm/dd/yyyy)   A client-defined custom field.
+contactAuxDate3        string(mm/dd/yyyy)   A client-defined custom field.
+contactAuxDate4        string(mm/dd/yyyy)   A client-defined custom field.
+Safety Object
+lesseeCode             string(4)            A 4-character alphanumeric code that identifies the Safety: REQUIRED
+                                            client in Holman’s system.
+division               string(2)            A client-defined custom field.                       Safety: REQUIRED
+prefix                 string(4)            A client-defined custom field.                       Safety: REQUIRED
+excludeFromSafety      string(1)            Allows record to be excluded from Safety. Defaults   Safety: REQUIRED
+                                            to “N” for “no.”
+safetyTermDate         string(mm/dd/yyyy)   Date of employee’s termination for Holman’s          Safety: REQUIRED (only
+                                            Safety program.                                      for terminations from
+                                                                                                 program). Is nullable.
+updateLegalName        string(30)           Designate the Contact’s name as their legal name.
+                                            Used by Safety in the MVR license verification
+                                            process. Y = Yes, N= No.
+clientData1            string(12)           A client-defined custom field in Safety system.
+clientData2            string(9)            A client-defined custom field in Safety system.
+clientData3            string(12)           A client-defined custom field in Safety system.
+clientData4            string(12)           A client-defined custom field in Safety system.
+clientData5            string(12)           A client-defined custom field in Safety system.
+clientData6            string(12)           A client-defined custom field in Safety system.
+clientData7            string(12)           A client-defined custom field in Safety system.
+
+
+         13       13
+auxData1                string(50)   A client-defined custom field in Safety system.
+auxData2                string(50)   A client-defined custom field in Safety system.
+auxData3                string(50)   A client-defined custom field in Safety system.
+auxData4                string(50)   A client-defined custom field in Safety system.
+auxData5                string(50)   A client-defined custom field in Safety system.
+auxData6                string(50)   A client-defined custom field in Safety system.
+auxData7                string(50)   A client-defined custom field in Safety system.
+auxData8                string(50)   A client-defined custom field in Safety system.
+auxData9                string(50)   A client-defined custom field in Safety system.
+auxData10               string(50)   A client-defined custom field in Safety system.
+auxData11               string(50)   A client-defined custom field in Safety system.
+auxData12               string(50)   A client-defined custom field in Safety system.
+auxData13               string(50)   A client-defined custom field in Safety system.
+auxData14               string(50)   A client-defined custom field in Safety system.
+Inventory Object
+lesseeCode              integer(4)   A 4-character alphanumeric code that identifies the Asset Assign: REQUIRED
+                                     client in Holman’s system.                          Must be passed with one of
+                                                                                         the following in order to
+                                                                                         uniquely identify the record:
+                                                                                         1. holmanVehicleNumber
+                                                                                         2. clientVehicleNumber
+                                                                                         3. vin
+                                                                                         4. licensePlate
+holmanVehicleNumber     string(6)    A unique number assigned by Holman to each           Asset Assign: REQUIRED
+                                     vehicle.                                             depending on which
+                                                                                          identifier you choose to use
+                                                                                          along with lesseeCode.
+clientVehicleNumber     string(12)   A unique number assigned by the client to each       Asset Assign: REQUIRED
+                                     vehicle.                                             depending on which
+                                                                                          identifier you choose to use
+                                                                                          along with lesseeCode.
+vin                     string(17)   Vehicle serial number as determined by the vehicle Asset Assign: REQUIRED
+                                     manufacturer.                                      depending on which
+                                                                                        identifier you choose to use
+                                                                                        along with lesseeCode.
+licensePlate            string(10)   Vehicle license plate number.                        Asset Assign: REQUIRED
+                                                                                          depending on which
+                                                                                          identifier you choose to use
+                                                                                          along with lesseeCode.
+syncDrvNameAndEmpId     string(1)    Allows contacts name and employee id to be
+                                     assigned to an asset. “Y” to assign, “N” to
+                                     unassign.
+syncDrvAddress          string(1)    Allows contacts address to be assigned to an
+                                     asset. “Y” to assign, “N” to unassign.
+syncDrvPhoneAndEmail    string(1)    Allows contacts phone and email to be assigned to
+                                     an asset. “Y” to assign, “N” to unassign.
+grantDrvAppAccess       string(1)    Grants contact access to view asset in the mobile
+                                     app. “Y” to grant access, “N” to remove access.
+
+
+
+
+      14           14
+JSON Sample
+[
+    {
+        "contactFirstName": "string",
+        "contactMiddleName": "string",
+        "contactLastName": "string",
+        "contactEmployeeId": "string",
+        "contactActivationDate": "string",
+        "contactTerminationDate": "string",
+        "contactDeactivationDate": "string",
+        "contactHireDate": "string",
+        "contactEmail": "string",
+        "contactCellPhone": "5125651301",
+        "contactCellAcceptsText": "string",
+        "contactWorkPhone": "900)294.4774",
+        "contactWorkPhoneExtension": "string",
+        "contactHomePhone": "(939) 3554084",
+        "contactAddress1": "string",
+        "contactAddress2": "string",
+        "contactAddress3": "string",
+        "city": "string",
+        "stateProvince": "string",
+        "zipPostalCode": "79019",
+        "country": "string",
+        "languagePreference": "string",
+        "supervisorEmail": "string",
+        "contactData1": "string",
+        "contactData3": "string",
+        "contactData4": "string",
+        "contactData5": "string",
+        "contactData6": "string",
+        "contactData7": "string",
+        "contactAuxData1": "string",
+        "contactAuxData2": "string",
+        "contactAuxData3": "string",
+        "contactAuxData4": "string",
+        "contactAuxData5": "string",
+        "contactAuxData6": "string",
+        "contactAuxData7": "string",
+        "contactAuxData8": "string",
+        "contactAuxData9": "string",
+        "contactAuxData10": "string",
+        "contactAuxData11": "string",
+        "contactAuxData12": "string",
+        "contactAuxData13": "string",
+        "contactAuxData14": "string",
+        "contactAuxDate1": "string",
+        "contactAuxDate2": "string",
+        "contactAuxDate3": "string",
+        "contactAuxDate4": "string",
+        "safety": {
+          "lesseeCode": "string",
+          "division": "string",
+          "prefix": "string",
+          "clientData1": "string",
+          "clientData2": "string",
+
+
+
+            15         15
+          "clientData3": "string",
+          "clientData4": "string",
+          "clientData5": "string",
+          "clientData6": "string",
+          "clientData7": "string",
+          "auxData1": "string",
+          "auxData2": "string",
+          "auxData3": "string",
+          "auxData4": "string",
+          "auxData5": "string",
+          "auxData6": "string",
+          "auxData7": "string",
+          "auxData8": "string",
+          "auxData9": "string",
+          "auxData10": "string",
+          "auxData11": "string",
+          "auxData12": "string",
+          "auxData13": "string",
+          "auxData14": "string",
+          "excludeFromSafety": "string",
+          "safetyTermDate": "string",
+          "updateLegalName": "string"
+        },
+        "inventory": {
+          "lesseeCode": "string",
+          "holmanVehicleNumber": "string",
+          "clientVehicleNumber": "string",
+          "vin": "string",
+          "licensePlate": "string",
+          "grantDrvAppAccess": "string",
+          "syncDrvNameAndEmpId": "string",
+          "syncDrvPhoneAndEmail": "string",
+          "syncDrvAddress": "string"
+        }
+    }
+]
+
+
+
+
+            16         16
+MAINTENANCE
+QUERY Maintenance Purchase Order
+Data (Basic & Custom) Endpoints
+This Maintenance endpoint uses GET method to return information about your vehicle maintenance purchase orders. This
+method is commonly used for attributes like purchase order numbers, vendor information, repair dates, and repair
+information. Only closed POs with a status of “Approved” or “Paid” are accessible via this endpoint.
+
+Basic Query Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/basic-query
+PROD: https://api.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/basic-query
+
+Custom Query Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/custom-query
+PROD: https://api.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/custom-query
+
+
+Input Parameters
+       INPUT              DATA        CUSTOM
+   PARAMETER              TYPE         FILTER           DEFINITION                                   NOTES
+                                                A 4-character alphanumeric        User can filter on specific lesseeCode within
+                                                code that identifies the client   their user restrictions.
+ lesseeCode            string(4)      Y         in Holman's system.               Multiple inputs separated by comma ‘,’
+                                                                                  1 – Previous day
+                                                                                  2 – Previous month
+                                                                                  3 – Previous 3 months
+                                                Date the PO was paid and          4 – Previous 6 months
+ billPaidDateCode      integer(1)     Y         closed.                           5 – Previous 12 months
+                                                                                  This input parameter allows you to pull any
+                                                                                  records starting from the
+                                                                                  lastChangeRecordID entered. This property
+                                                                                  can be used to order a data set by change
+                                                                                  history. If used, you will receive delta records
+ lastChangeRecordID    string                   A unique ID for each record.      only.
+                                                                                  This input parameter allows you to pull any
+                                                                                  records starting from the lastChangeDate
+                                                Enables delta API feature to      entered. This property can be used to order a
+                       String                   return records based on last      data set by change history. If used, you will
+ lastChangeDate        (mm/dd/yyyy)             change date                       receive delta records only.
+                                                                                  1 – Previous day
+                                                                                  2 – Previous month
+                                                                                  3 – Previous 3 months
+                                                                                  4 – Previous 6 months
+ poDateCode            integer(1)     Y         Date the PO was created.          5 – Previous 12 months
+
+
+
+
+      17          17
+                                                                               Default page limit set to 200. Max 1000.
+                                              The number of records to be      When a page is first retrieved it will contain
+pageSize               integer                returned per page.               total number of pages that are included.
+pageNumber             integer(1)             Page number of return json.
+
+
+
+                                         CUSTOM
+    PARAMETER              DATA TYPE                                              DEFINITION
+                                          FILTER
+lesseeCode               string(4)      Y          A 4-character alphanumeric code that identifies the client in Holman's
+                                                   system.
+holmanVehicleNumber      string(6)      Y          A unique number assigned by Holman to each vehicle. Unique within
+                                                   lesseeCode but not across lesseeCode.
+clientVehicleNumber      string(12)     Y          A unique number assigned by the client to each vehicle. Unique within
+                                                   lesseeCode but not across lesseeCode.
+vin                      string(17)     Y          Vehicle serial number as determined by the vehicle manufacturer.
+odometer                 number(10)                Odometer reading (miles or kilometers depending on vehicle country).
+hourMeter                string(6)                 Engine hours.
+poNumber                 integer                   A unique purchase order number assigned by Holman.
+vendorId                 string(10)                Unique ID assigned to each vendor.
+vendorName               string(40)                Vendor who performed the repair.
+vendorAddressLine1       string(40)                Address of vendor who performed the repair.
+vendorAddressLine2       string(40)                Address of vendor who performed the repair.
+vendorCity               string(20)                Address of vendor who performed the repair.
+vendorStateProvince      string(2)                 Address of vendor who performed the repair.
+vendorZipPostalCode      string(10)                Address of vendor who performed the repair.
+customerPoNumber         string(20)                The client's work order number.
+invoiceNumber            string(25)     Y          Invoice number as submitted by the vendor.
+invoiceDate              string         Y          Invoice date as submitted by the vendor.
+                         (mm/dd/yyyy)
+repairDate               string         Y          Actual date the repair was done.
+                         (mm/dd/yyyy)
+poDate                   string                    Date the PO was created.
+                         (mm/dd/yyyy
+                         hh:mm:ss)
+billPaidDate             string                    Date the PO was paid and closed.
+                         (mm/dd/yyyy
+                         hh:mm:ss)
+poDetailsId              integer                   A unique number per PO line item.
+poTotalLineCost          number(8,2)               The sum of the entire PO as it will appear in Holman Insights. Will be in
+                                                   USD/CAD depending on vehicle location.
+quantity                 string(6,2)               The quantity of Parts or Labor hours.
+cost                     string(8,2)               The cost of the individual line item.
+type                     string(2)                 Describes the PO line item (i.e. parts, labor, taxes). Please refer to the
+                                                   “Maintenance PO Types” sheet in the Reference Lists workbook.
+complaint                string(30)                Reason why the vehicle was brought in for service.
+cause                    string(30)                Issue as identified by the vendor.
+ataCode                  string(10)                ATA code associated with ataDescription. A detailed repair breakdown.
+ataDescription           string(100)               Description associated with ataCode.
+vendorType               string(2)                 Vendor type.
+division                 string(2)      Y          A client-defined custom field.
+prefix                   string(4)      Y          A client-defined custom field.
+clientData1              string(12)                A client-defined custom field.
+clientData2              string(9)                 A client-defined custom field.
+clientData3              string(12)                A client-defined custom field.
+
+
+
+     18           18
+clientData4               string(12)        A client-defined custom field.
+clientData5               string(12)        A client-defined custom field.
+clientData6               string(12)        A client-defined custom field.
+clientData7               string(12)        A client-defined custom field.
+driverClass               string(1)         A client-defined custom field.
+exec                      string(1)         A client-defined custom field.
+auxData1                  string(50)        A client-defined custom field.
+auxData2                  string(50)        A client-defined custom field.
+auxData3                  string(50)        A client-defined custom field.
+auxData4                  string(50)        A client-defined custom field.
+auxData5                  string(50)        A client-defined custom field.
+auxData6                  string(50)        A client-defined custom field.
+auxData7                  string(50)        A client-defined custom field.
+auxData8                  string(50)        A client-defined custom field.
+auxData9                  string(50)        A client-defined custom field.
+auxData10                 string(50)        A client-defined custom field.
+auxData11                 string(50)        A client-defined custom field.
+auxData12                 string(50)        A client-defined custom field.
+auxData13                 string(50)        A client-defined custom field.
+
+auxData14                 string(50)        A client-defined custom field.
+auxDate1                  string            A client-defined custom field.
+                          (mm/dd/yyyy)
+auxDate2                  string            A client-defined custom field.
+                          (mm/dd/yyyy)
+auxDate3                  string            A client-defined custom field.
+                          (mm/dd/yyyy)
+auxDate4                  string            A client-defined custom field.
+                          (mm/dd/yyyy)
+firstName                 string(20)        Vehicle contact.
+lastName                  string(30)        Vehicle contact.
+recordID                  string            A unique record ID for each paid maintenance record.
+
+
+
+JSON Sample                                         Custom Query Sample:
+     {                                              {
+     "totalCount": 0,                                   "additionalFilters": [
+     "pageInfo": {                                         {
+                                                             "name": "invoiceNumber",
+       "pageNumber": 0,
+                                                             "values": [
+       "pageSize": 0,                                           "657567"
+       "totalPages": 0,                                      ]
+       "lastChangeRecordId": 0                             }
+     },                                                 ],
+     "items": [                                         "paging": {
+       {                                                   "pageNumber": 1,
+                                                           "pageSize": 1
+         "lastChangeDate": “string",
+                                                        },
+         "lastChangeRecordId": 0,                       "lesseeCodes": [
+         "lesseeCode": "string",                           "9010"
+         "holmanVehicleNumber": "string",               ]
+         "clientVehicleNumber": "string",           }
+         "vin": "string",
+         "odometer": 0,
+         "hourMeter": 0,
+         "poNumber": 0,
+
+
+
+     19         19
+            "poLineNumber": 0,
+            "vendorId": "string",
+            "vendorName": "string",
+            "vendorAddressLine1": "string",
+            "vendorAddressLine2": "string",
+            "vendorCity": "string",
+            "vendorStateProvince": "string",
+            "vendorZipPostalCode": "string",
+            "customerPoNumber": "string",
+            "invoiceNumber": "string",
+            "invoiceDate": "mm/dd/yyyy",
+            "repairDate": "mm/dd/yyyy",
+            "poDate": "mm/dd/yyyy",
+            "billPaidDate": "mm/dd/yyyy",
+            "poDetailsId": 0,
+            "poTotalLineCost": 0,
+            "quantity": 0,
+            "cost": 0,
+            "type": "string",
+            "complaint": "string",
+            "cause": "string",
+            "ataCode": "string",
+            "ataDescription": "string",
+            "vendorType": "string",
+            "division": "string",
+            "prefix": "string",
+            "clientData1": "string",
+            "clientData2": "string",
+            "clientData3": "string",
+            "clientData4": "string",
+            "clientData5": "string",
+            "clientData6": "string",
+            "clientData7": "string",
+            "driverClass": "string",
+            "exec": "string",
+            "auxData1": "string",
+            "auxData2": "string",
+            "auxData12": "string",
+            "auxData13": "string",
+            "auxData14": "string",
+            "auxDate1": "mm/dd/yyyy",
+            "auxDate2": "mm/dd/yyyy",
+            "auxDate3": "mm/dd/yyyy",
+            "auxDate4": "mm/dd/yyyy",
+            "firstName": "string",
+            "lastName": "string",
+            "lastMaintenanceConformedChangeDate":
+              "mm/dd/yyyy",
+            "lastMaintenanceConformedChangeRecordId": 0,
+        }
+    ]
+}
+
+
+
+
+    20              20
+ SUBMIT Add new or update existing
+ Maintenance Endpoint
+This Maintenance endpoint uses the POST method to add Purchase Order history. This method is commonly used for
+attributes like purchase order numbers, vendor information, repair dates, and invoice information. Only closed/paid POs
+are available for this endpoint.
+
+This endpoint is structured by objects; please refer to the sample json for the required structure.
+
+Submit Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/custom-query
+PROD: https://api.holman.solutions/CustomerDataAPI/maintenance/purchase-orders/custom-query
+
+Status Result Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/submission/status
+PROD: https://api.holman.solutions/CustomerDataAPI/submission/status
+
+
+Available Parameters
+
+       PARAMETER               DATA TYPE              DEFINITION                    NOTES                  FIELD REQUIREMENT
+
+ lesseeCode                  string(4)           A 4-character               User can filter on specific   Required Must be passed
+                                                 alphanumeric code that      lesseeCode within their       with one of the following
+                                                 identifies the client in    user restrictions.            in order to uniquely
+                                                 Holman’s system.            Multiple inputs separated     identify the record:
+                                                                             by comma ‘,’                  1. holmanVehicleNumber
+                                                                             Length must = 4               2. clientVehicleNumber
+                                                                                                           3. vin
+ holmanVehicleNumber         string(6)           A unique number             Unique within Lessee          Required depending on
+                                                 assigned by ARI to each     Code but not across           which identifier you
+                                                 vehicle.                    Lessee Code.                  choose to use. Unique
+                                                                                                           identifier must be either:
+                                                                                                           1. lesseeCode &
+                                                                                                           holmanVehicleNumber
+                                                                                                           2. lesseeCode &
+                                                                                                           clientVehicleNumber
+                                                                                                           3. lesseeCode & vin
+ clientVehicleNumber         string(12)          A unique number             Unique within Lessee          Required depending on
+                                                 assigned by the client to   Code but not across           which identifier you
+                                                 each vehicle.               Lessee Code.                  choose to use. Unique
+                                                                                                           identifier must be either:
+                                                                                                           1. lesseeCode &
+                                                                                                           holmanVehicleNumber
+                                                                                                           2. lesseeCode &
+                                                                                                           clientVehicleNumber
+                                                                                                           3. lesseeCode & vin
+ vin                         string(17)          Vehicle serial number as                                  Required depending on
+                                                 determined by the                                         which identifier you
+                                                 vehicle manufacturer.                                     choose to use. Unique
+                                                                                                           identifier must be either:
+
+
+
+
+        21       21
+                                                                                            1. lesseeCode &
+                                                                                            holmanVehicleNumber
+                                                                                            2. lesseeCode &
+                                                                                            clientVehicleNumber
+                                                                                            3. lesseeCode & vin
+odometer              string(10)     Odometer reading (miles
+                                     or kilometers depending
+                                     on vehicle country).
+vendorName            string(40)     Vendor who performed
+                                     the repair.
+vendorAddressLine1    string(40)     Address of vendor who
+                                     performed the repair.
+vendorAddressLine2    string(40)     Address of vendor who
+                                     performed the repair.
+vendorCity            string(20)     Address of vendor who
+                                     performed the repair.
+vendorStateProvince   string(2)      Address of vendor who
+                                     performed the repair.
+                                     Length must = 2
+vendorZipPostalCode   string(10)     Address of vendor who
+                                     performed the repair.
+customerPoNumber      string(20)     The client's work order
+                                     number.
+invoiceNumber         string(25)     Invoice number as
+                                     submitted by the vendor.
+invoiceDate           String         Invoice date as          Date must be sys date
+                      (mm/dd/yyyy)   submitted by the vendor. or past date. Cannot
+                                                              accept future dates.
+repairDate            String         The actual date the      Date must be sys date
+                      (mm/dd/yyyy)   repair was done.         or past date. Cannot
+                                                              accept future dates.
+
+quantity              number(6,2)    Quantity of Parts or
+                                     Labor hours.
+cost                  number(8,2)    Cost of the individual        Will be in USD/CAD
+                                     line item                     depending on vehicle
+                                                                   location.
+                                                                   The sum of all line
+                                                                   items (cost*quantity)
+                                                                   will be the sum of the
+                                                                   entire PO as it will
+                                                                   appear in Holman
+                                                                   Insights.
+type                  string(2)      Describes the PO line         Please refer to the
+                                     (i.e., parts, labor, taxes)   “Maintenance PO
+                                                                   Types” sheet in the
+                                                                   Reference Lists
+                                                                   workbook.
+ataCode               string(10)     ATA code associated
+                                     with ataDescription. A
+                                     detailed repair
+                                     breakdown.
+ataDescription        string(100)    Description associated                                 REQUIRED; no set
+                                     with ataCode.                                          values.
+poNotes               string(1000)   Written repair details.
+
+
+
+       22        22
+JSON Sample
+[
+    {
+        "customerPoNumber": "string",
+        "invoiceDate": "string",
+        "invoiceNumber": "string",
+        "poNotes": "string",
+        "repairDate": "string",
+        "po_details": [
+           {
+             "ataCode": "string",
+             "ataDescription": "string",
+             "cost": "string",
+             "quantity": "string",
+             "type": "string"
+           }
+        ],
+        "vehicle_details": {
+           "clientVehicleNumber": "string",
+           "holmanVehicleNumber": "string",
+           "lesseeCode": "string",
+           "odometer": "string",
+           "vin": "string"
+        },
+        "vendor_details": {
+           "vendorAddressLine1": "string",
+           "vendorAddressLine2": "string",
+           "vendorCity": "string",
+           "vendorName": "string",
+           "vendorStateProvince": "string",
+           "vendorZipPostalCode": "string"
+        }
+    }
+]
+
+
+
+
+            23          23
+ODOMETER
+ QUERY Odometer Data (Basic & Custom)
+ Endpoints
+Both the basic and custom query endpoints are used to return information about your vehicle odometers.
+
+Basic Query Endpoint URLs
+QA: https://api.stg.holman.solutions/CustomerDataAPI/odometer/basic-query
+PROD: https://api.holman.solutions/CustomerDataAPI/odometer/basic-query
+
+Custom Query Endpoint URLs
+QA: https://api.stg.holman.solutions/CustomerDataAPI/odometer/custom-query
+PROD: https://api.holman.solutions/CustomerDataAPI/odometer/custom-query
+
+Input Parameters
+                                               Custom
+  INPUT PARAMETER           DATA TYPE                           DEFINITION                             NOTES
+                                                Filter
+                                                            A 4-character
+                                                            alphanumeric code
+                                                            that identifies the     User can filter on specific lesseeCode
+                                                            client in Holman’s      within their user restrictions.
+ lesseeCode                 string(4)             Y         system.                 Multiple inputs separated by comma ‘,’
+                                                                                    1 – Previous day odometer readings
+                                                            A parameter that        (default)
+                                                            determines the          2 – Previous week readings
+                                                            number of months        3 – Previous month readings
+                                                            back to pull odometer   4 – Previous three months readings
+ odometerHistoryDateCode    integer(1)            Y         history for.            5 – Previous six months readings
+                                                                                    This input parameter allows you to pull any
+                                                                                    records starting from the
+                                                                                    lastChangeRecordID entered. This
+                                                                                    property can be used to order a data set by
+                                                                                    change history. If used, you will receive
+                                                                                    delta records only.
+
+                                                            A unique ID for each    Note: either use odometerHistoryDateCode
+ lastChangeRecordId         string()                        record.                 or lastChangeRecordId.
+                                                                                    This input parameter allows you to pull any
+                                                            Enables delta API       records starting from the lastChangeDate
+                                                            feature to return       entered. This property can be used to order
+                            String                          records based on last   a data set by change history. If used, you
+ lastChangeDate             (mm/dd/yyyy)                    change date             will receive delta records only.
+                                                                                    Default page limit set to 200. When a page
+                                                            Page number of          is first retrieved, it will contain total number
+ pageNumber                 integer(1)                      return Json.            of pages that are included.
+
+
+
+
+      24          24
+Available Parameters
+                                  DATA           Custom
+    PARAMETER                     TYPE            Filter                                   DEFINITION
+                                                             A 4-character alphanumeric code that identifies the client in Holman’s
+ lesseeCode                    string(4)         Y           system.
+                                                             A unique number assigned by Holman to each vehicle. Unique within
+ holmanVehicleNumber           string(6)         Y           lesseeCode, but not across lesseeCode.
+                                                             A unique number assigned by Holman to each vehicle. Unique within
+ clientVehicleNumber           string(12)        Y           lesseeCode, but not across lesseeCode.
+ vin                           string(17)        Y           Vehicle serial number.
+ division                      string(2)         Y           A client-defined custom field.
+ prefix                        string(4)         Y           A client-defined custom field.
+ odometer                      string(10)                    Vehicle odometer reading.
+                               string
+                               (mm/dd/yyyy
+                               HH:MM:SS
+ odometerDate                  AM/PM)                        Date of vehicle odometer reading.
+ odometerSource                string(5)                     Source of vehicle’s odometer reading.
+                                                             Quality rating of vehicle’s odometer reading. Expected values:
+ odometerQuality               string(20)                    Good, Insufficient Data, Out of Range, Excluded, Invalid
+
+
+
+
+ JSON Sample                                                          Custom Query Sample
+     {                                                                {
+         "totalCount": 0,                                                 "additionalFilters": [
+         "pageInfo": {                                                       {
+           "pageNumber": 0,                                                    "name": "odometerHistoryDateCode",
+           "pageSize": 0,                                                      "values": [
+           "totalPages": 0,                                                       5
+           "lastChangeRecordId": 0                                             ]
+         },                                                                  }
+         "items": [                                                       ],
+           {                                                              "paging": {
+             "lastChangeDate": "2025-04-21T20:31:26.558Z",                   "pageNumber": 1,
+             "lastChangeRecordId": 0,                                        "pageSize": 1
+             "odometerHistoryId": 0,                                      },
+             "lesseeCode": "string",                                      "lesseeCodes": [
+             "holmanVehicleNumber": "string",                                "9010"
+             "clientVehicleNumber": "string",                             ]
+             "division": "string",                                    }
+             "prefix": "string",
+             "vin": "string",
+             "odometer": 0,
+             "odometerDate": "2025-04-21T20:31:26.558Z",
+             "odometerSource": "string",
+             "odometerQuality": "string"
+           }
+         ]
+     }
+
+
+
+
+         25         25
+ SUBMIT Add new or update existing
+ Odometer Endpoint
+This Odometer endpoint uses the POST method to add odometer records for your vehicles into Holman system.
+
+Submit Endpoint URLs
+QA: https://api.stg.holman.solutions/CustomerDataAPI/odometer/submit
+PROD: https://api.holman.solutions/CustomerDataAPI/odometer/submit
+
+Status Result Endpoint URLs:
+QA: https://api.stg.holman.solutions/CustomerDataAPI/submission/status
+PROD: https://api.holman.solutions/CustomerDataAPI/submission/status
+Note: If you use QUERY Odometer Data (Basic & Custom) Endpoints to verify, posted records will only be available next
+day.
+
+
+Available Fields
+   PARAMETER            DATA TYPE                   DEFINITION                                 FIELD REQUIREMENT
+
+lesseeCode             string(4)       A 4-character alphanumeric code that        User can filter on specific lesseeCode within their
+                                       identifies the client in Holman’s system.   user restrictions.
+                                                                                   Multiple inputs separated by comma ‘,’
+                                                                                   Must be passed with one of the following in order
+                                                                                   to uniquely identify the record:
+                                                                                   1. holmanVehicleNumber
+                                                                                   2. clientVehicleNumber
+                                                                                   3. vin
+holmanVehicleNumber    string(6)       A unique number assigned by Holman          Required depending on which identifier you
+                                       to each vehicle.                            choose to use. Unique identifier must be either:
+                                                                                   1. lesseeCode & holmanVehicleNumber
+                                                                                   2. lesseeCode & clientVehicleNumber
+                                                                                   3. lesseeCode & vin
+clientVehicleNumber    string(12)      A unique number assigned by the client      Required depending on which identifier you
+                                       to each vehicle.                            choose to use. Unique identifier must be either:
+                                                                                   1. lesseeCode & holmanVehicleNumber
+                                                                                   2. lesseeCode & clientVehicleNumber
+                                                                                   3. lesseeCode & vin
+vin                    string(17)      Vehicle serial number as determined by      Required depending on which identifier you
+                                       the vehicle manufacturer.                   choose to use. Unique identifier must be either:
+                                                                                   1. lesseeCode & holmanVehicleNumber
+                                                                                   2. lesseeCode & clientVehicleNumber
+                                                                                   3. lesseeCode & vin
+odometer               string(7)       Current odometer reading for vehicle.       Required when providing odometerDate.
+
+odometerDate           String          Current odometer reading date.              Required when providing odometer.
+                       (mm/dd/yyyy)
+datasource             string(5)       Source of input for odometer. Source        REQUIRED
+                                       definition as “API”.
+
+
+
+
+      26        26
+JSON Sample
+        [
+       {
+         "clientVehicleNumber": "string",
+         "datasource": "string",
+         "holmanVehicleNumber": "string",
+         "lesseeCode": "string",
+         "odometer": "string",
+         "odometerDate": "string",
+         "vin": "string"
+       }
+   ]
+
+
+
+
+        27          27
+VEHICLE
+QUERY Vehicle Data (Basic & Custom)
+Endpoints
+Both the basic and custom query endpoints are used to return information about your fleet inventory. These endpoints are
+commonly used for vehicle attributes (i.e. vin, makeVin, modelVin, odometer), assigned contact information (i.e. lastName,
+addressLine1), supply chain dates (i.e. deliveryDate), and client-defined fields (i.e. division, clientData1, auxData1).
+
+Basic Query Endpoint URLs
+QA: https://api.stg.holman.solutions/CustomerDataAPI/vehicles/basic-query
+PROD: https://api.holman.solutions/CustomerDataAPI/vehicles/basic-query
+
+Custom Query Endpoint URLs
+QA: https://api.stg.holman.solutions/CustomerDataAPI/vehicles/custom-query
+PROD: https://api.holman.solutions/CustomerDataAPI/vehicles/custom-query
+
+Input Parameters
+                                                               CUSTOM
+     PARAMETER           DATA TYPE          DEFINITION                                             NOTES
+                                                                FILTER
+                                        A 4-character          Y
+                                        alphanumeric code
+                                        that identifies the              User can filter on specific lesseeCode(s) within their user
+                                        client in Holman's               restrictions.
+ lesseeCode            string(4)        system.                          Multiple inputs separated by comma ‘,’
+                                                               Y         0 – New; vehicle is on order and not yet been delivered
+                                                                         1 – Active; vehicle is on the road
+                                                                         2 – Out of Service; vehicle was taken off road for
+                                                                         maintenance, preparation for sale, etc.
+                                                                         3 – Sold (can be used in conjunction with soldDateCode)
+                                        The current state of             Only non-purged vehicles are available.
+ statusCode            integer(1)       the vehicle’s use.               Multiple inputs separated by comma ‘,’
+                                                               Y         Can be defined in conjunction with statusCode = 3
+                                                                         1 – Previous Month
+                                                                         2 – Previous Three months
+                                                                         3 – Previous Six months
+                                        Date the vehicle                 4 – Previous 12 months
+ soldDateCode          integer(1)       was sold.                        5 - Will return all sold assets regardless of saleDate.
+                                                                         This input parameter allows you to pull any proceeding
+                                                                         records from the lastChangeRecordID entered. This
+                                        A unique ID for                  property can be used to order a data set by change
+ lastChangeRecordID    integer          each record.                     history. If omitted, you will not receive delta records only.
+                       string           Enables delta API                This input parameter allows you to pull any proceeding
+                       (mm/dd/yyyy      feature to return                records from the lastChangeDate entered. This property
+                       hh:mm:ss         records based on                 can be used to order a data set by change history. If
+ lastChangeDate        AM/PM)           last change date                 omitted, you will not receive delta records only.
+
+
+
+
+      28          28
+                                         Page number of
+ pageNumber            integer           return Json.
+                                         The number of                    Default page limit set to 200. Max 1000. When a page is
+                                         records to be                    first retrieved it will contain total number of pages that
+ pageSize              integer           returned per page.               are included.
+
+
+
+Available Parameters
+                                               CUSTOM
+       PARAMETER                 DATA TYPE      FILTER                                     DEFINITION
+
+ lesseeCode                string(4)           Y          A 4-character alphanumeric code that identifies the client in Holman's
+                                                          system.
+ holmanVehicleNumber       string(6)           Y          A unique number assigned by Holman to each vehicle. Unique within
+                                                          lesseeCode but not across lesseeCode.
+ clientVehicleNumber       string(12)          Y          A unique number assigned by the client to each vehicle. Unique within
+                                                          lesseeCode but not across lesseeCode.
+ vin                       string(17)          Y          Vehicle serial number as determined by the vehicle manufacturer. Unique
+                                                          within lesseeCode but not across lesseeCode.
+ status                    string(40)                     The current state of the vehicle’s use.
+                                                          Please refer to the “Vehicle Status” sheet in the Reference Lists workbook.
+ assignedStatus            string(20)          Y          Additional optional classification of how the vehicle is currently being used.
+                                                          Please refer to the “Assigned Status” sheet in the Reference Lists
+                                                          workbook.
+ division                  string(2)           Y          A client-defined custom field.
+ prefix                    string(4)           Y          A client-defined custom field.
+ clientData1               string(12)          Y          A client-defined custom field.
+ clientData2               string(9)           Y          A client-defined custom field.
+ clientData3               string(12)          Y          A client-defined custom field.
+ clientData4               string(12)          Y          A client-defined custom field.
+ clientData5               string(12)          Y          A client-defined custom field.
+ clientData6               string(12)          Y          A client-defined custom field.
+ clientData7               string(12)          Y          A client-defined custom field.
+ driverClass               string(1)                      A client-defined custom field.
+ exec                      string(1)                      A client-defined custom field.
+ auxData1                  string(50)          Y          A client-defined custom field.
+ auxData2                  string(50)          Y          A client-defined custom field.
+ auxData3                  string(50)          Y          A client-defined custom field.
+ auxData4                  string(50)          Y          A client-defined custom field.
+ auxData5                  string(50)          Y          A client-defined custom field.
+ auxData6                  string(50)          Y          A client-defined custom field.
+ auxData7                  string(50)          Y          A client-defined custom field.
+ auxData8                  string(50)          Y          A client-defined custom field.
+ auxData9                  string(50)          Y          A client-defined custom field.
+ auxData10                 string(50)          Y          A client-defined custom field.
+ auxData11                 string(50)          Y          A client-defined custom field.
+ auxData12                 string(50)          Y          A client-defined custom field.
+ auxData13                 string(50)          Y          A client-defined custom field.
+ auxData14                 string(50)          Y          A client-defined custom field.
+ auxDate1                  string                         A client-defined custom field.
+                           (mm/dd/yyyy)
+ auxDate2                  string                         A client-defined custom field.
+                           (mm/dd/yyyy)
+ auxDate3                  string                         A client-defined custom field.
+                           (mm/dd/yyyy)
+
+
+
+       29         29
+auxDate4              string                A client-defined custom field.
+                      (mm/dd/yyyy)
+firstName             string(20)        Y   Vehicle contact.
+lastName              string(30)        Y   Vehicle contact.
+email                 string(50)        Y   Vehicle contact email.
+cellPhone             string(10)        Y   Vehicle contact phone number.
+                      Format: #######
+workPhone             string(10)            Vehicle contact phone number.
+                      Format: #######
+workPhoneExtension    string(6)             Vehicle contact phone number.
+                      Format: ######
+homePhone             string(10)            Vehicle contact phone number.
+                      Format: #######
+addressLine1          string(40)            Physical address where the vehicle is domiciled.
+addressLine2          string(40)            Physical address where the vehicle is domiciled.
+addressLine3          string(40)            Physical address where the vehicle is domiciled.
+city                  string(40)            Physical address where the vehicle is domiciled.
+stateProvince         string(2)             Physical address where the vehicle is domiciled.
+zipPostalCode         string(10)            Physical address where the vehicle is domiciled.
+modelYear             string(4)             Vehicle Model Year based on VIN Decode.
+makeVin               string(50)            Vehicle Make based on VIN Decode.
+makeClient            string(20)            Vehicle Make as defined by the client.
+modelVin              string(100)           Vehicle Model based on VIN Decode.
+modelClient           string(20)            Vehicle Model Name as defined by the client.
+engineType            string(4000)          Engine details as defined by the VIN. Includes engine size and cylinders.
+driveline             string(100)           Drivetrain based on VIN Decode (i.e., 4x2, 4x4)
+series                string(100)           i.e., 1500, 2500HD
+fuelType              string(50)            Type of fuel vehicle operates on based on VIN Decode.
+fuelTypeDescription   string(25)            Fuel Type as defined by the client.
+fuelTypeCode          string(2)             Fuel Type of the vehicle as defined by the client.
+fuelCapacity          number(6,1)           Fuel tank capacity. Measured in gallons for US assets and litres for
+                                            Canadian assets.
+fuelMeasureType       string(1)             Fuel unit of measure. Liters = L, Gallons = G.
+odometer              number(7)             Current odometer reading for the vehicle.
+odometerDate          string                Current odometer reading date.
+                      (mm/dd/yyyy)
+hourMeter             string(6)             Current hour meter on the vehicle.
+hourMeterDate         string                Current hour meter date.
+                      (mm/dd/yyyy)
+licensePlate          string(10)        Y   Vehicle license plate number.
+tagStateProvince      string(2)             State/province where the vehicle is registered for licensing purposes.
+plateType             string(3)             License plate classification.
+                                            Please refer to the “Plate Type” sheet in the Reference Lists workbook.
+renewalDate           string                Renewal date for the license plate.
+                      (mm/dd/yyyy)
+assetType             string(10)            Vehicle classification.
+                                            Please refer to the “Asset Type and Asset Sub-Type” sheet in the
+                                            Reference Lists workbook.
+assetSubtype          string(25)            Secondary vehicle classification that is dependent on the chosen
+                                            assetType.
+                                            Please refer to the “Asset Type and Asset Sub-Type” sheet in the
+                                            Reference Lists workbook.
+orderType             string(7)             How the vehicle order was placed.
+                                            Please refer to the “Order Type” sheet in the Reference Lists workbook.
+
+
+
+     30         30
+deliveryDate              string         Date the vehicle was delivered to the contact. This date drives the
+                          (mm/dd/yyyy)   calculated monthsInService.
+onRoadDate                string         Date the vehicle was put in use.
+                          (mm/dd/yyyy)
+outOfServiceDate          string         Date the vehicle was taken out of use.
+                          (mm/dd/yyyy)
+soldDate                  string         Date the vehicle was sold.
+                          (mm/dd/yyyy)
+soldAmount                number(9,2)    Final sale amount for the vehicle.
+saleOdometer              integer(6)     Odometer reading for the vehicle at the time it was sold.
+capCost                   number(9,2)    Vehicle’s full purchase price. Will be 0 for vehicles not leased through
+                                         Holman.
+gvwr                      integer(6)     Gross Vehicle Weight. Maximum amount specified by the vehicle
+                                         manufacturer for the total weight of the vehicle and any cargo including
+                                         people.
+curbWeight                string(6)      Curb weight. The current total vehicle weight with all fluids and normal
+                                         operating gear without passengers or cargo.
+registeredVehicleWeight   string(6)      Registered Vehicle Weight. The weight of the vehicle's Motor Vehicle
+                                         registration.
+vendor                    string(30)     Vehicle owner.
+                                         Please refer to the “Vendor” sheet in the Reference Lists workbook.
+leaseTerm                 integer(3)     The number of months for the vehicle’s lease.
+monthsBilled              integer(3)     Months that the vehicle has been billed.
+monthsInService           integer        Months in Service (MIS) calculated as of the deliveryDate.
+remainingBookValue        number(9,2)    Current book value remaining on the vehicle.
+telematicsDeviceId        string(30)     A unique number assigned to each telematics device by the vendor.
+telematicsDeviceModel     string(30)     i.e., GoPro
+telematicsDeviceVendor    string(50)     i.e., Geotab
+titleOwnerLessor          string(100)    Vehicle’s owners name printed on title.
+
+
+
+
+       31      31
+JSON Sample                                Custom Query Body Example:
+{                                             {
+    "totalCount": 0,                              "additionalFilters": [
+    "pageInfo": {                                   {
+      "pageNumber": 0,                                "name": "statusCode",
+      "pageSize": 0,                                  "values": ["1"]
+      "totalPages": 0,                              }
+      "lastChangeRecordId": 0                     ],
+    },                                            "paging": {
+    "items": [                                      "pageNumber": 1,
+      {                                             "pageSize": 1
+        "addressLine1": "string",                 },
+        "addressLine2": "string",
+        "addressLine3": "string",                 "lesseeCodes": ["9010"]
+        "assetSubtype": "string",             }
+        "assetType": "string",
+        "assignedStatus": "string",
+        "auxData1": "string",
+        "auxData10": "string",
+        "auxData11": "string",
+        "auxData12": "string",
+        "auxData13": "string",
+        "auxData14": "string",
+        "auxData2": "string",
+        "auxData3": "string",
+        "auxData4": "string",
+        "auxData5": "string",
+        "auxData6": "string",
+        "auxData7": "string",
+        "auxData8": "string",
+        "auxData9": "string",
+        "auxDate1": "mm/dd/yyyy",
+        "auxDate2": "mm/dd/yyyy",
+        "auxDate3": "mm/dd/yyyy",
+        "auxDate4": "mm/dd/yyyy",
+        "capCost": "string",
+        "cellPhone": "string",
+        "city": "string",
+        "clientData1": "string",
+        "clientData2": "string",
+        "clientData3": "string",
+        "clientData4": "string",
+        "clientData5": "string",
+        "clientData6": "string",
+        "clientData7": "string",
+        "clientVehicleNumber": "string",
+        "curbWeight": "string",
+        "deliveryDate": "mm/dd/yyyy",
+        "division": "string",
+        "driveline": "string",
+        "driverClass": "string",
+        "email": "string",
+        "engineType": "string",
+        "exec": "string",
+        "firstName": "string",
+        "fuelCapacity": 0,
+        "fuelMeasureType": "string",
+        "fuelType": "string",
+        "fuelTypeCode": "string",
+        "fuelTypeDescription": "string",
+        "gvwr": 0,
+        "holmanVehicleNumber": "string",
+        "homePhone": "string",
+        "hourMeter": 0,
+
+
+
+         32         32
+            "hourMeterDate": "mm/dd/yyyy",
+            "lastChangeDate": "2025-04-15T18:37:17.401Z",
+            "lastChangeRecordId": 0,
+            "lastName": "string",
+            "leaseTerm": "string",
+            "lesseeCode": "string",
+            "licensePlate": "string",
+            "makeClient": "string",
+            "makeVin": "string",
+            "modelClient": "string",
+            "modelVin": "string",
+            "modelYear": "string",
+            "monthsBilled": 0,
+            "monthsInService": 0,
+            "odometer": "string",
+            "odometerDate": "mm/dd/yyyy”,
+            "onRoadDate": "mm/dd/yyyy",
+            "orderType": "string",
+            "outOfServiceDate": "mm/dd/yyyy",
+            "plateType": "string",
+            "prefix": "string",
+            "registeredVehicleWeight": "string",
+            "remainingBookValue": 0,
+            "renewalDate": "mm/dd/yyyy",
+            "saleOdometer": 0,
+            "series": "string",
+            "soldAmount": 0,
+            "soldDate": "mm/dd/yyyy",
+            "stateProvince": "string",
+            "status": "string",
+            "statusCode": 0,
+            "tagStateProvince": "string",
+            "telematicsDeviceId": "string",
+            "telematicsDeviceModel": "string",
+            "telematicsDeviceVendor": "string",
+            "titleOwnerLessor": "string",
+            "vendor": "string",
+            "vin": "string",
+            "workPhone": "string",
+            "workPhoneExtension": "string",
+            "zipPostalCode": "string"
+        }
+    ]
+}
+
+
+
+
+              33        33
+   SUBMIT Add new or update existing Vehicles
+   Endpoint
+  This endpoint uses POST method to add and update information to your fleet inventory.
+  There are different required fields depending on if you are adding a new non-Holman asset to inventory or updating an
+  existing asset.
+  Depending on the lease type (when vendorCode = ARI), certain fields may be restricted (for example, you cannot update
+  the capCost on a Holman-owned vehicle as this is controlled by our programs).
+  Please consult your Holman Representative to understand how this data needs to be maintained, especially for the client-
+  defined fields. The data entered via this endpoint can affect reporting and program qualifications.
+
+  Field Requirement “Add” refers to adding a new vehicle to Holman’s system. The vehicle will be added as a non-Holman
+  lease type. Please check that the identifier you are using (i.e. holmanVehicleNumber) doesn’t already exist in inventory
+  otherwise your record will be treated as an Update.
+
+  Field Requirement “Update” refers to updating the data for an existing vehicle in Holman’s system.
+
+  Submit Endpoint URLs
+  QA: https://api.stg.holman.solutions/CustomerDataAPI/vehicles/submit
+  PROD: https://api.holman.solutions/CustomerDataAPI/vehicles/submit
+
+  Status Results Endpoint URLs
+  QA: https://api.stg.holman.solutions/CustomerDataAPI/submission/status
+  PROD: https://api.holman.solutions/CustomerDataAPI/submission/status
+
+  Available Parameters
+
+   PARAMETER                   DATA TYPE                   DEFINITION / NOTES                        FIELD REQUIREMENT
+
+lesseeCode                 string(4)             A 4-character alphanumeric code that            Add: REQUIRED
+                                                 identifies the client in Holman’s system.
+                                                 User can filter on specific lesseeCode within   Update: REQUIRED
+                                                 their user restrictions.                        Must be passed with one of the
+                                                 Multiple inputs separated by comma ‘,’          following in order to uniquely
+                                                                                                 identify the record:
+                                                                                                 1. holmanVehicleNumber
+                                                                                                 2. clientVehicleNumber
+                                                                                                 3. vin
+holmanVehicleNumber        string(6)             A unique number assigned by Holman to           Add: REQUIRED—Must submit a
+                                                 each vehicle.                                   unique vehicle number. Please
+                                                 Unique within lesseeCode but not across         ensure you are following your
+                                                 lesseeCode.                                     sequence structure (if applicable)
+                                                                                                 and checking that the
+                                                                                                 holmanVehicleNumber does not
+                                                                                                 already exist in inventory.
+
+                                                                                                 Update: REQUIRED depending on
+                                                                                                 which identifier you choose to use.
+                                                                                                 Unique identifier must be either:
+                                                                                                 1. lesseeCode &
+                                                                                                 holmanVehicleNumber
+
+
+
+        34        34
+                                                                                        2. lesseeCode &
+                                                                                        clientVehicleNumber
+                                                                                        3. lesseeCode & vin
+clientVehicleNumber        string(12)   A unique number assigned by the client to       Add: REQUIRED (if the client is
+                                        each vehicle.                                   setup for this). Please ensure you
+                                        Unique within lesseeCode but not across         are following your sequence
+                                        lesseeCode.                                     structure (if applicable) and
+                                                                                        checking that the
+                                                                                        clientVehicleNumber does not
+                                                                                        already exist in inventory.
+
+                                                                                        Update: REQUIRED depending on
+                                                                                        which identifier you choose to use.
+                                                                                        Unique identifier must be either:
+                                                                                        1. lesseeCode &
+                                                                                        holmanVehicleNumber
+                                                                                        2. lesseeCode &
+                                                                                        clientVehicleNumber
+                                                                                        3. lesseeCode & vin
+vin                        string(17)   Vehicle serial number as determined by the      Add: REQUIRED - Must submit a
+                                        vehicle manufacturer.                           unique value. Please check that the
+                                        Cannot be updated on Holman owned               vin does not already exist in
+                                        vehicle (where vendorCode = ARI).               inventory.
+
+                                                                                        Update: REQUIRED depending on
+                                                                                        which identifier you choose to use.
+                                                                                        Unique identifier must be either:
+                                                                                        1. lesseeCode &
+                                                                                        holmanVehicleNumber
+                                                                                        2. lesseeCode &
+                                                                                        clientVehicleNumber
+                                                                                        3. lesseeCode & vin
+assignedStatusCode         string(1)    Additional optional classification how vehicle
+                                        is currently being used.
+                                        Please refer to the “Assigned Status” sheet in
+                                        the Reference Lists workbook.
+division                   string(2)    A client-defined custom field.                 Add: REQUIRED
+                                        Length must = 2
+                                                                                       Update: Not required but may be
+                                                                                       needed to satisfy fleet program
+                                                                                       qualification or dependency.
+prefix                     string(4)    A client-defined custom field.                 Not required but may be needed to
+                                        Length must = 4                                satisfy fleet program qualification or
+                                                                                       dependency.
+clientData1                string(12)   A client-defined custom field.                 Not required but may be needed to
+                                                                                       satisfy fleet program qualification or
+                                                                                       dependency.
+clientData2                string(9)    A client-defined custom field.                 Not required but may be needed to
+                                                                                       satisfy fleet program qualification or
+                                                                                       dependency.
+clientData3                string(12)   A client-defined custom field.                 Not required but may be needed to
+                                                                                       satisfy fleet program qualification or
+                                                                                       dependency.
+clientData4                string(12)   A client-defined custom field.                 Not required but may be needed to
+                                                                                       satisfy fleet program qualification or
+                                                                                       dependency.
+
+
+           35         35
+clientData5          string(12)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+clientData6          string(12)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+clientData7          string(12)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+driverClass          string(1)    A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+exec                 string(1)    A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData1             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData2             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData3             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData4             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData5             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData6             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData7             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData8             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData9             string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData10            string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData11            string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData12            string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+auxData13            string(50)   A client-defined custom field.   Not required but may be needed to
+                                                                   satisfy fleet program qualification or
+                                                                   dependency.
+
+
+
+
+           36   36
+auxData14                 string(50)           A client-defined custom field.            Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+auxDate1                  string(mm/dd/yyyy)   A client-defined custom field.            Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+auxDate2                  string(mm/dd/yyyy)   A client-defined custom field.            Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+auxDate3                  string(mm/dd/yyyy)   A client-defined custom field.            Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+auxDate4                  string(mm/dd/yyyy)   A client-defined custom field.            Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+firstName                 string(20)           Vehicle contact.                          Add: REQUIRED
+lastName                  string(30)           Vehicle contact.                          Add: REQUIRED
+email                     string(50)           Vehicle contact email.                    Not required but may be needed to
+                                                                                         satisfy fleet program qualification or
+                                                                                         dependency.
+cellPhone                 string(10)           Vehicle contact phone number.             Not required but may be needed to
+                          Format: ##########                                             satisfy fleet program qualification or
+                                                                                         dependency.
+workPhone                 string(10)           Vehicle contact phone number.
+                          Format: ##########
+workPhoneExtension        string(6)            Vehicle contact phone number.
+                          Format: ##########
+homePhone                 string(10)           Vehicle contact phone number.
+                          Format: ##########
+addressLine1              string(40)           Physical address where the vehicle is     Add: REQUIRED
+                                               domiciled.
+                                                                                         Update: Only required with change
+                                                                                         to city, stateProvince or
+                                                                                         zipPostalCode.
+addressLine2              string(40)           Physical address where the vehicle is
+                                               domiciled.
+addressLine3              string(40)           Physical address where the vehicle is
+                                               domiciled.
+city                      string(40)           Physical address where the vehicle is     Add: REQUIRED
+                                               domiciled.
+                                               Validation will check whether the city,   Update: Only required with change
+                                               stateProvince and zipPostalCode           to addressLine1, stateProvince or
+                                               combination is valid.                     zipPostalCode.
+stateProvince             string(2)            Physical address where the vehicle is     Add: REQUIRED
+                                               domiciled.                                Update: Only required with change
+                                               Validation will check whether the city,   to addressLine1, city or
+                                               stateProvince and zipPostalCode           zipPostalCode.
+                                               combination is valid.
+                                               Length must = 2
+zipPostalCode             string(10)           Physical address where the vehicle is     Add: REQUIRED
+                                               domiciled.                                Update: Only required with change
+                                               Validation will check whether the city,   to addressLine1, city or
+                                               stateProvince and zipPostalCode           stateProvince.
+                                               combination is valid.
+
+
+
+
+            37       37
+county                  string(45)           Physical address where the vehicle is located
+                                             (applicable to US vehicles only).
+                                             Used to validate address (where
+                                             zipPostalCode exists in more than one city).
+                                             If not provided Holman will assume an
+                                             applicable default.
+modelYear               string(4)            Vehicle Model Year as defined by the client.  Add: REQUIRED
+                                             There is no limit to how old a vehicle can
+                                             be for maintaining inventory.
+                                             Length must = 4
+
+                                             For vehicles where assetType in (‘CAR’,
+                                             ‘SUV’, ‘VAN’, ‘TRUCK LD’) Holman will
+                                             overwrite this information with the VIN
+                                             Decoded value to help ensure data integrity.
+makeClient              string(20)           Vehicle Make as defined by the client.       Add: REQUIRED
+                                             Please refer to the “Make Description”
+                                             sheet in the Reference Lists workbook.
+                                             For vehicles where assetType in (‘CAR’,
+                                             ‘SUV’, ‘VAN’, ‘TRUCK LD’) Holman will
+                                             overwrite this information with the VIN
+                                             Decoded value to help ensure data integrity.
+modelClient             string(20)           Vehicle Model Name as defined by the client. Add: REQUIRED
+                                             For vehicles where assetType in (‘CAR’,
+                                             ‘SUV’, ‘VAN’, ‘TRUCK LD’) Holman will
+                                             overwrite this information with the VIN
+                                             Decoded value to help ensure data integrity.
+
+driveline               string(100)          i.e., 4x2, 4x4
+series                  string(100)          i.e., 1500, 2500HD
+fuelTypeCode            string(2)            Fuel Type of the vehicle as defined by the         Required if providing
+                                             client.                                            fuelMeasureType and fuelCapacity.
+                                             Must provide valid Holman code. Please
+                                             refer to the “Fuel Type Code” sheet in the
+                                             Reference Lists workbook.
+                                             Length must = 2
+fuelCapacity            number(6,1)          Fuel tank capacity. Measured in gallons for        Required if providing fuelTypeCode
+                                             US assets and litres for Canadian assets.          and fuelMeasureType.
+fuelMeasureType         string(1)            Fuel unit of measure.                              Required if providing fuelTypeCode
+                                             Liters = L Gallons = G                             and fuelCapacity.
+odometer                string(7)            Current odometer reading for vehicle.              Required when providing
+                                                                                                odometerDate.
+odometerDate            string(mm/dd/yyyy)   Current odometer reading date.                     Required when providing odometer.
+hourMeter               string(6)            Current hour meter on the vehicle.                 Required when providing
+                                                                                                hourMeterDate.
+hourMeterDate           string(mm/dd/yyyy)   Current hour meter date.                           Required when providing
+                                                                                                hourMeter.
+licensePlate            string(10)           License plate
+                                             This field will not be accepted if vehicle is on
+                                             Holman’s Licensing program.
+tagStateProvince        string(2)            State/province where the vehicle is registered
+                                             for licensing purposes.
+                                             This field will not be accepted if vehicle is
+                                             on Holman’s Licensing program.
+                                             Length must = 2
+
+
+
+           38      38
+plateType               string(3)            License plate classification.
+                                             Please refer to the “Plate Type” sheet in
+                                             the Reference Lists workbook.
+
+                                             This field will not be accepted if vehicle is
+                                             on Holman’s Licensing program.
+                                             Length must = 3
+renewalDate             string(mm/dd/yyyy)   Renewal date for the license plate.
+                                             This field will not be accepted if vehicle is
+                                             on Holman’s Licensing program.
+
+                                             Must be > Today & < Today +5 Years
+assetType               string(10)           Vehicle classification.                          Add: REQUIRED
+                                             Please refer to the “Asset Type and Asset
+                                             Sub-Type” sheet in the Reference Lists
+                                             workbook.
+assetSubtype            string(25)           Secondary vehicle classification that is
+                                             dependent on the chosen assetType.
+                                             Please refer to the “Asset Type and Asset
+                                             Sub-Type” sheet in the Reference Lists
+                                             workbook.
+deliveryDate            string(mm/dd/yyyy)   Date the vehicle was delivered to the contact.   Add: REQUIRED
+                                             Must be <= Today.                                This will put the vehicle into Active
+                                             Cannot accept future dates.                      status.
+
+                                             Cannot be updated on Holman owned
+                                             vehicle (vendorCode = ARI).
+onRoadDate              string(mm/dd/yyyy)   Date the vehicle is put on the road.
+                                             Must be <= Today.
+                                             Cannot accept future dates.
+outOfServiceDate        string(mm/dd/yyyy)   Date the vehicle was taken out of use.           This will put the vehicle into Out of
+                                             Must be <= Today.                                Service status.
+                                             Cannot accept future dates.
+soldDate                string(mm/dd/yyyy)   Date the vehicle was sold.                       This will put the vehicle into Sold
+                                                                                              status.
+                                             Must be <= Today.
+                                             Cannot accept future dates.
+
+                                             Cannot be updated on a Holman owned
+                                             asset (vendorCode = ARI).
+
+                                             Can only be updated for a vehicle in active or
+                                             out of service status.
+soldAmount              number(9,2)          Final sale amount for the vehicle.
+                                             Cannot be updated on a Holman owned
+                                             asset (vendorCode = ARI).
+saleOdometer            string(6)            Odometer reading for the vehicle at the time
+                                             it was sold.
+                                             Cannot be updated on a Holman owned
+                                             asset (vendorCode = ARI).
+capCost                 number(9,2)          Vehicle’s full purchase price.
+
+                                             Cannot be updated on Holman owned
+                                             vehicle (vendorCode = ARI).
+gvw                     integer(6)           Gross Vehicle Weight.
+
+
+
+            39     39
+                                               Maximum amount specified by the vehicle
+                                               manufacturer for the total weight of the
+                                               vehicle and any cargo including people.
+gcwr                      integer(6)           Gross Combined Vehicle Weight. Maximum
+                                               total weight of the vehicle and trailer
+                                               attached.
+curbWeight                string(6)            Curb weight. The current total vehicle weight
+                                               with all fluids and normal operating gear
+                                               without passengers or cargo.
+                                               Cannot be greater than 100,000
+registeredVehicleWeight   string(6)            Registered Vehicle Weight. The weight of the
+                                               vehicle's Motor Vehicle registration.
+                                               Cannot be greater than 120,000
+vendorCode                string(30)           Vehicle owner                                   Add: REQUIRED
+                                               Please refer to the “Vendor” sheet in the
+                                               Reference Lists workbook.
+leaseTerm                 integer(3)           The number of months for the vehicle’s
+                                               lease.
+                                               Cannot be updated on Holman owned
+                                               vehicle (vendorCode = ARI).
+remainingBookValue        number(9,2)          Current book value remaining on the vehicle.
+                                               Cannot be updated on Holman owned
+                                               vehicle (vendorCode = ARI).
+telematicsDeviceId        string(30)           A unique number assigned to each              Required when submitting
+                                               telematics device by the vendor.              telematicsDeviceModel and
+                                               Cannot be updated on vehicles in sold status. telematicsDeviceVendor.
+telematicsDeviceModel     string(30)           i.e., GoPro                                   Required when submitting
+                                               Cannot be updated on vehicles in sold status. telematicsDeviceId and
+                                                                                             telematicsDeviceVendor.
+telematicsDeviceVendor    string(50)           i.e., Geotab                                  Required when submitting
+                                                                                             telematicsDeviceId and
+                                               Cannot be updated on vehicles in sold status. telematicsDeviceModel.
+Fringe Program Object
+fringeHireDate            string(mm/dd/yyyy)   Used if adding a vehicle to Fringe program.     Required for Fringe program
+                                                                                               additions when excludeFromFringe
+                                                                                               = ‘N’
+fringeTermDate            string(mm/dd/yyyy)   Used if terminating vehicle from Fringe         Required for Fringe vehicle
+                                               program.                                        terminations
+excludeFromFringe         string(1)            Allows records to be excluded from Fringe;      Required for Fringe
+                                               defaults to “N” for no.
+
+
+
+
+         40          40
+JSON Sample
+   [
+       {
+           "lesseeCode": "9010",
+           "holmanVehicleNumber": "123456",
+           "clientVehicleNumber": "A201201",
+           "vin": "11111111111111111",
+           "prefix": "1234",
+           "division": "01",
+           "firstName": "Jane",
+           "lastName": "Doe",
+           "addressLine1": "4001 Leadenhall Rd",
+           "addressLine2": "SUITE 100",
+           "city": "MOUNT LAUREL",
+           "stateProvince": "NJ",
+           "zipPostalCode": "08054",
+           "assetType": "TRUCK LD",
+           "assetSubType": "1/2 TON",
+           "vendorCode": "OTH",
+           "clientData1": "WESTERN",
+           "clientData2": "",
+           "clientData3": "TEST",
+           "clientData4": "",
+           "clientData5": "",
+           "clientData6": "",
+           "clientData7": "",
+           "auxData3": "TEST",
+           "auxData4": "NAME@COMPANYABC.COM",
+           "auxData5": "",
+           "auxData8": "",
+           "auxData9": "",
+           "modelYear": "2024",
+           "makeClient": "FORD",
+           "modelClient": "F150",
+           "deliveryDate": "01/15/2025",
+           "soldAmount": 0.0,
+           "gvw": 0,
+           "fuelTypeCode": "31",
+           "fuelCapacity": 0.0,
+           "fuelMeasureType": "G"
+       }
+   ]
+
+
+
+
+       41         41
+42   42
+
