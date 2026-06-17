@@ -9493,6 +9493,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const holmanPayload: Record<string, any> = {
           lesseeCode: "2B56",
           holmanVehicleNumber: paddedVehicle,
+          division: "01",
           prefix: holmanPrefix,
           clientData3: "890",
         };
