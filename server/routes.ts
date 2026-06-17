@@ -9492,7 +9492,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       try {
         const holmanPayload: Record<string, any> = {
           lesseeCode: "2B56",
-          holmanVehicleNumber: paddedVehicle,
+          // Holman matches an UPDATE on its natural stored number, NOT a zero-padded
+          // one. toHolmanRef pads to 6 digits ("023988"), which does NOT match Holman's
+          // stored "23988", so the 202 is captured but the prefix silently never applies.
+          // Use the cache's own holman_vehicle_number (Holman's value), like the working
+          // assign path. paddedVehicle stays correct for the synchronous TPMS call below.
+          holmanVehicleNumber: vehicle.holmanVehicleNumber,
           division: vehicle.division || "01",
           prefix: holmanPrefix,
           clientData3: "890",
