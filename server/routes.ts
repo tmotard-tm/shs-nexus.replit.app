@@ -10371,9 +10371,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       console.log('[Holman Fleet] Fetching vehicles...');
       
+      const forceRefresh = req.query.forceRefresh === 'true';
       const result = await holmanVehicleSyncService.fetchActiveVehicles({
         page: parseInt(pageNumber as string),
         pageSize: parseInt(pageSize as string),
+        forceRefresh,
       });
 
       // TPMS enrichment is now applied inside fetchActiveVehicles() before caching,

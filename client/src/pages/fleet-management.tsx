@@ -399,14 +399,31 @@ export default function FleetManagement() {
     setSelectedVehicle(match);
   }, [allVehicles, pendingOpenTruck]);
 
+  // Force a real fleet rebuild: bypass the 15-min in-memory cache so on-demand
+  // actions (resync, manual refresh) actually surface on the card instead of
+  // re-serving the same stale snapshot.
+  const [forcingRefresh, setForcingRefresh] = useState(false);
+  const forceFleetRebuild = async () => {
+    setForcingRefresh(true);
+    try {
+      const res = await fetch('/api/holman/fleet-vehicles?forceRefresh=true&pageSize=500', { credentials: 'include' });
+      if (res.ok) queryClient.setQueryData(['/api/holman/fleet-vehicles'], await res.json());
+      else await queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+    } catch {
+      await queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+    } finally {
+      setForcingRefresh(false);
+    }
+  };
+
   // Resync assignments mutation (re-checks TPMS + Holman APIs for selected vehicle)
   const resyncAssignmentsMutation = useMutation({
     mutationFn: async ({ vehicleNumber, enterpriseId }: { vehicleNumber: string; enterpriseId?: string | null }) => {
       const response = await apiRequest('POST', '/api/fleet-vehicles/resync-assignments', { vehicleNumber, enterpriseId });
       return response.json();
     },
-    onSuccess: (data: any) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+    onSuccess: async (data: any) => {
+      await forceFleetRebuild();
       const tpms = data.tpms;
       const tpmsMsg = tpms?.error
         ? `TPMS error: ${tpms.error}`
@@ -1923,12 +1940,12 @@ export default function FleetManagement() {
                       Export CSV
                     </Button>
                     <Button 
-                      onClick={() => refetch()}
+                      onClick={() => forceFleetRebuild()}
                       variant="outline"
-                      disabled={isFetching}
+                      disabled={isFetching || forcingRefresh}
                       data-testid="button-refresh"
                     >
-                      <RefreshCw className={`h-4 w-4 mr-2 ${isFetching ? 'animate-spin' : ''}`} />
+                      <RefreshCw className={`h-4 w-4 mr-2 ${(isFetching || forcingRefresh) ? 'animate-spin' : ''}`} />
                       Refresh
                     </Button>
                   </div>
