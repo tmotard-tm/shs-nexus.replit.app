@@ -82,6 +82,10 @@ export async function analyzeAlignment(
 ): Promise<AnalysisResult> {
   const h = (holmanTechId || "").trim().toLowerCase();
   const t = (tpmsTechId || "").trim().toLowerCase();
+  // Canonicalize the truck number (strip whitespace + leading zeros) so the
+  // sub-queries below match across tables that store it in different paddings
+  // (Holman 5-digit vs TPMS 6-digit, etc.), mirroring the CTE join's LTRIM.
+  const canonTruck = (truckNumber || "").trim().replace(/^0+/, "");
 
   // 1. BYOV VIN Missing
   if (byovVinMissing) {
@@ -111,7 +115,7 @@ export async function analyzeAlignment(
   try {
     const pendingResult = await db.execute(sql`
       SELECT id FROM holman_submissions
-      WHERE holman_vehicle_number = ${truckNumber}
+      WHERE regexp_replace(btrim(holman_vehicle_number), '^0+', '') = ${canonTruck}
         AND status IN ('pending', 'processing')
         AND created_at > NOW() - INTERVAL '30 minutes'
       LIMIT 1
@@ -135,7 +139,7 @@ export async function analyzeAlignment(
   try {
     const failedResult = await db.execute(sql`
       SELECT id, operation_type, ldap_id FROM operation_events
-      WHERE truck_number = ${truckNumber}
+      WHERE regexp_replace(btrim(truck_number), '^0+', '') = ${canonTruck}
         AND outcome = 'failed'
         AND attempt_count >= max_retries
         AND resolved_at IS NULL
@@ -170,7 +174,7 @@ export async function analyzeAlignment(
         bool_or(CASE WHEN system = 'holman' AND outcome = 'failed' THEN true END) AS holman_failed,
         bool_or(CASE WHEN system = 'ams' AND outcome = 'failed' THEN true END) AS ams_failed
       FROM operation_events
-      WHERE truck_number = ${truckNumber}
+      WHERE regexp_replace(btrim(truck_number), '^0+', '') = ${canonTruck}
         AND resolved_at IS NULL
         AND created_at > NOW() - INTERVAL '24 hours'
     `);
@@ -220,7 +224,7 @@ export async function analyzeAlignment(
         SELECT dat.employment_status
         FROM tpms_cached_assignments tca
         JOIN all_techs dat ON UPPER(dat.tech_racfid) = UPPER(tca.enterprise_id)
-        WHERE tca.truck_no = ${truckNumber}
+        WHERE regexp_replace(btrim(tca.truck_no), '^0+', '') = ${canonTruck}
           AND dat.employment_status != 'A'
         LIMIT 1
       `);
@@ -244,7 +248,7 @@ export async function analyzeAlignment(
   try {
     const tpmsExternalResult = await db.execute(sql`
       SELECT id FROM fleet_operation_log
-      WHERE truck_number = ${truckNumber}
+      WHERE regexp_replace(btrim(truck_number), '^0+', '') = ${canonTruck}
         AND source = 'tpms_external'
         AND created_at > NOW() - INTERVAL '7 days'
       LIMIT 1
@@ -271,7 +275,7 @@ export async function analyzeAlignment(
   try {
     const amsExternalResult = await db.execute(sql`
       SELECT id FROM fleet_operation_log
-      WHERE truck_number = ${truckNumber}
+      WHERE regexp_replace(btrim(truck_number), '^0+', '') = ${canonTruck}
         AND source = 'ams_external'
         AND created_at > NOW() - INTERVAL '7 days'
       LIMIT 1

@@ -19640,18 +19640,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // Query: any two of Holman / TPMS / AMS disagree on assignment
     const rawResult = await db.execute(sql`
       WITH tpms_latest AS (
-        SELECT DISTINCT ON (truck_no)
+        SELECT DISTINCT ON (LTRIM(truck_no, '0'))
           LTRIM(truck_no, '0') AS canonical_truck,
           enterprise_id AS tpms_id,
           TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')) AS tpms_name,
           district_no
         FROM tpms_cached_assignments
-        WHERE truck_no IS NOT NULL AND truck_no != ''
+        WHERE truck_no IS NOT NULL AND truck_no != '' AND LTRIM(truck_no, '0') != ''
         -- Prefer a real cached TPMS pull (raw_response present) over an optimistic stub
         -- (raw_response NULL, written by assign actions). SQL analog of the tpms-service
         -- batchLookupByTruckNumbers fix (5e2a226e), so stubs do not shadow real TPMS state
         -- in the cross-system mismatch panel. Falls back to a stub only if no real row exists.
-        ORDER BY truck_no, (raw_response IS NOT NULL) DESC, last_success_at DESC
+        ORDER BY LTRIM(truck_no, '0'), (raw_response IS NOT NULL) DESC, last_success_at DESC
       )
       SELECT
         h.holman_vehicle_number AS truck_number,
@@ -19700,16 +19700,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             AND TRIM(a.ams_assigned_ldap) != ''
             AND COALESCE(TRIM(t.tpms_id), '') = ''
           )
-          -- AMS unassigned but TPMS and/or Holman are assigned (AMS is blank, others are not)
-          OR (
-            (a.ams_assigned_ldap IS NULL OR TRIM(a.ams_assigned_ldap) = '')
-            AND (
-              COALESCE(TRIM(t.tpms_id), '') != ''
-              OR COALESCE(TRIM(h.holman_tech_assigned), '') != ''
-            )
-            -- Only flag this if the AMS row exists in the cache (vehicle is tracked in AMS)
-            AND a.vin IS NOT NULL
-          )
+          -- (Removed 2026-06-17) AMS-blank-but-others-assigned clause. AMS tracks
+          -- assignment for only ~160 of 2187 trucks, so a blank ams_assigned_ldap on a
+          -- present ams_vehicles_cache row is NOT a real mismatch (it falsely flagged 114
+          -- synced trucks). Genuine AMS disagreements are still caught by the AMS clauses
+          -- above and below, which require ams_assigned_ldap to be present.
           -- AMS ≠ Holman (both assigned, different values, no TPMS)
           OR (
             a.ams_assigned_ldap IS NOT NULL
@@ -19760,6 +19755,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get("/api/fleet-ops/mismatches", requireAuth, async (req: any, res) => {
     try {
       const countOnly = req.query.countOnly === "true";
+      const returnAll = req.query.all === "true";
       const forceRefresh = req.query.forceRefresh === "true";
       const rootCauseFilter = req.query.rootCause as string | undefined;
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -19773,6 +19769,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         let data = mismatchCache.data;
         if (rootCauseFilter) data = data.filter((r: any) => r.rootCause === rootCauseFilter);
         const total = data.length;
+        if (returnAll) return res.json({ data, total, page: 1, pageSize: total });
         const paginated = data.slice((page - 1) * pageSize, page * pageSize);
         return res.json({ data: paginated, total, page, pageSize });
       }
@@ -19788,6 +19785,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       let data = records;
       if (rootCauseFilter) data = data.filter((r: any) => r.rootCause === rootCauseFilter);
       const total = data.length;
+      if (returnAll) return res.json({ data, total, page: 1, pageSize: total });
       const paginated = data.slice((page - 1) * pageSize, page * pageSize);
       res.json({ data: paginated, total, page, pageSize });
     } catch (err: any) {
