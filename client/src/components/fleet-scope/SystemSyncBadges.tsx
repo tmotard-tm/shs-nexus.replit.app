@@ -81,6 +81,7 @@ export interface SystemSyncBadgesProps {
   onRetry?: (logId: number) => void;
   canRetry?: boolean;
   isRetrying?: boolean;
+  showAms?: boolean;
   className?: string;
 }
 
@@ -97,6 +98,7 @@ export function SystemSyncBadges({
   onRetry,
   canRetry,
   isRetrying,
+  showAms = true,
   className,
 }: SystemSyncBadgesProps) {
   const hasAnyStatus = tpmsStatus || holmanStatus || amsStatus;
@@ -124,7 +126,7 @@ export function SystemSyncBadges({
     <div className={cn("flex items-center gap-1.5 flex-wrap", className)}>
       <SystemBadge system="TPMS" status={tpmsStatus} message={tpmsMessage} />
       <SystemBadge system="Holman" status={holmanStatus} message={holmanMessage} />
-      <SystemBadge system="AMS" status={amsStatus} message={amsMessage} />
+      {showAms && <SystemBadge system="AMS" status={amsStatus} message={amsMessage} />}
       {ts && (
         <span className="text-xs text-muted-foreground ml-0.5">
           {ts.toLocaleDateString("en-US", { month: "short", day: "numeric" })}

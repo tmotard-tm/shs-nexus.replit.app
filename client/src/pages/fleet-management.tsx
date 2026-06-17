@@ -2435,6 +2435,8 @@ export default function FleetManagement() {
                           {/* Last sync status badges */}
                           <VehicleRowSyncBadges
                             truckNumber={vehicle.vehicleNumber}
+                            tpmsAssignedTechId={vehicle.tpmsAssignedTechId}
+                            holmanTechAssigned={vehicle.holmanTechAssigned}
                             onOpenHistory={() => setOpLogDialogTruck(vehicle.vehicleNumber)}
                           />
 
