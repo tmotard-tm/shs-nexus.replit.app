@@ -19374,9 +19374,27 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           .limit(1);
         const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
         if (vehicleDistrict && vehicleDistrict !== techDistrict) {
-          return res.status(409).json({
-            message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
-          });
+          // The cached district can lag a just-applied Holman change: the sync FREEZES
+          // holman_vehicles_cache.district until a submission verifies, so a change that
+          // already landed in Holman (and shows on the card, which reads the live prefix)
+          // can leave this column stale. Before blocking, double-check the LIVE Holman
+          // prefix. If Holman actually has the tech district, the cache is just stale and
+          // the assign is valid. Only the about-to-block path pays this lookup; any failure
+          // falls back to blocking so the guard intent is preserved.
+          let liveDistrictOk = false;
+          try {
+            const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
+            const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
+            if (livePrefix && livePrefix === techDistrict) liveDistrictOk = true;
+          } catch (e: any) {
+            console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+          }
+          if (!liveDistrictOk) {
+            return res.status(409).json({
+              message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
+            });
+          }
+          console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${techDistrict}, allowing assign for ${truckNumber}`);
         }
       }
 
