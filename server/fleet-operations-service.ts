@@ -1512,6 +1512,14 @@ export const fleetOpsService = {
     }
 
     try {
+      // [GHOST-PURGE 2026-06-18] Always clear any tpms_tech_profiles truck row for this truck so a
+      // manual unassign purges stale/orphan assignments even when live TPMS is already empty (the
+      // TPMS sub-step otherwise skips and leaves the ghost, e.g. truck 88047). Nexus-only write.
+      await db.update(tpmsTechProfiles)
+        .set({ truckNo: null, updatedAt: new Date() })
+        .where(sql`regexp_replace(btrim(${tpmsTechProfiles.truckNo}), '^0+', '') = ${toCanonical(params.truckNumber)}`)
+        .catch((e: unknown) => console.warn('[FleetOps] tpms_tech_profiles truck purge failed:', e));
+
       const logData: InsertFleetOperationLog = {
         operationType: "unassign",
         truckNumber: params.truckNumber,

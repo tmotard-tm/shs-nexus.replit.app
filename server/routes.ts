@@ -14870,6 +14870,23 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     //                     rows that have data the profile row is missing
     (async () => {
       try {
+        // [GHOST-SWEEP 2026-06-18] On boot, null stale truck assignments in tpms_tech_profiles for
+        // techs no longer active (T/null/not-in-roster). Upsert-only sync never cleared departed
+        // techs, creating ghosts like 88047/MLOPEZ1. Nexus-only write; never touches live systems.
+        try {
+          const ghostCleared: any = await db.execute(sql`
+            UPDATE tpms_tech_profiles p SET truck_no = NULL, updated_at = NOW()
+            WHERE p.truck_no IS NOT NULL AND p.truck_no <> ''
+              AND NOT EXISTS (
+                SELECT 1 FROM all_techs t
+                WHERE UPPER(t.tech_racfid) = UPPER(p.enterprise_id)
+                  AND t.employment_status IN ('A','L','P','R')
+              )`);
+          console.log(`[TPMS Ghost Sweep] Startup: cleared ${ghostCleared?.rowCount ?? 0} departed-tech truck assignments`);
+        } catch (gsErr: any) {
+          console.error('[TPMS Ghost Sweep] Startup sweep failed (continuing):', gsErr?.message || gsErr);
+        }
+
         const { tpmsCachedAssignments: cacheTable } = await import("@shared/schema");
 
         // ── Phase 1: Full upsert if profiles table is significantly behind ──────────
