@@ -17026,24 +17026,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get("/api/ams/vehicles/:vin", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.getVehicleByVin(req.params.vin);
-      // Read-through cache: persist the LIVE AMS assignment so the fleet card AMS pill
-      // (which reads ams_vehicles_cache) reflects what AMS actually shows, not just the
-      // ~368 trucks Nexus has assigned through itself. Non-fatal: a cache write must
-      // never break the live popout read. Mirrors the assign-path write-through.
-      try {
-        const cacheVin = (req.params.vin || "").trim();
-        if (cacheVin && result) {
-          await db.insert(amsVehiclesCache).values({
-            vin: cacheVin,
-            amsAssignedLdap: (result as any).Tech || null,
-            rawResponse: result,
-            lastAmsSyncAt: new Date(),
-          }).onConflictDoUpdate({
-            target: amsVehiclesCache.vin,
-            set: { amsAssignedLdap: (result as any).Tech || null, rawResponse: result, lastAmsSyncAt: new Date(), updatedAt: new Date() },
-          });
-        }
-      } catch { /* non-fatal: cache read-through must never break the live read */ }
       const keyFields = Object.keys(result || {}).filter(k => k.toLowerCase().includes('key'));
       if (keyFields.length > 0) {
         console.log(`[AMS] Key-related fields in response for ${req.params.vin}:`, keyFields.map(k => `${k}=${JSON.stringify(result[k])}`).join(', '));
