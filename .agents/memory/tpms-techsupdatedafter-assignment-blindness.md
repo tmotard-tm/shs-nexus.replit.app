@@ -32,5 +32,30 @@ bump the "tech updated" timestamp the feed keys on.
   `techsupdatedafter` — it will miss them.
 
 **How to apply:** Any "self-healing backstop" or "right-size the cache" plan for truck
-*assignments* must re-read live `techinfo` (per-truck/per-tech) or use the Snowflake extract.
+*assignments* must re-read live `techinfo` (per-truck/per-tech) or use a Snowflake extract.
 Reserve `techsupdatedafter` for roster/profile drift only.
+
+## Preferred assignment backstop source: `AIMS_TRUCK_INFO`
+
+`PARTS_SUPPLYCHAIN.SOFTEON.AIMS_TRUCK_INFO` is the vehicle-keyed (one row per truck) TPMS
+inventory extract — the right shape for assignment reconciliation. Columns used: `TRUCKNO`,
+`OWNERLDAPID` (the assigned tech; **null/empty = unassigned**, so it represents vacancy
+explicitly — the thing `techsupdatedafter` and the tech-keyed `TPMS_EXTRACT.TRUCK_LU` can't),
+`DISTRICT`, `FILE_DATE`, `LOAD_DATE`. Query latest with `FILE_DATE = (SELECT max(FILE_DATE) …)`.
+
+Verified June 2026: ~16.7k truck rows, ~1.65k assigned. Daily **batch extract at ~12:01 AM ET**
+(`FILE_DATE` = that day's midnight), **loaded to Snowflake ~6:15 AM ET** (`LOAD_DATE`, eastern).
+
+**Staleness / exemption rule (mandatory):** the snapshot reflects state as of the **extract
+time (~12:01 AM ET), NOT the LOAD_DATE**. Any Nexus assign/unassign after 12:01 AM is stale in
+it. Proven: trucks 61144/61705 still showed their old owners (gshelto/mgutie1) in the snapshot
+even though both were unassigned later that day — applying the snapshot blindly would revert
+them. So before applying, **exempt any vehicle with a `fleet_operation_log` op since the
+snapshot's extract time**, and derive that cutoff from the actual `max(FILE_DATE)` (so a stale
+weekend/holiday batch auto-widens the exemption window).
+
+**Lag caveat:** observed one truck (23988) where a pre-midnight assignment was NOT in the next
+12:01 AM snapshot → AIMS batch can lag. So a snapshot-driven correction outside the exemption
+window can still be wrong; **confirm each candidate drift with a live `GET /techinfo` read
+before writing**. Safest design: AIMS = cheap bulk drift *detector*, live `techinfo` =
+authoritative *confirmer*.
