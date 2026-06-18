@@ -1,6 +1,8 @@
 import { storage } from './storage';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
 import { toCanonical, normalizeEnterpriseId } from './vehicle-number-utils';
+import { db } from './db';
+import { tpmsTechProfiles } from '@shared/schema';
 
 interface TPMSToken {
   token: string;
@@ -363,54 +365,54 @@ class TPMSService {
   // Batch lookup for multiple truck numbers - uses cache primarily to avoid rate limiting
   async batchLookupByTruckNumbers(truckNumbers: string[]): Promise<Map<string, CachedTechInfo | null>> {
     const results = new Map<string, CachedTechInfo | null>();
-    
-    // First, get all cached data
-    const allCached = await storage.getAllTpmsCachedAssignments();
-    const cacheByCanonical = new Map<string, typeof allCached[0]>();
-    
-    // Key the cache by the CANONICAL truck number (leading zeros stripped, whitespace
-    // trimmed) so padded/space-padded TPMS values (e.g. "036177 ") match the unpadded
-    // Holman numbers ("36177") regardless of formatting on either side.
-    // allCached is ordered lastSuccessAt DESC — most recent entry wins per canonical key.
-    for (const cached of allCached) {
-      const canon = toCanonical(cached.truckNo);
+
+    // Source: tpms_tech_profiles — the FRESH TPMS roster synced in prod every few hours,
+    // NOT the legacy tpms_cached_assignments cache (its prod refresh is dev-only/disabled
+    // and goes stale; that staleness caused the BYOV "Unassigned in TPMS" false positives
+    // and the cross-truck search ghost). Keyed by CANONICAL truck number so padded/unpadded
+    // numbers match; most-recently-synced row wins. The results map stays keyed by the
+    // caller's original input string so callers resolve by whatever variation they passed.
+    const rows = await db
+      .select({
+        truckNo: tpmsTechProfiles.truckNo,
+        enterpriseId: tpmsTechProfiles.enterpriseId,
+        firstName: tpmsTechProfiles.firstName,
+        lastName: tpmsTechProfiles.lastName,
+        districtNo: tpmsTechProfiles.districtNo,
+        updatedAt: tpmsTechProfiles.updatedAt,
+      })
+      .from(tpmsTechProfiles);
+
+    const byCanonical = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) {
+      const canon = toCanonical(row.truckNo || '');
       if (!canon) continue;
-      // Prefer a real cached TPMS pull (has rawResponse) over an optimistic stub
-      // (rawResponse null, written by assign actions). Same-timestamp ties would
-      // otherwise let a stub shadow the real entry, leaving the truck falsely
-      // TPMS-unassigned and showing a false Holman/TPMS mismatch on the card.
-      const existing = cacheByCanonical.get(canon);
-      if (!existing || (!existing.rawResponse && cached.rawResponse)) {
-        cacheByCanonical.set(canon, cached);
+      const existing = byCanonical.get(canon);
+      if (!existing || (row.updatedAt && (!existing.updatedAt || new Date(row.updatedAt) > new Date(existing.updatedAt)))) {
+        byCanonical.set(canon, row);
       }
     }
-    
-    // For each requested truck number, look it up canonically too. The results map stays
-    // keyed by the original input string so callers can resolve by whichever variation
-    // they passed in.
+
     for (const truckNo of truckNumbers) {
-      const cached = cacheByCanonical.get(toCanonical(truckNo));
-      
-      if (cached && cached.rawResponse) {
-        try {
-          const techInfo: TechInfoResponse = JSON.parse(cached.rawResponse);
-          const cacheAge = cached.lastSuccessAt 
-            ? Math.round((Date.now() - new Date(cached.lastSuccessAt).getTime()) / (1000 * 60 * 60))
-            : undefined;
-          
-          results.set(truckNo, {
-            techInfo,
-            source: 'cached',
-            cacheAge,
-          });
-        } catch {
-          results.set(truckNo, null);
-        }
+      const row = byCanonical.get(toCanonical(truckNo));
+      if (row && row.enterpriseId) {
+        results.set(truckNo, {
+          techInfo: {
+            ldapId: row.enterpriseId,
+            firstName: row.firstName || '',
+            lastName: row.lastName || '',
+            techId: '',
+            districtNo: row.districtNo || '',
+            techManagerLdapId: '',
+            truckNo: row.truckNo || '',
+          },
+          source: 'cached',
+        });
       } else {
         results.set(truckNo, null);
       }
     }
-    
+
     return results;
   }
 
