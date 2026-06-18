@@ -9906,8 +9906,50 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       allVehiclesCache = { data: responseData, timestamp: Date.now() };
       res.json(responseData);
     } catch (error: any) {
+      // This route is a heavy aggregator (Snowflake REPLIT_ALL_VEHICLES + many
+      // Neon enrichment queries). Neon's serverless driver intermittently drops
+      // its WebSocket (closeCode 1006) and rejects with an ErrorEvent whose
+      // `message` getter is empty — which previously surfaced to the All Vehicles
+      // page as a useless `500 {"message":""}`. A single transient DB blip should
+      // not blank the whole page, so if we have a recent payload cached in-process
+      // serve it (slightly stale) instead of erroring.
       console.error("Error fetching all vehicles:", error);
-      res.status(500).json({ message: error.message });
+      const rawMsg: string =
+        (error && (error.message || error?.reason?.message)) || "";
+      const isTransientDbDrop =
+        error?.name === "ErrorEvent" ||
+        error?.type === "error" ||
+        rawMsg.includes("Cannot set property message") ||
+        rawMsg.includes("terminating connection due to administrator command") ||
+        error?.code === "ECONNRESET";
+      // Only fall back to stale cache for transient DB/network drops, and only
+      // when the cached payload is still reasonably fresh. This keeps a single
+      // Neon WS blip from blanking the page without silently masking real bugs
+      // or serving arbitrarily old data during a prolonged outage.
+      const MAX_STALE_FALLBACK_MS = 15 * 60 * 1000; // 15 minutes
+      if (isTransientDbDrop && allVehiclesCache?.data) {
+        const ageMs = Date.now() - allVehiclesCache.timestamp;
+        const ageSec = Math.round(ageMs / 1000);
+        if (ageMs <= MAX_STALE_FALLBACK_MS) {
+          console.warn(
+            `[AllVehicles] Serving stale cache (age: ${ageSec}s) after transient Neon WS drop`,
+          );
+          return res.json({
+            ...allVehiclesCache.data,
+            stale: true,
+            staleAgeSec: ageSec,
+          });
+        }
+        console.warn(
+          `[AllVehicles] Stale cache too old (age: ${ageSec}s) — not serving fallback`,
+        );
+      }
+      res.status(isTransientDbDrop ? 503 : 500).json({
+        message:
+          isTransientDbDrop
+            ? "Temporary database connection drop while loading vehicles — please retry."
+            : rawMsg || "Failed to load vehicle data.",
+      });
     }
   });
 
