@@ -242,6 +242,16 @@ export default function AllVehicles() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<AllVehiclesResponse>({
     queryKey: ["/api/fs/all-vehicles"],
+    // This heavy aggregator occasionally 503s on a transient Neon WebSocket drop
+    // ("please retry"). Auto-retry transient failures (5xx / network) so a one-off
+    // DB blip self-heals instead of surfacing an error to the user. Never retry
+    // 4xx (e.g. 401/403) — those won't fix themselves.
+    retry: (failureCount, err) => {
+      const status = parseInt(err instanceof Error ? err.message : '', 10);
+      if (Number.isFinite(status) && status >= 400 && status < 500) return false;
+      return failureCount < 4;
+    },
+    retryDelay: (attempt) => Math.min(2000 * attempt, 8000),
   });
 
   const { data: byovSnapshots } = useQuery<ByovSnapshotsResponse>({
