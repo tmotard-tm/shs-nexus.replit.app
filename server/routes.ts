@@ -16618,19 +16618,37 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // unfiltered map so the dependent counts don't silently undercount.
     let activeSweepComplete = false;
 
+    // AMS's /vehicles endpoint is slow/unreliable, and deep offset pages stall
+    // most often. A single timed-out page used to abort the whole sweep (break),
+    // discarding every prior page and forcing the incomplete-sweep fallback
+    // (which over-counts "Total Operational Fleet"). Retry each page a few times
+    // with backoff so a momentary AMS slowdown doesn't sink the entire sweep.
+    const MAX_PAGE_ATTEMPTS = 3;
     while (true) {
       let raw: any;
-      try {
-        // 30s per-page timeout so a stalled AMS request can't block the
-        // overall build (and the Snowflake supplement that follows).
-        raw = await Promise.race([
-          amsApiService.searchVehicles({ limit: pageSize, offset }),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error(`AMS page timeout (offset ${offset})`)), 30_000),
-          ),
-        ]);
-      } catch (err: any) {
-        console.warn(`[AMS TruckStatusMap] AMS search error at offset ${offset}: ${err.message}`);
+      let pageError: any = null;
+      for (let attempt = 1; attempt <= MAX_PAGE_ATTEMPTS; attempt++) {
+        try {
+          // 30s per-page timeout so a stalled AMS request can't block the
+          // overall build (and the Snowflake supplement that follows).
+          raw = await Promise.race([
+            amsApiService.searchVehicles({ limit: pageSize, offset }),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error(`AMS page timeout (offset ${offset})`)), 30_000),
+            ),
+          ]);
+          pageError = null;
+          break;
+        } catch (err: any) {
+          pageError = err;
+          console.warn(`[AMS TruckStatusMap] AMS search error at offset ${offset} (attempt ${attempt}/${MAX_PAGE_ATTEMPTS}): ${err.message}`);
+          if (attempt < MAX_PAGE_ATTEMPTS) {
+            await new Promise((r) => setTimeout(r, 2000 * attempt)); // backoff: 2s, 4s
+          }
+        }
+      }
+      if (pageError) {
+        console.warn(`[AMS TruckStatusMap] Giving up at offset ${offset} after ${MAX_PAGE_ATTEMPTS} attempts — sweep incomplete`);
         break;
       }
 

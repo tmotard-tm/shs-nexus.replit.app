@@ -766,12 +766,28 @@ export default function AllVehicles() {
                   >
                     <CardContent className="p-4">
                       <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Operational Fleet</p>
-                      <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
-                        {totalOperational.toLocaleString()}
-                      </div>
-                      <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                        AMS Active · excludes 88/088
-                      </p>
+                      {amsScorecardData && !amsSweepComplete ? (
+                        <>
+                          <div className="text-2xl font-bold text-slate-400 dark:text-slate-500">
+                            —
+                          </div>
+                          <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                            Calculating… waiting for full AMS sweep
+                          </p>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            Count hidden until AMS returns the complete active list (avoids an inflated total).
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="text-2xl font-bold text-slate-900 dark:text-slate-100">
+                            {totalOperational.toLocaleString()}
+                          </div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                            AMS Active · excludes 88/088
+                          </p>
+                        </>
+                      )}
                       {declineRepairCount > 0 && (
                         <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-1">
                           {declineRepairCount} Decline Repair
@@ -780,11 +796,6 @@ export default function AllVehicles() {
                       {sentToAuctionCount > 0 && (
                         <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mt-0.5">
                           {sentToAuctionCount} Sent to Auction
-                        </p>
-                      )}
-                      {amsScorecardData && !amsSweepComplete && (
-                        <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1">
-                          Pending full AMS sweep
                         </p>
                       )}
                       {amsScorecardLoading && !amsScorecardData && (
@@ -812,7 +823,7 @@ export default function AllVehicles() {
                             {count.toLocaleString()}
                           </div>
                           <p className={`text-xs ${colors.subtext}`}>
-                            {pct}% of total
+                            {amsScorecardData && !amsSweepComplete ? '—% of total' : `${pct}% of total`}
                           </p>
                         </CardContent>
                       </Card>
