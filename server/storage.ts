@@ -4133,6 +4133,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   async upsertTpmsCachedAssignment(data: InsertTpmsCachedAssignment): Promise<TpmsCachedAssignment> {
+    // [TPMS-CACHE-FREEZE 2026-06-17] tpms_cached_assignments retired as a board source; reads now
+    // hit tpms_tech_profiles. Disabled to stop feeding the legacy cache. Revert: delete next 2 lines.
+    const FREEZE_TPMS_CACHE_WRITES: boolean = true;
+    if (FREEZE_TPMS_CACHE_WRITES) return data as unknown as TpmsCachedAssignment;
     const lookupKey = data.lookupKey.toUpperCase();
     const existing = await this.getTpmsCachedAssignment(lookupKey);
     
@@ -4160,6 +4164,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async bulkUpsertTpmsCachedAssignments(items: InsertTpmsCachedAssignment[]): Promise<number> {
+    // [TPMS-CACHE-FREEZE 2026-06-17] legacy cache writes disabled. Revert: delete the next 2 lines.
+    const FREEZE_TPMS_CACHE_WRITES: boolean = true;
+    if (FREEZE_TPMS_CACHE_WRITES) return 0;
     if (items.length === 0) return 0;
     
     let upsertedCount = 0;

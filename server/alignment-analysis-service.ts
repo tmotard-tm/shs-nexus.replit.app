@@ -222,7 +222,7 @@ export async function analyzeAlignment(
     try {
       const staleResult = await db.execute(sql`
         SELECT dat.employment_status
-        FROM tpms_cached_assignments tca
+        FROM tpms_tech_profiles tca
         JOIN all_techs dat ON UPPER(dat.tech_racfid) = UPPER(tca.enterprise_id)
         WHERE regexp_replace(btrim(tca.truck_no), '^0+', '') = ${canonTruck}
           AND dat.employment_status != 'A'

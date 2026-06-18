@@ -626,6 +626,11 @@ async function checkAndRunTpmsPoll(): Promise<void> {
 // to server restarts resetting the watermark, or pre-Nexus stale imports).
 
 async function checkAndRunTpmsStaleSweep(): Promise<void> {
+  // [TPMS-CACHE-FREEZE 2026-06-17] tpms_cached_assignments retired as a board source; this sweep only
+  // validated/wrote that legacy cache and would otherwise re-hit the TPMS API every 4h for rows that
+  // never refresh. Disabled. Revert: delete the next 2 lines.
+  const FREEZE_TPMS_CACHE_WRITES: boolean = true;
+  if (FREEZE_TPMS_CACHE_WRITES) return;
   const now = Date.now();
   if (lastTpmsStaleSweepTime !== null && (now - lastTpmsStaleSweepTime) < TPMS_STALE_SWEEP_INTERVAL_MS) {
     return;

@@ -14,6 +14,10 @@ import {
   fleetOperationLog,
 } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
+
+// [TPMS-CACHE-FREEZE 2026-06-17] tpms_cached_assignments retired as a board source; reads now hit
+// tpms_tech_profiles. This flag disables the legacy cache writes below. To revert: set to false.
+const FREEZE_TPMS_CACHE_WRITES: boolean = true;
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { sendEmail } from "./email-service";
 
@@ -244,6 +248,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
       }
       if (!current.truckNo || current.truckNo.trim() === "") {
         // Evict the stale cache record so this phantom mismatch doesn't reappear
+        if (!FREEZE_TPMS_CACHE_WRITES) // [TPMS-CACHE-FREEZE 2026-06-17] legacy cache evict disabled
         await db.delete(tpmsCachedAssignments)
           .where(eq(tpmsCachedAssignments.enterpriseId, tpmsLdap))
           .catch((e: unknown) => console.warn(`[FleetOps-TPMS] Cache evict failed for ${tpmsLdap}:`, e));
@@ -280,6 +285,7 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         if (msg.includes("TPMS rejected update") && msg.replace("TPMS rejected update:", "").trim() === "") {
           console.log(`[FleetOps-TPMS] TPMS rejected unassign with empty message for "${tpmsLdap}" on truck "${params.truckNumber}" — treating as already clear`);
           // Evict the stale cache record so this phantom mismatch doesn't reappear
+          if (!FREEZE_TPMS_CACHE_WRITES) // [TPMS-CACHE-FREEZE 2026-06-17] legacy cache evict disabled
           await db.delete(tpmsCachedAssignments)
             .where(eq(tpmsCachedAssignments.enterpriseId, tpmsLdap))
             .catch((e: unknown) => console.warn(`[FleetOps-TPMS] Cache evict failed for ${tpmsLdap}:`, e));
@@ -989,6 +995,7 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
   try {
     await db.transaction(async (tx) => {
       // ── TPMS cache plan ─────────────────────────────────────────────────
+      if (!FREEZE_TPMS_CACHE_WRITES) { // [TPMS-CACHE-FREEZE 2026-06-17] legacy cache writes off; board reads tpms_tech_profiles
       for (const u of plan.cachedAssignmentUpserts) {
         await tx.insert(tpmsCachedAssignments).values({
           lookupKey: u.lookupKey,
@@ -1034,6 +1041,7 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
             eq(tpmsCachedAssignments.lookupType, d.lookupType),
           ));
       }
+      } // [TPMS-CACHE-FREEZE 2026-06-17] end disabled cache-write block
       for (const u of plan.lastKnownUpserts) {
         await tx.insert(tpmsLastKnownTruckTech).values({
           truckNo: u.truckNo,
