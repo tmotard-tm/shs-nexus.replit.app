@@ -11791,6 +11791,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     //      TPMS API live for that new enterprise ID and upsert the current
     //      assignment into tpms_cached_assignments (re-populate by truck).
     //   4. Log evicted / repopulated / errored counts.
+    // [AUTO-REMEDIATION-OFF 2026-06-18] Steps 4+5 disabled: they read the stale
+    // tpms_cached_assignments table and auto-pushed those assignments into LIVE
+    // AMS/Holman/TPMS nightly, reverting correct assignments (105 pushes logged).
+    // Revert: set DISABLE_AUTO_REMEDIATION = false.
+    const DISABLE_AUTO_REMEDIATION: boolean = true;
+    if (!DISABLE_AUTO_REMEDIATION) {
     try {
       const { db: dbInstance } = await import("./db");
       const { tpmsCachedAssignments: cacheTable } = await import("@shared/schema");
@@ -11888,6 +11894,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     } catch (staleErr: any) {
       console.error('[Tech Data Scheduler] Stale tech ID remediation failed (continuing):', staleErr?.message || staleErr);
     }
+    } // [AUTO-REMEDIATION-OFF 2026-06-18] end Step 4 guard
 
     // ── Step 5: Auto-remediate unexplained drift mismatches ───────────────────
     // Finds cross-system mismatches that classify as unexplained_drift with
@@ -11895,6 +11902,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     // TPMS is system-of-record: assigns TPMS tech to Holman+AMS when TPMS wins,
     // or pushes to Holman when it's blank. Does NOT auto-fix Holman-assigned /
     // TPMS-blank (silent unassign risk) or AMS-only mismatches.
+    if (!DISABLE_AUTO_REMEDIATION) {
     try {
       const { db: dbInstance } = await import("./db");
       const { analyzeAlignment } = await import("./alignment-analysis-service");
@@ -12006,6 +12014,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     } catch (driftErr: any) {
       console.error('[Tech Data Scheduler] Unexplained drift remediation failed (continuing):', driftErr?.message || driftErr);
     }
+    } // [AUTO-REMEDIATION-OFF 2026-06-18] end Step 5 guard
 
     try {
       // Get all trucks from our database
