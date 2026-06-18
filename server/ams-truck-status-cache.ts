@@ -2,6 +2,7 @@ import { AmsApiService } from "./ams-api-service";
 import { db } from "./db";
 import { amsVehiclesCache } from "@shared/schema";
 import { isNotNull } from "drizzle-orm";
+import { resolveTruckStatusLabel } from "./ams-truck-status-labels";
 
 const amsApiService = new AmsApiService();
 
@@ -85,12 +86,7 @@ async function build(): Promise<Record<string, string | null>> {
       const vin = (v.VIN || v.vin || "").trim().toUpperCase();
       if (!vin) continue;
       const raw_status = v.TruckStatus ?? v.truckStatus ?? v.truck_status;
-      if (raw_status == null) {
-        result[vin] = null;
-      } else {
-        const label = lookupMap.get(String(raw_status));
-        result[vin] = label ?? String(raw_status);
-      }
+      result[vin] = resolveTruckStatusLabel(raw_status, lookupMap);
       // AMS API returns this field as "OutofSvcDate" (verified against
       // a live response). Other casings are kept as defensive fallbacks.
       const oosRaw =
@@ -161,7 +157,7 @@ async function build(): Promise<Record<string, string | null>> {
       const vin = row.VIN.trim().toUpperCase();
       const rawStatus = (row.TRUCK_STATUS || "").trim();
       if (!rawStatus) continue;
-      const label = lookupMap.get(rawStatus) ?? rawStatus;
+      const label = resolveTruckStatusLabel(rawStatus, lookupMap);
       const existing = result[vin];
       if (existing == null) {
         if (!(vin in result)) sfAddedVins++;
@@ -327,11 +323,10 @@ export async function getAmsStatusForMissingVins(
         try {
           const v: any = await amsApiService.getVehicleByVin(vin);
           const rawStatus = v?.TruckStatus ?? v?.truckStatus ?? v?.truck_status;
-          let status: string | null = null;
-          if (rawStatus != null && String(rawStatus).trim() !== "") {
-            const label = lookupMap.get(String(rawStatus));
-            status = label ?? String(rawStatus);
-          }
+          const status: string | null = resolveTruckStatusLabel(
+            rawStatus,
+            lookupMap,
+          );
           const oosRaw =
             v?.OutofSvcDate ??
             v?.OutOfSvcDate ??

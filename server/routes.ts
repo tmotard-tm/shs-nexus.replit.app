@@ -30,6 +30,7 @@ import { sql, eq, and, or, gte, lte, lt, like, inArray, asc, desc, isNotNull, is
 import { queueItems, vehicleNexusData, holmanVehiclesCache, techVehicleAssignments, onboardingHires, storageSpots, termedTechs, offboardingTruckOverrides, byovCreationAudit, amsVehiclesCache, loaLeaves } from "@shared/schema";
 import { holmanApiService } from "./holman-api-service";
 import { AmsApiService, lookupAmsVinByTruckNumber } from "./ams-api-service";
+import { resolveTruckStatusLabel } from "./ams-truck-status-labels";
 const amsApiService = new AmsApiService();
 import { pmfApiService } from "./pmf-api-service";
 import { segnoApiService } from "./segno-api-service";
@@ -16678,12 +16679,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const vin = (v.VIN || v.vin || '').trim().toUpperCase();
         if (!vin) continue;
         const raw_status = v.TruckStatus ?? v.truckStatus ?? v.truck_status;
-        if (raw_status == null) {
-          result[vin] = null;
-        } else {
-          const label = lookupMap.get(String(raw_status));
-          result[vin] = label ?? String(raw_status);
-        }
+        result[vin] = resolveTruckStatusLabel(raw_status, lookupMap);
         // Track "active" status — matches AMS UI's Active count (no SaleDate,
         // no OutofSvcDate, no FinalDisposition). Used to scope the Declined
         // Repair / Sent to Auction counts to active vehicles only.
@@ -16752,7 +16748,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const vin = row.VIN.trim().toUpperCase();
         const rawStatus = (row.TRUCK_STATUS || '').trim();
         if (!rawStatus) continue;
-        const label = lookupMap.get(rawStatus) ?? rawStatus;
+        const label = resolveTruckStatusLabel(rawStatus, lookupMap);
         if (result[vin] == null) {
           if (!(vin in result)) sfAddedVins++;
           result[vin] = label || null;
@@ -16840,7 +16836,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         if (useActiveFilter && !cache.activeVins.has(vin)) continue;
         if (isExcluded88(vin)) { excluded88++; continue; }
         activeConsidered++;
-        const label = (status && status.trim()) ? status.trim() : 'Unknown';
+        // Defense-in-depth: never let a bare numeric code surface as its own
+        // bucket. resolveTruckStatusLabel maps known codes to their label and
+        // any unknown numeric to "Unknown".
+        const resolved = resolveTruckStatusLabel(status);
+        const label = (resolved && resolved.trim()) ? resolved.trim() : 'Unknown';
         const lc = label.toLowerCase();
         if (lc.includes('declined repair')) { declinedRepair++; continue; }
         if (lc.includes('sent to auction')) { sentToAuction++; continue; }
