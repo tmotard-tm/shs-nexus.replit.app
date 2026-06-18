@@ -281,7 +281,7 @@ export class AmsApiService {
     return this.hasCredentials();
   }
 
-  private async request(method: string, path: string, body?: any): Promise<any> {
+  private async request(method: string, path: string, body?: any, signal?: AbortSignal): Promise<any> {
     const url = `${this.baseUrl}${path}`;
     console.log(`[AMS] ${method} ${url}`);
 
@@ -298,6 +298,7 @@ export class AmsApiService {
       method,
       headers,
       body: body ? JSON.stringify(body) : undefined,
+      signal,
     });
 
     if (!response.ok) {
@@ -344,7 +345,7 @@ export class AmsApiService {
     tech?: string;
     limit?: number;
     offset?: number;
-  }): Promise<any> {
+  }, signal?: AbortSignal): Promise<any> {
     const queryParams = new URLSearchParams();
     if (params.vin) queryParams.append('vin', params.vin);
     if (params.plate) queryParams.append('plate', params.plate);
@@ -356,7 +357,7 @@ export class AmsApiService {
     if (params.offset !== undefined) queryParams.append('offset', params.offset.toString());
 
     const qs = queryParams.toString();
-    return this.request('GET', `/api/v1/vehicles${qs ? `?${qs}` : ''}`);
+    return this.request('GET', `/api/v1/vehicles${qs ? `?${qs}` : ''}`, undefined, signal);
   }
 
   async getVehicleByVin(vin: string): Promise<AmsVehicle> {

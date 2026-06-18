@@ -432,6 +432,22 @@ export default function AllVehicles() {
     activeSweepComplete: boolean;
   }>({
     queryKey: ['/api/ams/active-scorecard-counts'],
+    // The AMS sweep can take a while to warm on a fresh server instance and the
+    // endpoint returns 503 ("still warming") until it's ready. Retry transient
+    // failures, and keep polling until a FULL sweep has completed so the card
+    // self-heals from the pending state to real numbers without a manual refresh.
+    // Never retry 4xx (e.g. 401/403) — those won't fix themselves and would just
+    // add load.
+    retry: (failureCount, error) => {
+      const status = parseInt(error instanceof Error ? error.message : '', 10);
+      if (Number.isFinite(status) && status >= 400 && status < 500) return false;
+      return failureCount < 5;
+    },
+    retryDelay: (attempt) => Math.min(4000 * attempt, 15000),
+    refetchInterval: (query) => {
+      const d = query.state.data as { activeSweepComplete?: boolean } | undefined;
+      return d?.activeSweepComplete ? false : 15000;
+    },
   });
 
   // Fixed display order requested by the business. Any AMS status not in
@@ -465,6 +481,11 @@ export default function AllVehicles() {
   const declineRepairCount = amsScorecardData?.declinedRepair ?? 0;
   const sentToAuctionCount = amsScorecardData?.sentToAuction ?? 0;
   const amsSweepComplete = amsScorecardData?.activeSweepComplete ?? false;
+  // Numbers are only trustworthy once a FULL AMS sweep has completed. Until then
+  // — still loading, retrying a 503, or only a partial sweep is available — show
+  // a pending state instead of a misleading 0 (failed/loading) or inflated total
+  // (partial sweep).
+  const amsReady = !!amsScorecardData && amsSweepComplete;
 
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
@@ -766,7 +787,7 @@ export default function AllVehicles() {
                   >
                     <CardContent className="p-4">
                       <p className="text-xs font-medium text-slate-600 dark:text-slate-300">Total Operational Fleet</p>
-                      {amsScorecardData && !amsSweepComplete ? (
+                      {!amsReady ? (
                         <>
                           <div className="text-2xl font-bold text-slate-400 dark:text-slate-500">
                             —
@@ -775,7 +796,7 @@ export default function AllVehicles() {
                             Calculating… waiting for full AMS sweep
                           </p>
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                            Count hidden until AMS returns the complete active list (avoids an inflated total).
+                            The count appears once AMS returns the complete active list. This page keeps checking automatically.
                           </p>
                         </>
                       ) : (
@@ -788,19 +809,14 @@ export default function AllVehicles() {
                           </p>
                         </>
                       )}
-                      {declineRepairCount > 0 && (
+                      {amsReady && declineRepairCount > 0 && (
                         <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-1">
                           {declineRepairCount} Decline Repair
                         </p>
                       )}
-                      {sentToAuctionCount > 0 && (
+                      {amsReady && sentToAuctionCount > 0 && (
                         <p className="text-xs text-amber-700 dark:text-amber-400 font-medium mt-0.5">
                           {sentToAuctionCount} Sent to Auction
-                        </p>
-                      )}
-                      {amsScorecardLoading && !amsScorecardData && (
-                        <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-1">
-                          Loading…
                         </p>
                       )}
                     </CardContent>
@@ -820,10 +836,10 @@ export default function AllVehicles() {
                         <CardContent className="p-4">
                           <p className={`text-xs font-medium ${colors.text}`}>{status}</p>
                           <div className={`text-2xl font-bold ${colors.text}`}>
-                            {count.toLocaleString()}
+                            {amsReady ? count.toLocaleString() : '—'}
                           </div>
                           <p className={`text-xs ${colors.subtext}`}>
-                            {amsScorecardData && !amsSweepComplete ? '—% of total' : `${pct}% of total`}
+                            {amsReady ? `${pct}% of total` : '—% of total'}
                           </p>
                         </CardContent>
                       </Card>

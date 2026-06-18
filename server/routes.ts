@@ -16622,30 +16622,35 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // AMS's /vehicles endpoint is slow/unreliable, and deep offset pages stall
     // most often. A single timed-out page used to abort the whole sweep (break),
     // discarding every prior page and forcing the incomplete-sweep fallback
-    // (which over-counts "Total Operational Fleet"). Retry each page a few times
-    // with backoff so a momentary AMS slowdown doesn't sink the entire sweep.
-    const MAX_PAGE_ATTEMPTS = 3;
+    // (which over-counts "Total Operational Fleet"). Retry each page once more
+    // so a momentary AMS slowdown doesn't sink the entire sweep — but ABORT the
+    // underlying fetch on timeout. Promise.race alone leaves the timed-out fetch
+    // running in the background; under a struggling AMS those zombie requests
+    // pile up and make the whole sweep slower. AbortController cancels them, and
+    // a lighter retry (2 attempts, 25s timeout) keeps the build from ballooning.
+    const MAX_PAGE_ATTEMPTS = 2;
+    const PAGE_TIMEOUT_MS = 25_000;
     while (true) {
       let raw: any;
       let pageError: any = null;
       for (let attempt = 1; attempt <= MAX_PAGE_ATTEMPTS; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), PAGE_TIMEOUT_MS);
         try {
-          // 30s per-page timeout so a stalled AMS request can't block the
-          // overall build (and the Snowflake supplement that follows).
-          raw = await Promise.race([
-            amsApiService.searchVehicles({ limit: pageSize, offset }),
-            new Promise((_, reject) =>
-              setTimeout(() => reject(new Error(`AMS page timeout (offset ${offset})`)), 30_000),
-            ),
-          ]);
+          raw = await amsApiService.searchVehicles({ limit: pageSize, offset }, controller.signal);
           pageError = null;
           break;
         } catch (err: any) {
           pageError = err;
-          console.warn(`[AMS TruckStatusMap] AMS search error at offset ${offset} (attempt ${attempt}/${MAX_PAGE_ATTEMPTS}): ${err.message}`);
+          const reason = controller.signal.aborted
+            ? `AMS page timeout after ${PAGE_TIMEOUT_MS / 1000}s (offset ${offset})`
+            : err.message;
+          console.warn(`[AMS TruckStatusMap] AMS search error at offset ${offset} (attempt ${attempt}/${MAX_PAGE_ATTEMPTS}): ${reason}`);
           if (attempt < MAX_PAGE_ATTEMPTS) {
-            await new Promise((r) => setTimeout(r, 2000 * attempt)); // backoff: 2s, 4s
+            await new Promise((r) => setTimeout(r, 1500 * attempt)); // backoff: 1.5s
           }
+        } finally {
+          clearTimeout(timer);
         }
       }
       if (pageError) {
