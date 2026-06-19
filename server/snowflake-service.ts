@@ -19,9 +19,6 @@ export class SnowflakeService {
   constructor(config: SnowflakeConfig) {
     this.config = config;
     
-    console.log('[Snowflake] Raw key length:', config.privateKey.length);
-    console.log('[Snowflake] Raw key first 100 chars:', config.privateKey.substring(0, 100).replace(/\n/g, '\\n'));
-    
     // Normalize PEM string for Snowflake SDK
     // Step 1: Handle escaped newlines that often appear in environment variables
     let normalizedPem = config.privateKey.replace(/\\n/g, '\n');
@@ -53,8 +50,6 @@ export class SnowflakeService {
           const keyType = keyTypeMatch[1].replace(/\s+/g, ' ').trim();
           const fixedBegin = `-----BEGIN ${keyType}-----`;
           normalizedPem = normalizedPem.replace(brokenBegin, fixedBegin);
-          console.log('[Snowflake] Fixed BEGIN header from:', brokenBegin.replace(/\n/g, '\\n'));
-          console.log('[Snowflake] Fixed BEGIN header to:', fixedBegin);
         }
       }
       
@@ -68,8 +63,6 @@ export class SnowflakeService {
           const keyType = keyTypeMatch[1].replace(/\s+/g, ' ').trim();
           const fixedEnd = `-----END ${keyType}-----`;
           normalizedPem = normalizedPem.replace(brokenEnd, fixedEnd);
-          console.log('[Snowflake] Fixed END header from:', brokenEnd.replace(/\n/g, '\\n'));
-          console.log('[Snowflake] Fixed END header to:', fixedEnd);
         }
       }
     }
@@ -96,8 +89,6 @@ export class SnowflakeService {
       // Re-add line breaks every 64 characters (standard PEM format)
       const bodyLines = body.match(/.{1,64}/g) || [];
       normalizedPem = header + '\n' + bodyLines.join('\n') + '\n' + footer;
-      
-      console.log('[Snowflake] Normalized key structure: header + ' + bodyLines.length + ' body lines + footer');
     }
     
     // Validate the key by creating a KeyObject, but store the PEM string
@@ -110,8 +101,6 @@ export class SnowflakeService {
       console.log('[Snowflake] Private key successfully validated');
     } catch (error: any) {
       console.error('[Snowflake] Failed to parse private key:', error.message);
-      console.error('[Snowflake] Normalized key starts with:', normalizedPem.substring(0, 100).replace(/\n/g, '\\n'));
-      console.error('[Snowflake] Normalized key ends with:', normalizedPem.substring(normalizedPem.length - 50).replace(/\n/g, '\\n'));
       throw new Error(`Invalid private key format: ${error.message}. Please ensure you're using a PKCS#8 format private key.`);
     }
   }
