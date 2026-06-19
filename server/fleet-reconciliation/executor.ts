@@ -107,6 +107,8 @@ function bump(rec: Record<string, number>, key: string) {
   rec[key] = (rec[key] ?? 0) + 1;
 }
 
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
 function clampBatch(n: number | undefined): number {
   const v = Number.isFinite(n as number) ? Math.floor(n as number) : DEFAULT_BATCH;
   return Math.max(1, Math.min(MAX_BATCH, v));
@@ -139,6 +141,11 @@ export async function runExecutorKick(runId: string, opts: KickOptions): Promise
   if (run.status !== "completed") {
     return emptyResult(runId, run.kind, `run status is '${run.status}' — only a completed (materialized) run can be kicked`);
   }
+
+  // ---- Rescue any rows stuck `applying` with a before-image (external outcome
+  // unknown) BEFORE leasing fresh work — route them to bulk verification rather
+  // than risk a double-apply by re-leasing + re-writing them (#a). ----
+  await reapStuckApplying(runId);
 
   // ---- W5: lease a bounded batch atomically (FOR UPDATE SKIP LOCKED). ----
   const leasedIds = await leaseBatch(runId, leaseOwner, batchSize);
@@ -187,7 +194,7 @@ export async function runExecutorKick(runId: string, opts: KickOptions): Promise
     leased: leasedIds.length,
     processed: leased.length,
     byOutcome,
-    throttledSystems: [...throttledSystems],
+    throttledSystems: Array.from(throttledSystems),
     remainingActionable: await countActionable(runId),
   };
 }
@@ -204,8 +211,12 @@ function emptyResult(runId: string, kind: string, message: string): KickResult {
  * Atomically claim up to `limit` actionable items for the run by flipping them
  * to `applying`, stamping the lease, and bumping `attempts`. A single CTE with
  * FOR UPDATE SKIP LOCKED guarantees two overlapping kicks never grab the same
- * row. Reclaims `applying` rows whose lease has EXPIRED (a dead worker) — the
- * renew-or-abort check before each external write makes that reclaim safe.
+ * row. Reclaims `applying` rows whose lease has EXPIRED (a dead worker) ONLY
+ * when they have NO before-image yet — i.e. they never reached the external
+ * write, so re-running them is safe. An expired `applying` row that DOES carry a
+ * before-image may already have applied its external write (outcome unknown);
+ * those are NOT re-leased here — reapStuckApplying() routes them to the bulk
+ * verifier instead, so a real downstream write can never be double-applied (#a).
  */
 async function leaseBatch(runId: string, leaseOwner: string, limit: number): Promise<number[]> {
   const until = new Date(Date.now() + LEASE_MS);
@@ -216,7 +227,8 @@ async function leaseBatch(runId: string, leaseOwner: string, limit: number): Pro
        WHERE run_id = ${runId}
          AND (
               status IN ('queued','retry_scheduled')
-           OR (status = 'applying' AND lease_until IS NOT NULL AND lease_until < now())
+           OR (status = 'applying' AND lease_until IS NOT NULL AND lease_until < now()
+               AND before_image_id IS NULL)
          )
          AND (next_attempt_at IS NULL OR next_attempt_at <= now())
          AND (retry_after_at  IS NULL OR retry_after_at  <= now())
@@ -257,7 +269,11 @@ async function renewLeaseOrAbort(itemId: number, leaseOwner: string): Promise<bo
   return rows.length > 0;
 }
 
-/** Actionable = queued/retry_scheduled OR an `applying` row whose lease expired. */
+/**
+ * Actionable = queued/retry_scheduled OR an `applying` row whose lease expired
+ * AND has no before-image (safely re-leasable). Expired `applying` rows WITH a
+ * before-image are verification work (reapStuckApplying), not re-leasable here.
+ */
 async function countActionable(runId: string): Promise<number> {
   const r: any = await db.execute(sql`
     SELECT count(*)::int AS n
@@ -265,11 +281,110 @@ async function countActionable(runId: string): Promise<number> {
      WHERE run_id = ${runId}
        AND (
             status IN ('queued','retry_scheduled')
-         OR (status = 'applying' AND lease_until IS NOT NULL AND lease_until < now())
+         OR (status = 'applying' AND lease_until IS NOT NULL AND lease_until < now()
+             AND before_image_id IS NULL)
        )
   `);
   const rows: any[] = Array.isArray(r) ? r : (r?.rows ?? []);
   return Number(rows[0]?.n ?? 0);
+}
+
+// ---------------------------------------------------------------------------
+// Stuck-`applying` rescue + durable cache-pending persistence (#a safety)
+// ---------------------------------------------------------------------------
+
+/**
+ * Rescue rows stuck in `applying` whose lease has EXPIRED but which already hold
+ * a before-image — meaning the external write may already have landed (outcome
+ * UNKNOWN). Blindly re-leasing + re-writing these would double-apply the real
+ * downstream write and corrupt the before-image/reversal trail, so we route them
+ * to `external_applied_cache_pending`: the bulk verifier then reads live
+ * downstream truth and either confirms (→ verified, repairing the cache) or
+ * flags after the grace window. Expired `applying` rows WITHOUT a before-image
+ * never reached the external write and stay normally re-leasable (leaseBatch).
+ * Atomic + idempotent; safe to call from both the kick and the verifier.
+ *
+ * NOTE on the discriminator: before_image_id is committed in the statement
+ * immediately BEFORE executeReconWrite, so a crash in that razor-thin window
+ * leaves it set with no external write. We deliberately treat that as
+ * "outcome unknown" (route to verification → the verifier finds live≠desired and
+ * flags after grace, then the next run re-proposes). This conservative routing is
+ * irreducible: with no 2PC against Holman/WMS/AMS, ANY pre-write marker (a status
+ * flip, a timestamp, before_image_id) MUST be committed before the non-
+ * transactional external call, so it carries the same window — a "stronger phase
+ * marker" would only rename it, not shrink it. Fail-safe (never a double-apply) is
+ * the correct choice here; do not "fix" it with an additional marker.
+ */
+export async function reapStuckApplying(runId: string): Promise<number> {
+  const r: any = await db.execute(sql`
+    UPDATE reconciliation_items
+       SET status = 'external_applied_cache_pending',
+           external_applied_at = COALESCE(external_applied_at, now()),
+           lease_owner = NULL,
+           lease_until = NULL,
+           last_error = COALESCE(
+             last_error,
+             'reaped: lease expired while applying with a before-image — external outcome unknown, routed to bulk verification'
+           ),
+           updated_at = now()
+     WHERE run_id = ${runId}
+       AND status = 'applying'
+       AND lease_until IS NOT NULL
+       AND lease_until < now()
+       AND before_image_id IS NOT NULL
+    RETURNING id
+  `);
+  const rows: any[] = Array.isArray(r) ? r : (r?.rows ?? []);
+  return rows.length;
+}
+
+/**
+ * Durably record `external_applied_cache_pending` after a successful external
+ * write whose cache/fence tx failed (#a). This MUST persist — if it doesn't, the
+ * row is left `applying`, its lease expires, and a re-kick could DOUBLE-APPLY the
+ * external write — so retry a few times before giving up. If every attempt fails
+ * (DB down), the row keeps its before-image and reapStuckApplying() rescues it on
+ * a later kick/verify. Returns true iff the status was persisted.
+ */
+async function persistCachePendingWithRetry(
+  itemId: number,
+  owner: string,
+  externalAt: Date,
+  cacheErr: any,
+): Promise<boolean> {
+  const msg = `external applied; cache/fence tx failed: ${cacheErr?.message ?? cacheErr}`;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const r: any = await db.execute(sql`
+        UPDATE reconciliation_items
+           SET status = 'external_applied_cache_pending',
+               external_applied_at = ${externalAt},
+               lease_owner = NULL,
+               lease_until = NULL,
+               last_error = ${msg},
+               updated_at = now()
+         WHERE id = ${itemId} AND lease_owner = ${owner}
+        RETURNING id
+      `);
+      const rows: any[] = Array.isArray(r) ? r : (r?.rows ?? []);
+      if (rows.length > 0) return true; // proven: we durably persisted the row
+
+      // 0 rows + no throw → our lease was reclaimed during a stall. The reaper is
+      // the ONLY other writer that clears our lease, and it routes before-image
+      // rows to external_applied_cache_pending — so confirm the row actually left
+      // `applying` before declaring success (never claim persistence blindly).
+      const chk: any = await db.execute(sql`
+        SELECT status FROM reconciliation_items WHERE id = ${itemId}
+      `);
+      const st = ((Array.isArray(chk) ? chk[0] : chk?.rows?.[0]) ?? {}).status;
+      if (st && st !== "applying") return true; // safely settled by the reaper/verifier
+      // Still `applying` under another owner → anomalous; retry to settle it.
+    } catch {
+      // transient DB error → fall through to backoff and retry
+    }
+    await sleep(150 * (attempt + 1));
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -331,13 +446,30 @@ async function processItem(item: ReconciliationItem, ctx: ItemCtx): Promise<Item
   }
 
   // ---- W2: persist the before-image BEFORE the external write (#7). ----
+  // The before_image_id stamp is ALSO the double-apply discriminator: once it is
+  // set, reapStuckApplying() treats an expired-lease row as "external outcome
+  // unknown" (route to verification, never re-lease). So the stamping UPDATE must
+  // be lease-guarded with a rowcount check — if it affects 0 rows we lost the
+  // lease between renew and now, the external write has NOT happened, and we must
+  // bail WITHOUT writing (the new owner drives it). Proceeding would write under a
+  // lease we no longer hold and risk a double-apply.
   let beforeImageId: number | null = null;
   try {
     beforeImageId = await writeBeforeImage(item, ctx.runId);
-    await db
-      .update(reconciliationItems)
-      .set({ beforeImageId, updatedAt: new Date() })
-      .where(and(eq(reconciliationItems.id, item.id), eq(reconciliationItems.leaseOwner, owner)));
+    const r: any = await db.execute(sql`
+      UPDATE reconciliation_items
+         SET before_image_id = ${beforeImageId}, updated_at = now()
+       WHERE id = ${item.id} AND lease_owner = ${owner} AND status = 'applying'
+      RETURNING id
+    `);
+    const rows: any[] = Array.isArray(r) ? r : (r?.rows ?? []);
+    if (rows.length === 0) {
+      // Lease lost (a concurrent kick reclaimed an expired lease, or the row was
+      // completed elsewhere). The orphaned before-image is harmless audit noise:
+      // it is never linked to the item, and reversal re-confirms (#5a) before
+      // replaying so an unreferenced row whose write never happened is a no-op.
+      return { status: "lost_lease" };
+    }
   } catch (err: any) {
     // Could not record the audit row → do NOT write externally (reversal would
     // be blind). Re-queue as a transient failure.
@@ -400,19 +532,18 @@ async function processItem(item: ReconciliationItem, ctx: ItemCtx): Promise<Item
     });
     return { status: "verification_pending" };
   } catch (cacheErr: any) {
-    await db
-      .update(reconciliationItems)
-      .set({
-        status: "external_applied_cache_pending",
-        externalAppliedAt: externalAt,
-        leaseOwner: null,
-        leaseUntil: null,
-        lastError: `external applied; cache/fence tx failed: ${cacheErr?.message ?? cacheErr}`,
-        updatedAt: new Date(),
-      })
-      .where(and(eq(reconciliationItems.id, item.id), eq(reconciliationItems.leaseOwner, owner)))
-      .catch(() => {});
-    return { status: "external_applied_cache_pending" };
+    // The external write already landed but the cache/fence tx failed (#a). We
+    // MUST durably move the row off `applying` to external_applied_cache_pending
+    // so the bulk verifier — never a blind re-write — settles it. If we left it
+    // `applying`, the lease would expire and a re-kick would DOUBLE-APPLY the
+    // external write. Retry the persist; if it still fails (DB down) the row
+    // keeps its before-image so reapStuckApplying() rescues it next kick/verify.
+    const persisted = await persistCachePendingWithRetry(item.id, owner, externalAt, cacheErr);
+    return {
+      status: persisted
+        ? "external_applied_cache_pending"
+        : "external_applied_cache_pending_unpersisted",
+    };
   }
 }
 
@@ -501,7 +632,7 @@ interface BuiltParams {
 
 /** True iff `eid` is currently assigned to a WMS truck OTHER than `selfCanon`. */
 function techOnAnotherWmsTruck(wmsByCanon: Map<string, WmsRow>, eid: string, selfCanon: string): boolean {
-  for (const [canon, r] of wmsByCanon) {
+  for (const [canon, r] of Array.from(wmsByCanon)) {
     if (canon === selfCanon) continue;
     if (r.tech && r.tech === eid) return true;
   }

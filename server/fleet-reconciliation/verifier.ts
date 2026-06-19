@@ -39,6 +39,7 @@ import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import { verifyFence } from "./fences";
 import { pullWms, pullAms, pullHolman, type WmsPull, type AmsPull, type HolmanPull } from "./downstream";
 import { confirmTruckVacant } from "./authority";
+import { reapStuckApplying } from "./executor";
 import { normalizeEnterpriseId } from "../vehicle-number-utils";
 
 // ---- Tunables -------------------------------------------------------------
@@ -98,6 +99,12 @@ export async function runVerifierSweep(runId: string, opts: VerifierOptions = {}
   if (run.kind === "dry_run") return empty(runId, run.kind, "refusing to verify a dry_run — its items are a report, not writes");
   if (run.killSwitch) return empty(runId, run.kind, "kill switch engaged — no verification performed");
 
+  // Rescue any rows stuck `applying` past their lease that already carry a
+  // before-image (external outcome unknown) into external_applied_cache_pending
+  // so THIS sweep verifies them against live truth instead of leaving them
+  // orphaned (a re-kick would otherwise risk double-applying the write — #a).
+  await reapStuckApplying(runId);
+
   const items = await db
     .select()
     .from(reconciliationItems)
@@ -111,7 +118,8 @@ export async function runVerifierSweep(runId: string, opts: VerifierOptions = {}
     .limit(limit);
 
   if (items.length === 0) {
-    return { runId, kind: run.kind, scanned: 0, byOutcome: {}, pulled: [], message: "nothing pending to verify" };
+    const canaryMsg = await maybeStampCanaryVerified(runId, run.kind);
+    return { runId, kind: run.kind, scanned: 0, byOutcome: {}, pulled: [], message: canaryMsg ?? "nothing pending to verify" };
   }
 
   // ---- One live pull per TOUCHED system (#5b bulk; never per-item). ----
@@ -142,11 +150,76 @@ export async function runVerifierSweep(runId: string, opts: VerifierOptions = {}
     bump(byOutcome, outcome);
   }
 
-  return { runId, kind: run.kind, scanned: items.length, byOutcome, pulled };
+  const canaryMsg = await maybeStampCanaryVerified(runId, run.kind);
+  return { runId, kind: run.kind, scanned: items.length, byOutcome, pulled, message: canaryMsg };
 }
 
 function empty(runId: string, kind: string, message: string): VerifierResult {
   return { runId, kind, scanned: 0, byOutcome: {}, pulled: [], message };
+}
+
+/**
+ * For a CANARY run only (#8): once every item has settled to a terminal status
+ * AND at least one real write reached `verified` AND nothing failed/flagged/
+ * exhausted AND no write is terminal-but-unverified (`applied`), stamp
+ * `reconciliation_runs.verified_at`. This is the structural precondition a
+ * backfill needs to bypass G2 (a verified canary_run_id) — a merely-materialized
+ * canary, an all-skipped canary, or one with ANY failure (`failed`, `flagged`,
+ * `exhausted`) or unconfirmed write (`applied`) must NOT authorize a ~1,500-write
+ * backfill. Only the benign terminal states {verified, skipped, held} are allowed
+ * alongside the required verified writes. The stamp is necessary-but-not-
+ * sufficient: the backfill still requires an explicit human approver +
+ * g2_exempt_reason. Returns a status message for the sweep result (or undefined
+ * when not a canary).
+ */
+async function maybeStampCanaryVerified(runId: string, kind: string): Promise<string | undefined> {
+  if (kind !== "canary") return undefined;
+
+  const r: any = await db.execute(sql`
+    SELECT
+      count(*) FILTER (WHERE status IN (
+        'queued','applying','external_applied_cache_pending','retry_scheduled',
+        'awaiting_batch','verification_pending'
+      ))::int AS non_terminal,
+      count(*) FILTER (WHERE status = 'verified')::int  AS verified,
+      count(*) FILTER (WHERE status = 'failed')::int    AS failed,
+      count(*) FILTER (WHERE status = 'flagged')::int   AS flagged,
+      count(*) FILTER (WHERE status = 'exhausted')::int AS exhausted,
+      count(*) FILTER (WHERE status = 'applied')::int   AS applied,
+      count(*)::int AS total
+    FROM reconciliation_items
+    WHERE run_id = ${runId}
+  `);
+  const row: any = (Array.isArray(r) ? r[0] : r?.rows?.[0]) ?? {};
+  const nonTerminal = Number(row.non_terminal ?? 0);
+  const verified = Number(row.verified ?? 0);
+  const failed = Number(row.failed ?? 0);
+  const flagged = Number(row.flagged ?? 0);
+  const exhausted = Number(row.exhausted ?? 0);
+  const applied = Number(row.applied ?? 0);
+  const total = Number(row.total ?? 0);
+
+  if (total === 0) return "canary has no items — nothing to verify";
+  if (nonTerminal > 0) return `canary not settled — ${nonTerminal} item(s) still in flight`;
+  if (verified === 0) return "canary settled but produced 0 verified writes — NOT authorizing a backfill";
+  // `applied` is terminal-but-unverified (the executor settles real writes to
+  // verification_pending → verified, so `applied` should never appear; if it does
+  // it is an unconfirmed write and must NOT authorize a backfill). `exhausted` is
+  // a terminal failure. Any of these blocks the stamp.
+  const bad = failed + flagged + exhausted + applied;
+  if (bad > 0) {
+    return `canary settled with ${failed} failed / ${flagged} flagged / ${exhausted} exhausted / ${applied} applied-unverified — NOT stamping verified_at (manual review required)`;
+  }
+
+  const upd: any = await db
+    .update(reconciliationRuns)
+    .set({ verifiedAt: new Date() })
+    .where(and(eq(reconciliationRuns.id, runId), isNull(reconciliationRuns.verifiedAt)))
+    .returning({ id: reconciliationRuns.id });
+  const stamped = (Array.isArray(upd) ? upd.length : upd?.rowCount ?? 0) > 0;
+  return stamped
+    ? `canary verified_at stamped (${verified} verified write(s)) — backfill G2 bypass now permitted`
+    : "canary already verified";
 }
 
 // ---------------------------------------------------------------------------
