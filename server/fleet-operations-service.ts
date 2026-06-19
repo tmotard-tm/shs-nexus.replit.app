@@ -87,6 +87,12 @@ function normalizeSystemStatus(value: string | null | undefined): SystemStatus {
 interface SystemResult {
   status: SystemStatus;
   message: string;
+  /**
+   * WMS/NetSuite error classification (#15) surfaced to the tier-3 backstop
+   * executor: "auth" → re-auth + resume (not a failure); "throttle" → hold off
+   * + back off + resume from checkpoint; "data" → real failure (audit + flag).
+   */
+  errorBucket?: "auth" | "throttle" | "data" | null;
   submissionDbId?: string;
   /**
    * The TPMS-side enterprise LDAP that was actually written to. May differ
@@ -113,11 +119,25 @@ interface SystemResult {
   };
 }
 
+type SystemName = "tpms" | "holman" | "ams" | "wms";
+
+/**
+ * Fresh skipped SystemResult — the WMS default on the live assign/unassign
+ * orchestrator paths. WMS assignment is corrected by the tier-3 backstop
+ * runner (operating on its own reconciliation_items substrate), NOT the live
+ * paths, so those paths leave WMS skipped until explicitly wired. A factory
+ * (not a shared const) so no caller can mutate a shared object.
+ */
+function skippedWms(message = "WMS not wired to live orchestrator path"): SystemResult {
+  return { status: "skipped", message };
+}
+
 interface OperationResult {
   log: FleetOperationLog;
   tpms: SystemResult;
   holman: SystemResult;
   ams: SystemResult;
+  wms: SystemResult;
   holmanSubmissionDbId?: string;
   overallSuccess: boolean;
   partialSuccess: boolean;
@@ -631,6 +651,170 @@ async function callAms(action: string, params: Record<string, any>): Promise<Sys
   return { status: "skipped", message: "Unknown AMS action" };
 }
 
+/**
+ * WMS/NetSuite assignment writer. STRUCTURAL leg for the tier-3 backstop +
+ * retry path — the live assign/unassign orchestrator defaults WMS to `skipped`
+ * (see skippedWms) and never calls this. The backstop runner (T005) resolves
+ * the WMS truckId from getAllTrucks() and the ghost tech, then routes here.
+ *
+ * Identity is canonical Enterprise ID across all systems (#16): WMS
+ * `techEnterpriseId` == AIMS owner == Holman clientData.
+ *
+ * NOTE: createAssignment-vs-updateAssignment for a truck with no prior
+ * assignment record is the #3 OPEN item resolved at T005; this defaults to
+ * updateAssignment per decision #3a (targeted tech-tag write). The richer
+ * move/displacement (#9) and auth/governance error bucketing (#15) live in the
+ * runner, not here.
+ */
+async function callWms(action: string, params: Record<string, any>): Promise<SystemResult> {
+  try {
+    const { wmsEngineService } = await import("./wms-engine-service");
+    if (!wmsEngineService.isConfigured()) {
+      return { status: "skipped", message: "WMS not configured" };
+    }
+    if (action === "assign") {
+      const techId = normalizeEnterpriseId(params.ldapId || params.toLdap || "");
+      const truckId = params.wmsTruckId || params.truckId;
+      if (!truckId) {
+        return { status: "skipped", message: "WMS assign skipped — no resolved WMS truckId" };
+      }
+      if (!techId) {
+        return { status: "skipped", message: "WMS assign skipped — no Enterprise ID" };
+      }
+      await wmsEngineService.updateAssignment(techId, { techId, truckId });
+      return { status: "success", message: `WMS assignment set (${techId} → ${truckId})` };
+    }
+    if (action === "unassign") {
+      // Ghost-clear: remove the WMS assignment for the (ghost) tech the truck
+      // currently shows. The runner passes the ghost tech explicitly so we never
+      // clear the wrong tech when params.ldapId is the *desired* (vacant) owner.
+      const ghostTech = normalizeEnterpriseId(params.wmsGhostTech || params.ldapId || params.toLdap || "");
+      if (!ghostTech) {
+        return { status: "skipped", message: "WMS unassign skipped — no tech to clear" };
+      }
+      await wmsEngineService.deleteAssignment(ghostTech);
+      return { status: "success", message: `WMS assignment cleared (${ghostTech})` };
+    }
+    if (action === "cost_center") {
+      // WMS "update truck details" — sets costCenter only (#3). updateTruck is a
+      // whole-record POST, so the executor MUST resolve the truck's current
+      // identity (name/locationId/isActive) AND its current description from the
+      // live getAllTrucks() row and pass them through here so this write changes
+      // ONLY costCenter and never blanks description (#3 keeps description OOS).
+      const truckId = params.wmsTruckId || params.truckId;
+      const costCenter = params.costCenter ?? params.desiredValue;
+      if (!truckId) {
+        return { status: "skipped", message: "WMS cost-center skipped — no resolved WMS truckId" };
+      }
+      if (costCenter === undefined || costCenter === null || String(costCenter) === "") {
+        // Never blank/guess a cost center (the COSTCENTER_SKIP_FLAG decision is upstream, #3).
+        return { status: "skipped", message: "WMS cost-center skipped — no desired cost center" };
+      }
+      const name = params.wmsName ?? params.name;
+      const locationId = params.wmsLocationId ?? params.locationId;
+      if (!name || !locationId) {
+        return { status: "skipped", message: "WMS cost-center skipped — missing truck identity (name/locationId)" };
+      }
+      await wmsEngineService.updateTruck(truckId, {
+        name,
+        locationId,
+        isActive: params.wmsIsActive ?? params.isActive ?? true,
+        costCenter: String(costCenter),
+        // Preserve the current description verbatim — never touch it (#3).
+        ...(params.wmsDescription !== undefined ? { description: params.wmsDescription } : {}),
+      });
+      return { status: "success", message: `WMS cost center set (${truckId} → ${costCenter})` };
+    }
+    return { status: "skipped", message: "Not applicable for this operation" };
+  } catch (err: any) {
+    return { status: "failed", message: `WMS error: ${err.message}`, errorBucket: err.wmsErrorBucket ?? "data" };
+  }
+}
+
+/**
+ * Systems the tier-3 backstop executor may write. TPMS is deliberately absent:
+ * the backstop is structurally READ-ONLY against TPMS (#11) — a TPMS write
+ * cannot be expressed through this choke point.
+ */
+export type ReconWriteSystem = "wms" | "ams" | "holman";
+export type ReconWriteAction = "assign" | "clear" | "cost_center";
+
+export interface ReconWriteOutcome {
+  status: SystemStatus;
+  message: string;
+  errorBucket?: "auth" | "throttle" | "data" | null;
+  cachePayload?: SystemResult["cachePayload"];
+  submissionDbId?: string;
+}
+
+/**
+ * Generic per-system writer for the tier-3 AIMS backstop executor (T005). The
+ * executor MUST route EVERY external correction through here and never import
+ * the wms/ams/holman services directly. This is the single choke point that:
+ *   - enforces #11 (read-only TPMS — `system` is constrained to wms|ams|holman,
+ *     and a "tpms" system throws),
+ *   - enforces #10 (the backstop NEVER unassigns AMS via API — a vacant-AMS
+ *     ghost goes through the await-batch/verify path, not a clear call here),
+ *   - normalizes WMS error buckets (#15) for the executor's W3 throttle / W4
+ *     auth ladders.
+ * It does NOT touch local caches, before-images or write-fences — ordering (#a),
+ * the before-image (W2), the fence (#b) and idempotency (W5) all live in the
+ * executor AROUND this call.
+ */
+export async function executeReconWrite(
+  system: ReconWriteSystem,
+  action: ReconWriteAction,
+  params: Record<string, any>,
+): Promise<ReconWriteOutcome> {
+  if ((system as string) === "tpms") {
+    throw new Error(
+      "executeReconWrite: TPMS writes are forbidden from the tier-3 backstop (#11 read-only TPMS)",
+    );
+  }
+
+  let res: SystemResult;
+  switch (system) {
+    case "wms": {
+      // assign | clear→unassign | cost_center
+      res = await callWms(action === "clear" ? "unassign" : action, params);
+      break;
+    }
+    case "holman": {
+      if (action === "cost_center") {
+        return { status: "skipped", message: "Holman has no cost-center leg" };
+      }
+      res = await callHolman(action === "clear" ? "unassign" : "assign", params);
+      break;
+    }
+    case "ams": {
+      if (action === "cost_center") {
+        return { status: "skipped", message: "AMS has no cost-center leg" };
+      }
+      if (action === "clear") {
+        // #10/#11: never unassign AMS from the backstop. A vacant-AMS ghost is
+        // stamped + verified at +24h/+36h (AMS_AWAIT_BATCH), never cleared via
+        // the AMS API and never written back to TPMS.
+        return {
+          status: "skipped",
+          message: "AMS unassign is not a backstop write (#10 await-batch path)",
+        };
+      }
+      res = await callAms("assign", params);
+      break;
+    }
+    default:
+      return { status: "skipped", message: `Unknown recon system: ${String(system)}` };
+  }
+
+  return {
+    status: res.status,
+    message: res.message,
+    errorBucket: res.errorBucket ?? (res.status === "failed" ? "data" : null),
+    cachePayload: res.cachePayload,
+    submissionDbId: res.submissionDbId,
+  };
+}
+
 async function logOperationEvent(
   fleetOpLogId: number,
   system: string,
@@ -675,31 +859,57 @@ async function logAllEvents(
   tpms: SystemResult,
   holman: SystemResult,
   ams: SystemResult,
+  wms: SystemResult = skippedWms(),
 ): Promise<void> {
-  await Promise.all([
-    logOperationEvent(logId, "tpms", action, params, tpms),
-    logOperationEvent(logId, "holman", action, params, holman),
-    logOperationEvent(logId, "ams", action, params, ams),
-  ]);
+  // Generic over all legs so the 4th (WMS) leg can't drift from the others.
+  const results: Record<SystemName, SystemResult> = { tpms, holman, ams, wms };
+  await Promise.all(
+    (Object.keys(results) as SystemName[]).map((sys) =>
+      logOperationEvent(logId, sys, action, params, results[sys]),
+    ),
+  );
 }
 
-function buildResult(log: FleetOperationLog, tpms: SystemResult, holman: SystemResult, ams: SystemResult): OperationResult {
-  const anyFailed = tpms.status === "failed" || holman.status === "failed" || ams.status === "failed";
-  const anySuccess = tpms.status === "success" || holman.status === "success" || ams.status === "success"
-    || tpms.status === "pending" || holman.status === "pending" || ams.status === "pending";
-  // overallSuccess = nothing failed (success + skipped + pending is a clean outcome)
+function buildResult(
+  log: FleetOperationLog,
+  tpms: SystemResult,
+  holman: SystemResult,
+  ams: SystemResult,
+  wms: SystemResult = skippedWms(),
+): OperationResult {
+  // Generic over all legs so adding the WMS (4th) leg can't regress the
+  // hand-written tpms/holman/ams OR-chains (architect hardening, T004).
+  const all = Object.values({ tpms, holman, ams, wms } as Record<SystemName, SystemResult>);
+  const anyFailed = all.some((r) => r.status === "failed");
+  // success + skipped + pending is a clean outcome; pending counts as "some
+  // success" for partial-failure detection.
+  const anySuccess = all.some((r) => r.status === "success" || r.status === "pending");
   const overallSuccess = !anyFailed;
-  // partialSuccess = some failed AND some succeeded (true mixed outcome)
   const partialSuccess = anyFailed && anySuccess;
   return {
     log,
     tpms,
     holman,
     ams,
+    wms,
     holmanSubmissionDbId: holman.submissionDbId,
     overallSuccess,
     partialSuccess,
   };
+}
+
+/**
+ * Per-system fleet_operation_log status/message column patch. Generic so the
+ * retry path doesn't hand-maintain a tpms/holman/ams/wms ternary (T004).
+ */
+function statusPatchFor(system: string, result: SystemResult): Partial<FleetOperationLog> {
+  switch (system) {
+    case "tpms": return { tpmsStatus: result.status, tpmsMessage: result.message };
+    case "holman": return { holmanStatus: result.status, holmanMessage: result.message };
+    case "ams": return { amsStatus: result.status, amsMessage: result.message };
+    case "wms": return { wmsStatus: result.status, wmsMessage: result.message };
+    default: return {};
+  }
 }
 
 async function resolveCurrentTechTruck(ldapId: string): Promise<string | null> {
@@ -821,6 +1031,10 @@ export interface WriteThroughCacheArgs {
   tpms: SystemResult;
   holman: SystemResult;
   ams: SystemResult;
+  /** Optional WMS leg. WMS has no Nexus-local cache, so this only feeds the
+   * atomic fleet_operation_log wms_status/wms_message columns (kept in lockstep
+   * with the other legs). Defaults to skipped on the live paths. */
+  wms?: SystemResult;
   previousTruckHolderLdap?: string | null;
   previousTechTruck?: string | null;
   changeSource?: string;
@@ -1198,6 +1412,7 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
 
       // Atomic per-system log status update — commits with cache writes.
       if (args.fleetOpLogId != null) {
+        const wmsRes = args.wms ?? skippedWms();
         // completedAt preserved (downstream reconciliation checks it).
         await tx.update(fleetOperationLog)
           .set({
@@ -1207,6 +1422,8 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
             holmanMessage: args.holman.message,
             amsStatus: args.ams.status,
             amsMessage: args.ams.message,
+            wmsStatus: wmsRes.status,
+            wmsMessage: wmsRes.message,
             updatedAt: now,
             completedAt: now,
           })
@@ -1718,6 +1935,8 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
       result = await callHolman(event.action, params);
     } else if (event.system === "ams") {
       result = await callAms(event.action, params);
+    } else if (event.system === "wms") {
+      result = await callWms(event.action, params);
     } else {
       continue;
     }
@@ -1756,28 +1975,26 @@ export async function retryFailedOperationEvents(): Promise<{ retried: number; s
           const amsRes: SystemResult = event.system === "ams"
             ? result
             : { status: normalizeSystemStatus(cur?.amsStatus), message: cur?.amsMessage ?? "" };
+          const wmsRes: SystemResult = event.system === "wms"
+            ? result
+            : { status: normalizeSystemStatus(cur?.wmsStatus), message: cur?.wmsMessage ?? "" };
           await writeThroughCaches({
             action: event.action as "assign" | "unassign",
             params,
             tpms: tpmsRes,
             holman: holmanRes,
             ams: amsRes,
+            wms: wmsRes,
             changeSource: "retry",
             fleetOpLogId: event.fleetOpLogId,
           });
         } catch (wtErr: any) {
           console.warn(`[FleetOps-Retry] write-through after retry failed for event ${event.id}: ${wtErr.message}`);
           // Fall back to non-atomic log update so we at least record the status.
-          const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
-            : event.system === "holman" ? { holmanStatus: result.status, holmanMessage: result.message }
-            : { amsStatus: result.status, amsMessage: result.message };
-          await storage.updateFleetOperationLog(event.fleetOpLogId, field);
+          await storage.updateFleetOperationLog(event.fleetOpLogId, statusPatchFor(event.system, result));
         }
       } else if (event.fleetOpLogId) {
-        const field = event.system === "tpms" ? { tpmsStatus: result.status, tpmsMessage: result.message }
-          : event.system === "holman" ? { holmanStatus: result.status, holmanMessage: result.message }
-          : { amsStatus: result.status, amsMessage: result.message };
-        await storage.updateFleetOperationLog(event.fleetOpLogId, field);
+        await storage.updateFleetOperationLog(event.fleetOpLogId, statusPatchFor(event.system, result));
       }
     } else {
       failed++;

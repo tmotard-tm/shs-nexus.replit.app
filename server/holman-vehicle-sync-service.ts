@@ -9,6 +9,7 @@ const ALLOWED_DIVISIONS = ['01', 'RF'];
 import { holmanApiService } from "./holman-api-service";
 import { getTPMSService } from "./tpms-service";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
+import { loadActiveFenceSet } from "./fleet-reconciliation/fences";
 import { decodeModelYearFromVin } from "@shared/vin-year";
 
 // Resolve a model year, preferring the Holman-supplied value and falling back
@@ -244,6 +245,8 @@ class HolmanVehicleSyncService {
   // Update cache with change tracking fields
   private async updateCacheWithChangeTracking(vehicles: any[]): Promise<void> {
     const now = new Date();
+    // Write-fence (#b): never clobber an in-flight backstop assignment correction.
+    const holmanAssignFences = await loadActiveFenceSet("holman", "assignment");
     
     for (const v of vehicles) {
       const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString();
@@ -303,6 +306,7 @@ class HolmanVehicleSyncService {
         holmanAssignedStatusCd: v.assignedStatus || v.assignedStatusCode || null,
       };
       
+      const holmanFenced = holmanAssignFences.has(toCanonical(vehicleNumber) || "");
       await db
         .insert(holmanVehiclesCache)
         .values(cacheData)
@@ -311,6 +315,14 @@ class HolmanVehicleSyncService {
           set: {
             ...cacheData,
             district: sql`${holmanVehiclesCache.district}`,
+            // Write-fence (#b): preserve the backstop-written tech (id + name)
+            // until the fence is verified/expires; do not overwrite from this pull.
+            ...(holmanFenced
+              ? {
+                  holmanTechAssigned: sql`${holmanVehiclesCache.holmanTechAssigned}`,
+                  holmanTechName: sql`${holmanVehiclesCache.holmanTechName}`,
+                }
+              : {}),
             updatedAt: now,
           },
         });
@@ -565,6 +577,8 @@ class HolmanVehicleSyncService {
 
   private async updateCache(holmanVehicles: any[]): Promise<void> {
     const now = new Date();
+    // Write-fence (#b): never clobber an in-flight backstop assignment correction.
+    const holmanAssignFences = await loadActiveFenceSet("holman", "assignment");
 
     for (const v of holmanVehicles) {
       const vehicleNumber = v.holmanVehicleNumber?.toString() || v.clientVehicleNumber?.toString() || v.vehicleNumber?.toString();
@@ -612,6 +626,7 @@ class HolmanVehicleSyncService {
         holmanAssignedStatusCd: v.assignedStatus || v.assignedStatusCode || null,
       };
 
+      const holmanFenced = holmanAssignFences.has(toCanonical(vehicleNumber) || "");
       await db
         .insert(holmanVehiclesCache)
         .values(cacheData)
@@ -620,6 +635,14 @@ class HolmanVehicleSyncService {
           set: {
             ...cacheData,
             district: sql`${holmanVehiclesCache.district}`,
+            // Write-fence (#b): preserve the backstop-written tech (id + name)
+            // until the fence is verified/expires; do not overwrite from this pull.
+            ...(holmanFenced
+              ? {
+                  holmanTechAssigned: sql`${holmanVehiclesCache.holmanTechAssigned}`,
+                  holmanTechName: sql`${holmanVehiclesCache.holmanTechName}`,
+                }
+              : {}),
             updatedAt: now,
           },
         });

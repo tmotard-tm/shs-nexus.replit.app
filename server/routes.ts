@@ -11179,6 +11179,62 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Tier-3 backstop EXECUTOR kick (#6 leased, bounded, resumable). Leases a
+  // bounded batch of materialized reconciliation_items for a run and applies
+  // them downstream (Holman/WMS/AMS) + mirrors caches + stamps write-fences.
+  // Developer-only: this is the ONLY admin path that triggers REAL tier-3
+  // downstream writes, so it enforces the strictest RBAC + audits requestedBy.
+  app.post("/api/admin/reconciliation/runs/:runId/kick", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can kick a reconciliation run" });
+      }
+      const runId = String(req.params.runId);
+      const rawBatch = req.body?.batchSize;
+      const batchSize = rawBatch === undefined || rawBatch === null ? undefined : Number(rawBatch);
+      const { runExecutorKick } = await import("./fleet-reconciliation/executor");
+      const result = await runExecutorKick(runId, {
+        leaseOwner: `kick:${currentUser.username}:${Date.now()}`,
+        requestedBy: currentUser.username,
+        batchSize,
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error kicking reconciliation run:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Tier-3 backstop VERIFIER sweep (#5b bulk landing-verification + repair).
+  // Confirms verification_pending / external_applied_cache_pending writes landed
+  // live (Holman 202≠applied, clobbered WMS), repairs the cache when the cache tx
+  // had failed, lifts write-fences, and runs the AMS +24h/+36h overnight-batch
+  // verification (#10/#17). Bulk by design — one live pull per touched system.
+  // Developer-only; safe to re-run (resumable, idempotent transitions).
+  app.post("/api/admin/reconciliation/runs/:runId/verify", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can verify a reconciliation run" });
+      }
+      const runId = String(req.params.runId);
+      const num = (v: any) => (v === undefined || v === null || v === "" ? undefined : Number(v));
+      const { runVerifierSweep } = await import("./fleet-reconciliation/verifier");
+      const result = await runVerifierSweep(runId, {
+        requestedBy: currentUser.username,
+        verifyGraceMs: num(req.body?.verifyGraceMs),
+        amsWindowMs: num(req.body?.amsWindowMs),
+        amsEscalateMs: num(req.body?.amsEscalateMs),
+        limit: num(req.body?.limit),
+      });
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error verifying reconciliation run:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Force-refresh tpms_tech_profiles from the live TPMS API for specific (or all) enterprise IDs
   app.post("/api/admin/tpms-tech-profiles/refresh", requireAuth, async (req: any, res) => {
     try {
@@ -11188,7 +11244,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       const { getTpmsApiService } = await import("./tpms-api-service");
-      const { tpmsCachedAssignments, tpmsTechProfiles } = await import("@shared/schema");
+      const { tpmsTechProfiles } = await import("@shared/schema");
       const { isNotNull } = await import("drizzle-orm");
 
       const tpmsApi = getTpmsApiService();
@@ -11200,9 +11256,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (Array.isArray(bodyIds) && bodyIds.length > 0) {
         enterpriseIds = bodyIds.map((id: any) => String(id).trim().toUpperCase()).filter(Boolean);
       } else {
-        const cacheRows = await db.select({ enterpriseId: tpmsCachedAssignments.enterpriseId })
-          .from(tpmsCachedAssignments)
-          .where(isNotNull(tpmsCachedAssignments.enterpriseId));
+        // [T007 migration] Enumerate the refresh set from tpms_tech_profiles (the live roster
+        // this endpoint populates) instead of the retired tpms_cached_assignments cache —
+        // self-bootstrapping off the table it maintains.
+        const cacheRows = await db.select({ enterpriseId: tpmsTechProfiles.enterpriseId })
+          .from(tpmsTechProfiles)
+          .where(isNotNull(tpmsTechProfiles.enterpriseId));
         enterpriseIds = [...new Set(
           cacheRows.map((r: any) => (r.enterpriseId || "").trim().toUpperCase()).filter(Boolean)
         )];
@@ -20455,13 +20514,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           TRIM(t.first_name) AS "tpmsFirstName",
           TRIM(t.last_name) AS "tpmsLastName",
           t.district_no AS "tpmsDistrict",
-          t.contact_no AS "tpmsContact",
+          t.mobile_phone AS "tpmsContact",
           t.email AS "tpmsEmail"
         FROM holman_vehicles_cache hvc
-        LEFT JOIN tpms_cached_assignments t
-          ON LTRIM(t.truck_no, '0') = LTRIM(hvc.holman_vehicle_number, '0')
+        -- [T007 migration] Joined against tpms_tech_profiles (live-synced roster) instead of the
+        -- retired tpms_cached_assignments cache. Column map: contact_no→mobile_phone,
+        -- last_success_at→updated_at. TRIM both sides so space-padded TPMS truck#s still match.
+        LEFT JOIN tpms_tech_profiles t
+          ON LTRIM(TRIM(t.truck_no), '0') = LTRIM(TRIM(hvc.holman_vehicle_number), '0')
         WHERE hvc.out_of_service_date IS NULL
-        ORDER BY hvc.holman_vehicle_number, t.last_success_at DESC NULLS LAST
+        ORDER BY hvc.holman_vehicle_number, t.updated_at DESC NULLS LAST
       `);
 
       const vehicles = vehicleRows.rows as any[];

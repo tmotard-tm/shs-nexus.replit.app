@@ -11696,7 +11696,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   
   // Background scheduler: Refresh Tech Data from Snowflake TPMS_EXTRACT daily at 7:30 AM ET
   
-  async function scheduledTechDataRefresh() {
+  async function scheduledTechDataRefresh(opts?: { isStartup?: boolean }) {
     console.log(`[Tech Data Scheduler] Starting Snowflake tech data refresh at ${new Date().toISOString()}`);
 
     // Refresh the in-process TPMS_EXTRACT snapshot first so the rest of this
@@ -12292,6 +12292,53 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     } catch (error: any) {
       console.error("[Tech Data Scheduler] Error refreshing tech data:", error.message);
     }
+
+    // ── Tier-3 AIMS backstop reconciler — MATERIALIZE-ONLY (T006) ─────────────
+    // Queue the nightly reconciliation proposals into reconciliation_runs/items
+    // (the durable state machine). This performs NO external writes and does NOT
+    // kick the executor — steady-state corrections are applied only by the
+    // admin-triggered, user-gated executor (#6/#8). The materializer runs its own
+    // G0 (extract freshness) / G1 (row-count floor) short-circuit and G2 (volume
+    // circuit-breaker) HARD-HALT *before* any item is inserted, so a stuck/empty
+    // AIMS extract or an implausibly large drift halts + alerts instead of
+    // queueing. Authority freshness reads AIMS_TRUCK_INFO directly (independent of
+    // the TPMS snapshot above), so this is intentionally NOT gated on snapshotOk.
+    // Skipped on startup: the nightly schedule is the steady-state cadence, and we
+    // avoid a full live WMS/AMS/Holman pull on every autoscale cold-start.
+    if (!opts?.isStartup) {
+      try {
+        const { materialize } = await import("./fleet-reconciliation/materializer");
+        const recon = await materialize({
+          kind: "nightly",
+          requestedBy: "nightly-scheduler",
+          onPhase: (m) => console.log(`[Reconciliation Backstop] ${m}`),
+        });
+        if (recon.halted) {
+          // Not silent: a halt (stale/empty extract or drift over the 30% guard)
+          // must be visible. The run row also persists alertMessage (#1/#2).
+          console.error(
+            `[Reconciliation Backstop] ALERT — nightly run HALTED (${recon.haltReason}). ` +
+              `runId=${recon.runId} acceptedFileDate=${recon.acceptedFileDate} ` +
+              `g0=${JSON.stringify(recon.gates.g0)} g1=${JSON.stringify(recon.gates.g1)} ` +
+              `g2=${JSON.stringify(recon.gates.g2)} proposed=${recon.proposedWriteTotal}`,
+          );
+        } else {
+          console.log(
+            `[Reconciliation Backstop] nightly materialize complete: runId=${recon.runId} ` +
+              `acceptedFileDate=${recon.acceptedFileDate} proposed=${recon.proposedWriteTotal} ` +
+              `queued=${recon.itemsQueued} flagged=${recon.itemsFlagged} ` +
+              `awaitingBatch=${recon.itemsAwaitingBatch} lifecycleFlags=${recon.lifecycleFlags} ` +
+              `contestedFlags=${recon.contestedFlags} (${recon.elapsedMs}ms). ` +
+              `Materialize-only — executor NOT kicked (user-gated #6/#8).`,
+          );
+        }
+      } catch (reconErr: any) {
+        console.error(
+          "[Reconciliation Backstop] nightly materialize failed (continuing):",
+          reconErr?.message || reconErr,
+        );
+      }
+    }
   }
   
   // Background scheduler: Refresh Snowflake Assigned status daily at 7:30 AM ET
@@ -12743,8 +12790,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   
   setTimeout(() => {
     console.log(`[Tech Data Scheduler] Initializing daily Snowflake tech data scheduler (7:30 AM ET)`);
-    // Run once on startup
-    scheduledTechDataRefresh();
+    // Run once on startup (reconciler materialize skipped on startup — nightly only)
+    scheduledTechDataRefresh({ isStartup: true });
     // Then schedule for 7:30 AM ET daily (30 sec after assigned sync)
     scheduleNextTechDataRefresh();
   }, 10000); // Start 2 seconds after Assigned scheduler

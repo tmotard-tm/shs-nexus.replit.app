@@ -1,10 +1,12 @@
 /**
  * End-to-end regression test for the vehicle 61385 / jcasti0 prod incident.
  *
- * Hits the real dev Postgres. Seeds the pre-incident state across all four
- * TPMS cache tables + tech_vehicle_assignments, calls writeThroughCaches with
- * Holman timed out, then asserts each of the five required tables reflects
- * the new tech immediately (no waiting on bulk sync). Cleans up after itself.
+ * Hits the real dev Postgres. Seeds the pre-incident state across the TPMS
+ * cache tables + tech_vehicle_assignments, calls writeThroughCaches with
+ * Holman timed out, then asserts each authoritative table reflects the new
+ * tech immediately (no waiting on bulk sync). The legacy tpms_cached_assignments
+ * cache is frozen (FREEZE_TPMS_CACHE_WRITES), so write-through must NOT mutate
+ * it — the board now reads tpms_tech_profiles. Cleans up after itself.
  *
  * Uses test-only enterprise IDs / truck numbers prefixed with `_t184_` so a
  * failed run cannot stomp on real fleet data.
@@ -48,7 +50,7 @@ async function cleanup() {
 before(cleanup);
 after(cleanup);
 
-test("vehicle 61385 prod regression: assign over previous holder w/ Holman timeout updates all 5 tables immediately", async () => {
+test("vehicle 61385 prod regression: assign over previous holder w/ Holman timeout updates authoritative tables immediately (legacy cache frozen)", async () => {
   // ── Seed pre-incident state ───────────────────────────────────────────────
   // Previous holder owns the truck across all four TPMS caches.
   await db.insert(tpmsCachedAssignments).values([
@@ -119,30 +121,17 @@ test("vehicle 61385 prod regression: assign over previous holder w/ Holman timeo
   assert.ok(finalLog[0]?.completedAt instanceof Date, "fleet_operation_log.completed_at must be set after write-through");
   await db.delete(fleetOperationLog).where(eq(fleetOperationLog.id, logRow.id));
 
-  // ── Assertions: every required table reflects new tech immediately ────────
+  // ── Assertions: every authoritative surface reflects new tech immediately ──
 
-  // 1. tpms_cached_assignments — enterprise-id row for new tech
+  // 1. tpms_cached_assignments is FROZEN (FREEZE_TPMS_CACHE_WRITES). The legacy
+  //    cache is no longer a write target — the board reads tpms_tech_profiles.
+  //    Regression guard: write-through must NOT create a legacy cache row for
+  //    the new tech (and must not resurrect the retired write path).
   const newEnt = await db.select().from(tpmsCachedAssignments)
     .where(eq(tpmsCachedAssignments.lookupKey, NEW_TECH));
-  assert.equal(newEnt.length, 1, "new tech enterprise-id row must exist");
-  assert.equal(newEnt[0].truckNo, TRUCK_PADDED);
-  assert.equal(newEnt[0].enterpriseId, NEW_TECH);
-  assert.equal(newEnt[0].status, "live");
+  assert.equal(newEnt.length, 0, "frozen legacy cache must NOT gain a new-tech row");
 
-  // 1b. tpms_cached_assignments — both truck-keyed variants point at new tech
-  const truckPaddedRow = await db.select().from(tpmsCachedAssignments)
-    .where(eq(tpmsCachedAssignments.lookupKey, TRUCK_PADDED));
-  assert.equal(truckPaddedRow[0]?.enterpriseId, NEW_TECH, "padded truck row must point at new tech");
-  const truckCanonRow = await db.select().from(tpmsCachedAssignments)
-    .where(eq(tpmsCachedAssignments.lookupKey, TRUCK));
-  assert.equal(truckCanonRow[0]?.enterpriseId, NEW_TECH, "canonical truck row must point at new tech");
-
-  // 1c. Previous holder no longer claims the truck
-  const prevEnt = await db.select().from(tpmsCachedAssignments)
-    .where(eq(tpmsCachedAssignments.lookupKey, PREV_TECH));
-  assert.equal(prevEnt[0]?.truckNo, null, "previous holder enterprise row must be cleared");
-
-  // 2. tpms_last_known_truck_tech — points at new tech
+  // 2. tpms_last_known_truck_tech — points at new tech (authoritative)
   const lk = await db.select().from(tpmsLastKnownTruckTech)
     .where(eq(tpmsLastKnownTruckTech.truckNo, TRUCK_PADDED));
   assert.equal(lk[0]?.enterpriseId, NEW_TECH);
@@ -465,8 +454,11 @@ test("atomicity: when write-through transaction fails, fleet log status does NOT
   // We force the tx to fail by passing a fleetOpLogId that violates the FK
   // constraint on fleet_operation_log. The cache writes inside the same tx
   // must roll back, and the log row (which never existed) must remain absent.
-  // Force-abort approach: lookup_key is varchar(50). Use a 60-char ldap so the
-  // tpms_cached_assignments INSERT fails, aborting the entire transaction.
+  // Force-abort approach: use a 60-char ldap that overflows a varchar column so
+  // the entire transaction aborts. tpms_cached_assignments is frozen
+  // (FREEZE_TPMS_CACHE_WRITES), so the overflow now lands on the
+  // tpms_last_known_truck_tech enterprise_id varchar(20) insert — still inside
+  // the same tx, so atomicity/rollback is exercised exactly the same way.
   const ATOMIC_TECH = "_t184_atomic_overflow_" + "x".repeat(40); // > 50 chars
   const ATOMIC_TRUCK = "_t184";
   await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, ATOMIC_TECH));

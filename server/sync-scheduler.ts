@@ -5,6 +5,7 @@ import { queueItems, amsVehiclesCache, externalWatermarkState, fleetOperationLog
 import { rentalImports } from '@shared/fleet-scope-schema';
 import { eq, and, isNotNull, desc, gte, sql } from 'drizzle-orm';
 import { toCanonical } from './vehicle-number-utils';
+import { loadActiveFenceSet } from './fleet-reconciliation/fences';
 import { getInitialToolsTaskStatus, TOOLS_OWNER } from './byov-utils';
 import { storage } from './storage';
 import { createOffboardingQueueTasks } from './create-offboarding-tasks-service';
@@ -750,6 +751,8 @@ async function checkAndRunAmsPoll(): Promise<void> {
     const pollTime = new Date();
     let upserted = 0;
     let flagged = 0;
+    // Write-fence (#b): preserve in-flight backstop AMS assignment corrections.
+    const amsAssignFences = await loadActiveFenceSet("ams", "assignment");
 
     for (const tech of techs) {
       try {
@@ -767,6 +770,7 @@ async function checkAndRunAmsPoll(): Promise<void> {
         const prevTech = prevCache[0]?.amsAssignedLdap ?? null;
         const prevStatus = prevCache[0]?.amsTruckStatusId ?? null;
         const vehicleNumber = (tech.VehicleNumber || tech.vehicleNumber || '').trim();
+        const amsFenced = amsAssignFences.has(toCanonical(vehicleNumber) || "");
 
         const newTech = (tech.Tech || tech.LdapId || '').trim() || null;
         const rawStatus = tech.Status ?? tech.status ?? null;
@@ -790,7 +794,10 @@ async function checkAndRunAmsPoll(): Promise<void> {
         }).onConflictDoUpdate({
           target: amsVehiclesCache.vin,
           set: {
-            amsAssignedLdap: newTech,
+            // Write-fence (#b): preserve the backstop-written tech while a
+            // correction for this truck is in flight (omit amsAssignedLdap so the
+            // existing cached value is kept) until the fence is verified/expires.
+            ...(amsFenced ? {} : { amsAssignedLdap: newTech }),
             amsTruckStatusId: isNaN(amsStatusCode as number) ? null : amsStatusCode,
             amsTruckStatusLabel: tech.StatusLabel || tech.TruckStatusLabel || null,
             rawResponse: tech,
@@ -804,7 +811,9 @@ async function checkAndRunAmsPoll(): Promise<void> {
         // Flag external change if tech or status changed and no Nexus op explains it
         const techChanged = newTech !== prevTech;
         const statusChanged = amsStatusCode !== prevStatus;
-        if ((techChanged || statusChanged) && prevCache.length > 0) {
+        // Write-fence (#b): a fenced truck's "tech change" is the backstop's own
+        // in-flight correction landing in live AMS — not an external change.
+        if ((techChanged || statusChanged) && prevCache.length > 0 && !amsFenced) {
           const lookupTruck = vehicleNumber || '';
           const hasPending = lookupTruck ? await hasPendingNexusOp(lookupTruck) : false;
           if (!hasPending) {

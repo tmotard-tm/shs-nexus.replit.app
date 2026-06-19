@@ -138,15 +138,56 @@ async function fetchToken(): Promise<{ token: string; url: string; status: numbe
   return { token, url, status: res.status, rawExcerpt };
 }
 
-/** Return cached token, refreshing if expired */
+/**
+ * In-flight token refresh, shared so a bounded-concurrency backfill batch does
+ * not stampede the auth gateway with parallel logins when the cached token
+ * expires mid-run (#15 refresh mutex).
+ */
+let tokenRefreshPromise: Promise<string> | null = null;
+
+/** Return cached token, refreshing if expired (single-flight via mutex) */
 async function getToken(): Promise<string> {
   if (cachedToken && Date.now() < tokenExpiresAt) {
     return cachedToken;
   }
-  const { token } = await fetchToken();
-  cachedToken = token;
-  tokenExpiresAt = Date.now() + TOKEN_TTL_MS;
-  return token;
+  if (tokenRefreshPromise) {
+    return tokenRefreshPromise;
+  }
+  const p = (async () => {
+    const { token } = await fetchToken();
+    cachedToken = token;
+    tokenExpiresAt = Date.now() + TOKEN_TTL_MS;
+    return token;
+  })();
+  tokenRefreshPromise = p;
+  try {
+    return await p;
+  } finally {
+    tokenRefreshPromise = null;
+  }
+}
+
+/**
+ * Bucket a WMS/NetSuite error so the tier-3 backstop executor can react
+ * correctly (#15): "auth" → re-auth + resume (NOT a write failure); "throttle"
+ * → hold off + back off + resume from checkpoint (#5c); "data" → real failure
+ * (audit + flag, no blind retry).
+ */
+function classifyWmsError(status: number, message: string): "auth" | "throttle" | "data" {
+  if (status === 401 || status === 403) return "auth";
+  const m = (message || "").toLowerCase();
+  if (
+    status === 429 ||
+    m.includes("governance") ||
+    m.includes("rate limit") ||
+    m.includes("request limit") ||
+    m.includes("sss_request_limit") ||
+    m.includes("concurrent request") ||
+    m.includes("too many requests")
+  ) {
+    return "throttle";
+  }
+  return "data";
 }
 
 interface ApiFetchOpts {
@@ -171,8 +212,9 @@ async function apiFetch(path: string, opts: ApiFetchOpts = {}, retry = true): Pr
     body: opts.body,
   });
 
-  // On 401, invalidate cache and retry once
-  if (res.status === 401 && retry) {
+  // On 401/403 (expired/invalid token), invalidate cache and retry once (#15
+  // reactive re-auth). A single reactive re-auth is NOT a write failure.
+  if ((res.status === 401 || res.status === 403) && retry) {
     cachedToken = null;
     tokenExpiresAt = 0;
     return apiFetch(path, opts, false);
@@ -190,6 +232,7 @@ async function apiFetch(path: string, opts: ApiFetchOpts = {}, retry = true): Pr
     );
     err.status = res.status;
     err.wmsMessage = message;
+    err.wmsErrorBucket = classifyWmsError(res.status, message);
     throw err;
   }
 

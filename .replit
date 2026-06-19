@@ -91,6 +91,18 @@ args = "cache-alignment-unit"
 task = "workflow.run"
 args = "cache-alignment-integration"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "dryrun-golden"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "materialize-smoke"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "materialize-slice"
+
 [[workflows.workflow]]
 name = "Start application"
 author = "agent"
@@ -121,6 +133,39 @@ isValidation = true
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx --test tests/vehicle-61385-integration.test.ts"
+
+[[workflows.workflow]]
+name = "dryrun-golden"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "DRYRUN_OUT=/tmp/dryrun-golden.json npx tsx server/fleet-reconciliation/_dryrun.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "materialize-smoke"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx server/fleet-reconciliation/_materialize.ts --kind=nightly"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "materialize-slice"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx server/fleet-reconciliation/_materialize.ts --kind=dry_run --only=021776,021659,023988,021315,021772,021769,061111,842002,088264"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 integrations = ["javascript_mem_db:1.0.0", "javascript_database:1.0.0", "javascript_log_in_with_replit:1.0.0", "javascript_auth_all_persistance:1.0.0", "javascript_sendgrid:1.0.0", "javascript_object_storage:1.0.0", "javascript_openai:1.0.0", "javascript_gemini:1.0.0"]

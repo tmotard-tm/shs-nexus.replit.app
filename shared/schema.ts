@@ -2118,6 +2118,12 @@ export const fleetOperationLog = pgTable("fleet_operation_log", {
   holmanMessage: text("holman_message"),
   amsStatus: text("ams_status").default("pending"),
   amsMessage: text("ams_message"),
+  // WMS leg added for the tier-3 reconciliation backstop. Defaults to "skipped"
+  // because existing live assign/unassign paths do not touch WMS until it is
+  // explicitly wired into the orchestrator (T005). The orchestrator sets this
+  // per-operation via the generic per-system result map.
+  wmsStatus: text("wms_status").default("skipped"),
+  wmsMessage: text("wms_message"),
   requestedBy: text("requested_by"),
   notes: text("notes"),
   source: text("source"),
@@ -2337,6 +2343,300 @@ export const insertOperationEventSchema = createInsertSchema(operationEvents).om
 });
 export type OperationEvent = typeof operationEvents.$inferSelect;
 export type InsertOperationEvent = z.infer<typeof insertOperationEventSchema>;
+
+// ===============================================================
+// Tier-3 Reconciliation Backstop (T004)
+// Self-healing nightly reconciler that drives tech<->truck ASSIGNMENT
+// (and WMS cost-center) corrections across WMS / AMS / Holman from the
+// AIMS extract + live TPMS /techinfo authority. This is a SEPARATE
+// substrate from operation_events (which stays the tier-2 live-op retry
+// path) because it carries run-level gates (G0/G1/G2), canary approval,
+// kill switch, leases, before-images and verification state.
+// ===============================================================
+
+// --- Reconciliation runs: one row per reconciler invocation ---
+// kind:    'dry_run' | 'canary' | 'backfill' | 'nightly'
+// status:  'pending' | 'running' | 'halted' | 'completed' | 'killed' | 'failed'
+export const reconciliationRuns = pgTable("reconciliation_runs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull(),
+  status: text("status").notNull().default("pending"),
+  // The AIMS extract this run is anchored to (the FILE_DATE that passed G0).
+  acceptedFileDate: date("accepted_file_date"),
+  // Run-level gate results (#2/#1): { g0:{pass,reason}, g1:{...}, g2:{...} }.
+  gates: jsonb("gates"),
+  // Proposed/applied/skipped/failed counts keyed by outcome + by leg.
+  totals: jsonb("totals"),
+  // G2 (30% volume circuit-breaker) is enforced by default. ONLY a supervised
+  // backfill may bypass it, and only with an approver + a verified canary run.
+  g2Exempt: boolean("g2_exempt").notNull().default(false),
+  g2ExemptReason: text("g2_exempt_reason"),
+  canaryRunId: varchar("canary_run_id"), // the canary run that gated a backfill
+  batchSize: integer("batch_size"),       // tunable writes-per-batch (#6)
+  killSwitch: boolean("kill_switch").notNull().default(false),
+  alertMessage: text("alert_message"),    // populated on HALT so it is not silent
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  requestedBy: text("requested_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  startedAt: timestamp("started_at"),
+  finishedAt: timestamp("finished_at"),
+  // Set by the verification step when a CANARY run's writes are confirmed
+  // landed (#8). A backfill may bypass G2 ONLY against a canary whose
+  // verifiedAt is set — a merely-materialized canary (status='completed', no
+  // writes yet) must NOT authorize a large backfill.
+  verifiedAt: timestamp("verified_at"),
+}, (table) => {
+  return {
+    kindIdx: index("recon_runs_kind_idx").on(table.kind),
+    statusIdx: index("recon_runs_status_idx").on(table.status),
+    createdIdx: index("recon_runs_created_idx").on(table.createdAt),
+  };
+});
+
+export const insertReconciliationRunSchema = createInsertSchema(reconciliationRuns).omit({
+  id: true,
+  createdAt: true,
+});
+export type ReconciliationRun = typeof reconciliationRuns.$inferSelect;
+export type InsertReconciliationRun = z.infer<typeof insertReconciliationRunSchema>;
+
+// --- Reconciliation items: the resumable, leased per-leg write queue ---
+// One row per proposed per-leg write. This is a durable state machine.
+// system:  'wms' | 'ams' | 'holman'
+// field:   'assignment' | 'cost_center'
+// ruleId:  the #20 truth-table outcome (e.g. WMS_ASSIGN, HOLMAN_GHOST_CLEAR)
+// status (state machine):
+//   active/in-flight: 'queued' | 'applying' | 'external_applied_cache_pending'
+//                     | 'retry_scheduled' | 'awaiting_batch'
+//   terminal:         'applied' | 'verified' | 'skipped' | 'held'
+//                     | 'flagged' | 'failed' | 'exhausted'
+// errorBucket: 'auth' | 'throttle' | 'data'  (#15)
+export const reconciliationItems = pgTable("reconciliation_items", {
+  id: serial("id").primaryKey(),
+  runId: varchar("run_id").notNull(),
+  system: text("system").notNull(),
+  ruleId: text("rule_id").notNull(),
+  action: text("action").notNull(), // 'assign' | 'clear' | 'cost_center'
+  field: text("field").notNull(),
+  truckCanonical: text("truck_canonical").notNull(),
+  truckNumber: text("truck_number"),
+  desiredEnterpriseId: text("desired_enterprise_id"),
+  desiredValue: text("desired_value"),       // cost-center value, '^null^', etc.
+  expectedBeforeValue: text("expected_before_value"),
+  // Idempotency key = system + action + truck + desiredEnterpriseId (#6, W5).
+  idempotencyKey: text("idempotency_key").notNull(),
+  status: text("status").notNull().default("queued"),
+  attempts: integer("attempts").notNull().default(0),
+  errorBucket: text("error_bucket"),
+  lastError: text("last_error"),
+  beforeImageId: integer("before_image_id"),
+  // Write-ordering timestamps (external-write -> cache-write -> verify; #a).
+  externalAppliedAt: timestamp("external_applied_at"),
+  cacheAppliedAt: timestamp("cache_applied_at"),
+  verifiedAt: timestamp("verified_at"),
+  // Scheduling / backoff (#5c rate-limit hold-off).
+  retryAfterAt: timestamp("retry_after_at"),
+  nextAttemptAt: timestamp("next_attempt_at"),
+  // Cooperative lease so only one worker touches an item at a time (#6).
+  leaseOwner: text("lease_owner"),
+  leaseUntil: timestamp("lease_until"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    runIdx: index("recon_items_run_idx").on(table.runId),
+    statusIdx: index("recon_items_status_idx").on(table.status),
+    systemIdx: index("recon_items_system_idx").on(table.system),
+    truckIdx: index("recon_items_truck_idx").on(table.truckCanonical),
+    nextAttemptIdx: index("recon_items_next_attempt_idx").on(table.nextAttemptAt),
+    // Idempotency within a run: re-materializing / re-kicking never double-inserts.
+    runIdempUq: uniqueIndex("recon_items_run_idemp_uq").on(table.runId, table.idempotencyKey),
+    // Cross-run guard: only one IN-FLIGHT item per logical target at a time, so a
+    // nightly run cannot start a second write while a backfill item is mid-flight.
+    // Partial over active statuses only -> future legit re-corrections are allowed.
+    activeIdempUq: uniqueIndex("recon_items_active_idemp_uq")
+      .on(table.idempotencyKey)
+      .where(sql`${table.status} in ('queued','applying','external_applied_cache_pending','retry_scheduled','awaiting_batch')`),
+    // Stronger W5 guard: at most ONE active item per LOGICAL TARGET
+    // {system, truck, field} regardless of desired value. idempotencyKey embeds
+    // `desired`, so it alone lets an authority change (desired X->Y) create two
+    // coexisting active corrections for the same field. This index forbids that;
+    // the retained row is reconciled by the executor's W1 live re-confirm.
+    // (assignment vs cost_center are different `field` values -> both may be
+    // active on the same truck, which is correct.)
+    activeTargetUq: uniqueIndex("recon_items_active_target_uq")
+      .on(table.system, table.truckCanonical, table.field)
+      .where(sql`${table.status} in ('queued','applying','external_applied_cache_pending','retry_scheduled','awaiting_batch')`),
+  };
+});
+
+export const insertReconciliationItemSchema = createInsertSchema(reconciliationItems).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ReconciliationItem = typeof reconciliationItems.$inferSelect;
+export type InsertReconciliationItem = z.infer<typeof insertReconciliationItemSchema>;
+
+// --- Before-images: persisted BEFORE every write; drives reversal (#7) ---
+// 90-day retention (tunable prune). old_value is jsonb so it can hold the full
+// Holman clientData blob for an exact reversal.
+export const reconciliationBeforeImages = pgTable("reconciliation_before_images", {
+  id: serial("id").primaryKey(),
+  runId: varchar("run_id").notNull(),
+  itemId: integer("item_id"),
+  system: text("system").notNull(),
+  field: text("field").notNull(),
+  truckCanonical: text("truck_canonical").notNull(),
+  truckNumber: text("truck_number"),
+  oldValue: jsonb("old_value"),
+  newValue: jsonb("new_value"),
+  reason: text("reason"),
+  reverted: boolean("reverted").notNull().default(false),
+  revertedAt: timestamp("reverted_at"),
+  revertedBy: text("reverted_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    runIdx: index("recon_bimg_run_idx").on(table.runId),
+    itemIdx: index("recon_bimg_item_idx").on(table.itemId),
+    truckIdx: index("recon_bimg_truck_idx").on(table.truckCanonical),
+    createdIdx: index("recon_bimg_created_idx").on(table.createdAt),
+  };
+});
+
+export const insertReconciliationBeforeImageSchema = createInsertSchema(reconciliationBeforeImages).omit({
+  id: true,
+  createdAt: true,
+});
+export type ReconciliationBeforeImage = typeof reconciliationBeforeImages.$inferSelect;
+export type InsertReconciliationBeforeImage = z.infer<typeof insertReconciliationBeforeImageSchema>;
+
+// --- AMS in-flight stamps: CROSS-run, keyed by truck (#17) ---
+// AMS unassigns propagate via an overnight TPMS batch file. While inside the
+// propagation window we suppress re-proposing AND re-counting the truck so it
+// neither churns night-to-night nor double-counts toward the G2 ceiling.
+export const amsInflightStamps = pgTable("ams_inflight_stamps", {
+  truckCanonical: varchar("truck_canonical").primaryKey(),
+  truckNumber: text("truck_number"),
+  submittedToAmsAt: timestamp("submitted_to_ams_at").notNull(),
+  reason: text("reason"),
+  lastSeenDivergedAt: timestamp("last_seen_diverged_at"),
+  escalatedAt: timestamp("escalated_at"),
+  resolvedAt: timestamp("resolved_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    submittedIdx: index("ams_inflight_submitted_idx").on(table.submittedToAmsAt),
+    resolvedIdx: index("ams_inflight_resolved_idx").on(table.resolvedAt),
+  };
+});
+
+export const insertAmsInflightStampSchema = createInsertSchema(amsInflightStamps).omit({
+  createdAt: true,
+  updatedAt: true,
+});
+export type AmsInflightStamp = typeof amsInflightStamps.$inferSelect;
+export type InsertAmsInflightStamp = z.infer<typeof insertAmsInflightStampSchema>;
+
+// --- Holman lifecycle review flags: persistent (#4, L2 write-hold) ---
+// A truck TPMS-active but Holman Sold/OOS goes on a FULL write-hold across
+// every leg until a USER resolves the flag. One OPEN flag per truck.
+export const holmanLifecycleFlags = pgTable("holman_lifecycle_flags", {
+  id: serial("id").primaryKey(),
+  truckCanonical: text("truck_canonical").notNull(),
+  truckNumber: text("truck_number"),
+  reason: text("reason"),
+  holmanStatus: text("holman_status"),
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
+  owner: text("owner"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    truckIdx: index("holman_lifecycle_truck_idx").on(table.truckCanonical),
+    resolvedIdx: index("holman_lifecycle_resolved_idx").on(table.resolvedAt),
+    openUq: uniqueIndex("holman_lifecycle_open_uq")
+      .on(table.truckCanonical)
+      .where(sql`${table.resolvedAt} is null`),
+  };
+});
+
+export const insertHolmanLifecycleFlagSchema = createInsertSchema(holmanLifecycleFlags).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type HolmanLifecycleFlag = typeof holmanLifecycleFlags.$inferSelect;
+export type InsertHolmanLifecycleFlag = z.infer<typeof insertHolmanLifecycleFlagSchema>;
+
+// --- Contested-authority flags: persistent (#11, L3 hold) ---
+// AIMS owner cannot be confirmed against live /techinfo -> write NOTHING on any
+// leg + flag. One OPEN flag per truck.
+export const contestedFlags = pgTable("contested_flags", {
+  id: serial("id").primaryKey(),
+  truckCanonical: text("truck_canonical").notNull(),
+  truckNumber: text("truck_number"),
+  reason: text("reason"),
+  aimsOwner: text("aims_owner"),
+  liveHolder: text("live_holder"),
+  firstSeen: timestamp("first_seen").defaultNow().notNull(),
+  lastSeen: timestamp("last_seen").defaultNow().notNull(),
+  resolvedAt: timestamp("resolved_at"),
+  resolvedBy: text("resolved_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    truckIdx: index("contested_truck_idx").on(table.truckCanonical),
+    resolvedIdx: index("contested_resolved_idx").on(table.resolvedAt),
+    openUq: uniqueIndex("contested_open_uq")
+      .on(table.truckCanonical)
+      .where(sql`${table.resolvedAt} is null`),
+  };
+});
+
+export const insertContestedFlagSchema = createInsertSchema(contestedFlags).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ContestedFlag = typeof contestedFlags.$inferSelect;
+export type InsertContestedFlag = z.infer<typeof insertContestedFlagSchema>;
+
+// --- Write fences: generic field-freeze so nightly sync can't clobber a
+// backstop write before it is verified (#b). Keyed {system, truck, field}. ---
+export const reconciliationWriteFences = pgTable("reconciliation_write_fences", {
+  id: serial("id").primaryKey(),
+  system: text("system").notNull(),
+  truckCanonical: text("truck_canonical").notNull(),
+  field: text("field").notNull(), // 'assignment' | 'cost_center'
+  expectedValue: text("expected_value"), // value the backstop wrote; sync must keep
+  runId: varchar("run_id"),
+  expiresAt: timestamp("expires_at"),   // fence lifetime
+  verifiedAt: timestamp("verified_at"), // set when bulk-verify confirms (lifts early)
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    truckIdx: index("recon_fence_truck_idx").on(table.truckCanonical),
+    expiresIdx: index("recon_fence_expires_idx").on(table.expiresAt),
+    targetUq: uniqueIndex("recon_fence_target_uq").on(table.system, table.truckCanonical, table.field),
+  };
+});
+
+export const insertReconciliationWriteFenceSchema = createInsertSchema(reconciliationWriteFences).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+export type ReconciliationWriteFence = typeof reconciliationWriteFences.$inferSelect;
+export type InsertReconciliationWriteFence = z.infer<typeof insertReconciliationWriteFenceSchema>;
 
 // ===============================
 // Bulk Fix Runs (Alignment Dashboard)

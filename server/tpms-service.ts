@@ -2,7 +2,8 @@ import { storage } from './storage';
 import type { InsertTpmsCachedAssignment } from '@shared/schema';
 import { toCanonical, normalizeEnterpriseId } from './vehicle-number-utils';
 import { db } from './db';
-import { tpmsTechProfiles } from '@shared/schema';
+import { sql } from 'drizzle-orm';
+import { tpmsTechProfiles, tpmsLastKnownTruckTech } from '@shared/schema';
 
 interface TPMSToken {
   token: string;
@@ -296,6 +297,9 @@ class TPMSService {
     }
   }
 
+  // [T007 DEPRECATED] Legacy reader of tpms_cached_assignments. No longer called —
+  // lookupByTruckNumber now reads tpms_tech_profiles via getTruckTechFromProfiles().
+  // Kept temporarily; remove in the T007 phase-3 schema cleanup once writers are retired.
   // Get cached data by truck number
   async getCachedByTruckNo(truckNo: string): Promise<CachedTechInfo | null> {
     const cached = await storage.getTpmsCachedAssignmentByTruckNo(truckNo);
@@ -339,26 +343,105 @@ class TPMSService {
     };
   }
 
-  // NOTE: The TPMS API has no truck-number lookup endpoint — /techinfo/{id} only accepts
-  // an LDAP/Enterprise ID. Truck number lookups are cache-only (populated via Enterprise ID
-  // lookups and the fleet sync that calls techsupdatedafter).
+  // [T007 migration] Truck→tech lookups resolve against tpms_tech_profiles (the FRESH TPMS
+  // roster synced in prod every few hours), with a guarded fallback to tpms_last_known_truck_tech
+  // (persists the last tech seen on a truck even after it drops off the live roster). The legacy
+  // tpms_cached_assignments path (getCachedByTruckNo) is retired here — its prod refresh is
+  // disabled and went stale. Matching is CANONICAL (toCanonical = trim + strip leading zeros) so
+  // padded/unpadded numbers align. The TPMS API itself has no truck-number lookup endpoint
+  // (/techinfo/{id} only accepts an LDAP/Enterprise ID), so this remains a local-roster read.
+  private async getTruckTechFromProfiles(truckNo: string): Promise<CachedTechInfo | null> {
+    const canon = toCanonical(truckNo);
+    if (!canon) return null;
+
+    // Tier 1: live-synced tech roster; most-recently-updated row wins.
+    const [profile] = await db
+      .select({
+        enterpriseId: tpmsTechProfiles.enterpriseId,
+        techId: tpmsTechProfiles.techId,
+        firstName: tpmsTechProfiles.firstName,
+        lastName: tpmsTechProfiles.lastName,
+        districtNo: tpmsTechProfiles.districtNo,
+        techManagerLdapId: tpmsTechProfiles.techManagerLdapId,
+        mobilePhone: tpmsTechProfiles.mobilePhone,
+        email: tpmsTechProfiles.email,
+        truckNo: tpmsTechProfiles.truckNo,
+        updatedAt: tpmsTechProfiles.updatedAt,
+      })
+      .from(tpmsTechProfiles)
+      .where(sql`ltrim(trim(${tpmsTechProfiles.truckNo}), '0') = ${canon}`)
+      .orderBy(sql`${tpmsTechProfiles.updatedAt} desc nulls last`)
+      .limit(1);
+
+    if (profile && profile.enterpriseId) {
+      const cacheAge = profile.updatedAt
+        ? Math.round((Date.now() - new Date(profile.updatedAt).getTime()) / (1000 * 60 * 60))
+        : undefined;
+      return {
+        techInfo: {
+          ldapId: profile.enterpriseId,
+          firstName: profile.firstName || '',
+          lastName: profile.lastName || '',
+          techId: profile.techId || '',
+          districtNo: profile.districtNo || '',
+          techManagerLdapId: profile.techManagerLdapId || '',
+          truckNo: profile.truckNo || '',
+          contactNo: profile.mobilePhone || undefined,
+          email: profile.email || undefined,
+        },
+        source: 'cached',
+        cacheAge,
+      };
+    }
+
+    // Tier 2 (guarded fallback): last-known tech for this truck; most-recently-seen row wins.
+    const [lastKnown] = await db
+      .select()
+      .from(tpmsLastKnownTruckTech)
+      .where(sql`ltrim(trim(${tpmsLastKnownTruckTech.truckNo}), '0') = ${canon}`)
+      .orderBy(sql`${tpmsLastKnownTruckTech.lastSeenAt} desc nulls last`)
+      .limit(1);
+
+    if (lastKnown && lastKnown.enterpriseId) {
+      const cacheAge = lastKnown.lastSeenAt
+        ? Math.round((Date.now() - new Date(lastKnown.lastSeenAt).getTime()) / (1000 * 60 * 60))
+        : undefined;
+      return {
+        techInfo: {
+          ldapId: lastKnown.enterpriseId,
+          firstName: lastKnown.firstName || '',
+          lastName: lastKnown.lastName || '',
+          techId: lastKnown.techId || '',
+          districtNo: lastKnown.districtNo || '',
+          techManagerLdapId: '',
+          truckNo: lastKnown.truckNo || '',
+          contactNo: lastKnown.mobilePhone || undefined,
+          email: lastKnown.email || undefined,
+        },
+        source: 'cached',
+        cacheAge,
+      };
+    }
+
+    return null;
+  }
+
   async lookupByTruckNumber(truckNumber: string): Promise<{ success: boolean; data?: TechInfoResponse; message?: string; source?: 'live' | 'cached' }> {
     const cleanTruckNo = truckNumber.trim();
-    console.log(`[TPMS] Looking up tech by truck number (cache-only): ${cleanTruckNo}`);
-    
-    const cached = await this.getCachedByTruckNo(cleanTruckNo);
+    console.log(`[TPMS] Looking up tech by truck number (tpms_tech_profiles): ${cleanTruckNo}`);
+
+    const cached = await this.getTruckTechFromProfiles(cleanTruckNo);
     if (cached) {
-      console.log(`[TPMS-Cache] Returning cached data for truck ${cleanTruckNo}`);
       return {
         success: true,
         data: cached.techInfo,
         source: 'cached',
       };
     }
-    
+
     return {
       success: false,
-      message: `No cached assignment found for truck ${cleanTruckNo}. The TPMS API does not support truck number lookup — populate cache via Enterprise ID first.`,
+      message: `No tech profile found for truck ${cleanTruckNo}. The TPMS API does not support truck-number lookup — populate the roster via Enterprise ID first.`,
     };
   }
 

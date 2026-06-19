@@ -6,6 +6,11 @@
  * (via the pure `decideTruck` oracle) so the report is assertable against the spec
  * and the T009 unit tests share the same decision code.
  *
+ * As of T004 the per-truck loop is the SHARED engine (`loadReconContext` +
+ * `iterateDecisions`) so the dry-run tally and the materializer persist from the
+ * exact same decision stream — they can never diverge. This module only TALLIES;
+ * it performs no writes.
+ *
  * Authority modes:
  *  - fast (default): AIMS snapshot owner (OWNERLDAPID alone) — reproduces the drift
  *    baseline without 1,651 live /techinfo calls.
@@ -14,36 +19,11 @@
  * Live confirmation is enforced unconditionally at WRITE time (W1) regardless of mode.
  */
 
-import { storage } from '../storage';
+import { loadReconContext, iterateDecisions } from './engine';
 import {
-  loadAimsSnapshot,
-  resolveTruckAuthority,
-  etYmd,
-  etDayDiff,
-  type AimsSnapshot,
-  type AimsTruckRow,
-} from './authority';
-import {
-  decideTruck,
-  checkFreshness,
-  checkRowCountFloors,
   evaluateVolumeGuard,
-  EXEMPT_MAX_AGE_DAYS,
-  FRESHNESS_WINDOW_DAYS,
-  GUARD_THRESHOLD_PCT,
-  type AuthorityInput,
   type LadderResult,
-  type Outcome,
-  type TruckDecision,
 } from './decision';
-import {
-  pullWms,
-  pullAms,
-  pullHolman,
-  type WmsPull,
-  type AmsPull,
-  type HolmanPull,
-} from './downstream';
 
 export interface DryRunOptions {
   liveConfirm?: boolean;
@@ -110,69 +90,23 @@ function tally(map: Record<string, number>, key: string): void {
   map[key] = (map[key] ?? 0) + 1;
 }
 
-function authorityFromAims(row: AimsTruckRow, expectedCostCenter: string | null): AuthorityInput {
-  if (row.ownerStatus === 'owner' && row.ownerEnterpriseId) {
-    return {
-      kind: 'owner',
-      enterpriseId: row.ownerEnterpriseId,
-      districtNo: row.district,
-      expectedCostCenter,
-    };
-  }
-  return { kind: 'vacant' };
-}
-
 export async function runDryRun(opts: DryRunOptions = {}): Promise<DryRunReport> {
   const start = Date.now();
-  const todayEt = etYmd();
-  const freshnessWindowDays = opts.freshnessWindowDays ?? FRESHNESS_WINDOW_DAYS;
-  const exemptMaxAgeDays = opts.exemptMaxAgeDays ?? EXEMPT_MAX_AGE_DAYS;
-  const guardThresholdPct = opts.guardThresholdPct ?? GUARD_THRESHOLD_PCT;
   const sampleSize = opts.sampleSize ?? 5;
   const mode: 'fast' | 'liveConfirm' = opts.liveConfirm ? 'liveConfirm' : 'fast';
-  const phase = (m: string) => opts.onPhase?.(`[+${Math.round((Date.now() - start) / 1000)}s] ${m}`);
 
-  // ---- Authority snapshot (read-only; AIMS max FILE_DATE -> DELIND=0) ----
-  phase('loading AIMS snapshot…');
-  const snapshot: AimsSnapshot = await loadAimsSnapshot({ withLocalChanges: true });
-  phase(`snapshot: ${snapshot.totalRows} rows @ ${snapshot.fileDate}, ${snapshot.activeRows} active, ${snapshot.byCanonicalTruck.size} distinct trucks`);
-
-  const ownerRows = snapshot.rows.filter((r) => r.ownerStatus === 'owner').length;
-  const vacantRows = snapshot.rows.length - ownerRows;
-
-  // ---- Level 0 gates (G0 freshness, G1 row-count) — evaluated before any truck ----
-  const g0 = checkFreshness(snapshot.fileDate || null, todayEt, freshnessWindowDays, etDayDiff);
-  const g1 = checkRowCountFloors(snapshot.totalRows, snapshot.activeRows);
-
-  // ---- Live downstream pulls (in parallel) ----
-  phase('pulling WMS + AMS + Holman (live)…');
-  const [wms, ams, holman]: [WmsPull, AmsPull, HolmanPull] = await Promise.all([
-    pullWms().then((r) => { phase(`WMS done: ${r.rawCount} rows`); return r; }),
-    pullAms().then((r) => { phase(`AMS done: ${r.rawCount} rows / ${r.pages} pages`); return r; }),
-    pullHolman().then((r) => { phase(`Holman done: ${r.rawCount} rows / ${r.pages} pages`); return r; }),
-  ]);
-
-  // ---- Completeness assertion (#19): getAllTrucks() must cover the active fleet ----
-  const completeness = {
-    wmsRawCount: wms.rawCount,
-    aimsActive: snapshot.activeRows,
-    ok: wms.rawCount >= snapshot.activeRows,
-    note:
-      wms.rawCount >= snapshot.activeRows
-        ? undefined
-        : `WMS getAllTrucks() returned ${wms.rawCount} < AIMS-active ${snapshot.activeRows} — possible silent pagination/truncation`,
-  };
-
-  // ---- Cost-center cache keyed by district (avoid per-truck DB calls) ----
-  const ccCache = new Map<string, string | null>();
-  async function expectedCostCenter(district: string | null): Promise<string | null> {
-    if (!district) return null;
-    if (ccCache.has(district)) return ccCache.get(district)!;
-    const rec = await storage.getDistrictCostCenter(district);
-    const cc = rec?.costCenter ?? null;
-    ccCache.set(district, cc);
-    return cc;
-  }
+  // ---- Shared context: snapshot, gates, live pulls, AMS stamps (#17) ----
+  // shortCircuitOnGateFail=false: the dry-run ALWAYS pulls downstream so its
+  // diagnostic counts are reported even when G0/G1 would halt a real run.
+  const ctx = await loadReconContext({
+    freshnessWindowDays: opts.freshnessWindowDays,
+    guardThresholdPct: opts.guardThresholdPct,
+    exemptMaxAgeDays: opts.exemptMaxAgeDays,
+    shortCircuitOnGateFail: false,
+    onPhase: opts.onPhase,
+    phaseStart: start,
+  });
+  const { snapshot, wms, ams, holman } = ctx;
 
   const ladder: Record<LadderResult, number> = {
     OUT_OF_SCOPE: 0,
@@ -205,75 +139,14 @@ export async function runDryRun(opts: DryRunOptions = {}): Promise<DryRunReport>
 
   let proposedWriteTotal = 0;
   let forcedReconcileCount = 0;
-  let liveConfirmsDone = 0;
 
-  // Iterate the deduped active fleet (one row per canonical truck).
-  for (const [canon, aims] of Array.from(snapshot.byCanonicalTruck.entries())) {
-    const w = wms.byTruck.get(canon) ?? null;
-    const a = ams.byTruck.get(canon) ?? null;
-    const h = holman.byTruck.get(canon) ?? null;
-
-    const cc = aims.ownerStatus === 'owner' ? await expectedCostCenter(aims.district) : null;
-
-    // Authority resolution
-    let authority: AuthorityInput;
-    if (
-      mode === 'liveConfirm' &&
-      (opts.liveConfirmLimit === undefined || liveConfirmsDone < opts.liveConfirmLimit)
-    ) {
-      liveConfirmsDone++;
-      const resolved = await resolveTruckAuthority(canon, snapshot, { nowEt: todayEt });
-      const r = resolved.authority;
-      if (r.kind === 'owner') {
-        authority = { kind: 'owner', enterpriseId: r.enterpriseId, districtNo: r.districtNo, expectedCostCenter: r.expectedCostCenter };
-      } else if (r.kind === 'contested') {
-        authority = { kind: 'contested', reason: r.reason };
-      } else {
-        authority = { kind: 'vacant' };
-      }
-    } else {
-      authority = authorityFromAims(aims, cc);
-    }
-
-    // Exemption (best-effort exemptAgeDays until T004 run-state)
-    const localChange = snapshot.localChangeByCanonical?.get(canon) ?? null;
-    const exempt = !!(localChange && snapshot.fileDate && localChange.getTime() > snapshot.extractInstant.getTime());
-
-    const lifecycleConflict = !!h?.lifecycleConflict;
-
-    const ownerX = authority.kind === 'owner' ? authority.enterpriseId : null;
-    const techOnOtherTruck =
-      ownerX != null && (() => {
-        const set = wms.techToTrucks.get(ownerX);
-        if (!set || set.size === 0) return false;
-        if (set.size > 1) return true;
-        return !set.has(canon);
-      })();
-
-    const decision: TruckDecision = decideTruck({
-      active: true, // snapshot already scoped to DELIND=0
-      exempt,
-      exemptAgeDays: 0,
-      exemptMaxAgeDays,
-      lifecycleConflict,
-      authority,
-      wms: {
-        present: !!w,
-        tech: w?.tech ?? null,
-        costCenter: w?.costCenter ?? null,
-        techOnOtherTruck,
-      },
-      ams: {
-        present: !!a,
-        tech: a?.tech ?? null,
-        inFlightWithinWindow: false,
-        inFlightElapsed: false,
-      },
-      holman: {
-        present: !!h,
-        tech: h?.tech ?? null,
-      },
-    });
+  for await (const dc of iterateDecisions(ctx, {
+    liveConfirm: opts.liveConfirm,
+    liveConfirmLimit: opts.liveConfirmLimit,
+    exemptMaxAgeDays: opts.exemptMaxAgeDays,
+    onPhase: opts.onPhase,
+  })) {
+    const { authority, decision, w, a, h, lifecycleConflict, techOnOtherTruck } = dc;
 
     ladder[decision.ladder]++;
     if (decision.forcedReconcile) forcedReconcileCount++;
@@ -282,10 +155,10 @@ export async function runDryRun(opts: DryRunOptions = {}): Promise<DryRunReport>
     for (const leg of [decision.legs.wms, decision.legs.wmsCostCenter, decision.legs.ams, decision.legs.holman]) {
       if (leg) {
         tally(outcomes, leg.outcome);
-        sample(leg.outcome, aims.truckNo);
+        sample(leg.outcome, dc.aims.truckNo);
       }
     }
-    sample(`LADDER_${decision.ladder}`, aims.truckNo);
+    sample(`LADDER_${decision.ladder}`, dc.aims.truckNo);
 
     // ---- Raw drift (ladder-independent, for baseline matching) ----
     if (lifecycleConflict) rawDrift.lifecycleConflict++;
@@ -316,35 +189,41 @@ export async function runDryRun(opts: DryRunOptions = {}): Promise<DryRunReport>
     }
   }
 
-  phase(`per-truck loop done: ${proposedWriteTotal} proposed writes, ${liveConfirmsDone} live-confirms`);
+  opts.onPhase?.(
+    `[+${Math.round((Date.now() - start) / 1000)}s] per-truck loop done: ${proposedWriteTotal} proposed writes`,
+  );
 
   // ---- G2 volume guard (after proposals computed) ----
-  const g2eval = evaluateVolumeGuard(proposedWriteTotal, snapshot.activeRows, guardThresholdPct);
-  const halted = !g0.ok || !g1.ok || g2eval.halt;
+  const g2eval = evaluateVolumeGuard(proposedWriteTotal, snapshot.activeRows, ctx.guardThresholdPct);
+  const halted = !ctx.g0.ok || !ctx.g1.ok || g2eval.halt;
 
   return {
     generatedAt: new Date().toISOString(),
-    todayEt,
+    todayEt: ctx.todayEt,
     mode,
     snapshot: {
       fileDate: snapshot.fileDate,
       totalRows: snapshot.totalRows,
       activeRows: snapshot.activeRows,
-      ownerRows,
-      vacantRows,
+      ownerRows: ctx.ownerRows,
+      vacantRows: ctx.vacantRows,
       distinctActiveTrucks: snapshot.byCanonicalTruck.size,
     },
     gates: {
-      g0,
-      g1,
+      g0: ctx.g0,
+      g1: ctx.g1,
       g2: { halt: g2eval.halt, ceiling: g2eval.ceiling, totalProposed: proposedWriteTotal },
     },
     downstream: {
-      wms: { rawCount: wms.rawCount, distinctCanonical: wms.distinctCanonical, duplicateCanonical: wms.duplicateCanonical },
-      ams: { rawCount: ams.rawCount, pages: ams.pages, truncated: ams.truncated },
-      holman: { rawCount: holman.rawCount, pages: holman.pages },
+      wms: {
+        rawCount: wms?.rawCount ?? 0,
+        distinctCanonical: wms?.distinctCanonical ?? 0,
+        duplicateCanonical: wms?.duplicateCanonical ?? 0,
+      },
+      ams: { rawCount: ams?.rawCount ?? 0, pages: ams?.pages ?? 0, truncated: ams?.truncated ?? false },
+      holman: { rawCount: holman?.rawCount ?? 0, pages: holman?.pages ?? 0 },
     },
-    completeness,
+    completeness: ctx.completeness,
     ladder,
     outcomes,
     rawDrift,
