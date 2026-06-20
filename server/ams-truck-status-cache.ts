@@ -3,6 +3,7 @@ import { db } from "./db";
 import { amsVehiclesCache } from "@shared/schema";
 import { isNotNull } from "drizzle-orm";
 import { resolveTruckStatusLabel } from "./ams-truck-status-labels";
+import { runUnderSnowflakeSyncLock } from "./fleetscope-snowflake-sync-lock";
 
 const amsApiService = new AmsApiService();
 
@@ -145,7 +146,16 @@ async function build(): Promise<Record<string, string | null>> {
           AND TRUCK_STATUS IS NOT NULL
           AND TRUCK_STATUS != ''
       `;
-    const sfRows = (await snowflakeService.executeQuery(sql)) as Array<{
+    // Serialize this REPLIT_ALL_VEHICLES read against the All Vehicles mirror
+    // refresh (which also reads REPLIT_ALL_VEHICLES) via the shared advisory
+    // lock. Only the Snowflake read is wrapped — the AMS API pagination above
+    // is a different system and stays outside the lock. If the lock can't be
+    // acquired the helper throws and the catch below just skips the supplement
+    // (the AMS-sourced statuses are still served).
+    const sfRows = (await runUnderSnowflakeSyncLock(
+      "ams-truck-status-supplement",
+      () => snowflakeService.executeQuery(sql),
+    )) as Array<{
       VIN: string;
       TRUCK_STATUS: string;
       OUT_OF_SERVICE_DATE: string | null;

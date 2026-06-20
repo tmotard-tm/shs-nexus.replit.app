@@ -703,6 +703,27 @@ CREATE TABLE IF NOT EXISTS "fs_decomm_messages" (
   "media_type" text
 );
 
+-- Task #487: Local mirror of the four Snowflake roster sources the All Vehicles
+-- page reads on every request (REPLIT_ALL_VEHICLES base, Holman_VEHICLES odometer
+-- + STATUS, UNASSIGNED_VEHICLES, TPMS_EXTRACT tech). Daily overwrite, never-growing.
+-- See server/fleet-scope-all-vehicles-mirror.ts for the refresh + read logic.
+CREATE TABLE IF NOT EXISTS "fs_all_vehicles_mirror" (
+  "id" bigserial PRIMARY KEY,
+  "record_kind" text NOT NULL,
+  "seq" integer NOT NULL,
+  "vehicle_number_key" text,
+  "base_row" jsonb,
+  "holman_odometer" jsonb,
+  "holman_status" text,
+  "tech_name" text,
+  "tech_no" text,
+  "tech_phone" text,
+  "unassigned_vehicle_number" text,
+  "synced_at" timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS "idx_fs_all_vehicles_mirror_kind_seq"
+  ON "fs_all_vehicles_mirror" ("record_kind", "seq");
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_url') THEN
     ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_url" text;

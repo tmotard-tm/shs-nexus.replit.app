@@ -536,6 +536,41 @@ async function runStartupBootstrap() {
     });
   });
 
+  // The port is now open, but `/` has NO handler yet: the SPA catch-all is only
+  // mounted after `await registerRoutes()` + setupVite()/serveStatic() finish
+  // below. A navigation that lands in that window would otherwise get Express's
+  // bare "Cannot GET /". In production the early express.static mount further
+  // down already serves index.html for `/` immediately, but in development the
+  // SPA is served exclusively by Vite's catch-all (mounted only after the slow
+  // registerRoutes returns). So, in development only, hold HTML navigations with
+  // a tiny auto-refreshing page until the real catch-all is live, then turn into
+  // a transparent passthrough (single flag check) once routes are ready.
+  let routesReady = false;
+  if (app.get("env") === "development") {
+    app.use((req, res, next) => {
+      if (routesReady) return next();
+      const accept = req.headers.accept || "";
+      const isHtmlNav =
+        req.method === "GET" &&
+        !req.path.startsWith("/api") &&
+        !req.path.startsWith("/@") &&        // vite client (/@vite, /@react-refresh, /@fs)
+        !req.path.startsWith("/src") &&      // vite source modules
+        !req.path.startsWith("/node_modules") &&
+        accept.includes("text/html");
+      if (!isHtmlNav) return next();
+      res
+        .status(503)
+        .type("html")
+        .send(
+          `<!doctype html><html><head><meta charset="utf-8">` +
+            `<meta http-equiv="refresh" content="2"><title>Starting…</title>` +
+            `<style>body{font-family:system-ui,sans-serif;margin:0;height:100vh;display:flex;` +
+            `align-items:center;justify-content:center;background:#0b0b0c;color:#e5e5e5}</style>` +
+            `</head><body><div>Starting the app… this page refreshes automatically.</div></body></html>`,
+        );
+    });
+  }
+
   // Register routes on the already-listening server. The heavy DB schema init
   // inside here now runs with the port already open, so it can never block the
   // health-check probe. Because the port is already open, a failure in this
@@ -580,6 +615,9 @@ async function runStartupBootstrap() {
     } else {
       serveStatic(app);
     }
+    // SPA catch-all is now mounted — turn the dev "starting…" holding page (above)
+    // into a transparent passthrough so `/` is served by Vite from here on.
+    routesReady = true;
     log("route registration + static wiring complete — `/` and all routes are live");
   } catch (err) {
     console.error("[Startup] FATAL: route/static wiring failed after port open — exiting:", err);

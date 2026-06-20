@@ -98,6 +98,16 @@ async function checkAndRunSync(): Promise<void> {
           console.error('[Scheduler] TPMS snapshot refresh failed (non-fatal):', snapErr?.message);
         }
 
+        // Task #487: refresh the All Vehicles roster mirror right after the TPMS
+        // snapshot so the All Vehicles page serves today's roster from local
+        // Postgres instead of live Snowflake. Non-fatal — keeps last-good on error.
+        try {
+          const { runMirrorRefreshIfNeeded } = await import('./fleet-scope-all-vehicles-mirror');
+          await runMirrorRefreshIfNeeded('scheduler');
+        } catch (mirrorErr: any) {
+          console.error('[Scheduler] All Vehicles mirror refresh failed (non-fatal):', mirrorErr?.message);
+        }
+
         console.log('[Scheduler] Starting vehicle odometer enrichment...');
         try {
           const odoResult = await syncService.enrichVehicleOdometerData();
@@ -1148,7 +1158,20 @@ export function startSyncScheduler(): void {
   }
 
   schedulerRunning = true;
-  
+
+  // Task #487: startup catch-up for the All Vehicles roster mirror (all envs).
+  // Offset 45s — distinct from the rental (15s) / offboarding (25s) / cost-center
+  // (35s) catch-ups and after the AMS/TPMS startup priming — so heavy Snowflake
+  // reads don't overlap at boot. Conditional (skips if already refreshed today,
+  // force-runs if empty) and advisory-lock guarded so only one instance rebuilds.
+  setTimeout(() => {
+    import('./fleet-scope-all-vehicles-mirror')
+      .then(({ runMirrorRefreshIfNeeded }) => runMirrorRefreshIfNeeded('startup_catchup'))
+      .catch(err =>
+        console.error('[Scheduler] Startup All Vehicles mirror catch-up error:', err?.message),
+      );
+  }, 45000);
+
   if (isDevelopment) {
     console.log('[Scheduler] Starting Snowflake sync scheduler (development mode - uses setInterval)');
     

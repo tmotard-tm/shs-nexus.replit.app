@@ -45,12 +45,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 const { hasSecurityQuestions } = await sqStatus.json();
                 setRequiresSecurityQuestions(!hasSecurityQuestions);
               } else {
-                console.warn("Security questions status check failed, prompting setup as fallback");
-                setRequiresSecurityQuestions(true);
+                // A transient failure of the status check must NOT pop the
+                // security-questions gate for a user who has already set them
+                // up — that caused the "random and often" re-prompts. Fail
+                // open: leave the gate down; the next successful check (or the
+                // next login, which carries requiresSecurityQuestions) will
+                // re-evaluate the real requirement.
+                console.warn("Security questions status check failed; leaving gate down (not prompting)");
+                setRequiresSecurityQuestions(false);
               }
             } catch (sqError) {
-              console.warn("Security questions status check error, prompting setup as fallback:", sqError);
-              setRequiresSecurityQuestions(true);
+              console.warn("Security questions status check error; leaving gate down (not prompting):", sqError);
+              setRequiresSecurityQuestions(false);
             }
           } else if (response.status === 401) {
             console.log("Session expired, clearing stored user — attempting SSO fallback");

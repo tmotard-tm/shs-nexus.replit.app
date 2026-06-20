@@ -44,3 +44,23 @@ leaks across restarts (pool is Neon WebSocket, `max:10`).
 
 **Caveat:** the skip-if-exists fast path also skips `CREATE INDEX IF NOT EXISTS`; if a partial first run ever
 left tables without indexes, heal indexes once manually (non-blocking — correctness is unaffected).
+
+# Dev-only "Cannot GET /" window after every restart
+
+The boot opens the TCP port FIRST (autoscale needs port 5000 fast), then runs `await registerRoutes()`,
+then mounts the SPA catch-all via `setupVite()` (dev) / `serveStatic()` (prod). Between port-open and that
+catch-all mounting, `/` has NO handler, so a navigation that lands in the window gets Express's bare
+**"Cannot GET /"**. Window is normally ~1s but stretches if any inline-awaited init stalls (e.g.
+`await initLogicalEntitiesSchema()` mid-`registerRoutes`, or a Neon WS hiccup).
+
+**Why it only shows in dev:** the early `express.static` mount that serves index.html for `/` immediately is
+gated to `app.get("env") !== "development"` — prod is covered, dev is not (dev's SPA is served *only* by
+Vite's catch-all, which mounts last). Symptom correlates with a restart (browser console shows a `502 Bad
+Gateway` right before).
+
+**Fix pattern (server/index.ts):** right after `server.listen()` resolves, in DEV only, register a
+`routesReady`-gated middleware that intercepts HTML navigations (GET, `Accept: text/html`, not `/api`,`/@`,
+`/src`,`/node_modules`) and returns a tiny `<meta http-equiv=refresh>` "starting…" page; flip
+`routesReady = true` immediately after `setupVite()`/`serveStatic()` so it becomes a transparent
+`next()` passthrough. Don't intercept in prod (early static already serves `/`, and intercepting would
+preempt it). Can't fix inside `server/vite.ts` — it's forbidden-to-modify.

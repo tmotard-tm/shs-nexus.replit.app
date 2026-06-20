@@ -8619,40 +8619,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[AllVehicles] Returning cached response (age: ${Math.round((Date.now() - allVehiclesCache.timestamp) / 1000)}s)`);
         return res.json(allVehiclesCache.data);
       }
-      // Include columns for vehicle details plus location data (GPS, AMS, TPMS)
-      const sql = `
-        SELECT 
-          VEHICLE_NUMBER,
-          VIN,
-          MAKE_NAME,
-          MODEL_NAME,
-          TRUCK_STATUS,
-          TRUCK_DISTRICT,
-          TPMS_ASSIGNED,
-          INTERIOR,
-          INVENTORY_PRODUCT_CATEGORY,
-          -- GPS location data
-          GPS_LATITUDE,
-          GPS_LONGITUDE,
-          GPS_LAST_UPDATE,
-          -- AMS location data
-          AMS_ZIP_LAT,
-          AMS_ZIP_LON,
-          AMS_CUR_ADDRESS,
-          AMS_CUR_CITY,
-          AMS_CUR_STATE,
-          AMS_LAST_UPDATE,
-          -- TPMS location data
-          LAST_TPMS_ZIP_LAT,
-          LAST_TPMS_ZIP_LON,
-          LAST_TPMS_ADDRESS,
-          LAST_TPMS_CITY,
-          LAST_TPMS_STATE,
-          LAST_TPMS_LAST_UPDATE
-        FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-        ORDER BY VEHICLE_NUMBER
-      `;
-      const data = await executeQuery(sql);
+      // Task #487: the four Snowflake roster sources the All Vehicles page used
+      // to read live on every request (REPLIT_ALL_VEHICLES base rows, Holman
+      // odometer by VIN, Holman STATUS, UNASSIGNED_VEHICLES, and TPMS_EXTRACT
+      // tech contacts) now come from a local Postgres mirror that is overwritten
+      // once a day. readAllVehiclesMirror() reconstructs the EXACT same inputs
+      // the merge/derivation logic below already consumes; all of that logic is
+      // unchanged. On an empty mirror (first boot) it falls back once to today's
+      // live aggregation and triggers a background refresh.
+      const { readAllVehiclesMirror } = await import("./fleet-scope-all-vehicles-mirror");
+      const mirror = await readAllVehiclesMirror({ getLiveTechnicianMap: getCachedTechnicianData });
+      const data = mirror.data;
+      console.log(`[AllVehicles] Roster source: ${mirror.source} — ${data.length} base rows`);
       
       // Helper function to normalize fleet vehicle numbers - extract digits and remove leading zeros
       const normalizeFleetId = (id: string): string => {
@@ -8683,61 +8661,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const fleetFinderVehicleInfoMap = await fetchFleetFinderVehicleInfo();
       console.log(`[AllVehicles] Fleet Finder vehicle info: ${fleetFinderVehicleInfoMap.size} vehicles with status info`);
       
-      // Fetch Holman odometer data - keyed by VIN since CLIENT_VEHICLE_NUMBER is NULL
-      interface HolmanOdometerData {
-        odometer: number | null;
-        odometerDate: string | null;
-        licensePlate: string | null;
-      }
-      const holmanOdometerByVin = new Map<string, HolmanOdometerData>();
-      try {
-        const holmanSql = `
-          SELECT 
-            VIN,
-            ODOMETER,
-            ODOMETER_DATE,
-            LICENSE_PLATE
-          FROM PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES
-          WHERE VIN IS NOT NULL AND ODOMETER IS NOT NULL
-        `;
-        const holmanData = await executeQuery<{ VIN: string; ODOMETER: number; ODOMETER_DATE: string; LICENSE_PLATE: string | null }>(holmanSql);
-        for (const row of holmanData) {
-          if (row.VIN) {
-            // Use VIN as key (uppercase and trimmed)
-            const vin = row.VIN.toString().trim().toUpperCase();
-            holmanOdometerByVin.set(vin, {
-              odometer: row.ODOMETER || null,
-              odometerDate: row.ODOMETER_DATE || null,
-              licensePlate: row.LICENSE_PLATE?.toString().trim() || null
-            });
-          }
-        }
-        console.log(`[AllVehicles] Holman data: ${holmanOdometerByVin.size} vehicles with odometer info (by VIN)`);
-      } catch (holmanError: any) {
-        console.error("[AllVehicles] Error fetching Holman odometer data:", holmanError.message);
-      }
-
-      // Fetch raw Holman STATUS string per vehicle (e.g. "Active", "Out of Service").
-      // Sourced live from the Snowflake Holman_VEHICLES table, keyed by HOLMAN_VEHICLE_NUMBER.
-      // This is independent of the status_code-derived "Managed by" tag below.
-      const holmanStatusByVehicle = new Map<string, string>();
-      try {
-        const statusSql = `
-          SELECT HOLMAN_VEHICLE_NUMBER, STATUS
-          FROM PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES
-          WHERE HOLMAN_VEHICLE_NUMBER IS NOT NULL
-        `;
-        const statusRows = await executeQuery<{ HOLMAN_VEHICLE_NUMBER: string; STATUS: string | null }>(statusSql);
-        for (const row of statusRows) {
-          if (!row.HOLMAN_VEHICLE_NUMBER || !row.STATUS) continue;
-          const digits = row.HOLMAN_VEHICLE_NUMBER.toString().replace(/\D/g, '');
-          const stripped = digits.replace(/^0+/, '') || '0';
-          holmanStatusByVehicle.set(stripped, row.STATUS.toString().trim());
-        }
-        console.log(`[AllVehicles] Holman status map: ${holmanStatusByVehicle.size} vehicles`);
-      } catch (statusErr: any) {
-        console.error("[AllVehicles] Error fetching Holman STATUS:", statusErr.message);
-      }
+      // Holman odometer (by VIN) and Holman STATUS (by stripped vehicle number)
+      // are reconstructed from the daily mirror (Task #487) instead of two live
+      // Snowflake reads. Same Map shapes the merge logic below already expects.
+      const holmanOdometerByVin = mirror.holmanOdometerByVin;
+      const holmanStatusByVehicle = mirror.holmanStatusByVehicle;
+      console.log(`[AllVehicles] Holman (from mirror): ${holmanOdometerByVin.size} odometer, ${holmanStatusByVehicle.size} status`);
 
       // Build set of Holman-managed vehicle numbers (status_code = 1 means active/managed by Holman)
       // Sourced from local holman_vehicles_cache PG table (mirrors Snowflake Holman_VEHICLES).
@@ -8956,11 +8885,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const oneMonthAgo = Date.now() - (30 * 24 * 60 * 60 * 1000);
       
       try {
-        const unassignedSql = `
-          SELECT VEHICLE_NUMBER 
-          FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES
-        `;
-        const unassignedVehicles = await executeQuery<{ VEHICLE_NUMBER: string }>(unassignedSql);
+        // Task #487: UNASSIGNED_VEHICLES served from the daily mirror (raw
+        // VEHICLE_NUMBER strings preserved) instead of a live Snowflake read.
+        const unassignedVehicles = mirror.unassignedVehicles;
         
         // Count unassigned vehicles that are NOT in PMF (other local parking locations)
         // Also exclude vehicles that are in the repair shop to avoid double-counting
@@ -9332,9 +9259,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return 'Undergoing repairs';
       };
       
-      // Use cached technician data (populated by scheduler on startup)
-      // This avoids querying Snowflake on every request
-      const technicianMap = getCachedTechnicianData();
+      // Technician contacts (name / number / phone) come from the daily mirror
+      // (Task #487), reconstructed by readAllVehiclesMirror() above. Same Map
+      // shape getCachedTechnicianData() provided for the fields consumed here.
+      const technicianMap = mirror.technicianMap;
       
       // Fetch vehicle maintenance costs from database
       const maintenanceCosts = await getDb().select().from(vehicleMaintenanceCosts);
@@ -9383,8 +9311,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // Create set of unassigned vehicle numbers (from UNASSIGNED_VEHICLES table - these are in storage)
       const unassignedVehicleSet = new Set<string>();
       try {
-        const unassignedSql = `SELECT VEHICLE_NUMBER FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES`;
-        const unassignedVehicles = await executeQuery<{ VEHICLE_NUMBER: string }>(unassignedSql);
+        // Task #487: UNASSIGNED_VEHICLES served from the daily mirror.
+        const unassignedVehicles = mirror.unassignedVehicles;
         for (const v of unassignedVehicles) {
           unassignedVehicleSet.add(normalizeFleetId(v.VEHICLE_NUMBER?.toString() || ''));
         }
@@ -9905,6 +9833,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       allVehiclesCache = { data: responseData, timestamp: Date.now() };
       res.json(responseData);
+      // Persist the fully-assembled payload (best-effort, non-blocking) so that
+      // a cold restart followed by a transient Neon drop on the first request
+      // can still serve last-good data instead of a blank 503 — see catch block.
+      void import("./fleet-scope-all-vehicles-mirror")
+        .then((m) => m.saveAllVehiclesResponseSnapshot(responseData))
+        .catch(() => {});
     } catch (error: any) {
       // This route is a heavy aggregator (Snowflake REPLIT_ALL_VEHICLES + many
       // Neon enrichment queries). Neon's serverless driver intermittently drops
@@ -9922,28 +9856,58 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         rawMsg.includes("Cannot set property message") ||
         rawMsg.includes("terminating connection due to administrator command") ||
         error?.code === "ECONNRESET";
-      // Only fall back to stale cache for transient DB/network drops, and only
-      // when the cached payload is still reasonably fresh. This keeps a single
-      // Neon WS blip from blanking the page without silently masking real bugs
-      // or serving arbitrarily old data during a prolonged outage.
-      const MAX_STALE_FALLBACK_MS = 15 * 60 * 1000; // 15 minutes
-      if (isTransientDbDrop && allVehiclesCache?.data) {
-        const ageMs = Date.now() - allVehiclesCache.timestamp;
-        const ageSec = Math.round(ageMs / 1000);
-        if (ageMs <= MAX_STALE_FALLBACK_MS) {
-          console.warn(
-            `[AllVehicles] Serving stale cache (age: ${ageSec}s) after transient Neon WS drop`,
-          );
-          return res.json({
-            ...allVehiclesCache.data,
-            stale: true,
-            staleAgeSec: ageSec,
-          });
+      // Two-tier last-good fallback for a single transient Neon WS drop:
+      //   1) the in-process payload cache (fast, but lost on restart)
+      //   2) a persisted response snapshot in Postgres (survives restart, so a
+      //      cold-start drop on the very first request still serves real data)
+      // A real (non-transient) error, or last-good that is too old, still
+      // surfaces — we never silently mask bugs or a prolonged outage.
+      const MAX_STALE_FALLBACK_MS = 15 * 60 * 1000; // in-memory: 15 minutes
+      const MAX_PERSISTED_FALLBACK_MS = 24 * 60 * 60 * 1000; // persisted: 24 hours
+
+      let persisted: { payload: any; builtAt: Date } | null = null;
+      if (isTransientDbDrop) {
+        try {
+          const { readAllVehiclesResponseSnapshot } = await import("./fleet-scope-all-vehicles-mirror");
+          persisted = await readAllVehiclesResponseSnapshot();
+        } catch (snapErr: any) {
+          console.warn("[AllVehicles] Persisted snapshot fallback unavailable:", snapErr?.message);
         }
-        console.warn(
-          `[AllVehicles] Stale cache too old (age: ${ageSec}s) — not serving fallback`,
-        );
       }
+
+      const { selectColdStartFallback } = await import("./fleet-scope-all-vehicles-mirror");
+      const choice = selectColdStartFallback({
+        isTransientDbDrop,
+        now: Date.now(),
+        inMemory: allVehiclesCache ? { timestamp: allVehiclesCache.timestamp } : null,
+        inMemoryMaxAgeMs: MAX_STALE_FALLBACK_MS,
+        persisted: persisted ? { builtAt: persisted.builtAt.getTime() } : null,
+        persistedMaxAgeMs: MAX_PERSISTED_FALLBACK_MS,
+      });
+
+      if (choice?.source === "memory" && allVehiclesCache?.data) {
+        console.warn(
+          `[AllVehicles] Serving in-memory stale cache (age: ${choice.staleAgeSec}s) after transient Neon WS drop`,
+        );
+        return res.json({
+          ...allVehiclesCache.data,
+          stale: true,
+          staleAgeSec: choice.staleAgeSec,
+          staleSource: "memory",
+        });
+      }
+      if (choice?.source === "persisted" && persisted?.payload) {
+        console.warn(
+          `[AllVehicles] Serving persisted last-good snapshot (age: ${choice.staleAgeSec}s) after transient Neon WS drop`,
+        );
+        return res.json({
+          ...persisted.payload,
+          stale: true,
+          staleAgeSec: choice.staleAgeSec,
+          staleSource: "persisted-snapshot",
+        });
+      }
+
       res.status(isTransientDbDrop ? 503 : 500).json({
         message:
           isTransientDbDrop

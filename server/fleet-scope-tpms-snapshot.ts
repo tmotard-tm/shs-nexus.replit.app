@@ -23,6 +23,7 @@
 
 import { executeQuery } from './fleet-scope-snowflake';
 import { isSnowflakeConfigured } from './snowflake-service';
+import { runUnderSnowflakeSyncLock } from './fleetscope-snowflake-sync-lock';
 
 export interface TpmsSnapshotEntry {
   enterpriseId: string;
@@ -121,25 +122,32 @@ export async function refreshSnapshot(
     }
     try {
       console.log(`[TPMS-Snapshot] Refresh started (triggeredBy=${triggeredBy})`);
-      const rows = await executeQuery<{
-        ENTERPRISE_ID: string | null;
-        FULL_NAME: string | null;
-        MOBILEPHONENUMBER: string | number | null;
-        MANAGER_ENT_ID: string | null;
-        MANAGER_NAME: string | null;
-        PRIMARYZIP: string | null;
-        DISTRICT: string | null;
-      }>(`
-        SELECT ENTERPRISE_ID,
-               FULL_NAME,
-               MOBILEPHONENUMBER,
-               MANAGER_ENT_ID,
-               MANAGER_NAME,
-               PRIMARYZIP,
-               DISTRICT
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
-        WHERE ENTERPRISE_ID IS NOT NULL
-      `);
+      // Serialize this TPMS_EXTRACT read against the All Vehicles mirror refresh
+      // (which also reads TPMS_EXTRACT) via the shared advisory lock so two
+      // heavy reads of the same table can't run concurrently. If the lock can't
+      // be acquired in time the helper throws, and the catch below keeps the
+      // previous snapshot — exactly the "skip, keep last-good" behaviour we want.
+      const rows = await runUnderSnowflakeSyncLock('tpms-snapshot', () =>
+        executeQuery<{
+          ENTERPRISE_ID: string | null;
+          FULL_NAME: string | null;
+          MOBILEPHONENUMBER: string | number | null;
+          MANAGER_ENT_ID: string | null;
+          MANAGER_NAME: string | null;
+          PRIMARYZIP: string | null;
+          DISTRICT: string | null;
+        }>(`
+          SELECT ENTERPRISE_ID,
+                 FULL_NAME,
+                 MOBILEPHONENUMBER,
+                 MANAGER_ENT_ID,
+                 MANAGER_NAME,
+                 PRIMARYZIP,
+                 DISTRICT
+          FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+          WHERE ENTERPRISE_ID IS NOT NULL
+        `),
+      );
 
       // Collect the manager-LDAP set from the RAW (pre-dedup) rows so the
       // isManager flag exactly matches the SQL EXISTS semantics used by the
