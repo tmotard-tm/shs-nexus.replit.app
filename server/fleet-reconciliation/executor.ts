@@ -706,19 +706,27 @@ async function buildParams(
     }
     // updateTruck is a whole-record POST → source the current identity from the
     // live record so ONLY costCenter changes (never blank description, #3).
+    // NOTE: the WMS getTruck response does NOT carry a `locationId` field (it has
+    // id/internalId/externalId/locationType/isInactive). In the WMS engine the
+    // truck's `locationId` IS the padded truck number — identical to `name` — as
+    // proven by the live createTruck payloads (locationId: paddedVehicle) in the
+    // BYOV create flow. We therefore derive name/locationId from the truck number
+    // and use getTruck ONLY to preserve the current description verbatim and read
+    // the live active state.
     const { wmsEngineService } = await import("../wms-engine-service");
     const full: any = await wmsEngineService.getTruck(row.name).catch(() => null);
     if (!full) return { skip: true, reason: "WMS getTruck returned nothing (cost-center)", params: {} };
-    if (!full.name || !full.locationId) {
-      return { skip: true, reason: "WMS cost-center missing identity (name/locationId)", params: {} };
+    const wmsName = String(full.name || row.name);
+    if (!wmsName) {
+      return { skip: true, reason: "WMS cost-center missing identity (truck number)", params: {} };
     }
     return {
       params: {
         wmsTruckId: row.name,
         costCenter: item.desiredValue,
-        wmsName: full.name,
-        wmsLocationId: full.locationId,
-        wmsIsActive: full.isActive ?? !row.isInactive,
+        wmsName,
+        wmsLocationId: wmsName,
+        wmsIsActive: full.isInactive != null ? !full.isInactive : !row.isInactive,
         wmsDescription: full.description ?? "",
       },
     };
