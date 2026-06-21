@@ -708,6 +708,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   } catch (e: any) {
     console.error("[BYOV] Failed to init byov_drift_checks table:", e.message);
   }
+
+  // app_settings — idempotent table init. Backs the Reconciliation Admin
+  // "Automate" toggle (key 'reconciliation.autoApply'). Created here (not via
+  // drizzle-kit push) so a fresh deployed DB self-heals; getBooleanSetting()
+  // defaults the toggle OFF when the row/table is absent, so automation stays
+  // safely disabled until a developer turns it on.
+  try {
+    await withTimeout(db.execute(sql`
+      CREATE TABLE IF NOT EXISTS app_settings (
+        key text PRIMARY KEY,
+        value jsonb NOT NULL,
+        updated_at timestamp DEFAULT NOW() NOT NULL,
+        updated_by text
+      )
+    `), 20000, "app_settings init");
+    console.log("[AppSettings] app_settings table ready");
+  } catch (e: any) {
+    console.error("[AppSettings] Failed to init app_settings table:", e.message);
+  }
   })();
 
   // Mount WMS Engine routes at /api/wms/*
@@ -11231,6 +11250,124 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json(result);
     } catch (error: any) {
       console.error("Error verifying reconciliation run:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Developer-only: list recent reconciliation runs + per-run item-status
+  // aggregate counts so the Reconciliation Admin page can render meaningful
+  // Apply/Verify buttons. Read-only (no writes), so it is safe to poll.
+  app.get("/api/admin/reconciliation/runs", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can view reconciliation runs" });
+      }
+      const rawLimit = Number(req.query?.limit);
+      const limit = Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, Math.floor(rawLimit))) : 25;
+      const { reconciliationRuns, reconciliationItems } = await import("@shared/schema");
+
+      const runs = await db
+        .select()
+        .from(reconciliationRuns)
+        .orderBy(desc(reconciliationRuns.createdAt))
+        .limit(limit);
+
+      const runIds = runs.map((r: any) => r.id);
+      const countsByRun: Record<string, Record<string, number>> = {};
+      if (runIds.length > 0) {
+        const rows = await db
+          .select({
+            runId: reconciliationItems.runId,
+            status: reconciliationItems.status,
+            count: sql<number>`count(*)::int`,
+          })
+          .from(reconciliationItems)
+          .where(inArray(reconciliationItems.runId, runIds))
+          .groupBy(reconciliationItems.runId, reconciliationItems.status);
+        for (const row of rows as any[]) {
+          const r = (countsByRun[row.runId] ||= {});
+          r[row.status] = Number(row.count) || 0;
+        }
+      }
+
+      // active = still actionable by a kick; mirrors the executor's lease set.
+      const ACTIVE = new Set([
+        "queued", "applying", "external_applied_cache_pending", "retry_scheduled", "awaiting_batch",
+      ]);
+      const result = runs.map((run: any) => {
+        const byStatus = countsByRun[run.id] || {};
+        let total = 0, actionable = 0, verified = 0, applied = 0, failed = 0, flagged = 0, held = 0, skipped = 0;
+        for (const [st, nRaw] of Object.entries(byStatus)) {
+          const n = nRaw as number;
+          total += n;
+          if (ACTIVE.has(st)) actionable += n;
+          if (st === 'verified') verified += n;
+          if (st === 'applied') applied += n;
+          if (st === 'failed' || st === 'exhausted') failed += n;
+          if (st === 'flagged') flagged += n;
+          if (st === 'held') held += n;
+          if (st === 'skipped') skipped += n;
+        }
+        return {
+          ...run,
+          itemCounts: { total, actionable, verified, applied, failed, flagged, held, skipped, byStatus },
+        };
+      });
+
+      res.json({ runs: result });
+    } catch (error: any) {
+      console.error("Error listing reconciliation runs:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Developer-only: read the reconciliation auto-apply toggle. When ON, the
+  // nightly scheduler drains + verifies each materialized run with NO human gate.
+  app.get("/api/admin/reconciliation/automation", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can view reconciliation automation" });
+      }
+      const { appSettings } = await import("@shared/schema");
+      const [row] = await db
+        .select()
+        .from(appSettings)
+        .where(eq(appSettings.key, "reconciliation.autoApply"))
+        .limit(1);
+      res.json({
+        enabled: row ? row.value === true : false,
+        updatedAt: row?.updatedAt ?? null,
+        updatedBy: row?.updatedBy ?? null,
+      });
+    } catch (error: any) {
+      console.error("Error reading reconciliation automation:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Developer-only: flip the reconciliation auto-apply toggle. Turning this ON
+  // removes the human review gate — the nightly run will perform REAL Holman /
+  // WMS / AMS writes automatically. Defaults OFF.
+  app.put("/api/admin/reconciliation/automation", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can change reconciliation automation" });
+      }
+      const parsed = z.object({ enabled: z.boolean() }).safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: "Body must be { enabled: boolean }" });
+      }
+      const { setSetting } = await import("./app-settings");
+      await setSetting("reconciliation.autoApply", parsed.data.enabled, currentUser.username);
+      console.log(
+        `[Reconciliation Automation] autoApply set to ${parsed.data.enabled} by ${currentUser.username}`,
+      );
+      res.json({ enabled: parsed.data.enabled, updatedBy: currentUser.username, updatedAt: new Date().toISOString() });
+    } catch (error: any) {
+      console.error("Error updating reconciliation automation:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });

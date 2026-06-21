@@ -343,6 +343,20 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
             );
           })}
 
+          {user.role === 'developer' && (
+            <DropdownMenuItem asChild>
+              <Link
+                href="/reconciliation-admin"
+                onClick={handleNavClick}
+                className="flex items-center gap-3 cursor-pointer"
+                data-testid="link-nav-reconciliation-admin"
+              >
+                <Wrench className="h-4 w-4" />
+                Reconciliation Admin
+              </Link>
+            </DropdownMenuItem>
+          )}
+
           <DropdownMenuSeparator />
 
           {/* View as Role - Super Admin Only */}

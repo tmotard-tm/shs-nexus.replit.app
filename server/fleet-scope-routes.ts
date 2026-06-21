@@ -12292,9 +12292,48 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               `acceptedFileDate=${recon.acceptedFileDate} proposed=${recon.proposedWriteTotal} ` +
               `queued=${recon.itemsQueued} flagged=${recon.itemsFlagged} ` +
               `awaitingBatch=${recon.itemsAwaitingBatch} lifecycleFlags=${recon.lifecycleFlags} ` +
-              `contestedFlags=${recon.contestedFlags} (${recon.elapsedMs}ms). ` +
-              `Materialize-only — executor NOT kicked (user-gated #6/#8).`,
+              `contestedFlags=${recon.contestedFlags} (${recon.elapsedMs}ms).`,
           );
+
+          // ── Auto-apply (developer toggle 'reconciliation.autoApply', OFF by
+          // default) ───────────────────────────────────────────────────────
+          // When ON, drain the freshly-materialized run (bounded, resumable
+          // kicks) and run ONE verifier sweep — full automation with NO human
+          // gate, performing REAL Holman/WMS/AMS writes. Only reached for a
+          // NON-halted nightly materialize, and isolated in its own try/catch so
+          // a failure never breaks the rest of the scheduler. Each kick still
+          // honors the per-item kill switch, dry_run guard, and #20 invariants.
+          try {
+            const { getBooleanSetting } = await import("./app-settings");
+            const autoApply = await getBooleanSetting("reconciliation.autoApply", false);
+            if (autoApply) {
+              console.log(`[Reconciliation Backstop] auto-apply ON — draining runId=${recon.runId}`);
+              const { drainReconciliationRun } = await import("./fleet-reconciliation/executor");
+              const drain = await drainReconciliationRun(recon.runId, { requestedBy: "nightly-automation" });
+              console.log(
+                `[Reconciliation Backstop] auto-apply drain done: runId=${recon.runId} ` +
+                  `iterations=${drain.iterations} processed=${drain.processed} ` +
+                  `remainingActionable=${drain.remainingActionable} stopped=${drain.stoppedReason} ` +
+                  `outcomes=${JSON.stringify(drain.byOutcome)} throttled=${JSON.stringify(drain.throttledSystems)}`,
+              );
+              const { runVerifierSweep } = await import("./fleet-reconciliation/verifier");
+              const verify = await runVerifierSweep(recon.runId, { requestedBy: "nightly-automation" });
+              console.log(
+                `[Reconciliation Backstop] auto-apply verify done: runId=${recon.runId} ` +
+                  `scanned=${verify.scanned} outcomes=${JSON.stringify(verify.byOutcome)} ` +
+                  `pulled=${JSON.stringify(verify.pulled)}`,
+              );
+            } else {
+              console.log(
+                `[Reconciliation Backstop] auto-apply OFF — Materialize-only, executor NOT kicked (user-gated #6/#8).`,
+              );
+            }
+          } catch (autoErr: any) {
+            console.error(
+              "[Reconciliation Backstop] auto-apply failed (continuing):",
+              autoErr?.message || autoErr,
+            );
+          }
         }
       } catch (reconErr: any) {
         console.error(

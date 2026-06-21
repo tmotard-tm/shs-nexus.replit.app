@@ -29,3 +29,4 @@
 - [Security-questions fail-open](security-questions-fail-open.md) — client must NOT force the SQ prompt on a transient status-check failure; failing closed caused random re-prompts for already-enrolled users.
 - [dry_run holds active-target lock](dry-run-active-target-lock.md) — materialized dry_run items (status=queued) reserve the recon {system,truck,field} lock and silently block real canary/nightly/backfill writes; give them a non-active status.
 - [WMS cost-center update safety](wms-cost-center-update-safety.md) — getTruck/getAllTrucks expose only a 13-field projection (no locationId/isActive); derive identity from truck#; updateTruck merges (only costCenter changes), non-projected NetSuite fields are unobservable+irrelevant.
+- [Reconciliation auto-apply gate](reconciliation-auto-apply-gate.md) — Automate toggle must stay fail-safe OFF; Apply = real Holman/WMS/AMS writes; never auto-apply on materialize halt/startup; app_settings absence = OFF, not crash.

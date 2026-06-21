@@ -918,3 +918,107 @@ async function releaseToRetry(
     .where(and(eq(reconciliationItems.id, item.id), eq(reconciliationItems.leaseOwner, owner)));
   return "retry_scheduled";
 }
+
+// ---------------------------------------------------------------------------
+// Bounded auto-drain — the engine entrypoint for the nightly auto-apply toggle.
+// Repeatedly re-kicks a run (the SAME leased, resumable batch the manual
+// developer "Apply" button uses) until the run is fully applied or a safety cap
+// trips. It NEVER loops the HTTP endpoint, only the in-process kick, and is
+// hard-bounded (max iterations, max processed, stop-on-no-progress) so a
+// stuck / throttled / halted run can never hot-spin. All #20 truth-table
+// per-item invariants (W1 live re-confirm, idempotency/lease, kill switch,
+// dry_run guard) still apply inside each kick.
+// ---------------------------------------------------------------------------
+export interface DrainOptions {
+  requestedBy?: string;
+  leaseOwner?: string;
+  batchSize?: number;
+  maxIterations?: number;   // hard cap on kick loops (anti-spin)
+  maxProcessed?: number;    // hard cap on total items applied this drain
+  sleepMs?: number;         // pause between kicks
+}
+
+export interface DrainResult {
+  runId: string;
+  iterations: number;
+  processed: number;
+  byOutcome: Record<string, number>;
+  remainingActionable: number;
+  throttledSystems: string[];
+  stoppedReason: string;
+}
+
+const DRAIN_MAX_ITERATIONS = 25;
+const DRAIN_MAX_PROCESSED = 2000;
+const DRAIN_SLEEP_MS = 1500;
+
+export async function drainReconciliationRun(
+  runId: string,
+  opts: DrainOptions = {},
+): Promise<DrainResult> {
+  const maxIterations = Math.max(
+    1,
+    Math.min(DRAIN_MAX_ITERATIONS, opts.maxIterations ?? DRAIN_MAX_ITERATIONS),
+  );
+  const maxProcessed = Math.max(1, opts.maxProcessed ?? DRAIN_MAX_PROCESSED);
+  const sleepMs = Math.max(0, opts.sleepMs ?? DRAIN_SLEEP_MS);
+  const requestedBy = opts.requestedBy ?? "nightly-automation";
+  const leaseOwner = opts.leaseOwner ?? `drain:${requestedBy}:${Date.now()}`;
+
+  const byOutcome: Record<string, number> = {};
+  let iterations = 0;
+  let processed = 0;
+  let remainingActionable = 0;
+  let throttledSystems: string[] = [];
+  let stoppedReason = "drained";
+
+  while (iterations < maxIterations) {
+    const kick = await runExecutorKick(runId, {
+      leaseOwner,
+      requestedBy,
+      batchSize: opts.batchSize,
+    });
+    iterations += 1;
+    processed += kick.processed;
+    for (const [k, v] of Object.entries(kick.byOutcome)) {
+      byOutcome[k] = (byOutcome[k] ?? 0) + v;
+    }
+    remainingActionable = kick.remainingActionable;
+    throttledSystems = kick.throttledSystems;
+
+    if (remainingActionable <= 0) {
+      stoppedReason = "drained";
+      break;
+    }
+    if (processed >= maxProcessed) {
+      stoppedReason = "max_processed_cap";
+      break;
+    }
+    // No forward progress (nothing leased/applied) -> the run is halted, killed,
+    // or everything left is throttled / scheduled for later. Stop, don't spin.
+    if (kick.leased === 0 && kick.processed === 0) {
+      stoppedReason =
+        throttledSystems.length > 0
+          ? "all_throttled"
+          : kick.message
+            ? `stopped: ${kick.message}`
+            : "no_progress";
+      break;
+    }
+    if (sleepMs > 0) await sleep(sleepMs);
+  }
+
+  if (iterations >= maxIterations && remainingActionable > 0) {
+    stoppedReason = "max_iterations_cap";
+  }
+
+  return {
+    runId,
+    iterations,
+    processed,
+    byOutcome,
+    remainingActionable,
+    throttledSystems,
+    stoppedReason,
+  };
+}

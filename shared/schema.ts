@@ -2479,6 +2479,23 @@ export const insertReconciliationItemSchema = createInsertSchema(reconciliationI
 export type ReconciliationItem = typeof reconciliationItems.$inferSelect;
 export type InsertReconciliationItem = z.infer<typeof insertReconciliationItemSchema>;
 
+// --- Generic key/value app settings (feature flags / toggles) ------------
+// One row per setting key; `value` is jsonb so a setting may hold a boolean,
+// string, number, or small object. Used by the developer-gated reconciliation
+// auto-apply toggle under the key 'reconciliation.autoApply' (defaults OFF).
+export const appSettings = pgTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: jsonb("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  updatedBy: text("updated_by"),
+});
+
+export const insertAppSettingSchema = createInsertSchema(appSettings).omit({
+  updatedAt: true,
+});
+export type AppSetting = typeof appSettings.$inferSelect;
+export type InsertAppSetting = z.infer<typeof insertAppSettingSchema>;
+
 // --- Before-images: persisted BEFORE every write; drives reversal (#7) ---
 // 90-day retention (tunable prune). old_value is jsonb so it can hold the full
 // Holman clientData blob for an exact reversal.
