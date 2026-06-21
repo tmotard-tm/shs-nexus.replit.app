@@ -32,3 +32,33 @@ in the loop. The whole point of the gate is that automation is opt-in per enviro
 - The drain helper (`drainReconciliationRun`) loops the in-process executor kick
   with hard caps (iterations/processed/sleep) and stops on no-progress/throttle —
   do not replace it with an unbounded loop or HTTP self-calls.
+
+## Manual "Create a run now" trigger
+
+Runs are created ONLY by `materialize()`, which steady-state fires only in the
+7:30 AM ET nightly (skipped on startup). So a freshly-deployed/empty environment
+shows an empty runs table — the page/endpoints are fine, there is just nothing to
+Apply yet. The developer-only `POST /api/admin/reconciliation/materialize` lets a
+developer create a run on demand (button on the Reconciliation Admin page).
+
+**Rule:** a manual trigger uses `kind: 'nightly'` (RunKind has no `manual`) and is
+distinguished only by `requestedBy: 'manual:<username>'`. It must call the SAME
+`materialize()` with the SAME gates — never expose G2-bypass / scope / liveConfirm
+options to the request body.
+
+**Why:** the goal is "run the identical full nightly scan now," and materialize is
+read+propose only (real writes still gated behind per-run Apply/kick). Letting the
+body override gates would turn a convenience trigger into a way to bypass the
+circuit breakers.
+
+**How to apply:**
+- Safe to run concurrently with the nightly or a double-click: the button is
+  disabled while pending, and item-level `activeIdempUq` + `activeTargetUq` with
+  `onConflictDoNothing()` stop double-targeting the same {system,truck,field}.
+  A concurrent loser may report `proposedWriteTotal` > actually-inserted — expected,
+  not a bug. No advisory lock is taken (matches the nightly path); do not add one
+  just for this.
+- Keep it synchronous over HTTP like the existing kick/verify endpoints. Only
+  caveat is UX: a very long materialize can outlive a proxy/client timeout while
+  the server still finishes — tell users to Refresh the runs table before retrying
+  (no external writes happen during materialize, so a retry is harmless).

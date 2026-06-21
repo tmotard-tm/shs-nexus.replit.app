@@ -11372,6 +11372,41 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Developer-only: manually trigger a reconciliation MATERIALIZE on demand — the
+  // same read+propose step the 7:30 AM ET nightly runs, so a developer can create
+  // a fresh run between nightly cadences and then Apply/Verify it from the table.
+  // This performs NO external writes: it only reads Snowflake / Holman / WMS / AMS
+  // and stages proposals into reconciliation_runs/items. The real Holman/WMS/AMS
+  // writes still happen ONLY via the per-run Apply (kick). It runs the same
+  // G0 (extract freshness) / G1 (row-count floor) / G2 (volume circuit-breaker)
+  // gates and the activeIdempUq + activeTargetUq cross-run guards as the nightly,
+  // so a stale extract or oversized drift HALTS instead of queueing, and it cannot
+  // double-target a truck the nightly already queued. Synchronous like kick/verify.
+  app.post("/api/admin/reconciliation/materialize", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!currentUser || currentUser.role !== 'developer') {
+        return res.status(403).json({ message: "Only developer users can create a reconciliation run" });
+      }
+      const { materialize } = await import("./fleet-reconciliation/materializer");
+      const result = await materialize({
+        kind: "nightly",
+        requestedBy: `manual:${currentUser.username}`,
+        onPhase: (m) => console.log(`[Reconciliation Manual] ${m}`),
+      });
+      console.log(
+        `[Reconciliation Manual] materialize by ${currentUser.username}: runId=${result.runId} ` +
+          `halted=${result.halted}${result.haltReason ? ` (${result.haltReason})` : ""} ` +
+          `proposed=${result.proposedWriteTotal} queued=${result.itemsQueued} ` +
+          `flagged=${result.itemsFlagged} awaitingBatch=${result.itemsAwaitingBatch} (${result.elapsedMs}ms).`,
+      );
+      res.json(result);
+    } catch (error: any) {
+      console.error("Error creating reconciliation run:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Force-refresh tpms_tech_profiles from the live TPMS API for specific (or all) enterprise IDs
   app.post("/api/admin/tpms-tech-profiles/refresh", requireAuth, async (req: any, res) => {
     try {

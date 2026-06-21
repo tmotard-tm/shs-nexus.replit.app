@@ -38,6 +38,7 @@ import {
   CheckCircle2,
   RefreshCcw,
   Loader2,
+  PlusCircle,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -164,6 +165,30 @@ export default function ReconciliationAdmin() {
       toast({ title: "Failed to update automation", description: e.message, variant: "destructive" }),
   });
 
+  const createRunMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", "/api/admin/reconciliation/materialize", {});
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.halted) {
+        toast({
+          title: "Run created, but a safety gate stopped it",
+          description: `${data?.haltReason ?? "halted"} — nothing was queued or applied.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "Run created",
+          description: `Proposed ${data?.proposedWriteTotal ?? 0} · queued ${data?.itemsQueued ?? 0} · flagged ${data?.itemsFlagged ?? 0}. Review it below, then Apply.`,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/reconciliation/runs"] });
+    },
+    onError: (e: any) =>
+      toast({ title: "Could not create run", description: e.message, variant: "destructive" }),
+  });
+
   if (!isDeveloper) {
     return (
       <div className="flex items-center justify-center p-10">
@@ -267,22 +292,42 @@ export default function ReconciliationAdmin() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <CardTitle>Recent runs</CardTitle>
-              <CardDescription>The 25 most recent reconciliation runs.</CardDescription>
+              <CardDescription>
+                The 25 most recent reconciliation runs. Creating a run only proposes changes —
+                nothing is written until you Apply.
+              </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => runsQuery.refetch()}
-              disabled={runsQuery.isFetching}
-              data-testid="button-refresh-runs"
-            >
-              {runsQuery.isFetching ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCcw className="h-4 w-4" />
-              )}
-              <span className="ml-2">Refresh</span>
-            </Button>
+            <div className="flex items-center gap-2 shrink-0">
+              <Button
+                size="sm"
+                onClick={() => createRunMutation.mutate()}
+                disabled={createRunMutation.isPending}
+                data-testid="button-create-run"
+              >
+                {createRunMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <PlusCircle className="h-4 w-4" />
+                )}
+                <span className="ml-2">
+                  {createRunMutation.isPending ? "Creating…" : "Create a run now"}
+                </span>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => runsQuery.refetch()}
+                disabled={runsQuery.isFetching}
+                data-testid="button-refresh-runs"
+              >
+                {runsQuery.isFetching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCcw className="h-4 w-4" />
+                )}
+                <span className="ml-2">Refresh</span>
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -298,7 +343,8 @@ export default function ReconciliationAdmin() {
             </div>
           ) : runs.length === 0 ? (
             <div className="text-sm text-muted-foreground py-6 text-center" data-testid="text-no-runs">
-              No reconciliation runs yet.
+              No reconciliation runs yet. Click “Create a run now” above to generate one, or wait for
+              the 7:30&nbsp;AM&nbsp;ET nightly job.
             </div>
           ) : (
             <TooltipProvider>
