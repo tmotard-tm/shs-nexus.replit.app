@@ -352,6 +352,7 @@ async function syncLoaLeaves(
   }
 
   await enrichLoaLeavesVanDistrict();
+  await refreshLoaQueueItemVanDistrict();
 
   return { extensionWorkflowIds };
 }
@@ -362,7 +363,7 @@ async function syncLoaLeaves(
  * technician's truck and district as soon as they go on LOA, so the leave row
  * captured at sync time is often empty. This fills from durable tables instead.
  *
- *   van:      tpms_tech_profiles.truck_no  ->  all_techs.last_known_truck_lu
+ *   van:      tpms_tech_profiles.truck_no  ->  all_techs.truck_lu  ->  all_techs.last_known_truck_lu
  *   district: tpms_tech_profiles.district_no -> all_techs.district_no
  *
  * Fill-blank-only: the WHERE clause never touches a row that already has a value
@@ -379,6 +380,9 @@ async function enrichLoaLeavesVanDistrict(): Promise<void> {
           NULLIF((SELECT t.truck_no FROM "tpms_tech_profiles" t
                   WHERE upper(t.enterprise_id) = ids.eid
                     AND coalesce(t.truck_no, '') <> '' LIMIT 1), ''),
+          NULLIF((SELECT a.truck_lu FROM "all_techs" a
+                  WHERE upper(a.tech_racfid) = ids.eid
+                    AND coalesce(a.truck_lu, '') <> '' LIMIT 1), ''),
           NULLIF((SELECT a.last_known_truck_lu FROM "all_techs" a
                   WHERE upper(a.tech_racfid) = ids.eid
                     AND coalesce(a.last_known_truck_lu, '') <> '' LIMIT 1), '')
@@ -408,6 +412,86 @@ async function enrichLoaLeavesVanDistrict(): Promise<void> {
       AND (l."district" IS NULL OR l."district" = '')
       AND d.district IS NOT NULL AND d.district <> '';
   `);
+}
+
+/**
+ * Refresh embedded LOA queue-item JSON from the canonical `loa_leaves` row.
+ *
+ * The Assets/Fleet/Inventory LOA detail views render truck data from
+ * queue_items.data.tech.lastKnownTruck. Existing queue items were created before
+ * durable van/district enrichment ran, so their embedded JSON can stay blank
+ * even after loa_leaves is correct. Fill blank fields only.
+ */
+async function refreshLoaQueueItemVanDistrict(): Promise<number> {
+  const result = await db.execute(sql`
+    UPDATE "queue_items" q
+    SET
+      "data" = (
+        WITH base AS (
+          SELECT COALESCE(q."data"::jsonb, '{}'::jsonb) AS data_json
+        ),
+        with_truck AS (
+          SELECT CASE
+            WHEN COALESCE(base.data_json->'tech'->>'lastKnownTruck', '') = ''
+             AND COALESCE(l."van_number", '') <> ''
+            THEN jsonb_set(
+              base.data_json,
+              '{tech,lastKnownTruck}',
+              to_jsonb(l."van_number"::text),
+              true
+            )
+            ELSE base.data_json
+          END AS data_json
+          FROM base
+        ),
+        with_district AS (
+          SELECT CASE
+            WHEN COALESCE(with_truck.data_json->>'district', '') = ''
+             AND COALESCE(l."district", '') <> ''
+            THEN jsonb_set(
+              with_truck.data_json,
+              '{district}',
+              to_jsonb(l."district"::text),
+              true
+            )
+            ELSE with_truck.data_json
+          END AS data_json
+          FROM with_truck
+        )
+        SELECT CASE
+          WHEN COALESCE(with_district.data_json->'tech'->>'district', '') = ''
+           AND COALESCE(l."district", '') <> ''
+          THEN jsonb_set(
+            with_district.data_json,
+            '{tech,district}',
+            to_jsonb(l."district"::text),
+            true
+          )
+          ELSE with_district.data_json
+        END::text
+        FROM with_district
+      ),
+      "updated_at" = now()
+    FROM "loa_leaves" l
+    WHERE q."workflow_type" = ${WORKFLOW_TYPE}
+      AND q."workflow_id" = l."workflow_id"
+      AND (
+        (COALESCE(q."data"::jsonb->'tech'->>'lastKnownTruck', '') = ''
+          AND COALESCE(l."van_number", '') <> '')
+        OR (COALESCE(q."data"::jsonb->>'district', '') = ''
+          AND COALESCE(l."district", '') <> '')
+        OR (COALESCE(q."data"::jsonb->'tech'->>'district', '') = ''
+          AND COALESCE(l."district", '') <> '')
+      )
+    RETURNING q."id";
+  `);
+  const count = Array.isArray(result)
+    ? result.length
+    : ((result as any)?.rowCount ?? (result as any)?.rows?.length ?? 0);
+  if (count > 0) {
+    console.log(`[LoaRecovery] Refreshed van/district on ${count} LOA queue item(s).`);
+  }
+  return count;
 }
 
 /**
@@ -761,6 +845,7 @@ async function runLoaRecoverySyncInner(
       result.queueItemsCreated += created;
       if (created > 0) result.workflowsCreated += 1;
     }
+    await refreshLoaQueueItemVanDistrict();
 
     // 9. Auto-cancel: for any open workflow whose enterprise_id is NOT in the
     //    current qualifying set, cancel all of its open items.
@@ -844,9 +929,26 @@ async function createLoaRecoveryWorkflow(
   // login-ID placeholder (mirrors the COALESCE pattern used for loa_leaves).
   const realName = tpms?.fullName || null;
   const techName = realName || q.enterpriseId;
-  const lastKnownTruck = tpms?.truckLu || null;
   const phone = tpms?.mobilePhone || null;
   const primaryZip = tpms?.primaryZip || null;
+  let canonicalVan: string | null = null;
+  let canonicalDistrict: string | null = null;
+  try {
+    const [leave] = await db
+      .select({
+        vanNumber: loaLeaves.vanNumber,
+        district: loaLeaves.district,
+      })
+      .from(loaLeaves)
+      .where(eq(loaLeaves.workflowId, workflowId))
+      .limit(1);
+    canonicalVan = leave?.vanNumber || null;
+    canonicalDistrict = leave?.district || null;
+  } catch {
+    canonicalVan = null;
+    canonicalDistrict = null;
+  }
+  const lastKnownTruck = tpms?.truckLu || canonicalVan;
 
   // Best-effort address from all_techs (TPMS extract only has zip).
   let address: {
@@ -877,6 +979,7 @@ async function createLoaRecoveryWorkflow(
     enterpriseId: q.enterpriseId,
     employeeNumber: q.employeeNumber,
     techName,
+    district: canonicalDistrict,
     leave: {
       startDate: q.startDate,
       endDate: q.endDate,
@@ -885,6 +988,7 @@ async function createLoaRecoveryWorkflow(
     },
     tech: {
       lastKnownTruck,
+      district: canonicalDistrict,
       phone,
       primaryZip,
       address,

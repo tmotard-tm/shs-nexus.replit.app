@@ -106,11 +106,12 @@ export function parseTechData(item: QueueItem): TechData | undefined {
           .join(", ") || null;
       const leaveStart = parsed.leave.startDate || null;
       const truck = parsed.tech?.lastKnownTruck || null;
+      const district = parsed.district || parsed.tech?.district || null;
       const phone = parsed.tech?.phone || null;
       return {
         techName: parsed.techName || "Unknown",
         enterpriseId: parsed.enterpriseId || "",
-        district: null,
+        district,
         separationDate: leaveStart,
         lastDayWorked: leaveStart,
         mobilePhone: phone,

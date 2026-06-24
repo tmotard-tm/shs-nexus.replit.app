@@ -119,39 +119,64 @@ async function ensureSession(): Promise<void> {
   console.log("[HolmanPortal] Logging in…");
   const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36";
 
-  const loginGet = await fetch(LOGIN_URL, { headers: { "User-Agent": ua } });
-  _sessionCookies = mergeCookies("", loginGet);
-  const loginHtml = await (loginGet as any).text();
+  // Step 1: GET Login.aspx — follows 302 redirect to LoginForm.aspx
+  const step1 = await fetch(LOGIN_URL, { headers: { "User-Agent": ua }, redirect: "follow" });
+  _sessionCookies = mergeCookies("", step1);
+  const step1Html = await (step1 as any).text();
+  const step1Url: string = (step1 as any).url ?? `${PORTAL_BASE}/LoginForm.aspx`;
 
-  const vs  = extractHidden(loginHtml, "__VIEWSTATE");
-  const vsg = extractHidden(loginHtml, "__VIEWSTATEGENERATOR");
-  const ev  = extractHidden(loginHtml, "__EVENTVALIDATION");
+  const vs1  = extractHidden(step1Html, "__VIEWSTATE");
+  const vsg1 = extractHidden(step1Html, "__VIEWSTATEGENERATOR");
+  const ev1  = extractHidden(step1Html, "__EVENTVALIDATION");
+  const mac  = extractHidden(step1Html, "HdnMacName");
+  const fa1  = step1Html.match(/<form[^>]+action="([^"]+)"/i)?.[1] ?? "./LoginForm.aspx";
+  const base = step1Url.replace(/\/[^\/]*$/, "/");
+  const loginFormUrl = fa1.startsWith("./") ? base + fa1.slice(2)
+    : fa1.startsWith("/") ? "https://insights.holman.com" + fa1 : fa1;
 
-  const body = new URLSearchParams({
-    __VIEWSTATE: vs, __VIEWSTATEGENERATOR: vsg, __EVENTVALIDATION: ev,
-    "ctl00$MainContent$txtUserName": user,
-    "ctl00$MainContent$txtPassword": pass,
-    "ctl00$MainContent$btnLogin": "Login",
+  // Step 2: POST username — Holman shows password field on same page after this
+  const step2Body = new URLSearchParams({
+    __VIEWSTATE: vs1, __VIEWSTATEGENERATOR: vsg1, __EVENTVALIDATION: ev1,
+    hdnCXFormState: "Init", hdnCXFormPrevState: "Init", HdnMacName: mac,
+    txtCXLoginLogonId: user,
+    btnLogonId: "Continue",
   });
-
-  const loginPost = await fetch(LOGIN_URL, {
+  const step2 = await fetch(loginFormUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Cookie": _sessionCookies, "User-Agent": ua, "Referer": LOGIN_URL,
-    },
-    body: body.toString(),
-    redirect: "follow",
+    headers: { "Content-Type": "application/x-www-form-urlencoded",
+      "Cookie": _sessionCookies, "User-Agent": ua, "Referer": step1Url },
+    body: step2Body.toString(), redirect: "follow",
   });
-  _sessionCookies = mergeCookies(_sessionCookies, loginPost);
+  _sessionCookies = mergeCookies(_sessionCookies, step2);
+  const step2Html = await (step2 as any).text();
+
+  // Step 3: POST password using fields from the password page
+  const vs2  = extractHidden(step2Html, "__VIEWSTATE");
+  const vsg2 = extractHidden(step2Html, "__VIEWSTATEGENERATOR");
+  const ev2  = extractHidden(step2Html, "__EVENTVALIDATION");
+  const mac2 = extractHidden(step2Html, "HdnMacName") || mac;
+  const step3Body = new URLSearchParams({
+    __VIEWSTATE: vs2, __VIEWSTATEGENERATOR: vsg2, __EVENTVALIDATION: ev2,
+    hdnCXFormState: "Init", hdnCXFormPrevState: "Init", HdnMacName: mac2,
+    LoginName: user,
+    LoginPass: pass,
+    LoginButton1: "Log in",
+  });
+  const step3 = await fetch(loginFormUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded",
+      "Cookie": _sessionCookies, "User-Agent": ua, "Referer": loginFormUrl },
+    body: step3Body.toString(), redirect: "follow",
+  });
+  _sessionCookies = mergeCookies(_sessionCookies, step3);
 
   const hasSession = /ASP\.NET_SessionId|ASPSESSIONId|\.ASPXAUTH/i.test(_sessionCookies);
   if (!hasSession) {
     _sessionCookies = "";
-    throw new Error("[HolmanPortal] Login failed — no session cookie. Check HOLMAN_PORTAL_USER/PASS.");
+    throw new Error("[HolmanPortal] Login failed — no session cookie after password step. Check HOLMAN_PORTAL_USER/PASS.");
   }
   _sessionExpiry = new Date(Date.now() + 25 * 60 * 1000);
-  console.log("[HolmanPortal] Session established");
+  console.log("[HolmanPortal] Session established, cookies: " + _sessionCookies.substring(0, 80));
 }
 
 // ─── Scrape awaiting-auth queue ───────────────────────────────────────────────
