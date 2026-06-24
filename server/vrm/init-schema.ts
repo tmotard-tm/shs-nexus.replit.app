@@ -781,5 +781,43 @@ export async function initVrmSchema(): Promise<void> {
     console.warn("[VRM] vrm_repair_tracker_tech_ldap_uq creation failed (will retry next boot):", err?.message ?? err);
   }
 
+
+  // ── Holman Rental PO Queue — awaiting-auth rental POs mirrored from Holman portal ──
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS holman_rental_po_queue (
+      id                          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      po_number                   TEXT NOT NULL UNIQUE,
+      repair_number               TEXT,
+      holman_key                  TEXT NOT NULL,
+      vehicle_number              TEXT,
+      driver_name                 TEXT,
+      vendor_name                 TEXT,
+      division                    TEXT,
+      additional_requested_amt    NUMERIC(12,2),
+      approved_amount             NUMERIC(12,2),
+      po_date                     TEXT,
+      submitted_date              TEXT,
+      approval_process            TEXT,
+      tech_ldap                   TEXT,
+      tech_name                   TEXT,
+      profitability_recommendation TEXT,
+      profitability_score         NUMERIC(8,3),
+      match_confidence            TEXT DEFAULT 'no_match',
+      status                      TEXT NOT NULL DEFAULT 'pending',
+      approved_in_holman          BOOLEAN NOT NULL DEFAULT FALSE,
+      holman_approve_attempted_at TIMESTAMPTZ,
+      holman_approve_confirmed_at TIMESTAMPTZ,
+      holman_approve_error        TEXT,
+      decided_by_name             TEXT,
+      decided_at                  TIMESTAMPTZ,
+      scraped_at                  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      last_synced_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await db.execute(sql`
+    CREATE INDEX IF NOT EXISTS holman_rental_po_queue_status_idx
+      ON holman_rental_po_queue (status)
+  `);
+
   console.log("[VRM] Schema initialised");
 }

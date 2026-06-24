@@ -79,6 +79,11 @@ import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync"
 import { fetchProfitabilityCheck } from "./snowflake-queries";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
+import {
+  listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved,
+  updateHolmanApprovalResult, markHolmanPoDenied, upsertHolmanRentalPoQueue,
+} from "./holman-rental-po-storage";
+import { scrapeAwaitingAuth, approvePoInHolman } from "../holman-portal-service";
 import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
@@ -2980,7 +2985,7 @@ export function registerVrmRoutes(): Router {
     try {
       const { key } = req.params;
       if (!ALLOWED_RATE_KEYS.has(key)) {
-        return res.status(400).json({ error: `Unknown rate key '${key}'. Allowed keys: ${[...ALLOWED_RATE_KEYS].join(", ")}` });
+        return res.status(400).json({ error: `Unknown rate key '${key}'. Allowed keys: ${Array.from(ALLOWED_RATE_KEYS).join(", ")}` });
       }
       const { value } = req.body;
       const valueNum = Number(value);
@@ -3352,6 +3357,144 @@ export function registerVrmRoutes(): Router {
   setTimeout(runPunchSyncCycle, 30 * 1000);
   setInterval(runPunchSyncCycle, PUNCH_SYNC_INTERVAL_MS);
   console.log("[VRM Scheduler] Tech-Punch sync scheduler initialised (every 15 min, Action Needed + In Progress)");
+
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // Holman Rental PO Queue — awaiting-authorization rental POs
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  // holman-po-queue helpers imported at top of file
+
+  async function matchDriverNameToTech(driverName: string | null): Promise<{
+    poNumber?: string;
+    techLdap: string | null;
+    techName: string | null;
+    recommendation: string | null;
+    score: number | null;
+    matchConfidence: string;
+  }> {
+    if (!driverName || /^UNKNOWN/i.test(driverName.trim())) {
+      return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
+    }
+    // Holman format: "LASTNAME, FIRSTNAME" — flip to "firstname lastname" for ILIKE match
+    const commaIdx = driverName.indexOf(",");
+    const lastName  = commaIdx > 0 ? driverName.slice(0, commaIdx).trim() : driverName.trim();
+    const firstName = commaIdx > 0 ? driverName.slice(commaIdx + 1).trim() : "";
+
+    try {
+      const qResult = await db.execute(sql`
+        SELECT tech_ldap, tech_name, recommendation, scorecard_score
+        FROM vrm_profitability_snapshot
+        WHERE tech_name ILIKE ${"%" + lastName + "%"}
+          ${firstName ? sql`AND tech_name ILIKE ${"%" + firstName + "%"}` : sql``}
+        LIMIT 5
+      `);
+      const hits = qResult.rows as any[];
+      if (hits.length === 1) {
+        return {
+          techLdap: hits[0].tech_ldap, techName: hits[0].tech_name,
+          recommendation: hits[0].recommendation, score: hits[0].scorecard_score,
+          matchConfidence: "exact",
+        };
+      }
+      if (hits.length > 1) {
+        return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "ambiguous" };
+      }
+    } catch (e: any) {
+      console.error("[VRM/HolmanPO] name-match query error:", e.message);
+    }
+    return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
+  }
+
+  /**
+   * GET /api/vrm/holman-po-queue
+   * Returns the current mirrored Holman rental PO queue (DB cache — no Holman scrape).
+   */
+  router.get("/holman-po-queue", async (_req, res) => {
+    try {
+      const rows = await listHolmanPoQueue();
+      res.json({ rows });
+    } catch (e: any) {
+      console.error("[VRM] holman-po-queue GET error:", e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/holman-po-queue/refresh
+   * Scrapes the Holman awaiting-auth queue, matches techs, upserts to DB.
+   * Requires HOLMAN_PORTAL_USER + HOLMAN_PORTAL_PASS env vars.
+   */
+  router.post("/holman-po-queue/refresh", async (_req, res) => {
+    try {
+      const { rows: scraped, scrapedAt, error: scrapeErr } = await scrapeAwaitingAuth();
+      if (scrapeErr && scraped.length === 0) {
+        return res.status(502).json({ ok: false, error: scrapeErr });
+      }
+      const enriched = await Promise.all(
+        scraped.map(async (po) => ({ poNumber: po.poNumber, ...(await matchDriverNameToTech(po.driverName)) }))
+      );
+      await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt);
+      const rows = await listHolmanPoQueue();
+      res.json({ ok: true, scrapedCount: scraped.length, rows, scrapeError: scrapeErr ?? null });
+    } catch (e: any) {
+      console.error("[VRM] holman-po-queue refresh error:", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/holman-po-queue/:id/approve
+   * Approves the PO in Nexus and fires the Holman WebForms postback.
+   * Dry-run by default until HOLMAN_DECISION_DRY_RUN=false is explicitly set.
+   */
+  router.post("/holman-po-queue/:id/approve", async (req, res) => {
+    const { id } = req.params;
+    const { decidedByName } = req.body ?? {};
+    if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
+    try {
+      const row = await getHolmanPoRow(id);
+      if (!row) return res.status(404).json({ ok: false, error: "PO not found" });
+      if (row.status !== "pending") return res.status(400).json({ ok: false, error: `Already ${row.status}` });
+
+      const updated = await markHolmanPoApproved(id, decidedByName.trim());
+
+      const dryRun = process.env.HOLMAN_DECISION_DRY_RUN !== "false";
+      const holmanResult = await approvePoInHolman(
+        row.holmanKey, row.poNumber, Number(row.additionalRequestedAmt ?? 0), dryRun,
+      );
+
+      await updateHolmanApprovalResult(
+        id,
+        holmanResult.confirmed,
+        holmanResult.confirmed ? new Date() : null,
+        holmanResult.error ?? null,
+      );
+
+      res.json({ ok: true, row: updated, holmanResult });
+    } catch (e: any) {
+      console.error("[VRM] holman-po-queue approve error:", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  /**
+   * POST /api/vrm/holman-po-queue/:id/deny
+   * Records a denial in Nexus. No Holman action (deny code not yet captured).
+   */
+  router.post("/holman-po-queue/:id/deny", async (req, res) => {
+    const { id } = req.params;
+    const { decidedByName } = req.body ?? {};
+    if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
+    try {
+      const row = await markHolmanPoDenied(id, decidedByName.trim());
+      if (!row) return res.status(404).json({ ok: false, error: "PO not found or already decided" });
+      res.json({ ok: true, row });
+    } catch (e: any) {
+      console.error("[VRM] holman-po-queue deny error:", e.message);
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
 
   return router;
 }

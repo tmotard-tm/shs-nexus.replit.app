@@ -1379,6 +1379,78 @@ export default function NewRentals() {
   const [selectedDecision, setSelectedDecision] = useState<DecisionRow | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // ─── Holman PO queue (rental POs awaiting authorization) ─────────────────
+  const [decidingPoId, setDecidingPoId] = useState<string | null>(null);
+  const [poDeciderName, setPoDeciderName] = useState("");
+  const [poConfirmAction, setPoConfirmAction] = useState<"approve" | "deny" | null>(null);
+
+  const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[] }>({
+    queryKey: ["/api/vrm/holman-po-queue"],
+    queryFn: async () => {
+      const r = await fetch("/api/vrm/holman-po-queue", { credentials: "include" });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
+  const poQueue = poQueueData?.rows ?? [];
+  const pendingPoQueue = poQueue.filter((r: any) => r.status === "pending");
+  const lastSyncedAt = pendingPoQueue[0]?.lastSyncedAt ?? poQueue[0]?.lastSyncedAt ?? null;
+  const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
+  const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
+
+  const refreshPoMut = useMutation({
+    mutationFn: async () => {
+      const r = await fetch("/api/vrm/holman-po-queue/refresh", { method: "POST", credentials: "include" });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
+      return r.json();
+    },
+    onSuccess: () => { refetchPoQueue(); toast({ title: "Holman queue refreshed" }); },
+    onError: (e: any) => toast({ title: "Refresh failed", description: e.message, variant: "destructive" }),
+  });
+
+  const approvePoMut = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const r = await fetch(`/api/vrm/holman-po-queue/${id}/approve`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decidedByName: name }),
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
+      return r.json();
+    },
+    onSuccess: (data) => {
+      refetchPoQueue();
+      setDecidingPoId(null); setPoDeciderName(""); setPoConfirmAction(null);
+      const hr = data.holmanResult;
+      if (hr?.dryRun) toast({ title: "Approved (Nexus) — DRY RUN", description: "Set HOLMAN_DECISION_DRY_RUN=false to write to Holman portal" });
+      else if (hr?.confirmed) toast({ title: "Approved and confirmed in Holman" });
+      else toast({ title: "Approved in Nexus", description: hr?.error ?? "Holman confirmation pending — verify manually", variant: "destructive" });
+    },
+    onError: (e: any) => toast({ title: "Approval failed", description: e.message, variant: "destructive" }),
+  });
+
+  const denyPoMut = useMutation({
+    mutationFn: async ({ id, name }: { id: string; name: string }) => {
+      const r = await fetch(`/api/vrm/holman-po-queue/${id}/deny`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decidedByName: name }),
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
+      return r.json();
+    },
+    onSuccess: () => {
+      refetchPoQueue();
+      setDecidingPoId(null); setPoDeciderName(""); setPoConfirmAction(null);
+      toast({ title: "Denied in Nexus" });
+    },
+    onError: (e: any) => toast({ title: "Deny failed", description: e.message, variant: "destructive" }),
+  });
+
+
+
   // ── Evaluate mutation ──────────────────────────────────────────────────────
 
   const evaluateMut = useMutation({
@@ -1591,6 +1663,209 @@ export default function NewRentals() {
         <h1 style={{ fontFamily: fonts.syne, fontSize: 28, fontWeight: 700, color: colors.ink, margin: 0 }}>
           New Rentals — Profitability Tracker
         </h1>
+      </div>
+
+
+      {/* ── Holman Rental POs Awaiting Authorization ─────────────────────────── */}
+      <div style={{ marginBottom: 40 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div>
+            <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 2px" }}>
+              Repairs Awaiting Authorization
+            </h2>
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: isSyncStale ? colors.red : colors.inkMuted }}>
+              {lastSyncedAt
+                ? `${isSyncStale ? "STALE — " : ""}Last synced ${syncAgeMin}m ago`
+                : "Not yet synced from Holman"}
+            </span>
+          </div>
+          <button
+            onClick={() => refreshPoMut.mutate()}
+            disabled={refreshPoMut.isPending}
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+              color: colors.accent, backgroundColor: "transparent",
+              border: `1px solid ${colors.accent}`, borderRadius: 8,
+              padding: "6px 14px", cursor: refreshPoMut.isPending ? "not-allowed" : "pointer",
+              opacity: refreshPoMut.isPending ? 0.6 : 1,
+            }}
+          >
+            {refreshPoMut.isPending ? <Loader2 size={13} className="animate-spin" /> : null}
+            {refreshPoMut.isPending ? "Pulling from Holman…" : "Refresh from Holman"}
+          </button>
+        </div>
+
+        {/* Confirm modal overlay */}
+        {decidingPoId && poConfirmAction && (() => {
+          const po = poQueue.find((r: any) => r.id === decidingPoId);
+          if (!po) return null;
+          const isApprove = poConfirmAction === "approve";
+          return (
+            <div style={{
+              position: "fixed", inset: 0, zIndex: 100,
+              backgroundColor: "rgba(0,0,0,0.4)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <div style={{
+                backgroundColor: colors.surface, borderRadius: 12, padding: 28,
+                width: 420, boxShadow: "0 16px 40px rgba(0,0,0,0.18)",
+              }}>
+                <p style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, margin: "0 0 8px" }}>
+                  {isApprove ? "Approve this PO?" : "Deny this PO?"}
+                </p>
+                <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: "0 0 16px" }}>
+                  {isApprove
+                    ? `PO ${po.poNumber} for ${po.driverName ?? "unknown driver"} ($${Number(po.additionalRequestedAmt ?? 0).toFixed(2)}). This will execute the approval on the Holman portal.`
+                    : `PO ${po.poNumber} will be marked denied in Nexus. Holman portal action requires manual follow-up.`}
+                </p>
+                <input
+                  type="text"
+                  placeholder="Your name (required)"
+                  value={poDeciderName}
+                  onChange={(e) => setPoDeciderName(e.target.value)}
+                  style={{
+                    width: "100%", fontFamily: fonts.dmSans, fontSize: 13,
+                    padding: "8px 10px", border: `1px solid ${colors.rule}`,
+                    borderRadius: 8, backgroundColor: colors.background,
+                    outline: "none", marginBottom: 16, boxSizing: "border-box",
+                  }}
+                />
+                <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                  <button
+                    onClick={() => { setDecidingPoId(null); setPoDeciderName(""); setPoConfirmAction(null); }}
+                    style={{
+                      fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+                      padding: "8px 16px", borderRadius: 8, border: `1px solid ${colors.rule}`,
+                      cursor: "pointer", color: colors.ink, backgroundColor: colors.background,
+                    }}
+                  >Cancel</button>
+                  <button
+                    disabled={!poDeciderName.trim() || approvePoMut.isPending || denyPoMut.isPending}
+                    onClick={() => {
+                      if (isApprove) approvePoMut.mutate({ id: decidingPoId, name: poDeciderName.trim() });
+                      else denyPoMut.mutate({ id: decidingPoId, name: poDeciderName.trim() });
+                    }}
+                    style={{
+                      fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+                      padding: "8px 20px", borderRadius: 8, border: "none", cursor: "pointer",
+                      color: "#fff",
+                      backgroundColor: isApprove ? colors.green : colors.red,
+                      opacity: !poDeciderName.trim() || approvePoMut.isPending || denyPoMut.isPending ? 0.5 : 1,
+                    }}
+                  >
+                    {approvePoMut.isPending || denyPoMut.isPending ? "Saving…" : isApprove ? "Confirm Approve" : "Confirm Deny"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+        {pendingPoQueue.length === 0 && !refreshPoMut.isPending && (
+          <div style={{
+            padding: "24px 20px", border: `1px dashed ${colors.rule}`,
+            borderRadius: 10, textAlign: "center",
+          }}>
+            <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
+              {lastSyncedAt ? "No rental POs pending authorization." : "Click \"Refresh from Holman\" to pull the current awaiting-authorization queue."}
+            </p>
+          </div>
+        )}
+
+        {pendingPoQueue.length > 0 && (
+          <div style={{ border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ backgroundColor: colors.surface }}>
+                  {["Truck", "Driver (Holman)", "PO #", "Amount", "PO Date", "Profitability Rec", "Match", ""].map((h) => (
+                    <th key={h} style={{
+                      fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
+                      color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em",
+                      padding: "10px 14px", textAlign: "left",
+                      borderBottom: `1px solid ${colors.rule}`,
+                    }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {pendingPoQueue.map((po: any, idx: number) => {
+                  const rec: string = po.profitabilityRecommendation ?? "No Data";
+                  const conf: string = po.matchConfidence ?? "no_match";
+                  const confColor = conf === "exact" ? colors.green : conf === "ambiguous" ? colors.amber : conf === "manual" ? colors.blue : colors.inkMuted;
+                  const confLabel = conf === "exact" ? "Matched" : conf === "ambiguous" ? "Ambiguous" : conf === "manual" ? "Manual" : "No match";
+                  const amt = Number(po.additionalRequestedAmt ?? 0);
+                  const isAlreadyDecided = po.status !== "pending";
+                  return (
+                    <tr key={po.id} style={{ borderBottom: idx < pendingPoQueue.length - 1 ? `1px solid ${colors.rule}` : "none" }}>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
+                        {po.vehicleNumber || "—"}
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
+                          {po.driverName || "Unknown"}
+                        </div>
+                        {po.techName && (
+                          <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
+                            {po.techLdap} — {po.techName}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
+                        {po.poNumber}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 13, fontWeight: 600, color: colors.ink }}>
+                        ${amt.toFixed(2)}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+                        {po.poDate || "—"}
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <RecPill rec={rec} />
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        <span style={{
+                          fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500,
+                          color: confColor,
+                          backgroundColor: confColor + "18",
+                          padding: "2px 8px", borderRadius: 4,
+                        }}>
+                          {confLabel}
+                        </span>
+                      </td>
+                      <td style={{ padding: "12px 14px" }}>
+                        {isAlreadyDecided ? (
+                          <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, fontStyle: "italic" }}>
+                            {po.status}
+                          </span>
+                        ) : (
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("approve"); }}
+                              style={{
+                                fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+                                color: "#fff", backgroundColor: colors.green,
+                                border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer",
+                              }}
+                            >Approve</button>
+                            <button
+                              onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("deny"); }}
+                              style={{
+                                fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
+                                color: colors.red, backgroundColor: "transparent",
+                                border: `1px solid ${colors.red}`, borderRadius: 6, padding: "5px 12px", cursor: "pointer",
+                              }}
+                            >Deny</button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
