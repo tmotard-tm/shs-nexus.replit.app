@@ -96,6 +96,7 @@
     "passport-strategy": "^1.0.0",
     "pdfkit": "^0.18.0",
     "pg": "^8.16.3",
+    "playwright-core": "^1.41.2",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",
     "react-dom": "^18.3.1",

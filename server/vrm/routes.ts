@@ -80,10 +80,10 @@ import { fetchProfitabilityCheck } from "./snowflake-queries";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import {
-  listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved,
+  listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved, markHolmanPoOutcome,
   updateHolmanApprovalResult, markHolmanPoDenied, upsertHolmanRentalPoQueue,
 } from "./holman-rental-po-storage";
-import { scrapeAwaitingAuth, approvePoInHolman } from "../holman-portal-service";
+import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman } from "../holman-portal-service";
 import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
@@ -3406,6 +3406,108 @@ export function registerVrmRoutes(): Router {
     return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
   }
 
+  // A CONFIRMED Holman approve/deny records the decision through the SAME functions a
+  // manual decision uses, so it shows in the Decision Log (addRentalDecision) and the
+  // New Rental Full Log (upsertFullLogFromDecision) with full parity: tech approval SMS,
+  // or on deny the supervisor SMS+email + tech denial SMS + DCA make-unavailable. The
+  // economic context is enriched from the tech's profitability snapshot by LDAP.
+  // No-ops with a loud warning if the PO has no matched tech (the rental-request
+  // name-resolution work will guarantee a match before this point).
+  async function recordHolmanDecision(
+    po: {
+      techLdap: string | null; techName: string | null; poNumber: string;
+      vehicleNumber: string | null; profitabilityRecommendation: string | null;
+      profitabilityScore: string | null;
+    },
+    decidedByName: string,
+    decision: "approved" | "denied",
+  ): Promise<string | null> {
+    const ldap = (po.techLdap ?? "").trim().toUpperCase();
+    if (!ldap) {
+      console.warn(`[VRM/HolmanPO] ${decision} PO ${po.poNumber}: no matched tech — decision NOT logged. Resolve the rental-request name first.`);
+      return null;
+    }
+    const veh = String(po.vehicleNumber ?? "").trim();
+    if (!veh) {
+      console.warn(`[VRM/HolmanPO] ${decision} PO ${po.poNumber}: no vehicle number — decision NOT logged.`);
+      return null;
+    }
+    let snap: any = null;
+    try {
+      const rows = await getProfitabilitySnapshotRows([ldap]);
+      snap = rows?.[0] ?? null;
+    } catch (e: any) {
+      console.warn(`[VRM/HolmanPO] snapshot enrich failed for ${ldap}:`, e?.message);
+    }
+    const s = (v: any) => (v != null ? String(v) : null);
+
+    const decisionRow = await addRentalDecision({
+      techLdap: ldap,
+      techName: po.techName ?? snap?.techName ?? null,
+      decision,
+      decidedByName,
+      recommendation: po.profitabilityRecommendation ?? snap?.recommendation ?? "Unknown",
+      scorecardScore: po.profitabilityScore ?? s(snap?.scorecardScore),
+      dailyNetWithRental: s(snap?.dailyNetWithRental),
+      tenureMonths: snap?.tenureMonths ?? null,
+      lastHireDate: snap?.lastHireDate ?? null,
+      state: snap?.state ?? null,
+      district: snap?.district ?? null,
+      completes: snap?.completes ?? null,
+      dailyRevenue: s(snap?.dailyRevenue),
+      dailyCosts: s(snap?.dailyCosts),
+      dailyNetBeforeRental: s(snap?.dailyNetBeforeRental),
+      dailyPptProfit: s(snap?.dailyPptProfit),
+      supervisorName: snap?.supervisorName ?? null,
+      supervisorLdap: snap?.supervisorLdap ?? null,
+      supervisorPhone: snap?.supervisorPhone ?? null,
+      notes: `Holman PO ${po.poNumber} ${decision} from rental queue`,
+    });
+
+    if (decision === "denied") {
+      try {
+        await syncDeniedDecisionToRepairTracker(decisionRow.id);
+      } catch (e: any) {
+        console.error("[VRM/HolmanPO] tracker sync failed:", e?.message);
+      }
+      enqueueNotificationsForDeny({
+        decisionId: decisionRow.id,
+        techLdap: ldap,
+        techName: po.techName ?? null,
+        dailyNetWithRental: s(snap?.dailyNetWithRental),
+        scorecardScore: s(snap?.scorecardScore),
+        tenureMonths: snap?.tenureMonths ?? null,
+      })
+        .then(() => triggerImmediateDispatch(`holman deny supervisor ${decisionRow.id}`))
+        .catch((err: any) => console.error("[VRM/HolmanPO] deny supervisor notify failed:", err?.message ?? err));
+      enqueueDenialSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null })
+        .then(() => triggerImmediateDispatch(`holman deny tech ${decisionRow.id}`))
+        .catch((err: any) => console.error("[VRM/HolmanPO] deny tech SMS failed:", err?.message ?? err));
+      enqueueDcaMakeUnavailableForDecision(decisionRow.id).catch((err: any) =>
+        console.error("[VRM/HolmanPO] DCA make_unavailable failed:", err?.message ?? err));
+    } else {
+      enqueueApprovalSmsForTech({ decisionId: decisionRow.id, techLdap: ldap, techName: po.techName ?? null })
+        .then(() => triggerImmediateDispatch(`holman approval ${decisionRow.id}`))
+        .catch((err: any) => console.error("[VRM/HolmanPO] approval SMS failed:", err?.message ?? err));
+    }
+
+    try {
+      await upsertFullLogFromDecision({
+        techLdap: ldap,
+        techName: po.techName ?? null,
+        decidedByName,
+        decision,
+        notes: null,
+        rentalVehicleNumber: veh,
+      });
+    } catch (e: any) {
+      console.error("[VRM/HolmanPO] full-log upsert failed:", e?.message);
+    }
+
+    console.log(`[VRM/HolmanPO] decision logged: ${decision} ${ldap} po=${po.poNumber} decisionId=${decisionRow.id}`);
+    return decisionRow.id;
+  }
+
   /**
    * GET /api/vrm/holman-po-queue
    * Returns the current mirrored Holman rental PO queue (DB cache — no Holman scrape).
@@ -3452,26 +3554,51 @@ export function registerVrmRoutes(): Router {
     const { id } = req.params;
     const { decidedByName } = req.body ?? {};
     if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
+    const who = decidedByName.trim();
     try {
       const row = await getHolmanPoRow(id);
       if (!row) return res.status(404).json({ ok: false, error: "PO not found" });
-      if (row.status !== "pending") return res.status(400).json({ ok: false, error: `Already ${row.status}` });
-
-      const updated = await markHolmanPoApproved(id, decidedByName.trim());
+      // Allow an approve from pending OR a prior failed/blocked attempt (retry / re-check
+      // in case the blocking repair PO has since been resolved).
+      if (!["pending", "approve_failed", "blocked"].includes(row.status)) {
+        return res.status(400).json({ ok: false, error: `Already ${row.status}` });
+      }
 
       const dryRun = process.env.HOLMAN_DECISION_DRY_RUN !== "false";
+      // Holman FIRST — never flip Nexus to "approved" before Holman actually confirms.
       const holmanResult = await approvePoInHolman(
         row.holmanKey, row.poNumber, Number(row.additionalRequestedAmt ?? 0), dryRun,
       );
 
-      await updateHolmanApprovalResult(
-        id,
-        holmanResult.confirmed,
-        holmanResult.confirmed ? new Date() : null,
-        holmanResult.error ?? null,
-      );
+      // Blocked: rental shares its repair page with another awaiting PO → cannot approve
+      // online in isolation. Persist a loud, visible 'blocked' state; do NOT mark approved.
+      if (holmanResult.blocked) {
+        const updated = await markHolmanPoOutcome(id, "blocked", who, holmanResult.error ?? "blocked");
+        return res.json({ ok: false, status: "blocked", error: holmanResult.error, holmanResult, row: updated });
+      }
 
-      res.json({ ok: true, row: updated, holmanResult });
+      // Dry-run = preview only. Leave the row pending; surface what WOULD be submitted.
+      if (holmanResult.dryRun) {
+        return res.json({ ok: true, status: "dry_run", dryRun: true, holmanResult, row });
+      }
+
+      // Real submit, confirmed on Holman re-read → mark approved + record the decision
+      // through the SAME functions the manual flow uses (Decision Log + Full Log + tech
+      // SMS), so a Holman approval shows up there with full parity.
+      if (holmanResult.success && holmanResult.confirmed) {
+        const updated = await markHolmanPoApproved(id, who);
+        await updateHolmanApprovalResult(id, true, new Date(), null);
+        const decisionId = await recordHolmanDecision(updated ?? row, who, "approved").catch((e: any) => {
+          console.error("[VRM] holman approve decision-log failed:", e?.message);
+          return null;
+        });
+        return res.json({ ok: true, status: "approved", decisionId, holmanResult, row: updated });
+      }
+
+      // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.
+      const failMsg = holmanResult.error ?? "Holman did not confirm the approval on re-read";
+      const updated = await markHolmanPoOutcome(id, "approve_failed", who, failMsg);
+      return res.json({ ok: false, status: "approve_failed", error: failMsg, holmanResult, row: updated });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue approve error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
@@ -3480,16 +3607,53 @@ export function registerVrmRoutes(): Router {
 
   /**
    * POST /api/vrm/holman-po-queue/:id/deny
-   * Records a denial in Nexus. No Holman action (deny code not yet captured).
+   * Clicks the Decline radio on Holman (mirror of approve): Holman first, only mark
+   * Nexus 'denied' after Holman confirms; blocked/failed are surfaced loudly.
    */
   router.post("/holman-po-queue/:id/deny", async (req, res) => {
     const { id } = req.params;
     const { decidedByName } = req.body ?? {};
     if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
+    const who = decidedByName.trim();
     try {
-      const row = await markHolmanPoDenied(id, decidedByName.trim());
-      if (!row) return res.status(404).json({ ok: false, error: "PO not found or already decided" });
-      res.json({ ok: true, row });
+      const row = await getHolmanPoRow(id);
+      if (!row) return res.status(404).json({ ok: false, error: "PO not found" });
+      if (!["pending", "approve_failed", "deny_failed", "blocked"].includes(row.status)) {
+        return res.status(400).json({ ok: false, error: `Already ${row.status}` });
+      }
+
+      const dryRun = process.env.HOLMAN_DECISION_DRY_RUN !== "false";
+      // Holman FIRST — never flip Nexus to "denied" before Holman confirms the Decline.
+      const holmanResult = await denyPoInHolman(row.holmanKey, row.poNumber, dryRun);
+
+      // Blocked: rental shares its repair page with another awaiting PO → can't decide
+      // the rental in isolation online. Loud, visible, manual.
+      if (holmanResult.blocked) {
+        const updated = await markHolmanPoOutcome(id, "blocked", who, holmanResult.error ?? "blocked");
+        return res.json({ ok: false, status: "blocked", error: holmanResult.error, holmanResult, row: updated });
+      }
+
+      // Dry-run = preview only. Leave the row as-is; surface what WOULD be submitted.
+      if (holmanResult.dryRun) {
+        return res.json({ ok: true, status: "dry_run", dryRun: true, holmanResult, row });
+      }
+
+      // Real submit, confirmed on Holman re-read → mark denied + record the decision
+      // through the SAME functions the manual flow uses (Decision Log + Full Log +
+      // tech/supervisor SMS + DCA make-unavailable), for full parity.
+      if (holmanResult.success && holmanResult.confirmed) {
+        const updated = await markHolmanPoDenied(id, who);
+        const decisionId = await recordHolmanDecision(updated ?? row, who, "denied").catch((e: any) => {
+          console.error("[VRM] holman deny decision-log failed:", e?.message);
+          return null;
+        });
+        return res.json({ ok: true, status: "denied", decisionId, holmanResult, row: updated });
+      }
+
+      // Real submit but NOT confirmed on re-read → FAILED. Loud, visible, retryable.
+      const failMsg = holmanResult.error ?? "Holman did not confirm the denial on re-read";
+      const updated = await markHolmanPoOutcome(id, "deny_failed", who, failMsg);
+      return res.json({ ok: false, status: "deny_failed", error: failMsg, holmanResult, row: updated });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue deny error:", e.message);
       res.status(500).json({ ok: false, error: e.message });

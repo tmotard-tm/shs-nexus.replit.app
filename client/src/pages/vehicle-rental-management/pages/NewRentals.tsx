@@ -1395,7 +1395,10 @@ export default function NewRentals() {
     refetchOnWindowFocus: false,
   });
   const poQueue = poQueueData?.rows ?? [];
-  const pendingPoQueue = poQueue.filter((r: any) => r.status === "pending");
+  // Actionable worklist: pending AND the loud not-done states (blocked / failed) so a PO
+  // that could NOT be approved in Holman stays visible and red, never silently gone.
+  const pendingPoQueue = poQueue.filter((r: any) =>
+    ["pending", "blocked", "approve_failed", "deny_failed"].includes(r.status));
   const lastSyncedAt = pendingPoQueue[0]?.lastSyncedAt ?? poQueue[0]?.lastSyncedAt ?? null;
   const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
   const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
@@ -1423,12 +1426,20 @@ export default function NewRentals() {
     onSuccess: (data) => {
       refetchPoQueue();
       setDecidingPoId(null); setPoDeciderName(""); setPoConfirmAction(null);
-      const hr = data.holmanResult;
-      if (hr?.dryRun) toast({ title: "Approved (Nexus) — DRY RUN", description: "Set HOLMAN_DECISION_DRY_RUN=false to write to Holman portal" });
-      else if (hr?.confirmed) toast({ title: "Approved and confirmed in Holman" });
-      else toast({ title: "Approved in Nexus", description: hr?.error ?? "Holman confirmation pending — verify manually", variant: "destructive" });
+      const st = data.status;
+      if (st === "blocked") {
+        toast({ title: "🚫 BLOCKED in Holman — NOT approved", description: data.error ?? "This rental shares its repair page with another PO; approve it manually in Holman.", variant: "destructive" });
+      } else if (st === "approve_failed") {
+        toast({ title: "❌ FAILED in Holman — NOT approved", description: data.error ?? "Holman did not confirm. The PO is still pending; handle it manually.", variant: "destructive" });
+      } else if (st === "dry_run") {
+        toast({ title: "DRY RUN — nothing sent to Holman", description: "Would approve. Set HOLMAN_DECISION_DRY_RUN=false to submit for real." });
+      } else if (st === "approved") {
+        toast({ title: "✓ Approved and confirmed in Holman" });
+      } else {
+        toast({ title: "Approval result unclear — verify in Holman", description: data.error ?? JSON.stringify(data), variant: "destructive" });
+      }
     },
-    onError: (e: any) => toast({ title: "Approval failed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Approval request failed", description: e.message, variant: "destructive" }),
   });
 
   const denyPoMut = useMutation({
@@ -1441,12 +1452,23 @@ export default function NewRentals() {
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
       return r.json();
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       refetchPoQueue();
       setDecidingPoId(null); setPoDeciderName(""); setPoConfirmAction(null);
-      toast({ title: "Denied in Nexus" });
+      const st = data.status;
+      if (st === "blocked") {
+        toast({ title: "🚫 BLOCKED in Holman — NOT denied", description: data.error ?? "This rental shares its repair page with another PO; decline it manually in Holman.", variant: "destructive" });
+      } else if (st === "deny_failed") {
+        toast({ title: "❌ FAILED in Holman — NOT denied", description: data.error ?? "Holman did not confirm the Decline. The PO is still pending; handle it manually.", variant: "destructive" });
+      } else if (st === "dry_run") {
+        toast({ title: "DRY RUN — nothing sent to Holman", description: "Would click Decline. Set HOLMAN_DECISION_DRY_RUN=false to submit for real." });
+      } else if (st === "denied") {
+        toast({ title: "✓ Declined and confirmed in Holman" });
+      } else {
+        toast({ title: "Deny result unclear — verify in Holman", description: data.error ?? JSON.stringify(data), variant: "destructive" });
+      }
     },
-    onError: (e: any) => toast({ title: "Deny failed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({ title: "Deny request failed", description: e.message, variant: "destructive" }),
   });
 
 
@@ -1795,9 +1817,11 @@ export default function NewRentals() {
                   const confColor = conf === "exact" ? colors.green : conf === "ambiguous" ? colors.amber : conf === "manual" ? colors.blue : colors.inkMuted;
                   const confLabel = conf === "exact" ? "Matched" : conf === "ambiguous" ? "Ambiguous" : conf === "manual" ? "Manual" : "No match";
                   const amt = Number(po.additionalRequestedAmt ?? 0);
-                  const isAlreadyDecided = po.status !== "pending";
+                  const terminal = ["approved", "denied", "resolved_holman"].includes(po.status);
+                  const failed = po.status === "blocked" || po.status === "approve_failed" || po.status === "deny_failed";
+                  const failLabel = po.status === "blocked" ? "BLOCKED" : po.status === "deny_failed" ? "DENY FAILED" : "FAILED";
                   return (
-                    <tr key={po.id} style={{ borderBottom: idx < pendingPoQueue.length - 1 ? `1px solid ${colors.rule}` : "none" }}>
+                    <tr key={po.id} style={{ borderBottom: idx < pendingPoQueue.length - 1 ? `1px solid ${colors.rule}` : "none", backgroundColor: failed ? colors.red + "12" : undefined }}>
                       <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
                         {po.vehicleNumber || "—"}
                       </td>
@@ -1808,6 +1832,11 @@ export default function NewRentals() {
                         {po.techName && (
                           <div style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
                             {po.techLdap} — {po.techName}
+                          </div>
+                        )}
+                        {failed && po.holmanApproveError && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.red, fontWeight: 600, marginTop: 4, maxWidth: 460, lineHeight: 1.35 }}>
+                            {failLabel} in Holman — not approved: {po.holmanApproveError}
                           </div>
                         )}
                       </td>
@@ -1834,12 +1863,20 @@ export default function NewRentals() {
                         </span>
                       </td>
                       <td style={{ padding: "12px 14px" }}>
-                        {isAlreadyDecided ? (
+                        {terminal ? (
                           <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, fontStyle: "italic" }}>
                             {po.status}
                           </span>
                         ) : (
-                          <div style={{ display: "flex", gap: 6 }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                            {failed && (
+                              <span style={{
+                                fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 700,
+                                color: "#fff", backgroundColor: colors.red,
+                                padding: "2px 7px", borderRadius: 4, alignSelf: "flex-start", letterSpacing: "0.04em",
+                              }}>{failLabel}</span>
+                            )}
+                            <div style={{ display: "flex", gap: 6 }}>
                             <button
                               onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("approve"); }}
                               style={{
@@ -1847,7 +1884,7 @@ export default function NewRentals() {
                                 color: "#fff", backgroundColor: colors.green,
                                 border: "none", borderRadius: 6, padding: "5px 12px", cursor: "pointer",
                               }}
-                            >Approve</button>
+                            >{failed ? "Retry" : "Approve"}</button>
                             <button
                               onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("deny"); }}
                               style={{
@@ -1856,6 +1893,7 @@ export default function NewRentals() {
                                 border: `1px solid ${colors.red}`, borderRadius: 6, padding: "5px 12px", cursor: "pointer",
                               }}
                             >Deny</button>
+                            </div>
                           </div>
                         )}
                       </td>

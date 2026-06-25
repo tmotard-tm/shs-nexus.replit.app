@@ -41,6 +41,39 @@ interface EnrichRow {
   matchConfidence: string;
 }
 
+// Postgres returns snake_case column names. The interface + the React UI consume
+// camelCase, so SELECT/RETURNING must alias every column or row.driverName etc. come
+// back undefined (was the "Unknown / blank / Not yet synced" bug). Embed via sql.raw.
+const SELECT_COLS = `
+  id,
+  po_number AS "poNumber",
+  repair_number AS "repairNumber",
+  holman_key AS "holmanKey",
+  vehicle_number AS "vehicleNumber",
+  driver_name AS "driverName",
+  vendor_name AS "vendorName",
+  division,
+  additional_requested_amt AS "additionalRequestedAmt",
+  approved_amount AS "approvedAmount",
+  po_date AS "poDate",
+  submitted_date AS "submittedDate",
+  approval_process AS "approvalProcess",
+  tech_ldap AS "techLdap",
+  tech_name AS "techName",
+  profitability_recommendation AS "profitabilityRecommendation",
+  profitability_score AS "profitabilityScore",
+  match_confidence AS "matchConfidence",
+  status,
+  approved_in_holman AS "approvedInHolman",
+  holman_approve_attempted_at AS "holmanApproveAttemptedAt",
+  holman_approve_confirmed_at AS "holmanApproveConfirmedAt",
+  holman_approve_error AS "holmanApproveError",
+  decided_by_name AS "decidedByName",
+  decided_at AS "decidedAt",
+  scraped_at AS "scrapedAt",
+  last_synced_at AS "lastSyncedAt"
+`;
+
 export async function upsertHolmanRentalPoQueue(
   rows: HolmanPortalPO[],
   enriched: EnrichRow[],
@@ -88,7 +121,7 @@ export async function upsertHolmanRentalPoQueue(
         match_confidence        = COALESCE(EXCLUDED.match_confidence, holman_rental_po_queue.match_confidence),
         scraped_at              = EXCLUDED.scraped_at,
         last_synced_at          = EXCLUDED.last_synced_at
-      WHERE holman_rental_po_queue.status = 'pending'
+      WHERE holman_rental_po_queue.status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
     `);
   }
 
@@ -98,15 +131,15 @@ export async function upsertHolmanRentalPoQueue(
     await db.execute(sql.raw(`
       UPDATE holman_rental_po_queue
       SET status = 'resolved_holman', last_synced_at = '${now}'
-      WHERE status = 'pending' AND po_number NOT IN (${inList})
+      WHERE status IN ('pending', 'blocked', 'approve_failed', 'deny_failed') AND po_number NOT IN (${inList})
     `));
   }
 }
 
 export async function listHolmanPoQueue(): Promise<HolmanRentalPoRow[]> {
   const result = await db.execute(sql`
-    SELECT * FROM holman_rental_po_queue
-    WHERE status IN ('pending', 'approved', 'denied')
+    SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue
+    WHERE status IN ('pending', 'approved', 'denied', 'approve_failed', 'deny_failed', 'blocked')
     ORDER BY scraped_at DESC
     LIMIT 200
   `);
@@ -115,7 +148,7 @@ export async function listHolmanPoQueue(): Promise<HolmanRentalPoRow[]> {
 
 export async function getHolmanPoRow(id: string): Promise<HolmanRentalPoRow | null> {
   const result = await db.execute(sql`
-    SELECT * FROM holman_rental_po_queue WHERE id = ${id} LIMIT 1
+    SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue WHERE id = ${id} LIMIT 1
   `);
   return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
 }
@@ -127,9 +160,10 @@ export async function markHolmanPoApproved(id: string, decidedByName: string): P
     SET status = 'approved',
         decided_by_name = ${decidedByName},
         decided_at = ${now},
-        holman_approve_attempted_at = ${now}
-    WHERE id = ${id} AND status = 'pending'
-    RETURNING *
+        holman_approve_attempted_at = ${now},
+        holman_approve_error = NULL
+    WHERE id = ${id} AND status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
+    RETURNING ${sql.raw(SELECT_COLS)}
   `);
   return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
 }
@@ -149,15 +183,38 @@ export async function updateHolmanApprovalResult(
   `);
 }
 
+// Record a NON-success decision outcome (blocked / approve_failed) loudly: keep the row
+// visible (NOT 'approved'), stamp who tried + the reason, so the UI can surface it red.
+export async function markHolmanPoOutcome(
+  id: string,
+  status: "blocked" | "approve_failed" | "deny_failed",
+  decidedByName: string,
+  error: string,
+): Promise<HolmanRentalPoRow | null> {
+  const now = new Date().toISOString();
+  const result = await db.execute(sql`
+    UPDATE holman_rental_po_queue
+    SET status = ${status},
+        decided_by_name = ${decidedByName},
+        holman_approve_attempted_at = ${now},
+        holman_approve_error = ${error},
+        approved_in_holman = false
+    WHERE id = ${id}
+    RETURNING ${sql.raw(SELECT_COLS)}
+  `);
+  return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
+}
+
 export async function markHolmanPoDenied(id: string, decidedByName: string): Promise<HolmanRentalPoRow | null> {
   const now = new Date().toISOString();
   const result = await db.execute(sql`
     UPDATE holman_rental_po_queue
     SET status = 'denied',
         decided_by_name = ${decidedByName},
-        decided_at = ${now}
-    WHERE id = ${id} AND status = 'pending'
-    RETURNING *
+        decided_at = ${now},
+        holman_approve_error = NULL
+    WHERE id = ${id} AND status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
+    RETURNING ${sql.raw(SELECT_COLS)}
   `);
   return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
 }
