@@ -20,6 +20,14 @@ const OFFBOARDING_TASKS_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes for offboard
 const EXTERNAL_WATERMARK_POLL_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes for TPMS/AMS external change detection
 const TPMS_STALE_SWEEP_INTERVAL_MS = 4 * 60 * 60 * 1000;   // 4 hours — validates cached assignments against live TPMS
 const DISTRICT_COST_CENTER_SEED_INTERVAL_MS = 24 * 60 * 60 * 1000; // 24 hours — auto-seed any new districts that appeared in fleet data
+// Automatic district cost-center seeding is DISABLED. Cost centers change
+// rarely and the auto-seed re-derived districts from dirty roster data,
+// resurrecting invalid districts (e.g. 3132 / 3580) that admins had deleted.
+// Seeding is now manual-only via the "Run auto-seed now" admin trigger
+// (triggerDistrictCostCenterSeed → runDistrictCostCenterSeed with force:true).
+// Flip this to `true` to re-enable the startup / scheduler-tick / post-daily-sync
+// automatic seeds.
+const DISTRICT_COST_CENTER_AUTO_SEED_ENABLED = false;
 
 let lastSyncDate: string | null = null;
 let lastEnrichTime: number | null = null; // Timestamp of last enrichment
@@ -139,13 +147,15 @@ async function checkAndRunSync(): Promise<void> {
 
         // Auto-seed district cost-center table so any newly synced districts
         // appear on the management page same-day. Force the run by clearing
-        // both throttle timestamps first.
-        try {
-          lastDistrictCostCenterSeedTime = null;
-          lastDistrictCostCenterSeedAttemptTime = null;
-          await checkAndRunDistrictCostCenterSeed();
-        } catch (seedErr: any) {
-          console.error('[Scheduler] District cost-center seed (post-daily-sync) failed (non-fatal):', seedErr?.message);
+        // both throttle timestamps first. DISABLED — seeding is manual-only.
+        if (DISTRICT_COST_CENTER_AUTO_SEED_ENABLED) {
+          try {
+            lastDistrictCostCenterSeedTime = null;
+            lastDistrictCostCenterSeedAttemptTime = null;
+            await checkAndRunDistrictCostCenterSeed();
+          } catch (seedErr: any) {
+            console.error('[Scheduler] District cost-center seed (post-daily-sync) failed (non-fatal):', seedErr?.message);
+          }
         }
 
         lastSyncDate = currentDateStr;
@@ -163,7 +173,9 @@ async function checkAndRunSync(): Promise<void> {
   await checkAndRunTpmsPoll();
   await checkAndRunAmsPoll();
   await checkAndRunTpmsStaleSweep();
-  await checkAndRunDistrictCostCenterSeed();
+  if (DISTRICT_COST_CENTER_AUTO_SEED_ENABLED) {
+    await checkAndRunDistrictCostCenterSeed();
+  }
 }
 
 async function checkAndRunEnrichment(): Promise<void> {
@@ -397,6 +409,12 @@ export function clearPendingDistrictCostCenterNotification(): void {
 }
 
 async function checkAndRunDistrictCostCenterSeed(): Promise<void> {
+  // Defense-in-depth: even if a caller forgets to gate, never auto-seed when
+  // automatic seeding is disabled. Manual seeding goes through
+  // triggerDistrictCostCenterSeed (force:true) and bypasses this function.
+  if (!DISTRICT_COST_CENTER_AUTO_SEED_ENABLED) {
+    return;
+  }
   try {
     await runDistrictCostCenterSeed('scheduler');
   } catch (error: any) {
@@ -1202,11 +1220,13 @@ export function startSyncScheduler(): void {
       );
     }, 25000);
 
-    setTimeout(() => {
-      checkAndRunDistrictCostCenterSeed().catch(err =>
-        console.error('[Scheduler] Production startup district cost-center seed error:', err?.message)
-      );
-    }, 35000);
+    if (DISTRICT_COST_CENTER_AUTO_SEED_ENABLED) {
+      setTimeout(() => {
+        checkAndRunDistrictCostCenterSeed().catch(err =>
+          console.error('[Scheduler] Production startup district cost-center seed error:', err?.message)
+        );
+      }, 35000);
+    }
   }
 
   // Separation poll and notification backfill run independently on every boot
@@ -1280,6 +1300,7 @@ export function getSchedulerStatus(): {
   opEventsRetryIntervalMs: number;
   lastDistrictCostCenterSeed: string | null;
   districtCostCenterSeedIntervalMs: number;
+  districtCostCenterAutoSeedEnabled: boolean;
 } {
   const estNow = getESTDate();
   const nextSync = new Date(estNow);
@@ -1301,6 +1322,7 @@ export function getSchedulerStatus(): {
     opEventsRetryIntervalMs: OP_EVENTS_RETRY_INTERVAL_MS,
     lastDistrictCostCenterSeed: lastDistrictCostCenterSeedTime ? new Date(lastDistrictCostCenterSeedTime).toISOString() : null,
     districtCostCenterSeedIntervalMs: DISTRICT_COST_CENTER_SEED_INTERVAL_MS,
+    districtCostCenterAutoSeedEnabled: DISTRICT_COST_CENTER_AUTO_SEED_ENABLED,
   };
 }
 

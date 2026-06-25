@@ -303,6 +303,7 @@ type AutoSeedStatus = {
   lastAutoSeed: string | null;
   intervalMs: number;
   nextAutoSeed: string | null;
+  autoSeedEnabled?: boolean;
   newDistricts: AutoSeedNewDistricts | null;
 };
 
@@ -548,21 +549,6 @@ export default function CostCenterManagement() {
     if (isNaN(d.getTime())) return null;
     return d.toLocaleString();
   }, [autoSeedStatus?.lastAutoSeed]);
-
-  const nextAutoSeedRelative = useMemo(() => {
-    if (!autoSeedStatus?.nextAutoSeed) return null;
-    const d = new Date(autoSeedStatus.nextAutoSeed);
-    if (isNaN(d.getTime())) return null;
-    void nowTick;
-    return formatDistanceToNow(d, { addSuffix: true });
-  }, [autoSeedStatus?.nextAutoSeed, nowTick]);
-
-  const nextAutoSeedAbsolute = useMemo(() => {
-    if (!autoSeedStatus?.nextAutoSeed) return null;
-    const d = new Date(autoSeedStatus.nextAutoSeed);
-    if (isNaN(d.getTime())) return null;
-    return d.toLocaleString();
-  }, [autoSeedStatus?.nextAutoSeed]);
 
   const createMutation = useMutation({
     mutationFn: (data: CreateFormData) => apiRequest("POST", "/api/cost-centers", data),
@@ -947,22 +933,21 @@ export default function CostCenterManagement() {
             >
               <Clock className="h-3 w-3" />
               <span>
-                Last auto-refreshed:{" "}
+                Last seeded:{" "}
                 <span className="font-medium">
-                  {lastAutoSeedRelative ?? "never (will run on next scheduler tick)"}
+                  {lastAutoSeedRelative ?? "never"}
                 </span>
               </span>
             </p>
             <p
               className="text-xs text-muted-foreground mt-1 flex items-center gap-1"
               data-testid="text-next-auto-seed"
-              title={nextAutoSeedAbsolute ?? undefined}
             >
               <Clock className="h-3 w-3" />
               <span>
-                Next auto-refresh:{" "}
+                Automatic seeding:{" "}
                 <span className="font-medium">
-                  {nextAutoSeedRelative ?? "within the next minute"}
+                  Disabled — seeding is manual only
                 </span>
               </span>
             </p>

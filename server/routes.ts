@@ -8035,7 +8035,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // successful run) has elapsed. If we've never run, the next tick will
       // pick it up — surface that as `null` so the UI can render "within the
       // next minute".
-      const nextAutoSeed = status.lastDistrictCostCenterSeed
+      // Automatic seeding is disabled — seeding is manual-only. When disabled,
+      // there is no upcoming automatic refresh, so surface nextAutoSeed as null
+      // and let the UI label it "manual only".
+      const nextAutoSeed = status.districtCostCenterAutoSeedEnabled && status.lastDistrictCostCenterSeed
         ? new Date(
             new Date(status.lastDistrictCostCenterSeed).getTime() +
               status.districtCostCenterSeedIntervalMs,
@@ -8045,6 +8048,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         lastAutoSeed: status.lastDistrictCostCenterSeed,
         intervalMs: status.districtCostCenterSeedIntervalMs,
         nextAutoSeed,
+        autoSeedEnabled: status.districtCostCenterAutoSeedEnabled,
         newDistricts: pending,
       });
     } catch (error) {
