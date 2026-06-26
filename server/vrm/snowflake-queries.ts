@@ -780,7 +780,7 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
         UPPER(TRIM(ENTERPRISE_ID))               AS LDAP_ID,
         EMPL_NAME,
         EMPL_STATUS,
-        LAST_HIRE_DATE,
+        LAST_HIRE_DT AS LAST_HIRE_DATE,
         LAST_DATE_WORKED,
         EXPECTED_RETURN_DT,
         SUPERVISOR_NAME,
