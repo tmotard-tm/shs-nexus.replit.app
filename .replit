@@ -25,23 +25,15 @@ externalPort = 8008
 
 [[ports]]
 localPort = 10181
-externalPort = 3003
-exposeLocalhost = true
 
 [[ports]]
 localPort = 13841
-externalPort = 5173
-exposeLocalhost = true
 
 [[ports]]
 localPort = 21395
-externalPort = 8000
-exposeLocalhost = true
 
 [[ports]]
 localPort = 22024
-externalPort = 6800
-exposeLocalhost = true
 
 [[ports]]
 localPort = 23636
@@ -49,24 +41,18 @@ externalPort = 3000
 
 [[ports]]
 localPort = 23637
-externalPort = 4200
 
 [[ports]]
 localPort = 23638
-externalPort = 3002
 
 [[ports]]
 localPort = 23639
-externalPort = 3001
 
 [[ports]]
 localPort = 23640
-externalPort = 5000
 
 [[ports]]
 localPort = 31191
-externalPort = 6000
-exposeLocalhost = true
 
 [env]
 PORT = "5000"
