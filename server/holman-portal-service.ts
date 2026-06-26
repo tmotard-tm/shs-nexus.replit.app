@@ -898,3 +898,52 @@ export async function denyPoInHolman(
     return { success: false, confirmed: false, error: err.message };
   }
 }
+
+// ─── Read repair-page comment/notes text (for the "unknown driver" resolver) ──────
+// READ-ONLY GET of the same RepairDetails page the approve/deny flow already uses,
+// returned as plain text so the comment section (where Holman reps record who they
+// actually spoke with) can be handed to the LLM extractor. Fault-isolated: never
+// throws into the caller; returns { ok:false, error } on any failure.
+export async function fetchRepairDetailsText(
+  key: string,
+): Promise<{ ok: boolean; text: string; error?: string }> {
+  if (process.env.HOLMAN_DECISION_DISABLED === "true") {
+    return { ok: false, text: "", error: "HOLMAN_DECISION_DISABLED" };
+  }
+  try {
+    await ensureSession();
+    const url = `${REPAIR_DETAILS_PATH}?key=${key}&isDrilldown=True&IsShowAll=True&rowid=1`;
+    const resp = await fetch(url, {
+      headers: {
+        Cookie: _sessionCookies,
+        "User-Agent": UA,
+        Referer: `${PORTAL_BASE}/WebForms/KPIs/DetailsListing.aspx`,
+      },
+      redirect: "follow",
+    });
+    _sessionCookies = mergeCookies(_sessionCookies, resp);
+    const respUrl: string = (resp as any).url ?? "";
+    if (/LoginForm\.aspx/i.test(respUrl)) {
+      _sessionExpiry = null;
+      return { ok: false, text: "", error: "RepairDetails bounced to LoginForm — session expired" };
+    }
+    if (!resp.ok) {
+      if (resp.status === 302 || resp.status === 401 || resp.status === 500) _sessionExpiry = null;
+      return { ok: false, text: "", error: `RepairDetails HTTP ${resp.status}` };
+    }
+    const html = await (resp as any).text();
+    const text = html
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;/g, " ")
+      .replace(/&amp;/g, "&")
+      .replace(/&#39;/g, "'")
+      .replace(/\s+/g, " ")
+      .trim();
+    return { ok: true, text };
+  } catch (e: any) {
+    console.error("[HolmanPortal] fetchRepairDetailsText:", e?.message ?? e);
+    return { ok: false, text: "", error: e?.message ?? String(e) };
+  }
+}
