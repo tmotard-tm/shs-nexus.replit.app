@@ -529,6 +529,17 @@ export default function WeeklyOffboarding() {
     return dateA - dateB;
   });
 
+  // Count trucks over 31 days since Date Last Worked, split by whether a manual status is set
+  const loaOver31 = filteredLoa.filter(e => {
+    const days = e.lastDateWorked ? differenceInDays(new Date(), new Date(e.lastDateWorked)) : null;
+    return days !== null && days > 31;
+  });
+  const loaOver31WithStatus = loaOver31.filter(e => {
+    const truck = e.lastKnownTruck?.trim() || null;
+    return !!(truck && nexusDataMap.get(truck)?.postOffboardedStatus);
+  }).length;
+  const loaOver31WithoutStatus = loaOver31.length - loaOver31WithStatus;
+
   const filteredByov = byovEnrollments.filter(e => {
     if (!byovSearch.trim()) return true;
     const q = byovSearch.toLowerCase();
@@ -1329,6 +1340,12 @@ export default function WeeklyOffboarding() {
                   </Select>
                   <span className="text-sm text-muted-foreground whitespace-nowrap">
                     {filteredLoa.length} of {loaTechs.length} record{loaTechs.length !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-sm whitespace-nowrap" title="Trucks over 31 days since Date Last Worked, split by whether a manual status is selected">
+                    <span className="font-medium text-green-700 dark:text-green-400">{loaOver31WithStatus} with status</span>
+                    <span className="text-muted-foreground"> · </span>
+                    <span className="font-medium text-red-700 dark:text-red-400">{loaOver31WithoutStatus} no status</span>
+                    <span className="text-muted-foreground"> (over 31 days)</span>
                   </span>
                 </div>
 
