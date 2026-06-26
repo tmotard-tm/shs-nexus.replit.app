@@ -5,6 +5,7 @@ import { Search, Upload, CheckCircle, XCircle, Loader2, FileDown, X, Plus, Clock
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 
@@ -1380,6 +1381,14 @@ export default function NewRentals() {
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ─── Holman PO queue (rental POs awaiting authorization) ─────────────────
+  // Restricted feature: only the named approvers (Tyler Morgan / Rob Anderson)
+  // may see or act on the Holman rental-PO queue. The server enforces the same
+  // allowlist on every /api/vrm/holman-po-queue route; this hides the UI and
+  // skips the fetch for everyone else so the page never 403s.
+  const { user } = useAuth();
+  const canApproveHolman = ["jmorga1", "handers"].includes(
+    (user?.username ?? "").trim().toLowerCase(),
+  );
   const [decidingPoId, setDecidingPoId] = useState<string | null>(null);
   const [poDeciderName, setPoDeciderName] = useState("");
   const [poConfirmAction, setPoConfirmAction] = useState<"approve" | "deny" | null>(null);
@@ -1391,6 +1400,7 @@ export default function NewRentals() {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     },
+    enabled: canApproveHolman,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
   });
@@ -1688,7 +1698,8 @@ export default function NewRentals() {
       </div>
 
 
-      {/* ── Holman Rental POs Awaiting Authorization ─────────────────────────── */}
+      {/* ── Holman Rental POs Awaiting Authorization (restricted) ─────────────── */}
+      {canApproveHolman && (
       <div style={{ marginBottom: 40 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
@@ -1905,6 +1916,7 @@ export default function NewRentals() {
           </div>
         )}
       </div>
+      )}
 
       {/* ── Weekly Scorecard ──────────────────────────────────────────────────── */}
       {decisionLog.length > 0 && (() => {

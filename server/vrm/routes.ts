@@ -3365,6 +3365,21 @@ export function registerVrmRoutes(): Router {
 
   // holman-po-queue helpers imported at top of file
 
+  // ── Access control ────────────────────────────────────────────────────────
+  // Holman rental-PO approvals are restricted to named approvers: Tyler Morgan
+  // (jmorga1) and Rob Anderson (handers). The gate is by authenticated session
+  // username (req.user is set by requireAuth on the /api/vrm mount), NOT by role
+  // — and it is intentionally kept inside the VRM module so it never leaks into
+  // global RBAC or any other module.
+  const HOLMAN_APPROVER_USERNAMES = new Set(["jmorga1", "handers"]);
+  function requireHolmanApprover(req: any, res: any, next: any) {
+    const username = String(req.user?.username ?? "").trim().toLowerCase();
+    if (!HOLMAN_APPROVER_USERNAMES.has(username)) {
+      return res.status(403).json({ ok: false, error: "Not authorized for Holman rental-PO approvals." });
+    }
+    return next();
+  }
+
   async function matchDriverNameToTech(driverName: string | null): Promise<{
     poNumber?: string;
     techLdap: string | null;
@@ -3512,7 +3527,7 @@ export function registerVrmRoutes(): Router {
    * GET /api/vrm/holman-po-queue
    * Returns the current mirrored Holman rental PO queue (DB cache — no Holman scrape).
    */
-  router.get("/holman-po-queue", async (_req, res) => {
+  router.get("/holman-po-queue", requireHolmanApprover, async (_req, res) => {
     try {
       const rows = await listHolmanPoQueue();
       res.json({ rows });
@@ -3527,7 +3542,7 @@ export function registerVrmRoutes(): Router {
    * Scrapes the Holman awaiting-auth queue, matches techs, upserts to DB.
    * Requires HOLMAN_PORTAL_USER + HOLMAN_PORTAL_PASS env vars.
    */
-  router.post("/holman-po-queue/refresh", async (_req, res) => {
+  router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
     try {
       const { rows: scraped, scrapedAt, error: scrapeErr } = await scrapeAwaitingAuth();
       if (scrapeErr && scraped.length === 0) {
@@ -3550,7 +3565,7 @@ export function registerVrmRoutes(): Router {
    * Approves the PO in Nexus and fires the Holman WebForms postback.
    * Dry-run by default until HOLMAN_DECISION_DRY_RUN=false is explicitly set.
    */
-  router.post("/holman-po-queue/:id/approve", async (req, res) => {
+  router.post("/holman-po-queue/:id/approve", requireHolmanApprover, async (req, res) => {
     const { id } = req.params;
     const { decidedByName } = req.body ?? {};
     if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
@@ -3610,7 +3625,7 @@ export function registerVrmRoutes(): Router {
    * Clicks the Decline radio on Holman (mirror of approve): Holman first, only mark
    * Nexus 'denied' after Holman confirms; blocked/failed are surfaced loudly.
    */
-  router.post("/holman-po-queue/:id/deny", async (req, res) => {
+  router.post("/holman-po-queue/:id/deny", requireHolmanApprover, async (req, res) => {
     const { id } = req.params;
     const { decidedByName } = req.body ?? {};
     if (!decidedByName?.trim()) return res.status(400).json({ ok: false, error: "decidedByName required" });
