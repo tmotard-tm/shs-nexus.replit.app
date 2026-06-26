@@ -505,6 +505,38 @@ async function runStartupBootstrap() {
   } catch (error) {
     console.error("⚠️ TPMS snapshot startup priming failed:", error);
   }
+
+  // VRM profitability schema-drift canary — runs ONE cheap INFORMATION_SCHEMA
+  // pass at startup to verify every column the profitability queries depend on
+  // against the live Snowflake views. Surfaces upstream column renames/drops
+  // hours before the 01:00 UTC profitability sync, naming ALL drifted columns at
+  // once in a loud, greppable log line. Non-blocking: fired without await so it
+  // can never delay server start.
+  try {
+    const { isSnowflakeConfigured } = await import("./snowflake-service");
+    if (isSnowflakeConfigured()) {
+      const { checkProfitabilitySchema } = await import("./vrm/snowflake-queries");
+      checkProfitabilitySchema()
+        .then((res) => {
+          if (res.errors.length > 0) {
+            console.warn(
+              `⚠️ [VRM SchemaCanary] Could not verify ${res.errors.length} profitability view(s): ` +
+                res.errors.map((e) => `${e.label}: ${e.error}`).join("; "),
+            );
+          }
+          if (res.ok) {
+            log(`✅ [VRM SchemaCanary] Profitability schema intact — verified ${res.checkedViews} view(s).`);
+          } else {
+            console.error(`❌ [VRM SchemaCanary] ${res.summary}`);
+          }
+        })
+        .catch((err) => {
+          console.error("⚠️ [VRM SchemaCanary] Schema drift canary failed to run:", err?.message ?? err);
+        });
+    }
+  } catch (error) {
+    console.error("⚠️ [VRM SchemaCanary] Schema drift canary failed to start:", error);
+  }
 }
 
 (async () => {

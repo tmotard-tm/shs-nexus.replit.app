@@ -11,7 +11,7 @@
  */
 
 import { getSnowflakeService, isSnowflakeConfigured } from "../snowflake-service";
-import { fetchAllProfitabilityRows } from "./snowflake-queries";
+import { fetchAllProfitabilityRows, checkProfitabilitySchema } from "./snowflake-queries";
 import {
   getProfitabilityCacheMeta,
   upsertProfitabilityCacheMeta,
@@ -165,6 +165,44 @@ export async function runProfitabilitySync(): Promise<void> {
     errorMessage: null,
     sourceSnowflakeLastAltered: null,
   });
+
+  // ── Schema-drift gate ───────────────────────────────────────────────────────
+  // Cheap INFORMATION_SCHEMA pass that verifies every column the profitability
+  // queries depend on against the live Snowflake views. Runs BEFORE the settle
+  // gate and the expensive fetch (independent of both) so an upstream column
+  // rename/drop fails loudly and early — naming ALL drifted columns at once —
+  // instead of surfacing as a buried first-identifier SQL compilation error.
+  // Infra/query errors here never block the sync (the heavy fetch has its own
+  // error handling); only confirmed drift aborts.
+  try {
+    const schemaCheck = await checkProfitabilitySchema();
+    if (schemaCheck.errors.length > 0) {
+      console.warn(
+        `[ProfitabilitySync] Schema check could not verify ${schemaCheck.errors.length} view(s): ` +
+          schemaCheck.errors.map((e) => `${e.label}: ${e.error}`).join("; "),
+      );
+    }
+    if (!schemaCheck.ok) {
+      console.error(`[ProfitabilitySync] Aborting sync — ${schemaCheck.summary}`);
+      await upsertProfitabilityCacheMeta({
+        status: "error",
+        lastSyncStartedAt: syncStartedAt,
+        lastSyncCompletedAt: prevCompletedAt, // preserve — no new snapshot was written
+        rowCount: prevRowCount,
+        errorMessage: schemaCheck.summary,
+        sourceSnowflakeLastAltered: null,
+      });
+      return;
+    }
+  } catch (schemaErr: any) {
+    // Couldn't run the check at all (e.g. transient Snowflake connection issue).
+    // Don't block the sync on a check-infrastructure failure — proceed to the
+    // settle gate and the heavy fetch, which carry their own error handling.
+    console.warn(
+      "[ProfitabilitySync] Schema-drift check failed to run — proceeding to settle gate:",
+      schemaErr?.message ?? schemaErr,
+    );
+  }
 
   // Wait for IHR table to finish its daily rebuild.
   const { settled, lastAltered } = await waitForSettle();

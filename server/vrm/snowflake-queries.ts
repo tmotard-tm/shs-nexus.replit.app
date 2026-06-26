@@ -1003,6 +1003,203 @@ export async function fetchAllProfitabilityRows(): Promise<ProfitabilityRow[]> {
   return rows;
 }
 
+// ─── Profitability schema-drift canary ──────────────────────────────────────
+//
+// The two profitability queries above (fetchAllProfitabilityRows +
+// fetchProfitabilityCheck) hard-code column names against ~5 external Snowflake
+// views owned by other teams. When an upstream column is renamed or dropped,
+// Snowflake aborts the ENTIRE query on a compilation error — and reports only
+// the FIRST invalid identifier, so fixing one column simply unmasks the next on
+// the following run. The manifest below enumerates EVERY column those queries
+// depend on, grouped by source view, so a single cheap INFORMATION_SCHEMA pass
+// can pinpoint ALL drifted columns at once before the expensive fetch.
+//
+// Keep this manifest in lockstep with the SELECT lists above. Column names are
+// compared case-insensitively (Snowflake folds unquoted identifiers to upper).
+
+export interface ProfitabilityViewManifest {
+  /** Friendly label used in log / cache-status messages (the view name). */
+  label: string;
+  database: string;
+  schema: string;
+  table: string;
+  /** Columns the profitability queries reference from this view. */
+  columns: string[];
+}
+
+export const PROFITABILITY_VIEW_MANIFEST: ProfitabilityViewManifest[] = [
+  {
+    // roster — universe driver (fetchAllProfitabilityRows only)
+    label: "NS_TECH_ACTIVE_ROSTER_DAILY_VW",
+    database: "IT_ANALYTICS",
+    schema: "HR_REPORTING_TECH_NON_SENSITIVE",
+    table: "NS_TECH_ACTIVE_ROSTER_DAILY_VW",
+    columns: [
+      "ENTERPRISE_ID",
+      "EMPL_NAME",
+      "EMPL_STATUS",
+      "LAST_HIRE_DT",
+      "LAST_DATE_WORKED",
+      "EXPECTED_RETURN_DT",
+      "SUPERVISOR_NAME",
+      "SUPERVISOR_ENTERPRISE_ID",
+    ],
+  },
+  {
+    // financials — IHR unit economics
+    label: "IHR_UNIT_ECONOMICS",
+    database: "FINANCE_ANALYTICS",
+    schema: "ADHOC_TBLS",
+    table: "IHR_UNIT_ECONOMICS",
+    columns: [
+      "TECH_LDAP",
+      "SO_STS_DESC",
+      "SO_STS_DT",
+      "TOTAL_REVENUE",
+      "LABOR_DIRECT_EXPENSE",
+      "LABOR_BENEFITS_EXPENSE",
+      "TOTAL_PARTS_COGS_EXPENSE",
+      "TOTAL_PARTS_COGS_EXPENSE_UNDISPOSITIONED",
+      "TOTAL_SHIPPING_FORWARD_EXPENSE",
+      "PPT_PROFIT",
+    ],
+  },
+  {
+    // DCR — scorecard inputs (written lowercase in SQL; folds to upper)
+    label: "daily_assigns_dcr_temp_new",
+    database: "IH_DATASCIENCE",
+    schema: "HS_REFERENCE",
+    table: "DAILY_ASSIGNS_DCR_TEMP_NEW",
+    columns: [
+      "LDAP_ID",
+      "EMP_FULL_NM",
+      "TENURE_YRS",
+      "COMP_PCT_NUM",
+      "COMP_PCT_DEN",
+      "WAGES",
+      "TOTAL_REVENUE",
+      "RECALL_30D_WOM_NUM",
+      "RECALL_30D_WOM_DEN",
+      "CM_CONV_NUM",
+      "CM_CONV_DEN",
+      "SPHW_ENROLLMENT_SALE_QTY",
+      "SPHW_ELIG_ENROL_D2C_COMPLETES",
+      "TIMEWINDOW",
+      "BUSUNIT",
+      "ACCTG_DT",
+    ],
+  },
+  {
+    // contacts fallback — COMTTU
+    label: "COMTTU_TECH_UN",
+    database: "PRD_TPMS",
+    schema: "HSTECH",
+    table: "COMTTU_TECH_UN",
+    columns: ["LDAP_ID", "MBL_PH_NO", "EMAIL_ADDR", "UPD_TS"],
+  },
+  {
+    // contacts primary — TPMS_EXTRACT
+    label: "TPMS_EXTRACT",
+    database: "PARTS_SUPPLYCHAIN",
+    schema: "SOFTEON",
+    table: "TPMS_EXTRACT",
+    columns: [
+      "ENTERPRISE_ID",
+      "MOBILEPHONENUMBER",
+      "EMAIL_ADDRESS",
+      "FULL_NAME",
+      "FILE_DATE",
+    ],
+  },
+];
+
+export interface SchemaDriftView {
+  label: string;
+  /** True when the view itself returned no columns (dropped/renamed/no access). */
+  viewMissing: boolean;
+  /** Expected columns not present in the live view. */
+  missingColumns: string[];
+}
+
+export interface ProfitabilitySchemaCheckResult {
+  /** True only when NO drift was detected. Infra/query errors do NOT flip this. */
+  ok: boolean;
+  checkedViews: number;
+  /** Only the views WITH drift (missing view or missing columns). */
+  drift: SchemaDriftView[];
+  /** Views we could not verify (transient query error) — never blocks the sync. */
+  errors: Array<{ label: string; error: string }>;
+  /** Human-readable one-line drift summary, or null when ok. */
+  summary: string | null;
+}
+
+/** Build the single-line, human-readable drift message used by both the cache
+ *  status and the startup canary log. */
+export function formatSchemaDriftSummary(drift: SchemaDriftView[]): string {
+  const parts = drift.map((v) =>
+    v.viewMissing
+      ? `${v.label} (view not found or no columns visible)`
+      : `${v.label} is missing column(s): ${v.missingColumns.join(", ")}`,
+  );
+  return `Schema drift: ${parts.join("; ")}`;
+}
+
+/**
+ * Verifies every column the profitability queries depend on against the live
+ * Snowflake views in ONE pass (does not stop at the first miss). Each view is
+ * checked via its own database's INFORMATION_SCHEMA.COLUMNS (same pattern as the
+ * existing introspection queries). Comparison is case-insensitive.
+ *
+ * - `drift`  = views with a missing column or a missing/empty view → real schema
+ *              drift; the sync should abort and surface `summary`.
+ * - `errors` = views whose metadata query failed (transient) → logged but never
+ *              used to block the sync, since the heavy fetch has its own error
+ *              handling and an INFORMATION_SCHEMA hiccup is not evidence of drift.
+ */
+export async function checkProfitabilitySchema(): Promise<ProfitabilitySchemaCheckResult> {
+  if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
+  const svc = getSnowflakeService();
+
+  const drift: SchemaDriftView[] = [];
+  const errors: Array<{ label: string; error: string }> = [];
+
+  await Promise.all(
+    PROFITABILITY_VIEW_MANIFEST.map(async (m) => {
+      try {
+        const rows = (await svc.executeQuery(`
+          /* checkProfitabilitySchema */
+          SELECT COLUMN_NAME AS "name"
+          FROM ${m.database}.INFORMATION_SCHEMA.COLUMNS
+          WHERE UPPER(TABLE_SCHEMA) = '${m.schema.toUpperCase()}'
+            AND UPPER(TABLE_NAME)   = '${m.table.toUpperCase()}'
+        `)) as Array<{ name: string }>;
+        const actual = new Set(rows.map((r) => String(r.name).toUpperCase()));
+        if (actual.size === 0) {
+          drift.push({ label: m.label, viewMissing: true, missingColumns: [] });
+          return;
+        }
+        const missing = m.columns
+          .map((c) => c.toUpperCase())
+          .filter((c) => !actual.has(c));
+        if (missing.length > 0) {
+          drift.push({ label: m.label, viewMissing: false, missingColumns: missing });
+        }
+      } catch (err: any) {
+        errors.push({ label: m.label, error: err?.message ?? String(err) });
+      }
+    }),
+  );
+
+  const ok = drift.length === 0;
+  return {
+    ok,
+    checkedViews: PROFITABILITY_VIEW_MANIFEST.length,
+    drift,
+    errors,
+    summary: ok ? null : formatSchemaDriftSummary(drift),
+  };
+}
+
 // ─── Tech Punch Status (TimeHub) ────────────────────────────────────────────
 
 export interface TechPunchRow {
