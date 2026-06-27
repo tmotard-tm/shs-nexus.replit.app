@@ -35,5 +35,15 @@ id→label, send `truckStatus/vehicleRuns/vehicleLooks` as `Number(id)`, send
 `theftVerified` as a real boolean, and cap `updateUser` at 10 chars. The clear/null
 contract is untested — omit a field rather than sending a sentinel to clear it.
 The assign flow uses different endpoints (`tech-update`, `repair-updates`) and
-gives no evidence about this contract. Cannot empirically test writes (single
-shared prod AMS, no sandbox) — reason from the OpenAPI schema + error messages.
+gives no evidence about this contract.
+
+**Confirmed live (the ID path works):** a real save setting `truckStatus` →
+"Tech On LOA" (the exact value that previously threw `int_parsing`) succeeded with
+no error and persisted — the card pill reflected the new status after a page
+refresh. So the `Number(id)` conversion + changed-fields-only diff is validated
+end-to-end for the integer-ID fields, and AMS applies the write durably. Still
+UNconfirmed live: the NAME-label path (`color/branding/interior` id→label) and
+the clear/null path — those run different conversion code and haven't been
+exercised. Note the pill updated only on full refresh: the save invalidates
+`/api/ams/vehicles/:vin` but NOT `/api/ams/truck-status-map` (30-min staleTime),
+so the in-place card pill stays stale until refresh/expiry.
