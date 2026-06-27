@@ -17237,18 +17237,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Warm the AMS truck-status cache in the background at startup so the
   // first real request is served instantly from cache.
-  setImmediate(() => {
-    if (!amsTruckStatusCache) {
-      // Route through getOrBuildAmsTruckStatusCache so any request that arrives
-      // before the warmer finishes shares the same in-flight pagination instead
-      // of kicking off a duplicate ~2-minute full AMS pull.
-      getOrBuildAmsTruckStatusCache()
-        .then(built => {
-          console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(built.data).length} vehicles, ${built.activeVins.size} active, sweep complete=${built.activeSweepComplete})`);
-        })
-        .catch(err => {
-          console.warn('[AMS TruckStatusMap] Startup warm-up failed (will retry on first request):', err.message);
-        });
+  setImmediate(async () => {
+    // 1) Warm the AMS truck-status cache (drives the per-card status pills) so the
+    //    first real request is served instantly from cache.
+    try {
+      if (!amsTruckStatusCache) {
+        // Route through getOrBuildAmsTruckStatusCache so any request that arrives
+        // before the warmer finishes shares the same in-flight pagination instead
+        // of kicking off a duplicate ~2-minute full AMS pull.
+        const built = await getOrBuildAmsTruckStatusCache();
+        console.log(`[AMS TruckStatusMap] Cache warmed at startup (${Object.keys(built.data).length} vehicles, ${built.activeVins.size} active, sweep complete=${built.activeSweepComplete})`);
+      }
+    } catch (err: any) {
+      console.warn('[AMS TruckStatusMap] Startup warm-up failed (will retry on first request):', err?.message || err);
+    }
+    // 2) Warm the shared full-fleet AMS cache (drives current-location enrichment
+    //    on the fleet-vehicles cold path) so the first fleet load doesn't pay the
+    //    ~2-minute cold sweep inline. Chained after the truck-status sweep so we
+    //    don't hit the same AMS endpoint with two concurrent full pulls.
+    try {
+      const { warmAmsFullFleetCache } = await import("./ams-api-service");
+      await warmAmsFullFleetCache(amsApiService);
+    } catch (err: any) {
+      console.warn('[AMS FullFleet] Startup warm-up failed (will build on first request):', err?.message || err);
     }
   });
 

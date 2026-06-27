@@ -1192,10 +1192,24 @@ class HolmanVehicleSyncService {
       const { AmsApiService, batchFetchAmsCurrentLocation } = await import("./ams-api-service");
       const ams = new AmsApiService();
       if (ams.hasCredentials()) {
-        amsCurLocByTruck = await batchFetchAmsCurrentLocation(
+        // Bounded + fail-open: never let a cold full-fleet AMS sweep block the
+        // fleet response. batchFetchAmsCurrentLocation kicks off the shared build
+        // (which keeps running in the background even if we stop waiting), but we
+        // only wait a few seconds for it. On timeout we fall through with the
+        // DB-cache value, or empty — in which case the UI falls back to the
+        // registered Holman location. The next request is served from the now-warm cache.
+        const AMS_CURLOC_ENRICH_TIMEOUT_MS = 8000;
+        const batchPromise = batchFetchAmsCurrentLocation(
           vehicles.map(v => ({ truckNumber: v.vehicleNumber, vin: v.vin })),
           ams
+        ).catch(err => {
+          console.warn("[HolmanSync-AMS] current-location batch failed:", err instanceof Error ? err.message : String(err));
+          return new Map<string, { city: string; state: string; zip: string }>();
+        });
+        const timeoutPromise = new Promise<Map<string, { city: string; state: string; zip: string }>>(resolve =>
+          setTimeout(() => resolve(new Map()), AMS_CURLOC_ENRICH_TIMEOUT_MS)
         );
+        amsCurLocByTruck = await Promise.race([batchPromise, timeoutPromise]);
       }
     } catch (err) {
       console.warn("[HolmanSync-AMS] current-location enrichment failed:", err instanceof Error ? err.message : String(err));

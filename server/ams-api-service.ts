@@ -95,6 +95,10 @@ export function mapVehicleType(amsValue: string | null | undefined): string | un
 // looked up in-memory. Eliminates per-vehicle HTTP calls (true batch strategy).
 // ---------------------------------------------------------------------------
 const AMS_FULL_FLEET_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+// When a sweep gives up early (page timeout) we still cache the partial result,
+// but expire it much sooner so a transient AMS hiccup self-heals instead of
+// masking missing current-location/type data for a full hour.
+const AMS_FULL_FLEET_PARTIAL_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
 export interface AmsCurrentLocation {
   city: string;
@@ -108,6 +112,9 @@ interface AmsFullFleetCache {
   curLocByVin: Map<string, AmsCurrentLocation>;
   curLocByVehicleNumber: Map<string, AmsCurrentLocation>;
   cachedAt: number;
+  // True when the sweep gave up before paginating the whole fleet (page timeout);
+  // such caches use a shorter TTL so they refresh sooner.
+  incomplete: boolean;
 }
 
 let _amsFullFleetCache: AmsFullFleetCache | null = null;
@@ -160,8 +167,38 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
   let pagesFetched = 0;
   const MAX_PAGES = 20; // safety cap: 10 000 vehicles max
 
+  // Per-page timeout + single retry so a stalled AMS page can't hang the whole
+  // sweep indefinitely (mirrors the buildAmsTruckStatusMap sweep). Without this,
+  // one hung page would leave the shared build promise pending forever and
+  // current-location enrichment would never recover on that instance.
+  const MAX_PAGE_ATTEMPTS = 2;
+  const PAGE_TIMEOUT_MS = 25_000;
+  let incomplete = false;
+
   while (pagesFetched < MAX_PAGES) {
-    const raw = await amsService.searchVehicles({ limit: PAGE_SIZE, offset });
+    let raw: unknown = null;
+    let pageOk = false;
+    for (let attempt = 1; attempt <= MAX_PAGE_ATTEMPTS; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), PAGE_TIMEOUT_MS);
+      try {
+        raw = await amsService.searchVehicles({ limit: PAGE_SIZE, offset }, controller.signal);
+        pageOk = true;
+        break;
+      } catch (err) {
+        const reason = controller.signal.aborted
+          ? `AMS page timeout after ${PAGE_TIMEOUT_MS / 1000}s (offset ${offset})`
+          : (err instanceof Error ? err.message : String(err));
+        console.warn(`[AMS FullFleet] search error at offset ${offset} (attempt ${attempt}/${MAX_PAGE_ATTEMPTS}): ${reason}`);
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    if (!pageOk) {
+      console.warn(`[AMS FullFleet] Giving up at offset ${offset} after ${MAX_PAGE_ATTEMPTS} attempts — caching partial sweep (${pagesFetched} pages)`);
+      incomplete = true;
+      break;
+    }
     const rows = normalizeAmsRows(raw);
     for (const row of rows) {
       const data = extractTypeData(row);
@@ -181,7 +218,7 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
     offset += PAGE_SIZE;
   }
 
-  return { byVin, byVehicleNumber, curLocByVin, curLocByVehicleNumber, cachedAt: Date.now() };
+  return { byVin, byVehicleNumber, curLocByVin, curLocByVehicleNumber, cachedAt: Date.now(), incomplete };
 }
 
 /**
@@ -190,7 +227,10 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
  */
 async function ensureAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFullFleetCache | null> {
   const now = Date.now();
-  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= AMS_FULL_FLEET_CACHE_TTL_MS) {
+  const ttl = _amsFullFleetCache?.incomplete
+    ? AMS_FULL_FLEET_PARTIAL_CACHE_TTL_MS
+    : AMS_FULL_FLEET_CACHE_TTL_MS;
+  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= ttl) {
     if (!_amsFullFleetFetchPromise) {
       _amsFullFleetFetchPromise = buildAmsFullFleetCache(amsService)
         .then(cache => {
@@ -206,6 +246,19 @@ async function ensureAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFu
     await _amsFullFleetFetchPromise;
   }
   return _amsFullFleetCache;
+}
+
+/**
+ * Pre-warm (or reuse) the shared full-fleet AMS cache. Used at startup so the
+ * first fleet-vehicles request doesn't pay the cold-build cost inline. Fire-and-
+ * forget safe: no-ops when AMS has no credentials, logs on success.
+ */
+export async function warmAmsFullFleetCache(amsService: AmsApiService): Promise<void> {
+  if (!amsService.hasCredentials()) return;
+  const cache = await ensureAmsFullFleetCache(amsService);
+  if (cache) {
+    console.log(`[AMS FullFleet] Cache warmed (${cache.byVin.size} VINs, ${cache.curLocByVin.size} with current location)`);
+  }
 }
 
 /**
