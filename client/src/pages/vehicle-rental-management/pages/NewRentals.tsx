@@ -6,6 +6,7 @@ import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { usePreviewRole } from "@/hooks/use-preview-role";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
 
@@ -1386,8 +1387,20 @@ export default function NewRentals() {
   // allowlist on every /api/vrm/holman-po-queue route; this hides the UI and
   // skips the fetch for everyone else so the page never 403s.
   const { user } = useAuth();
+  // Honor the developer "preview as user/role" (mirror) mode: the restricted
+  // section must reflect what the previewed identity would actually see, not the
+  // real developer session. Previewing as another USER checks that user's
+  // username; previewing a ROLE has no specific username, so it can never be an
+  // approver (the allowlist is by username, not role). Only the real, non-preview
+  // session falls back to the live logged-in username.
+  const { previewUser, previewRole } = usePreviewRole();
+  const effectiveApproverUsername = previewUser
+    ? previewUser.username
+    : previewRole
+      ? ""
+      : (user?.username ?? "");
   const canApproveHolman = ["jmorga1", "handers"].includes(
-    (user?.username ?? "").trim().toLowerCase(),
+    effectiveApproverUsername.trim().toLowerCase(),
   );
   const [decidingPoId, setDecidingPoId] = useState<string | null>(null);
   const [poDeciderName, setPoDeciderName] = useState("");

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, ReactNode } from "react";
 import type { UserRole, User } from "@shared/schema";
 
 export interface PreviewUser {
@@ -25,28 +25,27 @@ const PREVIEW_ROLE_KEY = "preview_role";
 const PREVIEW_USER_KEY = "preview_user";
 
 export function PreviewRoleProvider({ children }: { children: ReactNode }) {
-  const [previewRole, setPreviewRoleState] = useState<UserRole | null>(null);
-  const [previewUser, setPreviewUserState] = useState<PreviewUser | null>(null);
-
-  useEffect(() => {
-    const storedRole = sessionStorage.getItem(PREVIEW_ROLE_KEY);
-    if (storedRole) {
-      try {
-        setPreviewRoleState(storedRole as UserRole);
-      } catch {
-        sessionStorage.removeItem(PREVIEW_ROLE_KEY);
-      }
+  // Initialize synchronously from sessionStorage so the FIRST render already
+  // reflects an active preview. A useEffect-based hydration left both values null
+  // on the first render after a reload, which briefly rendered restricted,
+  // username-gated UI (e.g. the VRM Holman approve/deny section) as the real
+  // developer — and fired its query — before the preview identity took over.
+  const [previewRole, setPreviewRoleState] = useState<UserRole | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = sessionStorage.getItem(PREVIEW_ROLE_KEY);
+    return stored ? (stored as UserRole) : null;
+  });
+  const [previewUser, setPreviewUserState] = useState<PreviewUser | null>(() => {
+    if (typeof window === "undefined") return null;
+    const stored = sessionStorage.getItem(PREVIEW_USER_KEY);
+    if (!stored) return null;
+    try {
+      return JSON.parse(stored) as PreviewUser;
+    } catch {
+      sessionStorage.removeItem(PREVIEW_USER_KEY);
+      return null;
     }
-    
-    const storedUser = sessionStorage.getItem(PREVIEW_USER_KEY);
-    if (storedUser) {
-      try {
-        setPreviewUserState(JSON.parse(storedUser));
-      } catch {
-        sessionStorage.removeItem(PREVIEW_USER_KEY);
-      }
-    }
-  }, []);
+  });
 
   const setPreviewRole = (role: UserRole | null) => {
     setPreviewRoleState(role);
