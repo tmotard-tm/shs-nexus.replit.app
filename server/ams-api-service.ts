@@ -487,18 +487,21 @@ export class AmsApiService {
 
   async updateUserFields(vin: string, data: {
     updateUser: string;
+    // color/branding/interior are validated by NAME (e.g. "White", "Sears");
+    // truckStatus/vehicleRuns/vehicleLooks are numeric lookup IDs; theftVerified
+    // is a boolean. See the AMS UserFieldsUpdateRequest OpenAPI schema.
     color?: string | null;
     branding?: string | null;
     interior?: string | null;
     address?: string | null;
     zip?: string | null;
-    truckStatus?: string | null;
-    theftVerified?: string | null;
+    truckStatus?: number | null;
+    theftVerified?: boolean | null;
     keyAddress?: string | null;
     keyZip?: string | null;
     storageCost?: number | null;
-    vehicleRuns?: string | null;
-    vehicleLooks?: string | null;
+    vehicleRuns?: number | null;
+    vehicleLooks?: number | null;
   }): Promise<any> {
     return this.request('POST', `/api/v1/vehicles/${vin}/user-updates`, data);
   }

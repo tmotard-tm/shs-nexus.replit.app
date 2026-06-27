@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   Truck, Search, Filter, ChevronDown, ChevronUp, ChevronRight, RefreshCw, AlertCircle, 
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
@@ -92,6 +93,18 @@ function getAmsLookupLabel(item: any): string {
   return String(item.UniqueID);
 }
 
+// The AMS user-updates write API takes the LABEL (not the UniqueID the Select
+// stores) for its string-enum fields color/branding/interior (e.g. color must
+// be "Blue"/"Unknown"/"White"). truckStatus/vehicleRuns/vehicleLooks instead
+// take the numeric ID, so those are sent as-is — this helper is only used for
+// the name fields. Resolve a selected UniqueID back to its label before sending.
+// Returns null when the id cannot be matched so the caller can block the write.
+function amsLookupLabelById(lookup: any[] | undefined, id: string): string | null {
+  if (!lookup?.length) return null;
+  const item = lookup.find(i => String(i.UniqueID) === String(id));
+  return item ? getAmsLookupLabel(item) : null;
+}
+
 const DISTANCE_BANDS = [
   { key: 'Nearby',    min: 0,   max: 25,       label: 'Nearby',    range: 'Within 25 miles',  color: 'text-green-600',  borderColor: 'border-green-500'  },
   { key: 'Moderate',  min: 25,  max: 100,      label: 'Moderate',  range: '25 – 100 miles',   color: 'text-yellow-600', borderColor: 'border-yellow-500' },
@@ -117,9 +130,55 @@ function formatDriveTime(miles: number): string {
   return `${hours}h ${mins}m`;
 }
 
+// Human-readable labels for technician employment status codes, matching how
+// these codes are surfaced elsewhere in the app (e.g. weekly-offboarding).
+const TECH_STATUS_LABELS: Record<string, string> = {
+  A: "Active",
+  T: "Terminated",
+  L: "Leave of Absence",
+  P: "Paid Leave",
+  S: "Suspended",
+};
+
+// Compact single-letter chip showing a technician's employment status.
+// Renders nothing when no status is known so the name appears exactly as before.
+function TechStatusBadge({ status }: { status: string | null | undefined }) {
+  const code = (status || "").trim().toUpperCase();
+  if (!code) return null;
+  const label = TECH_STATUS_LABELS[code] || code;
+  const isActive = code === "A";
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span
+            data-testid={`badge-tech-status-${code}`}
+            className={`inline-flex items-center justify-center h-4 min-w-4 px-1 rounded text-[10px] font-bold leading-none shrink-0 ${
+              isActive
+                ? "bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300"
+                : "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300"
+            }`}
+          >
+            {code}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent>
+          <span className="text-xs">{label}</span>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 // Separate component so it can call useQuery per-VIN without violating hook rules.
 // React Query caches per ["/api/ams/vehicles", vin], so slide-out won't re-fetch.
-function MismatchAssignmentSection({ vehicle }: { vehicle: FleetVehicle }) {
+function MismatchAssignmentSection({
+  vehicle,
+  getTechStatus,
+}: {
+  vehicle: FleetVehicle;
+  getTechStatus: (techId: string) => string | null | undefined;
+}) {
   const { data: amsData, isLoading: amsLoading } = useQuery<any>({
     queryKey: ["/api/ams/vehicles", vehicle.vin],
     queryFn: async () => {
@@ -153,7 +212,10 @@ function MismatchAssignmentSection({ vehicle }: { vehicle: FleetVehicle }) {
         </div>
       ) : techId ? (
         <>
-          <p className="text-xs font-medium leading-tight">{techName || techId}</p>
+          <p className="text-xs font-medium leading-tight flex items-center gap-1">
+            <span className="truncate">{techName || techId}</span>
+            <TechStatusBadge status={getTechStatus(techId)} />
+          </p>
           <p className="text-xs text-muted-foreground font-mono leading-tight">{techId}</p>
         </>
       ) : (
@@ -186,7 +248,10 @@ function MismatchAssignmentSection({ vehicle }: { vehicle: FleetVehicle }) {
           </div>
           {vehicle.tpmsAssignedTechId?.trim() ? (
             <>
-              <p className="text-xs font-medium leading-tight">{vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}</p>
+              <p className="text-xs font-medium leading-tight flex items-center gap-1">
+                <span className="truncate">{vehicle.tpmsAssignedTechName?.trim() || vehicle.tpmsAssignedTechId}</span>
+                <TechStatusBadge status={getTechStatus(vehicle.tpmsAssignedTechId.trim())} />
+              </p>
               <p className="text-xs text-muted-foreground font-mono leading-tight">{vehicle.tpmsAssignedTechId}</p>
             </>
           ) : (
@@ -708,6 +773,9 @@ export default function FleetManagement() {
   const [amsEditStorageCost, setAmsEditStorageCost] = useState("");
   const [amsEditVehicleRuns, setAmsEditVehicleRuns] = useState("");
   const [amsEditVehicleLooks, setAmsEditVehicleLooks] = useState("");
+  // Snapshot of the field values when the AMS Edit dialog opens, so we only
+  // send fields the user actually changed (avoids re-sending stale color/etc).
+  const [amsEditOriginal, setAmsEditOriginal] = useState<Record<string, string>>({});
 
   // AMS Repair form
   const [amsRepairInRepair, setAmsRepairInRepair] = useState(false);
@@ -747,12 +815,27 @@ export default function FleetManagement() {
     return m;
   }, [poFlagsData]);
 
-  // AMS Truck Status map — VIN → human-readable status label (batch, 30-min cache)
+  // AMS Truck Status map — VIN → human-readable status label (batch, 30-min cache).
+  // The server returns a transient 503 while its AMS status cache is still
+  // warming (cold/expired) or after an upstream AMS/Snowflake blip. Because every
+  // card's status pill reads from this single shared query, one stray 503 used to
+  // blank ALL pills until the user manually refreshed the page. Self-heal instead:
+  // retry transient server/network failures with backoff, recover on tab refocus,
+  // and slow-poll until the map finally loads (then stop).
   const { data: amsTruckStatusData } = useQuery<Record<string, string | null>>({
     queryKey: ['/api/ams/truck-status-map'],
     staleTime: 30 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    retry: false,
+    refetchOnWindowFocus: true,
+    retry: (failureCount, error) => {
+      const status = parseInt(error instanceof Error ? error.message : '', 10);
+      // Retry network errors (NaN) and server-side failures (5xx, incl. the
+      // "still warming" 503); never retry auth/permission/4xx.
+      const retriable = Number.isNaN(status) || status >= 500;
+      return retriable && failureCount < 8;
+    },
+    retryDelay: (attempt) => Math.min(2000 * 2 ** attempt, 30000),
+    // If retries are exhausted, keep slow-polling until the map loads, then stop.
+    refetchInterval: (query) => (query.state.data ? false : 30000),
   });
   const amsTruckStatusOptions = useMemo(() => {
     if (!amsTruckStatusData) return [];
@@ -846,7 +929,8 @@ export default function FleetManagement() {
 
   const dtcTruckSet = useMemo(() => new Set(dtcScoreMap.keys()), [dtcScoreMap]);
 
-  // All techs roster — fetched lazily when Ops Review modal is opened
+  // All techs roster — used both by the Ops Review modal and by the fleet cards
+  // to show each assigned tech's employment status. Read-only and cached.
   const { data: allTechsRoster } = useQuery<Array<{
     techRacfid: string; techName: string; employeeId: string;
     districtNo: string | null; planningAreaName: string | null;
@@ -857,7 +941,6 @@ export default function FleetManagement() {
     queryKey: ['/api/all-techs'],
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
-    enabled: showOpsReview,
   });
 
   type AllTechEntry = {
@@ -874,6 +957,14 @@ export default function FleetManagement() {
     }
     return m;
   }, [allTechsRoster]);
+
+  // Live employment-status lookup for fleet cards, keyed by tech ID (same
+  // lowercase keying used by allTechsRosterMap). Returns undefined when unknown.
+  const getTechStatus = useCallback(
+    (techId: string): string | null | undefined =>
+      allTechsRosterMap.get((techId || "").trim().toLowerCase())?.employmentStatus,
+    [allTechsRosterMap],
+  );
 
   // Ops Review — raw list of techs whose assigned vehicle is in rental ops
   const opsRawRentalTechs = useMemo(() => {
@@ -2388,14 +2479,17 @@ export default function FleetManagement() {
                           
                           {/* Tech Assignment Section */}
                           {hasMismatch ? (
-                            <MismatchAssignmentSection vehicle={vehicle} />
+                            <MismatchAssignmentSection vehicle={vehicle} getTechStatus={getTechStatus} />
                           ) : (
                             /* Matched or unassigned: show single tech line */
                             <div className="flex items-center gap-2 pt-2 border-t">
                               <User className="h-4 w-4 text-muted-foreground shrink-0" />
                               {vehicle.tpmsAssignedTechId ? (
                                 <div className="min-w-0">
-                                  <p className="text-sm font-medium truncate">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</p>
+                                  <p className="text-sm font-medium truncate flex items-center gap-1.5">
+                                    <span className="truncate">{vehicle.tpmsAssignedTechName || vehicle.tpmsAssignedTechId}</span>
+                                    <TechStatusBadge status={getTechStatus(vehicle.tpmsAssignedTechId)} />
+                                  </p>
                                   <p className="text-xs text-muted-foreground font-mono">{vehicle.tpmsAssignedTechId}</p>
                                 </div>
                               ) : (
@@ -3092,19 +3186,34 @@ export default function FleetManagement() {
                             const byLabel = lookup.find(item => getAmsLookupLabel(item).toLowerCase() === s.toLowerCase());
                             return byLabel ? String(byLabel.UniqueID) : "";
                           };
-                          setAmsEditColor(matchLookup(colorLookup, amsVehicle?.Color));
-                          setAmsEditBranding(matchLookup(brandingLookup, amsVehicle?.Branding));
-                          setAmsEditInterior(matchLookup(interiorLookup, amsVehicle?.Interior));
-                          setAmsEditAddress(amsVehicle?.CurLocAddress || "");
-                          setAmsEditAddressZip(amsVehicle?.CurLocZip || "");
-                          setAmsEditTruckStatus(matchLookup(truckStatusLookup, amsVehicle?.TruckStatus));
                           const tv = amsVehicle?.TheftVerified;
-                          setAmsEditTheftVerified(tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "");
-                          setAmsEditKeyAddress(amsVehicle?.KeyLocAddress || amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "");
-                          setAmsEditKeyZip(amsVehicle?.KeyLocZip || amsVehicle?.KeyZip || amsVehicle?.keyZip || "");
-                          setAmsEditStorageCost(amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "");
-                          setAmsEditVehicleRuns(matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns));
-                          setAmsEditVehicleLooks(matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks));
+                          const initial = {
+                            color: matchLookup(colorLookup, amsVehicle?.Color),
+                            branding: matchLookup(brandingLookup, amsVehicle?.Branding),
+                            interior: matchLookup(interiorLookup, amsVehicle?.Interior),
+                            address: amsVehicle?.CurLocAddress || "",
+                            addressZip: amsVehicle?.CurLocZip || "",
+                            truckStatus: matchLookup(truckStatusLookup, amsVehicle?.TruckStatus),
+                            theftVerified: tv === true || tv === "Y" ? "Y" : tv === false || tv === "N" ? "N" : "",
+                            keyAddress: amsVehicle?.KeyLocAddress || amsVehicle?.KeyAddress || amsVehicle?.keyAddress || "",
+                            keyZip: amsVehicle?.KeyLocZip || amsVehicle?.KeyZip || amsVehicle?.keyZip || "",
+                            storageCost: amsVehicle?.StorageCost != null ? String(amsVehicle.StorageCost) : "",
+                            vehicleRuns: matchLookup(vehicleRunsLookup, amsVehicle?.VehicleRuns),
+                            vehicleLooks: matchLookup(vehicleLooksLookup, amsVehicle?.VehicleLooks),
+                          };
+                          setAmsEditColor(initial.color);
+                          setAmsEditBranding(initial.branding);
+                          setAmsEditInterior(initial.interior);
+                          setAmsEditAddress(initial.address);
+                          setAmsEditAddressZip(initial.addressZip);
+                          setAmsEditTruckStatus(initial.truckStatus);
+                          setAmsEditTheftVerified(initial.theftVerified);
+                          setAmsEditKeyAddress(initial.keyAddress);
+                          setAmsEditKeyZip(initial.keyZip);
+                          setAmsEditStorageCost(initial.storageCost);
+                          setAmsEditVehicleRuns(initial.vehicleRuns);
+                          setAmsEditVehicleLooks(initial.vehicleLooks);
+                          setAmsEditOriginal(initial);
                           openModal("amsEdit");
                         }} data-testid="button-ams-edit">
                           <Pencil className="h-4 w-4 mr-1.5" />Edit Fields
@@ -4395,19 +4504,54 @@ export default function FleetManagement() {
             <Button
               disabled={amsUserUpdateMutation.isPending}
               onClick={() => {
-                const payload: Record<string, any> = { updateUser: user?.username || "nexus" };
-                if (amsEditColor && amsEditColor !== "__none__") payload.color = amsEditColor;
-                if (amsEditBranding && amsEditBranding !== "__none__") payload.branding = amsEditBranding;
-                if (amsEditInterior && amsEditInterior !== "__none__") payload.interior = amsEditInterior;
-                if (amsEditAddress) payload.address = amsEditAddress;
-                if (amsEditAddressZip) payload.zip = amsEditAddressZip;
-                if (amsEditTruckStatus && amsEditTruckStatus !== "__none__") payload.truckStatus = amsEditTruckStatus;
-                if (amsEditTheftVerified && amsEditTheftVerified !== "__none__") payload.theftVerified = amsEditTheftVerified;
-                if (amsEditKeyAddress) payload.keyAddress = amsEditKeyAddress;
-                if (amsEditKeyZip) payload.keyZip = amsEditKeyZip;
-                if (amsEditStorageCost !== "") payload.storageCost = parseFloat(amsEditStorageCost);
-                if (amsEditVehicleRuns && amsEditVehicleRuns !== "__none__") payload.vehicleRuns = amsEditVehicleRuns;
-                if (amsEditVehicleLooks && amsEditVehicleLooks !== "__none__") payload.vehicleLooks = amsEditVehicleLooks;
+                const orig = amsEditOriginal;
+                const payload: Record<string, any> = { updateUser: (user?.username || "nexus").slice(0, 10) };
+                const unresolved: string[] = [];
+                // The AMS write API expects DIFFERENT types per field (see its OpenAPI
+                // schema): color/branding/interior take the LABEL name (e.g. "White"),
+                // while truckStatus/vehicleRuns/vehicleLooks take the numeric ID. The
+                // Select stores the UniqueID for all of them, so convert accordingly.
+                // Only send a field when the user actually changed it.
+                const addNameField = (key: string, current: string, lookup: any[] | undefined, label: string) => {
+                  if (current === (orig[key] ?? "")) return; // unchanged — skip
+                  if (!current || current === "__none__") return; // clearing not supported by AMS write API
+                  const name = amsLookupLabelById(lookup, current);
+                  if (name == null) { unresolved.push(label); return; }
+                  payload[key] = name;
+                };
+                const addIdField = (key: string, current: string, label: string) => {
+                  if (current === (orig[key] ?? "")) return; // unchanged — skip
+                  if (!current || current === "__none__") return; // clearing not supported by AMS write API
+                  const id = Number(current);
+                  if (!Number.isInteger(id)) { unresolved.push(label); return; }
+                  payload[key] = id;
+                };
+                addNameField("color", amsEditColor, colorLookup, "Color");
+                addNameField("branding", amsEditBranding, brandingLookup, "Branding");
+                addNameField("interior", amsEditInterior, interiorLookup, "Interior");
+                addIdField("truckStatus", amsEditTruckStatus, "Truck Status");
+                addIdField("vehicleRuns", amsEditVehicleRuns, "Vehicle Runs");
+                addIdField("vehicleLooks", amsEditVehicleLooks, "Vehicle Looks");
+                // Free-form / non-lookup fields: only send when changed.
+                if (amsEditAddress !== (orig.address ?? "")) payload.address = amsEditAddress;
+                if (amsEditAddressZip !== (orig.addressZip ?? "")) payload.zip = amsEditAddressZip;
+                if (amsEditKeyAddress !== (orig.keyAddress ?? "")) payload.keyAddress = amsEditKeyAddress;
+                if (amsEditKeyZip !== (orig.keyZip ?? "")) payload.keyZip = amsEditKeyZip;
+                if (amsEditStorageCost !== (orig.storageCost ?? "") && amsEditStorageCost !== "") {
+                  payload.storageCost = parseFloat(amsEditStorageCost);
+                }
+                // theftVerified is a boolean in the AMS schema (Y -> true, N -> false).
+                if (amsEditTheftVerified && amsEditTheftVerified !== "__none__" && amsEditTheftVerified !== (orig.theftVerified ?? "")) {
+                  payload.theftVerified = amsEditTheftVerified === "Y";
+                }
+                if (unresolved.length) {
+                  toast({ title: "Cannot save", description: `Could not match ${unresolved.join(", ")} to a valid AMS option. Please reopen and reselect.`, variant: "destructive" });
+                  return;
+                }
+                if (Object.keys(payload).filter(k => k !== "updateUser").length === 0) {
+                  toast({ title: "No changes to save" });
+                  return;
+                }
                 amsUserUpdateMutation.mutate(payload);
               }}
             >
