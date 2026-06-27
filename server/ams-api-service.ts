@@ -96,9 +96,17 @@ export function mapVehicleType(amsValue: string | null | undefined): string | un
 // ---------------------------------------------------------------------------
 const AMS_FULL_FLEET_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
 
+export interface AmsCurrentLocation {
+  city: string;
+  state: string;
+  zip: string;
+}
+
 interface AmsFullFleetCache {
   byVin: Map<string, AmsVehicleTypeData>;
   byVehicleNumber: Map<string, AmsVehicleTypeData>;
+  curLocByVin: Map<string, AmsCurrentLocation>;
+  curLocByVehicleNumber: Map<string, AmsCurrentLocation>;
   cachedAt: number;
 }
 
@@ -116,6 +124,20 @@ function extractTypeData(row: AmsVehicle): AmsVehicleTypeData {
   return data;
 }
 
+/**
+ * Extract the AMS *Current Location* (where the vehicle physically sits now) from
+ * a vehicle row. This is intentionally the CurLoc* set — NOT the delivery address
+ * (Address/City/State/Zip), which represents the original delivery location.
+ * Returns null when no current-location values are present.
+ */
+function extractCurrentLocation(row: AmsVehicle): AmsCurrentLocation | null {
+  const city = (row.CurLocCity ?? '').toString().trim();
+  const state = (row.CurLocState ?? '').toString().trim();
+  const zip = (row.CurLocZip ?? '').toString().replace(/\D/g, '').slice(0, 5);
+  if (!city && !state && !zip) return null;
+  return { city, state, zip };
+}
+
 function normalizeAmsRows(raw: unknown): AmsVehicle[] {
   if (Array.isArray(raw)) return raw as AmsVehicle[];
   if (raw && typeof raw === 'object') {
@@ -130,6 +152,8 @@ function normalizeAmsRows(raw: unknown): AmsVehicle[] {
 async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFullFleetCache> {
   const byVin = new Map<string, AmsVehicleTypeData>();
   const byVehicleNumber = new Map<string, AmsVehicleTypeData>();
+  const curLocByVin = new Map<string, AmsCurrentLocation>();
+  const curLocByVehicleNumber = new Map<string, AmsCurrentLocation>();
 
   const PAGE_SIZE = 500;
   let offset = 0;
@@ -141,10 +165,15 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
     const rows = normalizeAmsRows(raw);
     for (const row of rows) {
       const data = extractTypeData(row);
-      if (row.VIN) byVin.set(row.VIN.toUpperCase(), data);
+      const loc = extractCurrentLocation(row);
+      if (row.VIN) {
+        byVin.set(row.VIN.toUpperCase(), data);
+        if (loc) curLocByVin.set(row.VIN.toUpperCase(), loc);
+      }
       if (row.VehicleNumber) {
         const vn = String(row.VehicleNumber).replace(/^0+/, '') || String(row.VehicleNumber);
         byVehicleNumber.set(vn, data);
+        if (loc) curLocByVehicleNumber.set(vn, loc);
       }
     }
     pagesFetched++;
@@ -152,7 +181,31 @@ async function buildAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFul
     offset += PAGE_SIZE;
   }
 
-  return { byVin, byVehicleNumber, cachedAt: Date.now() };
+  return { byVin, byVehicleNumber, curLocByVin, curLocByVehicleNumber, cachedAt: Date.now() };
+}
+
+/**
+ * Warm or reuse the shared in-memory full-fleet AMS cache (coalescing concurrent
+ * refreshes). Returns null only if the build failed and no cache is available.
+ */
+async function ensureAmsFullFleetCache(amsService: AmsApiService): Promise<AmsFullFleetCache | null> {
+  const now = Date.now();
+  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= AMS_FULL_FLEET_CACHE_TTL_MS) {
+    if (!_amsFullFleetFetchPromise) {
+      _amsFullFleetFetchPromise = buildAmsFullFleetCache(amsService)
+        .then(cache => {
+          _amsFullFleetCache = cache;
+          _amsFullFleetFetchPromise = null;
+          return cache;
+        })
+        .catch(err => {
+          _amsFullFleetFetchPromise = null;
+          throw err;
+        });
+    }
+    await _amsFullFleetFetchPromise;
+  }
+  return _amsFullFleetCache;
 }
 
 /**
@@ -197,26 +250,9 @@ export async function batchFetchAmsTypeData(
   const result = new Map<string, AmsVehicleTypeData>();
   if (!amsService.hasCredentials() || vehicles.length === 0) return result;
 
-  // Refresh or reuse the full-fleet cache (coalesce concurrent refreshes)
-  const now = Date.now();
-  if (!_amsFullFleetCache || (now - _amsFullFleetCache.cachedAt) >= AMS_FULL_FLEET_CACHE_TTL_MS) {
-    if (!_amsFullFleetFetchPromise) {
-      _amsFullFleetFetchPromise = buildAmsFullFleetCache(amsService)
-        .then(cache => {
-          _amsFullFleetCache = cache;
-          _amsFullFleetFetchPromise = null;
-          return cache;
-        })
-        .catch(err => {
-          _amsFullFleetFetchPromise = null;
-          throw err;
-        });
-    }
-    await _amsFullFleetFetchPromise;
-  }
-
-  if (!_amsFullFleetCache) return result;
-  const { byVin, byVehicleNumber } = _amsFullFleetCache;
+  const cache = await ensureAmsFullFleetCache(amsService);
+  if (!cache) return result;
+  const { byVin, byVehicleNumber } = cache;
 
   // Pure in-memory join: VIN first, then VehicleNumber
   for (const v of vehicles) {
@@ -227,6 +263,38 @@ export async function batchFetchAmsTypeData(
       data = byVehicleNumber.get(normalized);
     }
     if (data) result.set(v.truckNumber, data);
+  }
+
+  return result;
+}
+
+/**
+ * Returns the AMS *Current Location* (city/state/zip — where the vehicle physically
+ * sits now) for the given vehicles, via a single in-memory lookup against the shared
+ * full-fleet AMS cache (fetched once per hour). Zero per-vehicle HTTP calls after the
+ * cache is warm. Keyed by truckNumber. Vehicles with no AMS current location are
+ * omitted so callers can fall back to another source.
+ */
+export async function batchFetchAmsCurrentLocation(
+  vehicles: Array<{ truckNumber: string; vin?: string | null }>,
+  amsService: AmsApiService
+): Promise<Map<string, AmsCurrentLocation>> {
+  const result = new Map<string, AmsCurrentLocation>();
+  if (!amsService.hasCredentials() || vehicles.length === 0) return result;
+
+  const cache = await ensureAmsFullFleetCache(amsService);
+  if (!cache) return result;
+  const { curLocByVin, curLocByVehicleNumber } = cache;
+
+  // Pure in-memory join: VIN first, then VehicleNumber
+  for (const v of vehicles) {
+    let loc: AmsCurrentLocation | undefined;
+    if (v.vin) loc = curLocByVin.get(v.vin.toUpperCase());
+    if (!loc) {
+      const normalized = v.truckNumber.replace(/^0+/, '') || v.truckNumber;
+      loc = curLocByVehicleNumber.get(normalized);
+    }
+    if (loc) result.set(v.truckNumber, loc);
   }
 
   return result;

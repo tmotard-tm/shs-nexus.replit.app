@@ -1158,19 +1158,60 @@ class HolmanVehicleSyncService {
     const vins = Array.from(new Set(vehicles.map(v => (v.vin || "").trim()).filter(Boolean)));
     if (vins.length === 0) return vehicles;
     const byVin = new Map<string, string>();
+    const curLocByVin = new Map<string, { city: string; state: string; zip: string }>();
     try {
       const rows = await db
-        .select({ vin: amsVehiclesCache.vin, ldap: amsVehiclesCache.amsAssignedLdap })
+        .select({ vin: amsVehiclesCache.vin, ldap: amsVehiclesCache.amsAssignedLdap, rawResponse: amsVehiclesCache.rawResponse })
         .from(amsVehiclesCache)
         .where(inArray(amsVehiclesCache.vin, vins));
       for (const r of rows) {
-        if (r.vin) byVin.set(r.vin.trim(), (r.ldap || "").trim());
+        if (!r.vin) continue;
+        const key = r.vin.trim();
+        byVin.set(key, (r.ldap || "").trim());
+        const raw = (r.rawResponse || {}) as Record<string, any>;
+        const city = (raw.CurLocCity ?? "").toString().trim();
+        const state = (raw.CurLocState ?? "").toString().trim();
+        const zip = (raw.CurLocZip ?? "").toString().replace(/\D/g, "").slice(0, 5);
+        if (city || state || zip) {
+          curLocByVin.set(key, { city, state, zip });
+        }
       }
     } catch (err) {
       console.warn("[HolmanSync-AMS] enrichWithAMSData failed:", err instanceof Error ? err.message : String(err));
       return vehicles;
     }
-    return vehicles.map(v => ({ ...v, amsTechId: (v.vin ? byVin.get(v.vin.trim()) : "") || "" }));
+    // Primary, fleet-wide source of AMS Current Location: the shared full-fleet AMS
+    // cache (built from /api/v1/vehicles, which carries CurLoc* for every vehicle and
+    // refreshes hourly). The DB cache (ams_vehicles_cache.rawResponse) only carries
+    // CurLoc for the handful of vehicles touched by individual assign operations —
+    // its bulk sync uses the tech-shaped searchTechs payload, which has no CurLoc — so
+    // it is used only as a secondary fallback. Non-fatal: on any AMS failure we keep
+    // the DB-cache value (or empty, so the UI falls back to the Holman location).
+    let amsCurLocByTruck = new Map<string, { city: string; state: string; zip: string }>();
+    try {
+      const { AmsApiService, batchFetchAmsCurrentLocation } = await import("./ams-api-service");
+      const ams = new AmsApiService();
+      if (ams.hasCredentials()) {
+        amsCurLocByTruck = await batchFetchAmsCurrentLocation(
+          vehicles.map(v => ({ truckNumber: v.vehicleNumber, vin: v.vin })),
+          ams
+        );
+      }
+    } catch (err) {
+      console.warn("[HolmanSync-AMS] current-location enrichment failed:", err instanceof Error ? err.message : String(err));
+    }
+
+    return vehicles.map(v => {
+      const key = (v.vin || "").trim();
+      const cur = amsCurLocByTruck.get(v.vehicleNumber) || (key ? curLocByVin.get(key) : undefined);
+      return {
+        ...v,
+        amsTechId: (key ? byVin.get(key) : "") || "",
+        currentCity: cur?.city || "",
+        currentState: cur?.state || "",
+        currentZip: cur?.zip || "",
+      };
+    });
   }
 
   async enrichWithTPMSData(vehicles: FleetVehicle[]): Promise<FleetVehicle[]> {

@@ -1354,12 +1354,12 @@ export default function FleetManagement() {
       models: unique(allVehicles.map(v => v.modelName)),
       colors: unique(allVehicles.map(v => v.color)),
       years: uniqueNum(allVehicles.map(v => v.modelYear)),
-      states: unique(allVehicles.map(v => v.state)),
+      states: unique(allVehicles.map(v => v.currentState || v.state)),
       licenseStates: unique(allVehicles.map(v => v.licenseState)),
       regions: unique(allVehicles.map(v => v.region)),
       divisions: unique(allVehicles.map(v => v.division || '')),
       districts: unique(allVehicles.map(v => v.district)),
-      cities: unique(allVehicles.map(v => v.city)),
+      cities: unique(allVehicles.map(v => v.currentCity || v.city)),
       brandings: unique(allVehicles.map(v => v.branding)),
       interiors: unique(allVehicles.map(v => v.interior)),
       tuneStatuses: unique(allVehicles.map(v => v.tuneStatus)),
@@ -1430,8 +1430,8 @@ export default function FleetManagement() {
         (assignmentStatusFilter === "unassigned" && !vehicle.tpmsAssignedTechId);
       
       // Location filters
-      const matchesState = stateFilter === "all" || vehicle.state === stateFilter;
-      const matchesCity = cityFilter === "all" || vehicle.city === cityFilter;
+      const matchesState = stateFilter === "all" || (vehicle.currentState || vehicle.state) === stateFilter;
+      const matchesCity = cityFilter === "all" || (vehicle.currentCity || vehicle.city) === cityFilter;
       const matchesLicenseState = licenseStateFilter === "all" || vehicle.licenseState === licenseStateFilter;
       const matchesRegion = regionFilter === "all" || vehicle.region === regionFilter;
       const matchesDivision = divisionFilter === "all" || vehicle.division === divisionFilter;
@@ -1557,8 +1557,8 @@ export default function FleetManagement() {
         const targetCoords = await fetchZipCoords(zip);
         if (cancelled) return;
 
-        // Gather unique vehicle zips
-        const uniqueZips = [...new Set(filteredVehicles.map(v => v.zip || '').filter(Boolean))];
+        // Gather unique vehicle zips (prefer AMS current-location zip, fall back to Holman zip)
+        const uniqueZips = [...new Set(filteredVehicles.map(v => v.currentZip || v.zip || '').filter(Boolean))];
         const coordsMap = new Map<string, { lat: number; lng: number } | null>();
         await Promise.all(
           uniqueZips.map(async vZip => {
@@ -1570,7 +1570,7 @@ export default function FleetManagement() {
         if (cancelled) return;
 
         const withScores = filteredVehicles.map(v => {
-          const vZip = v.zip || '';
+          const vZip = v.currentZip || v.zip || '';
           let score = 9999;
           if (targetCoords && vZip && coordsMap.get(vZip)) {
             const vc = coordsMap.get(vZip)!;
@@ -2354,6 +2354,7 @@ export default function FleetManagement() {
                       || rentalOpsVehicleSet.has(toDisplayNumber(vehicle.vehicleNumber));
                     const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
                     const dtcScore = dtcScoreMap.get(vehicle.vehicleNumber) ?? dtcScoreMap.get(toCanonical(vehicle.vehicleNumber)) ?? 0;
+                    const amsTruckStatusLabel = amsTruckStatusData?.[(vehicle.vin || '').toUpperCase()] ?? null;
                     
                     const card = (
                       <Card 
@@ -2366,6 +2367,10 @@ export default function FleetManagement() {
                         <Badge variant="outline" className="absolute top-3 left-3 text-xs z-10">
                           {ownership.type}
                         </Badge>
+                        {/* AMS status pill — top-right corner */}
+                        {amsTruckStatusLabel && (
+                          <Badge className="absolute top-3 right-3 text-xs z-10 bg-indigo-600 text-white border-none">{amsTruckStatusLabel}</Badge>
+                        )}
                         <CardContent className="p-4 pt-9 space-y-3">
                           {/* Header: Vehicle Info */}
                           <div className="flex items-center gap-2">
@@ -2409,7 +2414,7 @@ export default function FleetManagement() {
                                 <MapPin className="h-3 w-3" />
                                 <span>Location</span>
                               </div>
-                              <p className="font-medium">{vehicle.city}, {vehicle.state}</p>
+                              <p className="font-medium">{vehicle.currentCity || vehicle.city}, {vehicle.currentState || vehicle.state}</p>
                               <p className="text-muted-foreground">
                                 {vehicle.region} / {vehicle.district}
                                 {lookupCostCenter(vehicle.district) && (

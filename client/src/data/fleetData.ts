@@ -26,6 +26,9 @@ export interface FleetVehicle {
   city: string;
   state: string;
   zip: string;
+  currentCity?: string; // AMS Current Location city (where the vehicle currently sits)
+  currentState?: string; // AMS Current Location state
+  currentZip?: string; // AMS Current Location zip
   mis: string;
   remainingBookValue: number;
   leaseEndDate: string;
