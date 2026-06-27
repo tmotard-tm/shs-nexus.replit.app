@@ -318,6 +318,7 @@ export interface IStorage {
   getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined>;
   getAllTechByTechRacfid(techRacfid: string): Promise<AllTech | undefined>;
   getAllTechs(): Promise<AllTech[]>;
+  getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]>;
   getTermedEmployeesFromRoster(daysBack?: number): Promise<AllTech[]>;
   getEmployeesNeedingOffboarding(daysBack?: number): Promise<AllTech[]>;
   markEmployeeOffboardingCreated(employeeId: string, taskId: string): Promise<AllTech | undefined>;
@@ -1420,6 +1421,10 @@ export class MemStorage implements IStorage {
   }
 
   async getAllTechs(): Promise<AllTech[]> {
+    return []; // Not implemented in memory storage
+  }
+
+  async getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]> {
     return []; // Not implemented in memory storage
   }
 
@@ -3842,6 +3847,12 @@ export class DatabaseStorage implements IStorage {
 
   async getAllTechs(): Promise<AllTech[]> {
     return await db.select().from(allTechs).orderBy(allTechs.techName);
+  }
+
+  async getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]> {
+    return await db
+      .select({ techRacfid: allTechs.techRacfid, employmentStatus: allTechs.employmentStatus })
+      .from(allTechs);
   }
 
   async getTermedEmployeesFromRoster(daysBack: number = 30): Promise<AllTech[]> {

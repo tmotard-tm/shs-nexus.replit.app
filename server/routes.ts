@@ -12882,6 +12882,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Lightweight tech-ID → employment-status lookup for fleet cards.
+  // Returns only { techRacfid, employmentStatus } instead of the full roster
+  // (contact info, addresses, phones) so the Fleet Management page can render
+  // the per-tech status badge without paying for the heavy /api/all-techs payload.
+  app.get("/api/all-techs/status", requireAuth, async (req: any, res) => {
+    try {
+      const statuses = await storage.getAllTechStatuses();
+      res.json(statuses);
+    } catch (error: any) {
+      console.error("Error getting all tech statuses:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Look up a termed tech by employee ID (for auto-filling dates) - now uses unified all_techs table
   app.get("/api/termed-techs/lookup/:employeeId", requireAuth, async (req: any, res) => {
     try {

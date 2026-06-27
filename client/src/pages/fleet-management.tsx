@@ -929,8 +929,27 @@ export default function FleetManagement() {
 
   const dtcTruckSet = useMemo(() => new Set(dtcScoreMap.keys()), [dtcScoreMap]);
 
-  // All techs roster — used both by the Ops Review modal and by the fleet cards
-  // to show each assigned tech's employment status. Read-only and cached.
+  // Lightweight tech-ID → employment-status lookup for the fleet cards' status
+  // badge. Loaded eagerly on every page open, but only carries the status letter
+  // (not the full roster's contact info/addresses/phones). Read-only and cached.
+  const { data: allTechStatuses } = useQuery<Array<{
+    techRacfid: string; employmentStatus: string | null;
+  }>>({
+    queryKey: ['/api/all-techs/status'],
+    staleTime: 30 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const techStatusMap = useMemo(() => {
+    const m = new Map<string, string | null>();
+    for (const t of allTechStatuses ?? []) {
+      m.set(t.techRacfid.toLowerCase(), t.employmentStatus);
+    }
+    return m;
+  }, [allTechStatuses]);
+
+  // Full techs roster — only the Ops Review modal needs the heavy fields
+  // (contact info, addresses, phones), so this is gated to load lazily when the
+  // modal opens rather than on every page load. Read-only and cached.
   const { data: allTechsRoster } = useQuery<Array<{
     techRacfid: string; techName: string; employeeId: string;
     districtNo: string | null; planningAreaName: string | null;
@@ -941,6 +960,7 @@ export default function FleetManagement() {
     queryKey: ['/api/all-techs'],
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
+    enabled: showOpsReview,
   });
 
   type AllTechEntry = {
@@ -958,12 +978,13 @@ export default function FleetManagement() {
     return m;
   }, [allTechsRoster]);
 
-  // Live employment-status lookup for fleet cards, keyed by tech ID (same
-  // lowercase keying used by allTechsRosterMap). Returns undefined when unknown.
+  // Live employment-status lookup for fleet cards, keyed by tech ID (lowercase).
+  // Uses the lightweight status map so cards never wait on the full roster.
+  // Returns undefined when unknown.
   const getTechStatus = useCallback(
     (techId: string): string | null | undefined =>
-      allTechsRosterMap.get((techId || "").trim().toLowerCase())?.employmentStatus,
-    [allTechsRosterMap],
+      techStatusMap.get((techId || "").trim().toLowerCase()),
+    [techStatusMap],
   );
 
   // Ops Review — raw list of techs whose assigned vehicle is in rental ops
