@@ -17495,6 +17495,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.post("/api/ams/vehicles/:vin/user-updates", requireAuth, async (req: any, res) => {
     try {
       const result = await amsApiService.updateUserFields(req.params.vin, req.body);
+      // Patch just this VIN in the cached truck-status map so the fleet-card
+      // status pill (served from /api/ams/truck-status-map, a 30-min cache)
+      // updates within seconds instead of waiting for the next rebuild. Awaited
+      // before responding so the client's follow-up refetch sees the new value.
+      // Non-fatal: the save already succeeded if we got here.
+      try {
+        const { refreshAmsTruckStatusForVin } = await import("./ams-truck-status-cache");
+        await refreshAmsTruckStatusForVin(req.params.vin);
+      } catch (cacheErr: any) {
+        console.warn(
+          `[AMS TruckStatusMap] Post-save cache patch skipped for VIN ${req.params.vin}: ${cacheErr?.message || cacheErr}`,
+        );
+      }
       res.json(result);
     } catch (error: any) {
       console.error("Error updating AMS vehicle fields:", error);

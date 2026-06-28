@@ -1137,6 +1137,10 @@ export default function FleetManagement() {
     onSuccess: () => {
       setActiveModal(null);
       queryClient.invalidateQueries({ queryKey: ["/api/ams/vehicles", selectedVehicle?.vin] });
+      // Also refresh the bulk status map that drives the fleet-card pill — the
+      // server has already patched this VIN's entry, so the refetch surfaces the
+      // new status immediately instead of lagging up to 30 minutes.
+      queryClient.invalidateQueries({ queryKey: ['/api/ams/truck-status-map'] });
       toast({ title: "AMS vehicle fields updated" });
     },
     onError: (error: any) => {

@@ -44,6 +44,20 @@ refresh. So the `Number(id)` conversion + changed-fields-only diff is validated
 end-to-end for the integer-ID fields, and AMS applies the write durably. Still
 UNconfirmed live: the NAME-label path (`color/branding/interior` id→label) and
 the clear/null path — those run different conversion code and haven't been
-exercised. Note the pill updated only on full refresh: the save invalidates
-`/api/ams/vehicles/:vin` but NOT `/api/ams/truck-status-map` (30-min staleTime),
-so the in-place card pill stays stale until refresh/expiry.
+exercised.
+
+**Card status pill staleness (FIXED):** the fleet-card status pill is driven by
+the BULK `/api/ams/truck-status-map` (server-side cache, 30-min TTL) — a SEPARATE
+source from the per-VIN detail query `['/api/ams/vehicles', vin]`. The save
+originally invalidated only the per-VIN query, so the pill lagged up to 30 min.
+The fix is TWO parts that must stay paired: (1) the mutation `onSuccess` also
+invalidates `['/api/ams/truck-status-map']`, and (2) the `/user-updates` route
+awaits a targeted per-VIN cache patch before responding (re-reads that one VIN
+from AMS and overwrites its entry in the in-memory bulk map).
+**Why:** a client invalidation ALONE is useless here — the server would just
+re-serve the ≤30-min-stale cached map; you need the server-side patch so the
+follow-up refetch returns the fresh value within seconds.
+**How to apply:** any NEW endpoint that changes a vehicle's AMS `TruckStatus`
+needs BOTH the client invalidation and the server patch. Today only
+`/user-updates` sets `truckStatus`; `tech-update` writes tech only and the repair
+routes write repair-status fields (a different field from `TruckStatus`).

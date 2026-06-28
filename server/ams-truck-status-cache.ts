@@ -370,6 +370,48 @@ export async function getAmsStatusForMissingVins(
   return result;
 }
 
+// After a write to a vehicle's AMS fields (e.g. truck status), refresh just
+// that one VIN's entry in the in-memory bulk map so the fleet-card status pill
+// (served from /api/ams/truck-status-map, a 30-min cache) reflects the change
+// within seconds instead of waiting for the next full rebuild. Does a fresh
+// per-VIN AMS read (bypassing the per-VIN TTL cache) and patches the bulk map,
+// the per-VIN cache, and the OOS map. Returns the new status, or undefined if
+// the read failed (non-fatal — the caller's write already succeeded). If the
+// bulk map has never been built, this is a no-op for the bulk map (the next
+// getAmsTruckStatusMap() will build fresh and include the current value).
+export async function refreshAmsTruckStatusForVin(
+  rawVin: string,
+): Promise<string | null | undefined> {
+  const vin = (rawVin || "").trim().toUpperCase();
+  if (!vin) return undefined;
+  try {
+    const lookupMap = await getTruckStatusLookup();
+    const v: any = await amsApiService.getVehicleByVin(vin);
+    const rawStatus = v?.TruckStatus ?? v?.truckStatus ?? v?.truck_status;
+    const status: string | null = resolveTruckStatusLabel(rawStatus, lookupMap);
+    const oosRaw =
+      v?.OutofSvcDate ??
+      v?.OutOfSvcDate ??
+      v?.outofSvcDate ??
+      v?.OutOfServiceDate ??
+      v?.outOfServiceDate ??
+      null;
+    const oos = oosRaw == null ? null : String(oosRaw).trim();
+    perVinCache.set(vin, { status, oos, builtAt: Date.now() });
+    if (cache) cache.data[vin] = status;
+    if (oosCache) oosCache.data[vin] = oos;
+    console.log(
+      `[AMS TruckStatusMap] Patched VIN ${vin} -> ${status ?? "null"} after AMS user-update`,
+    );
+    return status;
+  } catch (err: any) {
+    console.warn(
+      `[AMS TruckStatusMap] Could not refresh VIN ${vin} after user-update: ${err?.message || err}`,
+    );
+    return undefined;
+  }
+}
+
 export function isAmsTruckStatusCacheStale(): boolean {
   if (!cache) return true;
   return Date.now() - cache.builtAt > TTL_MS;
