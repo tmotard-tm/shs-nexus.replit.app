@@ -12882,6 +12882,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Constant-size roster availability probe. Returns just { count } so the
+  // background-sync hook can decide whether to show the "roster not synced"
+  // warning without downloading any per-tech rows at all.
+  app.get("/api/all-techs/count", requireAuth, async (req: any, res) => {
+    try {
+      const count = await storage.getAllTechsCount();
+      res.json({ count });
+    } catch (error: any) {
+      console.error("Error getting all techs count:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // Lightweight tech-ID → employment-status lookup for fleet cards.
   // Returns only { techRacfid, employmentStatus } instead of the full roster
   // (contact info, addresses, phones) so the Fleet Management page can render

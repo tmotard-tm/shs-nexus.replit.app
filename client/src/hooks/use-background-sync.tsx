@@ -44,7 +44,7 @@ export function useBackgroundSync() {
     // Just check if data is available, don't trigger a sync
     const checkDataStatus = async () => {
       try {
-        const response = await fetch("/api/all-techs?limit=1");
+        const response = await fetch("/api/all-techs/count");
         
         // Handle non-OK responses explicitly
         if (!response.ok) {
@@ -62,10 +62,9 @@ export function useBackgroundSync() {
         
         const data = await response.json();
         
-        // API returns array directly - check if it's empty
-        // Handle both array response and potential object wrapper
-        const records = Array.isArray(data) ? data : (data?.data || data?.techs || []);
-        const isEmpty = !records || (Array.isArray(records) && records.length === 0);
+        // API returns { count } - roster is "not synced" only when it's empty
+        const count = typeof data?.count === 'number' ? data.count : 0;
+        const isEmpty = count === 0;
         
         if (isEmpty) {
           // Only show warning for developers who can actually sync

@@ -318,6 +318,7 @@ export interface IStorage {
   getAllTechByEmployeeId(employeeId: string): Promise<AllTech | undefined>;
   getAllTechByTechRacfid(techRacfid: string): Promise<AllTech | undefined>;
   getAllTechs(): Promise<AllTech[]>;
+  getAllTechsCount(): Promise<number>;
   getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]>;
   getTermedEmployeesFromRoster(daysBack?: number): Promise<AllTech[]>;
   getEmployeesNeedingOffboarding(daysBack?: number): Promise<AllTech[]>;
@@ -1422,6 +1423,10 @@ export class MemStorage implements IStorage {
 
   async getAllTechs(): Promise<AllTech[]> {
     return []; // Not implemented in memory storage
+  }
+
+  async getAllTechsCount(): Promise<number> {
+    return 0; // Not implemented in memory storage
   }
 
   async getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]> {
@@ -3847,6 +3852,11 @@ export class DatabaseStorage implements IStorage {
 
   async getAllTechs(): Promise<AllTech[]> {
     return await db.select().from(allTechs).orderBy(allTechs.techName);
+  }
+
+  async getAllTechsCount(): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(allTechs);
+    return Number(result[0]?.count ?? 0);
   }
 
   async getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]> {
