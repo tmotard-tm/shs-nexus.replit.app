@@ -11,6 +11,7 @@ import {
 import { sql, eq, desc, and, isNull, isNotNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema, parseStatus, validateStatus, normalizeStatusLegacy } from "@shared/fleet-scope-schema";
+import { syncLogs } from "@shared/schema";
 import { z } from "zod";
 import { testConnection, executeQuery, getTableData, getTableSchema, lookupTpmsContactsByLdap } from "./fleet-scope-snowflake";
 import {
@@ -17123,10 +17124,29 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     try {
       const user = req.user;
       const triggeredBy = user?.username ?? "unknown";
-      console.log(`[RentalSync] Manual sync triggered by ${triggeredBy}`);
+      // Operator override: bypasses the proportional prune guards (#2 short-list
+      // floor, #3 single-empty-feed) to push a GENUINE large drop through. Never
+      // bypasses the absolute both-feeds-empty guard (#1).
+      const force =
+        req.query?.force === "true" || req.query?.force === "1" || req.body?.force === true;
+      console.log(`[RentalSync] Manual sync triggered by ${triggeredBy}${force ? " (FORCE)" : ""}`);
 
       const { syncRentalOpsToFleetScope } = await import("./rental-ops-sync");
-      const result = await syncRentalOpsToFleetScope();
+      const result = await syncRentalOpsToFleetScope(`manual:${triggeredBy}`, { force });
+
+      // A concurrent reconcile held the lock — nothing changed. Report it as a
+      // skip (HTTP 200) rather than success/failure so the UI can tell the user
+      // to retry shortly.
+      if (result.skipped) {
+        res.json({
+          success: false,
+          skipped: true,
+          skipReason: result.skipReason ?? "another reconcile was already running",
+          message: "Another rental reconcile is already running — try again shortly.",
+        });
+        return;
+      }
+
       // Manual rental sync rewrote fs_trucks (added/removed/date-filled).
       // Drop the /trucks cache locally + bump cross-replica version so
       // every ARD client sees the new SOT on their next refresh.
@@ -17149,6 +17169,68 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     } catch (error: any) {
       console.error("[RentalSync] Manual sync failed:", error);
       res.status(500).json({ message: error.message || "Rental Ops sync failed" });
+    }
+  });
+
+  // GET /rental-sync/health — surface Rental Ops → Fleet Scope sync health so a
+  // stall is caught quickly instead of going unnoticed for days. Returns the
+  // last successful run (timestamp + age), the most recent run of ANY status
+  // (so a failing run is visible), and an `isStale` flag once the last success
+  // is older than the expected daily window.
+  app.get("/rental-sync/health", async (req, res) => {
+    try {
+      const STALE_AFTER_HOURS = Number(process.env.RENTAL_SYNC_STALE_HOURS ?? 26);
+      const [lastSuccess] = await getDb()
+        .select()
+        .from(syncLogs)
+        .where(and(eq(syncLogs.syncType, "rental_ops_fleet_scope"), eq(syncLogs.status, "completed")))
+        .orderBy(desc(syncLogs.completedAt))
+        .limit(1);
+      // Order by COALESCE(completedAt, startedAt) DESC — NOT startedAt. A 'skipped'
+      // catch-up row can start slightly AFTER a Scheduled-Deployment run but
+      // complete instantly (before that run finishes); ordering by startedAt would
+      // then surface the skip as the "last run" and hide the real completing run.
+      const [lastRun] = await getDb()
+        .select()
+        .from(syncLogs)
+        .where(eq(syncLogs.syncType, "rental_ops_fleet_scope"))
+        .orderBy(desc(sql`COALESCE(${syncLogs.completedAt}, ${syncLogs.startedAt})`))
+        .limit(1);
+
+      const lastSuccessAt = lastSuccess?.completedAt ?? null;
+      const ageHours = lastSuccessAt
+        ? (Date.now() - new Date(lastSuccessAt).getTime()) / (1000 * 60 * 60)
+        : null;
+      const isStale = ageHours === null || ageHours > STALE_AFTER_HOURS;
+
+      res.json({
+        syncType: "rental_ops_fleet_scope",
+        lastSuccessAt,
+        lastSuccessAgeHours: ageHours === null ? null : Math.round(ageHours * 10) / 10,
+        staleAfterHours: STALE_AFTER_HOURS,
+        isStale,
+        lastSuccess: lastSuccess
+          ? {
+              completedAt: lastSuccess.completedAt,
+              triggeredBy: lastSuccess.triggeredBy,
+              vehiclesInRentalOps: lastSuccess.recordsProcessed,
+              added: lastSuccess.recordsCreated,
+              dateFilled: lastSuccess.recordsUpdated,
+            }
+          : null,
+        lastRun: lastRun
+          ? {
+              status: lastRun.status,
+              startedAt: lastRun.startedAt,
+              completedAt: lastRun.completedAt,
+              triggeredBy: lastRun.triggeredBy,
+              errorMessage: lastRun.errorMessage,
+            }
+          : null,
+      });
+    } catch (error: any) {
+      console.error("[RentalSync] Health check failed:", error);
+      res.status(500).json({ message: error.message || "Health check failed" });
     }
   });
 

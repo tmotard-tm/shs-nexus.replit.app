@@ -1423,7 +1423,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Truck Consolidation operations
-  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; consolidationId: string }> {
+  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }> {
     // Get current trucks in the system
     const currentTrucks = await this.getAllTrucks();
     const currentTruckNumbers = new Set(currentTrucks.map(t => t.truckNumber.trim().toUpperCase()));

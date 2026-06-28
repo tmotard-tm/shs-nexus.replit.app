@@ -1,8 +1,7 @@
 import { getSnowflakeSyncService } from './snowflake-sync-service';
 import { isSnowflakeConfigured } from './snowflake-service';
 import { db } from './db';
-import { queueItems, amsVehiclesCache, externalWatermarkState, fleetOperationLog, operationEvents, holmanVehiclesCache, tpmsCachedAssignments } from '@shared/schema';
-import { rentalImports } from '@shared/fleet-scope-schema';
+import { queueItems, amsVehiclesCache, externalWatermarkState, fleetOperationLog, operationEvents, holmanVehiclesCache, tpmsCachedAssignments, syncLogs } from '@shared/schema';
 import { eq, and, isNotNull, desc, gte, sql } from 'drizzle-orm';
 import { toCanonical } from './vehicle-number-utils';
 import { loadActiveFenceSet } from './fleet-reconciliation/fences';
@@ -128,7 +127,7 @@ async function checkAndRunSync(): Promise<void> {
         try {
           const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
           console.log('[Scheduler] Starting Rental Ops → Fleet Scope auto-sync...');
-          const rentalSyncResult = await syncRentalOpsToFleetScope();
+          const rentalSyncResult = await syncRentalOpsToFleetScope('scheduler');
           // Best-effort cross-replica invalidation. Imported lazily so any
           // import failure (file rename, etc.) is fully non-fatal — the
           // sync itself already succeeded.
@@ -1095,18 +1094,55 @@ async function backfillAllDepartments(): Promise<void> {
  */
 async function getLastRentalSyncDateFromDb(): Promise<string | null> {
   try {
+    // Watermark must read the table the auto-sync actually writes. The Rental
+    // Ops → Fleet Scope reconciliation records to sync_logs (syncType
+    // 'rental_ops_fleet_scope'), NOT fs_rental_imports — that table is the
+    // separate MANUAL weekly-import path. Reading rental_imports here let a
+    // manual import (or its absence) masquerade as the auto-sync watermark,
+    // causing false "already ran today" skips / missed runs. Only a COMPLETED
+    // run counts as "ran today".
     const [latest] = await db
-      .select({ importedAt: rentalImports.importedAt })
-      .from(rentalImports)
-      .orderBy(desc(rentalImports.importedAt))
+      .select({ completedAt: syncLogs.completedAt })
+      .from(syncLogs)
+      .where(and(eq(syncLogs.syncType, 'rental_ops_fleet_scope'), eq(syncLogs.status, 'completed')))
+      .orderBy(desc(syncLogs.completedAt))
       .limit(1);
-    if (!latest?.importedAt) return null;
+    if (!latest?.completedAt) return null;
     // Convert the stored UTC timestamp to EST date string
-    const estDate = new Date(latest.importedAt.getTime() - (5 * 60 * 60 * 1000));
+    const estDate = new Date(latest.completedAt.getTime() - (5 * 60 * 60 * 1000));
     return getDateString(estDate);
   } catch (err: any) {
     console.error('[Scheduler] Could not read last rental sync date from DB:', err?.message);
     return null;
+  }
+}
+
+/**
+ * True if a rental reconcile is currently mid-flight (a 'running' sync_logs row
+ * started within the last `thresholdMinutes`). Belt-and-suspenders on top of the
+ * advisory lock: lets the startup catch-up yield to an in-progress Scheduled
+ * Deployment run instead of opening a redundant attempt the lock would reject.
+ * Bounded by a recent window so a crashed run's stale 'running' row can't block
+ * catch-up forever. Fail-open (the advisory lock remains the real guard).
+ */
+async function hasRecentRunningRentalSync(thresholdMinutes = 20): Promise<boolean> {
+  try {
+    const cutoff = new Date(Date.now() - thresholdMinutes * 60 * 1000);
+    const [row] = await db
+      .select({ id: syncLogs.id })
+      .from(syncLogs)
+      .where(
+        and(
+          eq(syncLogs.syncType, 'rental_ops_fleet_scope'),
+          eq(syncLogs.status, 'running'),
+          gte(syncLogs.startedAt, cutoff),
+        ),
+      )
+      .limit(1);
+    return !!row;
+  } catch (err: any) {
+    console.error('[Scheduler] Could not check for running rental sync (non-fatal):', err?.message);
+    return false;
   }
 }
 
@@ -1152,9 +1188,15 @@ async function runCatchUpRentalSyncIfNeeded(): Promise<void> {
       console.log(`[Scheduler] Rental sync already ran today (${todayStr}), skipping startup catch-up`);
       return;
     }
+    // Yield to an in-progress reconcile (e.g. the Scheduled Deployment) so we
+    // don't open a redundant attempt the advisory lock would only reject anyway.
+    if (await hasRecentRunningRentalSync()) {
+      console.log('[Scheduler] A rental reconcile is currently running — skipping startup catch-up');
+      return;
+    }
     console.log(`[Scheduler] Startup catch-up: last rental sync was ${lastDbSyncDate ?? 'never'}, running now...`);
     const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
-    const result = await syncRentalOpsToFleetScope();
+    const result = await syncRentalOpsToFleetScope('startup_catchup');
     if (result.added.length > 0 || result.removed.length > 0 || result.updated > 0) {
       try {
         const { invalidateTrucksCache } = await import('./fleet-scope-routes');

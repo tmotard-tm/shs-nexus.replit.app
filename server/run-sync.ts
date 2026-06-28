@@ -22,11 +22,60 @@ async function runSync(): Promise<void> {
   console.log('='.repeat(60));
 
   try {
-    const { isSnowflakeConfigured } = await import('./snowflake-service');
-    
+    // ── Bootstrap: initialize Snowflake (mirrors server/index.ts and the proven
+    // standalone TPMS scripts). This script runs as its OWN process (a Replit
+    // Scheduled Deployment), so server/index.ts boot never ran and nothing has
+    // initialized the Snowflake singleton yet — we must do it here, BEFORE the
+    // isSnowflakeConfigured() check, or every sync below silently no-ops in dev
+    // (where the key comes from a file, not an env var). ─────────────────────
+    const { initializeSnowflakeService, isSnowflakeConfigured } = await import('./snowflake-service');
+
+    const account = process.env.SNOWFLAKE_ACCOUNT;
+    const username = process.env.SNOWFLAKE_USER;
+    let privateKey = process.env.SNOWFLAKE_PRIVATE_KEY;
+
+    // Dev fallback: read the key from file when the env var is absent.
+    if (!privateKey) {
+      try {
+        const { loadKeyFromFile } = await import('./snowflake-key-loader');
+        privateKey = loadKeyFromFile() ?? undefined;
+        if (privateKey) console.log('[Scheduled Sync] Loaded Snowflake private key from file.');
+      } catch {
+        /* file fallback unavailable — handled by the genuine-absence check below */
+      }
+    }
+
+    if (!account || !username || !privateKey) {
+      const missing = [
+        !account ? 'SNOWFLAKE_ACCOUNT' : null,
+        !username ? 'SNOWFLAKE_USER' : null,
+        !privateKey ? 'SNOWFLAKE_PRIVATE_KEY' : null,
+      ].filter(Boolean).join(', ');
+      const msg = `Missing Snowflake credentials: ${missing} — daily sync (incl. rental reconciliation) aborted`;
+      console.error(`[Scheduled Sync] ERROR: ${msg}`);
+      // Record a failed rental_ops_fleet_scope run so the broken scheduled job is
+      // visible at GET /api/fs/rental-sync/health, not only in the raw run log.
+      const { recordFailedRentalSync } = await import('./rental-ops-sync');
+      await recordFailedRentalSync(msg, 'scheduled_task');
+      process.exit(1);
+    }
+
+    initializeSnowflakeService({
+      account,
+      username,
+      privateKey,
+      database: process.env.SNOWFLAKE_DATABASE,
+      schema: process.env.SNOWFLAKE_SCHEMA,
+      warehouse: process.env.SNOWFLAKE_WAREHOUSE,
+      role: process.env.SNOWFLAKE_ROLE,
+    });
+    console.log('[Scheduled Sync] Snowflake service initialized.');
+
     if (!isSnowflakeConfigured()) {
-      console.error('[Scheduled Sync] ERROR: Snowflake is not configured');
-      console.error('[Scheduled Sync] Please ensure SNOWFLAKE_ACCOUNT, SNOWFLAKE_USER, and SNOWFLAKE_PRIVATE_KEY are set');
+      const msg = 'Snowflake still not configured after initialization — daily sync aborted';
+      console.error(`[Scheduled Sync] ERROR: ${msg}`);
+      const { recordFailedRentalSync } = await import('./rental-ops-sync');
+      await recordFailedRentalSync(msg, 'scheduled_task');
       process.exit(1);
     }
 
@@ -140,7 +189,7 @@ async function runSync(): Promise<void> {
 
     try {
       const { syncRentalOpsToFleetScope } = await import('./rental-ops-sync');
-      const rentalSyncResult = await syncRentalOpsToFleetScope();
+      const rentalSyncResult = await syncRentalOpsToFleetScope('scheduled_task');
       console.log(`[Scheduled Sync] Rental Ops sync complete:`);
       console.log(`  - Vehicles in open rentals: ${rentalSyncResult.vehiclesInRentalOps}`);
       console.log(`  - Added to Fleet Scope: ${rentalSyncResult.added.length}`);
