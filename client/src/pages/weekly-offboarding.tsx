@@ -1417,7 +1417,16 @@ export default function WeeklyOffboarding() {
                                 {e.employmentStatusLabel}
                               </Badge>
                             </TableCell>
-                            <TableCell className="font-medium">{e.fullName || '-'}</TableCell>
+                            <TableCell className="font-medium">
+                              <span className="inline-flex items-center gap-2">
+                                <span>{e.fullName || '-'}</span>
+                                {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
+                                  <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
+                                    Rental
+                                  </Badge>
+                                ) : null}
+                              </span>
+                            </TableCell>
                             <TableCell className="font-mono text-sm">{e.enterpriseId}</TableCell>
                             <TableCell className="text-sm whitespace-nowrap">
                               {lastWorkedDate ? (
