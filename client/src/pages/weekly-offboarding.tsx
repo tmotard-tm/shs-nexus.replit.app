@@ -169,6 +169,8 @@ export default function WeeklyOffboarding() {
   const [loaSearch, setLoaSearch] = useState("");
   const [loaStatusFilter, setLoaStatusFilter] = useState<string>("all");
   const [loaSortDateWorked, setLoaSortDateWorked] = useState<"default" | "asc" | "desc">("default");
+  const [rosterRentalTop, setRosterRentalTop] = useState(false);
+  const [loaRentalTop, setLoaRentalTop] = useState(false);
 
   const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
     queryKey: ['/api/loa-trucks-to-recover'],
@@ -426,6 +428,11 @@ export default function WeeklyOffboarding() {
       (manualStatusFilter === "__none__" ? !nexusInfo?.postOffboardedStatus : nexusInfo?.postOffboardedStatus === manualStatusFilter);
     
     return matchesSearch && matchesWeek && matchesStatus && matchesOwner && matchesManualStatus;
+  }).sort((a, b) => {
+    if (!rosterRentalTop) return 0;
+    const ar = a.enterpriseId && openRentalEidSet.has(a.enterpriseId.toUpperCase()) ? 1 : 0;
+    const br = b.enterpriseId && openRentalEidSet.has(b.enterpriseId.toUpperCase()) ? 1 : 0;
+    return br - ar;
   });
 
   const formatDate = (dateStr: string): string => {
@@ -506,6 +513,11 @@ export default function WeeklyOffboarding() {
       (e.personalNumber || '').toLowerCase().includes(q)
     );
   }).sort((a, b) => {
+    if (loaRentalTop) {
+      const ar = a.enterpriseId && openRentalEidSet.has(a.enterpriseId.toUpperCase()) ? 1 : 0;
+      const br = b.enterpriseId && openRentalEidSet.has(b.enterpriseId.toUpperCase()) ? 1 : 0;
+      if (ar !== br) return br - ar;
+    }
     if (loaSortDateWorked !== "default") {
       const dateA = a.lastDateWorked ? new Date(a.lastDateWorked).getTime() : 0;
       const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
@@ -943,7 +955,20 @@ export default function WeeklyOffboarding() {
                         <TableHead className="bg-background sticky top-0">Employee Name</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Enterprise ID</TableHead>
                         <TableHead className="w-[100px] bg-background sticky top-0">Truck</TableHead>
-                        <TableHead className="w-[80px] bg-background sticky top-0">Rental</TableHead>
+                        <TableHead
+                          className="w-[80px] bg-background sticky top-0 cursor-pointer select-none hover:bg-muted/50"
+                          onClick={() => setRosterRentalTop(prev => !prev)}
+                          title="Click to move rental records to the top"
+                        >
+                          <div className="flex items-center gap-1">
+                            Rental
+                            {rosterRentalTop ? (
+                              <ArrowUp className="h-3.5 w-3.5 text-amber-600" />
+                            ) : (
+                              <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                          </div>
+                        </TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">Status</TableHead>
                         <TableHead className="w-[120px] bg-background sticky top-0">
                           <div className="flex items-center gap-1">
@@ -1372,6 +1397,20 @@ export default function WeeklyOffboarding() {
                           <TableHead>Enterprise ID</TableHead>
                           <TableHead
                             className="cursor-pointer select-none hover:bg-muted/50"
+                            onClick={() => setLoaRentalTop(prev => !prev)}
+                            title="Click to move rental records to the top"
+                          >
+                            <div className="flex items-center gap-1">
+                              Rental
+                              {loaRentalTop ? (
+                                <ArrowUp className="h-3.5 w-3.5 text-amber-600" />
+                              ) : (
+                                <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                              )}
+                            </div>
+                          </TableHead>
+                          <TableHead
+                            className="cursor-pointer select-none hover:bg-muted/50"
                             onClick={() => setLoaSortDateWorked(prev => prev === "default" ? "asc" : prev === "asc" ? "desc" : "default")}
                           >
                             <div className="flex items-center gap-1">
@@ -1417,17 +1456,15 @@ export default function WeeklyOffboarding() {
                                 {e.employmentStatusLabel}
                               </Badge>
                             </TableCell>
-                            <TableCell className="font-medium">
-                              <span className="inline-flex items-center gap-2">
-                                <span>{e.fullName || '-'}</span>
-                                {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
-                                  <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
-                                    Rental
-                                  </Badge>
-                                ) : null}
-                              </span>
-                            </TableCell>
+                            <TableCell className="font-medium">{e.fullName || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{e.enterpriseId}</TableCell>
+                            <TableCell>
+                              {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
+                                <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
+                                  Rental
+                                </Badge>
+                              ) : null}
+                            </TableCell>
                             <TableCell className="text-sm whitespace-nowrap">
                               {lastWorkedDate ? (
                                 <div className="flex flex-col">
