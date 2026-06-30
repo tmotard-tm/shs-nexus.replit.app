@@ -18043,13 +18043,56 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const snapshot = getSnapshot();
 
       const lastNameMap = new Map<string, Array<{ enterpriseId: string; firstName: string }>>();
+      // Track which enterpriseIds we've already registered under each last name so
+      // that merging two sources (snapshot + Postgres profiles) for the SAME person
+      // doesn't inflate the candidate count and falsely trip the ambiguity branch.
+      const seenIdByLast = new Map<string, Set<string>>();
+      const addCandidate = (eid: string | null | undefined, last: string, first: string) => {
+        const id = (eid || '').trim();
+        if (!id || !last) return;
+        let seen = seenIdByLast.get(last);
+        if (!seen) { seen = new Set<string>(); seenIdByLast.set(last, seen); }
+        const key = id.toUpperCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (!lastNameMap.has(last)) lastNameMap.set(last, []);
+        lastNameMap.get(last)!.push({ enterpriseId: id, firstName: first });
+      };
+
+      // Primary source: in-memory TPMS_EXTRACT snapshot.
       for (const entry of snapshot.values()) {
         if (!entry.fullName) continue;
         const { first, last } = rentalNameParse(String(entry.fullName));
         if (!last) continue;
-        if (!lastNameMap.has(last)) lastNameMap.set(last, []);
-        lastNameMap.get(last)!.push({ enterpriseId: entry.enterpriseId, firstName: first });
+        addCandidate(entry.enterpriseId, last, first);
       }
+
+      // Fallback source: tpms_tech_profiles (Postgres). TPMS_EXTRACT can be missing
+      // techs that DO exist in our own profiles table (e.g. renter "LATARGI FOWLER"
+      // → enterpriseId LFOWLER), which otherwise leaves their open rental with no
+      // resolvable Enterprise ID and therefore no "Rental" badge anywhere.
+      try {
+        const { tpmsTechProfiles } = await import("@shared/schema");
+        const profileRows = await db
+          .select({
+            enterpriseId: tpmsTechProfiles.enterpriseId,
+            firstName: tpmsTechProfiles.firstName,
+            lastName: tpmsTechProfiles.lastName,
+          })
+          .from(tpmsTechProfiles)
+          .where(isNotNull(tpmsTechProfiles.enterpriseId));
+        for (const p of profileRows) {
+          if (!p.enterpriseId || !p.lastName) continue;
+          // Reuse rentalNameParse so suffix-stripping / casing match the renter side.
+          const last = rentalNameParse(String(p.lastName)).last;
+          const first = p.firstName ? rentalNameParse(`${p.firstName} ${p.lastName}`).first : '';
+          if (!last) continue;
+          addCandidate(p.enterpriseId, last, first);
+        }
+      } catch (e: any) {
+        console.warn('[RentalOps] tpms_tech_profiles enrichment fallback skipped:', e.message);
+      }
+
       for (const row of toEnrich) {
         const { first, last } = rentalNameParse(row.renterName || '');
         if (!last) { row.enterpriseIdSource = 'not_found'; continue; }
@@ -18481,7 +18524,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (eidCached) return res.json({ ...eidCached.data, _cachedAt: eidCached.cachedAt });
 
       const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
-      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
       const [ticketRows, holmanRows] = await Promise.all([
         sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
@@ -18498,7 +18540,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         const eDate = existing ? new Date(existing.RENTAL_START_DATE || '2000-01-01').getTime() : 0;
         if (!existing || rDate > eDate) entByVehicle.set(vn, r);
       }
-      const allEntVns = new Set(entByVehicle.keys());
 
       // Build rows for TPMS name enrichment
       const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
@@ -18514,10 +18555,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         if (row.enterpriseId) entIds.add(String(row.enterpriseId).trim().toUpperCase());
       }
 
-      // Add Holman segment direct Enterprise IDs
+      // Add Holman segment direct Enterprise IDs. This is a membership Set, so the
+      // list-only de-dupe guards (vendor=Enterprise, or vehicle already covered by an
+      // Enterprise ticket) must NOT drop rows here — doing so silently loses real
+      // open-rental renters from the badge set. Only exclude Toll rows, which are
+      // toll charges rather than vehicle rentals.
       for (const r of holmanRows) {
-        const vn = normV(r.VEHICLE_NUMBER || '');
-        if (!vn || isEntVendor(r.RENTAL_VENDOR) || allEntVns.has(vn)) continue;
+        if (/toll/i.test(r.RENTAL_VENDOR || '')) continue;
         const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
         if (eid) entIds.add(eid);
       }
