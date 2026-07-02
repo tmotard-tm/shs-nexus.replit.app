@@ -68,7 +68,7 @@ Auth is a CUSTOM session, not express-session: `requireAuth` (`server/routes.ts`
 ## Repo layout
 
 ```
-server/               Express backend. routes.ts (~22k lines, ~485 endpoints) is the main API.
+server/               Express backend. routes.ts (~22k lines, ~470 endpoints) is the main API.
 server/fleet-scope-*  Fleet-Scope services (rental sync, Snowflake mirror, Samsara/UPS/PMF, SMS)
 server/vrm/           VRM: rental approvals, profitability snapshot, repair tracker, DCA events
 server/fleet-reconciliation/  Tier-3 backstop reconciler (authority/decision/executor/verifier)
