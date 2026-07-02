@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Nexus is Sears Home Services' fleet-operations and task-management platform: one Express + React + Drizzle/Postgres monorepo on a Replit autoscale deployment. It centralizes four department work queues (NTAO, Assets, Inventory, Fleet), automates technician onboarding/offboarding/LOA workflows, and reads from or writes to nine external systems (Holman, TPMS, AMS, WMS Engine, Snowflake, Samsara, Segno, BYOV Dashboard, PMF/PARQ). Three large sub-applications live inside it: Fleet-Scope (`/api/fs`, `/fleet-scope/*`), VRM "Route Ready" (`/api/vrm`, `/vehicle-rental-management/*`), and the tier-3 fleet reconciliation engine.
 
-This file supersedes `replit.md` where they disagree. Known `replit.md` errors: there is no `server/db/schema.ts` (schema truth is `shared/schema.ts` + `shared/vrm-schema.ts` + `shared/fleet-scope-schema.ts`), and there are no `npm run typecheck` / `codegen` scripts (use `npm run check`). Its "Rental Ops -> Fleet Scope sync" section is current and authoritative; read it before touching rental sync.
+**Doc authority: read `replit.md` FIRST, before any review or work.** `replit.md` is the actively maintained operational doc and SUPERSEDES this file wherever they disagree — its Gotchas and its "Rental Ops -> Fleet Scope sync" section are authoritative. This file is a deeper technical companion (boot sequence, schema lifecycle, integration landmines) that is updated less often; treat anything here that contradicts `replit.md` as stale until verified. When either doc disagrees with the code, the code wins — verify doc claims by grep before acting on them.
 
 ## Commands
 
@@ -178,7 +178,7 @@ Secrets live in the Replit Secrets UI (source of truth for the running system). 
 
 ## Docs freshness map
 
-- `replit.md` (root): most current operational doc; authoritative on the rental sync; three known errors corrected at the top of this file.
+- `replit.md` (root): the most current operational doc, updated regularly; read it FIRST and treat it as superseding this file (see the authority note at the top).
 - `docs/fleet-truck-database-architecture.md`: authoritative `fs_*` / Snowflake-source / external-writeback reference. Its "Cross-App Sync" section still describes HTTP calls to `fleet-scope.replit.app`, which now lives in-repo; verify before touching that path.
 - `docs/vehicle-field-inventory.md` + `docs/assign-unassign-tech-flowcharts.md`: high-quality references for the fleet slide-out fields and the assign/unassign orchestration.
 - `docs/SYSTEM_ARCHITECTURE.md`, `docs/backlog.md`, `docs/enhancements.md`, `docs/changelog/*`: frozen Feb-2026 sprint record. Still right about queue_items and two-phase offboarding; the Tools Queue UI they describe no longer exists in the code.

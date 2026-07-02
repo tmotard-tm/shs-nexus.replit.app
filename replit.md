@@ -6,9 +6,8 @@ Nexus is an enterprise task management platform for automating tasks, centralizi
 
 -   **Run Dev**: `npm run dev`
 -   **Build**: `npm run build`
--   **Typecheck**: `npm run typecheck`
--   **Codegen**: `npm run codegen`
--   **DB Push**: `drizzle-kit push:pg` (for schema migrations)
+-   **Typecheck**: `npm run check` (tsc; there is no `typecheck` or `codegen` script)
+-   **DB Push**: `npm run db:push` (drizzle-kit push; see Gotchas — never against `fs_*` tables or prod)
 
 **Environment Variables**:
 -   `DATABASE_URL`
@@ -61,7 +60,7 @@ The Rental Ops → Fleet Scope reconciliation keeps `fs_trucks` (the "rentals op
 
 ## Where things live
 
--   **Database Schema**: `server/db/schema.ts`
+-   **Database Schema**: `shared/schema.ts` + `shared/vrm-schema.ts` + `shared/fleet-scope-schema.ts` (there is no `server/db/schema.ts`)
 -   **API Routes**: `server/routes.ts`
 -   **UI Components**: `client/src/components/`
 -   **Shared Zod Schemas**: `shared/`
