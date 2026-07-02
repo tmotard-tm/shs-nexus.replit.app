@@ -1,6 +1,6 @@
 ---
 name: tpms_cached_assignments phased retirement
-description: Why the legacy TPMS truck→tech cache is being retired in phases and what must NOT be dropped/disabled early.
+description: Why the legacy TPMS truck→tech cache is being retired in phases and what must NOT be dropped early.
 ---
 
 # tpms_cached_assignments is retired in PHASES — do not "finish the cleanup" early
@@ -12,18 +12,16 @@ live-synced roster the app already maintains). The migration is deliberately sta
    (+ its now-dead `getCachedByTruckNo` helper, kept and marked deprecated), the
    `/api/fleet-vehicles/export.csv` JOIN, and `/api/admin/tpms-tech-profiles/refresh`
    ("refresh all" enumeration) now read `tpms_tech_profiles`.
-2. **Phase 2: retire writers** (incl. the Snowflake→cache bulk sync).
-3. **Phase 3: drop schema**, remove the deprecated shim last.
+2. **Phase 2 (done as of mid-June 2026): writers frozen.** The tier-2 write-through
+   legacy cache writes are disabled behind `FREEZE_TPMS_CACHE_WRITES = true` in
+   `server/fleet-operations-service.ts` (flag near the top of the file; revert = set false).
+   The table is no longer a board source.
+3. **Phase 3: drop schema**, remove the deprecated shim last — still gated on verifying
+   no legacy reader (vrm/discrepancies, vrm/new-rental-log-enrichment, notification-backfill,
+   snowflake-sync-service) breaks on a now-stale table. Check current readers before dropping.
 
-**Why phased / why NOT drop or disable writers now:**
-- `tpms_cached_assignments` is **still written by tier-2 write-through** (fleet-operations
-  per-assignment fan-out), so it is NOT actually dead yet.
-- Other legacy readers are **intentionally left on it this slice** (vrm/discrepancies,
-  vrm/new-rental-log-enrichment, notification-backfill, snowflake-sync-service). They are
-  not broken because the table is still being written.
-- Phases 2/3 are gated on the controlled backfill + downstream-verification milestone
-  proving nothing still depends on the old path. Dropping it as "obvious cleanup" before
-  that will break live readers.
+**Why:** dropping the table as "obvious cleanup" before verifying downstream readers
+breaks live paths; and while writes were live, disabling them out of order desynced readers.
 
 **How to apply (truck→tech lookup convention now in `getTruckTechFromProfiles`):**
 - Match truck numbers CANONICALLY: `ltrim(trim(truck_no),'0')` on the stored side vs
@@ -31,8 +29,9 @@ live-synced roster the app already maintains). The migration is deliberately sta
 - Tier1 = `tpms_tech_profiles`, most-recent wins (`ORDER BY updated_at DESC NULLS LAST`,
   LIMIT 1). Tier2 = guarded fallback to `tpms_last_known_truck_tech`, same canonical match,
   `ORDER BY last_seen_at DESC NULLS LAST`.
-- The TPMS API has **no** truck-number lookup endpoint (`/techinfo/{id}` takes an
-  LDAP/Enterprise ID only), so truck→tech is unavoidably a local-roster read.
+- NOTE: TPMS `GET /techinfo/{id}` DOES accept a truck number (see
+  tpms-techinfo-truck-lookup.md) — truck→tech does not have to stay cache-only; a live
+  lookup on cache-miss is a valid upgrade path.
 - `lookupByTruckNumber` contract `{success, data?, message?, source?}` (source stays
   `'cached'`) is unchanged — callers depend on `success` + `data.ldapId`/name, not the
   message text.
