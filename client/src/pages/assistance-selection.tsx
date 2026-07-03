@@ -3,11 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car, Package, ExternalLink } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { FilteredMap } from "@/components/vehicle-map-filters";
 import { useQuery } from "@tanstack/react-query";
+import { EXTERNAL_APPS_KEY } from "@/lib/query-keys";
 
 interface FleetVehicle {
   tpmsAssignedTechId?: string;
@@ -59,10 +60,41 @@ export default function AssistanceSelection() {
     if (!permissions?.quickActions?.enabled) {
       return [];
     }
-    return allWorkflowOptions.filter(option => 
+    return allWorkflowOptions.filter(option =>
       permissions.quickActions[option.permissionKey] === true
     );
   }, [permissions]);
+
+  // TPMS tile is appended to the workflow dock only for users with TPMS access.
+  const canTpms = permissions?.sidebar?.tpms === true;
+  const workflowTileCount = workflowOptions.length + (canTpms ? 1 : 0);
+
+  // App Launcher dock — admin-managed external app tiles. staleTime is Infinity
+  // globally, so the admin screen invalidates EXTERNAL_APPS_KEY to refresh this.
+  interface ExternalAppTile {
+    id: string;
+    name: string;
+    url: string;
+    logoUrl: string | null;
+    color: string | null;
+    sortOrder: number;
+    isActive: boolean;
+  }
+  const { data: externalApps = [] } = useQuery<ExternalAppTile[]>({
+    queryKey: EXTERNAL_APPS_KEY,
+  });
+  const [failedLogos, setFailedLogos] = useState<Set<string>>(new Set());
+  const activeApps = [...externalApps]
+    .filter((a) => a.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const glassCardStyle = {
+    background: 'rgba(255, 255, 255, 0.12)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(255, 255, 255, 0.25)',
+    boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
+  } as const;
 
   return (
     <MainContent noPadding>
@@ -86,18 +118,12 @@ export default function AssistanceSelection() {
           </div>
 
           {/* Workflow Buttons Card — glass style */}
-          {workflowOptions.length > 0 && (
+          {(workflowOptions.length > 0 || canTpms) && (
           <div
             className="rounded-2xl p-6"
-            style={{
-              background: 'rgba(255, 255, 255, 0.12)',
-              backdropFilter: 'blur(20px)',
-              WebkitBackdropFilter: 'blur(20px)',
-              border: '1px solid rgba(255, 255, 255, 0.25)',
-              boxShadow: '0 8px 32px rgba(0, 0, 0, 0.2)',
-            }}
+            style={glassCardStyle}
           >
-            <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${Math.min(workflowOptions.length, 5)}, minmax(0, 1fr))` }}>
+            <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${Math.min(workflowTileCount, 5)}, minmax(0, 1fr))` }}>
               {workflowOptions.map((option) => (
                 <button
                   key={option.value}
@@ -111,6 +137,69 @@ export default function AssistanceSelection() {
                   <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{option.label}</span>
                 </button>
               ))}
+              {canTpms && (
+                <button
+                  key="tpms"
+                  onClick={() => setLocation("/tpms")}
+                  className="flex flex-col items-center gap-2 p-4 rounded-xl transition-all hover:bg-white/10"
+                  data-testid="button-tpms"
+                >
+                  <div className="w-12 h-12 rounded-lg bg-orange-600 hover:bg-orange-700 flex items-center justify-center shadow-lg">
+                    <Package className="h-6 w-6 text-white" />
+                  </div>
+                  <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>TPMS</span>
+                </button>
+              )}
+            </div>
+          </div>
+          )}
+
+          {/* App Launcher Card — admin-managed external apps (everyone who sees the home sees these) */}
+          {activeApps.length > 0 && (
+          <div
+            className="rounded-2xl p-6 mt-6"
+            style={glassCardStyle}
+          >
+            <h3 className="text-sm font-semibold text-center text-white mb-4" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>
+              App Launcher
+            </h3>
+            <div className={`grid gap-4`} style={{ gridTemplateColumns: `repeat(${Math.min(activeApps.length, 5)}, minmax(0, 1fr))` }}>
+              {activeApps.map((app) => {
+                const showLogo = app.logoUrl && !failedLogos.has(app.id);
+                return (
+                  <a
+                    key={app.id}
+                    href={app.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex flex-col items-center gap-2 p-4 rounded-xl transition-all hover:bg-white/10"
+                    data-testid={`link-app-${app.name.toLowerCase().replace(/\s+/g, '-')}`}
+                  >
+                    <div
+                      className="w-12 h-12 rounded-lg flex items-center justify-center shadow-lg overflow-hidden"
+                      style={{ backgroundColor: app.color || '#475569' }}
+                    >
+                      {showLogo ? (
+                        <img
+                          src={app.logoUrl as string}
+                          alt=""
+                          className="w-full h-full object-contain"
+                          onError={() =>
+                            setFailedLogos((prev) => {
+                              const next = new Set(prev);
+                              next.add(app.id);
+                              return next;
+                            })
+                          }
+                        />
+                      ) : (
+                        <ExternalLink className="h-6 w-6 text-white" />
+                      )}
+                    </div>
+                    <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{app.name}</span>
+                  </a>
+                );
+              })}
             </div>
           </div>
           )}
