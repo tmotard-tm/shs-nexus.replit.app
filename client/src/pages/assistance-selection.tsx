@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car, Package, ExternalLink } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car, Package, ExternalLink, CalendarDays } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { FilteredMap } from "@/components/vehicle-map-filters";
@@ -24,6 +24,52 @@ interface FleetVehiclesResponse {
 // Helper to check if a vehicle is assigned (has a tech via TPMS or Holman)
 function isVehicleAssigned(vehicle: FleetVehicle): boolean {
   return !!(vehicle.tpmsAssignedTechId || vehicle.holmanTechAssigned);
+}
+
+// Original vector icons for App Launcher tiles that have no brand logo.
+// A crew-cab pickup with a bed cap (NewMav / Mavericks) and a cargo van (VanGoNow).
+function PickupCapIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 40" className={className} xmlns="http://www.w3.org/2000/svg">
+      {/* capped bed */}
+      <path d="M30 33 V15 H51 L55 21 V33 Z" fill="#2563eb" stroke="#1e3a8a" strokeWidth="2" strokeLinejoin="round" />
+      {/* cab + hood */}
+      <path d="M6 33 V22 H11 L16 12 H31 V33 Z" fill="#3b82f6" stroke="#1e3a8a" strokeWidth="2" strokeLinejoin="round" />
+      {/* cab window */}
+      <path d="M17 14 H29 V21 H12.5 Z" fill="#d6e7ff" />
+      {/* cap window */}
+      <rect x="34" y="19" width="15" height="8" rx="1.5" fill="#d6e7ff" />
+      {/* wheels */}
+      <circle cx="18" cy="34" r="6" fill="#111827" />
+      <circle cx="46" cy="34" r="6" fill="#111827" />
+      <circle cx="18" cy="34" r="2.4" fill="#9ca3af" />
+      <circle cx="46" cy="34" r="2.4" fill="#9ca3af" />
+    </svg>
+  );
+}
+
+function CargoVanIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 64 40" className={className} xmlns="http://www.w3.org/2000/svg">
+      <path d="M5 33 V12 H42 L54 22 V33 Z" fill="#0ea5e9" stroke="#0c4a6e" strokeWidth="2" strokeLinejoin="round" />
+      <path d="M43 15 L52 22 H43 Z" fill="#d6e7ff" />
+      <rect x="11" y="16" width="10" height="6" rx="1.5" fill="#d6e7ff" />
+      <rect x="24" y="16" width="10" height="6" rx="1.5" fill="#d6e7ff" />
+      <circle cx="18" cy="34" r="6" fill="#111827" />
+      <circle cx="45" cy="34" r="6" fill="#111827" />
+      <circle cx="18" cy="34" r="2.4" fill="#9ca3af" />
+      <circle cx="45" cy="34" r="2.4" fill="#9ca3af" />
+    </svg>
+  );
+}
+
+// Maps an external app's `icon` field to a built-in icon; used when the app has
+// no brand logo (logoUrl). Falls back to a generic external-link glyph.
+function renderAppIcon(icon: string | null | undefined) {
+  if (icon === "calendar") return <CalendarDays className="w-8 h-8 text-slate-700" />;
+  if (icon === "pickup") return <PickupCapIcon className="w-10 h-9" />;
+  if (icon === "van") return <CargoVanIcon className="w-10 h-9" />;
+  return <ExternalLink className="h-6 w-6 text-slate-500" />;
 }
 
 export default function AssistanceSelection() {
@@ -76,6 +122,7 @@ export default function AssistanceSelection() {
     name: string;
     url: string;
     logoUrl: string | null;
+    icon: string | null;
     color: string | null;
     sortOrder: number;
     isActive: boolean;
@@ -183,7 +230,7 @@ export default function AssistanceSelection() {
                         <img
                           src={app.logoUrl as string}
                           alt=""
-                          className="w-full h-full object-contain"
+                          className="w-full h-full object-contain p-1"
                           onError={() =>
                             setFailedLogos((prev) => {
                               const next = new Set(prev);
@@ -193,7 +240,7 @@ export default function AssistanceSelection() {
                           }
                         />
                       ) : (
-                        <ExternalLink className="h-6 w-6 text-white" />
+                        renderAppIcon(app.icon)
                       )}
                     </div>
                     <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{app.name}</span>
