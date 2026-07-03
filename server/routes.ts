@@ -755,20 +755,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       )
     `), 20000, "external_apps init");
     console.log("[ExternalApps] external_apps table ready");
-    // Branded apps use their real logo (Clearbit logo service); the rest use a
-    // built-in vector icon rendered client-side from the `icon` field (van /
-    // pickup / calendar). Admins can override either via /external-app-management.
-    const STARTER_APPS: { name: string; url: string; logoUrl: string | null; icon: string | null; color: string; sortOrder: number }[] = [
-      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",                                                              logoUrl: null,                                     icon: "van",      color: "#ffffff", sortOrder: 0 },
-      { name: "NewMav",           url: "https://newmav.replit.app/admin",                                                                logoUrl: null,                                     icon: "pickup",   color: "#ffffff", sortOrder: 1 },
-      { name: "Activity DCA app", url: "https://eventrequestform.replit.app",                                                            logoUrl: null,                                     icon: "calendar", color: "#ffffff", sortOrder: 2 },
-      { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",                                                       logoUrl: "https://logo.clearbit.com/efleets.com",  icon: null,       color: "#ffffff", sortOrder: 3 },
-      { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", logoUrl: "https://logo.clearbit.com/holman.com", icon: null,     color: "#ffffff", sortOrder: 4 },
+    // Holman/eFleets use their real site favicon at the highest resolution the
+    // source publishes (Holman = 192px, crisp; eFleets only ships a small icon).
+    // The rest use a clean, colored Material icon (Iconify, open-source). Admins
+    // can override any logo URL via /external-app-management.
+    const iconify = (name: string, hexNoHash: string) => `https://api.iconify.design/mdi/${name}.svg?color=%23${hexNoHash}&width=64`;
+    const STARTER_APPS: { name: string; url: string; logoUrl: string; color: string; sortOrder: number }[] = [
+      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",         logoUrl: iconify("van-utility", "16a34a"),  color: "#ffffff", sortOrder: 0 },
+      { name: "NewMav",           url: "https://newmav.replit.app/admin",           logoUrl: iconify("car-pickup", "2563eb"),   color: "#ffffff", sortOrder: 1 },
+      { name: "Activity DCA app", url: "https://eventrequestform.replit.app",       logoUrl: iconify("calendar-month", "ea580c"), color: "#ffffff", sortOrder: 2 },
+      { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",  logoUrl: "https://icons.duckduckgo.com/ip3/efleets.com.ico", color: "#ffffff", sortOrder: 3 },
+      { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", logoUrl: "https://www.google.com/s2/favicons?domain=holman.com&sz=256", color: "#ffffff", sortOrder: 4 },
     ];
     for (const a of STARTER_APPS) {
       await withTimeout(db.execute(sql`
-        INSERT INTO external_apps (name, url, logo_url, icon, color, sort_order)
-        VALUES (${a.name}, ${a.url}, ${a.logoUrl}, ${a.icon}, ${a.color}, ${a.sortOrder})
+        INSERT INTO external_apps (name, url, logo_url, color, sort_order)
+        VALUES (${a.name}, ${a.url}, ${a.logoUrl}, ${a.color}, ${a.sortOrder})
         ON CONFLICT (name) DO NOTHING
       `), 20000, "external_apps seed");
     }
