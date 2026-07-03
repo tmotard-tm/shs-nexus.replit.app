@@ -755,17 +755,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       )
     `), 20000, "external_apps init");
     console.log("[ExternalApps] external_apps table ready");
-    const STARTER_APPS: { name: string; url: string; sortOrder: number }[] = [
-      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",                                                              sortOrder: 0 },
-      { name: "NewMav",           url: "https://newmav.replit.app/admin",                                                                sortOrder: 1 },
-      { name: "Activity DCA app", url: "https://eventrequestform.replit.app",                                                            sortOrder: 2 },
-      { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",                                                       sortOrder: 3 },
-      { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", sortOrder: 4 },
+    // Logos default to each site's favicon (Google's favicon service) on a
+    // white tile; admins can replace any logo URL via /external-app-management.
+    const favicon = (domain: string) => `https://www.google.com/s2/favicons?domain=${domain}&sz=64`;
+    const STARTER_APPS: { name: string; url: string; logoUrl: string; color: string; sortOrder: number }[] = [
+      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",                                                              logoUrl: favicon("vangonow.replit.app"),         color: "#ffffff", sortOrder: 0 },
+      { name: "NewMav",           url: "https://newmav.replit.app/admin",                                                                logoUrl: favicon("newmav.replit.app"),           color: "#ffffff", sortOrder: 1 },
+      { name: "Activity DCA app", url: "https://eventrequestform.replit.app",                                                            logoUrl: favicon("eventrequestform.replit.app"), color: "#ffffff", sortOrder: 2 },
+      { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",                                                       logoUrl: favicon("efleets.com"),                 color: "#ffffff", sortOrder: 3 },
+      { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", logoUrl: favicon("holman.com"),              color: "#ffffff", sortOrder: 4 },
     ];
     for (const a of STARTER_APPS) {
       await withTimeout(db.execute(sql`
-        INSERT INTO external_apps (name, url, sort_order)
-        VALUES (${a.name}, ${a.url}, ${a.sortOrder})
+        INSERT INTO external_apps (name, url, logo_url, color, sort_order)
+        VALUES (${a.name}, ${a.url}, ${a.logoUrl}, ${a.color}, ${a.sortOrder})
         ON CONFLICT (name) DO NOTHING
       `), 20000, "external_apps seed");
     }
