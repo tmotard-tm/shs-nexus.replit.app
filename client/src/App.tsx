@@ -40,6 +40,7 @@ import DecommissionsQueuePage from "@/pages/decommissions-queue";
 import UserManagement from "@/pages/user-management";
 import TemplateManagement from "@/pages/template-management";
 import CostCenterManagement from "@/pages/cost-center-management";
+import ExternalAppManagement from "@/pages/external-app-management";
 import RolePermissions from "@/pages/role-permissions";
 import ChangePassword from "@/pages/change-password";
 import AnalyticsBoard from "@/pages/analytics-board";
@@ -455,6 +456,14 @@ function Router() {
         <PermissionProtectedRoute formKey="cost-center-management" redirectOnDenied={true}>
           <MainContent>
             <CostCenterManagement />
+          </MainContent>
+        </PermissionProtectedRoute>
+      </Route>
+
+      <Route path="/external-app-management">
+        <PermissionProtectedRoute formKey="external-app-management" redirectOnDenied={true}>
+          <MainContent>
+            <ExternalAppManagement />
           </MainContent>
         </PermissionProtectedRoute>
       </Route>

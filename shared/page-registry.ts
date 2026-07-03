@@ -23,6 +23,7 @@ import {
   LayoutDashboard,
   Upload,
   GitBranch,
+  ExternalLink,
   type LucideIcon
 } from "lucide-react";
 
@@ -293,6 +294,15 @@ export const PAGES: PageDefinition[] = [
     icon: ClipboardList,
     category: "management",
     permissionKey: "costCenterManagement",
+  },
+  {
+    key: "externalAppManagement",
+    label: "App Launcher",
+    description: "Manage external app tiles shown on the dashboard",
+    path: "/external-app-management",
+    icon: ExternalLink,
+    category: "management",
+    permissionKey: "externalAppManagement",
   },
   {
     key: "communicationHub",

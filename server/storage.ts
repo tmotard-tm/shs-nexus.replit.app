@@ -78,8 +78,11 @@ import {
   type OffboardingReturnToken,
   type DistrictCostCenter,
   type InsertDistrictCostCenter,
+  type ExternalApp,
+  type InsertExternalApp,
   offboardingReturnTokens,
   districtCostCenters,
+  externalApps,
   tpmsChangeLog,
   users,
   requests,
@@ -511,6 +514,14 @@ export interface IStorage {
     records: InsertDistrictCostCenter[],
     updatedBy: string,
   ): Promise<{ inserted: number; updated: number; unchanged: number }>;
+
+  // External Apps (App Launcher dock)
+  listExternalApps(activeOnly?: boolean): Promise<ExternalApp[]>;
+  getExternalApp(id: string): Promise<ExternalApp | undefined>;
+  createExternalApp(record: InsertExternalApp & { createdBy?: string }): Promise<ExternalApp>;
+  updateExternalApp(id: string, patch: Partial<InsertExternalApp> & { updatedBy?: string }): Promise<ExternalApp | undefined>;
+  deleteExternalApp(id: string): Promise<boolean>;
+  reorderExternalApps(order: { id: string; sortOrder: number }[]): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -3660,6 +3671,26 @@ export class MemStorage implements IStorage {
   ): Promise<{ inserted: number; updated: number; unchanged: number }> {
     throw new Error("MemStorage does not support district cost centers. Use DatabaseStorage.");
   }
+
+  // External Apps (App Launcher dock)
+  async listExternalApps(_activeOnly = false): Promise<ExternalApp[]> {
+    return [];
+  }
+  async getExternalApp(_id: string): Promise<ExternalApp | undefined> {
+    return undefined;
+  }
+  async createExternalApp(_record: InsertExternalApp & { createdBy?: string }): Promise<ExternalApp> {
+    throw new Error("MemStorage does not support external apps. Use DatabaseStorage.");
+  }
+  async updateExternalApp(_id: string, _patch: Partial<InsertExternalApp> & { updatedBy?: string }): Promise<ExternalApp | undefined> {
+    return undefined;
+  }
+  async deleteExternalApp(_id: string): Promise<boolean> {
+    return false;
+  }
+  async reorderExternalApps(_order: { id: string; sortOrder: number }[]): Promise<void> {
+    return;
+  }
 }
 
 export class DatabaseStorage implements IStorage {
@@ -6804,6 +6835,51 @@ export class DatabaseStorage implements IStorage {
       .where(eq(districtCostCenters.district, padded))
       .returning({ district: districtCostCenters.district });
     return result.length > 0;
+  }
+
+  // ===== External Apps (App Launcher dock) =====
+  // listExternalApps wraps the select in try/catch → [] (deliberate departure from
+  // listDistrictCostCenters): the boot DDL is fire-and-forget, so on a cold
+  // autoscale start external_apps can be absent when the first dock GET arrives.
+  // An unwrapped select throws `relation "external_apps" does not exist` and 500s
+  // the whole dashboard render; the [] fallback degrades the dock to empty. Uses
+  // the .$dynamic() builder idiom for the activeOnly conditional (type-safe .where).
+  async listExternalApps(activeOnly = false): Promise<ExternalApp[]> {
+    try {
+      let q = db.select().from(externalApps).$dynamic();
+      if (activeOnly) q = q.where(eq(externalApps.isActive, true));
+      return await q.orderBy(externalApps.sortOrder, externalApps.name);
+    } catch (e) {
+      console.error("[ExternalApps] listExternalApps failed (returning []):", (e as any)?.message);
+      return [];
+    }
+  }
+
+  async getExternalApp(id: string): Promise<ExternalApp | undefined> {
+    const r = await db.select().from(externalApps).where(eq(externalApps.id, id)).limit(1);
+    return r[0];
+  }
+
+  async createExternalApp(record: InsertExternalApp & { createdBy?: string }): Promise<ExternalApp> {
+    const r = await db.insert(externalApps).values({ ...record, updatedAt: new Date() }).returning();
+    return r[0];
+  }
+
+  async updateExternalApp(id: string, patch: Partial<InsertExternalApp> & { updatedBy?: string }): Promise<ExternalApp | undefined> {
+    // updatedAt set explicitly on UPDATE (defaultNow only fires on INSERT).
+    const r = await db.update(externalApps).set({ ...patch, updatedAt: new Date() }).where(eq(externalApps.id, id)).returning();
+    return r[0];
+  }
+
+  async deleteExternalApp(id: string): Promise<boolean> {
+    const r = await db.delete(externalApps).where(eq(externalApps.id, id)).returning({ id: externalApps.id });
+    return r.length > 0;
+  }
+
+  async reorderExternalApps(order: { id: string; sortOrder: number }[]): Promise<void> {
+    for (const { id, sortOrder } of order) {
+      await db.update(externalApps).set({ sortOrder, updatedAt: new Date() }).where(eq(externalApps.id, id));
+    }
   }
 
   async bulkUpsertDistrictCostCenters(

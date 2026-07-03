@@ -81,6 +81,7 @@ export interface RolePermissionSettings {
       userManagement: boolean;
       templateManagement: boolean;
       costCenterManagement: boolean;
+      externalAppManagement: boolean;
       rolePermissions: boolean;
       fleetManagement: boolean;
       weeklyOnboarding: boolean;
@@ -2775,4 +2776,47 @@ export const insertDistrictCostCenterSchema = createInsertSchema(districtCostCen
 });
 export type DistrictCostCenter = typeof districtCostCenters.$inferSelect;
 export type InsertDistrictCostCenter = z.infer<typeof insertDistrictCostCenterSchema>;
+
+// ===============================
+// External Apps dock (admin-managed launcher tiles)
+// One row per external app tile on the dashboard. Admin CRUD via /api/external-apps.
+// Created at boot via CREATE TABLE IF NOT EXISTS in server/routes.ts (autoscale
+// deploys run NO migrations). Every column except the PK is nullable or defaulted
+// so a partial deploy can't crash the read path. permissionKey reserved for future
+// per-app gating (unused now). GUARDIAN NAMING: title the UI 'App Launcher'/'Fleet
+// Apps', NOT 'External Apps'/'External APIs'; collides with /integrations, the
+// api_configurations table, and the dashboard 'External APIs' status row.
+// Table/route/permission names stay external_apps / /api/external-apps /
+// externalAppManagement.
+// ===============================
+export const externalApps = pgTable("external_apps", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  url: text("url").notNull(),
+  description: text("description"),
+  logoUrl: text("logo_url"),
+  icon: text("icon"),
+  color: text("color"),
+  sortOrder: integer("sort_order").notNull().default(0),
+  isActive: boolean("is_active").notNull().default(true),
+  permissionKey: text("permission_key"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  createdBy: varchar("created_by").references(() => users.id),
+  updatedBy: varchar("updated_by").references(() => users.id),
+});
+
+const URL_HTTPS_ONLY = z.string().url().regex(/^https?:\/\//i, "URL must start with http:// or https://");
+export const insertExternalAppSchema = createInsertSchema(externalApps)
+  .omit({ id: true, createdAt: true, updatedAt: true, createdBy: true, updatedBy: true })
+  .extend({
+    name: z.string().trim().min(1),
+    url: URL_HTTPS_ONLY,
+    logoUrl: URL_HTTPS_ONLY.optional().nullable(),
+    sortOrder: z.coerce.number().int().default(0),
+    isActive: z.coerce.boolean().default(true),
+  });
+export const updateExternalAppSchema = insertExternalAppSchema.partial();
+export type ExternalApp = typeof externalApps.$inferSelect;
+export type InsertExternalApp = z.infer<typeof insertExternalAppSchema>;
 

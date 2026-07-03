@@ -10,7 +10,7 @@ import { registerVrmWebhooks } from "./vrm/webhooks";
 import { fetchProfitabilityCheck } from "./vrm/snowflake-queries";
 import crypto from 'crypto';
 import { storage } from "./storage";
-import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion, insertDistrictCostCenterSchema, type User, type RolePermissionSettings } from "@shared/schema";
+import { insertRequestSchema, insertUserSchema, insertApiConfigurationSchema, insertQueueItemSchema, insertStorageSpotSchema, insertVehicleSchema, insertTemplateSchema, QueueModule, saveProgressSchema, completeQueueItemSchema, assignQueueItemSchema, anonymousQueueItemSchema, anonymousVehicleSchema, anonymousStorageSpotSchema, anonymousVehicleAssignmentSchema, anonymousOnboardingSchema, anonymousOffboardingSchema, anonymousByovEnrollmentSchema, enhancedCompleteQueueItemSchema, securityQuestionSetupSchema, PREDEFINED_SECURITY_QUESTIONS, StoredSecurityQuestion, insertDistrictCostCenterSchema, insertExternalAppSchema, updateExternalAppSchema, type User, type RolePermissionSettings } from "@shared/schema";
 import { deepMergePermissions, getServerDefaultPermissions } from "./permission-utils";
 import { z } from "zod";
 import { sendEmail, createCreditCardDeactivationEmail } from "./email-service";
@@ -726,6 +726,52 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     console.log("[AppSettings] app_settings table ready");
   } catch (e: any) {
     console.error("[AppSettings] Failed to init app_settings table:", e.message);
+  }
+
+  // external_apps — idempotent table init + starter seed (App Launcher dock).
+  // Mirrors app_settings: CREATE IF NOT EXISTS every boot, withTimeout-guarded,
+  // non-awaited. Seed is check-by-name via ON CONFLICT DO NOTHING; never
+  // overwrites admin edits or resurrects deleted tiles (autoscale reboots often).
+  // NOTE: id is `varchar DEFAULT gen_random_uuid()` to match schema.ts; NOT serial.
+  // FK on created_by/updated_by intentionally omitted (plain varchar) to avoid a
+  // users-table boot ordering/lock dependency.
+  try {
+    await withTimeout(db.execute(sql`
+      CREATE TABLE IF NOT EXISTS external_apps (
+        id varchar PRIMARY KEY DEFAULT gen_random_uuid(),
+        name text NOT NULL UNIQUE,
+        url text NOT NULL,
+        description text,
+        logo_url text,
+        icon text,
+        color text,
+        sort_order integer NOT NULL DEFAULT 0,
+        is_active boolean NOT NULL DEFAULT true,
+        permission_key text,
+        created_at timestamp DEFAULT NOW() NOT NULL,
+        updated_at timestamp DEFAULT NOW() NOT NULL,
+        created_by varchar,
+        updated_by varchar
+      )
+    `), 20000, "external_apps init");
+    console.log("[ExternalApps] external_apps table ready");
+    const STARTER_APPS: { name: string; url: string; sortOrder: number }[] = [
+      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",                                                              sortOrder: 0 },
+      { name: "NewMav",           url: "https://newmav.replit.app/admin",                                                                sortOrder: 1 },
+      { name: "Activity DCA app", url: "https://eventrequestform.replit.app",                                                            sortOrder: 2 },
+      { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",                                                       sortOrder: 3 },
+      { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", sortOrder: 4 },
+    ];
+    for (const a of STARTER_APPS) {
+      await withTimeout(db.execute(sql`
+        INSERT INTO external_apps (name, url, sort_order)
+        VALUES (${a.name}, ${a.url}, ${a.sortOrder})
+        ON CONFLICT (name) DO NOTHING
+      `), 20000, "external_apps seed");
+    }
+    console.log("[ExternalApps] starter apps seeded (idempotent)");
+  } catch (e: any) {
+    console.error("[ExternalApps] Failed to init external_apps table:", e.message);
   }
   })();
 
@@ -7671,6 +7717,144 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
     return !!effective?.sidebar?.management?.costCenterManagement;
   }
+
+  // Mirrors userCanManageCostCenters exactly, reading the NEW externalAppManagement
+  // flag. Resolves defaults -> stored role row -> per-user overrides. Gates the
+  // App Launcher admin writes (POST/PATCH/DELETE/reorder). GET stays requireAuth
+  // only ("everyone sees everything"); do NOT reuse the `integrations` key (admins
+  // are hard-blocked from /integrations, which would kill the dock for admins).
+  async function userCanManageExternalApps(user: User | undefined): Promise<boolean> {
+    if (!user || !user.role) return false;
+
+    const defaults = getServerDefaultPermissions(user.role);
+    const stored = await storage.getRolePermission(user.role);
+    const merged = deepMergePermissions(
+      defaults,
+      stored?.permissions ?? null,
+    ) as RolePermissionSettings;
+
+    const overrides = user.permissionOverrides as
+      | Partial<RolePermissionSettings>
+      | null
+      | undefined;
+    const effective = (
+      overrides
+        ? deepMergePermissions(merged, overrides)
+        : merged
+    ) as RolePermissionSettings;
+
+    return !!effective?.sidebar?.management?.externalAppManagement;
+  }
+
+  // ===== External Apps (App Launcher dock) =====
+  // GET — readable by any authenticated user (the dock reads this). Catch→[]
+  // because the table may be absent during the cold-start window (boot DDL is
+  // non-awaited). Writes gated by userCanManageExternalApps. URL sanitization is
+  // enforced by the https-only zod refine in insert/updateExternalAppSchema —
+  // there is no CSP backstop, so this parse is the security boundary.
+  app.get("/api/external-apps", requireAuth, async (_req: any, res) => {
+    try {
+      res.json(await storage.listExternalApps(false));
+    } catch (e) {
+      console.error("Error fetching external apps:", e);
+      res.json([]); // degrade to empty dock, never 500 the dashboard
+    }
+  });
+
+  app.post("/api/external-apps", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageExternalApps(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage External Apps." });
+      }
+      const parsed = insertExternalAppSchema.parse(req.body);
+      const record = await storage.createExternalApp({ ...parsed, createdBy: currentUser!.id });
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "external_app_created",
+        entityType: "external_app",
+        entityId: record.id,
+        details: `External app '${record.name}' -> ${record.url}`,
+      });
+      res.status(201).json(record);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid external app data", errors: error.errors });
+      }
+      console.error("Error creating external app:", error);
+      res.status(500).json({ message: "Failed to create external app" });
+    }
+  });
+
+  app.patch("/api/external-apps/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageExternalApps(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage External Apps." });
+      }
+      const parsed = updateExternalAppSchema.parse(req.body);
+      const record = await storage.updateExternalApp(req.params.id, { ...parsed, updatedBy: currentUser!.id });
+      if (!record) return res.status(404).json({ message: "External app not found" });
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "external_app_updated",
+        entityType: "external_app",
+        entityId: record.id,
+        details: `Updated external app '${record.name}'`,
+      });
+      res.json(record);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid external app data", errors: error.errors });
+      }
+      console.error("Error updating external app:", error);
+      res.status(500).json({ message: "Failed to update external app" });
+    }
+  });
+
+  app.delete("/api/external-apps/:id", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageExternalApps(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage External Apps." });
+      }
+      const ok = await storage.deleteExternalApp(req.params.id);
+      if (!ok) return res.status(404).json({ message: "External app not found" });
+      await storage.createActivityLog({
+        userId: currentUser!.id,
+        action: "external_app_deleted",
+        entityType: "external_app",
+        entityId: req.params.id,
+        details: `Deleted external app ${req.params.id}`,
+      });
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Error deleting external app:", error);
+      res.status(500).json({ message: "Failed to delete external app" });
+    }
+  });
+
+  app.post("/api/external-apps/reorder", requireAuth, async (req: any, res) => {
+    try {
+      const currentUser = await storage.getUserByUsername(req.user.username);
+      if (!(await userCanManageExternalApps(currentUser))) {
+        return res.status(403).json({ message: "Access denied. You do not have permission to manage External Apps." });
+      }
+      const orderSchema = z.array(z.object({ id: z.string(), sortOrder: z.coerce.number().int() }));
+      const order = orderSchema.parse(req.body);
+      // guardian: ignore ids that don't exist so a stale PATCH can't touch phantom rows
+      const existing = new Set((await storage.listExternalApps(false)).map((a) => a.id));
+      const filtered = order.filter((o) => existing.has(o.id));
+      await storage.reorderExternalApps(filtered);
+      res.json({ success: true });
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return res.status(400).json({ message: "Invalid reorder payload", errors: error.errors });
+      }
+      console.error("Error reordering external apps:", error);
+      res.status(500).json({ message: "Failed to reorder" });
+    }
+  });
 
   // Mirrors the frontend gate at pageFeatures.createVehicle.updateDistricts:
   // defaults -> stored role row -> per-user overrides.

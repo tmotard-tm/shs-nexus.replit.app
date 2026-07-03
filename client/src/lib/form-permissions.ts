@@ -12,6 +12,7 @@ export const FORM_ACCESS_MAP = {
   'user-management': ['developer', 'admin'],
   'template-management': ['developer', 'admin'],
   'cost-center-management': ['developer', 'admin'],
+  'external-app-management': ['developer', 'admin'],
 } as const;
 
 export type FormKey = keyof typeof FORM_ACCESS_MAP;
@@ -26,6 +27,7 @@ export const PUBLIC_FORMS = new Set<FormKey>(['create-vehicle', 'assign-vehicle'
 // server-side check (e.g. /api/cost-centers uses the same matrix path).
 export const FORM_PERMISSION_SELECTORS: Partial<Record<FormKey, (perms: RolePermissionSettings) => boolean>> = {
   'cost-center-management': (perms) => perms.sidebar.management.costCenterManagement,
+  'external-app-management': (perms) => perms.sidebar.management.externalAppManagement,
 };
 
 // Build the user's effective permissions on the client by merging their
@@ -112,6 +114,7 @@ export const FORM_DISPLAY_NAMES: Record<FormKey, string> = {
   'user-management': 'User Management',
   'template-management': 'Template Management',
   'cost-center-management': 'District Cost Centers',
+  'external-app-management': 'App Launcher',
 };
 
 // Get forms accessible by a user. When `effectivePermissions` is provided,

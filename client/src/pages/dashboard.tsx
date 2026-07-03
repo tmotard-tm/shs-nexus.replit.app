@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
@@ -9,8 +10,10 @@ import { Badge } from "@/components/ui/badge";
 import { CopyLinkButton } from "@/components/ui/copy-link-button";
 import { Request } from "@shared/schema";
 import { useAuth } from "@/hooks/use-auth";
-import { Car, UserPlus, UserMinus, Plus, ArrowRight, Settings, TrendingUp, Clock, CheckCircle, Users } from "lucide-react";
+import { Car, UserPlus, UserMinus, Plus, ArrowRight, Settings, TrendingUp, Clock, CheckCircle, Users, Package, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
+import { useHasPermission } from "@/hooks/use-permissions";
+import { EXTERNAL_APPS_KEY } from "@/lib/query-keys";
 
 export default function Dashboard() {
   const { user } = useAuth();
@@ -31,6 +34,28 @@ export default function Dashboard() {
   const { data: apiConfigurations } = useQuery<Array<{ isActive: boolean }>>({
     queryKey: ["/api/configurations"],
   });
+
+  // TPMS tile is only shown to users who can access the TPMS module.
+  const canTpms = useHasPermission("sidebar.tpms");
+
+  interface ExternalAppTile {
+    id: string;
+    name: string;
+    url: string;
+    logoUrl: string | null;
+    color: string | null;
+    sortOrder: number;
+    isActive: boolean;
+  }
+  // App Launcher dock data. staleTime is Infinity globally, so the admin
+  // screen invalidates EXTERNAL_APPS_KEY to refresh this after edits.
+  const { data: externalApps = [] } = useQuery<ExternalAppTile[]>({
+    queryKey: EXTERNAL_APPS_KEY,
+  });
+  const [failedLogos, setFailedLogos] = useState<Set<string>>(new Set());
+  const activeApps = [...externalApps]
+    .filter((a) => a.isActive)
+    .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const recentRequests = (requests as Request[])?.slice(0, 4) || [];
 
@@ -301,7 +326,91 @@ export default function Dashboard() {
                 </Link>
               </div>
             </Card>
+
+            {/* TPMS — permission-gated: only rendered for users with TPMS access */}
+            {canTpms && (
+              <Card className="p-6 hover:shadow-md transition-shadow">
+                <div className="text-center space-y-4">
+                  <div className="w-12 h-12 mx-auto rounded-full bg-orange-100 dark:bg-orange-900/20 flex items-center justify-center">
+                    <Package className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-sm mb-2" data-testid="text-tpms-title">
+                      TPMS
+                    </h3>
+                    <p className="text-xs text-muted-foreground mb-4" data-testid="text-tpms-description">
+                      Tech Profiles, Addresses and Shipping
+                    </p>
+                  </div>
+                  <Link href="/tpms">
+                    <Button size="sm" className="w-full" data-testid="button-open-tpms">
+                      Open TPMS
+                    </Button>
+                  </Link>
+                </div>
+              </Card>
+            )}
           </div>
+        </div>
+
+        {/* App Launcher — admin-managed external app tiles (everyone sees these) */}
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-6" data-testid="text-app-launcher-title">
+            App Launcher
+          </h2>
+          {activeApps.length === 0 ? (
+            <p className="text-sm text-muted-foreground" data-testid="text-app-launcher-empty">
+              No apps yet.
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+              {activeApps.map((app) => {
+                const showLogo = app.logoUrl && !failedLogos.has(app.id);
+                return (
+                  <a
+                    key={app.id}
+                    href={app.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="block"
+                    data-testid={`link-app-${app.name.toLowerCase().replace(/\s+/g, '-')}`}
+                  >
+                    <Card className="p-6 hover:shadow-md transition-shadow h-full">
+                      <div className="text-center space-y-4">
+                        <div
+                          className="w-12 h-12 mx-auto rounded-full flex items-center justify-center overflow-hidden bg-muted"
+                          style={app.color ? { backgroundColor: app.color } : undefined}
+                        >
+                          {showLogo ? (
+                            <img
+                              src={app.logoUrl as string}
+                              alt=""
+                              className="w-full h-full object-contain"
+                              onError={() =>
+                                setFailedLogos((prev) => {
+                                  const next = new Set(prev);
+                                  next.add(app.id);
+                                  return next;
+                                })
+                              }
+                            />
+                          ) : (
+                            <ExternalLink className="h-6 w-6 text-muted-foreground" />
+                          )}
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-sm mb-2">{app.name}</h3>
+                          <p className="text-xs text-muted-foreground mb-4 flex items-center justify-center gap-1">
+                            Open app <ExternalLink className="h-3 w-3" />
+                          </p>
+                        </div>
+                      </div>
+                    </Card>
+                  </a>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
