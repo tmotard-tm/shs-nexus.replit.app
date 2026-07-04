@@ -18708,11 +18708,26 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const sf = getSnowflakeService();
       await sf.connect();
 
-      const eidCacheKey = `open-eid:${req.query?.fileDate || 'latest'}`;
+      // `scope=managed` (used by the Fleet Communications module) applies the SAME
+      // Enterprise-first / Holman-non-Enterprise de-dupe that the Rental Ops -> Fleet
+      // Scope sync (server/rental-ops-sync.ts) uses to build fs_trucks. That yields the
+      // same open-rental population as the Fleet Scope "rentals open" list, rather than
+      // the broader membership superset the default (badge) scope returns. Default scope
+      // is unchanged so the Weekly Offboarding rental badges keep their existing behavior.
+      const managedScope = /^(managed|fleet|fleetscope|fleet-scope)$/i.test(
+        String(req.query?.scope || '')
+      );
+      const eidCacheKey = `open-eid:${req.query?.fileDate || 'latest'}:${managedScope ? 'managed' : 'all'}`;
       const eidCached = getRentalOpsCache(eidCacheKey);
       if (eidCached) return res.json({ ...eidCached.data, _cachedAt: eidCached.cachedAt });
 
       const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
+      // Mirrors isEntVendor in server/rental-ops-sync.ts: empty, Enterprise, and Toll
+      // vendors are all treated as "Enterprise" (excluded from the Holman segment).
+      const isEntVendor = (v: string | null | undefined) => {
+        const s = (v || '').trim();
+        return !s || /enterprise/i.test(s) || /toll/i.test(s);
+      };
 
       const [ticketRows, holmanRows] = await Promise.all([
         sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
@@ -18750,7 +18765,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // open-rental renters from the badge set. Only exclude Toll rows, which are
       // toll charges rather than vehicle rentals.
       for (const r of holmanRows) {
-        if (/toll/i.test(r.RENTAL_VENDOR || '')) continue;
+        const vendor = r.RENTAL_VENDOR || '';
+        if (managedScope) {
+          // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
+          // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
+          // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
+          // inflate the default membership set.
+          if (isEntVendor(vendor)) continue;
+          if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
+        } else {
+          if (/toll/i.test(vendor)) continue;
+        }
         const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
         if (eid) entIds.add(eid);
       }

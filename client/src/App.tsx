@@ -64,6 +64,7 @@ import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import Reporting from "@/pages/reporting";
 import CommunicationHub from "@/pages/communication-hub";
+import FleetCommunications from "@/pages/fleet-communications";
 import TestRepairResults from "@/pages/test-repair-results";
 import About from "@/pages/about";
 import NexusFlowcharts from "@/pages/nexus-flowcharts";
@@ -472,6 +473,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <CommunicationHub />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/fleet-communications">
+        <ProtectedRoute>
+          <MainContent>
+            <FleetCommunications />
           </MainContent>
         </ProtectedRoute>
       </Route>

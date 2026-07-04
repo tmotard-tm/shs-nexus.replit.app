@@ -1,6 +1,7 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { CommsHandoff } from "@/components/fleet-scope/CommsHandoff";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -413,6 +414,13 @@ function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruc
 export default function Registration() {
   const [activeView, setActiveView] = useState<"table" | "conversations" | "unassigned">("table");
   const [convTruck, setConvTruck] = useState<string | null>(null);
+  // Communications module feature flag: when ON, the legacy conversation UI is
+  // retired in favor of the unified Fleet Communications inbox + quick-send.
+  const { data: commsConfig } = useQuery<{ enabled?: boolean }>({
+    queryKey: ["/api/fs/comms/config"],
+    retry: false,
+  });
+  const commsEnabled = commsConfig?.enabled === true;
   const [processFlowCollapsed, setProcessFlowCollapsed] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [truckNumberFilter, setTruckNumberFilter] = useState("");
@@ -1232,10 +1240,23 @@ export default function Registration() {
         </div>
       </div>
 
-      {/* Conversations view */}
-      {activeView === "conversations" && (
-        <RegConversations registrationData={data?.trucks || []} initialTruckNumber={convTruck ?? undefined} />
-      )}
+      {/* Conversations view — retired behind the Communications feature flag */}
+      {activeView === "conversations" &&
+        (commsEnabled ? (
+          <CommsHandoff
+            category="registrations"
+            categoryLabel="Registration"
+            records={(data?.trucks || []).map((t: any) => ({
+              truckNumber: t.truckNumber,
+              ldap: t.ldap,
+              name: t.techName,
+              phone: t.techPhone,
+              district: t.district,
+            }))}
+          />
+        ) : (
+          <RegConversations registrationData={data?.trucks || []} initialTruckNumber={convTruck ?? undefined} />
+        ))}
 
       {activeView === "table" && data?.trucks && data.trucks.length > 0 && (
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3" data-testid="registration-risk-cards">

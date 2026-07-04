@@ -1,0 +1,144 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+import {
+  isValidCategory,
+  normalizeDigits,
+  canonicalDistrict,
+  findUnknownTokens,
+  renderTemplate,
+  countSegments,
+  preview,
+  estimateBulkSend,
+  BULK_CONFIRM_THRESHOLD,
+  TEMPLATE_TOKENS,
+  COMMS_CATEGORIES,
+} from "../server/fleet-comms/lib.js";
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Master Fleet Communications — pure-logic unit tests (Task #524).
+ *
+ * These cover the token-validation, phone-normalization, and segment-counting
+ * helpers that gate template saving and message sending. No DB / network.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+test("isValidCategory accepts the canonical categories and rejects others", () => {
+  for (const c of COMMS_CATEGORIES) assert.equal(isValidCategory(c), true);
+  assert.equal(isValidCategory("registrations"), true);
+  assert.equal(isValidCategory("REGISTRATIONS"), false); // case-sensitive by design
+  assert.equal(isValidCategory("marketing"), false);
+  assert.equal(isValidCategory(""), false);
+  assert.equal(isValidCategory(null), false);
+  assert.equal(isValidCategory(123 as unknown), false);
+});
+
+test("normalizeDigits keeps the last 10 digits and strips formatting", () => {
+  assert.equal(normalizeDigits("+1 (415) 555-0142"), "4155550142");
+  assert.equal(normalizeDigits("415.555.0142"), "4155550142");
+  assert.equal(normalizeDigits("14155550142"), "4155550142"); // drops US country code
+  assert.equal(normalizeDigits("555-0142"), "5550142"); // short numbers pass through as-is
+  assert.equal(normalizeDigits(""), "");
+  assert.equal(normalizeDigits(null), "");
+  assert.equal(normalizeDigits(undefined), "");
+});
+
+test("canonicalDistrict collapses mixed padded/unpadded formats to one key", () => {
+  // The roster stores zero-padded ("0008147"); the Holman backfill stores
+  // unpadded ("8147"). Both must canonicalize identically so a bulk district
+  // filter can't silently miss recipients stored in the other format.
+  assert.equal(canonicalDistrict("0008147"), "8147");
+  assert.equal(canonicalDistrict("8147"), "8147");
+  assert.equal(canonicalDistrict("0008147"), canonicalDistrict("8147"));
+  assert.equal(canonicalDistrict("District 08147"), "8147"); // strips non-digits too
+  assert.equal(canonicalDistrict(" 8147 "), "8147");
+  assert.equal(canonicalDistrict("0"), ""); // all-zeros → empty (no valid district)
+  assert.equal(canonicalDistrict(""), "");
+  assert.equal(canonicalDistrict(null), "");
+  assert.equal(canonicalDistrict(undefined), "");
+});
+
+test("findUnknownTokens flags only non-whitelisted placeholders", () => {
+  // All-known tokens (both single and double brace styles) → valid.
+  assert.deepEqual(findUnknownTokens("Hi {name}, truck {{truck}} in {district}"), []);
+  for (const tok of TEMPLATE_TOKENS) {
+    assert.deepEqual(findUnknownTokens(`x {${tok}} y`), []);
+  }
+  // Unknown tokens are surfaced once each, in order.
+  assert.deepEqual(findUnknownTokens("Hi {name}, your {vin} and {ssn}"), ["vin", "ssn"]);
+  // Duplicates are de-duplicated.
+  assert.deepEqual(findUnknownTokens("{foo} {foo} {bar}"), ["foo", "bar"]);
+  // No tokens → valid.
+  assert.deepEqual(findUnknownTokens("plain text"), []);
+});
+
+test("renderTemplate substitutes whitelisted tokens and derives firstName", () => {
+  const ctx = { name: "Jane Smith", truck: "88123", district: "3132", ldap: "JSMITH1", managerName: "Bob Lee" };
+  assert.equal(renderTemplate("Hi {firstName}", ctx), "Hi Jane");
+  assert.equal(
+    renderTemplate("{name} on {truck} in {district} ({ldap}) mgr {managerName}", ctx),
+    "Jane Smith on 88123 in 3132 (JSMITH1) mgr Bob Lee",
+  );
+  // Missing context values render as empty strings, not the literal token.
+  assert.equal(renderTemplate("Hi {name}!", {}), "Hi !");
+  // Unknown tokens are left untouched (so an accidental unknown is visible).
+  assert.equal(renderTemplate("Hi {name}, {vin}", { name: "A" }), "Hi A, {vin}");
+  // Double-brace style also renders.
+  assert.equal(renderTemplate("Hi {{firstName}}", ctx), "Hi Jane");
+});
+
+test("countSegments handles GSM-7, extension chars, and UCS-2 boundaries", () => {
+  assert.equal(countSegments(""), 1);
+  assert.equal(countSegments("hello"), 1);
+  // Exactly 160 GSM-7 chars = 1 segment; 161 = 2.
+  assert.equal(countSegments("a".repeat(160)), 1);
+  assert.equal(countSegments("a".repeat(161)), 2);
+  // Extension chars (e.g. '€') cost two septets.
+  assert.equal(countSegments("€".repeat(80)), 1); // 160 septets
+  assert.equal(countSegments("€".repeat(81)), 2); // 162 septets → split
+  // Emoji forces UCS-2: <=70 units = 1, >70 = 2.
+  assert.equal(countSegments("😀".repeat(35)), 1); // 70 UTF-16 units
+  assert.equal(countSegments("😀".repeat(36)), 2); // 72 units → split
+});
+
+test("preview collapses whitespace and truncates with an ellipsis", () => {
+  assert.equal(preview("  hello   world  "), "hello world");
+  assert.equal(preview(null), "");
+  const long = "x".repeat(200);
+  const p = preview(long, 120);
+  assert.equal(p.length, 120);
+  assert.ok(p.endsWith("…"));
+});
+
+test("estimateBulkSend sums segments across per-recipient bodies", () => {
+  // Empty audience → nothing to send.
+  const empty = estimateBulkSend([]);
+  assert.equal(empty.recipients, 0);
+  assert.equal(empty.totalSegments, 0);
+  assert.equal(empty.estimatedSeconds, 0);
+  assert.equal(empty.needsConfirmation, false);
+
+  // Three short (1-segment) messages at 1 msg/sec → 3 segments, ~3 sec.
+  const three = estimateBulkSend(["hi", "hello", "hey"], 1);
+  assert.equal(three.recipients, 3);
+  assert.equal(three.totalSegments, 3);
+  assert.equal(three.estimatedSeconds, 3);
+
+  // A long body counts as multiple segments in the total.
+  const mixed = estimateBulkSend(["short", "a".repeat(161)], 1);
+  assert.equal(mixed.recipients, 2);
+  assert.equal(mixed.totalSegments, 3); // 1 + 2
+  assert.equal(mixed.estimatedSeconds, 3);
+
+  // Throughput scales the time estimate (rounds up).
+  const fast = estimateBulkSend(["a", "b", "c", "d"], 2);
+  assert.equal(fast.totalSegments, 4);
+  assert.equal(fast.estimatedSeconds, 2); // 4 segments / 2 mps
+});
+
+test("estimateBulkSend flips needsConfirmation at the 200-recipient threshold", () => {
+  const bodies = (n: number) => Array.from({ length: n }, () => "ping");
+  assert.equal(BULK_CONFIRM_THRESHOLD, 200);
+  assert.equal(estimateBulkSend(bodies(BULK_CONFIRM_THRESHOLD - 1)).needsConfirmation, false);
+  assert.equal(estimateBulkSend(bodies(BULK_CONFIRM_THRESHOLD)).needsConfirmation, true);
+  assert.equal(estimateBulkSend(bodies(BULK_CONFIRM_THRESHOLD + 50)).needsConfirmation, true);
+});

@@ -24,6 +24,7 @@ import {
   Upload,
   GitBranch,
   ExternalLink,
+  MessageSquare,
   type LucideIcon
 } from "lucide-react";
 
@@ -327,6 +328,15 @@ export const PAGES: PageDefinition[] = [
     icon: Shield,
     category: "management",
     permissionKey: "rolePermissions",
+  },
+  {
+    key: "fleetCommunications",
+    label: "Fleet Communications",
+    description: "Unified team SMS inbox across registration, decommissioning, rentals, and more",
+    path: "/fleet-communications",
+    icon: MessageSquare,
+    category: "activities",
+    permissionKey: "fleetCommunications",
   },
   {
     key: "fleetManagement",

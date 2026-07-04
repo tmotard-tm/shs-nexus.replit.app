@@ -372,6 +372,21 @@ async function runStartupBootstrap() {
     console.error("❌ Failed to start sync scheduler:", error);
   }
 
+  // Master Fleet Communications Module (Task #524) — ensure the fs_comms_*
+  // tables exist and start the in-process send-queue drainer. Runs post-listen
+  // (autoscale listen-first) so a transient DB hiccup can't stall boot. The
+  // durable cadence is a Scheduled Deployment (server/run-comms-queue.ts /
+  // run-comms-sync.ts); this in-process drainer is a best-effort warm path.
+  try {
+    const { initCommsSchema } = await import("./fleet-comms/schema-init");
+    await initCommsSchema();
+    const { startInProcessQueueDrain } = await import("./fleet-comms/outbound");
+    startInProcessQueueDrain();
+    log("✅ Fleet Communications: schema ensured + in-process queue drainer started");
+  } catch (error: any) {
+    console.error("⚠️ Fleet Communications startup init failed:", error?.message || error);
+  }
+
   // Start the BYOV assignment drift scheduler (nightly at 2am EST by default)
   try {
     const { startByovDriftScheduler } = await import("./byov-verification-service");

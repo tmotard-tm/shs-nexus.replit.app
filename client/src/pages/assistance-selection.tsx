@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MainContent } from "@/components/layout/main-content";
 import { usePermissions } from "@/hooks/use-permissions";
-import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car, Package, ExternalLink } from "lucide-react";
+import { MapPin, Truck, UserPlus, UserMinus, Map, Plus, LayoutGrid, Wrench, CalendarPlus, CalendarMinus, Car, Package, ExternalLink, MessageSquare } from "lucide-react";
 import { useLocation } from "wouter";
 import searsVanImage from "@assets/generated_images/Sears_service_van_5aad7e52.png";
 import { FilteredMap } from "@/components/vehicle-map-filters";
@@ -44,17 +44,40 @@ export default function AssistanceSelection() {
   const assignedVehicles = allVehicles.filter(isVehicleAssigned);
   const unassignedVehicles = allVehicles.filter(v => !isVehicleAssigned(v));
 
-  const allWorkflowOptions = [
-    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" as const },
-    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician"), permissionKey: "offboarding" as const },
-    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire"), permissionKey: "onboarding" as const },
-    { value: "assign-vehicle", label: "Fleet Management", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setLocation("/fleet-management"), permissionKey: "assignVehicle" as const },
-    { value: "weekly-onboarding", label: "Weekly Onboarding", icon: CalendarPlus, color: "bg-cyan-600 hover:bg-cyan-700", action: () => setLocation("/weekly-onboarding"), permissionKey: "weeklyOnboarding" as const },
-    { value: "weekly-offboarding", label: "Weekly Offboarding", icon: CalendarMinus, color: "bg-rose-600 hover:bg-rose-700", action: () => setLocation("/weekly-offboarding"), permissionKey: "weeklyOffboarding" as const },
-    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
-    { value: "fleet-scope", label: "Fleet Scope", icon: Wrench, color: "bg-amber-600 hover:bg-amber-700", action: () => setLocation("/fleet-scope"), permissionKey: "fleetScope" as const },
-    { value: "vehicle-rental-management", label: "Vehicle Rental Management", icon: Car, color: "bg-teal-600 hover:bg-teal-700", action: () => setLocation("/vehicle-rental-management"), permissionKey: "vehicleRentalManagement" as const },
-    { value: "tpms", label: "TPMS", icon: Package, color: "bg-orange-600 hover:bg-orange-700", action: () => setLocation("/tpms"), permissionKey: "tpms" as const },
+  type WorkflowOption = {
+    value: string;
+    label: string;
+    icon: typeof MapPin;
+    color: string;
+    action: () => void;
+    permissionKey?:
+      | "taskQueue"
+      | "offboarding"
+      | "onboarding"
+      | "assignVehicle"
+      | "weeklyOnboarding"
+      | "weeklyOffboarding"
+      | "createVehicle"
+      | "fleetScope"
+      | "vehicleRentalManagement"
+      | "tpms";
+    // Some tiles aren't gated by a quickActions key — e.g. Fleet Communications
+    // lives under the sidebar Activities permission, so it uses a custom gate.
+    customGate?: (p: any) => boolean;
+  };
+
+  const allWorkflowOptions: WorkflowOption[] = [
+    { value: "task-queue", label: "Task Queue", icon: LayoutGrid, color: "bg-gray-600 hover:bg-gray-700", action: () => setLocation("/queue-management"), permissionKey: "taskQueue" },
+    { value: "offboarding", label: "Offboarding", icon: UserMinus, color: "bg-red-600 hover:bg-red-700", action: () => setLocation("/offboard-technician"), permissionKey: "offboarding" },
+    { value: "onboarding", label: "Onboarding", icon: UserPlus, color: "bg-purple-600 hover:bg-purple-700", action: () => setLocation("/onboard-hire"), permissionKey: "onboarding" },
+    { value: "assign-vehicle", label: "Fleet Management", icon: MapPin, color: "bg-green-600 hover:bg-green-700", action: () => setLocation("/fleet-management"), permissionKey: "assignVehicle" },
+    { value: "weekly-onboarding", label: "Weekly Onboarding", icon: CalendarPlus, color: "bg-cyan-600 hover:bg-cyan-700", action: () => setLocation("/weekly-onboarding"), permissionKey: "weeklyOnboarding" },
+    { value: "weekly-offboarding", label: "Weekly Offboarding", icon: CalendarMinus, color: "bg-rose-600 hover:bg-rose-700", action: () => setLocation("/weekly-offboarding"), permissionKey: "weeklyOffboarding" },
+    { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" },
+    { value: "fleet-scope", label: "Fleet Scope", icon: Wrench, color: "bg-amber-600 hover:bg-amber-700", action: () => setLocation("/fleet-scope"), permissionKey: "fleetScope" },
+    { value: "vehicle-rental-management", label: "Vehicle Rental Management", icon: Car, color: "bg-teal-600 hover:bg-teal-700", action: () => setLocation("/vehicle-rental-management"), permissionKey: "vehicleRentalManagement" },
+    { value: "tpms", label: "TPMS", icon: Package, color: "bg-orange-600 hover:bg-orange-700", action: () => setLocation("/tpms"), permissionKey: "tpms" },
+    { value: "fleet-communications", label: "Fleet Communications", icon: MessageSquare, color: "bg-indigo-600 hover:bg-indigo-700", action: () => setLocation("/fleet-communications"), customGate: (p) => p?.sidebar?.activities?.fleetCommunications === true },
   ];
 
   const workflowOptions = useMemo(() => {
@@ -62,7 +85,9 @@ export default function AssistanceSelection() {
       return [];
     }
     return allWorkflowOptions.filter(option =>
-      permissions.quickActions[option.permissionKey] === true
+      option.customGate
+        ? option.customGate(permissions)
+        : !!option.permissionKey && permissions.quickActions[option.permissionKey] === true
     );
   }, [permissions]);
 

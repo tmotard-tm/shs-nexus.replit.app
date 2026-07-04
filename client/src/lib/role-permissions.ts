@@ -60,6 +60,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       enabled: true,
       activityLogs: true,
       communicationHub: true,
+      fleetCommunications: true,
     },
     account: {
       enabled: true,
@@ -202,6 +203,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       enabled: true,
       activityLogs: true,
       communicationHub: true,
+      fleetCommunications: true,
     },
     account: {
       enabled: true,
@@ -343,6 +345,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       enabled: false,
       activityLogs: false,
       communicationHub: false,
+      fleetCommunications: false,
     },
     account: {
       enabled: true,
@@ -493,6 +496,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
     '/communication-hub': () => perms.sidebar.management.communicationHub,
+    '/fleet-communications': () => perms.sidebar.activities.fleetCommunications,
     '/role-permissions': () => perms.sidebar.management.rolePermissions,
     '/holman-integration': () => perms.sidebar.management.integrations,
     '/field-mapping': () => perms.sidebar.management.integrations,

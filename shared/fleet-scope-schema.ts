@@ -1479,3 +1479,200 @@ export const decommMessages = pgTable("fs_decomm_messages", {
 export const insertDecommMessageSchema = createInsertSchema(decommMessages).omit({ id: true, sentAt: true });
 export type DecommMessage = typeof decommMessages.$inferSelect;
 export type InsertDecommMessage = z.infer<typeof insertDecommMessageSchema>;
+
+// ============================================================================
+// Master Fleet Communications Module (Task #524)
+// A single team SMS inbox: one thread per technician (keyed by LDAP), with
+// per-message category labels. All tables use the fs_comms_ prefix and are
+// managed via the raw-SQL init path (server/fleet-comms/schema-init.ts), NOT
+// drizzle-kit push (see project Gotchas).
+// ============================================================================
+
+// The message categories. Category is a per-message label; tabs are filters.
+export const COMMS_CATEGORIES = [
+  "decommissioning",
+  "registrations",
+  "new_vehicles",
+  "rental_management",
+  "vehicle_assignments",
+  "offboarding",
+  "general_fleet",
+] as const;
+export type CommsCategory = (typeof COMMS_CATEGORIES)[number];
+
+export const COMMS_CATEGORY_LABELS: Record<CommsCategory, string> = {
+  decommissioning: "Decommissioning",
+  registrations: "Registrations",
+  new_vehicles: "New Vehicles",
+  rental_management: "Rental Management",
+  vehicle_assignments: "Vehicle Assignments",
+  offboarding: "Offboarding",
+  general_fleet: "General Fleet",
+};
+
+// Communications Contacts — the module's self-contained directory, refreshed
+// daily from the Active Roster + TPMS_EXTRACT. Keyed by LDAP (enterprise ID).
+export const commsContacts = pgTable("fs_comms_contacts", {
+  ldap: varchar("ldap", { length: 60 }).primaryKey(), // UPPER(TRIM(ENTERPRISE_ID))
+  name: text("name"),
+  district: text("district"),
+  emplStatus: text("empl_status"), // A / L / P / S (or null when tombstoned)
+  managerLdap: text("manager_ldap"),
+  managerName: text("manager_name"),
+  phone: text("phone"), // display phone from TPMS MOBILEPHONENUMBER
+  phoneDigits: varchar("phone_digits", { length: 10 }), // last-10 normalized, for matching
+  primaryState: text("primary_state"), // for recipient-local quiet hours
+  truckNumber: text("truck_number"),
+  active: boolean("active").notNull().default(true),
+  terminationDetectedAt: timestamp("termination_detected_at"), // set when dropped off roster
+  lastSeenAt: timestamp("last_seen_at"), // last time present in the active roster
+  phoneLastVerifiedAt: timestamp("phone_last_verified_at"), // last TPMS row seen with phone
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsContact = typeof commsContacts.$inferSelect;
+
+// Per-contact phone-number change history (append-only).
+export const commsPhoneHistory = pgTable("fs_comms_phone_history", {
+  id: serial("id").primaryKey(),
+  ldap: varchar("ldap", { length: 60 }).notNull(),
+  phone: text("phone"),
+  phoneDigits: varchar("phone_digits", { length: 10 }),
+  changedAt: timestamp("changed_at").default(sql`now()`),
+  source: text("source"), // 'sync' | 'manual_link'
+  note: text("note"),
+});
+export type CommsPhoneHistory = typeof commsPhoneHistory.$inferSelect;
+
+// Per-tech thread summary — the lightweight row the inbox list renders from.
+export const commsThreads = pgTable("fs_comms_threads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  kind: text("kind").notNull().default("tech"), // 'tech' | 'unmatched'
+  ldap: varchar("ldap", { length: 60 }), // null for unmatched threads
+  phoneDigits: varchar("phone_digits", { length: 10 }), // current/known number (unmatched keyed on this)
+  contactName: text("contact_name"), // denormalized
+  district: text("district"),
+  truckNumber: text("truck_number"),
+  lastMessagePreview: text("last_message_preview"),
+  lastMessageAt: timestamp("last_message_at"),
+  lastMessageDirection: text("last_message_direction"),
+  lastCategory: text("last_category"),
+  unread: boolean("unread").notNull().default(false),
+  unreadCount: integer("unread_count").notNull().default(0),
+  optedOut: boolean("opted_out").notNull().default(false),
+  lastViewedAt: timestamp("last_viewed_at"),
+  lastViewedBy: text("last_viewed_by"),
+  lastRepliedAt: timestamp("last_replied_at"),
+  lastRepliedBy: text("last_replied_by"),
+  // Soft-delete + manual archive lifecycle. active = both null; archived =
+  // archivedAt set & deletedAt null; deleted = deletedAt set. Restore clears both.
+  archivedAt: timestamp("archived_at"),
+  archivedBy: text("archived_by"),
+  deletedAt: timestamp("deleted_at"),
+  deletedBy: text("deleted_by"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsThread = typeof commsThreads.$inferSelect;
+
+// Full message history — loaded/paginated only when a thread is opened.
+export const commsMessages = pgTable("fs_comms_messages", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  threadId: varchar("thread_id").notNull(),
+  ldap: varchar("ldap", { length: 60 }),
+  category: text("category").notNull().default("general_fleet"),
+  direction: text("direction").notNull(), // 'inbound' | 'outbound'
+  contactRole: text("contact_role").notNull().default("tech"), // 'tech' | 'manager' | 'unknown'
+  body: text("body").notNull().default(""),
+  phone: text("phone"), // number used at the time
+  phoneDigits: varchar("phone_digits", { length: 10 }),
+  status: text("status").default("sent"), // queued|sent|delivered|undelivered|failed|received
+  twilioSid: text("twilio_sid"), // unique when present, for dedupe
+  mediaUrl: text("media_url"), // object-storage key or Twilio URL
+  mediaType: text("media_type"),
+  sentBy: text("sent_by"), // app user id; null for system/inbound
+  senderName: text("sender_name"),
+  segments: integer("segments"),
+  errorMessage: text("error_message"),
+  readAt: timestamp("read_at"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+});
+export type CommsMessage = typeof commsMessages.$inferSelect;
+
+// Opt-out registry (STOP/START), keyed by phone digits.
+export const commsOptOuts = pgTable("fs_comms_optouts", {
+  phoneDigits: varchar("phone_digits", { length: 10 }).primaryKey(),
+  optedOut: boolean("opted_out").notNull().default(true),
+  reason: text("reason"), // 'STOP' | 'START' | 'manual'
+  ldap: varchar("ldap", { length: 60 }),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsOptOut = typeof commsOptOuts.$inferSelect;
+
+// Categorized message templates with whitelisted token placeholders.
+export const commsTemplates = pgTable("fs_comms_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull(),
+  name: text("name").notNull(),
+  body: text("body").notNull(),
+  createdBy: text("created_by"),
+  updatedBy: text("updated_by"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsTemplate = typeof commsTemplates.$inferSelect;
+
+// Thread audit — who viewed / who replied, for the shared-inbox audit trail.
+export const commsThreadAudit = pgTable("fs_comms_thread_audit", {
+  id: serial("id").primaryKey(),
+  threadId: varchar("thread_id").notNull(),
+  action: text("action").notNull(), // 'viewed' | 'replied'
+  actor: text("actor"),
+  actorName: text("actor_name"),
+  at: timestamp("at").default(sql`now()`),
+});
+export type CommsThreadAudit = typeof commsThreadAudit.$inferSelect;
+
+// Durable send queue — quiet-hours deferrals + chunked bulk sends. Every row
+// carries a claimed/sent marker checked atomically (CAS) so a crashed-and-
+// restarted processor can never text the same tech twice.
+export const commsSendQueue = pgTable("fs_comms_send_queue", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  batchId: varchar("batch_id"),
+  ldap: varchar("ldap", { length: 60 }),
+  phone: text("phone").notNull(),
+  phoneDigits: varchar("phone_digits", { length: 10 }),
+  category: text("category").notNull(),
+  body: text("body").notNull(),
+  mediaUrl: text("media_url"), // JSON array of URLs, or null
+  managerCc: boolean("manager_cc").notNull().default(false),
+  scheduledFor: timestamp("scheduled_for"), // quiet-hours deferral target
+  status: text("status").notNull().default("pending"), // pending|claimed|sent|failed|skipped|cancelled
+  claimedAt: timestamp("claimed_at"),
+  claimedBy: text("claimed_by"),
+  sentAt: timestamp("sent_at"),
+  twilioSid: text("twilio_sid"),
+  errorMessage: text("error_message"),
+  attempts: integer("attempts").notNull().default(0),
+  createdBy: text("created_by"),
+  senderName: text("sender_name"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsSendQueueItem = typeof commsSendQueue.$inferSelect;
+
+// Bulk-send batches — progress + failure reporting.
+export const commsSendBatches = pgTable("fs_comms_send_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  category: text("category").notNull(),
+  createdBy: text("created_by"),
+  total: integer("total").notNull().default(0),
+  sent: integer("sent").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  skipped: integer("skipped").notNull().default(0),
+  status: text("status").notNull().default("pending"), // pending|processing|completed
+  filterDesc: text("filter_desc"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type CommsSendBatch = typeof commsSendBatches.$inferSelect;

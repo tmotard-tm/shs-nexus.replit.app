@@ -97,6 +97,7 @@ export interface RolePermissionSettings {
       enabled: boolean;
       activityLogs: boolean;
       communicationHub: boolean;
+      fleetCommunications: boolean;
     };
     account: {
       enabled: boolean;

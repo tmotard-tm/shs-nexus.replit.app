@@ -50,6 +50,19 @@ The Rental Ops → Fleet Scope reconciliation keeps `fs_trucks` (the "rentals op
 -   **Health**: `GET /api/fs/rental-sync/health` returns `lastSuccessAt`, `lastSuccessAgeHours`, `isStale` (older than `RENTAL_SYNC_STALE_HOURS`), and the last run of any status (with `errorMessage`). `lastRun` is ordered by `COALESCE(completedAt, startedAt) DESC` so a fast `skipped`/`failed` row can't hide a still-completing run. Only `completed` rows advance the catch-up watermark / `lastSuccess`.
 -   **Manual trigger**: `POST /api/fs/rental-sync` (session-gated, or `x-internal-cron: $SESSION_SECRET` header to bypass auth). Accepts `?force=true` (query) or `{ "force": true }` (body) for the override above; a lock-contended call returns HTTP 200 `{ success:false, skipped:true }`.
 
+## Master Fleet Communications Module
+
+A single team SMS inbox that consolidates Registration + Decommissioning two-way texting (and future rental/assignment/offboarding/general fleet texts) into ONE thread per technician, keyed by LDAP, with per-message category labels shown as inbox tabs. It takes over the shared `FS_TWILIO_PHONE_NUMBER`. The VRM 877-number / ElevenLabs voice path is intentionally OUT of scope.
+
+-   **Where it lives**: backend `server/fleet-comms/` (schema-init, lib, storage, contacts-sync, outbound, inbound, routes), schema in `shared/fleet-scope-schema.ts` (`fs_comms_*` tables, raw-SQL init — NOT drizzle-kit), UI at `client/src/pages/fleet-communications.tsx` (route `/fleet-communications`, sidebar under Activities, gated by the `communicationHub` permission).
+-   **Dark rollout**: every non-webhook route under `/api/fs/comms/*` is gated by the `comms_module_enabled` app_setting flag. While OFF, only developer/admin roles can reach it (pilot); everyone else gets 404. The two Twilio webhooks (`/api/fs/comms/webhooks/inbound` + `/status`) are auth-excluded and always live so no inbound text is lost during rollout. Toggle the flag from the page header (admins) or `POST /api/fs/comms/config`.
+-   **Autoscale-safe schedulers (create these Scheduled Deployments after publish — the agent env cannot create platform schedules)**:
+    -   Contacts sync: `npx tsx server/run-comms-sync.ts` — daily (e.g. `0 9 * * *`). Self-bootstraps Snowflake (mirrors run-rental-sync). Refreshes `fs_comms_contacts` from Active Roster + TPMS_EXTRACT; records a `comms_contacts` `sync_logs` row. Health at `GET /api/fs/comms/health` (`isStale` after `COMMS_CONTACTS_STALE_HOURS`, default 30).
+    -   Send-queue drain: `npx tsx server/run-comms-queue.ts` — every ~5 min. No Snowflake. Drains quiet-hours deferrals + chunked bulk sends via `processSendQueue()`. An in-process drain also runs post-listen as a best-effort secondary path.
+    -   Legacy backfill: `npx tsx server/run-comms-migrate.ts` — ONE-OFF (safe to re-run). Copy-only: reads `fs_reg_messages` + `fs_decomm_messages`, never writes/deletes them. Idempotent via a deterministic dedupe key in `twilio_sid` (real SID, else `legacy:reg:<id>` / `legacy:decomm:<id>`) + the partial unique index. Preserves original `sent_at` as message `created_at`; recomputes thread summaries + unread counts at the end.
+-   **Cutover order**: (1) publish with the flag OFF, (2) create the sync + queue Scheduled Deployments, (3) run the one-off migrate, (4) pilot as developer/admin, (5) point the shared `FS_TWILIO_PHONE_NUMBER` inbound + status webhooks at `/api/fs/comms/webhooks/*`, (6) flip `comms_module_enabled` ON.
+-   **Env vars**: `FS_TWILIO_ACCOUNT_SID` / `FS_TWILIO_AUTH_TOKEN` / `FS_TWILIO_PHONE_NUMBER` (shared sender + signature validation), `COMMS_CONTACTS_STALE_HOURS` (optional, default 30).
+
 ## Stack
 
 -   **Frontend**: React 18, TypeScript, Vite, shadcn/ui, Radix UI, Tailwind CSS, TanStack Query, Wouter, React Hook Form, Zod

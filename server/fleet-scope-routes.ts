@@ -23,6 +23,7 @@ import {
   refreshTpmsExtractSnapshot,
 } from "./tpms-extract-snapshot";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
+import { registerCommsRoutes } from "./fleet-comms/routes";
 import { fetchRentalRoster } from "./vrm/snowflake-queries";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
 import { parqApi } from "./fleet-scope-pmf-api";
@@ -2475,7 +2476,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       req.path === '/public' ||
       req.path === '/elevenlabs/webhook' ||
       req.path === '/webhooks/twilio-decomm' ||
-      req.path === '/webhooks/twilio-reg'
+      req.path === '/webhooks/twilio-reg' ||
+      req.path === '/comms/webhooks/inbound' ||
+      req.path === '/comms/webhooks/status' ||
+      req.path.startsWith('/comms/public-media/')
     ) {
       return next();
     }
@@ -18241,6 +18245,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   setTimeout(() => {
     sweepStuckMmsMedia().catch(err => console.error('[MMS Sweep] Unhandled error:', err));
   }, 30_000);
+
+  // Master Fleet Communications Module (Task #524) — mounted under /api/fs/comms/*.
+  registerCommsRoutes(app);
 
   return app;
 }

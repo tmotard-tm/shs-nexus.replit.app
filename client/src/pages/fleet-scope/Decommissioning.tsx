@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
+import { CommsHandoff } from "@/components/fleet-scope/CommsHandoff";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -101,6 +102,13 @@ export default function Decommissioning() {
   const termFileInputRef = useRef<HTMLInputElement>(null);
   const [activeView, setActiveView] = useState<"table" | "conversations">("table");
   const [convTruck, setConvTruck] = useState<string | null>(null);
+  // Communications module feature flag: when ON, the legacy conversation UI is
+  // retired in favor of the unified Fleet Communications inbox + quick-send.
+  const { data: commsConfig } = useQuery<{ enabled?: boolean }>({
+    queryKey: ["/api/fs/comms/config"],
+    retry: false,
+  });
+  const commsEnabled = commsConfig?.enabled === true;
   const [tableTab, setTableTab] = useState<"active" | "decommissioned" | "oldDeclines">("active");
   const [oldDeclinesDialogOpen, setOldDeclinesDialogOpen] = useState(false);
   const [oldDeclinesPaste, setOldDeclinesPaste] = useState("");
@@ -1017,6 +1025,18 @@ export default function Decommissioning() {
       </div>
 
       {activeView === "conversations" ? (
+        commsEnabled ? (
+          <CommsHandoff
+            category="decommissioning"
+            categoryLabel="Decommissioning"
+            records={vehicles.map((v) => ({
+              truckNumber: v.truckNumber,
+              ldap: v.enterpriseId,
+              name: v.fullName,
+              phone: v.mobilePhone,
+            }))}
+          />
+        ) : (
         <DecommConversations
           vehicleData={vehicles.map(v => ({
             id: v.id,
@@ -1034,6 +1054,7 @@ export default function Decommissioning() {
           }))}
           initialTruckNumber={convTruck ?? undefined}
         />
+        )
       ) : (
       <>
       <div className="flex items-center gap-1 mb-3">

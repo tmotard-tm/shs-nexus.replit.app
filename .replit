@@ -91,6 +91,17 @@ args = "npx tsx --test tests/vehicle-61385-integration.test.ts"
 isValidation = true
 
 [[workflows.workflow]]
+name = "comms-lib-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/fleet-comms-lib.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
 name = "artifacts/mockup-sandbox: Component Preview Server"
 author = "agent"
 mode = "sequential"
