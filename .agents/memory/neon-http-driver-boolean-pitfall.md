@@ -19,3 +19,24 @@ the SAME driver the app uses — the drizzle `neon-serverless` WebSocket Pool ex
 from `server/db.ts` (`import { db } from "../server/db"` in a `tsx` script). Use that
 for both reads and credential writes. Reserve the HTTP `neon()` path for throwaway
 checks where a wrong boolean won't mislead a diagnosis.
+
+## `neonConfig.poolQueryViaFetch = true` reintroduces this bug on the POOL driver
+
+Setting `neonConfig.poolQueryViaFetch = true` (in `server/db.ts` / `server/fleet-scope-db.ts`)
+reroutes the WebSocket `Pool`'s simple queries over Neon's HTTP endpoint — which
+brings the SAME boolean misread into the app's normal driver. Proven empirically:
+with the flag ON, `users.is_active` read `false` for every account whose raw value
+was `true`; with it OFF, it read `true`. The whole app runs on `drizzle-orm/neon-serverless`
++ `Pool`, whose contract is WebSocket transport.
+
+**Symptom seen:** every login (credential `routes.ts` + SAML `saml-config.ts`) hit
+`if (!user.isActive)` and returned "Your account has been deactivated"; session
+validation (`!user || !user.isActive`) failed every authenticated request → blank
+authed UI + 401s (e.g. App Launcher `/api/external-apps`). It's a fail-CLOSED bug
+(false lockout), not an auth bypass.
+
+**Rule:** do NOT set `poolQueryViaFetch = true` here. Keep `neonConfig.webSocketConstructor = ws`
+only. If a future WS-drop mitigation is wanted, handle it at the app layer
+(bounded-stale cache / retry), never by switching the pool to fetch transport.
+**Why:** the fetch path silently corrupts booleans app-wide AND splits
+transaction/session semantics from single-query transport for zero benefit.
