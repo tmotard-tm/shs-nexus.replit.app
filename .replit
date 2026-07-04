@@ -137,3 +137,6 @@ BYOV_DASHBOARD_URL = "https://byovdashboard.replit.app"
 [postMerge]
 path = "scripts/post-merge.sh"
 timeoutMs = 60000
+
+[objectStorage]
+defaultBucketID = "replit-objstore-c045591a-a89c-45b9-9118-8c388bdd00c6"

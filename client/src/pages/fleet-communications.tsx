@@ -541,7 +541,7 @@ export default function FleetCommunications() {
     if (!thread || (!body.trim() && !attachment)) return;
     sendMut.mutate({
       ldap: thread.ldap,
-      phone: thread.ldap ? undefined : detail?.contact?.phone ?? undefined,
+      phone: thread.ldap ? undefined : (detail?.contact?.phone ?? (thread.phoneDigits ? `+1${thread.phoneDigits}` : undefined)),
       category: sendCategory,
       body: body.trim(),
       mediaUrl: attachment ? [attachment.url] : undefined,
@@ -1348,15 +1348,24 @@ function ComposeDialog({ open, onOpenChange, categories, health, onSent }: {
   const [body, setBody] = useState("");
   const [managerCc, setManagerCc] = useState(false);
   const [ackStale, setAckStale] = useState(false);
+  const [recipientMode, setRecipientMode] = useState<"tech" | "phone">("tech");
+  const [manualPhone, setManualPhone] = useState("");
 
   const reset = () => {
     setSelected(new Map());
     setBody(""); setManagerCc(false); setAckStale(false);
+    setRecipientMode("tech"); setManualPhone("");
   };
 
   const selectedList = Array.from(selected.values());
   const count = selectedList.length;
   const withoutManager = selectedList.filter((c) => !c.managerName && !c.managerLdap).length;
+
+  // Ad-hoc recipient: text a number not on the technician roster. Normalize to
+  // E.164 because sendTwilioMessage passes `to` straight to Twilio.
+  const phoneDigits = manualPhone.replace(/\D/g, "");
+  const phoneValid = phoneDigits.length === 10 || (phoneDigits.length === 11 && phoneDigits.startsWith("1"));
+  const phoneE164 = phoneDigits.length === 10 ? `+1${phoneDigits}` : phoneDigits.length === 11 ? `+${phoneDigits}` : manualPhone.trim();
 
   const singleMut = useMutation({
     mutationFn: (confirmed?: boolean) =>
@@ -1410,12 +1419,29 @@ function ComposeDialog({ open, onOpenChange, categories, health, onSent }: {
     },
   });
 
-  const sending = singleMut.isPending || bulkMut.isPending;
+  const phoneMut = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", "/api/fs/comms/send", { phone: phoneE164, category: cat, body: body.trim() }),
+    onSuccess: async (res: any) => {
+      const data = await res.json();
+      toast({ title: data.status === "queued" ? "Queued" : "Sent" });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
+      onOpenChange(false);
+      reset();
+      onSent(data.threadId);
+    },
+    onError: (e: any) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
+  });
+
+  const sending = singleMut.isPending || bulkMut.isPending || phoneMut.isPending;
   const staleBlock = !!health?.isStale && count > 1 && !ackStale;
-  const canSend = count > 0 && !!body.trim() && !sending && !staleBlock;
+  const canSend = recipientMode === "phone"
+    ? phoneValid && !!body.trim() && !sending
+    : count > 0 && !!body.trim() && !sending && !staleBlock;
 
   const doSend = () => {
-    if (count === 1) singleMut.mutate(false);
+    if (recipientMode === "phone") phoneMut.mutate();
+    else if (count === 1) singleMut.mutate(false);
     else bulkMut.mutate(false);
   };
 
@@ -1424,18 +1450,38 @@ function ComposeDialog({ open, onOpenChange, categories, health, onSent }: {
       <DialogContent className="max-w-lg">
         <DialogHeader><DialogTitle>New message</DialogTitle></DialogHeader>
         <div className="space-y-3">
-          <RecipientPicker open={open} selected={selected} onChange={setSelected} />
+          {/* Recipient: pick from the technician roster, or text an arbitrary number */}
+          <div className="flex gap-1 rounded-lg bg-muted p-1 text-sm">
+            <button type="button" onClick={() => setRecipientMode("tech")} className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${recipientMode === "tech" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} data-testid="button-recipient-mode-tech">Technician</button>
+            <button type="button" onClick={() => setRecipientMode("phone")} className={`flex-1 rounded-md px-3 py-1.5 font-medium transition-colors ${recipientMode === "phone" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} data-testid="button-recipient-mode-phone">Phone number</button>
+          </div>
+
+          {recipientMode === "tech" ? (
+            <RecipientPicker open={open} selected={selected} onChange={setSelected} />
+          ) : (
+            <div className="space-y-1">
+              <Input type="tel" inputMode="tel" value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} placeholder="e.g. (704) 555-0123" data-testid="input-compose-phone" />
+              {manualPhone.trim() !== "" && !phoneValid && (
+                <div className="text-xs text-amber-600 dark:text-amber-500">Enter a 10-digit US number.</div>
+              )}
+              <div className="text-xs text-muted-foreground">Texts a number that is not on the technician roster. Replies land in the inbox as an unmatched thread.</div>
+            </div>
+          )}
 
           <Select value={cat} onValueChange={setCat}>
             <SelectTrigger data-testid="select-compose-category"><SelectValue /></SelectTrigger>
             <SelectContent>{categories.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
           </Select>
           <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Message... (supports {name}, {truck}, {district}, {ldap}, {managerName})" data-testid="input-compose-body" />
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={managerCc} onCheckedChange={(v) => setManagerCc(!!v)} data-testid="checkbox-compose-managercc" /> CC each technician's Lead
-          </label>
-          {managerCc && count > 0 && withoutManager > 0 && (
-            <div className="text-xs text-amber-600 dark:text-amber-500">{withoutManager} selected recipient{withoutManager === 1 ? " has" : "s have"} no Lead on file — they won't get a CC.</div>
+          {recipientMode === "tech" && (
+            <>
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox checked={managerCc} onCheckedChange={(v) => setManagerCc(!!v)} data-testid="checkbox-compose-managercc" /> CC each technician's Lead
+              </label>
+              {managerCc && count > 0 && withoutManager > 0 && (
+                <div className="text-xs text-amber-600 dark:text-amber-500">{withoutManager} selected recipient{withoutManager === 1 ? " has" : "s have"} no Lead on file — they won't get a CC.</div>
+              )}
+            </>
           )}
 
           {!!health?.isStale && count > 1 && (

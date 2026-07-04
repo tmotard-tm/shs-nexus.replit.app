@@ -70,6 +70,15 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
   const { previewRole, setPreviewRole, previewUser, setPreviewUser, isPreviewMode, isUserPreviewMode, exitPreviewMode } = usePreviewRole();
   const [isOpen, setIsOpen] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+  // Only one category/preview popout open at a time. Radix leaves sibling
+  // subs open on some interactions (touch, or a scrolled menu), so they pile
+  // up ("stuck with all recently viewed"); controlling open enforces
+  // single-open and closes the previous popout when another opens. The close
+  // branch only clears when this sub is still the open one, so a leave event
+  // that arrives after the next sub opened cannot wipe the new selection.
+  const [openSub, setOpenSub] = useState<string | null>(null);
+  const handleSubOpenChange = (name: string) => (o: boolean) =>
+    setOpenSub((cur) => (o ? name : cur === name ? null : cur));
 
   // Mismatch count badge — poll every 15 minutes
   const { data: mismatchCountData } = useQuery<{ count: number }>({
@@ -249,7 +258,7 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
 
   return (
     <div className={wrapperCls}>
-      <DropdownMenu open={isOpen} onOpenChange={setIsOpen}>
+      <DropdownMenu open={isOpen} onOpenChange={(o) => { setIsOpen(o); if (!o) setOpenSub(null); }}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -301,7 +310,7 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
           {categories.map((category) => {
             const CategoryIcon = category.icon;
             return (
-              <DropdownMenuSub key={category.name}>
+              <DropdownMenuSub key={category.name} open={openSub === category.name} onOpenChange={handleSubOpenChange(category.name)}>
                 <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid={`menu-category-${category.name.toLowerCase()}`}>
                   <CategoryIcon className="h-4 w-4" />
                   <span>{category.name}</span>
@@ -361,7 +370,7 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
 
           {/* View as Role - Super Admin Only */}
           {user.role === 'developer' && (
-            <DropdownMenuSub>
+            <DropdownMenuSub open={openSub === "view-as-role"} onOpenChange={handleSubOpenChange("view-as-role")}>
               <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-role">
                 <Eye className="h-4 w-4" />
                 <span>View as Role</span>
@@ -391,7 +400,7 @@ export function Sidebar({ inline = false }: { inline?: boolean } = {}) {
 
           {/* View as User - Super Admin Only */}
           {user.role === 'developer' && (
-            <DropdownMenuSub>
+            <DropdownMenuSub open={openSub === "view-as-user"} onOpenChange={handleSubOpenChange("view-as-user")}>
               <DropdownMenuSubTrigger className="flex items-center gap-3" data-testid="menu-view-as-user">
                 <UserIcon className="h-4 w-4" />
                 <span>View as User</span>
