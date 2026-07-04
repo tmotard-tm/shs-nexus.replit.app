@@ -755,14 +755,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       )
     `), 20000, "external_apps init");
     console.log("[ExternalApps] external_apps table ready");
-    // Holman/eFleets use their real site favicon at the highest resolution the
+    // eFleets/Holman use their real site favicon at the highest resolution the
     // source publishes (Holman = 192px, crisp; eFleets only ships a small icon).
-    // The rest use a clean, colored Material icon (Iconify, open-source). Admins
-    // can override any logo URL via /external-app-management.
+    // VanGoNow/NewMav are internal Replit apps with no distinct favicon, so they
+    // use hand-made brand PNGs shipped in client/public/app-launcher/. Activity DCA
+    // uses a clean, colored Material icon (Iconify, open-source). Admins can
+    // override any logo URL via /external-app-management.
     const iconify = (name: string, hexNoHash: string) => `https://api.iconify.design/mdi/${name}.svg?color=%23${hexNoHash}&width=64`;
     const STARTER_APPS: { name: string; url: string; logoUrl: string; color: string; sortOrder: number }[] = [
-      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",         logoUrl: iconify("van-utility", "16a34a"),  color: "#ffffff", sortOrder: 0 },
-      { name: "NewMav",           url: "https://newmav.replit.app/admin",           logoUrl: iconify("car-pickup", "2563eb"),   color: "#ffffff", sortOrder: 1 },
+      { name: "VanGoNow",         url: "https://vangonow.replit.app/admin",         logoUrl: "/app-launcher/vangonow.png",      color: "#ffffff", sortOrder: 0 },
+      { name: "NewMav",           url: "https://newmav.replit.app/admin",           logoUrl: "/app-launcher/newmav.png",        color: "#ffffff", sortOrder: 1 },
       { name: "Activity DCA app", url: "https://eventrequestform.replit.app",       logoUrl: iconify("calendar-month", "ea580c"), color: "#ffffff", sortOrder: 2 },
       { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",  logoUrl: "https://icons.duckduckgo.com/ip3/efleets.com.ico", color: "#ffffff", sortOrder: 3 },
       { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", logoUrl: "https://www.google.com/s2/favicons?domain=holman.com&sz=256", color: "#ffffff", sortOrder: 4 },
@@ -774,7 +776,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         ON CONFLICT (name) DO NOTHING
       `), 20000, "external_apps seed");
     }
-    console.log("[ExternalApps] starter apps seeded (idempotent)");
+    // One-time self-heal: existing environments (incl. production) were seeded with
+    // generic Iconify placeholders for VanGoNow/NewMav before the real brand PNGs
+    // existed. The INSERT above can't fix them (ON CONFLICT DO NOTHING), so heal ONLY
+    // rows that still hold the EXACT old placeholder — any admin-set custom logo is
+    // left untouched. Idempotent: a no-op once healed.
+    await withTimeout(db.execute(sql`
+      UPDATE external_apps SET logo_url = '/app-launcher/vangonow.png'
+      WHERE name = 'VanGoNow'
+        AND logo_url = 'https://api.iconify.design/mdi/van-utility.svg?color=%2316a34a&width=64'
+    `), 20000, "external_apps heal VanGoNow");
+    await withTimeout(db.execute(sql`
+      UPDATE external_apps SET logo_url = '/app-launcher/newmav.png'
+      WHERE name = 'NewMav'
+        AND logo_url = 'https://api.iconify.design/mdi/car-pickup.svg?color=%232563eb&width=64'
+    `), 20000, "external_apps heal NewMav");
+    console.log("[ExternalApps] starter apps seeded + VanGoNow/NewMav logos healed (idempotent)");
   } catch (e: any) {
     console.error("[ExternalApps] Failed to init external_apps table:", e.message);
   }

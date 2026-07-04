@@ -487,5 +487,23 @@
       "0008_add_logical_entities.sql"
     ],
     "fingerprint": "8687dac5bdc1"
+  },
+  {
+    "deployedAt": "2026-07-04T21:12:51.569Z",
+    "bundleHash": "tNDycU3U",
+    "gitSha": "d2101fd1",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-07-04T21-12-11-870Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "b49343fc93bb"
   }
 ]
