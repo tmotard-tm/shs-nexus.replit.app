@@ -4,7 +4,6 @@ import ws from "ws";
 import * as fsSchema from "@shared/fleet-scope-schema";
 
 neonConfig.webSocketConstructor = ws;
-neonConfig.poolQueryViaFetch = true;
 
 /**
  * Fleet-Scope Database Connection
