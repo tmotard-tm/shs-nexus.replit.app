@@ -54,6 +54,7 @@ export default function AssistanceSelection() {
     { value: "create-vehicle", label: "Create New Vehicle", icon: Plus, color: "bg-blue-600 hover:bg-blue-700", action: () => setLocation("/create-vehicle-location"), permissionKey: "createVehicle" as const },
     { value: "fleet-scope", label: "Fleet Scope", icon: Wrench, color: "bg-amber-600 hover:bg-amber-700", action: () => setLocation("/fleet-scope"), permissionKey: "fleetScope" as const },
     { value: "vehicle-rental-management", label: "Vehicle Rental Management", icon: Car, color: "bg-teal-600 hover:bg-teal-700", action: () => setLocation("/vehicle-rental-management"), permissionKey: "vehicleRentalManagement" as const },
+    { value: "tpms", label: "TPMS", icon: Package, color: "bg-orange-600 hover:bg-orange-700", action: () => setLocation("/tpms"), permissionKey: "tpms" as const },
   ];
 
   const workflowOptions = useMemo(() => {
@@ -65,9 +66,7 @@ export default function AssistanceSelection() {
     );
   }, [permissions]);
 
-  // TPMS tile is appended to the workflow dock only for users with TPMS access.
-  const canTpms = permissions?.sidebar?.tpms === true;
-  const workflowTileCount = workflowOptions.length + (canTpms ? 1 : 0);
+  const workflowTileCount = workflowOptions.length;
 
   // App Launcher dock — admin-managed external app tiles. staleTime is Infinity
   // globally, so the admin screen invalidates EXTERNAL_APPS_KEY to refresh this.
@@ -118,7 +117,7 @@ export default function AssistanceSelection() {
           </div>
 
           {/* Workflow Buttons Card — glass style */}
-          {(workflowOptions.length > 0 || canTpms) && (
+          {workflowOptions.length > 0 && (
           <div
             className="rounded-2xl p-6"
             style={glassCardStyle}
@@ -137,19 +136,6 @@ export default function AssistanceSelection() {
                   <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>{option.label}</span>
                 </button>
               ))}
-              {canTpms && (
-                <button
-                  key="tpms"
-                  onClick={() => setLocation("/tpms")}
-                  className="flex flex-col items-center gap-2 p-4 rounded-xl transition-all hover:bg-white/10"
-                  data-testid="button-tpms"
-                >
-                  <div className="w-12 h-12 rounded-lg bg-orange-600 hover:bg-orange-700 flex items-center justify-center shadow-lg">
-                    <Package className="h-6 w-6 text-white" />
-                  </div>
-                  <span className="text-xs text-center text-white font-medium leading-tight" style={{ textShadow: '0 1px 3px rgba(0,0,0,0.8)' }}>TPMS</span>
-                </button>
-              )}
             </div>
           </div>
           )}

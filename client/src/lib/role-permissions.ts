@@ -14,6 +14,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
     createVehicle: true,
     fleetScope: true,
     vehicleRentalManagement: true,
+    tpms: true,
   },
   sidebar: {
     enabled: true,
@@ -155,6 +156,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
     createVehicle: true,
     fleetScope: true,
     vehicleRentalManagement: true,
+    tpms: true,
   },
   sidebar: {
     enabled: true,
@@ -295,6 +297,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
     createVehicle: false,
     fleetScope: false,
     vehicleRentalManagement: false,
+    tpms: true,
   },
   sidebar: {
     enabled: true,

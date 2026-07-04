@@ -652,6 +652,7 @@ export const QUICK_ACTIONS: PageFeature[] = [
   { key: "createVehicle", label: "Create New Vehicle", description: "Access to Create Vehicle quick action" },
   { key: "fleetScope", label: "Fleet Scope", description: "Access to Fleet Scope module" },
   { key: "vehicleRentalManagement", label: "Vehicle Rental Management", description: "Access to Vehicle Rental Management module" },
+  { key: "tpms", label: "TPMS", description: "Access to the TPMS quick action" },
 ];
 
 export function getPagesByCategory(category: PageCategory): PageDefinition[] {
