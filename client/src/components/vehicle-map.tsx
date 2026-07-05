@@ -195,7 +195,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
         
         const map = L.map(mapRef.current, {
           center: [39.8, -98.5],
-          zoom: 4
+          zoom: 4,
+          // Canvas renderer: circle markers are drawn to one <canvas> instead of
+          // one DOM node per vehicle (thousands of nodes was the map's heap/lag).
+          preferCanvas: true
         });
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -233,25 +236,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
           }
 
           try {
-            // Create professional marker with dark theme styling
-            const icon = L.divIcon({
-              html: `<div style="
-                width: 14px;
-                height: 14px;
-                border-radius: 50%;
-                background-color: ${status.color};
-                border: 2px solid white;
-                box-shadow: 0 0 8px rgba(0,0,0,0.5);
-                transition: all 0.2s;
-              "></div>`,
-              className: 'vehicle-marker-professional',
-              iconSize: [18, 18],
-              iconAnchor: [9, 9],
-            });
 
             // Professional popup styling
-            const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
-              .bindPopup(`
+            const marker = L.circleMarker([vehicle.position.lat, vehicle.position.lng], { radius: 6, fillColor: status.color, color: "#000", weight: 2, fillOpacity: 1 })
+              .bindPopup(() => `
                 <div style="
                   min-width: 200px; 
                   font-family: system-ui, sans-serif;
@@ -291,10 +279,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
           map.invalidateSize();
           console.log('Map invalidated, vehicles to show:', filteredVehicles.length);
           if (filteredVehicles.length > 0) {
-            const group = new L.FeatureGroup(filteredVehicles.map(vehicle => 
-              L.marker([vehicle.position.lat, vehicle.position.lng])
-            ));
-            map.fitBounds(group.getBounds().pad(0.05));
+            const pts = filteredVehicles
+              .filter(v => v.position && v.position.lat && v.position.lng)
+              .map(v => [v.position.lat, v.position.lng] as [number, number]);
+            if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.05));
             console.log('Map bounds fitted to vehicles');
           }
         }, 200);
@@ -350,25 +338,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
       }
 
       try {
-        // Create professional marker with dark theme styling
-        const icon = L.divIcon({
-          html: `<div style="
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background-color: ${status.color};
-            border: 2px solid #000;
-            box-shadow: 0 0 6px rgba(0,0,0,0.8);
-            transition: all 0.2s;
-          "></div>`,
-          className: 'vehicle-marker-professional',
-          iconSize: [16, 16],
-          iconAnchor: [8, 8],
-        });
 
         // Professional popup styling
-        const marker = L.marker([vehicle.position.lat, vehicle.position.lng], { icon })
-          .bindPopup(`
+        const marker = L.circleMarker([vehicle.position.lat, vehicle.position.lng], { radius: 6, fillColor: status.color, color: "#000", weight: 2, fillOpacity: 1 })
+          .bindPopup(() => `
             <div style="
               min-width: 200px; 
               font-family: system-ui, sans-serif;
@@ -404,12 +377,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
 
     // Auto-fit bounds when vehicles change
     if (filteredVehicles.length > 0 && leafletMapRef.current) {
-      const group = new L.FeatureGroup(
-        filteredVehicles.map(vehicle => 
-          L.marker([vehicle.position.lat, vehicle.position.lng])
-        )
-      );
-      leafletMapRef.current.fitBounds(group.getBounds().pad(0.05));
+      const pts = filteredVehicles
+        .filter(v => v.position && v.position.lat && v.position.lng)
+        .map(v => [v.position.lat, v.position.lng] as [number, number]);
+      if (pts.length) leafletMapRef.current.fitBounds(L.latLngBounds(pts).pad(0.05));
     }
   }, [filteredVehicles, statusFilter, brandingFilter, regionFilter, open]);
 
@@ -427,12 +398,10 @@ export function VehicleMap({ open, onOpenChange }: VehicleMapProps) {
 
   const handleResetView = () => {
     if (leafletMapRef.current && filteredVehicles.length > 0) {
-      const group = new L.FeatureGroup(
-        filteredVehicles.map(vehicle => 
-          L.marker([vehicle.position.lat, vehicle.position.lng])
-        )
-      );
-      leafletMapRef.current.fitBounds(group.getBounds().pad(0.05));
+      const pts = filteredVehicles
+        .filter(v => v.position && v.position.lat && v.position.lng)
+        .map(v => [v.position.lat, v.position.lng] as [number, number]);
+      if (pts.length) leafletMapRef.current.fitBounds(L.latLngBounds(pts).pad(0.05));
     } else if (leafletMapRef.current) {
       leafletMapRef.current.setView([39.8, -98.5], 4);
     }

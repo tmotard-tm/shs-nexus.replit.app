@@ -62,6 +62,30 @@ import { handleInbound } from "./inbound";
 import { COMMS_CONTACTS_SYNC_TYPE, syncCommsContacts } from "./contacts-sync";
 
 const FEATURE_FLAG = "comms_module_enabled";
+
+// Read-only retry: one immediate re-attempt when the Neon serverless WebSocket
+// drops mid-query (closeCode 1006 surfaces as an ErrorEvent with an empty
+// message, or ECONNRESET). Mirrors pgQueryWithRetry in
+// fleet-scope-all-vehicles-mirror.ts, scoped to the inbox-critical reads so a
+// single transient blip doesn't blank the inbox.
+async function retryOnceOnTransient<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn();
+  } catch (err: any) {
+    const msg = String(err?.message || "");
+    const transient =
+      err?.name === "ErrorEvent" ||
+      err?.type === "error" ||
+      err?.code === "ECONNRESET" ||
+      msg === "" ||
+      msg.includes("Cannot set property message") ||
+      msg.includes("terminating connection due to administrator command") ||
+      msg.includes("WebSocket");
+    if (!transient) throw err;
+    console.warn("[Fleet-Comms] transient DB drop on read — retrying once...");
+    return await fn();
+  }
+}
 const EMPTY_TWIML = '<?xml version="1.0" encoding="UTF-8"?><Response></Response>';
 
 function actor(req: any): { id: string | null; name: string | null } {
@@ -200,7 +224,7 @@ export function registerCommsRoutes(app: Router): void {
         );
       }
 
-      const rows = await fsDb
+      const rows = await retryOnceOnTransient(() => fsDb
         .select()
         .from(commsThreads)
         .where(conds.length ? and(...conds) : undefined)
@@ -213,7 +237,7 @@ export function registerCommsRoutes(app: Router): void {
         // no-message threads at the bottom; the id tiebreaker keeps same-timestamp
         // rows in a stable order across refetches.
         .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
-        .limit(limit);
+        .limit(limit));
       res.json(rows);
     } catch (e: any) {
       console.error("[Fleet-Comms] threads list error:", e?.message);
@@ -248,7 +272,7 @@ export function registerCommsRoutes(app: Router): void {
   app.get("/comms/threads/:id", gate, async (req: any, res) => {
     try {
       const id = req.params.id;
-      const [thread] = await fsDb.select().from(commsThreads).where(eq(commsThreads.id, id)).limit(1);
+      const [thread] = await retryOnceOnTransient(() => fsDb.select().from(commsThreads).where(eq(commsThreads.id, id)).limit(1));
       if (!thread) return res.status(404).json({ message: "Thread not found" });
 
       // Cursor pagination: load the newest `limit` messages on open, then page
@@ -261,12 +285,12 @@ export function registerCommsRoutes(app: Router): void {
         const beforeDate = new Date(before);
         if (!isNaN(beforeDate.getTime())) msgConds.push(sql`${commsMessages.createdAt} < ${beforeDate}`);
       }
-      const pageDesc = await fsDb
+      const pageDesc = await retryOnceOnTransient(() => fsDb
         .select()
         .from(commsMessages)
         .where(and(...msgConds))
         .orderBy(desc(commsMessages.createdAt))
-        .limit(limit + 1);
+        .limit(limit + 1));
       const hasMore = pageDesc.length > limit;
       const messages = pageDesc.slice(0, limit).reverse();
 

@@ -328,7 +328,7 @@ export function selectColdStartFallback(args: {
 
 // ── Mirror metadata (row count + freshness) ───────────────────────────────────
 export async function getMirrorMeta(): Promise<{ baseCount: number; unassignedCount: number; maxSyncedAt: Date | null }> {
-  const res = await fsPool.query(
+  const res = await pgQueryWithRetry(
     `SELECT
        COUNT(*) FILTER (WHERE record_kind = 'base')        AS base_count,
        COUNT(*) FILTER (WHERE record_kind = 'unassigned')  AS unassigned_count,
@@ -345,7 +345,7 @@ export async function getMirrorMeta(): Promise<{ baseCount: number; unassignedCo
 
 // ── Read path: reconstruct the handler's inputs from the mirror ───────────────
 export async function readAllVehiclesMirror(opts: ReadMirrorOptions): Promise<AllVehiclesMirrorResult> {
-  const baseRes = await fsPool.query(
+  const baseRes = await pgQueryWithRetry(
     `SELECT base_row, holman_odometer, holman_status, tech_name, tech_no, tech_phone, vehicle_number_key
      FROM fs_all_vehicles_mirror
      WHERE record_kind = 'base'
@@ -392,7 +392,7 @@ export async function readAllVehiclesMirror(opts: ReadMirrorOptions): Promise<Al
     }
   }
 
-  const unassignedRes = await fsPool.query(
+  const unassignedRes = await pgQueryWithRetry(
     `SELECT unassigned_vehicle_number
      FROM fs_all_vehicles_mirror
      WHERE record_kind = 'unassigned'
