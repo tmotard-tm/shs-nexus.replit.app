@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, useDeferredValue } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { toCanonical, toDisplayNumber } from '@shared/vehicle-number-utils';
 import { Input } from '@/components/ui/input';
@@ -21,13 +21,11 @@ interface Vehicle {
   truckStatus?: string;
   lastKnownLocation: string;
   locationSource: string;
-  locationUpdatedAt: string | null;
   locationState: string;
   samsaraStatus?: string;
   lastSamsaraSignal?: string | null;
   secondaryLocation?: string;
   secondaryLocationSource?: string;
-  secondaryLocationUpdatedAt?: string | null;
   district: string;
   vin: string;
   makeName: string;
@@ -235,6 +233,10 @@ function VehicleSearchPopover({ value, onChange, onClear }: VehicleSearchPopover
 export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClearCategoryFilter, mapSelections = [], visibleMapCategories, onMapFiltersChange, rentalTruckNumbers = new Set() }: FleetVehicleTableProps) {
   const [search, setSearch] = useState('');
   const [vehicleNumberSearch, setVehicleNumberSearch] = useState('');
+  // Deferred copies keep typing responsive: inputs update instantly while the
+  // heavy filter/sort memo below recomputes one frame behind on large fleets.
+  const deferredSearch = useDeferredValue(search);
+  const deferredVehicleNumberSearch = useDeferredValue(vehicleNumberSearch);
   const [assignmentFilters, setAssignmentFilters] = useState<Set<string>>(new Set());
   const [generalStatusFilters, setGeneralStatusFilters] = useState<Set<string>>(new Set());
   const [subStatusFilters, setSubStatusFilters] = useState<Set<string>>(new Set());
@@ -301,6 +303,13 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
   // Sorting state
   const [sortColumn, setSortColumn] = useState<SortColumn>(null);
   const [sortDirection, setSortDirection] = useState<SortDirection>(null);
+
+  // Windowed rendering: render rows in growing slices instead of a hard 500-row
+  // cap (which silently HID rows past 500). Starts at 100 for a fast first
+  // paint; an IntersectionObserver sentinel row extends the window before the
+  // user reaches the bottom, until every filtered row is reachable.
+  const [visibleCount, setVisibleCount] = useState(100);
+  const sentinelRef = useRef<HTMLTableRowElement | null>(null);
   
   // Toggle sort for a column
   const toggleSort = (column: SortColumn) => {
@@ -527,8 +536,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
 
   const filteredVehicles = useMemo(() => {
     let result = preFilteredVehicles.filter(vehicle => {
-      const searchLower = search.toLowerCase();
-      const matchesSearch = !search || 
+      const searchLower = deferredSearch.toLowerCase();
+      const matchesSearch = !deferredSearch || 
         vehicle.vehicleNumber.toLowerCase().includes(searchLower) ||
         vehicle.vin.toLowerCase().includes(searchLower) ||
         vehicle.district.toLowerCase().includes(searchLower) ||
@@ -538,8 +547,8 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
         (vehicle.technicianName || '').toLowerCase().includes(searchLower) ||
         (vehicle.technicianNo || '').toLowerCase().includes(searchLower);
       
-      const matchesVehicleNumber = !vehicleNumberSearch || 
-        vehicle.vehicleNumber.toLowerCase().includes(vehicleNumberSearch.toLowerCase());
+      const matchesVehicleNumber = !deferredVehicleNumberSearch || 
+        vehicle.vehicleNumber.toLowerCase().includes(deferredVehicleNumberSearch.toLowerCase());
       
       const matchesAssignment = assignmentFilters.size === 0 || assignmentFilters.has(vehicle.assignmentStatus);
       const matchesGeneralStatus = generalStatusFilters.size === 0 || 
@@ -583,7 +592,30 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
     }
     
     return result;
-  }, [preFilteredVehicles, search, vehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, rentalFilter, byovFilter, rentalTruckNumbers, byovAuditMap, sortColumn, sortDirection]);
+  }, [preFilteredVehicles, deferredSearch, deferredVehicleNumberSearch, assignmentFilters, generalStatusFilters, subStatusFilters, categoryFilters, samsaraStatusFilters, rentalFilter, byovFilter, rentalTruckNumbers, byovAuditMap, sortColumn, sortDirection]);
+
+  // New filter/search/data ⇒ start the window from the top again.
+  useEffect(() => {
+    setVisibleCount(100);
+  }, [filteredVehicles]);
+
+  // Observe the sentinel from an effect (post-commit, so tableContainerRef is
+  // already populated — callback refs fire child-first and would capture a
+  // null container as the observer root). Re-runs on every window/filter
+  // change to observe the current sentinel; if it is still within 600px of
+  // the container's bottom it fires again, until every filtered row renders.
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) setVisibleCount((c) => c + 200);
+      },
+      { root: tableContainerRef.current, rootMargin: "600px" },
+    );
+    obs.observe(node);
+    return () => obs.disconnect();
+  }, [visibleCount, filteredVehicles]);
 
   const getAssignmentBadgeColor = (status: string) => {
     if (status === 'Assigned') return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400';
@@ -972,7 +1004,7 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredVehicles.slice(0, 500).map((vehicle, index) => {
+                filteredVehicles.slice(0, visibleCount).map((vehicle, index) => {
                   const rowKey = `${vehicle.vehicleNumber}-${index}`;
                   
                   return (
@@ -1173,11 +1205,18 @@ export function FleetVehicleTable({ vehicles, isLoading, categoryFilter, onClear
                   );
                 })
               )}
+              {filteredVehicles.length > visibleCount && (
+                <TableRow ref={sentinelRef}>
+                  <TableCell colSpan={23} className="text-center py-3 text-xs text-muted-foreground" data-testid="row-load-more">
+                    Loading more… ({Math.min(visibleCount, filteredVehicles.length).toLocaleString()} of {filteredVehicles.length.toLocaleString()} shown)
+                  </TableCell>
+                </TableRow>
+              )}
             </TableBody>
           </Table>
-          {filteredVehicles.length > 500 && (
+          {filteredVehicles.length > 100 && visibleCount >= filteredVehicles.length && (
             <div className="p-3 text-center text-sm text-muted-foreground border-t">
-              Showing first 500 of {filteredVehicles.length.toLocaleString()} vehicles. Use filters to narrow down results.
+              All {filteredVehicles.length.toLocaleString()} vehicles loaded.
             </div>
           )}
         </div>

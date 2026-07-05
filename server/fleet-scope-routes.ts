@@ -3,6 +3,7 @@ import { fleetScopeStorage } from "./fleet-scope-storage";
 import { storage } from "./storage";
 import { fsDb } from "./fleet-scope-db";
 import { approvedCostRecords, vehicleMaintenanceCosts, pmfRows, spareVehicleDetails, registrationTracking, rentalWeeklyManual, pickupWeeklySnapshots, regMessages, regScheduledMessages, decommMessages, decommissioningVehicles, amsActiveWeeklySnapshots, samsaraPenetrationWeeklySnapshots } from "@shared/fleet-scope-schema";
+import compression from "compression";
 import {
   getAmsTruckStatusMap,
   getAmsStatusForMissingVins,
@@ -2418,6 +2419,12 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
 
 export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next: any) => Promise<any>): Router {
   const app = Router();
+
+  // Gzip every compressible /api/fs response. The All Vehicles payload alone is
+  // ~1.66 MB of JSON (~85% compressible) and was shipped raw — the slow
+  // "download" on page load was transfer time, not assembly. Scoped to this
+  // router on purpose: nothing outside /api/fs changes behavior.
+  app.use(compression());
 
   // Schedule Shop List daily sync at 6:00 AM server time (inside registration to ensure FS DB is available)
   cron.schedule("0 6 * * *", async () => {
@@ -9291,13 +9298,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         truckStatus: string;
         lastKnownLocation: string;
         locationSource: string;
-        locationUpdatedAt: string | null;
         locationState: string;
         samsaraStatus: string;
         lastSamsaraSignal: string | null;
         secondaryLocation: string;
         secondaryLocationSource: string;
-        secondaryLocationUpdatedAt: string | null;
         district: string;
         vin: string;
         makeName: string;
@@ -9763,13 +9768,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           truckStatus: r.TRUCK_STATUS?.toString() || '',
           lastKnownLocation,
           locationSource,
-          locationUpdatedAt,
           locationState,
           samsaraStatus,
           lastSamsaraSignal,
           secondaryLocation,
           secondaryLocationSource,
-          secondaryLocationUpdatedAt,
           district: r.TRUCK_DISTRICT || '',
           vin: r.VIN || '',
           makeName: r.MAKE_NAME || '',
@@ -9794,7 +9797,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
       
       const responseData = { 
-        data, 
         vehicles,
         totalCount: data.length,
         assignedCount,

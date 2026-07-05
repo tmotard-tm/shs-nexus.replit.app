@@ -54,7 +54,6 @@ interface VehicleTableRow {
   truckStatus?: string;
   lastKnownLocation: string;
   locationSource: string;
-  locationUpdatedAt: string | null;
   locationState: string;
   district: string;
   vin: string;
@@ -260,14 +259,20 @@ export default function AllVehicles() {
 
   const { data: fleetSnapshots } = useQuery<FleetSnapshotsResponse>({
     queryKey: ["/api/fs/fleet/weekly-snapshots"],
+    // Weekly Trends is collapsed by default — don't fetch until opened.
+    enabled: weeklyTrendsOpen,
   });
 
   const { data: pmfStatusSnapshots } = useQuery<PmfStatusSnapshotsResponse>({
     queryKey: ["/api/fs/pmf-status/weekly-snapshots"],
+    // Weekly Trends is collapsed by default — don't fetch until opened.
+    enabled: weeklyTrendsOpen,
   });
 
   const { data: repairSnapshots } = useQuery<RepairSnapshotsResponse>({
     queryKey: ["/api/fs/repair/weekly-snapshots"],
+    // Weekly Trends is collapsed by default — don't fetch until opened.
+    enabled: weeklyTrendsOpen,
   });
 
   const { data: weeklyRentalStats } = useQuery<Array<{weekYear: number; weekNumber: number; newRentals: number; rentalsReturned: number; totalImports: number}>>({
@@ -1427,7 +1432,7 @@ export default function AllVehicles() {
                 <CollapsibleContent>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
                 {/* Fleet Weekly Trends */}
-                {fleetSnapshots?.snapshots && fleetSnapshots.snapshots.length > 0 && (
+                {fleetSnapshots?.snapshots && fleetSnapshots?.snapshots.length > 0 && (
                   <Card data-testid="card-fleet-weekly">
                     <CardHeader className="pb-2 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1447,7 +1452,7 @@ export default function AllVehicles() {
                             </tr>
                           </thead>
                           <tbody>
-                            {fleetSnapshots.snapshots.map((snapshot) => (
+                            {fleetSnapshots?.snapshots.map((snapshot) => (
                               <tr key={snapshot.id} className="border-b border-muted/50 hover:bg-muted/30">
                                 <td className="py-1.5 px-2 font-medium">
                                   Wk {snapshot.weekNumber}
@@ -1471,7 +1476,7 @@ export default function AllVehicles() {
                 )}
 
                 {/* PMF Status Weekly History */}
-                {pmfStatusSnapshots?.snapshots && pmfStatusSnapshots.snapshots.length > 0 && (
+                {pmfStatusSnapshots?.snapshots && pmfStatusSnapshots?.snapshots.length > 0 && (
                   <Card data-testid="card-pmf-weekly">
                     <CardHeader className="pb-2 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1494,7 +1499,7 @@ export default function AllVehicles() {
                             </tr>
                           </thead>
                           <tbody>
-                            {pmfStatusSnapshots.snapshots.map((snapshot) => (
+                            {pmfStatusSnapshots?.snapshots.map((snapshot) => (
                               <tr key={snapshot.id} className="border-b border-muted/50 hover:bg-muted/30">
                                 <td className="py-1.5 px-1 font-medium">
                                   Wk {snapshot.weekNumber}
@@ -1527,7 +1532,7 @@ export default function AllVehicles() {
                 )}
 
                 {/* Repair Weekly History */}
-                {repairSnapshots?.snapshots && repairSnapshots.snapshots.length > 0 && (
+                {repairSnapshots?.snapshots && repairSnapshots?.snapshots.length > 0 && (
                   <Card data-testid="card-repair-weekly">
                     <CardHeader className="pb-2 pt-3 px-4">
                       <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -1547,7 +1552,7 @@ export default function AllVehicles() {
                             </tr>
                           </thead>
                           <tbody>
-                            {repairSnapshots.snapshots.map((snapshot) => (
+                            {repairSnapshots?.snapshots.map((snapshot) => (
                               <tr key={snapshot.id} className="border-b border-muted/50 hover:bg-muted/30">
                                 <td className="py-1.5 px-2 font-medium">
                                   Wk {snapshot.weekNumber}

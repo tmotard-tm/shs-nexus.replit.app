@@ -131,7 +131,7 @@ export function registerCommsRoutes(app: Router): void {
       if (!(await userHasFleetCommsPermission(req.user))) {
         return res.status(404).json({ message: "Not found" });
       }
-      const enabled = await getBooleanSetting(FEATURE_FLAG, false);
+      const enabled = await retryOnceOnTransient(() => getBooleanSetting(FEATURE_FLAG, false));
       if (enabled || isPrivileged(req)) return next();
       return res.status(404).json({ message: "Not found" });
     } catch {
@@ -141,7 +141,7 @@ export function registerCommsRoutes(app: Router): void {
 
   // ── Config / categories ─────────────────────────────────────────────────
   app.get("/comms/config", gate, async (req: any, res) => {
-    const enabled = await getBooleanSetting(FEATURE_FLAG, false);
+    const enabled = await retryOnceOnTransient(() => getBooleanSetting(FEATURE_FLAG, false));
     res.json({
       enabled,
       canManage: isPrivileged(req),
@@ -251,12 +251,12 @@ export function registerCommsRoutes(app: Router): void {
   // swallowed by the :id param route.
   app.get("/comms/threads/districts", gate, async (_req: any, res) => {
     try {
-      const result: any = await fsDb.execute(sql`
+      const result: any = await retryOnceOnTransient(() => fsDb.execute(sql`
         SELECT DISTINCT ltrim(regexp_replace(district,'[^0-9]','','g'),'0') AS d
         FROM fs_comms_threads
         WHERE district IS NOT NULL AND district <> ''
           AND ltrim(regexp_replace(district,'[^0-9]','','g'),'0') <> ''
-      `);
+      `));
       const rows: any[] = result?.rows ?? result ?? [];
       const districts = rows
         .map((r) => r.d as string)
@@ -298,7 +298,7 @@ export function registerCommsRoutes(app: Router): void {
       // only on the first page (no cursor), since they belong at the bottom.
       const pending = before
         ? []
-        : await fsDb
+        : await retryOnceOnTransient(() => fsDb
             .select()
             .from(commsSendQueue)
             .where(
@@ -308,9 +308,9 @@ export function registerCommsRoutes(app: Router): void {
                   : eq(commsSendQueue.phoneDigits, thread.phoneDigits ?? ""),
                 inArray(commsSendQueue.status, ["pending", "claimed"]),
               ),
-            );
+            ));
 
-      const contact = thread.ldap ? await getContactByLdap(thread.ldap) : undefined;
+      const contact = thread.ldap ? await retryOnceOnTransient(() => getContactByLdap(thread.ldap!)) : undefined;
       res.json({ thread, messages, pending, contact: contact ?? null, hasMore });
     } catch (e: any) {
       console.error("[Fleet-Comms] thread detail error:", e?.message);
@@ -831,33 +831,33 @@ export function registerCommsRoutes(app: Router): void {
   // ── Health (sync + queue) ───────────────────────────────────────────────
   app.get("/comms/health", gate, async (_req: any, res) => {
     try {
-      const [lastSync] = await db
+      const [lastSync] = await retryOnceOnTransient(() => db
         .select()
         .from(syncLogs)
         .where(and(eq(syncLogs.syncType, COMMS_CONTACTS_SYNC_TYPE), eq(syncLogs.status, "completed")))
         .orderBy(desc(syncLogs.completedAt))
-        .limit(1);
-      const [lastRun] = await db
+        .limit(1));
+      const [lastRun] = await retryOnceOnTransient(() => db
         .select()
         .from(syncLogs)
         .where(eq(syncLogs.syncType, COMMS_CONTACTS_SYNC_TYPE))
         .orderBy(desc(sql`COALESCE(${syncLogs.completedAt}, ${syncLogs.startedAt})`))
-        .limit(1);
+        .limit(1));
       const staleHours = Number(process.env.COMMS_CONTACTS_STALE_HOURS ?? 30);
       const ageHours = lastSync?.completedAt
         ? (Date.now() - new Date(lastSync.completedAt).getTime()) / 3600000
         : null;
-      const queueResult: any = await fsDb.execute(sql`
+      const queueResult: any = await retryOnceOnTransient(() => fsDb.execute(sql`
         SELECT
           COUNT(*) FILTER (WHERE status = 'pending')  AS pending,
           COUNT(*) FILTER (WHERE status = 'failed')   AS failed,
           COUNT(*) FILTER (WHERE status = 'claimed')  AS claimed
         FROM fs_comms_send_queue
-      `);
+      `));
       const queueStats = (queueResult?.rows ?? queueResult ?? [])[0] ?? null;
-      const contactResult: any = await fsDb.execute(sql`
+      const contactResult: any = await retryOnceOnTransient(() => fsDb.execute(sql`
         SELECT COUNT(*) FILTER (WHERE active) AS active, COUNT(*) AS total FROM fs_comms_contacts
-      `);
+      `));
       const contactStats = (contactResult?.rows ?? contactResult ?? [])[0] ?? null;
       res.json({
         lastSuccessAt: lastSync?.completedAt ?? null,
