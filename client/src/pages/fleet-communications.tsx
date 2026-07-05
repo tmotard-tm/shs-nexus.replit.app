@@ -260,7 +260,10 @@ function CommsAvatar({ name, className = "", size = "md" }: { name: string; clas
 
 export default function FleetCommunications() {
   const { toast } = useToast();
-  const [category, setCategory] = useState<string>("all");
+  const [category, setCategory] = useState<string>(() => {
+    if (typeof window === "undefined") return "all";
+    return new URLSearchParams(window.location.search).get("category") || "all";
+  });
   // Deep link support: /fleet-communications?q=<ldap|truck> pre-filters the inbox
   // (used by the Registration/Decommissioning handoff "Thread" links).
   const [search, setSearch] = useState(() => {

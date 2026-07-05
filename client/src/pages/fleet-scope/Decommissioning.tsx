@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CommsHandoff } from "@/components/fleet-scope/CommsHandoff";
+import { CommsCategoryFeed } from "@/components/fleet-scope/CommsCategoryFeed";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1026,16 +1027,19 @@ export default function Decommissioning() {
 
       {activeView === "conversations" ? (
         commsEnabled ? (
-          <CommsHandoff
-            category="decommissioning"
-            categoryLabel="Decommissioning"
-            records={vehicles.map((v) => ({
-              truckNumber: v.truckNumber,
-              ldap: v.enterpriseId,
-              name: v.fullName,
-              phone: v.mobilePhone,
-            }))}
-          />
+          <div className="space-y-4">
+            <CommsCategoryFeed category="decommissioning" categoryLabel="Decommissioning" />
+            <CommsHandoff
+              category="decommissioning"
+              categoryLabel="Decommissioning"
+              records={vehicles.map((v) => ({
+                truckNumber: v.truckNumber,
+                ldap: v.enterpriseId,
+                name: v.fullName,
+                phone: v.mobilePhone,
+              }))}
+            />
+          </div>
         ) : (
         <DecommConversations
           vehicleData={vehicles.map(v => ({

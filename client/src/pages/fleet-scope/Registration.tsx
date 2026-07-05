@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import { useCostCenters } from "@/hooks/use-cost-centers";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { CommsHandoff } from "@/components/fleet-scope/CommsHandoff";
+import { CommsCategoryFeed } from "@/components/fleet-scope/CommsCategoryFeed";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1243,17 +1244,20 @@ export default function Registration() {
       {/* Conversations view — retired behind the Communications feature flag */}
       {activeView === "conversations" &&
         (commsEnabled ? (
-          <CommsHandoff
-            category="registrations"
-            categoryLabel="Registration"
-            records={(data?.trucks || []).map((t: any) => ({
-              truckNumber: t.truckNumber,
-              ldap: t.ldap,
-              name: t.techName,
-              phone: t.techPhone,
-              district: t.district,
-            }))}
-          />
+          <div className="space-y-4">
+            <CommsCategoryFeed category="registrations" categoryLabel="Registration" initialSearch={convTruck ?? undefined} />
+            <CommsHandoff
+              category="registrations"
+              categoryLabel="Registration"
+              records={(data?.trucks || []).map((t: any) => ({
+                truckNumber: t.truckNumber,
+                ldap: t.ldap,
+                name: t.techName,
+                phone: t.techPhone,
+                district: t.district,
+              }))}
+            />
+          </div>
         ) : (
           <RegConversations registrationData={data?.trucks || []} initialTruckNumber={convTruck ?? undefined} />
         ))}
