@@ -3544,7 +3544,7 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
     try {
-      const { rows: scraped, scrapedAt, error: scrapeErr } = await scrapeAwaitingAuth();
+      const { rows: scraped, scrapedAt, error: scrapeErr } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
         return res.status(502).json({ ok: false, error: scrapeErr });
       }

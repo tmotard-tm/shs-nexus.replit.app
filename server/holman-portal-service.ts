@@ -271,7 +271,7 @@ async function getDashboardTabId(): Promise<{ tabId: string; ssoUrl: string | nu
   return { tabId, ssoUrl };
 }
 
-async function acquireListingContext(): Promise<ListingContext> {
+async function acquireListingContext(force = false): Promise<ListingContext> {
   // Env override wins — lets a headless-harvested fresh ID/TabId be injected without
   // a code change, and guarantees the listing GET can be built even if the HTTP-only
   // _Zones scrape comes up empty in production.
@@ -284,19 +284,24 @@ async function acquireListingContext(): Promise<ListingContext> {
   // Preferred: the values the headless login already harvested from the JS-gated
   // /Analytics dashboard (login + _Zones happen together in the browser). This avoids
   // re-doing the cross-app SSO over raw HTTP, which is brittle.
-  if (_harvestedId && _harvestedTabId) {
+  // Non-forced calls reuse the login-harvested token (cheap). A Refresh passes force=true
+  // so we ALWAYS re-render the dashboard below and pick up POs queued since login.
+  if (!force && _harvestedId && _harvestedTabId) {
     return { id: _harvestedId, tabId: _harvestedTabId, source: "headless" };
   }
 
-  // 1. TabId (and SSO bounce) from GetDashboardTabs.
-  let tabId = envTab ?? "";
+  // 1. TabId: prefer the cached/harvested tab (stable across renders); only hit
+  //    GetDashboardTabs (the brittle SSO bounce) when we don't already have one.
+  let tabId = _harvestedTabId ?? envTab ?? "";
   let ssoUrl: string | null = null;
-  try {
-    const tabs = await getDashboardTabId();
-    if (tabs.tabId) tabId = tabs.tabId;
-    ssoUrl = tabs.ssoUrl;
-  } catch (e: any) {
-    console.warn("[HolmanPortal] GetDashboardTabs failed:", e?.message);
+  if (!tabId) {
+    try {
+      const tabs = await getDashboardTabId();
+      if (tabs.tabId) tabId = tabs.tabId;
+      ssoUrl = tabs.ssoUrl;
+    } catch (e: any) {
+      console.warn("[HolmanPortal] GetDashboardTabs failed:", e?.message);
+    }
   }
   if (!tabId) throw new Error("[HolmanPortal] Could not determine TabId (set HOLMAN_KPI_TABID)");
 
@@ -333,6 +338,13 @@ async function acquireListingContext(): Promise<ListingContext> {
     } catch (e: any) {
       console.warn(`[HolmanPortal] dashboard fetch failed (${url}):`, e?.message);
     }
+  }
+
+  // Fallback: if the re-render produced no token, use the login-harvested one rather
+  // than failing the refresh outright (stale, but better than an empty queue).
+  if (_harvestedId) {
+    console.warn("[HolmanPortal] dashboard re-render yielded no token; using harvested id fallback.");
+    return { id: _harvestedId, tabId, source: "headless-fallback" };
   }
 
   throw new Error(
@@ -561,13 +573,13 @@ async function ensureSession(): Promise<void> {
 
 // ─── Scrape awaiting-auth queue ───────────────────────────────────────────────
 
-export async function scrapeAwaitingAuth(): Promise<ScrapeResult> {
+export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
   const scrapedAt = new Date();
   try {
     await ensureSession();
 
     // Acquire the session-issued ID/TabId, then build the DetailsListing URL.
-    const ctx = await acquireListingContext();
+    const ctx = await acquireListingContext(force);
     const listingUrl = buildListingUrl(ctx);
     console.log(`[HolmanPortal] listing ctx id=${ctx.id} tabId=${ctx.tabId} (src=${ctx.source})`);
 
