@@ -20336,6 +20336,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           OR (
             a.ams_assigned_ldap IS NOT NULL
             AND TRIM(a.ams_assigned_ldap) != ''
+            AND LOWER(TRIM(a.ams_assigned_ldap)) != 'unknown'
             AND COALESCE(TRIM(t.tpms_id), '') != ''
             AND LOWER(TRIM(a.ams_assigned_ldap)) != LOWER(TRIM(t.tpms_id))
           )
@@ -20343,6 +20344,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           OR (
             a.ams_assigned_ldap IS NOT NULL
             AND TRIM(a.ams_assigned_ldap) != ''
+            AND LOWER(TRIM(a.ams_assigned_ldap)) != 'unknown'
             AND COALESCE(TRIM(t.tpms_id), '') = ''
           )
           -- (Removed 2026-06-17) AMS-blank-but-others-assigned clause. AMS tracks
@@ -20354,6 +20356,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           OR (
             a.ams_assigned_ldap IS NOT NULL
             AND TRIM(a.ams_assigned_ldap) != ''
+            AND LOWER(TRIM(a.ams_assigned_ldap)) != 'unknown'
             AND COALESCE(TRIM(h.holman_tech_assigned), '') != ''
             AND COALESCE(TRIM(t.tpms_id), '') = ''
             AND LOWER(TRIM(a.ams_assigned_ldap)) != LOWER(TRIM(h.holman_tech_assigned))
