@@ -11736,59 +11736,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       console.warn('[Tech Data Scheduler] Skipping tpms_tech_profiles refresh — TPMS snapshot did not refresh successfully tonight.');
     } else {
       try {
-        const { db: dbInstance } = await import("./db");
-        const { tpmsCachedAssignments: cacheTable, tpmsTechProfiles: profilesTable } = await import("@shared/schema");
-        const { getTpmsApiService } = await import("./tpms-api-service");
-        const { eq: eqOp, isNotNull: isNotNullOp } = await import("drizzle-orm");
-
-        const tpmsApi = getTpmsApiService();
-        const cacheRows = await dbInstance.select({
-          enterpriseId: cacheTable.enterpriseId,
-        }).from(cacheTable).where(isNotNullOp(cacheTable.enterpriseId));
-
-        const enterpriseIds = [...new Set(
-          cacheRows.map((r: any) => (r.enterpriseId || "").trim().toUpperCase()).filter(Boolean)
-        )];
-
-        let profilesUpdated = 0;
-        let profilesErrored = 0;
-        const syncTime = new Date();
-
-        for (const eid of enterpriseIds) {
-          try {
-            const techInfo = await tpmsApi.getTechById(eid).catch(() => null);
-            if (!techInfo) { profilesErrored++; continue; }
-            const data = {
-              techId: techInfo.techId?.trim() || null,
-              enterpriseId: eid,
-              firstName: techInfo.firstName || null,
-              lastName: techInfo.lastName || null,
-              districtNo: techInfo.districtNo || null,
-              pdcNo: (techInfo as any).pdcNo || null,
-              techManagerLdapId: (techInfo.techManagerLdapId || (techInfo as any).managerEntId || "").trim() || null,
-              techManagerName: (techInfo as any).techManagerName || (techInfo as any).managerName || null,
-              truckNo: techInfo.truckNo?.trim() || null,
-              mobilePhone: (techInfo as any).contactNo || (techInfo as any).mobilePhone || null,
-              email: (techInfo as any).email || null,
-              shippingAddresses: (techInfo as any).addresses || [],
-              shippingSchedule: (techInfo as any).shippingSchedule || {},
-              techReplenishment: (techInfo as any).techReplenishment || {},
-              rawResponse: JSON.stringify(techInfo),
-              lastTpmsUpdatedAt: syncTime,
-              syncedAt: syncTime,
-            };
-            await dbInstance.insert(profilesTable).values(data).onConflictDoUpdate({
-              target: profilesTable.enterpriseId,
-              set: { ...data, updatedAt: new Date() },
-            });
-            profilesUpdated++;
-          } catch {
-            profilesErrored++;
-          }
-          // Rate-limit: 200ms between TPMS API calls
-          await new Promise(r => setTimeout(r, 200));
-        }
-        console.log(`[Tech Data Scheduler] tpms_tech_profiles nightly refresh: updated=${profilesUpdated}, errored=${profilesErrored}, total=${enterpriseIds.length}`);
+        // [TRUCK-DRIVEN REFRESH] Replaces the old tech-keyed getTechById loop that
+        // BLANKED trucks (seed-gap + truckNo null). This reads TPMS BY TRUCK so it
+        // fills the mirror from truth and can never blank a truck it is confirming.
+        const { refreshTruckDrivenMirror } = await import("./fleet-scope-truck-driven-refresh");
+        await refreshTruckDrivenMirror("nightly-scheduler");
       } catch (profileErr: any) {
         console.error('[Tech Data Scheduler] tpms_tech_profiles refresh failed (continuing):', profileErr?.message || profileErr);
       }

@@ -133,19 +133,17 @@ export async function loadReconContext(opts: LoadContextOptions = {}): Promise<R
   let holman: HolmanPull | null = null;
   if (gatesPassed || !opts.shortCircuitOnGateFail) {
     phase('pulling WMS + AMS + Holman (live)…');
+    // [WMS-ISOLATION] A failed downstream pull degrades to null (run continues) instead
+    // of rejecting Promise.all and killing the whole reconciliation. wms/ams/holman are
+    // typed |null and every consumer already handles a missing pull.
+    const settle = async (p: Promise<any>, label: string): Promise<any> => {
+      try { const r = await p; phase(label + ' done: ' + (r && r.rawCount != null ? r.rawCount + ' rows' : 'ok')); return r; }
+      catch (err: any) { phase(label + ' FAILED, degraded, run continues without ' + label + ': ' + (err && err.message ? err.message : String(err))); return null; }
+    };
     [wms, ams, holman] = await Promise.all([
-      pullWms().then((r) => {
-        phase(`WMS done: ${r.rawCount} rows`);
-        return r;
-      }),
-      pullAms().then((r) => {
-        phase(`AMS done: ${r.rawCount} rows / ${r.pages} pages`);
-        return r;
-      }),
-      pullHolman().then((r) => {
-        phase(`Holman done: ${r.rawCount} rows / ${r.pages} pages`);
-        return r;
-      }),
+      settle(pullWms(), 'WMS'),
+      settle(pullAms(), 'AMS'),
+      settle(pullHolman(), 'Holman'),
     ]);
   } else {
     phase('G0/G1 failed — short-circuiting before downstream pulls');
@@ -256,9 +254,9 @@ export async function* iterateDecisions(
   for (const [canon, aims] of Array.from(snapshot.byCanonicalTruck.entries())) {
     if (opts.onlyTrucks && !opts.onlyTrucks.has(canon)) continue;
 
-    const w = wms.byTruck.get(canon) ?? null;
-    const a = ams.byTruck.get(canon) ?? null;
-    const h = holman.byTruck.get(canon) ?? null;
+    const w = wms ? (wms.byTruck.get(canon) ?? null) : null;
+    const a = ams ? (ams.byTruck.get(canon) ?? null) : null;
+    const h = holman ? (holman.byTruck.get(canon) ?? null) : null;
 
     const cc = aims.ownerStatus === 'owner' ? await expectedCostCenter(aims.district) : null;
 
