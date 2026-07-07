@@ -300,7 +300,17 @@ function buildFinalWrite(
   if (write.lastCallDate instanceof Date && truck.lastCallDate) {
     const existing = new Date(truck.lastCallDate as any).getTime();
     if (Number.isFinite(existing) && (write.lastCallDate as Date).getTime() <= existing) {
+      // Stale call: an older outcome must never overwrite newer call state.
+      // Drop the whole call-derived tuple, not just the date — the feed is
+      // newest-first, so within one poll batch the newer row is processed
+      // FIRST and the older row would otherwise land last and win
+      // summary/status/eta.
       delete write.lastCallDate;
+      delete write.lastCallStatus;
+      delete write.lastCallSummary;
+      delete write.lastCallConversationId;
+      delete write.eta;
+      delete write.expectedReturnDate;
     }
   }
 
