@@ -387,6 +387,24 @@ async function runStartupBootstrap() {
     console.error("⚠️ Fleet Communications startup init failed:", error?.message || error);
   }
 
+  // LUCA → FleetScope write-back (Phase 3 of the LUCA plan) — polls LIVHR's
+  // escalation outbox and lands LUCA's shop-call outcomes on fs_trucks so
+  // humans follow up on the same record LUCA acted on. Gated by
+  // LUCA_WRITEBACK_APPLY (default OFF = log-only). The durable cadence is a
+  // Scheduled Deployment (server/run-luca-writeback.ts); this in-process
+  // poller is a best-effort warm path.
+  try {
+    const { startInProcessLucaWriteback } = await import("./luca-writeback/worker");
+    const armed = startInProcessLucaWriteback();
+    log(
+      armed
+        ? "✅ LUCA write-back: in-process poller armed (secondary; Scheduled Deployment is primary)"
+        : "ℹ️ LUCA write-back: not configured — in-process poller idle",
+    );
+  } catch (error: any) {
+    console.error("⚠️ LUCA write-back startup init failed:", error?.message || error);
+  }
+
   // Start the BYOV assignment drift scheduler (nightly at 2am EST by default)
   try {
     const { startByovDriftScheduler } = await import("./byov-verification-service");

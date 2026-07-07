@@ -724,6 +724,27 @@ CREATE TABLE IF NOT EXISTS "fs_all_vehicles_mirror" (
 CREATE INDEX IF NOT EXISTS "idx_fs_all_vehicles_mirror_kind_seq"
   ON "fs_all_vehicles_mirror" ("record_kind", "seq");
 
+-- LUCA -> FleetScope write-back dedup/audit log (Phase 3 of the LUCA plan).
+-- One row per LIVHR outbox task / call outcome consumed by
+-- server/luca-writeback/worker.ts; UNIQUE(source, external_id) is the
+-- idempotency key that makes re-polls and overlapping schedulers safe.
+-- Keep in lockstep with ENSURE_WRITEBACK_TABLE_SQL in that module.
+CREATE TABLE IF NOT EXISTS "fs_luca_writeback_log" (
+  "id" serial PRIMARY KEY,
+  "source" text NOT NULL,
+  "external_id" text NOT NULL,
+  "truck_number" text,
+  "truck_id" varchar,
+  "outcome" text NOT NULL,
+  "applied_fields" jsonb,
+  "raw_payload" jsonb,
+  "error_message" text,
+  "created_at" timestamptz NOT NULL DEFAULT now(),
+  "updated_at" timestamptz NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_luca_writeback_source_external"
+  ON "fs_luca_writeback_log" ("source", "external_id");
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_url') THEN
     ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_url" text;
