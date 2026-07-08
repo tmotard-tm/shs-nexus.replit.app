@@ -1098,7 +1098,14 @@ export function planTpmsCacheWrites(args: WriteThroughCacheArgs): TpmsCacheWrite
     techProfileTruckSets: [],
   };
 
-  if (args.tpms.status !== "success") return empty;
+  // [ASSIGN-UPSERT] Proceed also when TPMS was SKIPPED because the tech is ALREADY on the
+  // truck — the assignment is true in TPMS, so the mirror must reflect it. Without this, a
+  // re-confirm (or a first assign of a tech already on the truck) wrote nothing to the mirror.
+  const tpmsSkipConfirmed =
+    args.tpms.status === "skipped" &&
+    args.action === "assign" &&
+    /already assigned/i.test(args.tpms.message || "");
+  if (args.tpms.status !== "success" && !tpmsSkipConfirmed) return empty;
 
   // For unassign, prefer the LDAP that TPMS actually acted on (resolved via
   // truck-number cache) over the request author's ldapId — they can differ
@@ -1279,9 +1286,34 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
           .where(eq(tpmsLastKnownTruckTech.truckNo, t));
       }
       for (const t of plan.techProfileTruckSets) {
-        await tx.update(tpmsTechProfiles)
-          .set({ truckNo: t.truckNo, updatedAt: now })
-          .where(eq(tpmsTechProfiles.enterpriseId, t.enterpriseId));
+        if (t.truckNo) {
+          // [ASSIGN-UPSERT] Create the row if this tech has none yet (new hire / never-synced)
+          // instead of a silent no-op UPDATE. tech_id is NOT NULL — source it from the live tech
+          // info this assign already fetched; the truck-driven refresh corrects a placeholder on
+          // its next pass. On an existing row we only move the truck (preserve tech_id/name).
+          const ti: any = (args as any).tpmsTechInfo || {};
+          const techIdVal =
+            (ti.techId ? String(ti.techId).trim() : "") ||
+            ((params as any).techId ? String((params as any).techId).trim() : "") ||
+            "0000000";
+          await tx.insert(tpmsTechProfiles).values({
+            techId: techIdVal,
+            enterpriseId: t.enterpriseId,
+            firstName: (ti.firstName ?? (params.firstName as string) ?? null),
+            lastName: (ti.lastName ?? (params.lastName as string) ?? null),
+            districtNo: (ti.districtNo ?? (params.districtNo as string) ?? null),
+            truckNo: t.truckNo,
+            syncedAt: now,
+            updatedAt: now,
+          }).onConflictDoUpdate({
+            target: tpmsTechProfiles.enterpriseId,
+            set: { truckNo: t.truckNo, updatedAt: now },
+          });
+        } else {
+          await tx.update(tpmsTechProfiles)
+            .set({ truckNo: null, updatedAt: now })
+            .where(eq(tpmsTechProfiles.enterpriseId, t.enterpriseId));
+        }
       }
 
       // ── Holman cache (centralized via cachePayload) ─────────────────────

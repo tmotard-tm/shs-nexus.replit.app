@@ -474,8 +474,15 @@ export default function FleetManagement() {
       const res = await fetch('/api/holman/fleet-vehicles?forceRefresh=true&pageSize=500', { credentials: 'include' });
       if (res.ok) queryClient.setQueryData(['/api/holman/fleet-vehicles'], await res.json());
       else await queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      // [MISMATCH-FORCE] Also force-recompute the alignment mismatch count/list off
+      // the server's 15-min cache so this button reflects reality, not a stale snapshot.
+      try {
+        await fetch('/api/fleet-ops/mismatches?countOnly=true&forceRefresh=true', { credentials: 'include' });
+      } catch { /* non-fatal — invalidate below still refetches */ }
+      await queryClient.invalidateQueries({ queryKey: ['/api/fleet-ops/mismatches'] });
     } catch {
       await queryClient.invalidateQueries({ queryKey: ['/api/holman/fleet-vehicles'] });
+      await queryClient.invalidateQueries({ queryKey: ['/api/fleet-ops/mismatches'] });
     } finally {
       setForcingRefresh(false);
     }
