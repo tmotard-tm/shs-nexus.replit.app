@@ -32,6 +32,20 @@ export function toSnowflakeRef(n: string | number | null | undefined): string {
   return String(n).trim();
 }
 
+// All plausible stored representations of a truck number (raw, canonical
+// no-leading-zeros, 5-digit display, 6-digit TPMS/Holman). Used so lookups
+// match regardless of which format a writer used (61456 vs 061456).
+// Non-numeric values (e.g. "BYOV", "N/A") get no padded variants — padStart
+// would corrupt them ("BYOV" -> "0BYOV").
+export function vehicleNumberVariants(n: string | number | null | undefined): string[] {
+  if (n == null) return [];
+  const raw = String(n).trim();
+  if (!raw) return [];
+  if (!/^\d+$/.test(raw)) return [raw];
+  const variants = new Set<string>([raw, toCanonical(raw), toDisplayNumber(raw), toTpmsRef(raw)]);
+  return Array.from(variants).filter(Boolean);
+}
+
 export function formatForSystem(n: string | number | null | undefined, system: SystemName): string {
   switch (system) {
     case 'holman': return toHolmanRef(n);

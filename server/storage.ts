@@ -125,7 +125,8 @@ import { db } from "./db";
 import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
-import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical } from "./vehicle-number-utils";
+import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, vehicleNumberVariants } from "./vehicle-number-utils";
+import { expandVehicleNumberVariants, pickLatestPerVehicle, resolveNexusVehicleNumber } from "./vehicle-nexus-normalization";
 
 function deepMergeAutomationDetail(existing: AutomationDetail, patch: Partial<AutomationDetail>): AutomationDetail {
   const result: AutomationDetail = { ...existing };
@@ -6470,23 +6471,38 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Vehicle Nexus Data Module
+  // Lookups match across raw / canonical / 5-digit display / 6-digit TPMS
+  // formats (61456 and 061456 resolve to the same row); most recently
+  // updated row wins when legacy duplicates exist.
   async getVehicleNexusData(vehicleNumber: string): Promise<VehicleNexusData | undefined> {
-    const result = await db.select().from(vehicleNexusData)
-      .where(eq(vehicleNexusData.vehicleNumber, vehicleNumber))
-      .limit(1);
-    return result[0];
+    const variants = vehicleNumberVariants(vehicleNumber);
+    if (variants.length === 0) return undefined;
+    const rows = await db.select().from(vehicleNexusData)
+      .where(inArray(vehicleNexusData.vehicleNumber, variants))
+      .orderBy(desc(vehicleNexusData.updatedAt));
+    return rows[0];
   }
 
   async getVehicleNexusDataBatch(vehicleNumbers: string[]): Promise<VehicleNexusData[]> {
     if (vehicleNumbers.length === 0) return [];
-    const result = await db.select().from(vehicleNexusData)
-      .where(inArray(vehicleNexusData.vehicleNumber, vehicleNumbers));
-    return result;
+    const variants = expandVehicleNumberVariants(vehicleNumbers);
+    if (variants.length === 0) return [];
+    const rows = await db.select().from(vehicleNexusData)
+      .where(inArray(vehicleNexusData.vehicleNumber, variants));
+    return pickLatestPerVehicle(rows);
   }
 
   async upsertVehicleNexusData(data: InsertVehicleNexusData): Promise<VehicleNexusData> {
-    const existing = await this.getVehicleNexusData(data.vehicleNumber);
-    
+    const variants = vehicleNumberVariants(data.vehicleNumber);
+    const matches = variants.length > 0
+      ? await db.select().from(vehicleNexusData)
+          .where(inArray(vehicleNexusData.vehicleNumber, variants))
+          .orderBy(desc(vehicleNexusData.updatedAt))
+      : [];
+    const existing = matches[0];
+    const storedVehicleNumber = resolveNexusVehicleNumber(data.vehicleNumber, existing, matches);
+    const displayNumber = toDisplayNumber(data.vehicleNumber) || String(data.vehicleNumber).trim();
+
     if (existing) {
       const result = await db.update(vehicleNexusData)
         .set({
@@ -6501,16 +6517,18 @@ export class DatabaseStorage implements IStorage {
           partsRecoveryInitiated: data.partsRecoveryInitiated,
           updatedBy: data.updatedBy,
           updatedAt: new Date(),
-          vehicleNumberDisplay: toDisplayNumber(data.vehicleNumber),
+          vehicleNumber: storedVehicleNumber,
+          vehicleNumberDisplay: displayNumber,
         })
-        .where(eq(vehicleNexusData.vehicleNumber, data.vehicleNumber))
+        .where(eq(vehicleNexusData.id, existing.id))
         .returning();
       return result[0];
     } else {
       const result = await db.insert(vehicleNexusData).values({
         ...data,
         id: randomUUID(),
-        vehicleNumberDisplay: toDisplayNumber(data.vehicleNumber),
+        vehicleNumber: storedVehicleNumber,
+        vehicleNumberDisplay: displayNumber,
       }).returning();
       return result[0];
     }

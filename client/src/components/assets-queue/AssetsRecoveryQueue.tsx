@@ -34,6 +34,14 @@ import {
   enrichItem,
 } from "@/components/assets-queue/tech-data-utils";
 import {
+  type NexusBatchMap,
+  type NexusRecoveryFields,
+  buildNexusBatchMap,
+  lookupNexusData,
+  showToolsPartsRecovery,
+  formatToolsPartsLocation,
+} from "@/components/assets-queue/nexus-data-utils";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -1152,17 +1160,13 @@ export function AssetsRecoveryQueue() {
     return [...new Set(queueItems.map(item => item.techData?.hrTruckNumber).filter(Boolean) as string[])];
   }, [queueItems]);
 
-  const { data: vehicleNexusBatchData = {} } = useQuery<Record<string, { postOffboardedStatus: string | null }>>({
+  const { data: vehicleNexusBatchData = {} } = useQuery<NexusBatchMap>({
     queryKey: ["/api/vehicle-nexus-data/batch", vehicleNumbers],
     queryFn: async () => {
       if (vehicleNumbers.length === 0) return {};
       const res = await apiRequest("POST", "/api/vehicle-nexus-data/batch", { vehicleNumbers });
-      const arr = await res.json();
-      const map: Record<string, { postOffboardedStatus: string | null }> = {};
-      for (const item of arr) {
-        map[item.vehicleNumber] = { postOffboardedStatus: item.postOffboardedStatus };
-      }
-      return map;
+      const arr: Array<{ vehicleNumber: string } & Partial<NexusRecoveryFields>> = await res.json();
+      return buildNexusBatchMap(arr);
     },
     enabled: vehicleNumbers.length > 0,
     staleTime: 5 * 60 * 1000,
@@ -1299,8 +1303,8 @@ export function AssetsRecoveryQueue() {
           bVal = getVehicleType(b);
           break;
         case "routing":
-          aVal = (a.techData?.hrTruckNumber ? vehicleNexusBatchData[a.techData.hrTruckNumber]?.postOffboardedStatus : null) || '';
-          bVal = (b.techData?.hrTruckNumber ? vehicleNexusBatchData[b.techData.hrTruckNumber]?.postOffboardedStatus : null) || '';
+          aVal = lookupNexusData(vehicleNexusBatchData, a.techData?.hrTruckNumber)?.postOffboardedStatus || '';
+          bVal = lookupNexusData(vehicleNexusBatchData, b.techData?.hrTruckNumber)?.postOffboardedStatus || '';
           break;
         case "status":
           aVal = a.status;
@@ -1313,7 +1317,7 @@ export function AssetsRecoveryQueue() {
       if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
-  }, [filteredData, sortConfig]);
+  }, [filteredData, sortConfig, vehicleNexusBatchData]);
 
   const totalPages = Math.ceil(sortedData.length / itemsPerPage);
   const paginatedData = sortedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -1362,6 +1366,7 @@ export function AssetsRecoveryQueue() {
     { key: "separationDate", label: "Last Day", width: "w-28" },
     { key: "vehicleType", label: "Vehicle", width: "w-24" },
     { key: "routing", label: "Disposition", width: "w-28" },
+    { key: "recovery", label: "Recovery", width: "w-36" },
     { key: "status", label: "Status", width: "w-28" },
     { key: "tasks", label: "Tasks", width: "w-32" },
   ];
@@ -1474,7 +1479,7 @@ export function AssetsRecoveryQueue() {
                   <th
                     key={col.key}
                     className={`${col.width} px-4 py-3 font-semibold cursor-pointer hover:bg-[#153d73] transition-colors`}
-                    onClick={() => col.key !== "tasks" && handleSort(col.key)}
+                    onClick={() => col.key !== "tasks" && col.key !== "recovery" && handleSort(col.key)}
                   >
                     <div className="flex items-center gap-1">
                       {col.label}
@@ -1491,7 +1496,8 @@ export function AssetsRecoveryQueue() {
             <tbody className="divide-y divide-slate-100">
               {paginatedData.map((row) => {
                 const vehicleType = getVehicleType(row);
-                const rowDisposition = row.techData?.hrTruckNumber ? vehicleNexusBatchData[row.techData.hrTruckNumber]?.postOffboardedStatus : null;
+                const rowNexus = lookupNexusData(vehicleNexusBatchData, row.techData?.hrTruckNumber);
+                const rowDisposition = rowNexus?.postOffboardedStatus || null;
                 const sepDate = row.techData?.separationDate || null;
                 const daysUntilSep = getDaysUntilSeparation(sepDate);
                 const urgency = getUrgencyLevel(vehicleType, daysUntilSep);
@@ -1582,6 +1588,47 @@ export function AssetsRecoveryQueue() {
                         )}
                       </td>
                       <td className="px-4 py-3">
+                        <div className="flex flex-wrap gap-1">
+                          {showToolsPartsRecovery(vehicleType, rowNexus) && (
+                            <>
+                              {rowNexus?.toolsPartsLocation ? (
+                                <Badge
+                                  className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${rowNexus.toolsPartsLocation === "techs_home" ? "bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-100" : "bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-100"}`}
+                                  title={rowNexus.toolsPartsLocation === "techs_home" ? "Tools/parts are at the tech's home" : "Tools/parts are in the truck"}
+                                >
+                                  {formatToolsPartsLocation(rowNexus.toolsPartsLocation)}
+                                </Badge>
+                              ) : (
+                                (vehicleType === "byov" || vehicleType === "rental") && (
+                                  <Badge
+                                    className="text-[10px] px-1.5 py-0 h-4 w-fit font-medium border bg-slate-100 text-slate-500 border-slate-200 hover:bg-slate-100"
+                                    title="Tools/parts location not recorded yet — BYOV/rental vehicles require tools & parts recovery"
+                                  >
+                                    Tools: ?
+                                  </Badge>
+                                )
+                              )}
+                              {rowNexus?.partsRecoveryInitiated && (
+                                <Badge
+                                  className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${rowNexus.partsRecoveryInitiated === "yes" ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100" : "bg-red-100 text-red-800 border-red-200 hover:bg-red-100"}`}
+                                  title={`Parts recovery initiated: ${rowNexus.partsRecoveryInitiated}`}
+                                >
+                                  Parts: {rowNexus.partsRecoveryInitiated === "yes" ? "Yes" : "No"}
+                                </Badge>
+                              )}
+                            </>
+                          )}
+                          {rowNexus?.phoneRecoveryInitiated && (
+                            <Badge
+                              className={`text-[10px] px-1.5 py-0 h-4 w-fit font-medium border ${rowNexus.phoneRecoveryInitiated === "yes" ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100" : "bg-red-100 text-red-800 border-red-200 hover:bg-red-100"}`}
+                              title={`Phone recovery initiated: ${rowNexus.phoneRecoveryInitiated}`}
+                            >
+                              Phone: {rowNexus.phoneRecoveryInitiated === "yes" ? "Yes" : "No"}
+                            </Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
                         <Badge variant={getStatusBadgeVariant(row.status)} className="text-xs">
                           {formatStatus(row.status)}
                         </Badge>
@@ -1607,7 +1654,7 @@ export function AssetsRecoveryQueue() {
                     </tr>
                     {isExpanded && (
                       <tr>
-                        <td colSpan={8} className="p-0">
+                        <td colSpan={9} className="p-0">
                           {isLoaRecoveryItem(row) ? (
                             <LoaDetailView
                               item={row as unknown as CombinedQueueItem}

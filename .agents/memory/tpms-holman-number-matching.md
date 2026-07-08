@@ -27,6 +27,19 @@ the cache's own `holman_vehicle_number` to `vehicle.vehicleNumber` are same-fiel
 format gap) and must NOT be padded/canonicalized. The stale sweep matches by `enterprise_id`, not a
 truck number — leave it.
 
+# vehicle_nexus_data holds legacy rows in BOTH 5- and 6-digit formats
+
+Weekly Offboarding historically wrote `vehicle_nexus_data.vehicle_number` as 5-digit display numbers
+(61456) while queue/TPMS callers passed 6-digit values (061456), so prod can hold **duplicate rows for
+the same truck in different formats**, and `vehicle_number` is UNIQUE.
+
+**Why:** exact-string lookups silently missed the other format, and each writer created its own row.
+**How to apply:** all reads must expand `vehicleNumberVariants()` and collapse to one row per
+`toCanonical()` key (most-recently-updated wins); upserts must never blind-rewrite an existing row's
+`vehicle_number` to the display form when a legacy duplicate row already holds it — that violates the
+unique constraint. Direct SQL against the table (bypassing the storage helpers) can still surface the
+stale duplicate until a one-off dedupe merges them.
+
 # ~25% of tpms_cached_assignments rows have an empty raw_response
 
 The enrich path (`enrichWithTPMSData` → `batchLookupByTruckNumbers`) only returns a hit when the cache
