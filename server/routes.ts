@@ -8701,6 +8701,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   app.post("/api/holman/vehicles/submit", requireAuth, async (req: any, res) => {
     try {
+      // Guard: vehicle creation (assetAction ADD) must never send null vin/firstName/lastName.
+      // Updates intentionally omit fields (Holman treats omitted as no-change), so only
+      // ADD records are checked here.
+      const records = Array.isArray(req.body) ? req.body : [req.body];
+      for (const rec of records) {
+        if (rec && String(rec.assetAction || "").toUpperCase() === "ADD") {
+          const missing = (["vin", "firstName", "lastName"] as const).filter(
+            (k) => !rec[k] || String(rec[k]).trim() === ""
+          );
+          if (missing.length > 0) {
+            return res.status(400).json({
+              message: `Vehicle create (assetAction ADD) is missing required fields: ${missing.join(", ")}`,
+            });
+          }
+        }
+      }
       const result = await holmanApiService.submitVehicle(req.body);
       res.json(result);
     } catch (error) {
@@ -9965,6 +9981,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       } = req.body;
 
       if (!vehicleNumber) return res.status(400).json({ error: "vehicleNumber is required" });
+
+      // VIN, first name, and last name must never be sent to Holman as null on a create.
+      const requiredHolmanFields: Record<string, string> = {
+        vin: "VIN",
+        firstName: "First name",
+        lastName: "Last name",
+      };
+      const missingHolmanFields = Object.entries(requiredHolmanFields)
+        .filter(([key]) => !req.body[key] || String(req.body[key]).trim() === "")
+        .map(([, label]) => label);
+      if (missingHolmanFields.length > 0) {
+        return res.status(400).json({
+          error: `Missing required fields: ${missingHolmanFields.join(", ")}`,
+        });
+      }
 
       const paddedVehicle = toHolmanRef(vehicleNumber);
       const districtStr = String(district || "").trim();
