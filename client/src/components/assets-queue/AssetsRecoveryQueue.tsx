@@ -1162,7 +1162,7 @@ export function AssetsRecoveryQueue() {
   // metadata.tpmsTruckNo), so rows with a missing/dirty HR truck value still
   // join to vehicle_nexus_data. Server matches variants; client keys canonical.
   const vehicleNumbers = useMemo(() => {
-    return [...new Set(queueItems.flatMap(item => collectItemTruckCandidates(item)))];
+    return Array.from(new Set(queueItems.flatMap(item => collectItemTruckCandidates(item))));
   }, [queueItems]);
 
   const { data: vehicleNexusBatchData = {} } = useQuery<NexusBatchMap>({
@@ -1477,7 +1477,10 @@ export function AssetsRecoveryQueue() {
     <div className="space-y-4">
       <AssetsRecoveryFilterBar
         searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
+        onSearchChange={(value) => {
+          setSearchQuery(value);
+          setCurrentPage(1);
+        }}
         activeFilters={filters}
         onFilterChange={handleFilterChange}
         onClearFilters={handleClearFilters}

@@ -21,9 +21,12 @@ import {
 } from "./vehicle-nexus-normalization";
 import {
   buildNexusBatchMap,
+  collectItemTruckCandidates,
   lookupNexusData,
+  lookupNexusDataForItem,
   showToolsPartsRecovery,
   type NexusRecoveryFields,
+  type TruckCandidateSource,
 } from "../client/src/components/assets-queue/nexus-data-utils";
 
 let passed = 0;
@@ -158,6 +161,86 @@ test("lookup ignores empty / N/A truck numbers", () => {
   const map = buildNexusBatchMap(batchResponse);
   assert.equal(lookupNexusData(map, null), undefined);
   assert.equal(lookupNexusData(map, "N/A"), undefined);
+});
+
+console.log("collectItemTruckCandidates / lookupNexusDataForItem (Assets Queue widened sources)");
+
+test("collects candidates from all five sources in priority order", () => {
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "11111" },
+    data: JSON.stringify({
+      hrSeparation: { truckNumber: "22222" },
+      vehicle: { truckNo: "33333", vehicleNumber: "44444" },
+    }),
+    metadata: JSON.stringify({ tpmsTruckNo: "55555" }),
+  };
+  assert.deepEqual(collectItemTruckCandidates(item), ["11111", "22222", "33333", "44444", "55555"]);
+});
+
+test("candidates dedupe by canonical truck number", () => {
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "61771" },
+    data: JSON.stringify({ vehicle: { truckNo: "061771", vehicleNumber: "61771" } }),
+    metadata: JSON.stringify({ tpmsTruckNo: "0061771" }),
+  };
+  assert.deepEqual(collectItemTruckCandidates(item), ["61771"]);
+});
+
+test("skips missing sources, empty strings, and N/A", () => {
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "N/A" },
+    data: JSON.stringify({ hrSeparation: { truckNumber: "" }, vehicle: { truckNo: null, vehicleNumber: "46163" } }),
+    metadata: null,
+  };
+  assert.deepEqual(collectItemTruckCandidates(item), ["46163"]);
+});
+
+test("handles unparseable data/metadata JSON without throwing", () => {
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "61101" },
+    data: "not json",
+    metadata: "also not json",
+  };
+  assert.deepEqual(collectItemTruckCandidates(item), ["61101"]);
+});
+
+test("lookupNexusDataForItem finds a row saved as 46163 when the item carries 046163 (CHEW case)", () => {
+  const map = buildNexusBatchMap([
+    { vehicleNumber: "46163", postOffboardedStatus: "reserved_for_new_hire", toolsPartsLocation: "in_the_truck", partsRecoveryInitiated: "yes", phoneRecoveryInitiated: "yes" },
+  ]);
+  const item: TruckCandidateSource = { metadata: JSON.stringify({ tpmsTruckNo: "046163" }) };
+  const entry = lookupNexusDataForItem(map, item);
+  assert.ok(entry, "expected a match for 046163 -> 46163");
+  assert.equal(entry!.postOffboardedStatus, "reserved_for_new_hire");
+});
+
+test("lookupNexusDataForItem finds a row saved as 61771 when the item carries 061771 (FRANCO case)", () => {
+  const map = buildNexusBatchMap([
+    { vehicleNumber: "61771", postOffboardedStatus: "assigned_to_tech", phoneRecoveryInitiated: "yes" },
+  ]);
+  const item: TruckCandidateSource = { metadata: JSON.stringify({ tpmsTruckNo: "061771" }) };
+  const entry = lookupNexusDataForItem(map, item);
+  assert.ok(entry, "expected a match for 061771 -> 61771");
+  assert.equal(entry!.postOffboardedStatus, "assigned_to_tech");
+  assert.equal(entry!.phoneRecoveryInitiated, "yes");
+});
+
+test("lookupNexusDataForItem falls back through sources until one resolves", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "N/A" },
+    data: JSON.stringify({ vehicle: { truckNo: "99999" } }),
+    metadata: JSON.stringify({ tpmsTruckNo: "61456" }),
+  };
+  const entry = lookupNexusDataForItem(map, item);
+  assert.ok(entry, "expected fallback to metadata.tpmsTruckNo to resolve");
+  assert.equal(entry!.postOffboardedStatus, "In repair");
+});
+
+test("lookupNexusDataForItem returns undefined when no candidate matches", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = { techData: { hrTruckNumber: "99999" } };
+  assert.equal(lookupNexusDataForItem(map, item), undefined);
 });
 
 console.log("showToolsPartsRecovery business rule");
