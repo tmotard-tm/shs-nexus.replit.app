@@ -37,7 +37,8 @@ import {
   type NexusBatchMap,
   type NexusRecoveryFields,
   buildNexusBatchMap,
-  lookupNexusData,
+  collectItemTruckCandidates,
+  lookupNexusDataForItem,
   showToolsPartsRecovery,
   formatToolsPartsLocation,
 } from "@/components/assets-queue/nexus-data-utils";
@@ -1156,8 +1157,12 @@ export function AssetsRecoveryQueue() {
   });
 
 
+  // Widened truck-number harvest: hrTruckNumber plus the fallback sources
+  // (data.hrSeparation.truckNumber, data.vehicle.truckNo/vehicleNumber,
+  // metadata.tpmsTruckNo), so rows with a missing/dirty HR truck value still
+  // join to vehicle_nexus_data. Server matches variants; client keys canonical.
   const vehicleNumbers = useMemo(() => {
-    return [...new Set(queueItems.map(item => item.techData?.hrTruckNumber).filter(Boolean) as string[])];
+    return [...new Set(queueItems.flatMap(item => collectItemTruckCandidates(item)))];
   }, [queueItems]);
 
   const { data: vehicleNexusBatchData = {} } = useQuery<NexusBatchMap>({
@@ -1171,6 +1176,16 @@ export function AssetsRecoveryQueue() {
     enabled: vehicleNumbers.length > 0,
     staleTime: 5 * 60 * 1000,
   });
+
+  // Resolve each row's nexus record once (candidate mining JSON-parses item
+  // data/metadata, so don't do it inside the sort comparator or per-render).
+  const nexusByItemId = useMemo(() => {
+    const map: Record<string, NexusRecoveryFields | undefined> = {};
+    for (const item of queueItems) {
+      map[item.id] = lookupNexusDataForItem(vehicleNexusBatchData, item);
+    }
+    return map;
+  }, [queueItems, vehicleNexusBatchData]);
 
 
   const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
@@ -1303,8 +1318,8 @@ export function AssetsRecoveryQueue() {
           bVal = getVehicleType(b);
           break;
         case "routing":
-          aVal = lookupNexusData(vehicleNexusBatchData, a.techData?.hrTruckNumber)?.postOffboardedStatus || '';
-          bVal = lookupNexusData(vehicleNexusBatchData, b.techData?.hrTruckNumber)?.postOffboardedStatus || '';
+          aVal = nexusByItemId[a.id]?.postOffboardedStatus || '';
+          bVal = nexusByItemId[b.id]?.postOffboardedStatus || '';
           break;
         case "status":
           aVal = a.status;
@@ -1317,7 +1332,7 @@ export function AssetsRecoveryQueue() {
       if (aVal > bVal) return sortConfig.direction === "asc" ? 1 : -1;
       return 0;
     });
-  }, [filteredData, sortConfig, vehicleNexusBatchData]);
+  }, [filteredData, sortConfig, nexusByItemId]);
 
   const totalPages = Math.ceil(sortedData.length / itemsPerPage);
   const paginatedData = sortedData.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -1496,7 +1511,7 @@ export function AssetsRecoveryQueue() {
             <tbody className="divide-y divide-slate-100">
               {paginatedData.map((row) => {
                 const vehicleType = getVehicleType(row);
-                const rowNexus = lookupNexusData(vehicleNexusBatchData, row.techData?.hrTruckNumber);
+                const rowNexus = nexusByItemId[row.id];
                 const rowDisposition = rowNexus?.postOffboardedStatus || null;
                 const sepDate = row.techData?.separationDate || null;
                 const daysUntilSep = getDaysUntilSeparation(sepDate);

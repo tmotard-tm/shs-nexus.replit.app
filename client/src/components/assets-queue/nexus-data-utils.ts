@@ -37,6 +37,68 @@ export function lookupNexusData(
   return map[toCanonical(truckNumber)];
 }
 
+// Minimal structural view of a queue item — enough to mine truck numbers
+// from every place the producers stash them.
+export interface TruckCandidateSource {
+  data?: string | null;
+  metadata?: string | null;
+  techData?: { hrTruckNumber?: string | null } | null;
+}
+
+function safeParse(json: string | null | undefined): any {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+// All plausible truck numbers for a queue item, in priority order:
+//   1. techData.hrTruckNumber   (already-resolved HR/roster value)
+//   2. data.hrSeparation.truckNumber
+//   3. data.vehicle.truckNo
+//   4. data.vehicle.vehicleNumber
+//   5. metadata.tpmsTruckNo     (written by the automated Snowflake sync)
+// De-duplicated by canonical form so "61456" and "061456" count once.
+// Rows with a missing or dirty hrTruckNumber still join to vehicle_nexus_data
+// through the fallbacks.
+export function collectItemTruckCandidates(item: TruckCandidateSource): string[] {
+  const parsed = safeParse(item.data);
+  const meta = safeParse(item.metadata);
+  const raw: Array<unknown> = [
+    item.techData?.hrTruckNumber,
+    parsed?.hrSeparation?.truckNumber,
+    parsed?.vehicle?.truckNo,
+    parsed?.vehicle?.vehicleNumber,
+    meta?.tpmsTruckNo,
+  ];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const r of raw) {
+    if (typeof r !== "string" && typeof r !== "number") continue;
+    const s = String(r).trim();
+    if (!s || s === "N/A") continue;
+    const key = toCanonical(s);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(s);
+  }
+  return out;
+}
+
+// First candidate that resolves to a vehicle_nexus_data row wins.
+export function lookupNexusDataForItem(
+  map: NexusBatchMap,
+  item: TruckCandidateSource,
+): NexusRecoveryFields | undefined {
+  for (const candidate of collectItemTruckCandidates(item)) {
+    const hit = lookupNexusData(map, candidate);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
 // Business rule: on a standard company vehicle the tools stay with the truck,
 // so no Claudia tools/parts task is implied unless the fields indicate action
 // (tools at tech's home, or parts recovery explicitly initiated). BYOV/rental
