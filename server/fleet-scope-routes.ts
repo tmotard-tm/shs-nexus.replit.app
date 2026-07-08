@@ -1951,9 +1951,9 @@ async function summarizeCallTranscript(
   callType: "repair" | "tech",
   truckNumber: string
 ): Promise<{ status: string; summary: string; estimatedReadyDate: string | null; blockers: string | null }> {
-  if (!process.env.FS_OPENAI_API_KEY) {
-    console.warn("[ElevenLabs] No FS_OPENAI_API_KEY, skipping summarization");
-    return { status: "Unknown", summary: "OpenAI key not configured", estimatedReadyDate: null, blockers: null };
+  if (!process.env.AWS_BEARER_TOKEN_BEDROCK) {
+    console.warn("[ElevenLabs] No AWS_BEARER_TOKEN_BEDROCK, skipping summarization");
+    return { status: "Unknown", summary: "Bedrock key not configured", estimatedReadyDate: null, blockers: null };
   }
   const systemPrompt = callType === "tech"
     ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
@@ -1971,39 +1971,65 @@ Respond ONLY with valid JSON, no other text.`;
   const userPrompt = callType === "tech"
     ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
     : `Analyze this repair shop call transcript:\n\n${transcriptText}`;
-  try {
-    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${process.env.FS_OPENAI_API_KEY}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: systemPrompt }, { role: "user", content: userPrompt }],
-        max_tokens: 200,
-        temperature: 0.3,
-      }),
-    });
-    if (!openaiRes.ok) {
-      const errText = await openaiRes.text();
-      console.error(`[ElevenLabs] OpenAI error for truck ${truckNumber}:`, errText);
-      return { status: "Error", summary: "Summary unavailable — analysis failed.", estimatedReadyDate: null, blockers: null };
+
+  // Bedrock Converse (Claude Haiku by default). Model is env-overridable via
+  // FS_SUMMARY_MODEL (must be a Claude inference-profile id — the shared Bedrock
+  // token is Anthropic-scoped). Replaces the retired OpenAI summarizer.
+  const region = process.env.AWS_REGION || "us-east-2";
+  const model = process.env.FS_SUMMARY_MODEL || "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+  const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${model}/converse`;
+  const reqBody = JSON.stringify({
+    system: [{ text: systemPrompt }],
+    messages: [{ role: "user", content: [{ text: userPrompt }] }],
+    inferenceConfig: { maxTokens: 300, temperature: 0.3 },
+  });
+
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${process.env.AWS_BEARER_TOKEN_BEDROCK}`, "Content-Type": "application/json" },
+        body: reqBody,
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        // 429 (throttling) / 5xx are transient — back off and retry so a blip
+        // can't permanently stamp "Error" the way the OpenAI quota outage did.
+        if ((res.status === 429 || res.status >= 500) && attempt < maxAttempts) {
+          const waitMs = 500 * Math.pow(3, attempt - 1);
+          console.warn(`[ElevenLabs] Bedrock ${res.status} for truck ${truckNumber} (attempt ${attempt}/${maxAttempts}); retrying in ${waitMs}ms`);
+          await new Promise((r) => setTimeout(r, waitMs));
+          continue;
+        }
+        console.error(`[ElevenLabs] Bedrock error for truck ${truckNumber}: ${res.status} ${errText}`);
+        return { status: "Error", summary: "Summary unavailable — analysis failed.", estimatedReadyDate: null, blockers: null };
+      }
+      const data = await res.json();
+      const raw = (data?.output?.message?.content?.[0]?.text || "").trim();
+      console.log(`[ElevenLabs] Bedrock response (${callType}) for truck ${truckNumber}: ${raw}`);
+      // Claude sometimes wraps the JSON in markdown code fences (```json ... ```).
+      // Strip them before parsing so JSON.parse doesn't choke on the backticks.
+      const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+      const parsed = JSON.parse(stripped);
+      return {
+        status: parsed.status || "Unknown",
+        summary: parsed.summary || "",
+        estimatedReadyDate: parsed.estimated_ready_date || null,
+        blockers: parsed.blockers || null,
+      };
+    } catch (err: any) {
+      if (attempt < maxAttempts) {
+        const waitMs = 500 * Math.pow(3, attempt - 1);
+        console.warn(`[ElevenLabs] Summarization error for truck ${truckNumber} (attempt ${attempt}/${maxAttempts}): ${err.message}; retrying in ${waitMs}ms`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      console.error(`[ElevenLabs] Summarization error for truck ${truckNumber}:`, err.message);
+      return { status: "Unknown", summary: "Summarization failed", estimatedReadyDate: null, blockers: null };
     }
-    const openaiData = await openaiRes.json();
-    const raw = openaiData.choices?.[0]?.message?.content?.trim() || "";
-    console.log(`[ElevenLabs] GPT response (${callType}) for truck ${truckNumber}: ${raw}`);
-    // GPT sometimes wraps the JSON in markdown code fences (```json ... ```).
-    // Strip them before parsing so JSON.parse doesn't choke on the backticks.
-    const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
-    const parsed = JSON.parse(stripped);
-    return {
-      status: parsed.status || "Unknown",
-      summary: parsed.summary || "",
-      estimatedReadyDate: parsed.estimated_ready_date || null,
-      blockers: parsed.blockers || null,
-    };
-  } catch (err: any) {
-    console.error(`[ElevenLabs] Summarization error for truck ${truckNumber}:`, err.message);
-    return { status: "Unknown", summary: "Summarization failed", estimatedReadyDate: null, blockers: null };
   }
+  return { status: "Error", summary: "Summary unavailable — analysis failed.", estimatedReadyDate: null, blockers: null };
 }
 
 async function applyCallResultToTruck(
@@ -2017,6 +2043,13 @@ async function applyCallResultToTruck(
   transcriptText: string,
   callDate?: Date
 ): Promise<void> {
+  // Hardening: never overwrite a truck's status/summary or write a call log with a
+  // failure sentinel. When summarization fails (Bedrock error / misconfig / unparseable),
+  // leave the prior good data intact rather than degrading it to Error/Unknown.
+  if (status === "Error" || status === "Unknown") {
+    console.warn(`[ElevenLabs] Skipping call-result write for truck ${truck?.truckNumber} (${callType}): summarization returned "${status}"; preserving prior data`);
+    return;
+  }
   if (callType === "tech") {
     const updateFields: Record<string, any> = {
       lastTechCallSummary: summary,
@@ -5880,6 +5913,18 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
         if (coveredTypes.size === 0) skippedCount++;
       }
+
+      // Hardening: heal only stranded rows (status Error or unset). Leave the handful
+      // of already-good statuses (Ready / In Repair / In Authorization / No Answer)
+      // untouched so a re-summarize cannot re-label or reschedule them.
+      const beforeScope = candidates.length;
+      const scoped = candidates.filter((c) => {
+        const s = c.callType === "tech" ? c.truck.lastTechCallStatus : c.truck.lastCallStatus;
+        return !s || s === "Error" || s === "Unknown";
+      });
+      candidates.length = 0;
+      candidates.push(...scoped);
+      console.log(`[BackfillAll] scoped candidates ${beforeScope} -> ${candidates.length} (Error/unset only)`);
 
       const jobId = `backfill_all_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const job = {
