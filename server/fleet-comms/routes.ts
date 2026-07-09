@@ -101,6 +101,17 @@ function isPrivileged(req: any): boolean {
   return role === "developer" || role === "admin";
 }
 
+// Internal ops trigger (mirrors the rental-sync pattern in fleet-scope-routes):
+// a matching `x-internal-cron: $SESSION_SECRET` header lets an operator/cron
+// fire the contacts sync without a browser session. The outer fleet-scope auth
+// middleware already honors this header; this extends it past the comms gate
+// for the SYNC route ONLY (never message sends or reads).
+function isInternalCron(req: any): boolean {
+  const token = req.headers?.["x-internal-cron"];
+  const expected = process.env.SESSION_SECRET;
+  return !!token && !!expected && token === expected;
+}
+
 // Per-user access control. Mirrors the frontend route/sidebar gate at
 // sidebar.activities.fleetCommunications: defaults -> stored role row ->
 // per-user overrides. Developers always have access (full-access role).
@@ -905,15 +916,29 @@ export function registerCommsRoutes(app: Router): void {
   });
 
   // Manual triggers (privileged) — mostly for pilots / ops.
-  app.post("/comms/sync", gate, async (req: any, res) => {
-    if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
-    try {
-      const result = await syncCommsContacts("manual", { force: req.body?.force === true });
-      res.json({ success: true, ...result });
-    } catch (e: any) {
-      res.status(500).json({ success: false, message: e?.message });
-    }
-  });
+  // The sync trigger additionally accepts the internal-cron header (no session)
+  // so ops can fire a one-off prod sync without logging in — read-only refresh
+  // of the contacts directory, same guarded path the daily schedule runs.
+  app.post(
+    "/comms/sync",
+    (req: any, res: any, next: any) => (isInternalCron(req) ? next() : gate(req, res, next)),
+    async (req: any, res) => {
+      const viaSession = isPrivileged(req);
+      if (!viaSession && !isInternalCron(req)) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      try {
+        // `force` (anti-wipe floor override) is reserved for privileged
+        // SESSIONS — the cron token alone must not be able to mass-tombstone.
+        const result = await syncCommsContacts(viaSession ? "manual" : "internal_cron", {
+          force: viaSession && req.body?.force === true,
+        });
+        res.json({ success: true, ...result });
+      } catch (e: any) {
+        res.status(500).json({ success: false, message: e?.message });
+      }
+    },
+  );
 
   app.post("/comms/queue/drain", gate, async (req: any, res) => {
     if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
