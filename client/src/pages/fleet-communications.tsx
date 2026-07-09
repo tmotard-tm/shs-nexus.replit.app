@@ -50,6 +50,7 @@ import {
   AlertTriangle,
   Tag,
   ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 
 interface CategoryOpt {
@@ -460,6 +461,30 @@ export default function FleetCommunications() {
     onError: (e: any) => toast({ title: "Bulk archive failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
+  // Manual contacts refresh (privileged) — same guarded path as the daily sync:
+  // pulls the roster + TPMS phone data and reconciles fs_comms_contacts. The
+  // Snowflake pull takes ~30-60s, so keep the button in a spinner state.
+  const syncContactsMutation = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/fs/comms/sync")).json(),
+    onSuccess: (d: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/contacts"] });
+      if (d?.success === false || d?.skipped) {
+        toast({
+          title: "Sync skipped",
+          description: String(d?.skipReason || d?.message || "The sync did not run."),
+        });
+        return;
+      }
+      toast({
+        title: "Contacts synced",
+        description: `${d?.fetched ?? 0} techs checked · ${d?.updated ?? 0} updated · ${d?.phoneChanges ?? 0} phone change${(d?.phoneChanges ?? 0) === 1 ? "" : "s"}`,
+      });
+    },
+    onError: (e: any) => toast({ title: "Sync failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+
   const markRead = useMutation({
     mutationFn: (id: string) => apiRequest("POST", `/api/fs/comms/threads/${id}/read`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] }),
@@ -690,6 +715,23 @@ export default function FleetCommunications() {
                 data-testid="switch-comms-enabled"
               />
             </div>
+          )}
+          {config?.canManage && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => syncContactsMutation.mutate()}
+              disabled={syncContactsMutation.isPending}
+              className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
+              data-testid="button-sync-contacts"
+            >
+              {syncContactsMutation.isPending ? (
+                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+              ) : (
+                <RefreshCw className="w-4 h-4 mr-1.5" />
+              )}
+              {syncContactsMutation.isPending ? "Syncing…" : "Sync contacts"}
+            </Button>
           )}
           {config?.canManage && (
             <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-manage-templates">
