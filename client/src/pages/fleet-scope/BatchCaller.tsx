@@ -91,7 +91,7 @@ export default function BatchCaller() {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [isStarting, setIsStarting] = useState(false);
-  const pollGenRef = useRef(0);
+  const cancelRef = useRef(false);
 
   const { data: trucks = [], isLoading: trucksLoading } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
@@ -161,81 +161,54 @@ export default function BatchCaller() {
       toast({ title: "No vehicles selected", variant: "destructive" });
       return;
     }
+    cancelRef.current = false;
     setIsStarting(true);
+    setActiveBatchId("running");
+    const ids = Array.from(selectedIds);
+    const CHUNK = 15;
+    const agg: BatchStatus = { id: "local", total: ids.length, completed: 0, failed: 0, skipped: 0, inProgress: 0, cancelled: false, results: [], done: false };
+    setBatchStatus({ ...agg });
     try {
-      const res = await apiRequest("POST", "/api/fs/batch-call/start", {
-        truckIds: Array.from(selectedIds),
-        callType,
+      for (let i = 0; i < ids.length && !cancelRef.current; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        agg.inProgress = chunk.length;
+        setBatchStatus({ ...agg });
+        // Each request carries at most CHUNK trucks so the server finishes and
+        // responds well inside the autoscale proxy limit. Results come back
+        // synchronously; there is no batch id or in-memory poll state to lose
+        // across instances. The server-side 30-minute re-dial guard makes any
+        // retry safe.
+        const res = await apiRequest("POST", "/api/fs/batch-call/start", { truckIds: chunk, callType });
+        const data = await res.json();
+        for (const r of (data.results || [])) {
+          agg.results.push(r);
+          if (r.status === "failed") agg.failed++;
+          else if (r.status === "skipped") agg.skipped++;
+          else agg.completed++;
+        }
+        agg.inProgress = 0;
+        setBatchStatus({ ...agg });
+      }
+      agg.cancelled = cancelRef.current;
+      agg.done = true;
+      setBatchStatus({ ...agg });
+      const skippedNote = agg.skipped ? `, ${agg.skipped} skipped` : "";
+      toast({
+        title: agg.cancelled
+          ? "Batch cancelled"
+          : `Batch complete: ${agg.completed} called, ${agg.failed} failed${skippedNote}`,
       });
-      const data = await res.json();
-      setActiveBatchId(data.batchId);
-      setBatchStatus(null);
-      toast({ title: `Batch started: ${data.total} calls queued` });
-      pollBatch(data.batchId);
     } catch (err: any) {
-      toast({ title: "Failed to start batch", description: err.message, variant: "destructive" });
+      toast({ title: "Batch error", description: err.message, variant: "destructive" });
     } finally {
+      setActiveBatchId(null);
       setIsStarting(false);
     }
   };
 
-  const pollBatch = (batchId: string) => {
-    const gen = ++pollGenRef.current;
-    let notFoundCount = 0;
-    const poll = async () => {
-      if (gen !== pollGenRef.current) return;
-      try {
-        const res = await fetch(`/api/fs/batch-call/status/${batchId}`, { credentials: "include" });
-        if (res.status === 404) {
-          // Batch state is in-memory on the server — a restart or a different
-          // instance loses it. Don't spin forever: give up after 3 misses.
-          notFoundCount++;
-          if (notFoundCount >= 3) {
-            if (gen !== pollGenRef.current) return;
-            setActiveBatchId(null);
-            toast({
-              title: "Lost track of this batch",
-              description:
-                "The server restarted while the batch was running. Check the call log below for results — recently called numbers are protected from re-dialing for 30 minutes.",
-              variant: "destructive",
-            });
-            return;
-          }
-          setTimeout(poll, 3000);
-          return;
-        }
-        if (!res.ok) throw new Error(`Status ${res.status}`);
-        notFoundCount = 0;
-        const status: BatchStatus = await res.json();
-        if (gen !== pollGenRef.current) return;
-        setBatchStatus(status);
-        if (!status.done) {
-          setTimeout(poll, 3000);
-        } else {
-          setActiveBatchId(null);
-          const skippedNote = status.skipped ? `, ${status.skipped} skipped` : "";
-          toast({
-            title: status.cancelled
-              ? "Batch cancelled"
-              : `Batch complete: ${status.completed} called, ${status.failed} failed${skippedNote}`,
-          });
-        }
-      } catch {
-        // Transient poll failure — keep polling; the batch continues server-side.
-        setTimeout(poll, 5000);
-      }
-    };
-    poll();
-  };
-
   const cancelBatch = async () => {
-    if (!activeBatchId) return;
-    try {
-      await apiRequest("POST", `/api/fs/batch-call/cancel/${activeBatchId}`);
-      toast({ title: "Cancelling — calls already in progress will finish" });
-    } catch (err: any) {
-      toast({ title: "Failed to cancel", description: err.message, variant: "destructive" });
-    }
+    cancelRef.current = true;
+    toast({ title: "Cancelling: the current group will finish first" });
   };
 
   const getOutcomeBadge = (outcome: string | null) => {

@@ -120,8 +120,22 @@ export async function upsertHolmanRentalPoQueue(
         profitability_score     = COALESCE(EXCLUDED.profitability_score, holman_rental_po_queue.profitability_score),
         match_confidence        = COALESCE(EXCLUDED.match_confidence, holman_rental_po_queue.match_confidence),
         scraped_at              = EXCLUDED.scraped_at,
-        last_synced_at          = EXCLUDED.last_synced_at
+        last_synced_at          = EXCLUDED.last_synced_at,
+        status = CASE
+          WHEN holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
+           AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt
+          THEN 'pending'
+          ELSE holman_rental_po_queue.status
+        END,
+        approved_in_holman = CASE
+          WHEN holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
+           AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt
+          THEN false
+          ELSE holman_rental_po_queue.approved_in_holman
+        END
       WHERE holman_rental_po_queue.status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
+         OR (holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
+             AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt)
     `);
   }
 

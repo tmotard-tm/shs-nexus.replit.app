@@ -143,12 +143,17 @@ function shortPosition(raw?: string | null): string | null {
     if (/team lead/i.test(s)) return "HVAC Team Lead";
     if (/lead install/i.test(s)) return "HVAC Lead Installer";
     if (/assistant/i.test(s)) return "HVAC Assistant";
-    m = s.match(/(?:svc|service)\s*tech\w*\s*(I{1,3}|[0-9]+)/i);
+    // \b after tech(nician) + \b after the tier: without them the regex
+    // backtracks INTO the word "Technician" and captures its inner "i" as a
+    // fabricated tier ("HVAC Service Technician" -> "HVAC Tech I"). Untiered
+    // titles must fall through to the untiered label below.
+    m = s.match(/(?:svc|service)\s*tech(?:nician|s)?\b\s*(I{1,3}|[0-9]+)\b/i);
     if (m) return `HVAC Tech ${m[1].toUpperCase()}${suffix}`;
     if (/(?:svc|service)\s*tech/i.test(s)) return `HVAC Tech${suffix}`;
     return s.replace(/,.*$/, "").trim();
   }
-  m = s.match(/service\s*tech(?:nician)?\s*(LG|HV|HE|[0-9]+)/i);
+  // Same word-boundary guard: "Service Technician Helper" must NOT capture "HE".
+  m = s.match(/service\s*tech(?:nician|s)?\b\s*(LG|HV|HE|[0-9]+)\b/i);
   if (m) return `Service Tech ${m[1].toUpperCase()}${suffix}`;
   if (/team lead/i.test(s)) return "Team Lead";
   if (/lead\s*service\s*tech/i.test(s)) return "Lead Service Tech";
@@ -375,8 +380,11 @@ export default function FleetCommunications() {
   // open-rental set that drives the on-thread rental badge (isInRental), and
   // position matches the same shortened label shown on the row badge, so the
   // filters always match what the user sees — and they COMPOSE (e.g. "Service
-  // Tech 1" + "In rental"). Thread volume is small and we fetch up to 300
-  // above, so filtering the loaded list is complete (no pagination gap).
+  // Tech 1" + "In rental"). The server caps the list at 300 (newest first);
+  // that covers today's thread volume, but if the inbox ever exceeds the cap
+  // these client-side filters only see the newest 300 — the truncation banner
+  // below (threadsMaybeTruncated) surfaces that instead of silently hiding it.
+  const threadsMaybeTruncated = threads.length >= 300;
   const visibleThreads = threads
     .filter((t) => !inRentalOnly || isInRental(t))
     .filter((t) => positionFilter === "all" || shortPosition(t.position) === positionFilter);
@@ -858,6 +866,11 @@ export default function FleetCommunications() {
             </div>
           )}
           <div className="flex-1 overflow-y-auto">
+            {threadsMaybeTruncated && (
+              <div className="px-3 py-1.5 text-[11px] bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-400 border-b border-amber-200 dark:border-amber-500/20" data-testid="threads-truncated-warning">
+                Showing the 300 most recent conversations — older threads exist and are NOT included in these filters or "Select all". Narrow by search or district to reach them.
+              </div>
+            )}
             {threadsLoading ? (
               <div className="p-6 text-center text-slate-400"><Loader2 className="w-5 h-5 animate-spin mx-auto" /></div>
             ) : visibleThreads.length === 0 ? (
@@ -865,8 +878,8 @@ export default function FleetCommunications() {
                 <div className="h-12 w-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center mx-auto mb-3">
                   <MessageSquare className="w-5 h-5 text-slate-400" />
                 </div>
-                {inRentalOnly || positionFilter !== "all"
-                  ? `No conversations for ${positionFilter !== "all" ? `${positionFilter}s` : "technicians"}${inRentalOnly ? " in an open rental" : ""}`
+                {search.trim() || districtFilter.trim() || category !== "all" || unreadOnly || inRentalOnly || positionFilter !== "all"
+                  ? "No conversations match the current filters"
                   : "No conversations"}
               </div>
             ) : (
@@ -1282,8 +1295,17 @@ function RecipientPicker({
 }) {
   const [q, setQ] = useState("");
   const [districtFilter, setDistrictFilter] = useState("all");
-  const [positionFilter, setPositionFilter] = useState("all");
+  // Multi-select position filter: empty set = all positions. Toggling chips
+  // composes with district / rental / search (e.g. Tech 1 + Tech 2 + In rental).
+  const [positionSel, setPositionSel] = useState<Set<string>>(new Set());
   const [rentalOnly, setRentalOnly] = useState(false);
+  const togglePosition = (p: string) => {
+    setPositionSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+  };
 
   // Same open-rental LDAP set that drives the inbox rental badge/filter, passed
   // down from the page so the picker's "In rental" toggle matches it exactly.
@@ -1324,10 +1346,11 @@ function RecipientPicker({
     const dc = districtParam ? canonNum(districtParam) : "";
     return allContacts.filter((c) => {
       if (dc && canonNum(c.district) !== dc) return false;
-      // Composable audience filters: position + in-rental narrow the roster the
-      // same way the inbox filters do (e.g. "Service Tech 1" + "In rental"),
-      // then "Select all" targets exactly that slice.
-      if (positionFilter !== "all" && shortPosition(c.position) !== positionFilter) return false;
+      // Composable audience filters: positions (multi-select; empty = all) +
+      // in-rental narrow the roster the same way the inbox filters do (e.g.
+      // "Service Tech 1" + "Service Tech 2" + "In rental"), then "Select all"
+      // targets exactly that slice.
+      if (positionSel.size > 0 && !positionSel.has(shortPosition(c.position) ?? "")) return false;
       if (rentalOnly && !rentalSet.has(c.ldap.toUpperCase())) return false;
       if (term) {
         const hay = `${c.name || ""} ${c.ldap || ""} ${c.truckNumber || ""}`.toLowerCase();
@@ -1336,7 +1359,7 @@ function RecipientPicker({
       }
       return true;
     });
-  }, [allContacts, q, districtParam, positionFilter, rentalOnly, rentalSet]);
+  }, [allContacts, q, districtParam, positionSel, rentalOnly, rentalSet]);
 
   const toggle = (c: Contact) => {
     const next = new Map(selected);
@@ -1365,24 +1388,36 @@ function RecipientPicker({
           </SelectContent>
         </Select>
       </div>
-      <div className="flex gap-2 items-center">
-        <Select value={positionFilter} onValueChange={setPositionFilter}>
-          <SelectTrigger className="flex-1 min-w-0" data-testid="select-picker-position"><SelectValue placeholder="Position" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All positions</SelectItem>
-            {positionOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-          </SelectContent>
-        </Select>
+      <div className="flex gap-1.5 flex-wrap items-center">
         <button
           type="button"
           onClick={() => setRentalOnly((v) => !v)}
           disabled={rentalSet.size === 0}
           title={rentalSet.size === 0 ? "Open-rental list unavailable right now" : "Show only technicians currently in an open rental (matches the rental badge)"}
-          className={`px-3 h-9 rounded-md text-xs font-medium border transition-colors whitespace-nowrap flex-shrink-0 disabled:opacity-40 ${rentalOnly ? "bg-emerald-600 text-white border-emerald-600" : "bg-background border-input hover-elevate"}`}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap disabled:opacity-40 ${rentalOnly ? "bg-emerald-600 text-white border-emerald-600" : "bg-background hover-elevate"}`}
           data-testid="toggle-picker-rental"
         >
           In rental
         </button>
+        <button
+          type="button"
+          onClick={() => setPositionSel(new Set())}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${positionSel.size === 0 ? "bg-primary text-primary-foreground" : "bg-background hover-elevate"}`}
+          data-testid="picker-position-all"
+        >
+          All positions
+        </button>
+        {positionOptions.map((p) => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => togglePosition(p)}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${positionSel.has(p) ? "bg-indigo-600 text-white border-indigo-600" : "bg-background hover-elevate"}`}
+            data-testid={`picker-position-${p.replace(/\s+/g, "-")}`}
+          >
+            {p}
+          </button>
+        ))}
       </div>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -1668,9 +1703,20 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
   const [managerCc, setManagerCc] = useState(false);
   const [estimate, setEstimate] = useState<BulkEstimate | null>(null);
   const [ackStale, setAckStale] = useState(false);
-  const [rentalPosition, setRentalPosition] = useState("all");
+  // Multi-select position narrowing for the "In rental" audience: empty set =
+  // every open-rental tech; otherwise only techs whose position group matches
+  // one of the selected chips (e.g. Tech 1 + Tech 2 in a rental).
+  const [rentalPositions, setRentalPositions] = useState<Set<string>>(new Set());
+  const toggleRentalPosition = (p: string) => {
+    setRentalPositions((prev) => {
+      const next = new Set(prev);
+      if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+    setEstimate(null);
+  };
 
-  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPosition("all"); };
+  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPositions(new Set()); };
 
   // Contacts directory for the rental-mode position filter (ldap → position).
   // Same query key as the RecipientPicker's full fetch, so the cache is shared
@@ -1698,13 +1744,33 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
   }, [rentalLdaps, contactByLdap]);
 
   // Effective rental audience: everyone in an open rental, optionally narrowed
-  // to one position group. With a position selected, LDAPs whose position can't
-  // be resolved are excluded (we can't prove they match — never guess-send).
+  // to the selected position groups. With positions selected, LDAPs whose
+  // position can't be resolved are excluded (we can't prove they match — never
+  // guess-send).
   const rentalAudience = useMemo(() => {
     const all = rentalLdaps ?? [];
-    if (rentalPosition === "all") return all;
-    return all.filter((l) => shortPosition(contactByLdap.get(l.toUpperCase())?.position) === rentalPosition);
-  }, [rentalLdaps, rentalPosition, contactByLdap]);
+    if (rentalPositions.size === 0) return all;
+    return all.filter((l) => {
+      const p = shortPosition(contactByLdap.get(l.toUpperCase())?.position);
+      return !!p && rentalPositions.has(p);
+    });
+  }, [rentalLdaps, rentalPositions, contactByLdap]);
+
+  // Rental is the only bulk mode whose audience derives from LIVE query data
+  // rather than user-typed state, so if the open-rental list (or the contact
+  // directory feeding positions) refreshes underneath an already-previewed
+  // estimate — e.g. a network reconnect refetch — the Send button would fire
+  // confirmed:true against an audience the user never previewed. Guard: clear
+  // the estimate whenever the audience MEMBERSHIP actually changes (keyed on
+  // sorted content, not array identity, since the prop is rebuilt per render).
+  const rentalAudienceKey = useMemo(() => [...rentalAudience].sort().join("|"), [rentalAudience]);
+  const prevRentalAudienceKey = useRef(rentalAudienceKey);
+  useEffect(() => {
+    if (prevRentalAudienceKey.current !== rentalAudienceKey) {
+      prevRentalAudienceKey.current = rentalAudienceKey;
+      if (mode === "rental") setEstimate(null);
+    }
+  }, [rentalAudienceKey, mode]);
 
   // When opened from "Message selected", pre-seed the LDAP audience.
   useEffect(() => {
@@ -1715,17 +1781,27 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     }
   }, [open, presetLdaps]);
 
-  // Saved templates for the selected category. Picking one drops its raw body
-  // (tokens intact) into the message field; the server renders {name}/{truck}/…
+  // ALL saved templates, across every category (previously this fetched only
+  // the selected category, which hid every template until you happened to pick
+  // its exact category — e.g. the sole prod template lived under Rental
+  // Management while the dialog opens on General Fleet). Picking one drops its
+  // raw body (tokens intact) into the message field AND switches the send
+  // category to the template's own category; the server renders {name}/{truck}/…
   // per recipient at send time (see renderForContacts in routes.ts).
-  const { data: bulkTemplates = [] } = useQuery<Template[]>({
-    queryKey: ["/api/fs/comms/templates", "bulk", cat],
+  const { data: allTemplates = [] } = useQuery<Template[]>({
+    queryKey: ["/api/fs/comms/templates", "bulk-all"],
     queryFn: async () => {
-      const res = await apiRequest("GET", `/api/fs/comms/templates?category=${cat}`);
+      const res = await apiRequest("GET", `/api/fs/comms/templates`);
       return res.json();
     },
     enabled: open,
   });
+  // Selected-category templates first, then the rest (stable name order within
+  // each group — the endpoint already sorts by name).
+  const bulkTemplates = useMemo(() => {
+    return [...allTemplates].sort((a, b) => Number(b.category === cat) - Number(a.category === cat));
+  }, [allTemplates, cat]);
+  const categoryLabel = (v: string) => categories.find((c) => c.value === v)?.label ?? v;
 
   const buildPayload = (confirmed: boolean) => {
     const base: any = { category: cat, body: body.trim(), managerCc, confirmed };
@@ -1734,9 +1810,9 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     else if (mode === "trucks") base.truckNumbers = trucks.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     else if (mode === "rental") {
       base.ldaps = rentalAudience;
-      base.filterDesc = rentalPosition === "all"
+      base.filterDesc = rentalPositions.size === 0
         ? "technicians in an open rental"
-        : `${rentalPosition}s in an open rental`;
+        : `${Array.from(rentalPositions).sort().join(" / ")} techs in an open rental`;
     }
     else base.filter = { district: district.trim() };
     return base;
@@ -1807,19 +1883,33 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
           )}
           {mode === "rental" && (
             <div className="space-y-2">
-              <Select value={rentalPosition} onValueChange={(v) => { setRentalPosition(v); setEstimate(null); }}>
-                <SelectTrigger data-testid="select-bulk-rental-position"><SelectValue placeholder="All positions" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All positions</SelectItem>
-                  {rentalPositionOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-1.5 flex-wrap items-center" data-testid="bulk-rental-positions">
+                <button
+                  type="button"
+                  onClick={() => { setRentalPositions(new Set()); setEstimate(null); }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${rentalPositions.size === 0 ? "bg-primary text-primary-foreground" : "bg-background hover-elevate"}`}
+                  data-testid="bulk-rental-position-all"
+                >
+                  All positions
+                </button>
+                {rentalPositionOptions.map((p) => (
+                  <button
+                    key={p}
+                    type="button"
+                    onClick={() => toggleRentalPosition(p)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${rentalPositions.has(p) ? "bg-indigo-600 text-white border-indigo-600" : "bg-background hover-elevate"}`}
+                    data-testid={`bulk-rental-position-${p.replace(/\s+/g, "-")}`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
               <div className="text-sm text-slate-600 dark:text-slate-300 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2" data-testid="bulk-rental-info">
                 {(rentalLdaps?.length ?? 0) === 0
                   ? "No open-rental list is loaded right now (rental data may be unavailable). Try again shortly."
-                  : rentalPosition === "all"
+                  : rentalPositions.size === 0
                     ? `Targets every technician currently in an open rental — ${rentalLdaps!.length} on the rental list. Only active, messageable techs are sent (preview shows the exact count).`
-                    : `Targets ${rentalPosition}s currently in an open rental — ${rentalAudience.length} of ${rentalLdaps!.length} on the rental list match. Only active, messageable techs are sent (preview shows the exact count).`}
+                    : `Targets ${Array.from(rentalPositions).sort().join(" / ")} techs currently in an open rental — ${rentalAudience.length} of ${rentalLdaps!.length} on the rental list match. Only active, messageable techs are sent (preview shows the exact count).`}
               </div>
             </div>
           )}
@@ -1832,18 +1922,20 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
                   <button
                     key={t.id}
                     type="button"
-                    onClick={() => { setBody(t.body); setEstimate(null); }}
+                    onClick={() => { setBody(t.body); if (t.category !== cat) setCat(t.category); setEstimate(null); }}
+                    title={t.category !== cat ? `Applies this template and switches the category to ${categoryLabel(t.category)}` : undefined}
                     className="text-xs px-2.5 py-1 rounded-full border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
                     data-testid={`bulk-template-${t.id}`}
                   >
                     {t.name}
+                    {t.category !== cat && <span className="ml-1 text-[10px] text-slate-400 dark:text-slate-500">· {categoryLabel(t.category)}</span>}
                   </button>
                 ))}
               </div>
             </div>
           ) : (
             <div className="text-xs text-slate-400 dark:text-slate-500" data-testid="bulk-no-templates">
-              No saved templates for this category yet — type your message below, or an admin can add templates from the Templates panel.
+              No saved templates yet — type your message below, or an admin can add templates from the Templates panel.
             </div>
           )}
 

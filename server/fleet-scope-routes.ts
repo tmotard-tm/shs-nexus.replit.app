@@ -5667,16 +5667,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       };
       batchJobs.set(batchId, job);
 
-      // Process in background using a 5-slot concurrency pool.
-      // At most 5 ElevenLabs API requests are in-flight at any instant.
-      // As soon as one slot finishes (success or fail) the next truck is
-      // picked up immediately — no artificial inter-chunk delays.
-      // IMPORTANT: this MUST stay fire-and-forget (no await). Awaiting the
-      // whole batch holds the HTTP response open for minutes; the Replit
-      // autoscale proxy kills long responses (~60-100s), the client sees an
-      // error while the server keeps dialing, and a user retry double-calls
-      // real shops/techs. The client polls /batch-call/status instead.
-      void (async () => {
+      // Process with a 5-slot concurrency pool. At most 5 ElevenLabs API
+      // requests are in-flight at any instant; as soon as one slot finishes
+      // the next truck is picked up immediately.
+      // REQUEST-BOUND ON PURPOSE (await, not fire-and-forget): the client
+      // sends Select-All batches in chunks of <=15 trucks per request, so each
+      // request completes in roughly 10-30s, safely inside the autoscale proxy
+      // limit (~60-100s). Detached background loops die on autoscale
+      // scale-down, and their in-memory job state 404s when status polls land
+      // on a different instance; that was the original large-batch failure.
+      // If a chunk ever times out client-side, the 30-minute re-dial guard in
+      // processCall makes the retry safe (no double-dialing real shops/techs).
+      // Do NOT revert this to void/fire-and-forget.
+      await (async () => {
         const CONCURRENCY = 5;
         const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
         const queue = [...truckIds];
@@ -5915,7 +5918,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[BatchCaller] Batch ${batchId} complete: ${job.completed} called, ${job.failed} failed out of ${job.total}`);
       })();
 
-      res.json({ batchId, total: truckIds.length });
+      res.json({ batchId, total: truckIds.length, completed: job.completed, failed: job.failed, skipped: job.skipped, results: job.results, done: true });
     } catch (error: any) {
       console.error("[BatchCaller] Error:", error.message);
       res.status(500).json({ message: error.message });

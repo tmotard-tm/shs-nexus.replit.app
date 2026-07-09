@@ -44,31 +44,40 @@ export async function getPositionsForLdaps(
     ),
   );
   if (!uniq.length) return out;
-  try {
-    const res: any = await fsDb.execute(sql`
-      SELECT ldap, job_title FROM (
-        SELECT UPPER(TRIM(tech_racfid)) AS ldap, job_title,
-               ROW_NUMBER() OVER (
-                 PARTITION BY UPPER(TRIM(tech_racfid))
-                 ORDER BY (employment_status = 'A') DESC NULLS LAST,
-                          effective_date DESC NULLS LAST
-               ) AS rn
-        FROM all_techs
-        WHERE job_title IS NOT NULL AND TRIM(job_title) <> ''
-          AND UPPER(TRIM(tech_racfid)) IN (${sql.join(
-            uniq.map((l) => sql`${l}`),
-            sql`, `,
-          )})
-      ) t WHERE rn = 1
-    `);
-    const rows: any[] = res?.rows ?? res ?? [];
-    for (const r of rows) {
-      const l = r.ldap ? String(r.ldap).toUpperCase() : "";
-      if (l && r.job_title) out.set(l, String(r.job_title));
+  const query = () => fsDb.execute(sql`
+    SELECT ldap, job_title FROM (
+      SELECT UPPER(TRIM(tech_racfid)) AS ldap, job_title,
+             ROW_NUMBER() OVER (
+               PARTITION BY UPPER(TRIM(tech_racfid))
+               ORDER BY (employment_status = 'A') DESC NULLS LAST,
+                        effective_date DESC NULLS LAST
+             ) AS rn
+      FROM all_techs
+      WHERE job_title IS NOT NULL AND TRIM(job_title) <> ''
+        AND UPPER(TRIM(tech_racfid)) IN (${sql.join(
+          uniq.map((l) => sql`${l}`),
+          sql`, `,
+        )})
+    ) t WHERE rn = 1
+  `);
+  // One immediate retry on failure (mirrors the module's retryOnceOnTransient
+  // pattern for inbox-critical reads — a single Neon WebSocket drop would
+  // otherwise null every position and blank a position-filtered inbox for a
+  // whole poll cycle). Position stays a display nicety: after the retry we
+  // still swallow the error rather than break the inbox.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res: any = await query();
+      const rows: any[] = res?.rows ?? res ?? [];
+      for (const r of rows) {
+        const l = r.ldap ? String(r.ldap).toUpperCase() : "";
+        if (l && r.job_title) out.set(l, String(r.job_title));
+      }
+      return out;
+    } catch (e: any) {
+      if (attempt === 0) continue;
+      console.warn("[Fleet-Comms] getPositionsForLdaps failed after retry:", e?.message);
     }
-  } catch (e: any) {
-    // Position is a display nicety — never let a roster read break the inbox.
-    console.warn("[Fleet-Comms] getPositionsForLdaps failed:", e?.message);
   }
   return out;
 }
