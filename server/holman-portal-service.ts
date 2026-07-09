@@ -604,7 +604,65 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     }
 
     const html = await (resp as any).text();
-    const gridRows = parseGridRows(html);
+
+    // Walk ALL grid pages. The grid serves 20 rows per page with a WebForms
+    // pager (KPIDetailsGrid$NextPageBtn postback); rental POs on page 2+ were
+    // previously invisible to the queue ("missing rentals", found 2026-07-09).
+    // NextPageBtn renders with class "aspNetDisabled" (and no postback href)
+    // on the last page — that is the stop signal.
+    const allGridRows = [...parseGridRows(html)];
+    let pageHtml = html;
+    let pagesFetched = 1;
+    const MAX_PAGES = 10;
+    while (pagesFetched < MAX_PAGES) {
+      const nextBtn = pageHtml.match(/<a[^>]*id="KPIDetailsGrid_NextPageBtn"[^>]*>/i)?.[0] ?? "";
+      if (!nextBtn || /aspNetDisabled/i.test(nextBtn) || !/DoPostBack/i.test(nextBtn)) break;
+      const body = new URLSearchParams({
+        __EVENTTARGET: "KPIDetailsGrid$NextPageBtn",
+        __EVENTARGUMENT: "",
+        __VIEWSTATE: extractHidden(pageHtml, "__VIEWSTATE"),
+        __VIEWSTATEGENERATOR: extractHidden(pageHtml, "__VIEWSTATEGENERATOR"),
+        __EVENTVALIDATION: extractHidden(pageHtml, "__EVENTVALIDATION"),
+        "KPIDetailsGrid$mailableGridSortColumn": extractHidden(pageHtml, "KPIDetailsGrid$mailableGridSortColumn"),
+        "KPIDetailsGrid$mailableGridColumns": extractHidden(pageHtml, "KPIDetailsGrid$mailableGridColumns"),
+        "KPIDetailsGrid$mailableGridColumnOrder": extractHidden(pageHtml, "KPIDetailsGrid$mailableGridColumnOrder"),
+        "KPIDetailsGrid$showRecycleBin": extractHidden(pageHtml, "KPIDetailsGrid$showRecycleBin") || "True",
+        "KPIDetailsGrid$GotoPageTxt": "",
+      });
+      const pResp = await fetch(listingUrl, {
+        method: "POST",
+        headers: {
+          Cookie: _sessionCookies,
+          "User-Agent": UA,
+          Referer: listingUrl,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: body.toString(),
+        redirect: "follow",
+      });
+      _sessionCookies = mergeCookies(_sessionCookies, pResp);
+      if (!pResp.ok || /LoginForm\.aspx/i.test((pResp as any).url ?? "")) {
+        console.warn(`[HolmanPortal] pager POST for page ${pagesFetched + 1} failed (HTTP ${pResp.status}) — continuing with ${pagesFetched} page(s)`);
+        break;
+      }
+      pageHtml = await pResp.text();
+      const rows = parseGridRows(pageHtml);
+      if (rows.length === 0) break;
+      allGridRows.push(...rows);
+      pagesFetched++;
+    }
+    if (pagesFetched >= MAX_PAGES) {
+      console.warn(`[HolmanPortal] stopped at the ${MAX_PAGES}-page cap — grid may hold even more rows`);
+    }
+
+    // Dedupe by row key: a row can shift between pages while we walk them.
+    const seenRowKeys = new Set<string>();
+    const gridRows = allGridRows.filter((r) => {
+      const k = r.key || r.cells.join("|");
+      if (seenRowKeys.has(k)) return false;
+      seenRowKeys.add(k);
+      return true;
+    });
 
     const pos: HolmanPortalPO[] = [];
     for (const { cells, key } of gridRows) {
@@ -643,7 +701,7 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
       });
     }
 
-    console.log(`[HolmanPortal] ${gridRows.length} grid rows → ${pos.length} rental POs`);
+    console.log(`[HolmanPortal] ${gridRows.length} grid rows across ${pagesFetched} page(s) → ${pos.length} rental POs`);
     return { rows: pos, scrapedAt };
   } catch (err: any) {
     console.error("[HolmanPortal] scrapeAwaitingAuth:", err.message);

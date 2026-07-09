@@ -50,7 +50,6 @@ import {
   AlertTriangle,
   Tag,
   ArrowLeft,
-  RefreshCw,
 } from "lucide-react";
 
 interface CategoryOpt {
@@ -72,7 +71,6 @@ interface Thread {
   district: string | null;
   truckNumber: string | null;
   position?: string | null;
-  emplStatus?: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   lastCategory: string | null;
@@ -461,30 +459,6 @@ export default function FleetCommunications() {
     onError: (e: any) => toast({ title: "Bulk archive failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
-  // Manual contacts refresh (privileged) — same guarded path as the daily sync:
-  // pulls the roster + TPMS phone data and reconciles fs_comms_contacts. The
-  // Snowflake pull takes ~30-60s, so keep the button in a spinner state.
-  const syncContactsMutation = useMutation({
-    mutationFn: async () => (await apiRequest("POST", "/api/fs/comms/sync")).json(),
-    onSuccess: (d: any) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/health"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/contacts"] });
-      if (d?.success === false || d?.skipped) {
-        toast({
-          title: "Sync skipped",
-          description: String(d?.skipReason || d?.message || "The sync did not run."),
-        });
-        return;
-      }
-      toast({
-        title: "Contacts synced",
-        description: `${d?.fetched ?? 0} techs checked · ${d?.updated ?? 0} updated · ${d?.phoneChanges ?? 0} phone change${(d?.phoneChanges ?? 0) === 1 ? "" : "s"}`,
-      });
-    },
-    onError: (e: any) => toast({ title: "Sync failed", description: String(e?.message || e), variant: "destructive" }),
-  });
-
   const markRead = useMutation({
     mutationFn: (id: string) => apiRequest("POST", `/api/fs/comms/threads/${id}/read`),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] }),
@@ -717,23 +691,6 @@ export default function FleetCommunications() {
             </div>
           )}
           {config?.canManage && (
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => syncContactsMutation.mutate()}
-              disabled={syncContactsMutation.isPending}
-              className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
-              data-testid="button-sync-contacts"
-            >
-              {syncContactsMutation.isPending ? (
-                <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
-              ) : (
-                <RefreshCw className="w-4 h-4 mr-1.5" />
-              )}
-              {syncContactsMutation.isPending ? "Syncing…" : "Sync contacts"}
-            </Button>
-          )}
-          {config?.canManage && (
             <Button size="sm" variant="outline" onClick={() => setTemplatesOpen(true)} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-manage-templates">
               <Settings2 className="w-4 h-4 mr-1.5" /> Templates
             </Button>
@@ -958,7 +915,6 @@ export default function FleetCommunications() {
                           <span className={`text-sm truncate ${unread ? "font-bold text-slate-900 dark:text-white" : "font-semibold text-slate-800 dark:text-slate-100"}`}>
                             {displayName}
                           </span>
-                          <EmplStatusBadge status={t.emplStatus} />
                           {isInRental(t) && <RentalBadge />}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -1013,7 +969,6 @@ export default function FleetCommunications() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-base text-slate-900 dark:text-white">{thread.contactName || thread.ldap || "Unknown"}</span>
                       {thread.ldap && <Badge variant="secondary" className="text-xs">{thread.ldap}</Badge>}
-                      <EmplStatusBadge status={thread.emplStatus ?? detail?.contact?.emplStatus} />
                       {shortPosition(thread.position) && <Badge className="text-xs bg-indigo-100 hover:bg-indigo-100 text-indigo-700 border-0 dark:bg-indigo-500/15 dark:text-indigo-300">{shortPosition(thread.position)}</Badge>}
                       {isInRental(thread) && <RentalBadge />}
                       {thread.optedOut && <Badge variant="destructive" className="text-xs">Opted out (STOP)</Badge>}
@@ -1313,11 +1268,11 @@ function EmplStatusBadge({ status }: { status?: string | null }) {
   if (!meta) return null;
   return (
     <span
-      className={`shrink-0 inline-flex items-center justify-center rounded px-1 py-0.5 min-w-[18px] text-[10px] font-bold leading-none border ${meta.cls}`}
-      title={`Employment status: ${meta.label} (${key})`}
+      className={`shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border ${meta.cls}`}
+      title={`Employment status: ${meta.label}`}
       data-testid={`empl-status-${key}`}
     >
-      {key}
+      {meta.label}
     </span>
   );
 }
@@ -1343,11 +1298,22 @@ function RecipientPicker({
   // Multi-select position filter: empty set = all positions. Toggling chips
   // composes with district / rental / search (e.g. Tech 1 + Tech 2 + In rental).
   const [positionSel, setPositionSel] = useState<Set<string>>(new Set());
+  // Multi-select employment-status filter (A/L/P/S…): empty set = all. Lets the
+  // sender scope a blast to Active only, or exclude Leave-of-Absence techs, and
+  // composes with position / rental / district / search.
+  const [statusSel, setStatusSel] = useState<Set<string>>(new Set());
   const [rentalOnly, setRentalOnly] = useState(false);
   const togglePosition = (p: string) => {
     setPositionSel((prev) => {
       const next = new Set(prev);
       if (next.has(p)) next.delete(p); else next.add(p);
+      return next;
+    });
+  };
+  const toggleStatus = (s: string) => {
+    setStatusSel((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s); else next.add(s);
       return next;
     });
   };
@@ -1385,17 +1351,29 @@ function RecipientPicker({
     return Array.from(set).sort();
   }, [allContacts]);
 
+  // Status options present in the roster, in canonical order (Active first).
+  const statusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of allContacts) {
+      const s = (c.emplStatus || "").trim().toUpperCase();
+      if (s) set.add(s);
+    }
+    const order = ["A", "L", "P", "S", "T"];
+    return Array.from(set).sort((a, b) => ((order.indexOf(a) + 1) || 99) - ((order.indexOf(b) + 1) || 99));
+  }, [allContacts]);
+
   const contacts = useMemo(() => {
     const term = q.trim().toLowerCase();
     const termDigits = q.replace(/\D/g, "");
     const dc = districtParam ? canonNum(districtParam) : "";
     return allContacts.filter((c) => {
       if (dc && canonNum(c.district) !== dc) return false;
-      // Composable audience filters: positions (multi-select; empty = all) +
-      // in-rental narrow the roster the same way the inbox filters do (e.g.
-      // "Service Tech 1" + "Service Tech 2" + "In rental"), then "Select all"
+      // Composable audience filters: positions + statuses (multi-select; empty
+      // = all) + in-rental narrow the roster the same way the inbox filters do
+      // (e.g. "Service Tech 2" + "Active" + "In rental"), then "Select all"
       // targets exactly that slice.
       if (positionSel.size > 0 && !positionSel.has(shortPosition(c.position) ?? "")) return false;
+      if (statusSel.size > 0 && !statusSel.has((c.emplStatus || "").trim().toUpperCase())) return false;
       if (rentalOnly && !rentalSet.has(c.ldap.toUpperCase())) return false;
       if (term) {
         const hay = `${c.name || ""} ${c.ldap || ""} ${c.truckNumber || ""}`.toLowerCase();
@@ -1404,7 +1382,7 @@ function RecipientPicker({
       }
       return true;
     });
-  }, [allContacts, q, districtParam, positionSel, rentalOnly, rentalSet]);
+  }, [allContacts, q, districtParam, positionSel, statusSel, rentalOnly, rentalSet]);
 
   const toggle = (c: Contact) => {
     const next = new Map(selected);
@@ -1464,6 +1442,28 @@ function RecipientPicker({
           </button>
         ))}
       </div>
+      <div className="flex gap-1.5 flex-wrap items-center">
+        <span className="text-xs text-muted-foreground">Status:</span>
+        <button
+          type="button"
+          onClick={() => setStatusSel(new Set())}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${statusSel.size === 0 ? "bg-primary text-primary-foreground" : "bg-background hover-elevate"}`}
+          data-testid="picker-status-all"
+        >
+          All statuses
+        </button>
+        {statusOptions.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => toggleStatus(s)}
+            className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${statusSel.has(s) ? "bg-amber-600 text-white border-amber-600" : "bg-background hover-elevate"}`}
+            data-testid={`picker-status-${s}`}
+          >
+            {EMPL_STATUS_META[s]?.label ?? s}
+          </button>
+        ))}
+      </div>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>{isFetching && allContacts.length === 0 ? "Loading technicians…" : `${contacts.length} of ${allContacts.length} technician${allContacts.length === 1 ? "" : "s"}`}</span>
@@ -1473,13 +1473,13 @@ function RecipientPicker({
         </div>
       </div>
 
-      <div className="max-h-48 overflow-y-auto space-y-1 border rounded p-1">
+      <div className="max-h-72 overflow-y-auto space-y-1 border rounded p-1">
         {isFetching && allContacts.length === 0 ? (
           <div className="text-xs text-muted-foreground p-2">Loading technicians…</div>
         ) : contacts.length === 0 ? (
           <div className="text-xs text-muted-foreground p-2">No technicians match.</div>
         ) : (
-          contacts.slice(0, 200).map((c) => {
+          contacts.map((c) => {
             const on = selected.has(c.ldap);
             return (
               <button
@@ -1505,28 +1505,54 @@ function RecipientPicker({
             );
           })
         )}
-        {contacts.length > 200 && (
-          <div className="text-xs text-muted-foreground p-2" data-testid="picker-more-hint">
-            Showing first 200 of {contacts.length}. Refine your search (name, LDAP, truck #, or phone), pick a district, or use “Select all”.
-          </div>
-        )}
       </div>
 
       {count > 0 && (
         <div className="rounded border bg-muted/40 p-2 space-y-1" data-testid="picker-selected">
-          <div className="text-xs font-medium">{count} recipient{count === 1 ? "" : "s"} selected</div>
-          <div className="max-h-24 overflow-y-auto space-y-1">
-            {selectedList.slice(0, 50).map((c) => (
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="text-xs font-medium">{count} recipient{count === 1 ? "" : "s"} selected</div>
+            {/* One-click exclusion of non-Active statuses from the selection —
+                the full list below shows every selected tech so the sender can
+                verify exactly who will be targeted before previewing. */}
+            <div className="flex gap-1.5 flex-wrap">
+              {(() => {
+                const byStatus = new Map<string, number>();
+                for (const c of selectedList) {
+                  const s = (c.emplStatus || "").trim().toUpperCase();
+                  if (s && s !== "A") byStatus.set(s, (byStatus.get(s) || 0) + 1);
+                }
+                return Array.from(byStatus.entries()).map(([s, n]) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      const next = new Map(selected);
+                      for (const [ldap, c] of Array.from(next.entries())) {
+                        if ((c.emplStatus || "").trim().toUpperCase() === s) next.delete(ldap);
+                      }
+                      onChange(next);
+                    }}
+                    className="px-2 py-0.5 rounded-full text-[11px] font-medium border border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors whitespace-nowrap"
+                    data-testid={`picker-remove-status-${s}`}
+                  >
+                    Remove {EMPL_STATUS_META[s]?.label ?? s} ({n})
+                  </button>
+                ));
+              })()}
+            </div>
+          </div>
+          <div className="max-h-64 overflow-y-auto space-y-1">
+            {selectedList.map((c) => (
               <div key={c.ldap} className="flex items-center justify-between text-xs gap-2">
                 <span className="flex items-center gap-1.5 min-w-0">
                   <span className="truncate">{c.name || c.ldap}</span>
                   <EmplStatusBadge status={c.emplStatus} />
+                  {shortPosition(c.position) && <span className="shrink-0 inline-flex items-center rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">{shortPosition(c.position)}</span>}
                   <span className="text-muted-foreground truncate">→ Lead: {c.managerName || "none on file"}</span>
                 </span>
                 <button type="button" onClick={() => toggle(c)} className="text-muted-foreground hover:text-foreground shrink-0" data-testid={`picker-remove-${c.ldap}`}>✕</button>
               </div>
             ))}
-            {count > 50 && <div className="text-xs text-muted-foreground">+ {count - 50} more selected</div>}
           </div>
         </div>
       )}
@@ -1647,7 +1673,7 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>New message</DialogTitle></DialogHeader>
         <div className="space-y-3">
           {/* Recipient: pick from the technician roster, or text an arbitrary number */}
@@ -1760,8 +1786,19 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     });
     setEstimate(null);
   };
+  // Multi-select employment-status narrowing for the rental audience (e.g.
+  // exclude Leave-of-Absence techs from a rental blast). Empty set = all.
+  const [rentalStatuses, setRentalStatuses] = useState<Set<string>>(new Set());
+  const toggleRentalStatus = (s: string) => {
+    setRentalStatuses((prev) => {
+      const next = new Set(prev);
+      if (next.has(s)) next.delete(s); else next.add(s);
+      return next;
+    });
+    setEstimate(null);
+  };
 
-  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPositions(new Set()); };
+  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPositions(new Set()); setRentalStatuses(new Set()); setRentalExcluded(new Set()); };
 
   // Contacts directory for the rental-mode position filter (ldap → position).
   // Same query key as the RecipientPicker's full fetch, so the cache is shared
@@ -1788,18 +1825,53 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     return Array.from(set).sort();
   }, [rentalLdaps, contactByLdap]);
 
+  // Status options among the open-rental techs specifically.
+  const rentalStatusOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of rentalLdaps ?? []) {
+      const s = (contactByLdap.get(l.toUpperCase())?.emplStatus || "").trim().toUpperCase();
+      if (s) set.add(s);
+    }
+    const order = ["A", "L", "P", "S", "T"];
+    return Array.from(set).sort((a, b) => ((order.indexOf(a) + 1) || 99) - ((order.indexOf(b) + 1) || 99));
+  }, [rentalLdaps, contactByLdap]);
+
   // Effective rental audience: everyone in an open rental, optionally narrowed
-  // to the selected position groups. With positions selected, LDAPs whose
-  // position can't be resolved are excluded (we can't prove they match — never
-  // guess-send).
+  // to the selected position groups and/or employment statuses. With a filter
+  // selected, LDAPs whose position/status can't be resolved are excluded (we
+  // can't prove they match — never guess-send).
   const rentalAudience = useMemo(() => {
     const all = rentalLdaps ?? [];
-    if (rentalPositions.size === 0) return all;
     return all.filter((l) => {
-      const p = shortPosition(contactByLdap.get(l.toUpperCase())?.position);
-      return !!p && rentalPositions.has(p);
+      const c = contactByLdap.get(l.toUpperCase());
+      if (rentalPositions.size > 0) {
+        const p = shortPosition(c?.position);
+        if (!p || !rentalPositions.has(p)) return false;
+      }
+      if (rentalStatuses.size > 0) {
+        const s = (c?.emplStatus || "").trim().toUpperCase();
+        if (!s || !rentalStatuses.has(s)) return false;
+      }
+      return true;
     });
-  }, [rentalLdaps, rentalPositions, contactByLdap]);
+  }, [rentalLdaps, rentalPositions, rentalStatuses, contactByLdap]);
+
+  // Per-person opt-out on top of the filters: every tech in the rental audience
+  // is CHECKED (included) by default; unchecking excludes just that tech from
+  // the send. The effective audience below is what preview + send both use.
+  const [rentalExcluded, setRentalExcluded] = useState<Set<string>>(new Set());
+  const toggleRentalExclude = (l: string) => {
+    setRentalExcluded((prev) => {
+      const next = new Set(prev);
+      if (next.has(l)) next.delete(l); else next.add(l);
+      return next;
+    });
+    setEstimate(null);
+  };
+  const rentalEffective = useMemo(
+    () => rentalAudience.filter((l) => !rentalExcluded.has(l)),
+    [rentalAudience, rentalExcluded],
+  );
 
   // Rental is the only bulk mode whose audience derives from LIVE query data
   // rather than user-typed state, so if the open-rental list (or the contact
@@ -1808,7 +1880,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
   // confirmed:true against an audience the user never previewed. Guard: clear
   // the estimate whenever the audience MEMBERSHIP actually changes (keyed on
   // sorted content, not array identity, since the prop is rebuilt per render).
-  const rentalAudienceKey = useMemo(() => [...rentalAudience].sort().join("|"), [rentalAudience]);
+  const rentalAudienceKey = useMemo(() => [...rentalEffective].sort().join("|"), [rentalEffective]);
   const prevRentalAudienceKey = useRef(rentalAudienceKey);
   useEffect(() => {
     if (prevRentalAudienceKey.current !== rentalAudienceKey) {
@@ -1854,10 +1926,11 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     else if (mode === "ldaps") base.ldaps = ldaps.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     else if (mode === "trucks") base.truckNumbers = trucks.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     else if (mode === "rental") {
-      base.ldaps = rentalAudience;
-      base.filterDesc = rentalPositions.size === 0
-        ? "technicians in an open rental"
-        : `${Array.from(rentalPositions).sort().join(" / ")} techs in an open rental`;
+      base.ldaps = rentalEffective;
+      const posDesc = rentalPositions.size === 0 ? "technicians" : `${Array.from(rentalPositions).sort().join(" / ")} techs`;
+      const statusDesc = rentalStatuses.size === 0 ? "" : ` (${Array.from(rentalStatuses).sort().map((s) => EMPL_STATUS_META[s]?.label ?? s).join(" / ")} only)`;
+      const exclDesc = rentalExcluded.size === 0 ? "" : `, ${rentalExcluded.size} manually excluded`;
+      base.filterDesc = `${posDesc} in an open rental${statusDesc}${exclDesc}`;
     }
     else base.filter = { district: district.trim() };
     return base;
@@ -1867,7 +1940,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     mode === "list" ? selected.size > 0
     : mode === "ldaps" ? !!ldaps.trim()
     : mode === "trucks" ? !!trucks.trim()
-    : mode === "rental" ? rentalAudience.length > 0
+    : mode === "rental" ? rentalEffective.length > 0
     : !!district.trim();
 
   const previewMut = useMutation({
@@ -1893,7 +1966,10 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
-      <DialogContent>
+      {/* The audience lists can make this dialog taller than the viewport —
+          without its own scroll the template chips / message box / send button
+          get clipped off-screen (looked like they were "removed"). */}
+      <DialogContent className="max-w-xl max-h-[90dvh] overflow-y-auto">
         <DialogHeader><DialogTitle>Bulk message</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <Select value={cat} onValueChange={setCat}>
@@ -1949,13 +2025,69 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
                   </button>
                 ))}
               </div>
+              <div className="flex gap-1.5 flex-wrap items-center" data-testid="bulk-rental-statuses">
+                <span className="text-xs text-muted-foreground">Status:</span>
+                <button
+                  type="button"
+                  onClick={() => { setRentalStatuses(new Set()); setEstimate(null); }}
+                  className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${rentalStatuses.size === 0 ? "bg-primary text-primary-foreground" : "bg-background hover-elevate"}`}
+                  data-testid="bulk-rental-status-all"
+                >
+                  All statuses
+                </button>
+                {rentalStatusOptions.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => toggleRentalStatus(s)}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors whitespace-nowrap ${rentalStatuses.has(s) ? "bg-amber-600 text-white border-amber-600" : "bg-background hover-elevate"}`}
+                    data-testid={`bulk-rental-status-${s}`}
+                  >
+                    {EMPL_STATUS_META[s]?.label ?? s}
+                  </button>
+                ))}
+              </div>
               <div className="text-sm text-slate-600 dark:text-slate-300 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2" data-testid="bulk-rental-info">
                 {(rentalLdaps?.length ?? 0) === 0
                   ? "No open-rental list is loaded right now (rental data may be unavailable). Try again shortly."
-                  : rentalPositions.size === 0
-                    ? `Targets every technician currently in an open rental — ${rentalLdaps!.length} on the rental list. Only active, messageable techs are sent (preview shows the exact count).`
-                    : `Targets ${Array.from(rentalPositions).sort().join(" / ")} techs currently in an open rental — ${rentalAudience.length} of ${rentalLdaps!.length} on the rental list match. Only active, messageable techs are sent (preview shows the exact count).`}
+                  : `Sending to ${rentalEffective.length} of ${rentalLdaps!.length} technicians in an open rental${rentalExcluded.size > 0 ? ` (${rentalExcluded.size} unchecked)` : ""}. Uncheck anyone below to exclude them. Only active, messageable techs are sent (preview shows the exact count).`}
               </div>
+              {/* Selectable recipient list — every tech in the current rental
+                  audience, CHECKED by default. Unchecking a row excludes that
+                  tech from both preview and send. */}
+              {rentalAudience.length > 0 && (
+                <div data-testid="bulk-rental-audience-list">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground mb-1">
+                    <span>{rentalEffective.length} of {rentalAudience.length} checked</span>
+                    <div className="flex gap-3">
+                      <button type="button" className="underline hover:no-underline" onClick={() => { setRentalExcluded(new Set()); setEstimate(null); }} data-testid="bulk-rental-check-all">Check all</button>
+                      <button type="button" className="underline hover:no-underline" onClick={() => { setRentalExcluded(new Set(rentalAudience)); setEstimate(null); }} data-testid="bulk-rental-uncheck-all">Uncheck all</button>
+                    </div>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto space-y-1 border rounded p-1">
+                    {rentalAudience.map((l) => {
+                      const c = contactByLdap.get(l.toUpperCase());
+                      const on = !rentalExcluded.has(l);
+                      return (
+                        <button
+                          type="button"
+                          key={l}
+                          onClick={() => toggleRentalExclude(l)}
+                          className={`w-full text-left flex items-center gap-1.5 text-xs px-1.5 py-1 rounded border ${on ? "border-primary bg-primary/5" : "border-transparent opacity-60 hover-elevate"}`}
+                          data-testid={`bulk-rental-recipient-${l}`}
+                        >
+                          <Checkbox checked={on} className="pointer-events-none shrink-0" />
+                          <span className="truncate">{c?.name || l}</span>
+                          <span className="text-muted-foreground font-mono text-[10px] shrink-0">{l}</span>
+                          <EmplStatusBadge status={c?.emplStatus} />
+                          {shortPosition(c?.position) && <span className="shrink-0 inline-flex items-center rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">{shortPosition(c?.position)}</span>}
+                          {!c && <span className="text-[10px] text-amber-600 dark:text-amber-400 shrink-0">not in contact directory</span>}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
