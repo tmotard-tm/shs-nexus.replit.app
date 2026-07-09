@@ -44,3 +44,4 @@
 - [Prod sync schedule reality](prod-sync-schedule-reality.md) — in-process sync-scheduler timers barely fire on autoscale (watermark polls NEVER ran in prod); audit via sync_logs + max(updated_at), not the coded schedule.
 - [TPMS tech-specialty tier-3 snapshot](tpms-tech-specialty-snapshot.md) — TPMS_EXTRACT_LAST_ASSIGNED = last tech EVER on truck (never clears); tier-3 fallback shows it as current assignee → ghost assignments; live-verify via /techinfo/{truckNo} first.
 - [OpenAI keys degrade silently](openai-keys-fail-soft.md) — both OpenAI features are fail-soft; out-of-quota keys pass /v1/models but 429 on completions, so "broken AI summaries" = check billing first, not code.
+- [Batch outbound-call safety](batch-outbound-call-safety.md) — never await a phone-call batch in the handler (proxy kill → retry → double-dial); real fix = DB dedup guard incl. timeout-ambiguous dials logged guard-visible.

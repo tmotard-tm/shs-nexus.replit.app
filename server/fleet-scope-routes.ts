@@ -5618,21 +5618,38 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     total: number;
     completed: number;
     failed: number;
+    skipped: number;
     inProgress: number;
     cancelled: boolean;
     results: Array<{ truckId: string; truckNumber: string; status: string; conversationId?: string; error?: string }>;
     startedAt: Date;
   }>();
 
+  // How recently a truck must have been dialed (same call type) for the batch
+  // engine to skip re-dialing it. Protects against accidental double-dials from
+  // user retries after a transport error — the server may have placed the calls
+  // even though the client saw a failure.
+  const BATCH_REDIAL_GUARD_MS = 30 * 60 * 1000; // 30 minutes
+
   app.post("/batch-call/start", async (req, res) => {
     try {
-      const { truckIds, callType } = req.body;
-      if (!truckIds?.length || !callType) {
+      const { truckIds: rawTruckIds, callType } = req.body;
+      if (!rawTruckIds?.length || !callType) {
         return res.status(400).json({ message: "truckIds and callType are required" });
       }
+      // Dedupe — duplicate ids in one request could each pass the re-dial guard
+      // before either has written a call log.
+      const truckIds: string[] = Array.from(new Set(rawTruckIds as string[]));
       if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
       }
+
+      // Prune finished/stale jobs so the Map doesn't grow forever
+      const PRUNE_AGE_MS = 6 * 60 * 60 * 1000; // 6 hours
+      const now = Date.now();
+      Array.from(batchJobs.entries()).forEach(([id, j]) => {
+        if (now - j.startedAt.getTime() > PRUNE_AGE_MS) batchJobs.delete(id);
+      });
 
       const batchId = `batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const job = {
@@ -5642,6 +5659,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         total: truckIds.length,
         completed: 0,
         failed: 0,
+        skipped: 0,
         inProgress: 0,
         cancelled: false,
         results: [] as Array<{ truckId: string; truckNumber: string; status: string; conversationId?: string; error?: string }>,
@@ -5653,7 +5671,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // At most 5 ElevenLabs API requests are in-flight at any instant.
       // As soon as one slot finishes (success or fail) the next truck is
       // picked up immediately — no artificial inter-chunk delays.
-      await (async () => {
+      // IMPORTANT: this MUST stay fire-and-forget (no await). Awaiting the
+      // whole batch holds the HTTP response open for minutes; the Replit
+      // autoscale proxy kills long responses (~60-100s), the client sees an
+      // error while the server keeps dialing, and a user retry double-calls
+      // real shops/techs. The client polls /batch-call/status instead.
+      void (async () => {
         const CONCURRENCY = 5;
         const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
         const queue = [...truckIds];
@@ -5668,9 +5691,34 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
               return;
             }
             if (truck.mainStatus === "Declined Repair" || truck.mainStatus === "Approved for sale") {
-              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "Excluded: " + truck.mainStatus });
-              job.failed++;
+              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "skipped", error: "Excluded: " + truck.mainStatus });
+              job.skipped++;
               return;
+            }
+
+            // Re-dial guard: if this truck was already dialed for the same call
+            // type within the last 30 minutes, skip it. This makes retries safe
+            // — a user re-running a batch after a network/proxy error cannot
+            // double-call the same shop or tech.
+            try {
+              const priorLogs = await fleetScopeStorage.getCallLogsByTruckId(truckId);
+              const recentDial = priorLogs.find((l: any) =>
+                l.callType === callType &&
+                l.status !== "failed" &&
+                l.callTimestamp &&
+                Date.now() - new Date(l.callTimestamp).getTime() < BATCH_REDIAL_GUARD_MS
+              );
+              if (recentDial?.callTimestamp) {
+                const minsAgo = Math.round((Date.now() - new Date(recentDial.callTimestamp).getTime()) / 60000);
+                console.log(`[BatchCaller] Skipping truck ${truck.truckNumber} — already dialed ${minsAgo}m ago (${callType})`);
+                job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "skipped", error: `Already called ${minsAgo} min ago` });
+                job.skipped++;
+                return;
+              }
+            } catch (guardErr: any) {
+              // If the guard check itself fails, log and continue — do not
+              // block the batch on a read error.
+              console.warn(`[BatchCaller] Re-dial guard check failed for truck ${truckId}:`, guardErr.message);
             }
 
             const phoneNumber = callType === "tech" ? truck.techPhone : truck.repairPhone;
@@ -5754,11 +5802,39 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             }
 
             console.log(`[BatchCaller] Calling ${toNumber} for truck ${vehicleNum} (${callType})`);
-            const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
-              method: "POST",
-              headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            });
+            // 60s hard timeout — an unresponsive ElevenLabs connection must not
+            // hold a concurrency slot for the full 10-minute slot failsafe.
+            const dialAbort = new AbortController();
+            const dialTimer = setTimeout(() => dialAbort.abort(), 60_000);
+            let response: Response;
+            try {
+              response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
+                method: "POST",
+                headers: { "xi-api-key": apiKey, "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+                signal: dialAbort.signal,
+              });
+            } catch (fetchErr: any) {
+              if (fetchErr?.name === "AbortError") {
+                // The request reached (or may have reached) ElevenLabs but no response
+                // came back within 60s — the call MAY have been placed. Write a
+                // guard-visible log (status !== 'failed') so the 30-min re-dial guard
+                // blocks an immediate retry from double-calling this number.
+                await fleetScopeStorage.createCallLog({
+                  truckId, truckNumber: vehicleNum, batchId, callType,
+                  phoneNumber: toNumber, status: "unknown", outcome: "TIMEOUT_UNKNOWN",
+                  shopNotes: "No response from ElevenLabs within 60s — call may or may not have been placed. Re-dial blocked for 30 min as a safety measure.",
+                }).catch((logErr: any) =>
+                  console.error(`[BatchCaller] Failed to write timeout guard log for truck ${vehicleNum}:`, logErr?.message)
+                );
+                job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: "Timed out after 60s — call status unknown; re-dial blocked for 30 min" });
+                job.failed++;
+                return;
+              }
+              throw fetchErr;
+            } finally {
+              clearTimeout(dialTimer);
+            }
 
             if (!response.ok) {
               const errText = await response.text();
@@ -5839,7 +5915,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[BatchCaller] Batch ${batchId} complete: ${job.completed} called, ${job.failed} failed out of ${job.total}`);
       })();
 
-      res.json({ batchId, total: truckIds.length, completed: job.completed, failed: job.failed, results: job.results, done: true });
+      res.json({ batchId, total: truckIds.length });
     } catch (error: any) {
       console.error("[BatchCaller] Error:", error.message);
       res.status(500).json({ message: error.message });
@@ -5851,8 +5927,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     if (!job) return res.status(404).json({ message: "Batch not found" });
     res.json({
       id: job.id, total: job.total, completed: job.completed, failed: job.failed,
-      inProgress: job.inProgress, cancelled: job.cancelled, results: job.results,
-      done: job.completed + job.failed >= job.total || job.cancelled,
+      skipped: job.skipped, inProgress: job.inProgress, cancelled: job.cancelled,
+      results: job.results,
+      done: (job.completed + job.failed + job.skipped >= job.total && job.inProgress === 0) || (job.cancelled && job.inProgress === 0),
     });
   });
 

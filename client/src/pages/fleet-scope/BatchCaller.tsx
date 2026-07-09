@@ -75,6 +75,7 @@ type BatchStatus = {
   total: number;
   completed: number;
   failed: number;
+  skipped: number;
   inProgress: number;
   cancelled: boolean;
   results: BatchResult[];
@@ -90,7 +91,7 @@ export default function BatchCaller() {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [isStarting, setIsStarting] = useState(false);
-  const cancelRef = useRef(false);
+  const pollGenRef = useRef(0);
 
   const { data: trucks = [], isLoading: trucksLoading } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
@@ -160,42 +161,81 @@ export default function BatchCaller() {
       toast({ title: "No vehicles selected", variant: "destructive" });
       return;
     }
-    cancelRef.current = false;
     setIsStarting(true);
-    setActiveBatchId("running");
-    const ids = Array.from(selectedIds);
-    const CHUNK = 15;
-    const agg: BatchStatus = { id: "local", total: ids.length, completed: 0, failed: 0, inProgress: 0, cancelled: false, results: [], done: false };
-    setBatchStatus({ ...agg });
     try {
-      for (let i = 0; i < ids.length && !cancelRef.current; i += CHUNK) {
-        const chunk = ids.slice(i, i + CHUNK);
-        agg.inProgress = chunk.length;
-        setBatchStatus({ ...agg });
-        const res = await apiRequest("POST", "/api/fs/batch-call/start", { truckIds: chunk, callType });
-        const data = await res.json();
-        for (const r of (data.results || [])) {
-          agg.results.push(r);
-          if (r.status === "failed") agg.failed++; else agg.completed++;
-        }
-        agg.inProgress = 0;
-        setBatchStatus({ ...agg });
-      }
-      agg.cancelled = cancelRef.current;
-      agg.done = true;
-      setBatchStatus({ ...agg });
-      toast({ title: cancelRef.current ? "Batch cancelled" : `Batch complete: ${agg.completed} called, ${agg.failed} failed` });
+      const res = await apiRequest("POST", "/api/fs/batch-call/start", {
+        truckIds: Array.from(selectedIds),
+        callType,
+      });
+      const data = await res.json();
+      setActiveBatchId(data.batchId);
+      setBatchStatus(null);
+      toast({ title: `Batch started: ${data.total} calls queued` });
+      pollBatch(data.batchId);
     } catch (err: any) {
-      toast({ title: "Batch error", description: err.message, variant: "destructive" });
+      toast({ title: "Failed to start batch", description: err.message, variant: "destructive" });
     } finally {
-      setActiveBatchId(null);
       setIsStarting(false);
     }
   };
 
+  const pollBatch = (batchId: string) => {
+    const gen = ++pollGenRef.current;
+    let notFoundCount = 0;
+    const poll = async () => {
+      if (gen !== pollGenRef.current) return;
+      try {
+        const res = await fetch(`/api/fs/batch-call/status/${batchId}`, { credentials: "include" });
+        if (res.status === 404) {
+          // Batch state is in-memory on the server — a restart or a different
+          // instance loses it. Don't spin forever: give up after 3 misses.
+          notFoundCount++;
+          if (notFoundCount >= 3) {
+            if (gen !== pollGenRef.current) return;
+            setActiveBatchId(null);
+            toast({
+              title: "Lost track of this batch",
+              description:
+                "The server restarted while the batch was running. Check the call log below for results — recently called numbers are protected from re-dialing for 30 minutes.",
+              variant: "destructive",
+            });
+            return;
+          }
+          setTimeout(poll, 3000);
+          return;
+        }
+        if (!res.ok) throw new Error(`Status ${res.status}`);
+        notFoundCount = 0;
+        const status: BatchStatus = await res.json();
+        if (gen !== pollGenRef.current) return;
+        setBatchStatus(status);
+        if (!status.done) {
+          setTimeout(poll, 3000);
+        } else {
+          setActiveBatchId(null);
+          const skippedNote = status.skipped ? `, ${status.skipped} skipped` : "";
+          toast({
+            title: status.cancelled
+              ? "Batch cancelled"
+              : `Batch complete: ${status.completed} called, ${status.failed} failed${skippedNote}`,
+          });
+        }
+      } catch {
+        // Transient poll failure — keep polling; the batch continues server-side.
+        setTimeout(poll, 5000);
+      }
+    };
+    poll();
+  };
+
   const cancelBatch = async () => {
-    cancelRef.current = true;
-    toast({ title: "Cancelling after the current group..." });
+    if (!activeBatchId) return;
+    try {
+      await apiRequest("POST", `/api/fs/batch-call/cancel/${activeBatchId}`);
+      toast({ title: "Cancelling — calls already in progress will finish" });
+    } catch (err: any) {
+      toast({ title: "Failed to cancel", description: err.message, variant: "destructive" });
+    }
   };
 
   const getOutcomeBadge = (outcome: string | null) => {
@@ -460,6 +500,12 @@ export default function BatchCaller() {
                     <XCircle className="h-3.5 w-3.5 text-red-500" />
                     <span>{batchStatus.failed} failed</span>
                   </div>
+                  {(batchStatus.skipped ?? 0) > 0 && (
+                    <div className="flex items-center gap-1 text-sm">
+                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                      <span>{batchStatus.skipped} skipped</span>
+                    </div>
+                  )}
                   {batchStatus.inProgress > 0 && (
                     <div className="flex items-center gap-1 text-sm">
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -474,7 +520,7 @@ export default function BatchCaller() {
                 <div className="w-full bg-muted rounded-full h-2 mb-4">
                   <div
                     className="bg-primary rounded-full h-2 transition-all"
-                    style={{ width: `${((batchStatus.completed + batchStatus.failed) / batchStatus.total) * 100}%` }}
+                    style={{ width: `${((batchStatus.completed + batchStatus.failed + (batchStatus.skipped ?? 0)) / batchStatus.total) * 100}%` }}
                   />
                 </div>
 
@@ -496,6 +542,10 @@ export default function BatchCaller() {
                               {r.status === "in_progress" ? (
                                 <Badge variant="secondary" className="bg-blue-600/15 text-blue-700 dark:text-blue-400">
                                   <Loader2 className="h-3 w-3 mr-1 animate-spin" />Calling
+                                </Badge>
+                              ) : r.status === "skipped" ? (
+                                <Badge variant="secondary" className="bg-yellow-600/15 text-yellow-700 dark:text-yellow-400">
+                                  <AlertTriangle className="h-3 w-3 mr-1" />Skipped
                                 </Badge>
                               ) : r.status === "failed" ? (
                                 <Badge variant="secondary" className="bg-red-600/15 text-red-700 dark:text-red-400">

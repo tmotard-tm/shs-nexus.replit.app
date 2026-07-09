@@ -70,6 +70,7 @@ interface Thread {
   contactName: string | null;
   district: string | null;
   truckNumber: string | null;
+  position?: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   lastCategory: string | null;
@@ -97,6 +98,7 @@ interface Contact {
   name: string | null;
   district: string | null;
   truckNumber: string | null;
+  position?: string | null;
   phone: string | null;
   managerLdap: string | null;
   managerName: string | null;
@@ -124,6 +126,34 @@ function formatTime(dateStr: string | null) {
   if (diffDays === 1) return "Yesterday";
   if (diffDays < 7) return d.toLocaleDateString("en-US", { weekday: "short" });
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/**
+ * Roster job titles are verbose ("Service Technician 2, In-Home"). Compress to a
+ * short, scannable label for the inbox / picker. Anything without a specific rule
+ * falls back to a trimmed raw value, so a title is never hidden entirely.
+ */
+function shortPosition(raw?: string | null): string | null {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (!s) return null;
+  const suffix = /trainee/i.test(s) ? " (Trainee)" : "";
+  let m: RegExpMatchArray | null;
+  if (/hvac/i.test(s)) {
+    if (/team lead/i.test(s)) return "HVAC Team Lead";
+    if (/lead install/i.test(s)) return "HVAC Lead Installer";
+    if (/assistant/i.test(s)) return "HVAC Assistant";
+    m = s.match(/(?:svc|service)\s*tech\w*\s*(I{1,3}|[0-9]+)/i);
+    if (m) return `HVAC Tech ${m[1].toUpperCase()}${suffix}`;
+    if (/(?:svc|service)\s*tech/i.test(s)) return `HVAC Tech${suffix}`;
+    return s.replace(/,.*$/, "").trim();
+  }
+  m = s.match(/service\s*tech(?:nician)?\s*(LG|HV|HE|[0-9]+)/i);
+  if (m) return `Service Tech ${m[1].toUpperCase()}${suffix}`;
+  if (/team lead/i.test(s)) return "Team Lead";
+  if (/lead\s*service\s*tech/i.test(s)) return "Lead Service Tech";
+  if (/modified duty/i.test(s)) return "Service Tech (Mod Duty)";
+  return s.replace(/,\s*in[- ]?home.*$/i, "").trim() || s;
 }
 
 /** apiRequest throws Error(`${status}: ${body}`); pull a 409 JSON body back out. */
@@ -273,6 +303,7 @@ export default function FleetCommunications() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [districtFilter, setDistrictFilter] = useState("");
   const [inRentalOnly, setInRentalOnly] = useState(false);
+  const [positionFilter, setPositionFilter] = useState("all");
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [scope, setScope] = useState<"active" | "archived">("active");
   const [body, setBody] = useState("");
@@ -328,11 +359,27 @@ export default function FleetCommunications() {
     refetchInterval: 30000,
   });
 
-  // Client-side "in a rental" filter. Uses the exact same open-rental set that
-  // drives the on-thread rental badge (isInRental), so the filter always matches
-  // the badges the user sees. Thread volume is small and we fetch up to 300
+  // Position filter options, derived from the loaded threads themselves (the
+  // filterable population), grouped through the same shortPosition() shortener
+  // that renders the badges — so the dropdown always matches what's on screen.
+  const positionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const t of threads) {
+      const p = shortPosition(t.position);
+      if (p) set.add(p);
+    }
+    return Array.from(set).sort();
+  }, [threads]);
+
+  // Client-side "in a rental" + position filters. Rental uses the exact same
+  // open-rental set that drives the on-thread rental badge (isInRental), and
+  // position matches the same shortened label shown on the row badge, so the
+  // filters always match what the user sees — and they COMPOSE (e.g. "Service
+  // Tech 1" + "In rental"). Thread volume is small and we fetch up to 300
   // above, so filtering the loaded list is complete (no pagination gap).
-  const visibleThreads = inRentalOnly ? threads.filter(isInRental) : threads;
+  const visibleThreads = threads
+    .filter((t) => !inRentalOnly || isInRental(t))
+    .filter((t) => positionFilter === "all" || shortPosition(t.position) === positionFilter);
 
   const { data: detail } = useQuery<{ thread: Thread; messages: Message[]; pending: any[]; contact: Contact | null; hasMore?: boolean }>({
     queryKey: ["/api/fs/comms/threads", selectedId],
@@ -715,22 +762,37 @@ export default function FleetCommunications() {
               />
             </div>
             <div className="space-y-2">
-              <Select
-                value={districtFilter || "all"}
-                onValueChange={(v) => setDistrictFilter(v === "all" ? "" : v)}
-              >
-                <SelectTrigger className="h-8 text-sm w-full" data-testid="select-district-filter">
-                  <SelectValue placeholder="All districts" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All districts</SelectItem>
-                  {districtOptions.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      District {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select
+                  value={districtFilter || "all"}
+                  onValueChange={(v) => setDistrictFilter(v === "all" ? "" : v)}
+                >
+                  <SelectTrigger className="h-8 text-sm flex-1 min-w-0" data-testid="select-district-filter">
+                    <SelectValue placeholder="All districts" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All districts</SelectItem>
+                    {districtOptions.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        District {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={positionFilter} onValueChange={setPositionFilter}>
+                  <SelectTrigger className="h-8 text-sm flex-1 min-w-0" data-testid="select-position-filter">
+                    <SelectValue placeholder="All positions" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All positions</SelectItem>
+                    {positionOptions.map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => setInRentalOnly((v) => !v)}
@@ -803,7 +865,9 @@ export default function FleetCommunications() {
                 <div className="h-12 w-12 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-center mx-auto mb-3">
                   <MessageSquare className="w-5 h-5 text-slate-400" />
                 </div>
-                {inRentalOnly ? "No conversations for technicians in an open rental" : "No conversations"}
+                {inRentalOnly || positionFilter !== "all"
+                  ? `No conversations for ${positionFilter !== "all" ? `${positionFilter}s` : "technicians"}${inRentalOnly ? " in an open rental" : ""}`
+                  : "No conversations"}
               </div>
             ) : (
               visibleThreads.map((t) => {
@@ -846,6 +910,7 @@ export default function FleetCommunications() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex-wrap">
+                        {shortPosition(t.position) && <span className="inline-flex items-center rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 font-medium text-indigo-700 dark:text-indigo-300">{shortPosition(t.position)}</span>}
                         {t.contactName && t.ldap && <span className="font-mono">{t.ldap}</span>}
                         {t.truckNumber && !t.truckNumber.startsWith("ADHOC-") && <span className="flex items-center gap-0.5"><Truck className="w-3 h-3" />{t.truckNumber.replace(/^0+/, "")}</span>}
                         {t.district && <span className="flex items-center gap-0.5"><MapPin className="w-3 h-3" />{t.district.replace(/^0+/, "")}</span>}
@@ -891,6 +956,7 @@ export default function FleetCommunications() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-base text-slate-900 dark:text-white">{thread.contactName || thread.ldap || "Unknown"}</span>
                       {thread.ldap && <Badge variant="secondary" className="text-xs">{thread.ldap}</Badge>}
+                      {shortPosition(thread.position) && <Badge className="text-xs bg-indigo-100 hover:bg-indigo-100 text-indigo-700 border-0 dark:bg-indigo-500/15 dark:text-indigo-300">{shortPosition(thread.position)}</Badge>}
                       {isInRental(thread) && <RentalBadge />}
                       {thread.optedOut && <Badge variant="destructive" className="text-xs">Opted out (STOP)</Badge>}
                     </div>
@@ -1103,6 +1169,7 @@ export default function FleetCommunications() {
         onOpenChange={setComposeOpen}
         categories={config?.categories ?? []}
         health={health}
+        rentalLdaps={Array.from(openRentalEidSet)}
         onSent={(threadId) => { if (threadId) setSelectedId(threadId); }}
       />
       <BulkDialog
@@ -1206,13 +1273,24 @@ function RecipientPicker({
   open,
   selected,
   onChange,
+  rentalLdaps,
 }: {
   open: boolean;
   selected: Map<string, Contact>;
   onChange: (next: Map<string, Contact>) => void;
+  rentalLdaps?: string[];
 }) {
   const [q, setQ] = useState("");
   const [districtFilter, setDistrictFilter] = useState("all");
+  const [positionFilter, setPositionFilter] = useState("all");
+  const [rentalOnly, setRentalOnly] = useState(false);
+
+  // Same open-rental LDAP set that drives the inbox rental badge/filter, passed
+  // down from the page so the picker's "In rental" toggle matches it exactly.
+  const rentalSet = useMemo(
+    () => new Set((rentalLdaps ?? []).map((l) => l.toUpperCase())),
+    [rentalLdaps],
+  );
 
   const { data: districtOptions = [] } = useQuery<string[]>({
     queryKey: ["/api/fs/comms/contacts/districts"],
@@ -1227,12 +1305,30 @@ function RecipientPicker({
 
   const canonNum = (s?: string | null) => (s || "").replace(/\D/g, "").replace(/^0+/, "");
   const districtParam = districtFilter !== "all" ? districtFilter : "";
+
+  // Position options derived from the full loaded roster (the picker fetches
+  // every active contact), grouped by the same shortPosition() used for the
+  // row badges so option labels always match what's rendered.
+  const positionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const c of allContacts) {
+      const p = shortPosition(c.position);
+      if (p) set.add(p);
+    }
+    return Array.from(set).sort();
+  }, [allContacts]);
+
   const contacts = useMemo(() => {
     const term = q.trim().toLowerCase();
     const termDigits = q.replace(/\D/g, "");
     const dc = districtParam ? canonNum(districtParam) : "";
     return allContacts.filter((c) => {
       if (dc && canonNum(c.district) !== dc) return false;
+      // Composable audience filters: position + in-rental narrow the roster the
+      // same way the inbox filters do (e.g. "Service Tech 1" + "In rental"),
+      // then "Select all" targets exactly that slice.
+      if (positionFilter !== "all" && shortPosition(c.position) !== positionFilter) return false;
+      if (rentalOnly && !rentalSet.has(c.ldap.toUpperCase())) return false;
       if (term) {
         const hay = `${c.name || ""} ${c.ldap || ""} ${c.truckNumber || ""}`.toLowerCase();
         const phoneDigits = (c.phone || "").replace(/\D/g, "");
@@ -1240,7 +1336,7 @@ function RecipientPicker({
       }
       return true;
     });
-  }, [allContacts, q, districtParam]);
+  }, [allContacts, q, districtParam, positionFilter, rentalOnly, rentalSet]);
 
   const toggle = (c: Contact) => {
     const next = new Map(selected);
@@ -1268,6 +1364,25 @@ function RecipientPicker({
             {districtOptions.map((d) => <SelectItem key={d} value={d}>District {d}</SelectItem>)}
           </SelectContent>
         </Select>
+      </div>
+      <div className="flex gap-2 items-center">
+        <Select value={positionFilter} onValueChange={setPositionFilter}>
+          <SelectTrigger className="flex-1 min-w-0" data-testid="select-picker-position"><SelectValue placeholder="Position" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All positions</SelectItem>
+            {positionOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <button
+          type="button"
+          onClick={() => setRentalOnly((v) => !v)}
+          disabled={rentalSet.size === 0}
+          title={rentalSet.size === 0 ? "Open-rental list unavailable right now" : "Show only technicians currently in an open rental (matches the rental badge)"}
+          className={`px-3 h-9 rounded-md text-xs font-medium border transition-colors whitespace-nowrap flex-shrink-0 disabled:opacity-40 ${rentalOnly ? "bg-emerald-600 text-white border-emerald-600" : "bg-background border-input hover-elevate"}`}
+          data-testid="toggle-picker-rental"
+        >
+          In rental
+        </button>
       </div>
 
       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -1300,6 +1415,7 @@ function RecipientPicker({
                     <span className="truncate">{c.name || c.ldap}</span>
                     <span className="text-muted-foreground text-xs font-normal shrink-0">{c.ldap}</span>
                     <EmplStatusBadge status={c.emplStatus} />
+                    {shortPosition(c.position) && <span className="shrink-0 inline-flex items-center rounded bg-indigo-50 dark:bg-indigo-500/10 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:text-indigo-300">{shortPosition(c.position)}</span>}
                   </div>
                   <div className="text-xs text-muted-foreground truncate">
                     {(c.truckNumber || "no truck").replace(/^0+/, "")} · {c.district ? `Dist ${c.district.replace(/^0+/, "")}` : "no district"} · Lead: {c.managerName || "—"}
@@ -1338,11 +1454,12 @@ function RecipientPicker({
   );
 }
 
-function ComposeDialog({ open, onOpenChange, categories, health, onSent }: {
+function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, onSent }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   categories: CategoryOpt[];
   health?: { isStale?: boolean; lastSuccessAgeHours?: number | null } | null;
+  rentalLdaps?: string[];
   onSent: (threadId?: string) => void;
 }) {
   const { toast } = useToast();
@@ -1460,7 +1577,7 @@ function ComposeDialog({ open, onOpenChange, categories, health, onSent }: {
           </div>
 
           {recipientMode === "tech" ? (
-            <RecipientPicker open={open} selected={selected} onChange={setSelected} />
+            <RecipientPicker open={open} selected={selected} onChange={setSelected} rentalLdaps={rentalLdaps} />
           ) : (
             <div className="space-y-1">
               <Input type="tel" inputMode="tel" value={manualPhone} onChange={(e) => setManualPhone(e.target.value)} placeholder="e.g. (704) 555-0123" data-testid="input-compose-phone" />
@@ -1551,8 +1668,43 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
   const [managerCc, setManagerCc] = useState(false);
   const [estimate, setEstimate] = useState<BulkEstimate | null>(null);
   const [ackStale, setAckStale] = useState(false);
+  const [rentalPosition, setRentalPosition] = useState("all");
 
-  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); };
+  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPosition("all"); };
+
+  // Contacts directory for the rental-mode position filter (ldap → position).
+  // Same query key as the RecipientPicker's full fetch, so the cache is shared
+  // and this usually costs zero extra requests.
+  const { data: dirContacts = [] } = useQuery<Contact[]>({
+    queryKey: ["/api/fs/comms/contacts", "picker-all"],
+    queryFn: async () => (await apiRequest("GET", `/api/fs/comms/contacts?limit=2000`)).json(),
+    enabled: open && mode === "rental",
+  });
+  const contactByLdap = useMemo(() => {
+    const m = new Map<string, Contact>();
+    for (const c of dirContacts) m.set(c.ldap.toUpperCase(), c);
+    return m;
+  }, [dirContacts]);
+
+  // Position options among the OPEN-RENTAL techs specifically (not the whole
+  // roster) so the dropdown reflects the actual rental population.
+  const rentalPositionOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const l of rentalLdaps ?? []) {
+      const p = shortPosition(contactByLdap.get(l.toUpperCase())?.position);
+      if (p) set.add(p);
+    }
+    return Array.from(set).sort();
+  }, [rentalLdaps, contactByLdap]);
+
+  // Effective rental audience: everyone in an open rental, optionally narrowed
+  // to one position group. With a position selected, LDAPs whose position can't
+  // be resolved are excluded (we can't prove they match — never guess-send).
+  const rentalAudience = useMemo(() => {
+    const all = rentalLdaps ?? [];
+    if (rentalPosition === "all") return all;
+    return all.filter((l) => shortPosition(contactByLdap.get(l.toUpperCase())?.position) === rentalPosition);
+  }, [rentalLdaps, rentalPosition, contactByLdap]);
 
   // When opened from "Message selected", pre-seed the LDAP audience.
   useEffect(() => {
@@ -1580,7 +1732,12 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     if (mode === "list") { base.ldaps = Array.from(selected.keys()); base.filterDesc = `${selected.size} hand-picked recipient${selected.size === 1 ? "" : "s"}`; }
     else if (mode === "ldaps") base.ldaps = ldaps.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
     else if (mode === "trucks") base.truckNumbers = trucks.split(/[\s,]+/).map((s) => s.trim()).filter(Boolean);
-    else if (mode === "rental") { base.ldaps = rentalLdaps ?? []; base.filterDesc = "technicians in an open rental"; }
+    else if (mode === "rental") {
+      base.ldaps = rentalAudience;
+      base.filterDesc = rentalPosition === "all"
+        ? "technicians in an open rental"
+        : `${rentalPosition}s in an open rental`;
+    }
     else base.filter = { district: district.trim() };
     return base;
   };
@@ -1589,7 +1746,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     mode === "list" ? selected.size > 0
     : mode === "ldaps" ? !!ldaps.trim()
     : mode === "trucks" ? !!trucks.trim()
-    : mode === "rental" ? (rentalLdaps?.length ?? 0) > 0
+    : mode === "rental" ? rentalAudience.length > 0
     : !!district.trim();
 
   const previewMut = useMutation({
@@ -1637,7 +1794,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
           </div>
 
           {mode === "list" && (
-            <RecipientPicker open={open} selected={selected} onChange={(next) => { setSelected(next); setEstimate(null); }} />
+            <RecipientPicker open={open} selected={selected} onChange={(next) => { setSelected(next); setEstimate(null); }} rentalLdaps={rentalLdaps} />
           )}
           {mode === "ldaps" && (
             <Textarea value={ldaps} onChange={(e) => { setLdaps(e.target.value); setEstimate(null); }} placeholder="LDAP IDs (comma or space separated)" className="min-h-[60px]" data-testid="input-bulk-ldaps" />
@@ -1649,10 +1806,21 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
             <Input value={district} onChange={(e) => { setDistrict(e.target.value); setEstimate(null); }} placeholder="District number" data-testid="input-bulk-district" />
           )}
           {mode === "rental" && (
-            <div className="text-sm text-slate-600 dark:text-slate-300 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2" data-testid="bulk-rental-info">
-              {(rentalLdaps?.length ?? 0) > 0
-                ? `Targets every technician currently in an open rental — ${rentalLdaps!.length} on the rental list. Only active, messageable techs are sent (preview shows the exact count).`
-                : "No open-rental list is loaded right now (rental data may be unavailable). Try again shortly."}
+            <div className="space-y-2">
+              <Select value={rentalPosition} onValueChange={(v) => { setRentalPosition(v); setEstimate(null); }}>
+                <SelectTrigger data-testid="select-bulk-rental-position"><SelectValue placeholder="All positions" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All positions</SelectItem>
+                  {rentalPositionOptions.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <div className="text-sm text-slate-600 dark:text-slate-300 rounded-lg border border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 px-3 py-2" data-testid="bulk-rental-info">
+                {(rentalLdaps?.length ?? 0) === 0
+                  ? "No open-rental list is loaded right now (rental data may be unavailable). Try again shortly."
+                  : rentalPosition === "all"
+                    ? `Targets every technician currently in an open rental — ${rentalLdaps!.length} on the rental list. Only active, messageable techs are sent (preview shows the exact count).`
+                    : `Targets ${rentalPosition}s currently in an open rental — ${rentalAudience.length} of ${rentalLdaps!.length} on the rental list match. Only active, messageable techs are sent (preview shows the exact count).`}
+              </div>
             </div>
           )}
 

@@ -50,6 +50,7 @@ import {
   setOptOut,
   recordPhoneChange,
   getContactByLdap,
+  getPositionsForLdaps,
   archiveThread,
   restoreThread,
   bulkArchiveUnmatched,
@@ -238,7 +239,14 @@ export function registerCommsRoutes(app: Router): void {
         // rows in a stable order across refetches.
         .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
         .limit(limit));
-      res.json(rows);
+      // Attach each tech's current position (job title) from the synced roster.
+      const posMap = await getPositionsForLdaps(rows.map((r: any) => r.ldap));
+      res.json(
+        rows.map((r: any) => ({
+          ...r,
+          position: r.ldap ? posMap.get(String(r.ldap).toUpperCase()) ?? null : null,
+        })),
+      );
     } catch (e: any) {
       console.error("[Fleet-Comms] threads list error:", e?.message);
       res.status(500).json({ message: e?.message });
@@ -311,7 +319,17 @@ export function registerCommsRoutes(app: Router): void {
             ));
 
       const contact = thread.ldap ? await retryOnceOnTransient(() => getContactByLdap(thread.ldap!)) : undefined;
-      res.json({ thread, messages, pending, contact: contact ?? null, hasMore });
+      // Current position (job title) from the synced roster, attached to both the
+      // thread (drives the header) and the contact for consistency.
+      const posMap = thread.ldap ? await getPositionsForLdaps([thread.ldap]) : null;
+      const position = thread.ldap ? posMap?.get(String(thread.ldap).toUpperCase()) ?? null : null;
+      res.json({
+        thread: { ...thread, position },
+        messages,
+        pending,
+        contact: contact ? { ...contact, position } : null,
+        hasMore,
+      });
     } catch (e: any) {
       console.error("[Fleet-Comms] thread detail error:", e?.message);
       res.status(500).json({ message: e?.message });
@@ -740,7 +758,13 @@ export function registerCommsRoutes(app: Router): void {
       );
     }
     const rows = await fsDb.select().from(commsContacts).where(and(...conds)).orderBy(asc(commsContacts.name)).limit(limit);
-    res.json(rows);
+    const posMap = await getPositionsForLdaps(rows.map((r: any) => r.ldap));
+    res.json(
+      rows.map((r: any) => ({
+        ...r,
+        position: r.ldap ? posMap.get(String(r.ldap).toUpperCase()) ?? null : null,
+      })),
+    );
   });
 
   // Distinct districts across ACTIVE contacts — powers the New-message district

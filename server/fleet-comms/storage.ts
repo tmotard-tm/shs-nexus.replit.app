@@ -20,6 +20,59 @@ import {
 import { and, eq, desc, sql } from "drizzle-orm";
 import { normalizeDigits, preview } from "./lib";
 
+/**
+ * Resolve the current job title ("position") for a set of technician LDAPs from
+ * the synced roster (all_techs.job_title, keyed by enterprise id = LDAP). The
+ * roster can carry >1 row per enterprise id, so we pick ONE per LDAP: an ACTIVE
+ * row wins, then the most recent effective date. Returns RAW titles (the UI
+ * shortens them for display, e.g. "Service Technician 2, In-Home" -> "Service
+ * Tech 2"). LDAPs with no roster match are simply absent from the map.
+ *
+ * all_techs lives in the main schema but shares the same physical DB as the
+ * fs_comms_ tables in every deployed environment, so this raw read is safe from
+ * the fsDb pool. Read-only; never mutates the roster.
+ */
+export async function getPositionsForLdaps(
+  ldaps: (string | null | undefined)[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = Array.from(
+    new Set(
+      ldaps
+        .filter((l): l is string => !!l && !!l.trim())
+        .map((l) => l.trim().toUpperCase()),
+    ),
+  );
+  if (!uniq.length) return out;
+  try {
+    const res: any = await fsDb.execute(sql`
+      SELECT ldap, job_title FROM (
+        SELECT UPPER(TRIM(tech_racfid)) AS ldap, job_title,
+               ROW_NUMBER() OVER (
+                 PARTITION BY UPPER(TRIM(tech_racfid))
+                 ORDER BY (employment_status = 'A') DESC NULLS LAST,
+                          effective_date DESC NULLS LAST
+               ) AS rn
+        FROM all_techs
+        WHERE job_title IS NOT NULL AND TRIM(job_title) <> ''
+          AND UPPER(TRIM(tech_racfid)) IN (${sql.join(
+            uniq.map((l) => sql`${l}`),
+            sql`, `,
+          )})
+      ) t WHERE rn = 1
+    `);
+    const rows: any[] = res?.rows ?? res ?? [];
+    for (const r of rows) {
+      const l = r.ldap ? String(r.ldap).toUpperCase() : "";
+      if (l && r.job_title) out.set(l, String(r.job_title));
+    }
+  } catch (e: any) {
+    // Position is a display nicety — never let a roster read break the inbox.
+    console.warn("[Fleet-Comms] getPositionsForLdaps failed:", e?.message);
+  }
+  return out;
+}
+
 export function getContactByLdap(ldap: string): Promise<CommsContact | undefined> {
   return fsDb
     .select()
