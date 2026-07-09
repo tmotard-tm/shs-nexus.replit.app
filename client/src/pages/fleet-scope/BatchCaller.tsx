@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -90,6 +90,7 @@ export default function BatchCaller() {
   const [activeBatchId, setActiveBatchId] = useState<string | null>(null);
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [isStarting, setIsStarting] = useState(false);
+  const cancelRef = useRef(false);
 
   const { data: trucks = [], isLoading: trucksLoading } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
@@ -116,7 +117,8 @@ export default function BatchCaller() {
   const filteredTrucks = useMemo(() => {
     let result = trucks.filter((t) => {
       const hasPhone = callType === "tech" ? t.techPhone?.trim() : t.repairPhone?.trim();
-      return !!hasPhone;
+      const excluded = t.mainStatus === "Declined Repair" || t.mainStatus === "Approved for sale";
+      return !!hasPhone && !excluded;
     });
 
     if (selectedStatuses.size > 0) {
@@ -158,50 +160,42 @@ export default function BatchCaller() {
       toast({ title: "No vehicles selected", variant: "destructive" });
       return;
     }
+    cancelRef.current = false;
     setIsStarting(true);
+    setActiveBatchId("running");
+    const ids = Array.from(selectedIds);
+    const CHUNK = 15;
+    const agg: BatchStatus = { id: "local", total: ids.length, completed: 0, failed: 0, inProgress: 0, cancelled: false, results: [], done: false };
+    setBatchStatus({ ...agg });
     try {
-      const res = await apiRequest("POST", "/api/fs/batch-call/start", {
-        truckIds: Array.from(selectedIds),
-        callType,
-      });
-      const data = await res.json();
-      setActiveBatchId(data.batchId);
-      toast({ title: `Batch started: ${data.total} calls queued` });
-      pollBatch(data.batchId);
+      for (let i = 0; i < ids.length && !cancelRef.current; i += CHUNK) {
+        const chunk = ids.slice(i, i + CHUNK);
+        agg.inProgress = chunk.length;
+        setBatchStatus({ ...agg });
+        const res = await apiRequest("POST", "/api/fs/batch-call/start", { truckIds: chunk, callType });
+        const data = await res.json();
+        for (const r of (data.results || [])) {
+          agg.results.push(r);
+          if (r.status === "failed") agg.failed++; else agg.completed++;
+        }
+        agg.inProgress = 0;
+        setBatchStatus({ ...agg });
+      }
+      agg.cancelled = cancelRef.current;
+      agg.done = true;
+      setBatchStatus({ ...agg });
+      toast({ title: cancelRef.current ? "Batch cancelled" : `Batch complete: ${agg.completed} called, ${agg.failed} failed` });
     } catch (err: any) {
-      toast({ title: "Failed to start batch", description: err.message, variant: "destructive" });
+      toast({ title: "Batch error", description: err.message, variant: "destructive" });
     } finally {
+      setActiveBatchId(null);
       setIsStarting(false);
     }
   };
 
-  const pollBatch = async (batchId: string) => {
-    const poll = async () => {
-      try {
-        const res = await fetch(`/api/fs/batch-call/status/${batchId}`);
-        const status: BatchStatus = await res.json();
-        setBatchStatus(status);
-        if (!status.done) {
-          setTimeout(poll, 3000);
-        } else {
-          setActiveBatchId(null);
-          toast({ title: `Batch complete: ${status.completed} called, ${status.failed} failed` });
-        }
-      } catch {
-        setTimeout(poll, 5000);
-      }
-    };
-    poll();
-  };
-
   const cancelBatch = async () => {
-    if (!activeBatchId) return;
-    try {
-      await apiRequest("POST", `/api/fs/batch-call/cancel/${activeBatchId}`);
-      toast({ title: "Batch cancelled" });
-    } catch (err: any) {
-      toast({ title: "Cancel failed", description: err.message, variant: "destructive" });
-    }
+    cancelRef.current = true;
+    toast({ title: "Cancelling after the current group..." });
   };
 
   const getOutcomeBadge = (outcome: string | null) => {

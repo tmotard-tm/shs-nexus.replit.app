@@ -5653,7 +5653,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // At most 5 ElevenLabs API requests are in-flight at any instant.
       // As soon as one slot finishes (success or fail) the next truck is
       // picked up immediately — no artificial inter-chunk delays.
-      (async () => {
+      await (async () => {
         const CONCURRENCY = 5;
         const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
         const queue = [...truckIds];
@@ -5664,6 +5664,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             const truck = await fleetScopeStorage.getTruck(truckId);
             if (!truck) {
               job.results.push({ truckId, truckNumber: "?", status: "failed", error: "Truck not found" });
+              job.failed++;
+              return;
+            }
+            if (truck.mainStatus === "Declined Repair" || truck.mainStatus === "Approved for sale") {
+              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "Excluded: " + truck.mainStatus });
               job.failed++;
               return;
             }
@@ -5834,7 +5839,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.log(`[BatchCaller] Batch ${batchId} complete: ${job.completed} called, ${job.failed} failed out of ${job.total}`);
       })();
 
-      res.json({ batchId, total: truckIds.length, message: "Batch calling started" });
+      res.json({ batchId, total: truckIds.length, completed: job.completed, failed: job.failed, results: job.results, done: true });
     } catch (error: any) {
       console.error("[BatchCaller] Error:", error.message);
       res.status(500).json({ message: error.message });
