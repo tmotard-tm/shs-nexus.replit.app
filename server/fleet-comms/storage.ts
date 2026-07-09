@@ -17,7 +17,7 @@ import {
   type CommsThread,
   type CommsMessage,
 } from "@shared/fleet-scope-schema";
-import { and, eq, desc, sql } from "drizzle-orm";
+import { and, eq, desc, sql, inArray } from "drizzle-orm";
 import { normalizeDigits, preview } from "./lib";
 
 /**
@@ -80,6 +80,59 @@ export async function getPositionsForLdaps(
     }
   }
   return out;
+}
+
+/**
+ * Resolve the current employment status (single-letter roster flag: A/L/P/S/T)
+ * for a set of LDAPs from the synced contacts directory. Tombstoned contacts
+ * (active=false — dropped off the active roster) report 'T' regardless of the
+ * stale empl_status letter the sync left behind, so a terminated tech can never
+ * render as "Active". LDAPs with no contact row (or a null status on an active
+ * row) are simply absent from the map. Read-only, best-effort — a failure never
+ * breaks the inbox (statuses just render blank for a cycle).
+ */
+export async function getEmplStatusForLdaps(
+  ldaps: (string | null | undefined)[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const uniq = Array.from(
+    new Set(
+      ldaps
+        .filter((l): l is string => !!l && !!l.trim())
+        .map((l) => l.trim().toUpperCase()),
+    ),
+  );
+  if (!uniq.length) return out;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const rows = await fsDb
+        .select({ ldap: commsContacts.ldap, emplStatus: commsContacts.emplStatus, active: commsContacts.active })
+        .from(commsContacts)
+        .where(inArray(commsContacts.ldap, uniq));
+      for (const r of rows) {
+        const status = effectiveEmplStatus(r);
+        if (r.ldap && status) out.set(r.ldap.toUpperCase(), status);
+      }
+      return out;
+    } catch (e: any) {
+      if (attempt === 0) continue;
+      console.warn("[Fleet-Comms] getEmplStatusForLdaps failed after retry:", e?.message);
+    }
+  }
+  return out;
+}
+
+/**
+ * Single source of truth for the display status letter: tombstoned contacts
+ * (active=false) are 'T' (terminated) — the sync only flips `active` and leaves
+ * empl_status at its last roster value (usually 'A'), which must never surface.
+ */
+export function effectiveEmplStatus(
+  c: { emplStatus: string | null; active: boolean | null } | null | undefined,
+): string | null {
+  if (!c) return null;
+  if (c.active === false) return "T";
+  return c.emplStatus ? c.emplStatus.trim().toUpperCase() : null;
 }
 
 export function getContactByLdap(ldap: string): Promise<CommsContact | undefined> {

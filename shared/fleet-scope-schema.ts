@@ -1516,7 +1516,7 @@ export const commsContacts = pgTable("fs_comms_contacts", {
   ldap: varchar("ldap", { length: 60 }).primaryKey(), // UPPER(TRIM(ENTERPRISE_ID))
   name: text("name"),
   district: text("district"),
-  emplStatus: text("empl_status"), // A / L / P / S (or null when tombstoned)
+  emplStatus: text("empl_status"), // A / L / P / S — last roster value; NOT cleared on tombstone (sync only flips `active`), so display must derive 'T' from active=false (see effectiveEmplStatus)
   managerLdap: text("manager_ldap"),
   managerName: text("manager_name"),
   phone: text("phone"), // display phone from TPMS MOBILEPHONENUMBER

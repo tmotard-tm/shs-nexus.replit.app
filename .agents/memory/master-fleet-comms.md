@@ -268,3 +268,8 @@ phone passed from the client for a known tech.
 - **Inbound webhook ACKs 200 (TwiML) BEFORE the async `handleInbound`** — a DB failure during processing
   loses that text permanently (Twilio won't retry). Confirm the "schema ensured" boot log before
   repointing, and monitor the inbound async-error log line for 48h post-cutover.
+
+## Employment status display (single-letter flag)
+- `fs_comms_contacts.empl_status` holds the LAST roster value (A/L/P/S) and is NOT cleared on tombstone — the sync only flips `active=false`. A terminated tech usually still reads 'A'.
+- **Rule:** never surface `empl_status` raw for possibly-inactive contacts. Derive the display letter via `effectiveEmplStatus()` (server/fleet-comms/storage.ts): `active=false` → 'T', else the stored letter. Threads list/detail use it; the picker route is safe only because it hard-filters `active=true`.
+- **Why:** raw reads rendered ex-employees with a green "Active" badge in the inbox.

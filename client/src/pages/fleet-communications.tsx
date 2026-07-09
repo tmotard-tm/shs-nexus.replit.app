@@ -71,6 +71,7 @@ interface Thread {
   district: string | null;
   truckNumber: string | null;
   position?: string | null;
+  emplStatus?: string | null;
   lastMessagePreview: string | null;
   lastMessageAt: string | null;
   lastCategory: string | null;
@@ -915,6 +916,7 @@ export default function FleetCommunications() {
                           <span className={`text-sm truncate ${unread ? "font-bold text-slate-900 dark:text-white" : "font-semibold text-slate-800 dark:text-slate-100"}`}>
                             {displayName}
                           </span>
+                          <EmplStatusBadge status={t.emplStatus} />
                           {isInRental(t) && <RentalBadge />}
                         </div>
                         <div className="flex items-center gap-1.5 flex-shrink-0">
@@ -969,6 +971,7 @@ export default function FleetCommunications() {
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-bold text-base text-slate-900 dark:text-white">{thread.contactName || thread.ldap || "Unknown"}</span>
                       {thread.ldap && <Badge variant="secondary" className="text-xs">{thread.ldap}</Badge>}
+                      <EmplStatusBadge status={thread.emplStatus ?? detail?.contact?.emplStatus} />
                       {shortPosition(thread.position) && <Badge className="text-xs bg-indigo-100 hover:bg-indigo-100 text-indigo-700 border-0 dark:bg-indigo-500/15 dark:text-indigo-300">{shortPosition(thread.position)}</Badge>}
                       {isInRental(thread) && <RentalBadge />}
                       {thread.optedOut && <Badge variant="destructive" className="text-xs">Opted out (STOP)</Badge>}
@@ -1268,11 +1271,11 @@ function EmplStatusBadge({ status }: { status?: string | null }) {
   if (!meta) return null;
   return (
     <span
-      className={`shrink-0 inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border ${meta.cls}`}
-      title={`Employment status: ${meta.label}`}
+      className={`shrink-0 inline-flex items-center justify-center rounded px-1 py-0.5 min-w-[18px] text-[10px] font-bold leading-none border ${meta.cls}`}
+      title={`Employment status: ${meta.label} (${key})`}
       data-testid={`empl-status-${key}`}
     >
-      {meta.label}
+      {key}
     </span>
   );
 }

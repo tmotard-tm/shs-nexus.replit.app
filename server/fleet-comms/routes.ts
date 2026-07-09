@@ -51,6 +51,8 @@ import {
   recordPhoneChange,
   getContactByLdap,
   getPositionsForLdaps,
+  getEmplStatusForLdaps,
+  effectiveEmplStatus,
   archiveThread,
   restoreThread,
   bulkArchiveUnmatched,
@@ -239,12 +241,18 @@ export function registerCommsRoutes(app: Router): void {
         // rows in a stable order across refetches.
         .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
         .limit(limit));
-      // Attach each tech's current position (job title) from the synced roster.
-      const posMap = await getPositionsForLdaps(rows.map((r: any) => r.ldap));
+      // Attach each tech's current position (job title) + employment status
+      // (single-letter roster flag A/L/P/S) from the synced roster/contacts.
+      const ldapList = rows.map((r: any) => r.ldap);
+      const [posMap, statusMap] = await Promise.all([
+        getPositionsForLdaps(ldapList),
+        getEmplStatusForLdaps(ldapList),
+      ]);
       res.json(
         rows.map((r: any) => ({
           ...r,
           position: r.ldap ? posMap.get(String(r.ldap).toUpperCase()) ?? null : null,
+          emplStatus: r.ldap ? statusMap.get(String(r.ldap).toUpperCase()) ?? null : null,
         })),
       );
     } catch (e: any) {
@@ -324,7 +332,7 @@ export function registerCommsRoutes(app: Router): void {
       const posMap = thread.ldap ? await getPositionsForLdaps([thread.ldap]) : null;
       const position = thread.ldap ? posMap?.get(String(thread.ldap).toUpperCase()) ?? null : null;
       res.json({
-        thread: { ...thread, position },
+        thread: { ...thread, position, emplStatus: effectiveEmplStatus(contact) },
         messages,
         pending,
         contact: contact ? { ...contact, position } : null,

@@ -1717,7 +1717,7 @@ export default function NewRentals() {
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
             <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 2px" }}>
-              Repairs Awaiting Authorization
+              Rental POs Awaiting Authorization
             </h2>
             <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: isSyncStale ? colors.red : colors.inkMuted }}>
               {lastSyncedAt
