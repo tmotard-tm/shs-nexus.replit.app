@@ -22,6 +22,7 @@ import {
 import {
   buildNexusBatchMap,
   collectItemTruckCandidates,
+  getNexusMatchStatus,
   lookupNexusData,
   lookupNexusDataForItem,
   showToolsPartsRecovery,
@@ -165,16 +166,34 @@ test("lookup ignores empty / N/A truck numbers", () => {
 
 console.log("collectItemTruckCandidates / lookupNexusDataForItem (Assets Queue widened sources)");
 
-test("collects candidates from all five sources in priority order", () => {
+test("collects candidates from all sources in priority order, including rosterContact.lastKnownTruckLu", () => {
   const item: TruckCandidateSource = {
     techData: { hrTruckNumber: "11111" },
     data: JSON.stringify({
       hrSeparation: { truckNumber: "22222" },
       vehicle: { truckNo: "33333", vehicleNumber: "44444" },
+      rosterContact: { lastKnownTruckLu: "66666" },
     }),
     metadata: JSON.stringify({ tpmsTruckNo: "55555" }),
   };
-  assert.deepEqual(collectItemTruckCandidates(item), ["11111", "22222", "33333", "44444", "55555"]);
+  assert.deepEqual(
+    collectItemTruckCandidates(item),
+    ["11111", "22222", "33333", "44444", "55555", "66666"],
+  );
+});
+
+test("MHUYNH2 case: garbage/missing hrTruckNumber falls back to rosterContact.lastKnownTruckLu (truck 21866)", () => {
+  const map = buildNexusBatchMap([
+    { vehicleNumber: "21866", postOffboardedStatus: "declined_repair", toolsPartsLocation: "techs_home", partsRecoveryInitiated: "yes", phoneRecoveryInitiated: "no" },
+  ]);
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "Truck was returned" },
+    data: JSON.stringify({ rosterContact: { lastKnownTruckLu: "21866" } }),
+  };
+  assert.deepEqual(collectItemTruckCandidates(item), ["Truck was returned", "21866"]);
+  const entry = lookupNexusDataForItem(map, item);
+  assert.ok(entry, "expected MHUYNH2 to resolve via rosterContact.lastKnownTruckLu");
+  assert.equal(entry!.postOffboardedStatus, "declined_repair");
 });
 
 test("candidates dedupe by canonical truck number", () => {
@@ -241,6 +260,35 @@ test("lookupNexusDataForItem returns undefined when no candidate matches", () =>
   const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
   const item: TruckCandidateSource = { techData: { hrTruckNumber: "99999" } };
   assert.equal(lookupNexusDataForItem(map, item), undefined);
+});
+
+console.log("getNexusMatchStatus (no-recovery-data-found indicator)");
+
+test("returns matched when a candidate resolves", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = { techData: { hrTruckNumber: "61456" } };
+  assert.equal(getNexusMatchStatus(map, item), "matched");
+});
+
+test("returns no-candidate when the item has no resolvable truck number at all", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = { techData: { hrTruckNumber: "N/A" } };
+  assert.equal(getNexusMatchStatus(map, item), "no-candidate");
+});
+
+test("returns no-match-found when a resolvable truck number has zero matching nexus rows", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = { techData: { hrTruckNumber: "99999" } };
+  assert.equal(getNexusMatchStatus(map, item), "no-match-found");
+});
+
+test("no-match-found still fires when only the rosterContact fallback produced the candidate", () => {
+  const map = buildNexusBatchMap([{ vehicleNumber: "61456", postOffboardedStatus: "In repair" }]);
+  const item: TruckCandidateSource = {
+    techData: { hrTruckNumber: "garbage text" },
+    data: JSON.stringify({ rosterContact: { lastKnownTruckLu: "88888" } }),
+  };
+  assert.equal(getNexusMatchStatus(map, item), "no-match-found");
 });
 
 console.log("showToolsPartsRecovery business rule");

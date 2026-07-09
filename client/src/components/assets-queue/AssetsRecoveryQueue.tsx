@@ -39,6 +39,7 @@ import {
   buildNexusBatchMap,
   collectItemTruckCandidates,
   lookupNexusDataForItem,
+  getNexusMatchStatus,
   showToolsPartsRecovery,
   formatToolsPartsLocation,
 } from "@/components/assets-queue/nexus-data-utils";
@@ -592,7 +593,12 @@ function ExpandedRowDetails({
 
   const [carrier, setCarrier] = useState<string>(item.carrier || "");
 
-  const truckNumber = detailData?.hrTruckNumber || techData?.hrTruckNumber || '';
+  // Widened truck-number resolution matching the queue-row lookup: falls back
+  // through data.hrSeparation/vehicle, metadata.tpmsTruckNo, and
+  // data.rosterContact.lastKnownTruckLu when hrTruckNumber is missing or
+  // free-text (server matches variants for whichever candidate we send).
+  const truckNumberCandidates = useMemo(() => collectItemTruckCandidates(item), [item]);
+  const truckNumber = detailData?.hrTruckNumber || techData?.hrTruckNumber || truckNumberCandidates[0] || '';
   const { data: vehicleNexusData } = useQuery<{ postOffboardedStatus: string | null; toolsPartsLocation: string | null; partsRecoveryInitiated: string | null }>({
     queryKey: ['/api/vehicle-nexus-data', truckNumber],
     enabled: !!truckNumber && truckNumber !== 'N/A',
@@ -1187,6 +1193,17 @@ export function AssetsRecoveryQueue() {
     return map;
   }, [queueItems, vehicleNexusBatchData]);
 
+  // "no-match-found" = a resolvable truck number with zero matching
+  // vehicle_nexus_data row (distinct from "no-candidate", which is the
+  // normal "nothing recorded yet" state agents already understand).
+  const nexusMatchStatusByItemId = useMemo(() => {
+    const map: Record<string, ReturnType<typeof getNexusMatchStatus>> = {};
+    for (const item of queueItems) {
+      map[item.id] = getNexusMatchStatus(vehicleNexusBatchData, item);
+    }
+    return map;
+  }, [queueItems, vehicleNexusBatchData]);
+
 
   const assetsUsers = users.filter(u => u.departments?.includes("ASSETS") || u.role === "developer" || u.role === "admin");
 
@@ -1516,6 +1533,7 @@ export function AssetsRecoveryQueue() {
                 const vehicleType = getVehicleType(row);
                 const rowNexus = nexusByItemId[row.id];
                 const rowDisposition = rowNexus?.postOffboardedStatus || null;
+                const rowNexusMatchStatus = nexusMatchStatusByItemId[row.id];
                 const sepDate = row.techData?.separationDate || null;
                 const daysUntilSep = getDaysUntilSeparation(sepDate);
                 const urgency = getUrgencyLevel(vehicleType, daysUntilSep);
@@ -1601,6 +1619,14 @@ export function AssetsRecoveryQueue() {
                       <td className="px-4 py-3 text-slate-600">
                         {rowDisposition ? (
                           <span className="text-xs font-medium">{rowDisposition}</span>
+                        ) : rowNexusMatchStatus === "no-match-found" ? (
+                          <Badge
+                            variant="outline"
+                            className="text-[10px] px-1.5 py-0 h-4 w-fit font-medium border-slate-300 text-slate-500"
+                            title="A truck number was found for this technician, but no matching Weekly Offboarding record exists yet — this is different from data simply not having been entered."
+                          >
+                            No recovery data found
+                          </Badge>
                         ) : (
                           <span className="text-xs text-slate-400 italic">Pending</span>
                         )}

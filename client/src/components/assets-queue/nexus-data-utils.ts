@@ -60,18 +60,24 @@ function safeParse(json: string | null | undefined): any {
 //   3. data.vehicle.truckNo
 //   4. data.vehicle.vehicleNumber
 //   5. metadata.tpmsTruckNo     (written by the automated Snowflake sync)
+//   6. data.rosterContact.lastKnownTruckLu / truckLu (roster's last-known
+//      truck; catches rows where hrTruckNumber is missing/free-text, e.g.
+//      "Truck was returned")
 // De-duplicated by canonical form so "61456" and "061456" count once.
 // Rows with a missing or dirty hrTruckNumber still join to vehicle_nexus_data
 // through the fallbacks.
 export function collectItemTruckCandidates(item: TruckCandidateSource): string[] {
   const parsed = safeParse(item.data);
   const meta = safeParse(item.metadata);
+  const roster = parsed?.rosterContact;
   const raw: Array<unknown> = [
     item.techData?.hrTruckNumber,
     parsed?.hrSeparation?.truckNumber,
     parsed?.vehicle?.truckNo,
     parsed?.vehicle?.vehicleNumber,
     meta?.tpmsTruckNo,
+    roster?.lastKnownTruckLu,
+    roster?.truckLu,
   ];
   const out: string[] = [];
   const seen = new Set<string>();
@@ -97,6 +103,24 @@ export function lookupNexusDataForItem(
     if (hit) return hit;
   }
   return undefined;
+}
+
+// Distinguishes "no nexus row found despite a resolvable truck number" from
+// "row has genuinely no recovery data yet" and from "no truck number at all
+// to look up". Only the former should show the "no recovery data found"
+// indicator — the latter two both render as the normal blank/"Pending" state.
+export type NexusMatchStatus = "matched" | "no-match-found" | "no-candidate";
+
+export function getNexusMatchStatus(
+  map: NexusBatchMap,
+  item: TruckCandidateSource,
+): NexusMatchStatus {
+  const candidates = collectItemTruckCandidates(item);
+  if (candidates.length === 0) return "no-candidate";
+  for (const candidate of candidates) {
+    if (lookupNexusData(map, candidate)) return "matched";
+  }
+  return "no-match-found";
 }
 
 // Business rule: on a standard company vehicle the tools stay with the truck,
