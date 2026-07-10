@@ -2445,8 +2445,13 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
 
     res.status(200).json({ received: true, matched: true, summarized: true });
   } catch (error: any) {
-    console.error("[ElevenLabs Webhook] Error:", error.message);
-    res.status(500).json({ message: error.message });
+    // Always ACK with 200 on internal errors. ElevenLabs auto-disables the
+    // entire webhook after 5xx responses (it did so on 7/9 and 7/10, silently
+    // killing all post-call summaries). A transient Neon drop or summarizer
+    // hiccup must cost us one event, not the whole pipeline; the Refresh
+    // import path backfills anything missed here.
+    console.error("[ElevenLabs Webhook] Error (acked 200 to avoid auto-disable):", error.message);
+    res.status(200).json({ received: true, error: error.message });
   }
 }
 
