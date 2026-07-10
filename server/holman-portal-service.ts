@@ -1,7 +1,7 @@
 import { fetch } from "undici";
 import type { HolmanHarvest } from "./holman-headless-login";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 // Production Holman uses /AriAccessWeb/ (NOT /AriAccessWeb4/, which is the Decom env).
@@ -529,6 +529,20 @@ function spawnHeadlessLogin(): Promise<HolmanHarvest> {
   });
 }
 
+// Fully invalidate the current session: memory AND the disk cache. Setting only
+// _sessionExpiry=null is NOT enough — ensureSession() step 3 would reload the same
+// dead cookies from SESSION_CACHE_FILE (its TTL is wall-clock, not validity-checked)
+// and every retry would bounce again until the file aged out (the "login loop").
+function invalidateSession(): void {
+  _sessionExpiry = null;
+  _sessionCookies = "";
+  try {
+    if (existsSync(SESSION_CACHE_FILE)) unlinkSync(SESSION_CACHE_FILE);
+  } catch {
+    /* non-fatal — worst case the stale file ages out on its own TTL */
+  }
+}
+
 async function ensureSession(): Promise<void> {
   // 1. In-memory session still valid.
   if (_sessionExpiry && _sessionExpiry > new Date() && _sessionCookies) return;
@@ -616,11 +630,11 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
 
     const respUrl: string = (resp as any).url ?? "";
     if (/LoginForm\.aspx/i.test(respUrl)) {
-      _sessionExpiry = null;
+      invalidateSession();
       throw new Error("[HolmanPortal] Listing GET bounced to LoginForm — session expired");
     }
     if (!resp.ok) {
-      if (resp.status === 302 || resp.status === 401 || resp.status === 500) _sessionExpiry = null;
+      if (resp.status === 302 || resp.status === 401 || resp.status === 500) invalidateSession();
       throw new Error(`[HolmanPortal] DetailsListing HTTP ${resp.status}`);
     }
 
@@ -832,7 +846,7 @@ async function submitDecision(
   _sessionCookies = mergeCookies(_sessionCookies, getResp);
   const getUrl: string = (getResp as any).url ?? "";
   if (/LoginForm\.aspx/i.test(getUrl)) {
-    _sessionExpiry = null;
+    invalidateSession(); // memory + disk — leaving the disk cache would re-bounce every retry
     return { success: false, confirmed: false, error: "RepairDetails GET bounced to LoginForm — session expired" };
   }
   const detailHtml = await (getResp as any).text();
@@ -916,8 +930,10 @@ async function submitDecision(
     return { success: true, confirmed: false, dryRun: true };
   }
 
-  // 2. POST the decision to the SAME URL (self-postback).
-  await fetch(detailUrl, {
+  // 2. POST the decision to the SAME URL (self-postback). Capture the response —
+  //    a successful WebForms postback re-renders the page, so its body is usually
+  //    the FIRST (and most atomic) confirmation evidence.
+  const postResp = await fetch(detailUrl, {
     method: "POST",
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -929,33 +945,70 @@ async function submitDecision(
     body: body.toString(),
     redirect: "follow",
   });
+  _sessionCookies = mergeCookies(_sessionCookies, postResp);
+  const postUrl: string = (postResp as any).url ?? "";
+  const postHtml = await (postResp as any).text();
 
-  // 3. Re-READ to confirm. 200 is NOT confirmation. A committed line renders its
-  //    chosen radio as checked AND disabled. We re-GET and verify the target PO's
-  //    line is now locked (disabled) for our decision.
-  const confirmResp = await fetch(detailUrl, {
-    headers: { Cookie: _sessionCookies, "User-Agent": UA, Referer: detailUrl },
-    redirect: "follow",
-  });
-  _sessionCookies = mergeCookies(_sessionCookies, confirmResp);
-  const confirmHtml = await (confirmResp as any).text();
+  // 3. Confirm the line is locked. 200 is NOT confirmation. A committed line renders
+  //    its chosen radio as checked AND disabled.
+  //
+  //    CRITICAL (learned live 2026-07-10, PO 119673335): a confirm read can be
+  //    INDETERMINATE — the session dies mid-flight (another instance/login kicked it)
+  //    and the read bounces to LoginForm or yields a page with NO decision lines.
+  //    That is NOT evidence the decision failed to apply: that PO's approve HAD
+  //    applied in Holman while the single instant re-read missed it and the row was
+  //    falsely marked approve_failed. So: only a VALID page (our PO's lines visible)
+  //    with the line still ENABLED counts as "not applied"; an unreadable page forces
+  //    a fresh login and a retry.
+  type ConfirmState = { kind: "confirmed" | "actionable" | "indeterminate"; detail: string };
+  const readState = (html: string, finalUrl: string): ConfirmState => {
+    if (/LoginForm\.aspx/i.test(finalUrl)) {
+      return { kind: "indeterminate", detail: "read bounced to LoginForm" };
+    }
+    const mine = parseDecisionLines(html, decision).filter((l) => l.poNumber === String(poNumber));
+    if (mine.length === 0) {
+      return { kind: "indeterminate", detail: "page had no decision lines for this PO" };
+    }
+    return mine.some((l) => !l.disabled)
+      ? { kind: "actionable", detail: "line still actionable (decision not applied)" }
+      : { kind: "confirmed", detail: "line locked" };
+  };
 
-  // Confirmed = the PO's radio for our decision is now disabled (locked/applied),
-  // i.e. no longer an actionable enabled radio.
-  const stillActionable = parseDecisionLines(confirmHtml, decision).some(
-    (l) => l.poNumber === String(poNumber) && !l.disabled,
-  );
-  const lockedForDecision = parseDecisionLines(confirmHtml, decision).some(
-    (l) => l.poNumber === String(poNumber) && l.disabled,
-  );
-  const confirmed = lockedForDecision && !stillActionable;
+  let state = readState(postHtml, postUrl);
 
+  // Re-read up to 3 times: indeterminate → force a fresh login first; actionable →
+  // brief backoff in case Holman lags the lock. Stop as soon as the lock is seen.
+  for (let attempt = 1; attempt <= 3 && state.kind !== "confirmed"; attempt++) {
+    if (state.kind === "indeterminate") {
+      console.warn(`[HolmanPortal] ${decision} confirm attempt ${attempt} indeterminate (${state.detail}) — re-login + re-read`);
+      invalidateSession(); // memory + disk, so ensureSession truly re-logins
+      try {
+        await ensureSession();
+      } catch (e: any) {
+        console.warn(`[HolmanPortal] confirm re-login failed: ${e?.message}`);
+        break; // can't read at all — report indeterminate honestly below
+      }
+    } else {
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    }
+    const confirmResp = await fetch(detailUrl, {
+      headers: { Cookie: _sessionCookies, "User-Agent": UA, Referer: detailUrl },
+      redirect: "follow",
+    });
+    _sessionCookies = mergeCookies(_sessionCookies, confirmResp);
+    const confirmHtml = await (confirmResp as any).text();
+    state = readState(confirmHtml, (confirmResp as any).url ?? "");
+  }
+
+  const confirmed = state.kind === "confirmed";
   return {
     success: true,
     confirmed,
     error: confirmed
       ? undefined
-      : "Decision POST returned but line not confirmed locked on re-read — verify in Holman portal",
+      : state.kind === "actionable"
+        ? "Decision POST returned but the line is still actionable on re-read (decision did not apply) — verify in Holman portal"
+        : `Decision POST returned but confirmation was unreadable after retries (${state.detail}) — the decision may HAVE applied; check Holman before retrying`,
   };
 }
 
@@ -1015,11 +1068,11 @@ export async function fetchRepairDetailsText(
     _sessionCookies = mergeCookies(_sessionCookies, resp);
     const respUrl: string = (resp as any).url ?? "";
     if (/LoginForm\.aspx/i.test(respUrl)) {
-      _sessionExpiry = null;
+      invalidateSession();
       return { ok: false, text: "", error: "RepairDetails bounced to LoginForm — session expired" };
     }
     if (!resp.ok) {
-      if (resp.status === 302 || resp.status === 401 || resp.status === 500) _sessionExpiry = null;
+      if (resp.status === 302 || resp.status === 401 || resp.status === 500) invalidateSession();
       return { ok: false, text: "", error: `RepairDetails HTTP ${resp.status}` };
     }
     const html = await (resp as any).text();
