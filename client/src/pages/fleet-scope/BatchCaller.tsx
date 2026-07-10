@@ -25,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import {
@@ -232,6 +233,29 @@ export default function BatchCaller() {
         <h1 className="text-xl font-semibold" data-testid="text-batch-caller-title">Batch Caller</h1>
       </div>
 
+      <Tabs defaultValue="call" className="flex flex-col flex-1 min-h-0">
+        <TabsList className="w-fit">
+          <TabsTrigger value="call" data-testid="tab-select-call">
+            <PhoneCall className="h-3.5 w-3.5 mr-1.5" />
+            Select &amp; Call
+            {activeBatchId && <Loader2 className="h-3 w-3 ml-1.5 animate-spin" />}
+          </TabsTrigger>
+          <TabsTrigger value="followups" data-testid="tab-follow-ups">
+            <Clock className="h-3.5 w-3.5 mr-1.5" />
+            Follow-Ups
+            {followUps.length > 0 && (
+              <Badge variant="secondary" className="ml-1.5 bg-yellow-600/15 text-yellow-700 dark:text-yellow-400">
+                {followUps.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="history" data-testid="tab-call-history">
+            <AlertTriangle className="h-3.5 w-3.5 mr-1.5" />
+            Call History
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="call" className="flex flex-col gap-4 mt-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
           <CardTitle className="text-base">Vehicle Selection</CardTitle>
@@ -343,7 +367,7 @@ export default function BatchCaller() {
                 </div>
               </div>
 
-              <div className="border rounded-md overflow-auto max-h-[400px]">
+              <div className="border rounded-md overflow-auto max-h-[calc(100vh-380px)]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -544,7 +568,9 @@ export default function BatchCaller() {
           </CardContent>
         </Card>
       )}
+        </TabsContent>
 
+        <TabsContent value="followups" className="mt-4">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
           <CardTitle className="text-base flex items-center gap-2">
@@ -567,7 +593,7 @@ export default function BatchCaller() {
               No pending follow-ups
             </div>
           ) : (
-            <div className="border rounded-md overflow-auto max-h-[300px]">
+            <div className="border rounded-md overflow-auto max-h-[calc(100vh-280px)]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -598,8 +624,10 @@ export default function BatchCaller() {
           )}
         </CardContent>
       </Card>
+        </TabsContent>
 
-      {recentLogs.length > 0 && (
+        <TabsContent value="history" className="mt-4">
+      {recentLogs.length > 0 ? (
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base flex items-center gap-2">
@@ -609,7 +637,7 @@ export default function BatchCaller() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="border rounded-md overflow-auto max-h-[300px]">
+            <div className="border rounded-md overflow-auto max-h-[calc(100vh-280px)]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -623,7 +651,7 @@ export default function BatchCaller() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recentLogs.slice(0, 50).map((log) => (
+                  {recentLogs.map((log) => (
                     <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {log.callTimestamp ? new Date(log.callTimestamp).toLocaleString() : "—"}
@@ -658,7 +686,11 @@ export default function BatchCaller() {
             </div>
           </CardContent>
         </Card>
+      ) : (
+        <div className="text-center py-8 text-muted-foreground text-sm">No call logs yet</div>
       )}
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

@@ -1853,10 +1853,19 @@ export class DatabaseStorage implements IStorage {
 
   async getPendingFollowUps(): Promise<CallLog[]> {
     const today = new Date().toISOString().split("T")[0];
+    // Only the LATEST call per truck+callType counts. Without the DISTINCT ON
+    // subquery this returned every historical row whose follow-up date had
+    // passed (2,300+ rows back to March) — superseded failures never cleared,
+    // so the board was an unusable wall of stale CALL_FAILED entries.
     return await getDb().select().from(callLogs).where(
       and(
         sql`${callLogs.nextFollowUpDate} IS NOT NULL`,
-        sql`${callLogs.nextFollowUpDate} <= ${today}`
+        sql`${callLogs.nextFollowUpDate} <= ${today}`,
+        sql`${callLogs.id} IN (
+          SELECT DISTINCT ON (truck_number, call_type) id
+          FROM fs_call_logs
+          ORDER BY truck_number, call_type, call_timestamp DESC
+        )`
       )
     ).orderBy(desc(callLogs.callTimestamp));
   }
