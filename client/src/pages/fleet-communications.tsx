@@ -50,6 +50,7 @@ import {
   AlertTriangle,
   Tag,
   ArrowLeft,
+  RefreshCw,
 } from "lucide-react";
 
 interface CategoryOpt {
@@ -313,6 +314,13 @@ export default function FleetCommunications() {
   const [scope, setScope] = useState<"active" | "archived">("active");
   const [body, setBody] = useState("");
   const [sendCategory, setSendCategory] = useState<string>("general_fleet");
+  // Keep replies in the lane you're looking at: when a category tab is active,
+  // default the thread composer's category to it — otherwise a reply sent from
+  // the Rental Management view would be tagged general_fleet and immediately
+  // disappear from the category-filtered thread you just sent it from.
+  useEffect(() => {
+    if (category !== "all") setSendCategory(category);
+  }, [category]);
   const [managerCc, setManagerCc] = useState(false);
   const [attachment, setAttachment] = useState<{ url: string; preview: string } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -389,11 +397,16 @@ export default function FleetCommunications() {
     .filter((t) => !inRentalOnly || isInRental(t))
     .filter((t) => positionFilter === "all" || shortPosition(t.position) === positionFilter);
 
+  // Category isolation: when a category tab is active, the open thread loads
+  // ONLY that category's messages (server filters), so e.g. Rental Management
+  // never shows decommissioning history. "All" keeps the full mixed thread.
   const { data: detail } = useQuery<{ thread: Thread; messages: Message[]; pending: any[]; contact: Contact | null; hasMore?: boolean }>({
-    queryKey: ["/api/fs/comms/threads", selectedId],
+    queryKey: ["/api/fs/comms/threads", selectedId, category],
     enabled: !!selectedId,
     queryFn: async () => {
-      const res = await apiRequest("GET", `/api/fs/comms/threads/${selectedId}?limit=50`);
+      const params = new URLSearchParams({ limit: "50" });
+      if (category !== "all") params.set("category", category);
+      const res = await apiRequest("GET", `/api/fs/comms/threads/${selectedId}?${params.toString()}`);
       return res.json();
     },
     refetchInterval: 20000,
@@ -406,7 +419,7 @@ export default function FleetCommunications() {
   useEffect(() => {
     setOlderMessages([]);
     setMoreOlder(false);
-  }, [selectedId]);
+  }, [selectedId, category]);
 
   // Always open a thread scrolled to the newest message so the team never has to
   // scroll down. Re-runs when the open thread changes or a new latest message
@@ -457,6 +470,25 @@ export default function FleetCommunications() {
       toast({ title: `Archived ${n} unmatched conversation${n === 1 ? "" : "s"}`, description: "Still viewable in the Archived tab." });
     },
     onError: (e: any) => toast({ title: "Bulk archive failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+
+  // Manual roster/phone refresh — runs the same guarded sync as the daily
+  // schedule (roster ⋈ TPMS → fs_comms_contacts) and clears the "contacts may
+  // be stale" warning once the health poll sees the fresh run.
+  const syncContactsMut = useMutation({
+    mutationFn: async () => (await apiRequest("POST", "/api/fs/comms/sync", {})).json(),
+    onSuccess: (d: any) => {
+      toast({
+        title: "Contacts synced",
+        description: d?.fetched != null
+          ? `${d.fetched} roster rows — ${d.updated ?? 0} updated, ${d.created ?? 0} new, ${d.phoneChanges ?? 0} phone changes`
+          : (d?.message || "Contact directory refreshed."),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/health"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/contacts"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
+    },
+    onError: (e: any) => toast({ title: "Contact sync failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
   const markRead = useMutation({
@@ -586,6 +618,7 @@ export default function FleetCommunications() {
     setLoadingOlder(true);
     try {
       const params = new URLSearchParams({ limit: "50", before: String(earliest.createdAt) });
+      if (category !== "all") params.set("category", category);
       const res = await apiRequest("GET", `/api/fs/comms/threads/${selectedId}?${params.toString()}`);
       const data = await res.json();
       setOlderMessages((prev) => [...(data.messages ?? []), ...prev]);
@@ -724,6 +757,18 @@ export default function FleetCommunications() {
             data-testid="button-select-mode"
           >
             <ListChecks className="w-4 h-4 mr-1.5" /> {selectMode ? "Done" : "Select"}
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => syncContactsMut.mutate()}
+            disabled={syncContactsMut.isPending}
+            title="Refresh the contact directory now (roster + TPMS phones). Same sync the daily schedule runs; takes ~30-60s."
+            className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm"
+            data-testid="button-sync-contacts"
+          >
+            <RefreshCw className={`w-4 h-4 mr-1.5 ${syncContactsMut.isPending ? "animate-spin" : ""}`} />
+            {syncContactsMut.isPending ? "Syncing…" : "Sync contacts"}
           </Button>
           <Button size="sm" variant="outline" onClick={() => { setPresetLdaps([]); setBulkOpen(true); }} className="h-9 border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm" data-testid="button-bulk-send">
             <Users className="w-4 h-4 mr-1.5" /> Bulk

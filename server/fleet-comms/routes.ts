@@ -51,8 +51,6 @@ import {
   recordPhoneChange,
   getContactByLdap,
   getPositionsForLdaps,
-  getEmplStatusForLdaps,
-  effectiveEmplStatus,
   archiveThread,
   restoreThread,
   bulkArchiveUnmatched,
@@ -99,17 +97,6 @@ function actor(req: any): { id: string | null; name: string | null } {
 function isPrivileged(req: any): boolean {
   const role = (req.user?.role || "").toLowerCase();
   return role === "developer" || role === "admin";
-}
-
-// Internal ops trigger (mirrors the rental-sync pattern in fleet-scope-routes):
-// a matching `x-internal-cron: $SESSION_SECRET` header lets an operator/cron
-// fire the contacts sync without a browser session. The outer fleet-scope auth
-// middleware already honors this header; this extends it past the comms gate
-// for the SYNC route ONLY (never message sends or reads).
-function isInternalCron(req: any): boolean {
-  const token = req.headers?.["x-internal-cron"];
-  const expected = process.env.SESSION_SECRET;
-  return !!token && !!expected && token === expected;
 }
 
 // Per-user access control. Mirrors the frontend route/sidebar gate at
@@ -252,18 +239,12 @@ export function registerCommsRoutes(app: Router): void {
         // rows in a stable order across refetches.
         .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
         .limit(limit));
-      // Attach each tech's current position (job title) + employment status
-      // (single-letter roster flag A/L/P/S) from the synced roster/contacts.
-      const ldapList = rows.map((r: any) => r.ldap);
-      const [posMap, statusMap] = await Promise.all([
-        getPositionsForLdaps(ldapList),
-        getEmplStatusForLdaps(ldapList),
-      ]);
+      // Attach each tech's current position (job title) from the synced roster.
+      const posMap = await getPositionsForLdaps(rows.map((r: any) => r.ldap));
       res.json(
         rows.map((r: any) => ({
           ...r,
           position: r.ldap ? posMap.get(String(r.ldap).toUpperCase()) ?? null : null,
-          emplStatus: r.ldap ? statusMap.get(String(r.ldap).toUpperCase()) ?? null : null,
         })),
       );
     } catch (e: any) {
@@ -308,6 +289,12 @@ export function registerCommsRoutes(app: Router): void {
       const limit = Math.min(Number(req.query.limit) || 50, 200);
       const before = String(req.query.before || "").trim();
       const msgConds: any[] = [eq(commsMessages.threadId, id)];
+      // Category isolation: when the inbox has a category tab active, the open
+      // thread shows ONLY that category's messages (and pending sends), so the
+      // Rental Management view isn't flooded with decommissioning history etc.
+      const msgCategory = String(req.query.category || "").trim();
+      const categoryScoped = !!msgCategory && isValidCategory(msgCategory);
+      if (categoryScoped) msgConds.push(eq(commsMessages.category, msgCategory));
       if (before) {
         const beforeDate = new Date(before);
         if (!isNaN(beforeDate.getTime())) msgConds.push(sql`${commsMessages.createdAt} < ${beforeDate}`);
@@ -334,6 +321,7 @@ export function registerCommsRoutes(app: Router): void {
                   ? eq(commsSendQueue.ldap, thread.ldap)
                   : eq(commsSendQueue.phoneDigits, thread.phoneDigits ?? ""),
                 inArray(commsSendQueue.status, ["pending", "claimed"]),
+                ...(categoryScoped ? [eq(commsSendQueue.category, msgCategory)] : []),
               ),
             ));
 
@@ -343,7 +331,7 @@ export function registerCommsRoutes(app: Router): void {
       const posMap = thread.ldap ? await getPositionsForLdaps([thread.ldap]) : null;
       const position = thread.ldap ? posMap?.get(String(thread.ldap).toUpperCase()) ?? null : null;
       res.json({
-        thread: { ...thread, position, emplStatus: effectiveEmplStatus(contact) },
+        thread: { ...thread, position },
         messages,
         pending,
         contact: contact ? { ...contact, position } : null,
@@ -916,29 +904,15 @@ export function registerCommsRoutes(app: Router): void {
   });
 
   // Manual triggers (privileged) — mostly for pilots / ops.
-  // The sync trigger additionally accepts the internal-cron header (no session)
-  // so ops can fire a one-off prod sync without logging in — read-only refresh
-  // of the contacts directory, same guarded path the daily schedule runs.
-  app.post(
-    "/comms/sync",
-    (req: any, res: any, next: any) => (isInternalCron(req) ? next() : gate(req, res, next)),
-    async (req: any, res) => {
-      const viaSession = isPrivileged(req);
-      if (!viaSession && !isInternalCron(req)) {
-        return res.status(403).json({ message: "Forbidden" });
-      }
-      try {
-        // `force` (anti-wipe floor override) is reserved for privileged
-        // SESSIONS — the cron token alone must not be able to mass-tombstone.
-        const result = await syncCommsContacts(viaSession ? "manual" : "internal_cron", {
-          force: viaSession && req.body?.force === true,
-        });
-        res.json({ success: true, ...result });
-      } catch (e: any) {
-        res.status(500).json({ success: false, message: e?.message });
-      }
-    },
-  );
+  app.post("/comms/sync", gate, async (req: any, res) => {
+    if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const result = await syncCommsContacts("manual", { force: req.body?.force === true });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
 
   app.post("/comms/queue/drain", gate, async (req: any, res) => {
     if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });

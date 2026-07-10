@@ -52,12 +52,9 @@ function resolveChromiumPath(): string | undefined {
     return undefined;
   }
 
-  // 3. Revision-aware scan. CRITICAL: playwright-core 1.55.x speaks the CDP of chromium
-  //    revision 1187 (the "-with-cjk" / "playwright-chromium-cjk" nix builds). A
-  //    mismatched revision (e.g. 1080 from a plain "playwright-browsers-chromium" build)
-  //    speaks a slightly different protocol and makes page.evaluate return garbage —
-  //    that silently broke the dashboard-token harvest and is a nondeterministic flake
-  //    depending on /nix readdir order. So PREFER the cjk build, then highest chromium-NNNN.
+  // 3. Scan /nix/store for a REAL playwright chromium build (present in the dev image).
+  //    playwright-core here is 1.41.2; a nix playwright chromium (e.g. the "-with-cjk"
+  //    rev-1187 dev build) drives page.evaluate correctly. Prefer cjk, then highest rev.
   const candidates: { path: string; rev: number; cjk: boolean }[] = [];
   for (const d of storeDirs) {
     if (!/playwright.*chromium|playwright-browsers/i.test(d)) continue;
@@ -84,7 +81,22 @@ function resolveChromiumPath(): string | undefined {
     return candidates[0].path;
   }
 
-  // 4. Fallback: a wrapped ungoogled-chromium binary.
+  // 4. A clean, non-privacy-patched chromium (replit.nix declares pkgs.chromium, which
+  //    ships to prod). Prefer it over the ungoogled fallback below: ungoogled-chromium is
+  //    privacy-patched and its post-login cookie/JS behavior diverged in prod and broke the
+  //    in-page TabId harvest, whereas stock chromium runs page.evaluate the same as the dev
+  //    playwright build (both verified against playwright-core 1.41.2). Store dir names are
+  //    hash-prefixed (e.g. "<hash>-chromium-125.0.6422.141"), so match "-chromium-<digit>"
+  //    unanchored and explicitly exclude ungoogled (which also contains "-chromium-<digit>");
+  //    "chromium-sandbox"/"chromium-unwrapped-…" don't match ("-chromium-" not followed by a digit).
+  for (const d of storeDirs) {
+    if (/ungoogled/i.test(d)) continue;
+    if (!/-chromium-[0-9]/.test(d)) continue;
+    const p = `/nix/store/${d}/bin/chromium`;
+    if (existsSync(p)) return p;
+  }
+
+  // 5. Last resort: a wrapped ungoogled-chromium binary.
   for (const d of storeDirs) {
     if (!/ungoogled-chromium-[0-9]/.test(d) || /sandbox$/.test(d)) continue;
     const p = `/nix/store/${d}/bin/chromium`;
@@ -179,27 +191,55 @@ export async function headlessHolmanLogin(): Promise<HolmanHarvest> {
     // (VERIFIED 2026-06-24) because the Analytics session isn't set until the SSO runs.
     let tabId: string | null = null;
     let ssoUrl: string | null = null;
-    try {
-      const info = await page.evaluate(async () => {
-        const r = await fetch("/AriAccessWeb/default.aspx/GetDashboardTabs", {
-          method: "POST",
-          credentials: "include",
-          headers: { "Content-Type": "application/json; charset=UTF-8", "X-Requested-With": "XMLHttpRequest" },
-          body: JSON.stringify({ userTemplateId: "" }),
-        });
-        const wrapper = await r.json();
-        const arr = JSON.parse(wrapper.d);
-        const tab = arr.find((t: any) => /my fleet info/i.test(t.TEMPLATE_NAME)) || arr[0];
-        return tab
-          ? { tabId: String(Math.trunc(tab.USER_TEMPLATE_ID)), ssoUrl: tab.URL || null }
-          : null;
+    // The in-page AJAX NEVER throws — it returns a diagnostic envelope so a prod failure
+    // (e.g. an HTML login page instead of the expected JSON) is logged, not silent. Retry
+    // once (re-landing on the portal home) to tolerate a not-yet-warm session.
+    for (let attempt = 1; attempt <= 2 && !tabId; attempt++) {
+      const res = await page.evaluate(async () => {
+        try {
+          const r = await fetch("/AriAccessWeb/default.aspx/GetDashboardTabs", {
+            method: "POST",
+            credentials: "include",
+            headers: { "Content-Type": "application/json; charset=UTF-8", "X-Requested-With": "XMLHttpRequest" },
+            body: JSON.stringify({ userTemplateId: "" }),
+          });
+          const contentType = r.headers.get("content-type") || "";
+          const body = await r.text();
+          let tabId: string | null = null;
+          let ssoUrl: string | null = null;
+          try {
+            const wrapper = JSON.parse(body);
+            const arr = JSON.parse(wrapper.d);
+            const tab = arr.find((t: any) => /my fleet info/i.test(t.TEMPLATE_NAME)) || arr[0];
+            if (tab) {
+              tabId = String(Math.trunc(tab.USER_TEMPLATE_ID));
+              ssoUrl = tab.URL || null;
+            }
+          } catch {
+            /* body was not the expected JSON envelope (e.g. a login page) */
+          }
+          return { status: r.status, contentType, snippet: body.slice(0, 200), tabId, ssoUrl };
+        } catch (e: any) {
+          return { status: 0, contentType: "", snippet: `fetch threw: ${e?.message || e}`, tabId: null, ssoUrl: null };
+        }
       });
-      if (info) {
-        tabId = info.tabId;
-        ssoUrl = info.ssoUrl;
+      if (res.tabId) {
+        tabId = res.tabId;
+        ssoUrl = res.ssoUrl;
+      } else {
+        console.warn(
+          `[HolmanHeadless] GetDashboardTabs harvest attempt ${attempt} yielded no TabId ` +
+            `(status=${res.status} type=${res.contentType} body="${res.snippet.replace(/\s+/g, " ").trim()}")`,
+        );
+        if (attempt < 2) {
+          try {
+            await page.goto(DEFAULT_URL, { waitUntil: "domcontentloaded", timeout: 25000 });
+            await page.waitForTimeout(1500);
+          } catch {
+            /* non-fatal */
+          }
+        }
       }
-    } catch (e: any) {
-      console.warn("[HolmanHeadless] GetDashboardTabs/TabId harvest failed:", e?.message);
     }
 
     // ── Establish the /Analytics session via SSO, then harvest the ID token ────
@@ -215,20 +255,31 @@ export async function headlessHolmanLogin(): Promise<HolmanHarvest> {
             timeout: 40000,
           });
         }
-        idToken = await page.evaluate(
+        const zres = await page.evaluate(
           async ([tid, kpi]) => {
-            const r = await fetch(`/Analytics/Dashboard/_Zones/${tid}?_=${Date.now()}`, {
-              credentials: "include",
-              headers: { "X-Requested-With": "XMLHttpRequest" },
-            });
-            const html = await r.text();
-            const m =
-              html.match(new RegExp(`data-widget-id="(${kpi}_[a-z0-9]{6,16})"`, "i")) ||
-              html.match(new RegExp(`w_\\d+_(${kpi}_[a-z0-9]{6,16})`, "i"));
-            return m ? m[1] : null;
+            try {
+              const r = await fetch(`/Analytics/Dashboard/_Zones/${tid}?_=${Date.now()}`, {
+                credentials: "include",
+                headers: { "X-Requested-With": "XMLHttpRequest" },
+              });
+              const html = await r.text();
+              const m =
+                html.match(new RegExp(`data-widget-id="(${kpi}_[a-z0-9]{6,16})"`, "i")) ||
+                html.match(new RegExp(`w_\\d+_(${kpi}_[a-z0-9]{6,16})`, "i"));
+              return { status: r.status, len: html.length, idToken: m ? m[1] : null, err: "" };
+            } catch (e: any) {
+              return { status: 0, len: 0, idToken: null, err: String(e?.message || e) };
+            }
           },
           [tabId, KPI_ID_NUM] as const,
         );
+        idToken = zres.idToken;
+        if (!idToken) {
+          console.warn(
+            `[HolmanHeadless] _Zones idToken harvest yielded none ` +
+              `(status=${zres.status} len=${zres.len}${zres.err ? ` err=${zres.err}` : ""})`,
+          );
+        }
       } catch (e: any) {
         console.warn("[HolmanHeadless] SSO/_Zones idToken harvest failed:", e?.message);
       }

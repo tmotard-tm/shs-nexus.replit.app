@@ -36,6 +36,11 @@ let _harvestedTabId: string | null = null;
 
 // ── Session stability controls ────────────────────────────────────────────────
 const SESSION_TTL_MS = 20 * 60 * 1000;
+// A login that returns cookies but NO TabId is a partial/poisoned session: every
+// Refresh then fast-fails at "Could not determine TabId". We hold such a session only
+// briefly (and never persist it to disk) so the next Refresh re-attempts a fresh login
+// instead of being stuck for the full SESSION_TTL_MS.
+const TABIDLESS_SESSION_TTL_MS = 3 * 60 * 1000;
 const SESSION_CACHE_FILE = "/tmp/holman-session.json";
 const LOGIN_TIMEOUT_MS = 120_000; // hard ceiling for the isolated login worker
 // Concurrency guard: only ONE headless login runs at a time. Concurrent callers
@@ -410,6 +415,11 @@ function loadCachedSession(): boolean {
     if (!existsSync(SESSION_CACHE_FILE)) return false;
     const c = JSON.parse(readFileSync(SESSION_CACHE_FILE, "utf8"));
     if (!c?.cookies || !c?.expiresAt || Date.parse(c.expiresAt) <= Date.now()) return false;
+    // Never reuse a persisted session that lacks a tabId. We only ever write a
+    // full-TTL disk session WITH a tabId now, but an OLD build could have left a
+    // tabId-less file on disk; honoring it would fast-fail every Refresh until it
+    // expired. A tabId-less hold is in-memory + short-TTL only (see ensureSession).
+    if (!c?.tabId) return false;
     _sessionCookies = c.cookies;
     _harvestedId = c.idToken ?? null;
     _harvestedTabId = c.tabId ?? null;
@@ -561,8 +571,19 @@ async function ensureSession(): Promise<void> {
     _sessionCookies = harvest.cookies;
     _harvestedId = harvest.idToken;
     _harvestedTabId = harvest.tabId;
-    _sessionExpiry = new Date(Date.now() + SESSION_TTL_MS);
-    saveCachedSession();
+    if (harvest.tabId) {
+      // Good login: full TTL + persist to disk so a restart within the TTL reuses it.
+      _sessionExpiry = new Date(Date.now() + SESSION_TTL_MS);
+      saveCachedSession();
+    } else {
+      // Cookies but no TabId → do NOT persist and hold only briefly, so the next Refresh
+      // re-logins instead of fast-failing for the full TTL. _loginInFlight already blocks
+      // a concurrent re-login and /tmp is per-instance on autoscale, so no re-login storm.
+      _sessionExpiry = new Date(Date.now() + TABIDLESS_SESSION_TTL_MS);
+      console.warn(
+        "[HolmanPortal] Login harvested NO TabId — holding cookies briefly (not persisted); next Refresh will re-login.",
+      );
+    }
     console.log(
       `[HolmanPortal] Session established (isolated worker). tabId=${_harvestedTabId ?? "?"} idToken=${_harvestedId ? "harvested" : "MISSING"}`,
     );
