@@ -762,6 +762,7 @@ interface DecisionLine {
   seq: string;
   value: string; // full radio value sans decision suffix: lineId^po^amt^seq
   disabled: boolean;
+  checked: boolean; // a COMMITTED line disables BOTH radios but checks only the chosen one
 }
 
 function parseDecisionLines(html: string, decision: "Approve" | "Decline"): DecisionLine[] {
@@ -780,6 +781,7 @@ function parseDecisionLines(html: string, decision: "Approve" | "Decline"): Deci
     if (!vm) continue;
     if (vm[5] !== decision) continue; // keep only the chosen decision's radio
     const disabled = /\bdisabled\b/i.test(tag);
+    const checked = /\bchecked\b/i.test(tag);
     lines.push({
       fieldName: decodeEntities(nameM[1]),
       lineId: vm[1],
@@ -788,6 +790,7 @@ function parseDecisionLines(html: string, decision: "Approve" | "Decline"): Deci
       seq: vm[4],
       value: `${vm[1]}^${vm[2]}^${vm[3]}^${vm[4]}`,
       disabled,
+      checked,
     });
   }
   return lines;
@@ -969,9 +972,15 @@ async function submitDecision(
     if (mine.length === 0) {
       return { kind: "indeterminate", detail: "page had no decision lines for this PO" };
     }
-    return mine.some((l) => !l.disabled)
-      ? { kind: "actionable", detail: "line still actionable (decision not applied)" }
-      : { kind: "confirmed", detail: "line locked" };
+    if (mine.some((l) => !l.disabled)) {
+      return { kind: "actionable", detail: "line still actionable (decision not applied)" };
+    }
+    // Locked. A committed line disables BOTH radios but checks only the chosen one —
+    // require OUR decision's radio to be the checked one, so a mid-race opposite
+    // decision (someone declining while we approve) can never read as confirmed.
+    return mine.every((l) => l.checked)
+      ? { kind: "confirmed", detail: "line locked with our decision checked" }
+      : { kind: "actionable", detail: "line locked but NOT with our decision — opposite decision appears applied; verify in Holman" };
   };
 
   let state = readState(postHtml, postUrl);
@@ -1007,7 +1016,7 @@ async function submitDecision(
     error: confirmed
       ? undefined
       : state.kind === "actionable"
-        ? "Decision POST returned but the line is still actionable on re-read (decision did not apply) — verify in Holman portal"
+        ? `Decision POST returned but not confirmed: ${state.detail} — verify in Holman portal`
         : `Decision POST returned but confirmation was unreadable after retries (${state.detail}) — the decision may HAVE applied; check Holman before retrying`,
   };
 }
