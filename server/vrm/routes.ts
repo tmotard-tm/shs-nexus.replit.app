@@ -80,7 +80,8 @@ import {
   listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved, markHolmanPoOutcome,
   updateHolmanApprovalResult, markHolmanPoDenied, upsertHolmanRentalPoQueue,
 } from "./holman-rental-po-storage";
-import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman } from "../holman-portal-service";
+import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
+  resolveRentersForVehicles } from "../holman-portal-service";
 import { enqueueNotificationsForDeny, enqueueApprovalSmsForTech, enqueueDenialSmsForTech, triggerImmediateDispatch } from "./notification-dispatcher";
 import { enqueueDcaMakeUnavailableForDecision, requestDcaEventRetry } from "./dca-event-dispatcher";
 import { fetchRentalRoster, fetchAdjustedNet, fetchScorecardScores, fetchTechPunchHistory, fetchTechPunchEvents, fetchPunchSourceDiagnostic, fetchPunchSourceShape, type ScorecardRow, type TechPunchRow, type TechPunchEvent } from "./snowflake-queries";
@@ -2675,6 +2676,28 @@ export function registerVrmRoutes(): Router {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
         return res.status(502).json({ ok: false, error: scrapeErr });
+      }
+      // Fill the REAL renter for UNKNOWN-driver POs from Holman's View Rental
+      // Request box (Tyler 2026-07-11). The renter chain runs in an isolated
+      // headless worker; fault-isolated — any failure leaves the driver as-is.
+      try {
+        const unknownVehicles = scraped
+          .filter((po) => !po.driverName || /^unknown/i.test(po.driverName.trim()))
+          .map((po) => (po as any).vehicleNumber)
+          .filter(Boolean);
+        if (unknownVehicles.length > 0) {
+          const renters = await resolveRentersForVehicles(unknownVehicles);
+          const byPo = new Map(renters.map((r) => [String(r.poNumber), r]));
+          let filled = 0;
+          for (const po of scraped) {
+            if (po.driverName && !/^unknown/i.test(po.driverName.trim())) continue;
+            const r = byPo.get(String(po.poNumber));
+            if (r?.renterName) { po.driverName = r.renterName; filled++; }
+          }
+          if (filled > 0) console.log(`[VRM/HolmanPO] renter-box filled ${filled} UNKNOWN driver(s) of ${unknownVehicles.length}`);
+        }
+      } catch (e: any) {
+        console.warn("[VRM/HolmanPO] renter resolve failed (non-fatal):", e?.message);
       }
       const enriched = await Promise.all(
         scraped.map(async (po) => ({ poNumber: po.poNumber, ...(await matchDriverNameToTech(po.driverName)) }))

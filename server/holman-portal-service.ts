@@ -750,6 +750,119 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
   }
 }
 
+
+const RENTER_TIMEOUT_MS = 180_000;
+
+// ─── Renter resolver spawn wrapper (Tyler 2026-07-11) ───────────────────────
+// Runs holman-renter-worker in an isolated child process (same containment as
+// spawnHeadlessLogin) and returns a poNumber -> renter-name map. Used to fill
+// the real renter when the awaiting-auth grid shows the driver as "UNKNOWN".
+export interface ResolvedRenter { poNumber: string; renterName: string | null; renterPhone: string | null; }
+
+export async function resolveRentersForVehicles(vehicles: string[]): Promise<ResolvedRenter[]> {
+  const uniq = Array.from(new Set(vehicles.map((v) => String(v || "").trim()).filter(Boolean)));
+  if (uniq.length === 0) return [];
+  return new Promise<ResolvedRenter[]>((resolve) => {
+    const distWorker = "dist/holman-renter-worker.js";
+    const useDist = existsSync(distWorker);
+    const cmd = useDist ? process.execPath : "node_modules/.bin/tsx";
+    const argv = (useDist ? [distWorker] : ["server/holman-renter-worker.ts"]).concat([uniq.join(",")]);
+    let child;
+    try {
+      child = spawn(cmd, argv, { cwd: process.cwd(), detached: true, stdio: ["ignore", "pipe", "pipe"], env: process.env });
+    } catch (e: any) {
+      console.warn("[HolmanRenter] spawn failed (non-fatal):", e?.message);
+      return resolve([]);
+    }
+    let out = "";
+    let settled = false;
+    const finish = (r: ResolvedRenter[]) => { if (settled) return; settled = true; clearTimeout(timer); resolve(r); };
+    const timer = setTimeout(() => {
+      try { if (child.pid) process.kill(-child.pid, "SIGKILL"); } catch { /* gone */ }
+      console.warn("[HolmanRenter] renter worker timed out — continuing without renter fill");
+      finish([]);
+    }, RENTER_TIMEOUT_MS);
+    child.stdout?.on("data", (d) => { out += d.toString(); });
+    child.stderr?.on("data", (d) => process.stderr.write(d.toString()));
+    child.on("error", (e) => { console.warn("[HolmanRenter] worker error:", e.message); finish([]); });
+    child.on("close", () => {
+      finish((() => {
+        const line = out.trim().split("\n").filter(Boolean).pop() ?? "";
+        try {
+          const parsed = line ? JSON.parse(line) : null;
+          if (!parsed?.ok || !Array.isArray(parsed.results)) return [];
+          return parsed.results
+            .filter((r: any) => r.po && r.renterName)
+            .map((r: any) => ({ poNumber: String(r.po), renterName: r.renterName, renterPhone: r.renterPhone ?? null }));
+        } catch { return []; }
+      })());
+    });
+  });
+}
+
+// ─── Rental Request renter resolver (Tyler 2026-07-11) ──────────────────────
+// When the awaiting-auth grid shows driver "UNKNOWN", the REAL renter name
+// lives in the PO's Rental Request view (Maintenance tab → PO → View Rental
+// Request). This fetches the repair-details page IN-SESSION (the cookies that
+// make RepairDetails.aspx work accrue across scrape responses and only exist
+// inside this module) and drills into the rental-request content.
+// Stage 1 exports a raw fetch so the parser can be built against real pages.
+
+export async function fetchRepairDetailsHtml(
+  key: string,
+): Promise<{ ok: boolean; html: string; error?: string }> {
+  try {
+    await ensureSession();
+    const url = `${REPAIR_DETAILS_PATH}?key=${key}&isDrilldown=True&IsShowAll=True&rowid=1`;
+    const resp = await fetch(url, {
+      headers: {
+        Cookie: _sessionCookies,
+        "User-Agent": UA,
+        Referer: `${PORTAL_BASE}/WebForms/KPIs/DetailsListing.aspx`,
+      },
+      redirect: "follow",
+    });
+    _sessionCookies = mergeCookies(_sessionCookies, resp);
+    const respUrl: string = (resp as any).url ?? "";
+    if (/LoginForm\.aspx/i.test(respUrl)) {
+      invalidateSession();
+      return { ok: false, html: "", error: "bounced to LoginForm" };
+    }
+    if (!resp.ok) return { ok: false, html: "", error: `HTTP ${resp.status}` };
+    return { ok: true, html: await (resp as any).text() };
+  } catch (e: any) {
+    return { ok: false, html: "", error: e?.message ?? String(e) };
+  }
+}
+
+export async function fetchPortalPathHtml(
+  path: string,
+  referer?: string,
+): Promise<{ ok: boolean; html: string; status: number; finalUrl?: string; error?: string }> {
+  try {
+    await ensureSession();
+    const url = path.startsWith("http") ? path : `${PORTAL_BASE}${path.startsWith("/") ? "" : "/"}${path}`;
+    const resp = await fetch(url, {
+      headers: {
+        Cookie: _sessionCookies,
+        "User-Agent": UA,
+        Referer: referer ?? `${PORTAL_BASE}/WebForms/Details/RepairDetails.aspx`,
+      },
+      redirect: "follow",
+    });
+    _sessionCookies = mergeCookies(_sessionCookies, resp);
+    const finalUrl: string = (resp as any).url ?? url;
+    if (/LoginForm\.aspx/i.test(finalUrl)) {
+      invalidateSession();
+      return { ok: false, html: "", status: resp.status, finalUrl, error: "bounced to LoginForm — session expired" };
+    }
+    if (!resp.ok) return { ok: false, html: "", status: resp.status, finalUrl, error: `HTTP ${resp.status}` };
+    return { ok: true, html: await (resp as any).text(), status: resp.status, finalUrl };
+  } catch (e: any) {
+    return { ok: false, html: "", status: 0, error: e?.message ?? String(e) };
+  }
+}
+
 // ─── Approve / Deny a PO via WebForms postback ────────────────────────────────
 // Decision page = RepairDetails.aspx?key=<hex>&isDrilldown=True&IsShowAll=True&rowid=1.
 // The GET renders radios with value "<lineId>^<poNumber>^<amount>^<seq>_Approve|Decline".
