@@ -663,8 +663,39 @@ export default function Dashboard() {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
+  // Bootstrap: one round trip that pre-seeds the fast grid/summary queries below.
+  // On success their caches are filled before they enable (so they read cache
+  // instead of each firing its own request); on any failure they fall back to
+  // fetching individually. No cache TTL — freshness is unchanged.
+  const dashboardBootstrap = useQuery<Record<string, { ok: boolean; data?: any }>>({
+    queryKey: ["/api/fs/dashboard-bootstrap"],
+    retry: false,
+    queryFn: async () => {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 10000);
+      try {
+        const res = await fetch("/api/fs/dashboard-bootstrap", {
+          credentials: "include",
+          signal: controller.signal,
+        });
+        if (!res.ok) throw new Error(`bootstrap ${res.status}`);
+        const sections = await res.json();
+        for (const [key, section] of Object.entries(sections)) {
+          if (section && (section as any).ok) {
+            queryClient.setQueryData([key], (section as any).data);
+          }
+        }
+        return sections;
+      } finally {
+        clearTimeout(t);
+      }
+    },
+  });
+  const bootstrapReady = dashboardBootstrap.isFetched;
+
   const { data: trucks, isLoading, error } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
+    enabled: bootstrapReady,
   });
 
   const { data: pickupsThisWeek } = useQuery<{
@@ -672,6 +703,7 @@ export default function Dashboard() {
     label: string;
   }>({
     queryKey: ["/api/fs/pickups-scheduled-this-week"],
+    enabled: bootstrapReady,
   });
 
 
@@ -734,6 +766,7 @@ export default function Dashboard() {
     byRegion: Record<string, number>;
   }>({
     queryKey: ["/api/fs/rentals/summary"],
+    enabled: bootstrapReady,
   });
 
   // Fetch weekly offboarding name set for persistent "T" badge on tech name
@@ -3319,7 +3352,7 @@ export default function Dashboard() {
                 Failed to load trucks. Please try again later.
               </AlertDescription>
             </Alert>
-          ) : isLoading ? (
+          ) : (isLoading || !bootstrapReady) ? (
             <div className="space-y-3">
               {[...Array(5)].map((_, i) => (
                 <Skeleton key={i} className="h-16 w-full" />

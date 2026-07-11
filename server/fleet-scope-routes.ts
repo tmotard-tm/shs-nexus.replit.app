@@ -2581,6 +2581,39 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // with server-side filtering, sorting (whitelisted columns) and paging applied.
   // The paginated branch is only opted into by ActiveRentalsDashboard today; if you
   // wire up another consumer, mind the response-shape switch.
+  // Rentals dashboard bootstrap: collapse the fast, always-fresh reads the board
+  // fires on mount (grid + pickups + rental summary) into ONE round trip. The
+  // Snowflake/external endpoints (rental-ops/open, scraper-status, hr/tech-status,
+  // byov-enrollment-status, weekly-offboarding/name-set) are deliberately excluded
+  // — bundling a slow read would stall the whole payload — so they keep loading
+  // independently. No caching is added: each sub-read runs live via loopback, so
+  // the data is byte-identical to calling the endpoints directly and stays exactly
+  // as fresh. Forwards the caller's cookie AND x-internal-cron so the sub-reads
+  // authenticate as whoever called the bootstrap.
+  app.get("/dashboard-bootstrap", async (req: any, res) => {
+    const base = `http://127.0.0.1:${process.env.PORT || 5000}`;
+    const fwd: Record<string, string> = {};
+    if (req.headers.cookie) fwd.cookie = String(req.headers.cookie);
+    if (req.headers["x-internal-cron"]) fwd["x-internal-cron"] = String(req.headers["x-internal-cron"]);
+    const paths = [
+      "/api/fs/trucks",
+      "/api/fs/pickups-scheduled-this-week",
+      "/api/fs/rentals/summary",
+    ];
+    const sections: Record<string, { ok: boolean; data?: any }> = {};
+    await Promise.all(
+      paths.map(async (p) => {
+        try {
+          const r = await fetch(`${base}${p}`, { headers: fwd });
+          sections[p] = r.ok ? { ok: true, data: await r.json() } : { ok: false };
+        } catch {
+          sections[p] = { ok: false };
+        }
+      }),
+    );
+    res.json(sections);
+  });
+
   app.get("/trucks", async (req, res) => {
     try {
       const trucksWithUps = await getCachedTrucksWithUps();
