@@ -133,12 +133,12 @@
   --status-gray-fg: #FFFFFF;
 
   /* Vehicle Rental Management — Light Theme */
-  --vrm-background: #FFFFFF;
-  --vrm-surface: #F7F8FA;
+  --vrm-background: #EFF3FA;
+  --vrm-surface: #E5EBF6;
   --vrm-ink: #0F1117;
   --vrm-ink-soft: #2A2E3B;
   --vrm-ink-muted: #5C6478;
-  --vrm-rule: #E8EAEF;
+  --vrm-rule: #D6DFEE;
   --vrm-accent: #1A56DB;
   --vrm-accent-light: #EFF4FF;
   --vrm-green: #0D9668;
@@ -159,7 +159,7 @@
   --vrm-purple-light: #FAF5FF;
   --vrm-purple-deep: #6D28D9;
   --vrm-purple-deep-light: #F3E8FF;
-  --vrm-sidebar-bg: #0F1117;
+  --vrm-sidebar-bg: #101B33;
   --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
 
@@ -229,12 +229,12 @@
   --status-gray-fg: #FFFFFF;
 
   /* Vehicle Rental Management — Dark Theme */
-  --vrm-background: #0A0B10;
-  --vrm-surface: #1B1E27;
+  --vrm-background: #0B1222;
+  --vrm-surface: #16203A;
   --vrm-ink: #F1F3F8;
   --vrm-ink-soft: #C9CED8;
   --vrm-ink-muted: #A0A8B5;
-  --vrm-rule: #262932;
+  --vrm-rule: #223052;
   --vrm-accent: #5B8BF5;
   --vrm-accent-light: #1A2540;
   --vrm-green: #34D399;
@@ -255,7 +255,7 @@
   --vrm-purple-light: #1F1730;
   --vrm-purple-deep: #DDD6FE;
   --vrm-purple-deep-light: #1F1730;
-  --vrm-sidebar-bg: #0F1117;
+  --vrm-sidebar-bg: #0D162B;
   --vrm-sidebar-active-item-bg: rgba(255,255,255,0.063);
 }
 
