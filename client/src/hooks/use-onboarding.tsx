@@ -191,13 +191,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       const completed = localStorage.getItem(storageKey) === "true";
       setHasCompletedOnboarding(completed);
       setSteps(getStepsForRole(user.role, user.departments ?? undefined));
-      
-      if (!completed) {
-        const timer = setTimeout(() => {
-          setIsActive(true);
-        }, 1000);
-        return () => clearTimeout(timer);
-      }
+      // Auto-launch removed (Tyler 7/11): the completed flag lives in
+      // localStorage, which is per-origin — rotating dev URLs and the dev/prod
+      // split meant the tutorial re-fired on every new origin no matter what
+      // the user checked. The tutorial is still available on demand via the
+      // sidebar's restart-tutorial action.
     }
   }, [user]);
 
