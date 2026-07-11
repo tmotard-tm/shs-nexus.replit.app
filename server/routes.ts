@@ -20521,6 +20521,33 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const records = await buildMismatchRecords();
       mismatchCache = { data: records, count: records.length, computedAt: Date.now() };
 
+      // Self-heal (Tyler 7/11): the AMS leg of a mismatch reads
+      // ams_vehicles_cache, which nothing refreshes on unassignment — the
+      // watermark poll never ran in prod and its delta feed is structurally
+      // blind to unassignments (VIN-keyed, and a tech who loses a truck
+      // arrives with no VIN). 25 of the 27 AMS-flagged rows on 7/11 were
+      // stale-cache ghosts that live AMS already showed as UNKNOWN/blank.
+      // Re-verify the flagged VINs against live AMS in the background and
+      // drop the mismatch cache when anything heals, so the next compute
+      // reflects reality. Fire-and-forget; failures are non-fatal.
+      {
+        const amsFlagged = records
+          .filter((r: any) => r.vin && r.amsTechId && String(r.amsTechId).trim() &&
+            String(r.amsTechId).trim().toUpperCase() !== "UNKNOWN")
+          .map((r: any) => ({ vin: r.vin, truckNumber: r.truckNumber, amsTechId: r.amsTechId }));
+        if (amsFlagged.length > 0) {
+          import("./ams-mismatch-reverify")
+            .then(({ reverifyAmsAssignments }) => reverifyAmsAssignments(amsFlagged, { apply: true }))
+            .then((sum) => {
+              if (sum.refreshed > 0) {
+                console.log(`[Alignment] AMS re-verify healed ${sum.refreshed}/${sum.checked} cached rows — dropping mismatch cache`);
+                mismatchCache = null;
+              }
+            })
+            .catch((e: any) => console.warn("[Alignment] AMS re-verify failed (non-fatal):", e?.message));
+        }
+      }
+
       if (countOnly) {
         return res.json({ count: records.length });
       }
@@ -20533,6 +20560,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json({ data: paginated, total, page, pageSize });
     } catch (err: any) {
       console.error("[Alignment] mismatches error:", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // POST /api/fleet-ops/mismatches/reverify-ams — re-check the AMS-flagged
+  // mismatch rows against live AMS. Dry-run by default (reports what WOULD
+  // refresh); ?apply=true writes the fresh values into ams_vehicles_cache.
+  app.post("/api/fleet-ops/mismatches/reverify-ams", requireAuth, async (req: any, res) => {
+    try {
+      const apply = req.query.apply === "true";
+      const records = (mismatchCache && (Date.now() - mismatchCache.computedAt) < MISMATCH_CACHE_TTL)
+        ? mismatchCache.data
+        : await buildMismatchRecords();
+      const amsFlagged = records
+        .filter((r: any) => r.vin && r.amsTechId && String(r.amsTechId).trim() &&
+          String(r.amsTechId).trim().toUpperCase() !== "UNKNOWN")
+        .map((r: any) => ({ vin: r.vin, truckNumber: r.truckNumber, amsTechId: r.amsTechId }));
+      const { reverifyAmsAssignments } = await import("./ams-mismatch-reverify");
+      const summary = await reverifyAmsAssignments(amsFlagged, { apply });
+      if (apply && summary.refreshed > 0) mismatchCache = null;
+      res.json({ apply, candidates: amsFlagged.length, ...summary });
+    } catch (err: any) {
+      console.error("[Alignment] reverify-ams error:", err);
       res.status(500).json({ message: err.message });
     }
   });
