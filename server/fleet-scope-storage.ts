@@ -1864,7 +1864,8 @@ export class DatabaseStorage implements IStorage {
         sql`${callLogs.id} IN (
           SELECT DISTINCT ON (truck_number, call_type) id
           FROM fs_call_logs
-          ORDER BY truck_number, call_type, call_timestamp DESC
+          WHERE status = 'completed'
+          ORDER BY truck_number, call_type, call_timestamp DESC, id DESC
         )`
       )
     ).orderBy(desc(callLogs.callTimestamp));
