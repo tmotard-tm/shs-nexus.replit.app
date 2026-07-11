@@ -1013,8 +1013,56 @@ export default function NewRentalFullLog() {
     {
       label: "Rental Vehicle #",
       sortKey: "vanRentalPo",
-      render: (e) => e.vanRentalPo ?? "—",
+      render: (e) => {
+        const canon = String(e.vanRentalPo ?? "").replace(/^0+/, "");
+        const tpms = String(e.vanAssignedInTpms ?? "").replace(/^0+/, "");
+        const mismatch = !!canon && !!tpms && canon !== tpms;
+        return (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            {e.vanRentalPo ?? "—"}
+            {mismatch && (
+              <span
+                title={`TPMS has a different van on this tech: ${e.vanAssignedInTpms}`}
+                style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 600, color: "#B45309", backgroundColor: "#FEF3C7", padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap" }}
+              >
+                TPMS {tpms}
+              </span>
+            )}
+          </span>
+        );
+      },
     },
+    {
+      label: "Decision",
+      render: (e) => {
+        if (!e.decision) return "—";
+        const d = e.decision.toLowerCase();
+        const cfg =
+          d === "approved" || d === "approve"
+            ? { fg: "#15803d", bg: "#dcfce7" }
+            : d === "denied" || d === "deny"
+            ? { fg: "#b91c1c", bg: "#fee2e2" }
+            : { fg: colors.inkMuted, bg: colors.surface };
+        return (
+          <span
+            style={{
+              display: "inline-block",
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 11,
+              color: cfg.fg,
+              backgroundColor: cfg.bg,
+              padding: "2px 10px",
+              borderRadius: 6,
+              textTransform: "capitalize",
+            }}
+          >
+            {e.decision}
+          </span>
+        );
+      },
+    },
+
     {
       label: "Rental Approved",
       render: (e) => {
@@ -1103,29 +1151,8 @@ export default function NewRentalFullLog() {
       render: (e) => e.name ?? "—",
     },
     {
-      label: "Enterprise ID",
-      sortKey: "enterpriseId",
-      render: (e) => (
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-          {e.enterpriseId ?? "—"}
-          <DiscrepancyFlag
-            row={discrepancies.byRequestId.get(e.id)}
-            size={11}
-          />
-        </span>
-      ),
-    },
-    {
-      label: "Van Number",
-      render: (e) => e.trimVanNum ?? "—",
-    },
-    {
       label: "Tech Ph Num",
       render: (e) => e.techPhNum ?? "—",
-    },
-    {
-      label: "Van in TPMS",
-      render: (e) => e.vanAssignedInTpms ?? "—",
     },
     {
       label: "Start Rental Date",
@@ -1163,8 +1190,14 @@ export default function NewRentalFullLog() {
     {
       label: "LDAP",
       render: (e) => (
-        <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
-          {e.ldap ?? e.enterpriseId ?? "—"}
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkSoft }}>
+            {e.ldap ?? e.enterpriseId ?? "—"}
+          </span>
+          <DiscrepancyFlag
+            row={discrepancies.byRequestId.get(e.id)}
+            size={11}
+          />
         </span>
       ),
     },
@@ -1209,36 +1242,6 @@ export default function NewRentalFullLog() {
       render: (e) => e.recommendation ?? "—",
     },
     {
-      label: "Decision",
-      render: (e) => {
-        if (!e.decision) return "—";
-        const d = e.decision.toLowerCase();
-        const cfg =
-          d === "approved" || d === "approve"
-            ? { fg: "#15803d", bg: "#dcfce7" }
-            : d === "denied" || d === "deny"
-            ? { fg: "#b91c1c", bg: "#fee2e2" }
-            : { fg: colors.inkMuted, bg: colors.surface };
-        return (
-          <span
-            style={{
-              display: "inline-block",
-              fontFamily: fonts.dmSans,
-              fontWeight: 500,
-              fontSize: 11,
-              color: cfg.fg,
-              backgroundColor: cfg.bg,
-              padding: "2px 10px",
-              borderRadius: 6,
-              textTransform: "capitalize",
-            }}
-          >
-            {e.decision}
-          </span>
-        );
-      },
-    },
-    {
       label: "Notes",
       render: (e) =>
         e.decisionNotes ? (
@@ -1250,7 +1253,7 @@ export default function NewRentalFullLog() {
         ),
     },
     {
-      label: "Date",
+      label: "Decision Date",
       render: (e) => (e.decisionDate ? fmtDate(e.decisionDate) : "—"),
     },
     {
@@ -1260,14 +1263,6 @@ export default function NewRentalFullLog() {
     {
       label: "District",
       render: (e) => (e.district ? e.district.replace(/^0+/, "") || "0" : "—"),
-    },
-    {
-      label: "Technician",
-      render: (e) => e.technician ?? e.name ?? "—",
-    },
-    {
-      label: "Truck #",
-      render: (e) => e.truckNumber ?? e.unitNumber ?? e.trimVanNum ?? "—",
     },
     {
       label: "",
