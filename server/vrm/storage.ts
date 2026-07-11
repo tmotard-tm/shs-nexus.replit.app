@@ -79,69 +79,6 @@ export interface TechListFilters {
   pageSize?: number;
 }
 
-export interface ActiveRentalRow {
-  id: string | null;
-  truckNumber: string | null;
-  ldap: string | null;
-  name: string;
-  market: string | null;
-  primaryZip: string | null;
-  tenureMonths: number | null;
-  gate1DaysInRental: number | null;
-  gate1Completes: number | null;
-  gate1TotalRevenue: string | null;
-  gate1LaborDirect: string | null;
-  gate1LaborBenefits: string | null;
-  gate1PartsCogs: string | null;
-  gate1PartsShipping: string | null;
-  gate1TruckExpense: string | null;
-  gate1PptProfit: string | null;
-  gate1FuelEst: string | null;
-  gate1RentalCost: string | null;
-  gate1AdjustedNet: string | null;
-  gate1PayrollCost: string | null;
-  gate1Classification: string | null;
-  gate2Exempt: boolean;
-  gate2WeightedScore: string | null;
-  newHireExempt: boolean;
-  dcaReviewOutcome: string | null;
-  currentStatus: string;
-  createdAt: Date | string | null;
-  rentalStartDate: Date | string | null;
-  outreachFlagged: boolean;
-  returnedRental: boolean;
-  escalationPath: string | null;
-  smsSentAt: Date | string | null;
-  hasVrmContext: boolean;
-  contextStatus: "matched" | "no_ldap" | "no_vrm_match" | "ambiguous_ldap" | "unresolved_ldap";
-  ldapMatchSource: "fleet" | "exact_name" | "fuzzy_name" | "truck_number" | null;
-  /** The original fs_trucks.tech_name — carried as a secondary label when the
-   *  TPMS-resolved name differs (stale assignment) or as the display name when
-   *  LDAP resolution failed.  Never used as the authoritative primary name. */
-  staleAssignmentName: string | null;
-  liveTruckStatus: string | null;
-  liveSource: string | null;
-  // From the latest vrm_rental_checks row keyed by LDAP — populated by the
-  // profitability check endpoint and survives even when vrm_techs is empty.
-  dailyNetWithRental: number | null;
-  dailyNetBeforeRental: number | null;
-  recommendation: string | null;
-  scorecardScore: number | null;
-  rentalCheckTenureMonths: number | null;
-  rentalCheckCompletes: number | null;
-  rentalCheckLookbackDays: number | null;
-  rentalCheckedAt: string | null;
-  /** True when EITHER vrm_techs OR vrm_rental_checks had data. */
-  hasFinancialData: boolean;
-  /** Where the financial fields came from. */
-  financialSource: "vrm_techs" | "vrm_rental_checks" | "none";
-  /** District code (district_no) — populated by the active-rentals endpoint
-   *  via a separate joined lookup against tpms_tech_profiles + all_techs. */
-  district: string | null;
-  /** Home state (2-letter) — populated by the active-rentals endpoint via the
-   *  same district/state lookup. */
-  state: string | null;
-}
 
 type RepairTrackerFleetScopeSyncInput = {
   id: string;
@@ -855,187 +792,6 @@ export async function resolveRosterLdapsByName(
   return techByLdap;
 }
 
-export async function listActiveRentalsFromFleetScope(): Promise<ActiveRentalRow[]> {
-  // ─── Source-of-truth refactor ─────────────────────────────────────────────
-  // Backbone is fetchRentalRoster() (the three validated Holman tables) plus
-  // resolveRosterLdapsByName() which fills in any missing ENTERPRISE_IDs from
-  // the Postgres all_techs roster + TPMS truck-owner fallback. Function name
-  // kept for API stability — the underlying source is no longer Fleet Scope.
-
-  const roster = await fetchRentalRoster();
-  await resolveRosterLdapsByName(roster);
-
-  const techRows = await db.select().from(vrmTechs);
-  const techByLdap = new Map(
-    techRows.map((tech) => [String(tech.ldap || "").trim().toUpperCase(), tech]),
-  );
-
-  // ─── Latest profitability check by LDAP (financials) ─────────────────────
-  const ldaps = Array.from(new Set(
-    roster
-      .map((r) => (r.ENTERPRISE_ID || "").trim().toUpperCase())
-      .filter(Boolean),
-  ));
-  const checkByLdap = new Map<string, {
-    techName: string | null;
-    dailyNetWithRental: number | null;
-    dailyNetBeforeRental: number | null;
-    recommendation: string | null;
-    scorecardScore: number | null;
-    tenureMonths: number | null;
-    completes: number | null;
-    lookbackDays: number | null;
-    checkedAt: string | null;
-  }>();
-  if (ldaps.length > 0) {
-    const checksResult = await db.execute(sql`
-      SELECT DISTINCT ON (UPPER(tech_ldap))
-        UPPER(tech_ldap)            AS "ldap",
-        tech_name                   AS "techName",
-        daily_net_with_rental       AS "dailyNetWithRental",
-        daily_net_before_rental     AS "dailyNetBeforeRental",
-        recommendation              AS "recommendation",
-        scorecard_score             AS "scorecardScore",
-        tenure_months               AS "tenureMonths",
-        completes                   AS "completes",
-        lookback_days               AS "lookbackDays",
-        checked_at                  AS "checkedAt"
-      FROM vrm_rental_checks
-      WHERE UPPER(tech_ldap) IN (${sql.join(ldaps.map((l) => sql`${l}`), sql`, `)})
-      ORDER BY UPPER(tech_ldap), checked_at DESC
-    `);
-    for (const r of (((checksResult as any).rows ?? []) as any[])) {
-      checkByLdap.set(String(r.ldap), {
-        techName: r.techName ?? null,
-        dailyNetWithRental: r.dailyNetWithRental != null ? Number(r.dailyNetWithRental) : null,
-        dailyNetBeforeRental: r.dailyNetBeforeRental != null ? Number(r.dailyNetBeforeRental) : null,
-        recommendation: r.recommendation ?? null,
-        scorecardScore: r.scorecardScore != null ? Number(r.scorecardScore) : null,
-        tenureMonths: r.tenureMonths != null ? Number(r.tenureMonths) : null,
-        completes: r.completes != null ? Number(r.completes) : null,
-        lookbackDays: r.lookbackDays != null ? Number(r.lookbackDays) : null,
-        checkedAt: r.checkedAt ? String(r.checkedAt) : null,
-      });
-    }
-  }
-
-  return roster.map((r) => {
-    const ldap = ((r.ENTERPRISE_ID || "").trim().toUpperCase()) || null;
-    const tech = ldap ? techByLdap.get(ldap) ?? null : null;
-    const check = ldap ? checkByLdap.get(ldap) ?? null : null;
-
-    // EID_MATCH_CONFIDENCE values (set by Snowflake or resolveRosterLdapsByName):
-    //   "HIGH - Truck Owner + Name Match"   → Holman PO + DRIVELINE name agree (Snowflake)
-    //   "HIGH - Holman Truck Owner"          → Holman PO has the LDAP for this truck (Snowflake)
-    //   "HIGH - Name Match"                  → exact name match against Postgres all_techs
-    //   "MEDIUM - Name Match"                → DRIVELINE name match (Snowflake)
-    //   "MEDIUM - Fuzzy Name Match"          → fuzzy name match against Postgres all_techs
-    //   "MEDIUM - Truck# Confirmed by Name"  → TPMS truck-owner verified by logical name match
-    //   "LOW - Truck# Last Name Only"        → TPMS truck-owner, weak (last-name only) match
-    //   "LOW - Name Not in Roster" / "LOW - No Renter Name" → unresolved
-    const conf = r.EID_MATCH_CONFIDENCE ?? "";
-    const ldapMatchSource: ActiveRentalRow["ldapMatchSource"] = !ldap
-      ? null
-      : conf.startsWith("HIGH") ? "exact_name"
-      : "fuzzy_name";
-
-    const contextStatus: ActiveRentalRow["contextStatus"] = !ldap
-      ? "no_ldap"
-      : (tech || check)
-      ? "matched"
-      : "no_vrm_match";
-
-    // Derive Gate-1 from rental check when vrm_techs is empty for this ldap
-    let derivedAdjustedNet: string | null = null;
-    let derivedClassification: string | null = null;
-    if (!tech && check?.dailyNetWithRental != null && check.lookbackDays) {
-      const adj = check.dailyNetWithRental * check.lookbackDays;
-      derivedAdjustedNet = adj.toFixed(2);
-      derivedClassification = adj < 0 ? "underwater" : adj <= 5000 ? "marginal" : "profitable";
-    }
-
-    return {
-      id: tech?.id ?? null,
-      truckNumber: r.VEHICLE_NUMBER ?? null,
-      ldap,
-      // Display name priority:
-      //   1. RENTER_NAME from the live rental table (the NAME ON THE RENTAL)
-      //   2. HR_FULL_NAME from DRIVELINE (canonical employee name)
-      //   3. vrm_techs.name (Snowflake-synced)
-      //   4. vrm_rental_checks.techName
-      //   5. ldap → vehicle # → fallback
-      name: r.RENTER_NAME
-        || r.HR_FULL_NAME
-        || tech?.name
-        || check?.techName
-        || ldap
-        || r.VEHICLE_NUMBER
-        || "Unknown Active Rental",
-      // staleAssignmentName: kept null — the new model doesn't have a "previous tech" concept;
-      // the renter on the live rental IS the authoritative person.
-      staleAssignmentName: null,
-      // Market priority: DRIVELINE > vrm_techs.market
-      market: r.MARKET ?? tech?.market ?? null,
-      primaryZip: tech?.primaryZip ?? r.PRIMARY_ZIP ?? null,
-      // Tenure priority: vrm_techs.tenureMonths > rental_check.tenureMonths
-      // > DRIVELINE.YEARS_OF_SERVICE × 12
-      tenureMonths: tech?.tenureMonths
-        ?? check?.tenureMonths
-        ?? (r.YEARS_OF_SERVICE != null ? Math.round(Number(r.YEARS_OF_SERVICE) * 12) : null),
-      gate1DaysInRental: tech?.gate1DaysInRental ?? r.DAYS_OPEN ?? null,
-      gate1Completes: tech?.gate1Completes ?? check?.completes ?? null,
-      gate1TotalRevenue: tech?.gate1TotalRevenue ?? null,
-      gate1LaborDirect: tech?.gate1LaborDirect ?? null,
-      gate1LaborBenefits: tech?.gate1LaborBenefits ?? null,
-      gate1PartsCogs: tech?.gate1PartsCogs ?? null,
-      gate1PartsShipping: tech?.gate1PartsShipping ?? null,
-      gate1TruckExpense: tech?.gate1TruckExpense ?? null,
-      gate1PptProfit: tech?.gate1PptProfit ?? null,
-      gate1FuelEst: tech?.gate1FuelEst ?? null,
-      gate1RentalCost: tech?.gate1RentalCost ?? null,
-      gate1AdjustedNet: tech?.gate1AdjustedNet ?? derivedAdjustedNet,
-      gate1PayrollCost: tech?.gate1PayrollCost ?? null,
-      gate1Classification: tech?.gate1Classification ?? derivedClassification,
-      gate2Exempt: tech?.gate2Exempt ?? false,
-      gate2WeightedScore: tech?.gate2WeightedScore
-        ?? (check?.scorecardScore != null ? String(check.scorecardScore) : null),
-      newHireExempt: tech?.newHireExempt ?? false,
-      dcaReviewOutcome: tech?.dcaReviewOutcome ?? null,
-      currentStatus: tech?.currentStatus ?? "in_rental",
-      createdAt: tech?.createdAt ?? null,
-      rentalStartDate: r.RENTAL_START_DATE
-        ? String(r.RENTAL_START_DATE)
-        : (tech?.rentalStartDate as string | null) ?? null,
-      outreachFlagged: tech?.outreachFlagged ?? false,
-      // returnedRental defaults false — no fs_trucks rentalReturned flag now.
-      // The truth is: if we still see this rental in today's Holman/Enterprise
-      // snapshot, it's NOT returned (otherwise it wouldn't be in the roster).
-      returnedRental: tech?.returnedRental ?? false,
-      escalationPath: tech?.escalationPath ?? null,
-      smsSentAt: tech?.smsSentAt ?? null,
-      hasVrmContext: !!(tech || check),
-      contextStatus,
-      ldapMatchSource,
-      liveTruckStatus: r.TRUCK_STATUS ?? null,
-      liveSource: "snowflake_rental_tables",
-      dailyNetWithRental: check?.dailyNetWithRental ?? null,
-      dailyNetBeforeRental: check?.dailyNetBeforeRental ?? null,
-      recommendation: check?.recommendation ?? null,
-      scorecardScore: check?.scorecardScore ?? null,
-      rentalCheckTenureMonths: check?.tenureMonths ?? null,
-      rentalCheckCompletes: check?.completes ?? null,
-      rentalCheckLookbackDays: check?.lookbackDays ?? null,
-      rentalCheckedAt: check?.checkedAt ?? null,
-      hasFinancialData: !!(tech || check),
-      financialSource: tech ? "vrm_techs" : check ? "vrm_rental_checks" : "none",
-      // District comes directly from DRIVELINE_ALL_TECHS via the Snowflake query.
-      district: r.DISTRICT ?? null,
-      // State now populated by resolveRosterLdapsByName() from all_techs.home_state.
-      state: r.STATE ?? null,
-    };
-  });
-}
-
 export async function syncRepairTrackerToFleetScope(
   row: RepairTrackerFleetScopeSyncInput,
   changedFields: RepairTrackerFleetScopeChangedFields = {},
@@ -1104,7 +860,7 @@ export async function syncRepairTrackerToFleetScope(
     return { truckId: truck.id, applied: false };
   }
 
-  updates.lastUpdatedBy = "VRM Rental Repair Tracker";
+  updates.lastUpdatedBy = "VRM Rental Denial Tracker";
   await fleetScopeStorage.updateTruck(truck.id, updates);
   // Drop the /api/fs/trucks cache so VRM repair-tracker edits surface on
   // dashboards immediately instead of waiting for the 5s TTL. Lazy import
@@ -1778,10 +1534,6 @@ export async function updateNewRentalLogEntry(
 
 export async function deleteNewRentalLogEntry(id: string) {
   await db.delete(vrmNewRentalLog).where(eq(vrmNewRentalLog.id, id));
-}
-
-export async function clearAllNewRentalLogEntries() {
-  await db.execute(sql`DELETE FROM vrm_new_rental_log`);
 }
 
 // ─── Auto-populate Full Log from a New Rentals decision ──────────────────────

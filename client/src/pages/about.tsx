@@ -185,7 +185,7 @@ export default function About() {
                 <Capability icon={<Truck className="h-4 w-4 text-primary" />} title="Fleet Operations" desc="Assignments, PO tracking, decommissioning" />
                 <Capability icon={<Clock className="h-4 w-4 text-primary" />} title="Unified Task Queue" desc="Cross-department work with specialized cards" />
                 <Capability icon={<Building2 className="h-4 w-4 text-primary" />} title="District Cost Centers" desc="Manual + bulk import + daily auto-seed" />
-                <Capability icon={<Wrench className="h-4 w-4 text-primary" />} title="Rental Repair Tracker" desc="Cases, stages, sub-stages, dark-mode UI" />
+                <Capability icon={<Wrench className="h-4 w-4 text-primary" />} title="Rental Denial Tracker" desc="Cases, stages, sub-stages, dark-mode UI" />
                 <Capability icon={<MessageSquare className="h-4 w-4 text-primary" />} title="Communication Hub" desc="Email & SMS templates with simulation modes" />
                 <Capability icon={<Phone className="h-4 w-4 text-primary" />} title="Phone Recovery" desc="Inventory queue + dedicated workflow" />
                 <Capability icon={<MapPin className="h-4 w-4 text-primary" />} title="Cross-System Address" desc="Update TPMS + AMS in a single action" />

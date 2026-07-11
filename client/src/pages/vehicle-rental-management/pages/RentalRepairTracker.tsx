@@ -2581,7 +2581,7 @@ export default function RentalRepairTracker() {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
           <h1 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 22, color: colors.ink, margin: 0 }}>
-            Rental Repair Tracker
+            Rental Denial Tracker
           </h1>
           <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: "4px 0 0" }}>
             Track techs denied a rental — truck number, shop details, and current status.

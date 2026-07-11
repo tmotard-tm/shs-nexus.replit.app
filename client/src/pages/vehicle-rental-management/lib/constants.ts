@@ -1,6 +1,4 @@
 import {
-  LayoutDashboard,
-  Users,
   TrendingUp,
   ClipboardList,
   Wrench,
@@ -105,10 +103,8 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
-  { label: "Dashboard", path: "/vehicle-rental-management", icon: LayoutDashboard },
   { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
   { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
-  { label: "Rental Repair Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
-  { label: "Active Rentals", path: "/vehicle-rental-management/active-rentals", icon: Users },
+  { label: "Rental Denial Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];

@@ -1,19 +1,16 @@
-import { Switch, Route, useLocation } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { RouteReadySidebar } from "./components/route-ready-sidebar";
 import { RouteReadyTopbar } from "./components/route-ready-topbar";
 import { WipPlaceholder } from "./components/wip-placeholder";
 import { colors, navItems } from "./lib/constants";
-import Dashboard from "./pages/Dashboard";
 import NewRentals from "./pages/NewRentals";
 import NewRentalFullLog from "./pages/NewRentalFullLog";
 import RentalRepairTracker from "./pages/RentalRepairTracker";
-import ActiveRentalsDashboard from "./pages/ActiveRentalsDashboard";
 import Settings from "./pages/Settings";
 
 function getPageTitle(path: string): string {
-  if (path === "/vehicle-rental-management" || path === "/vehicle-rental-management/") return "Dashboard";
   const item = navItems.find((n) => path.startsWith(n.path) && n.path !== "/vehicle-rental-management");
-  return item?.label ?? "Dashboard";
+  return item?.label ?? "New Rentals";
 }
 
 export default function RouteReadyLayout() {
@@ -27,9 +24,15 @@ export default function RouteReadyLayout() {
         <RouteReadyTopbar title={title} />
         <main className="flex-1 overflow-auto" style={{ padding: 32 }}>
           <Switch>
-            <Route path="/vehicle-rental-management" component={Dashboard} />
+            {/* Dashboard and Active Rentals were scrapped 2026-07-11; old
+                bookmarks land on New Rentals instead of a dead pane. */}
+            <Route path="/vehicle-rental-management">
+              <Redirect to="/vehicle-rental-management/new-rentals" replace />
+            </Route>
+            <Route path="/vehicle-rental-management/active-rentals">
+              <Redirect to="/vehicle-rental-management/new-rentals" replace />
+            </Route>
             <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
-            <Route path="/vehicle-rental-management/active-rentals" component={ActiveRentalsDashboard} />
             <Route path="/vehicle-rental-management/new-rental-full-log" component={NewRentalFullLog} />
             <Route path="/vehicle-rental-management/rental-repair-tracker" component={RentalRepairTracker} />
             <Route path="/vehicle-rental-management/settings" component={Settings} />
