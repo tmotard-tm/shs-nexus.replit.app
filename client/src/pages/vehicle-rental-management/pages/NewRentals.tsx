@@ -233,6 +233,7 @@ function TechSearchInput({
 interface ProfitRow {
   tech_ldap: string;
   tech_name: string | null;
+  truck_no?: string | null;
   tenure_months: number | null;
   scorecard_score: number | null;
   completes: number;
@@ -1308,6 +1309,7 @@ function evalAccessor(col: string): (r: ProfitRow) => unknown {
   switch (col) {
     case "ldap":            return (r) => r.tech_ldap;
     case "name":            return (r) => r.tech_name;
+    case "truck":           return (r) => r.truck_no;
     case "state":           return (r) => r.state;
     case "district":        return (r) => r.district;
     case "tenure":          return (r) => r.tenure_months;
@@ -1426,6 +1428,11 @@ export default function NewRentals() {
   const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
   const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
 
+  // Auto-refresh the Holman queue once per page load (Tyler 7/11): show the
+  // CURRENT portal queue on arrival instead of the last manual sync. The ref
+  // guard stops StrictMode double-mounts / re-renders from double-scraping.
+  const holmanAutoRefreshed = useRef(false);
+
   const refreshPoMut = useMutation({
     mutationFn: async () => {
       const r = await fetch("/api/vrm/holman-po-queue/refresh", { method: "POST", credentials: "include" });
@@ -1435,6 +1442,13 @@ export default function NewRentals() {
     onSuccess: () => { refetchPoQueue(); toast({ title: "Holman queue refreshed" }); },
     onError: (e: any) => toast({ title: "Refresh failed", description: e.message, variant: "destructive" }),
   });
+
+  useEffect(() => {
+    if (!canApproveHolman || holmanAutoRefreshed.current) return;
+    holmanAutoRefreshed.current = true;
+    refreshPoMut.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canApproveHolman]);
 
   const approvePoMut = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
@@ -1816,7 +1830,7 @@ export default function NewRentals() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ backgroundColor: colors.surface }}>
-                  {["Truck", "Driver (Holman)", "PO #", "Amount", "PO Date", "Profitability Rec", "Match", ""].map((h) => (
+                  {["Truck", "Driver (Holman)", "District", "State", "PO #", "Amount", "PO Date", "Profitability Rec", "Match", ""].map((h) => (
                     <th key={h} style={{
                       fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
                       color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em",
@@ -1855,6 +1869,12 @@ export default function NewRentals() {
                             {failLabel} in Holman — not approved: {po.holmanApproveError}
                           </div>
                         )}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
+                        {po.district ? String(po.district).replace(/^0+/, "") || po.district : "—"}
+                      </td>
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink }}>
+                        {po.state ?? "—"}
                       </td>
                       <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
                         {po.poNumber}
@@ -2155,6 +2175,7 @@ export default function NewRentals() {
                 <tr>
                   <SortableTh col="ldap"           label="LDAP"            current={evalSort} onChange={setEvalSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={evalSort} onChange={setEvalSort} style={thStyle} />
+                  <SortableTh col="truck"          label="Truck"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <th style={thStyle}>Supervisor</th>
                   <SortableTh col="state"          label="State"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
@@ -2195,7 +2216,7 @@ export default function NewRentals() {
                     <ReactFragment key={row.tech_ldap}>
                       {onLoa && (
                         <tr key={`loa-${row.tech_ldap}`}>
-                          <td colSpan={15} style={{ padding: 0, borderBottom: 0 }}>
+                          <td colSpan={16} style={{ padding: 0, borderBottom: 0 }}>
                             <div
                               role="alert"
                               style={{
@@ -2251,6 +2272,9 @@ export default function NewRentals() {
                         </td>
                         <td style={tdStyle}>
                           <span style={{ fontWeight: 500 }}>{formatPersonNameOr(row.tech_name, "—")}</span>
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                          {row.truck_no ? String(row.truck_no).replace(/^0+/, "") || row.truck_no : "—"}
                         </td>
                         <td style={tdStyle}>
                           {row.supervisor_name ? (

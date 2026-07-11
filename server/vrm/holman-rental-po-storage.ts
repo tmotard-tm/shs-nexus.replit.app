@@ -30,6 +30,8 @@ export interface HolmanRentalPoRow {
   decidedAt: string | null;
   scrapedAt: string;
   lastSyncedAt: string;
+  district: string | null;
+  state: string | null;
 }
 
 interface EnrichRow {
@@ -151,11 +153,22 @@ export async function upsertHolmanRentalPoQueue(
 }
 
 export async function listHolmanPoQueue(): Promise<HolmanRentalPoRow[]> {
+  // District/state are looked up live from the same sources tech-search uses
+  // (tpms_tech_profiles primary, all_techs fallback) keyed by the matched LDAP.
   const result = await db.execute(sql`
-    SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue
-    WHERE status IN ('pending', 'approved', 'denied', 'approve_failed', 'deny_failed', 'blocked')
-    ORDER BY scraped_at DESC
-    LIMIT 200
+    SELECT q.*,
+      COALESCE(
+        (SELECT tp.district_no FROM tpms_tech_profiles tp WHERE UPPER(tp.enterprise_id) = UPPER(q."techLdap") LIMIT 1),
+        (SELECT at.district_no FROM all_techs at WHERE UPPER(at.tech_racfid) = UPPER(q."techLdap") LIMIT 1)
+      ) AS "district",
+      (SELECT at2.home_state FROM all_techs at2 WHERE UPPER(at2.tech_racfid) = UPPER(q."techLdap") LIMIT 1) AS "state"
+    FROM (
+      SELECT ${sql.raw(SELECT_COLS)} FROM holman_rental_po_queue
+      WHERE status IN ('pending', 'approved', 'denied', 'approve_failed', 'deny_failed', 'blocked')
+      ORDER BY scraped_at DESC
+      LIMIT 200
+    ) q
+    ORDER BY q."scrapedAt" DESC
   `);
   return result.rows as unknown as HolmanRentalPoRow[];
 }

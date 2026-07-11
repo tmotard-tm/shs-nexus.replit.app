@@ -859,20 +859,22 @@ export function registerVrmRoutes(): Router {
       }).filter(Boolean);
 
       // ── District/state lookup (local DB) ─────────────────────────────────────
-      const districtStateMap = new Map<string, { district: string | null; state: string | null }>();
+      const districtStateMap = new Map<string, { district: string | null; state: string | null; truckNo: string | null }>();
       try {
         const ldapSql = sql.join(cleaned.map((l) => sql`${l}`), sql`, `);
         const dsRows = await db.execute(sql`
           SELECT UPPER(tp.enterprise_id) AS ldap,
                  tp.district_no          AS district,
-                 at.home_state           AS state
+                 at.home_state           AS state,
+                 tp.truck_no             AS truck_no
           FROM tpms_tech_profiles tp
           LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
           WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
           UNION ALL
           SELECT UPPER(at.tech_racfid) AS ldap,
                  at.district_no        AS district,
-                 at.home_state         AS state
+                 at.home_state         AS state,
+                 NULL::text            AS truck_no
           FROM all_techs at
           WHERE UPPER(at.tech_racfid) IN (${ldapSql})
             AND UPPER(at.tech_racfid) NOT IN (
@@ -883,6 +885,7 @@ export function registerVrmRoutes(): Router {
           if (r.ldap) districtStateMap.set(String(r.ldap).toUpperCase(), {
             district: r.district ?? null,
             state: r.state ?? null,
+            truckNo: r.truck_no ?? null,
           });
         }
       } catch (err: any) {
@@ -953,6 +956,7 @@ export function registerVrmRoutes(): Router {
         const ds = districtStateMap.get(ldap);
         r.district = ds?.district ?? null;
         r.state = ds?.state ?? null;
+        r.truck_no = ds?.truckNo ?? null;
         r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district).replace(/^0+/, "") || String(ds.district)) : false)
           || (ds?.state ? String(ds.state).toUpperCase() === "CA" : false);
         if (r.union_exempt && r.recommendation === "Deny") {
