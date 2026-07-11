@@ -531,7 +531,11 @@ function TemplateEditor({
   allowedTokens: string[];
 }) {
   const qc = useQueryClient();
-  const [draft, setDraft] = useState(initialBody);
+  // The box shows the ACTUAL template text — the saved custom copy if one
+  // exists, otherwise the built-in default — so it can be edited in place
+  // instead of vanishing the moment you type over a placeholder (Tyler 7/11).
+  const effectiveInitial = initialBody !== "" ? initialBody : (TEMPLATE_DEFAULTS[templateKey] ?? "");
+  const [draft, setDraft] = useState(effectiveInitial);
   const [savedMsg, setSavedMsg] = useState<string | null>(null);
   const taRef = useRef<HTMLTextAreaElement | null>(null);
   const isSms =
@@ -540,7 +544,7 @@ function TemplateEditor({
     templateKey === "sms_template_deny_tech";
   const isEmailBody = templateKey === "email_body_template_deny";
 
-  const dirty = draft !== initialBody;
+  const dirty = draft !== effectiveInitial;
   const unknownTokens = useMemo(() => findUnknownTemplateTokens(draft, allowedTokens), [draft, allowedTokens]);
 
   const charCount = draft.length;
@@ -678,7 +682,7 @@ function TemplateEditor({
         </button>
         <button
           type="button"
-          onClick={() => setDraft("")}
+          onClick={() => setDraft(TEMPLATE_DEFAULTS[templateKey] ?? "")}
           style={{
             display: "inline-flex", alignItems: "center", gap: 6,
             padding: "6px 12px", borderRadius: 6,
@@ -687,7 +691,7 @@ function TemplateEditor({
             fontFamily: fonts.dmSans, fontSize: 12,
             cursor: "pointer",
           }}
-          title="Clear this template — dispatcher will use the built-in default"
+          title="Restore the built-in default text (still editable until you Save)"
         >
           <RotateCcw size={12} />
           Reset to default
