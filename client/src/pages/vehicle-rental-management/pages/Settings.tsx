@@ -1059,10 +1059,6 @@ export default function Settings() {
 
   return (
     <div style={containerStyle}>
-      <h1 style={headingStyle}>
-        <Settings2 size={20} color={colors.accent} />
-        Settings
-      </h1>
       <p style={subheadStyle}>
         Manage the financial rate assumptions used in profitability calculations. Changes take effect on the next evaluation run — no redeployment needed.
       </p>

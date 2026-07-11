@@ -1703,14 +1703,6 @@ export default function NewRentals() {
 
   return (
     <div>
-      {/* ── Header ────────────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 28 }}>
-        <h1 style={{ fontFamily: fonts.syne, fontSize: 28, fontWeight: 700, color: colors.ink, margin: 0 }}>
-          New Rentals — Profitability Tracker
-        </h1>
-      </div>
-
-
       {/* ── Holman Rental POs Awaiting Authorization (restricted) ─────────────── */}
       {canApproveHolman && (
       <div style={{ marginBottom: 40 }}>

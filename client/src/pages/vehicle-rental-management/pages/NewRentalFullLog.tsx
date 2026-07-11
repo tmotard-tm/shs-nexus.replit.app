@@ -1300,17 +1300,6 @@ export default function NewRentalFullLog() {
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 24 }}>
         <div>
-          <h1
-            style={{
-              fontFamily: fonts.dmSans,
-              fontWeight: 700,
-              fontSize: 22,
-              color: colors.ink,
-              margin: 0,
-            }}
-          >
-            New Rental — Full Log
-          </h1>
           <p
             style={{
               fontFamily: fonts.dmSans,
