@@ -1023,7 +1023,7 @@ export default function NewRentalFullLog() {
             {mismatch && (
               <span
                 title={`TPMS has a different van on this tech: ${e.vanAssignedInTpms}`}
-                style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 600, color: "#B45309", backgroundColor: "#FEF3C7", padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap" }}
+                style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 600, color: colors.amber, backgroundColor: colors.amberLight, padding: "1px 5px", borderRadius: 4, whiteSpace: "nowrap" }}
               >
                 TPMS {tpms}
               </span>
@@ -1039,9 +1039,9 @@ export default function NewRentalFullLog() {
         const d = e.decision.toLowerCase();
         const cfg =
           d === "approved" || d === "approve"
-            ? { fg: "#15803d", bg: "#dcfce7" }
+            ? { fg: "var(--vrm-green-deep)", bg: "var(--vrm-green-deep-light)" }
             : d === "denied" || d === "deny"
-            ? { fg: "#b91c1c", bg: "#fee2e2" }
+            ? { fg: "var(--vrm-red-deep)", bg: "var(--vrm-red-deep-light)" }
             : { fg: colors.inkMuted, bg: colors.surface };
         return (
           <span

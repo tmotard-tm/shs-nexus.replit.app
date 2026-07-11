@@ -51,8 +51,8 @@ export function WipPlaceholder({ moduleName }: WipPlaceholderProps) {
           fontFamily: fonts.dmSans,
           fontWeight: 500,
           fontSize: 11,
-          color: "#B45309",
-          backgroundColor: "#FFFBEB",
+          color: colors.amber,
+          backgroundColor: colors.amberLight,
           borderRadius: 6,
         }}
       >

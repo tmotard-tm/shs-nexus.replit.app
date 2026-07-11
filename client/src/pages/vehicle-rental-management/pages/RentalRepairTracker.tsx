@@ -147,7 +147,7 @@ const RT_ACTION_TYPE_LABELS: Record<string, string> = {
 // fg = dark text, bg = saturated hue used for the left-border accent (and to compute the pale tint).
 const TINT = {
   red:    { fg: "#B91C1C", bg: "#EF4444" },
-  amber:  { fg: "#B45309", bg: "#F5A623" },
+  amber:  { fg: colors.amber, bg: "#F5A623" },
   green:  { fg: "#15803D", bg: "#22C55E" },
   blue:   { fg: "#1D4ED8", bg: "#3B82F6" },
   teal:   { fg: "#0F766E", bg: "#14B8A6" },
@@ -2559,7 +2559,7 @@ export default function RentalRepairTracker() {
   const byovBadge = (entry: RepairTrackerEntry) => {
     const status = (entry.byovStatus ?? "").trim();
     if (status === "Temporary") {
-      return <TintPill label="Temp BYOV" fg="#B45309" bg={TINT.amber.bg} />;
+      return <TintPill label="Temp BYOV" fg={colors.amber} bg={TINT.amber.bg} />;
     }
     if (status === "Permanent") {
       return <TintPill label="Perm BYOV" fg={TINT.teal.fg} bg={TINT.teal.bg} />;

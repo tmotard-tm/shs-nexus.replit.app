@@ -108,8 +108,8 @@ export function RouteReadySidebar() {
                     fontFamily: fonts.dmSans,
                     fontWeight: 500,
                     fontSize: 10,
-                    color: "#B45309",
-                    backgroundColor: "#FFFBEB",
+                    color: colors.amber,
+                    backgroundColor: colors.amberLight,
                     borderRadius: 6,
                   }}
                 >

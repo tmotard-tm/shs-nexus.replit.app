@@ -208,7 +208,7 @@ function TechSearchInput({
                       fontSize: 10,
                       fontWeight: 600,
                       color: "#92400E",
-                      backgroundColor: "#FEF3C7",
+                      backgroundColor: colors.amberLight,
                       border: "1px solid #FDE68A",
                       borderRadius: 4,
                       padding: "2px 6px",
@@ -604,7 +604,7 @@ function DcaEventCell({ decision }: { decision: DecisionRow }) {
       case "sent":
         return { fg: "#0D9668", bg: "#ECFDF5", label: sentAt ? `Sent ${new Date(sentAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : "Sent" };
       case "pending":
-        return { fg: "#B45309", bg: "#FEF3C7", label: attempts > 0 ? `Retrying (${attempts})` : "Pending" };
+        return { fg: colors.amber, bg: colors.amberLight, label: attempts > 0 ? `Retrying (${attempts})` : "Pending" };
       case "sending":
         return { fg: "#1D4ED8", bg: "#DBEAFE", label: "Sending…" };
       case "failed":
@@ -1661,7 +1661,7 @@ export default function NewRentals() {
                               style={{
                                 margin: "8px 0 0 0",
                                 padding: "10px 14px",
-                                backgroundColor: "#FEF3C7",
+                                backgroundColor: colors.amberLight,
                                 border: "1px solid #F59E0B",
                                 borderLeft: "4px solid #B45309",
                                 borderRadius: 6,
@@ -1672,7 +1672,7 @@ export default function NewRentals() {
                               }}
                             >
                               <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, marginBottom: 4 }}>
-                                <TriangleAlert size={14} color="#B45309" />
+                                <TriangleAlert size={14} color={colors.amber} />
                                 <span>{loaLabel} — {formatPersonNameOr(row.tech_name, row.tech_ldap)} ({row.tech_ldap})</span>
                               </div>
                               <div style={{ fontSize: 11 }}>
@@ -1840,8 +1840,8 @@ export default function NewRentals() {
                                     fontFamily: fonts.dmSans,
                                     fontSize: 9,
                                     fontWeight: 600,
-                                    color: "#6D28D9",
-                                    backgroundColor: "#EDE9FE",
+                                    color: "var(--vrm-purple-deep)",
+                                    backgroundColor: colors.purpleDeepLight,
                                     padding: "1px 6px",
                                     borderRadius: 4,
                                     letterSpacing: "0.03em",
@@ -2203,8 +2203,8 @@ export default function NewRentals() {
                                 fontFamily: fonts.dmSans,
                                 fontSize: 9,
                                 fontWeight: 600,
-                                color: "#6D28D9",
-                                backgroundColor: "#EDE9FE",
+                                color: "var(--vrm-purple-deep)",
+                                backgroundColor: colors.purpleDeepLight,
                                 padding: "1px 6px",
                                 borderRadius: 4,
                                 letterSpacing: "0.03em",

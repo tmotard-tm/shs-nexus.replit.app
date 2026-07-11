@@ -310,7 +310,7 @@ function SupervisorOverrideRow({ row }: { row: SupervisorOverride }) {
               gap: 4,
               padding: "2px 8px",
               borderRadius: 999,
-              background: "#FEF3C7",
+              background: colors.amberLight,
               color: "#78350F",
               fontSize: 11,
               fontWeight: 600,
