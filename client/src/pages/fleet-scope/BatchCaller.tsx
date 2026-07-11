@@ -367,7 +367,7 @@ export default function BatchCaller() {
                 </div>
               </div>
 
-              <div className="border rounded-md overflow-auto max-h-[calc(100vh-380px)]">
+              <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-380px))]">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -593,7 +593,7 @@ export default function BatchCaller() {
               No pending follow-ups
             </div>
           ) : (
-            <div className="border rounded-md overflow-auto max-h-[calc(100vh-280px)]">
+            <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-280px))]">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -637,7 +637,7 @@ export default function BatchCaller() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="border rounded-md overflow-auto max-h-[calc(100vh-280px)]">
+            <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-280px))]">
               <Table>
                 <TableHeader>
                   <TableRow>
