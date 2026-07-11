@@ -120,7 +120,7 @@ export async function headlessHolmanLogin(): Promise<HolmanHarvest> {
   const executablePath = resolveChromiumPath();
   // Logs MUST go to stderr (console.error/warn): when this runs inside the isolated
   // login worker, stdout is reserved for the single JSON result line.
-  console.error(`[HolmanHeadless] login start user=${user} chromium=${executablePath ?? "auto"}`);
+  console.error(`[HolmanHeadless] login start (credentials present) chromium=${executablePath ?? "auto"}`);
   let browser: Browser | null = null;
   try {
     browser = await chromium.launch({
