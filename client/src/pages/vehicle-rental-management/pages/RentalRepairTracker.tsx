@@ -2624,19 +2624,22 @@ export default function RentalRepairTracker() {
                 if (v.includes(",") || v.includes('"') || v.includes("\n")) return `"${v.replace(/"/g, '""')}"`;
                 return v;
               };
+              // Screen-column order (Case → Flags), each cell's fields
+              // adjacent; extras (supervisor, closed) trail.
               const headers = [
-                "ldap","tech_name","tech_phone","district","supervisor","supervisor_phone",
-                "truck_number","repair_shop_address","repair_shop_phone",
+                "ldap","tech_name","tech_phone",
+                "truck_number","district",
                 "denied_date","denial_reason","denial_reason_detail",
                 "stage","stage_sub","section",
                 "tech_punch_status","tech_punch_latest","tech_punch_last_synced_at",
-                "main_status","sub_status","van_status","shop_eta_on_road",
+                "main_status","sub_status","shop_eta_on_road","van_status",
+                "repair_shop_address","repair_shop_phone","shop_last_contacted_date",
                 "tech_contacted","tech_contacted_date","tech_contact_outcome",
                 "byov_status","byov_decision_date",
-                "shop_last_contacted_date",
                 "rental_returned","rental_return_date",
                 "route_cleared","route_cleared_date",
-                "link_missing","closed_at","closed_by",
+                "link_missing",
+                "supervisor","supervisor_phone","closed_at","closed_by",
               ];
               const punchLabel = (ldap: string | null) => {
                 if (!ldap) return "";
@@ -2658,19 +2661,19 @@ export default function RentalRepairTracker() {
               };
               const rows = sorted.map((e: any) => [
                 e.techLdap ?? "", formatPersonName(e.techName), e.techPhone ?? "",
+                e.truckNumber ?? "",
                 e.district ? e.district.replace(/^0+/, "") || "0" : "",
-                formatPersonName(e.supervisorName ?? e.tpmsManagerName), e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
-                e.truckNumber ?? "", e.repairShopAddress ?? "", e.repairShopPhone ?? "",
                 fmtDate(e.deniedAt), e.denialReason ?? "", e.denialReasonDetail ?? "",
                 e.stage ?? "", e.stageSub ?? "", e.section ?? "",
                 punchLabel(e.techLdap), punchTime(e.techLdap), punchSynced(e.techLdap),
-                e.mainStatus ?? "", e.subStatus ?? "", e.techStatus ?? "", fmtDate(e.shopEtaOnRoad),
+                e.mainStatus ?? "", e.subStatus ?? "", fmtDate(e.shopEtaOnRoad), e.techStatus ?? "",
+                e.repairShopAddress ?? "", e.repairShopPhone ?? "", fmtDate(e.shopLastContactedDate ?? e.lastShopContactAt),
                 boolStr(e.techContacted), fmtDate(e.techContactedDate ?? e.techContactedAt), e.techContactOutcome ?? "",
                 e.byovStatus ?? (e.byovEnrolled ? "Accepted" : ""), fmtDate(e.byovDecisionDate),
-                fmtDate(e.shopLastContactedDate ?? e.lastShopContactAt),
                 e.rentalReturned ?? "N/A", fmtDate(e.rentalReturnDate),
                 boolStr(e.routeCleared), fmtDate(e.routeClearedDate),
                 e.flags?.blue?.active ? "Yes" : "No",
+                formatPersonName(e.supervisorName ?? e.tpmsManagerName), e.supervisorPhone ?? e.tpmsManagerPhone ?? "",
                 fmtDate(e.closedAt), e.closedBy ?? "",
               ].map(esc));
               const csv = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");

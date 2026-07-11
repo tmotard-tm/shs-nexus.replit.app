@@ -1333,10 +1333,15 @@ export default function NewRentals() {
 
   const handleExport = () => {
     if (!sortedEvaluatedRows.length) return;
-    const headers = ["LDAP", "Name", "Tenure (mo)", "Scorecard", "Completes", "Working Days", "Daily Revenue", "Daily Costs", "Daily Net (no rental)", `Daily Net (w/ $${rentalPerDay})`, "Daily PPT Profit", "Recommendation"];
-    // CSV honors the active table sort so the export matches what the user sees.
+    // Columns mirror the on-screen Evaluation Results table exactly (same
+    // order, same active sort); extra data fields ride at the end.
+    const esc = (v: unknown) => {
+      const str = String(v ?? "");
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+    const headers = ["LDAP", "Name", "Truck", "Supervisor", "State", "District", "Tenure (mo)", "Scorecard", "Completes", "Daily Revenue", "Daily Costs", "Daily Net (pre-rental)", `Daily Net (w/ $${rentalPerDay})`, "Daily PPT", "Recommendation", "Working Days", "Supervisor LDAP"];
     const lines = sortedEvaluatedRows.map((r) =>
-      [r.tech_ldap, r.tech_name ?? "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.working_days, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation].join(","),
+      [r.tech_ldap, r.tech_name ?? "", r.truck_no ? String(r.truck_no).replace(/^0+/, "") : "", r.supervisor_name ?? "", r.state ?? "", r.district ? String(r.district).replace(/^0+/, "") : "", r.tenure_months ?? "", r.scorecard_score ?? "", r.completes, r.daily_revenue, r.daily_costs, r.daily_net_before_rental, r.daily_net_with_rental, r.daily_ppt_profit, r.recommendation, r.working_days, r.supervisor_ldap ?? ""].map(esc).join(","),
     );
     const blob = new Blob([headers.join(",") + "\n" + lines.join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
