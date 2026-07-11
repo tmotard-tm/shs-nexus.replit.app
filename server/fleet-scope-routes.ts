@@ -2536,7 +2536,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
     const internalToken = req.headers['x-internal-cron'];
     const expectedInternal = process.env.SESSION_SECRET;
-    if (internalToken && expectedInternal && internalToken === expectedInternal) {
+    const expectedCron = process.env.NEXUS_CRON_SECRET; // dedicated, revocable agent-cron key (does not expose SESSION_SECRET)
+    if (internalToken && ((expectedInternal && internalToken === expectedInternal) || (expectedCron && internalToken === expectedCron))) {
       return next();
     }
     return requireAuth(req, res, next);

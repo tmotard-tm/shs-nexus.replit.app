@@ -148,7 +148,9 @@ export function registerCommsRoutes(app: Router): void {
   // contract as the /api/fs router-wide bypass in fleet-scope-routes.ts).
   function isInternalCron(req: any): boolean {
     const t = req.headers?.["x-internal-cron"];
-    return !!(t && process.env.SESSION_SECRET && t === process.env.SESSION_SECRET);
+    const s = process.env.SESSION_SECRET;
+    const cron = process.env.NEXUS_CRON_SECRET; // dedicated agent-cron key
+    return !!(t && ((s && t === s) || (cron && t === cron)));
   }
 
   app.post("/comms/cron/sync", async (req: any, res) => {
