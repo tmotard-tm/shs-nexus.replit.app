@@ -1990,27 +1990,6 @@ export default function NewRentals() {
         </div>
       )}
 
-      {/* ── Empty state ───────────────────────────────────────────────────────── */}
-      {evaluatedRows.length === 0 && !evaluateMut.isPending && !preparingInfo && (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "64px 32px",
-            border: `1px dashed ${colors.rule}`,
-            borderRadius: 12,
-            marginBottom: 40,
-          }}
-        >
-          <Search size={40} style={{ color: colors.inkMuted, marginBottom: 12 }} />
-          <p style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 6px" }}>
-            Evaluate a rental request
-          </p>
-          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
-            Enter one or more LDAPs above, or upload a CSV to check profitability across multiple techs.
-          </p>
-        </div>
-      )}
-
       {/* ── Loading state ─────────────────────────────────────────────────────── */}
       {evaluateMut.isPending && evaluatedRows.length === 0 && (
         <div style={{ textAlign: "center", padding: "48px 32px" }}>
