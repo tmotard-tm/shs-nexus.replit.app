@@ -17216,6 +17216,71 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   });
 
   // POST /rental-sync — manually trigger Rental Ops → Fleet Scope auto-sync (any authenticated user)
+  // ── LUCA write-back trigger (scheduled dispatcher / manual) ──────────────
+  // One write-back pass (LIVHR outbox -> fs_trucks). Safe under overlap: the
+  // advisory lock + fs_luca_writeback_log dedupe live inside runLucaWriteback.
+  // Reachable by session users AND x-internal-cron (router-wide bypass above).
+  app.post("/luca-writeback/run", async (req: any, res) => {
+    try {
+      const triggeredBy = req.user?.username ? `manual:${req.user.username}` : "scheduled_dispatcher";
+      const { runLucaWriteback } = await import("./luca-writeback/worker");
+      const result = await runLucaWriteback(triggeredBy);
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("[LucaWriteback] Triggered run failed:", error);
+      res.status(500).json({ success: false, message: error?.message || "LUCA write-back failed" });
+    }
+  });
+
+  // ── Roster/TPMS/onboarding daily sync trigger (scheduled dispatcher) ──────
+  // In-process equivalent of server/run-sync.ts MINUS its final rental step
+  // (the dispatcher triggers /rental-sync separately at its own hour).
+  // Snowflake is already initialized by server boot. Core roster steps
+  // (termed/all-techs) failing fails the run; the downstream enrichment steps
+  // are best-effort — mirroring run-sync.ts semantics. Each service records
+  // its own sync_logs row, so cadence stays auditable in the DB.
+  app.post("/roster-sync", async (req: any, res) => {
+    const triggeredBy = req.user?.username ? `manual:${req.user.username}` : "scheduled_dispatcher";
+    const steps: Array<{ step: string; ok: boolean; summary?: any; error?: string }> = [];
+    const summarize = (r: any) => ({
+      recordsProcessed: r?.recordsProcessed,
+      recordsCreated: r?.recordsCreated,
+      queueItemsCreated: r?.queueItemsCreated,
+      enrichedCount: r?.enrichedCount,
+      recordsUpdated: r?.recordsUpdated,
+      errors: Array.isArray(r?.errors) ? r.errors.length : undefined,
+    });
+    const run = async (step: string, fn: () => Promise<any>) => {
+      try { steps.push({ step, ok: true, summary: summarize(await fn()) }); }
+      catch (e: any) { steps.push({ step, ok: false, error: e?.message || String(e) }); }
+    };
+    try {
+      const { isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) {
+        return res.status(503).json({ success: false, message: "Snowflake not configured" });
+      }
+      const { getSnowflakeSyncService } = await import("./snowflake-sync-service");
+      const syncService = getSnowflakeSyncService();
+
+      await run("termed_techs", () => syncService.syncTermedTechs(triggeredBy));
+      await run("all_techs", () => syncService.syncAllTechs(triggeredBy));
+      await run("tpms_snowflake", () => syncService.syncTPMSFromSnowflake(triggeredBy));
+      await run("onboarding_hires", () => syncService.syncOnboardingHires(triggeredBy));
+      await run("enrich_onboarding", () => syncService.enrichOnboardingHires());
+      await run("byov_intent", async () => {
+        const { syncByovIntentForOnboarding } = await import("./byov-intent-sync");
+        return syncByovIntentForOnboarding();
+      });
+
+      const core = steps.filter((s) => s.step === "termed_techs" || s.step === "all_techs");
+      const success = core.every((s) => s.ok);
+      res.status(success ? 200 : 500).json({ success, steps });
+    } catch (error: any) {
+      console.error("[RosterSync] Triggered run failed:", error);
+      res.status(500).json({ success: false, steps, message: error?.message || "Roster sync failed" });
+    }
+  });
+
   app.post("/rental-sync", async (req: any, res) => {
     try {
       const user = req.user;

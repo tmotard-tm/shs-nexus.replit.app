@@ -138,3 +138,14 @@ Preferred communication style: Simple, everyday language.
 -   **Snowflake Documentation**: https://docs.snowflake.com/
 -   **Samsara API Docs**: https://developer.samsara.com/
 -   **Twilio Docs**: https://www.twilio.com/docs
+## Scheduled dispatch (actual implementation, 2026-07-11)
+
+Replit allows ONE deployment per Repl, and this Repl's slot is taken by the Autoscale web app — so the "create a Scheduled Deployment" instructions in earlier sections cannot be executed on this Repl (this is why none of the documented schedules ever existed). The durable scheduler is a separate tiny Repl (**Fleet-Dispatcher**) deployed as a Scheduled Deployment (cron `*/5 * * * *`, run command `node index.js`, secrets `NEXUS_BASE_URL` + `INTERNAL_CRON_SECRET` = this app's `SESSION_SECRET`). Every 5 minutes it POSTs to internal-cron trigger endpoints on this app with the `x-internal-cron` header:
+
+-   every run → `POST /api/fs/comms/cron/drain` (send-queue drain; cron-only route)
+-   minute % 15 < 5 → `POST /api/fs/luca-writeback/run` (one write-back pass; advisory-locked, apply-gated)
+-   09:00 UTC → `POST /api/fs/comms/cron/sync` (contacts sync; cron-only route)
+-   10:00 UTC → `POST /api/fs/roster-sync` (in-process equivalent of run-sync.ts MINUS its final rental step)
+-   11:00 UTC → `POST /api/fs/rental-sync` (existing manual route; all guards + advisory lock apply)
+
+The `/comms/cron/*` routes are registered OUTSIDE the comms `gate` deliberately (the dispatcher has no session user); they grant exactly these two operations, so the cron secret does NOT gain send/bulk powers. The standalone `server/run-sync.ts` / `server/run-rental-sync.ts` scripts remain valid entry points if a real per-Repl schedule ever becomes possible. Sync cadence remains auditable in `sync_logs` (triggered_by = `scheduled_dispatcher`).

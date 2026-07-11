@@ -140,6 +140,37 @@ export function registerCommsRoutes(app: Router): void {
     }
   }
 
+  // ── Internal-cron trigger routes (scheduled dispatcher) ──────────────────
+  // Deliberately registered OUTSIDE `gate`: the dispatcher has no session and
+  // no user, and widening `gate` for it would also expose the send/bulk routes
+  // to the cron secret. These grant exactly two capabilities — contacts sync
+  // and queue drain — to callers presenting the internal secret (same header
+  // contract as the /api/fs router-wide bypass in fleet-scope-routes.ts).
+  function isInternalCron(req: any): boolean {
+    const t = req.headers?.["x-internal-cron"];
+    return !!(t && process.env.SESSION_SECRET && t === process.env.SESSION_SECRET);
+  }
+
+  app.post("/comms/cron/sync", async (req: any, res) => {
+    if (!isInternalCron(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const result = await syncCommsContacts("scheduled_dispatcher", { force: false });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
+
+  app.post("/comms/cron/drain", async (req: any, res) => {
+    if (!isInternalCron(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const result = await processSendQueue(200, "scheduled_dispatcher");
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
+
   // ── Config / categories ─────────────────────────────────────────────────
   app.get("/comms/config", gate, async (req: any, res) => {
     const enabled = await retryOnceOnTransient(() => getBooleanSetting(FEATURE_FLAG, false));
