@@ -810,379 +810,6 @@ function DecisionForm({
   );
 }
 
-// ─── Action type labels ───────────────────────────────────────────────────────
-
-const ACTION_TYPE_LABELS: Record<string, string> = {
-  text_sent: "Text Sent",
-  call_completed: "Call Completed",
-  carl_escalated: "Escalated to Carl",
-  epv_issued: "EPV Issued",
-  byov_enrolled: "BYOV Enrolled",
-  exception_opened: "Exception Opened",
-};
-
-const NR_SELECT_STYLE: React.CSSProperties = {
-  fontFamily: "var(--font-dm-sans, sans-serif)", fontWeight: 400, fontSize: 13,
-  color: colors.ink, backgroundColor: colors.surface,
-  border: `1px solid ${colors.rule}`, borderRadius: 8,
-  padding: "6px 28px 6px 10px", height: 34, appearance: "none" as any,
-  cursor: "pointer", width: "100%",
-  backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238891A4' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
-  backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center",
-  colorScheme: "light dark",
-};
-
-// ─── Decision detail panel ────────────────────────────────────────────────────
-
-function DecisionDetailPanel({ decision, onClose }: { decision: DecisionRow; onClose: () => void }) {
-  const qc = useQueryClient();
-
-  const { data: ratesData } = useQuery<Array<{ key: string; value: string }>>({
-    queryKey: ["/api/vrm/settings/rates"],
-  });
-  const panelRateMap = Object.fromEntries((ratesData ?? []).map((r) => [r.key, Number(r.value)]));
-  const rentalPerDay = Number.isFinite(panelRateMap["rental_per_day"]) ? panelRateMap["rental_per_day"] : 78;
-
-  const { data: actionsData } = useQuery<{ rows: DecisionAction[] }>({
-    queryKey: ["/api/vrm/profitability/log", decision.id, "actions"],
-    queryFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decision.id}/actions`);
-      if (!r.ok) throw new Error("Failed to load actions");
-      return r.json();
-    },
-  });
-  const actionLog = actionsData?.rows ?? [];
-
-  // Structured tracking state
-  const [smsSentAt, setSmsSentAt] = useState<string>(decision.smsSentAt ? decision.smsSentAt.split("T")[0] : "");
-  const [smsResponseStatus, setSmsResponseStatus] = useState<string>(decision.smsResponseStatus ?? "");
-  const [byovEnrolled, setByovEnrolled] = useState<boolean>(decision.byovEnrolled);
-  const [returnedRental, setReturnedRental] = useState<boolean>(decision.returnedRental);
-  const [rentalReturnDate, setRentalReturnDate] = useState<string>(decision.rentalReturnDate ?? "");
-  const [saved, setSaved] = useState(false);
-
-  // Action log form state
-  const [showAddAction, setShowAddAction] = useState(false);
-  const [actionType, setActionType] = useState<string>("text_sent");
-  const [actionNotes, setActionNotes] = useState<string>("");
-  const [actionPerformer, setActionPerformer] = useState<string>("");
-
-  const trackingMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decision.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          smsSentAt: smsSentAt || null,
-          smsResponseStatus: smsResponseStatus || null,
-          byovEnrolled,
-          returnedRental,
-          rentalReturnDate: rentalReturnDate || null,
-        }),
-      });
-      if (!r.ok) throw new Error("Failed to save");
-      return r.json();
-    },
-    onSuccess: () => {
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-      qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log"] });
-      // Decision Log on NewRentalFullLog mirrors decision/notes/date — keep it fresh.
-      qc.invalidateQueries({ queryKey: ["/api/vrm/new-rental-log/enriched"] });
-    },
-  });
-
-  const addActionMutation = useMutation({
-    mutationFn: async () => {
-      const r = await fetch(`/api/vrm/profitability/log/${decision.id}/actions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ actionType, notes: actionNotes || null, performedByName: actionPerformer }),
-      });
-      if (!r.ok) throw new Error("Failed to add action");
-      return r.json();
-    },
-    onSuccess: () => {
-      setShowAddAction(false);
-      setActionType("text_sent");
-      setActionNotes("");
-      setActionPerformer("");
-      qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/log", decision.id, "actions"] });
-    },
-  });
-
-  const labelStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 11,
-    color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6,
-  };
-  const rowStyle: React.CSSProperties = { padding: "14px 0", borderBottom: `1px solid ${colors.rule}` };
-  const inputStyle: React.CSSProperties = {
-    fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink,
-    backgroundColor: colors.surface, border: `1px solid ${colors.rule}`,
-    borderRadius: 8, padding: "6px 10px", width: "100%", outline: "none",
-    colorScheme: "light dark",
-  };
-  const toggleBtnStyle = (active: boolean): React.CSSProperties => ({
-    fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
-    padding: "5px 16px", borderRadius: 6, cursor: "pointer",
-    border: `1px solid ${active ? colors.accent : colors.rule}`,
-    backgroundColor: active ? colors.accent : "transparent",
-    color: active ? "#FFFFFF" : colors.inkSoft,
-    transition: "all 120ms",
-  });
-
-  const decisionAsRec = decision.decision === "approved" ? "Approve" : decision.decision === "denied" ? "Deny" : decision.decision;
-  const isOverride = decisionAsRec !== decision.recommendation && decision.recommendation !== "No Data";
-
-  return (
-    <>
-      {/* Backdrop */}
-      <div onClick={onClose} style={{ position: "fixed", inset: 0, backgroundColor: "rgba(15,17,23,0.35)", zIndex: 40 }} />
-      {/* Panel */}
-      <div style={{
-        position: "fixed", top: 0, right: 0, bottom: 0, width: 520,
-        backgroundColor: colors.background, borderLeft: `1px solid ${colors.rule}`,
-        zIndex: 50, display: "flex", flexDirection: "column",
-        boxShadow: "-4px 0 24px rgba(0,0,0,0.18)",
-      }}>
-        {/* Header */}
-        <div style={{ padding: "20px 24px", borderBottom: `1px solid ${colors.rule}`, display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexShrink: 0 }}>
-          <div>
-            <h2 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 20, color: colors.ink, margin: 0 }}>
-              {formatPersonNameOr(decision.techName, decision.techLdap)}
-            </h2>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-              <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{decision.techLdap}</span>
-              <RecPill rec={decision.decision} />
-              {isOverride && (
-                <span style={{ fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 500, color: colors.amber, backgroundColor: colors.amberLight, padding: "1px 6px", borderRadius: 4 }}>
-                  OVERRIDE
-                </span>
-              )}
-            </div>
-          </div>
-          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, marginTop: -2 }}>
-            <X size={20} />
-          </button>
-        </div>
-
-        {/* Scrollable body */}
-        <div style={{ flex: 1, overflowY: "auto", padding: "0 24px 40px" }}>
-
-          {/* ── Outreach Tracking ──────────────────────────────── */}
-          <div style={{ marginTop: 20, marginBottom: 4 }}>
-            <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-              Outreach Tracking
-            </h3>
-          </div>
-
-          <div style={rowStyle}>
-            <div style={labelStyle}>SMS Sent</div>
-            <input type="date" value={smsSentAt} onChange={(e) => setSmsSentAt(e.target.value)} style={inputStyle} />
-          </div>
-
-          <div style={rowStyle}>
-            <div style={labelStyle}>Response</div>
-            <input
-              type="text"
-              value={smsResponseStatus}
-              onChange={(e) => setSmsResponseStatus(e.target.value)}
-              placeholder="Enter response…"
-              style={inputStyle}
-            />
-          </div>
-
-          <div style={rowStyle}>
-            <div style={labelStyle}>Enrolled in BYOV</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              {([true, false] as boolean[]).map((val) => (
-                <button key={String(val)} onClick={() => setByovEnrolled(val)} style={toggleBtnStyle(byovEnrolled === val)}>
-                  {val ? "Yes" : "No"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div style={rowStyle}>
-            <div style={labelStyle}>Returned Rental</div>
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-              {([true, false] as boolean[]).map((val) => (
-                <button key={String(val)} onClick={() => setReturnedRental(val)} style={toggleBtnStyle(returnedRental === val)}>
-                  {val ? "Yes" : "No"}
-                </button>
-              ))}
-            </div>
-            {returnedRental && (
-              <div style={{ marginTop: 8 }}>
-                <div style={{ ...labelStyle, marginBottom: 4 }}>Return Date</div>
-                <input type="date" value={rentalReturnDate} onChange={(e) => setRentalReturnDate(e.target.value)} style={inputStyle} />
-              </div>
-            )}
-          </div>
-
-          {/* Save button */}
-          <div style={{ marginTop: 18 }}>
-            <button
-              onClick={() => trackingMutation.mutate()}
-              disabled={trackingMutation.isPending}
-              style={{
-                fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 13,
-                color: "#FFFFFF", backgroundColor: saved ? colors.green : colors.accent,
-                border: "none", borderRadius: 8, padding: "8px 20px",
-                cursor: trackingMutation.isPending ? "not-allowed" : "pointer",
-                opacity: trackingMutation.isPending ? 0.7 : 1,
-                transition: "background-color 200ms",
-              }}
-            >
-              {saved ? "Saved ✓" : trackingMutation.isPending ? "Saving…" : "Save Changes"}
-            </button>
-          </div>
-
-          {/* ── Action Log ────────────────────────────────────── */}
-          <div style={{ marginTop: 32 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-                Action Log
-              </h3>
-              <button
-                onClick={() => setShowAddAction((v) => !v)}
-                style={{
-                  fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-                  color: colors.accent, backgroundColor: colors.accentLight,
-                  border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "4px 10px",
-                  cursor: "pointer", display: "flex", alignItems: "center", gap: 4,
-                }}
-              >
-                <Plus size={12} /> Add Action
-              </button>
-            </div>
-
-            {showAddAction && (
-              <div style={{ padding: 14, borderRadius: 10, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface, marginBottom: 14 }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <div>
-                    <div style={labelStyle}>Action Type</div>
-                    <select value={actionType} onChange={(e) => setActionType(e.target.value)} style={NR_SELECT_STYLE}>
-                      {Object.entries(ACTION_TYPE_LABELS).map(([v, l]) => (
-                        <option key={v} value={v}>{l}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <div style={labelStyle}>Notes</div>
-                    <textarea
-                      value={actionNotes}
-                      onChange={(e) => setActionNotes(e.target.value)}
-                      placeholder="Optional notes…"
-                      rows={2}
-                      style={{ ...inputStyle, resize: "vertical", height: "auto" }}
-                    />
-                  </div>
-                  <div>
-                    <div style={labelStyle}>Performed By</div>
-                    <input
-                      type="text"
-                      value={actionPerformer}
-                      onChange={(e) => setActionPerformer(e.target.value)}
-                      placeholder="Your name"
-                      style={inputStyle}
-                    />
-                  </div>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button
-                      onClick={() => addActionMutation.mutate()}
-                      disabled={!actionPerformer.trim() || addActionMutation.isPending}
-                      style={{
-                        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-                        color: "#fff", backgroundColor: colors.accent,
-                        border: "none", borderRadius: 6, padding: "6px 14px",
-                        cursor: !actionPerformer.trim() || addActionMutation.isPending ? "not-allowed" : "pointer",
-                        opacity: !actionPerformer.trim() || addActionMutation.isPending ? 0.55 : 1,
-                      }}
-                    >
-                      {addActionMutation.isPending ? "Saving…" : "Log Action"}
-                    </button>
-                    <button
-                      onClick={() => setShowAddAction(false)}
-                      style={{
-                        fontFamily: fonts.dmSans, fontWeight: 500, fontSize: 12,
-                        color: colors.inkSoft, backgroundColor: "transparent",
-                        border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "6px 12px", cursor: "pointer",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {actionLog.length === 0 ? (
-              <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>No actions logged yet.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {actionLog.map((entry) => (
-                  <div key={entry.id} style={{ padding: "10px 14px", borderRadius: 8, border: `1px solid ${colors.rule}`, backgroundColor: colors.surface }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: entry.notes ? 6 : 0 }}>
-                      <span style={{
-                        fontFamily: fonts.dmSans, fontWeight: 600, fontSize: 12,
-                        color: colors.accent, backgroundColor: colors.accentLight, padding: "2px 8px", borderRadius: 5,
-                      }}>
-                        {ACTION_TYPE_LABELS[entry.actionType] ?? entry.actionType}
-                      </span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 4, color: colors.inkMuted }}>
-                        <Clock size={12} />
-                        <span style={{ fontFamily: fonts.dmSans, fontSize: 11 }}>
-                          {new Date(entry.createdAt).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}
-                        </span>
-                      </div>
-                    </div>
-                    {entry.notes && <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, margin: "4px 0 0" }}>{entry.notes}</p>}
-                    {entry.performedByName && <p style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted, margin: "4px 0 0" }}>— {entry.performedByName}</p>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* ── Decision Summary ──────────────────────────────── */}
-          <div style={{ marginTop: 32, marginBottom: 4 }}>
-            <h3 style={{ fontFamily: fonts.syne, fontWeight: 700, fontSize: 13, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-              Decision Summary
-            </h3>
-          </div>
-          <div style={rowStyle}>
-            <div style={labelStyle}>Daily Net (w/ ${rentalPerDay})</div>
-            <span style={{ fontFamily: fonts.jetbrains, fontWeight: 600, fontSize: 14, color: decision.dailyNetWithRental != null ? (Number(decision.dailyNetWithRental) < 0 ? colors.red : colors.green) : colors.inkMuted }}>
-              {decision.dailyNetWithRental != null ? (Number(decision.dailyNetWithRental) < 0 ? `-$${Math.abs(Number(decision.dailyNetWithRental)).toFixed(2)}` : `$${Number(decision.dailyNetWithRental).toFixed(2)}`) : "—"}
-            </span>
-          </div>
-          <div style={rowStyle}>
-            <div style={labelStyle}>Recommendation</div>
-            <RecPill rec={decision.recommendation} />
-          </div>
-          <div style={rowStyle}>
-            <div style={labelStyle}>Scorecard</div>
-            <span style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.ink }}>
-              {decision.scorecardScore != null ? Number(decision.scorecardScore).toFixed(2) : "—"}
-            </span>
-          </div>
-          <div style={rowStyle}>
-            <div style={labelStyle}>Tenure</div>
-            <span style={{ fontFamily: fonts.dmSans, fontSize: 14, color: colors.ink }}>
-              {decision.tenureMonths != null ? `${decision.tenureMonths} mo` : "—"}
-            </span>
-          </div>
-          <div style={{ ...rowStyle, borderBottom: "none" }}>
-            <div style={labelStyle}>Decided By</div>
-            <span style={{ fontFamily: fonts.dmSans, fontSize: 14, color: colors.ink }}>{decision.decidedByName}</span>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-}
-
 // ─── Main component ───────────────────────────────────────────────────────────
 
 // ─── Column-sort plumbing (Evaluation Results + Decision Log) ───────────────
@@ -1383,7 +1010,6 @@ export default function NewRentals() {
   const setCheckHistorySort = useCallback((s: SortState) => { _setCheckHistorySort(s); writeSortPref(CHECK_HISTORY_SORT_KEY, s); }, []);
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
-  const [selectedDecision, setSelectedDecision] = useState<DecisionRow | null>(null);
   const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -2667,13 +2293,14 @@ export default function NewRentals() {
                   <SortableTh col="ldap"           label="LDAP"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <SortableTh col="truck"          label="Truck"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <th style={thStyle}>Supervisor</th>
+                  <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <th style={thStyle} title="Tech-facing SMS: approval text on Approve, BYOV-pitch denial text on Deny. Delivery state is reported by Twilio's status callback (delivered/undelivered/failed).">Tech SMS</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="scorecard"      label="Scorecard"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
                   <SortableTh col="recommendation" label="Recommendation"  current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="decision"       label="Decision"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                 </tr>
               </thead>
               <tbody>
@@ -2719,19 +2346,8 @@ export default function NewRentals() {
                         <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
                           {d.truckNo ? String(d.truckNo).replace(/^0+/, "") || d.truckNo : "—"}
                         </td>
-                        <td style={tdStyle}>
-                          {d.supervisorName ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                              <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(d.supervisorName)}</span>
-                              {d.supervisorLdap && (
-                                <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
-                                  {d.supervisorLdap}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span style={{ color: colors.inkMuted }}>—</span>
-                          )}
+                        <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                          {d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}
                         </td>
                         <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
                           <TechSmsCell decision={d} />
@@ -2768,18 +2384,28 @@ export default function NewRentals() {
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={d.recommendation} />
                         </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          <RecPill rec={d.decision} />
+                          {isOverride && (
+                            <div style={{ marginTop: 3 }}>
+                              <span style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 500, color: colors.amber, backgroundColor: colors.amberLight, padding: "1px 6px", borderRadius: 4 }}>
+                                OVERRIDE
+                              </span>
+                            </div>
+                          )}
+                        </td>
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td colSpan={10} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+                          <td colSpan={11} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 28px", alignItems: "flex-start" }}>
                               <div>
-                                <div style={ribbonLbl}>Decision</div>
-                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                                  <RecPill rec={d.decision} />
-                                  {isOverride && (
-                                    <span style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 500, color: colors.amber, backgroundColor: colors.amberLight, padding: "1px 6px", borderRadius: 4 }}>
-                                      OVERRIDE
+                                <div style={ribbonLbl}>Supervisor</div>
+                                <div style={ribbonVal}>
+                                  {d.supervisorName ? formatPersonName(d.supervisorName) : "—"}
+                                  {d.supervisorLdap && (
+                                    <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginLeft: 6 }}>
+                                      {d.supervisorLdap}
                                     </span>
                                   )}
                                 </div>
@@ -2801,10 +2427,6 @@ export default function NewRentals() {
                               <div>
                                 <div style={ribbonLbl}>DCA Event</div>
                                 <div onClick={(e) => e.stopPropagation()}><DcaEventCell decision={d} /></div>
-                              </div>
-                              <div>
-                                <div style={ribbonLbl}>District</div>
-                                <div style={{ ...ribbonVal, fontFamily: fonts.jetbrains }}>{d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}</div>
                               </div>
                               <div>
                                 <div style={ribbonLbl}>Completes</div>
@@ -2834,25 +2456,6 @@ export default function NewRentals() {
                                 <div style={ribbonLbl}>Notes</div>
                                 <div style={ribbonVal}>{d.notes ?? "—"}</div>
                               </div>
-                              <button
-                                onClick={(e) => { e.stopPropagation(); setSelectedDecision(d); }}
-                                style={{
-                                  alignSelf: "center",
-                                  fontFamily: fonts.dmSans,
-                                  fontWeight: 500,
-                                  fontSize: 12,
-                                  color: colors.accent,
-                                  background: "transparent",
-                                  border: `1px solid ${colors.accent}`,
-                                  borderRadius: 6,
-                                  padding: "5px 12px",
-                                  cursor: "pointer",
-                                  marginLeft: "auto",
-                                }}
-                                data-testid={`button-decision-full-${d.id}`}
-                              >
-                                Open full record →
-                              </button>
                             </div>
                           </td>
                         </tr>
@@ -2942,13 +2545,6 @@ export default function NewRentals() {
         )}
       </div>
 
-      {/* Decision detail panel */}
-      {selectedDecision && (
-        <DecisionDetailPanel
-          decision={selectedDecision}
-          onClose={() => setSelectedDecision(null)}
-        />
-      )}
     </div>
   );
 }
