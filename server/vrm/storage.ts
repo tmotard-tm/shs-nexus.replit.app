@@ -1235,6 +1235,7 @@ export async function listRentalDecisions(limit = 50) {
       id: vrmRentalDecisions.id,
       techLdap: vrmRentalDecisions.techLdap,
       techName: vrmRentalDecisions.techName,
+      truckNo: sql<string | null>`(SELECT tp.truck_no FROM tpms_tech_profiles tp WHERE UPPER(tp.enterprise_id) = UPPER(${vrmRentalDecisions.techLdap}) LIMIT 1)`,
       dailyNetWithRental: vrmRentalDecisions.dailyNetWithRental,
       recommendation: vrmRentalDecisions.recommendation,
       decision: vrmRentalDecisions.decision,

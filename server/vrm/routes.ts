@@ -693,6 +693,62 @@ export function registerVrmRoutes(): Router {
   // Districts excluded from denial due to union agreements.
   const UNION_DISTRICTS = new Set(["6141", "7983", "7323", "8309"]);
 
+  // Shared post-processing for EVERY recommendation surface. Used by
+  // POST /profitability/check (Evaluate) AND matchDriverNameToTech (the
+  // Holman PO queue refresh), so both paths produce IDENTICAL
+  // recommendations (district/state/truck attach + union-district/CA
+  // Deny→Approve override). Do NOT fork this logic — change it here.
+  async function attachEvalContextAndOverrides(rows: any[], cleaned: string[]): Promise<void> {
+    if (rows.length === 0 || cleaned.length === 0) return;
+      // ── District/state lookup (local DB) ─────────────────────────────────────
+      const districtStateMap = new Map<string, { district: string | null; state: string | null; truckNo: string | null }>();
+      try {
+        const ldapSql = sql.join(cleaned.map((l) => sql`${l}`), sql`, `);
+        const dsRows = await db.execute(sql`
+          SELECT UPPER(tp.enterprise_id) AS ldap,
+                 tp.district_no          AS district,
+                 at.home_state           AS state,
+                 tp.truck_no             AS truck_no
+          FROM tpms_tech_profiles tp
+          LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
+          WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
+          UNION ALL
+          SELECT UPPER(at.tech_racfid) AS ldap,
+                 at.district_no        AS district,
+                 at.home_state         AS state,
+                 NULL::text            AS truck_no
+          FROM all_techs at
+          WHERE UPPER(at.tech_racfid) IN (${ldapSql})
+            AND UPPER(at.tech_racfid) NOT IN (
+              SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
+            )
+        `);
+        for (const r of (dsRows.rows ?? []) as any[]) {
+          if (r.ldap) districtStateMap.set(String(r.ldap).toUpperCase(), {
+            district: r.district ?? null,
+            state: r.state ?? null,
+            truckNo: r.truck_no ?? null,
+          });
+        }
+      } catch (err: any) {
+        console.error("[VRM] district/state lookup failed:", err.message);
+      }
+
+      // Attach district/state and apply union district override.
+      for (const r of rows as any[]) {
+        const ldap = String(r.tech_ldap || "").toUpperCase();
+        const ds = districtStateMap.get(ldap);
+        r.district = ds?.district ?? null;
+        r.state = ds?.state ?? null;
+        r.truck_no = ds?.truckNo ?? null;
+        r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district).replace(/^0+/, "") || String(ds.district)) : false)
+          || (ds?.state ? String(ds.state).toUpperCase() === "CA" : false);
+        if (r.union_exempt && r.recommendation === "Deny") {
+          r.recommendation = "Approve";
+        }
+      }
+  }
+
   /**
    * POST /api/vrm/profitability/check
    * Accepts { ldaps: string[] }.
@@ -858,39 +914,6 @@ export function registerVrmRoutes(): Router {
         };
       }).filter(Boolean);
 
-      // ── District/state lookup (local DB) ─────────────────────────────────────
-      const districtStateMap = new Map<string, { district: string | null; state: string | null; truckNo: string | null }>();
-      try {
-        const ldapSql = sql.join(cleaned.map((l) => sql`${l}`), sql`, `);
-        const dsRows = await db.execute(sql`
-          SELECT UPPER(tp.enterprise_id) AS ldap,
-                 tp.district_no          AS district,
-                 at.home_state           AS state,
-                 tp.truck_no             AS truck_no
-          FROM tpms_tech_profiles tp
-          LEFT JOIN all_techs at ON UPPER(at.tech_racfid) = UPPER(tp.enterprise_id)
-          WHERE UPPER(tp.enterprise_id) IN (${ldapSql})
-          UNION ALL
-          SELECT UPPER(at.tech_racfid) AS ldap,
-                 at.district_no        AS district,
-                 at.home_state         AS state,
-                 NULL::text            AS truck_no
-          FROM all_techs at
-          WHERE UPPER(at.tech_racfid) IN (${ldapSql})
-            AND UPPER(at.tech_racfid) NOT IN (
-              SELECT UPPER(enterprise_id) FROM tpms_tech_profiles WHERE enterprise_id IS NOT NULL
-            )
-        `);
-        for (const r of (dsRows.rows ?? []) as any[]) {
-          if (r.ldap) districtStateMap.set(String(r.ldap).toUpperCase(), {
-            district: r.district ?? null,
-            state: r.state ?? null,
-            truckNo: r.truck_no ?? null,
-          });
-        }
-      } catch (err: any) {
-        console.error("[VRM] district/state lookup failed:", err.message);
-      }
 
       // Surface "No Data" placeholder for any requested LDAP missing from snapshot/Snowflake.
       const returnedLdaps = new Set(rows.map((r: any) => String(r.tech_ldap || "").toUpperCase()));
@@ -950,19 +973,7 @@ export function registerVrmRoutes(): Router {
         }
       }
 
-      // Attach district/state and apply union district override.
-      for (const r of rows as any[]) {
-        const ldap = String(r.tech_ldap || "").toUpperCase();
-        const ds = districtStateMap.get(ldap);
-        r.district = ds?.district ?? null;
-        r.state = ds?.state ?? null;
-        r.truck_no = ds?.truckNo ?? null;
-        r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district).replace(/^0+/, "") || String(ds.district)) : false)
-          || (ds?.state ? String(ds.state).toUpperCase() === "CA" : false);
-        if (r.union_exempt && r.recommendation === "Deny") {
-          r.recommendation = "Approve";
-        }
-      }
+      await attachEvalContextAndOverrides(rows as any[], cleaned);
 
       // Auto-save check history.
       const checkRecords = rows.map((r: any) => ({
@@ -2502,9 +2513,17 @@ export function registerVrmRoutes(): Router {
       `);
       const hits = qResult.rows as any[];
       if (hits.length === 1) {
+        // Same function Evaluate runs — never return the raw snapshot value.
+        const evalRow: any = {
+          tech_ldap: hits[0].tech_ldap,
+          tech_name: hits[0].tech_name,
+          recommendation: hits[0].recommendation,
+          scorecard_score: hits[0].scorecard_score,
+        };
+        await attachEvalContextAndOverrides([evalRow], [String(hits[0].tech_ldap ?? "").toUpperCase()]);
         return {
-          techLdap: hits[0].tech_ldap, techName: hits[0].tech_name,
-          recommendation: hits[0].recommendation, score: hits[0].scorecard_score,
+          techLdap: evalRow.tech_ldap, techName: evalRow.tech_name,
+          recommendation: evalRow.recommendation, score: evalRow.scorecard_score,
           matchConfidence: "exact",
         };
       }

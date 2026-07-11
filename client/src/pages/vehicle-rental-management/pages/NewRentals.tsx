@@ -278,6 +278,7 @@ interface DecisionRow {
   id: string;
   techLdap: string;
   techName: string | null;
+  truckNo?: string | null;
   dailyNetWithRental: string | null;
   recommendation: string;
   decision: string;
@@ -1330,6 +1331,7 @@ function decisionAccessor(col: string): (r: DecisionRow) => unknown {
   switch (col) {
     case "ldap":            return (r) => r.techLdap;
     case "name":            return (r) => r.techName;
+    case "truck":           return (r) => r.truckNo;
     case "state":           return (r) => r.state;
     case "district":        return (r) => r.district;
     case "tenure":          return (r) => r.tenureMonths;
@@ -1381,6 +1383,7 @@ export default function NewRentals() {
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [selectedDecision, setSelectedDecision] = useState<DecisionRow | null>(null);
+  const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ─── Holman PO queue (rental POs awaiting authorization) ─────────────────
@@ -2618,35 +2621,23 @@ export default function NewRentals() {
           <div style={{ overflowX: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               {/*
-                Decision Log mirrors the Evaluation Results columns above so
-                approvers see the same context they decided against, plus the
-                decision-tracking columns. Snapshot fields (state/district/
-                completes/daily_*) are pulled from vrm_rental_decisions, which
-                captures them at decision time. Pre-snapshot rows render "—".
+                Slim Decision Log (Tyler 7/11): ten columns; everything else
+                lives in the per-row expandable ribbon. Snapshot fields are
+                frozen on vrm_rental_decisions at decision time; truckNo is
+                the tech's CURRENT TPMS assignment resolved at read time.
               */}
               <thead>
                 <tr>
                   <SortableTh col="ldap"           label="LDAP"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
+                  <SortableTh col="truck"          label="Truck"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <th style={thStyle}>Supervisor</th>
-                  <th style={thStyle}>Supervisor SMS</th>
                   <th style={thStyle} title="Tech-facing SMS: approval text on Approve, BYOV-pitch denial text on Deny. Delivery state is reported by Twilio's status callback (delivered/undelivered/failed).">Tech SMS</th>
-                  <th style={thStyle} title="DCA Make-Unavailable event filed to the Standard Activities Request Generator API on Deny">DCA Event</th>
                   <SortableTh col="state"          label="State"           current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="district"       label="District"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="scorecard"      label="Scorecard"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="completes"      label="Completes"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="daily_revenue"  label="Daily Revenue"   current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_costs"    label="Daily Costs"     current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_net_pre"  label="Daily Net (pre-rental)" current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
                   <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_ppt"      label="Daily PPT"       current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)" />
                   <SortableTh col="recommendation" label="Recommendation"  current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="decision"       label="Decision"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="decided_by"     label="Decided By"      current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
-                  <SortableTh col="notes"          label="Notes"           current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
-                  <SortableTh col="date"           label="Date"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                 </tr>
               </thead>
               <tbody>
@@ -2660,145 +2651,177 @@ export default function NewRentals() {
                   const dailyNetWith = d.dailyNetWithRental != null ? Number(d.dailyNetWithRental) : null;
                   const dailyPpt = d.dailyPptProfit != null ? Number(d.dailyPptProfit) : null;
                   const scorecard = d.scorecardScore != null ? Number(d.scorecardScore) : null;
+                  const isExpanded = expandedDecisions.has(d.id);
+                  const ribbonLbl = { fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: colors.inkMuted, marginBottom: 3 };
+                  const ribbonVal = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
                   return (
-                    <tr
-                      key={d.id}
-                      onClick={() => setSelectedDecision(d)}
-                      style={{
-                        borderLeft: isOverride ? `3px solid ${colors.amber}` : "3px solid transparent",
-                        transition: "background 100ms",
-                        cursor: "pointer",
-                      }}
-                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
-                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
-                    >
-                      <td style={tdStyle}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{d.techLdap}</span>
-                          <ChevronRight size={12} style={{ color: colors.inkMuted, flexShrink: 0 }} />
-                        </div>
-                      </td>
-                      <td style={tdStyle}>{formatPersonNameOr(d.techName, "—")}</td>
-                      <td style={tdStyle}>
-                        {d.supervisorName ? (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                            <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(d.supervisorName)}</span>
-                            {d.supervisorLdap && (
-                              <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
-                                {d.supervisorLdap}
-                              </span>
-                            )}
+                    <ReactFragment key={d.id}>
+                      <tr
+                        onClick={() => setExpandedDecisions((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(d.id)) next.delete(d.id); else next.add(d.id);
+                          return next;
+                        })}
+                        style={{
+                          borderLeft: isOverride ? `3px solid ${colors.amber}` : "3px solid transparent",
+                          transition: "background 100ms",
+                          cursor: "pointer",
+                        }}
+                        onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
+                        onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
+                      >
+                        <td style={tdStyle}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{d.techLdap}</span>
+                            <ChevronRight
+                              size={12}
+                              style={{ color: colors.inkMuted, flexShrink: 0, transform: isExpanded ? "rotate(90deg)" : "none", transition: "transform 100ms" }}
+                            />
                           </div>
-                        ) : (
-                          <span style={{ color: colors.inkMuted }}>—</span>
-                        )}
-                      </td>
-                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                        <SupervisorSmsCell decision={d} />
-                      </td>
-                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                        <TechSmsCell decision={d} />
-                      </td>
-                      <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
-                        <DcaEventCell decision={d} />
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
-                        {d.state ?? "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
-                        {d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        <div>{d.tenureMonths != null ? `${Math.round(d.tenureMonths)} mo` : "—"}</div>
-                        {d.lastHireDate && (
-                          <div
-                            style={{
-                              fontFamily: fonts.jetbrains,
-                              fontSize: 10,
-                              color: colors.inkMuted,
-                              marginTop: 2,
-                            }}
-                            title={`Last hire date: ${d.lastHireDate}`}
-                          >
-                            since {d.lastHireDate}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        {scorecard != null ? scorecard.toFixed(2) : "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        {d.completes != null ? fmtInt(d.completes) : "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "right" }}>
-                        {dailyRevenue != null ? fmt$(dailyRevenue) : "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "right" }}>
-                        {dailyCosts != null ? fmt$(dailyCosts) : "—"}
-                      </td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          textAlign: "right",
-                          fontWeight: 500,
-                          color: dailyNetBefore == null ? colors.inkMuted : dailyNetBefore < 0 ? colors.red : colors.green,
-                        }}
-                      >
-                        {dailyNetBefore != null ? fmt$(dailyNetBefore) : "—"}
-                      </td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          textAlign: "right",
-                          fontWeight: 600,
-                          fontFamily: fonts.syne,
-                          fontSize: 14,
-                          color: dailyNetWith == null ? colors.inkMuted : dailyNetWith < 0 ? colors.red : colors.green,
-                        }}
-                      >
-                        {dailyNetWith != null ? fmt$(dailyNetWith) : "—"}
-                      </td>
-                      <td
-                        style={{
-                          ...tdStyle,
-                          textAlign: "right",
-                          fontWeight: 500,
-                          color: dailyPpt == null ? colors.inkMuted : dailyPpt < 0 ? colors.red : colors.green,
-                        }}
-                      >
-                        {dailyPpt != null ? fmt$(dailyPpt) : "—"}
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        <RecPill rec={d.recommendation} />
-                      </td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>
-                        <RecPill rec={d.decision} />
-                        {isOverride && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              fontFamily: fonts.dmSans,
-                              fontSize: 9,
-                              fontWeight: 500,
-                              color: colors.amber,
-                              backgroundColor: colors.amberLight,
-                              padding: "1px 6px",
-                              borderRadius: 4,
-                              marginLeft: 6,
-                            }}
-                          >
-                            OVERRIDE
-                          </span>
-                        )}
-                      </td>
-                      <td style={tdStyle}>{d.decidedByName}</td>
-                      <td style={{ ...tdStyle, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {d.notes ?? "—"}
-                      </td>
-                      <td style={{ ...tdStyle, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-                        {new Date(d.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                      </td>
-                    </tr>
+                        </td>
+                        <td style={tdStyle}>{formatPersonNameOr(d.techName, "—")}</td>
+                        <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
+                          {d.truckNo ? String(d.truckNo).replace(/^0+/, "") || d.truckNo : "—"}
+                        </td>
+                        <td style={tdStyle}>
+                          {d.supervisorName ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                              <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(d.supervisorName)}</span>
+                              {d.supervisorLdap && (
+                                <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
+                                  {d.supervisorLdap}
+                                </span>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ color: colors.inkMuted }}>—</span>
+                          )}
+                        </td>
+                        <td style={tdStyle} onClick={(e) => e.stopPropagation()}>
+                          <TechSmsCell decision={d} />
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
+                          {d.state ?? "—"}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          <div>{d.tenureMonths != null ? `${Math.round(d.tenureMonths)} mo` : "—"}</div>
+                          {d.lastHireDate && (
+                            <div
+                              style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginTop: 2 }}
+                              title={`Last hire date: ${d.lastHireDate}`}
+                            >
+                              since {d.lastHireDate}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          {scorecard != null ? scorecard.toFixed(2) : "—"}
+                        </td>
+                        <td
+                          style={{
+                            ...tdStyle,
+                            textAlign: "right",
+                            fontWeight: 600,
+                            fontFamily: fonts.syne,
+                            fontSize: 14,
+                            color: dailyNetWith == null ? colors.inkMuted : dailyNetWith < 0 ? colors.red : colors.green,
+                          }}
+                        >
+                          {dailyNetWith != null ? fmt$(dailyNetWith) : "—"}
+                        </td>
+                        <td style={{ ...tdStyle, textAlign: "center" }}>
+                          <RecPill rec={d.recommendation} />
+                        </td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={10} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 28px", alignItems: "flex-start" }}>
+                              <div>
+                                <div style={ribbonLbl}>Decision</div>
+                                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                                  <RecPill rec={d.decision} />
+                                  {isOverride && (
+                                    <span style={{ fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 500, color: colors.amber, backgroundColor: colors.amberLight, padding: "1px 6px", borderRadius: 4 }}>
+                                      OVERRIDE
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Decided By</div>
+                                <div style={ribbonVal}>{d.decidedByName || "—"}</div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Date</div>
+                                <div style={ribbonVal}>
+                                  {new Date(d.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Supervisor SMS</div>
+                                <div onClick={(e) => e.stopPropagation()}><SupervisorSmsCell decision={d} /></div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>DCA Event</div>
+                                <div onClick={(e) => e.stopPropagation()}><DcaEventCell decision={d} /></div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>District</div>
+                                <div style={{ ...ribbonVal, fontFamily: fonts.jetbrains }}>{d.district ? String(d.district).replace(/^0+/, "") || d.district : "—"}</div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Completes</div>
+                                <div style={ribbonVal}>{d.completes != null ? fmtInt(d.completes) : "—"}</div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Daily Revenue</div>
+                                <div style={ribbonVal}>{dailyRevenue != null ? fmt$(dailyRevenue) : "—"}</div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Daily Costs</div>
+                                <div style={ribbonVal}>{dailyCosts != null ? fmt$(dailyCosts) : "—"}</div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Daily Net (pre-rental)</div>
+                                <div style={{ ...ribbonVal, fontWeight: 500, color: dailyNetBefore == null ? colors.inkMuted : dailyNetBefore < 0 ? colors.red : colors.green }}>
+                                  {dailyNetBefore != null ? fmt$(dailyNetBefore) : "—"}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={ribbonLbl}>Daily PPT</div>
+                                <div style={{ ...ribbonVal, fontWeight: 500, color: dailyPpt == null ? colors.inkMuted : dailyPpt < 0 ? colors.red : colors.green }}>
+                                  {dailyPpt != null ? fmt$(dailyPpt) : "—"}
+                                </div>
+                              </div>
+                              <div style={{ maxWidth: 340 }}>
+                                <div style={ribbonLbl}>Notes</div>
+                                <div style={ribbonVal}>{d.notes ?? "—"}</div>
+                              </div>
+                              <button
+                                onClick={(e) => { e.stopPropagation(); setSelectedDecision(d); }}
+                                style={{
+                                  alignSelf: "center",
+                                  fontFamily: fonts.dmSans,
+                                  fontWeight: 500,
+                                  fontSize: 12,
+                                  color: colors.accent,
+                                  background: "transparent",
+                                  border: `1px solid ${colors.accent}`,
+                                  borderRadius: 6,
+                                  padding: "5px 12px",
+                                  cursor: "pointer",
+                                  marginLeft: "auto",
+                                }}
+                                data-testid={`button-decision-full-${d.id}`}
+                              >
+                                Open full record →
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </ReactFragment>
                   );
                 })}
               </tbody>
