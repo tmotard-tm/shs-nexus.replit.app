@@ -111,7 +111,7 @@ const SEED_ENTITIES: SeedEntity[] = [
       { sourceName: 'db_all_techs',          role: 'cache',     notes: 'Local mirror of Snowflake roster' },
       { sourceName: 'db_tpms_tech_profiles', role: 'cache',     notes: 'TPMS profile snapshot' },
       { sourceName: 'db_vrm_techs',          role: 'extension', notes: 'VRM tech-state extension' },
-      { sourceName: 'snowflake_all_techs',   role: 'canonical', notes: 'Snowflake DRIVELINE_ALL_TECHS (source of truth)' },
+      { sourceName: 'snowflake_all_techs',   role: 'canonical', notes: 'IT_ANALYTICS NS_TECH active/term/hire rosters (derived; DRIVELINE retired 2026-07-11)' },
       { sourceName: 'tpms_tech_info',        role: 'canonical', notes: 'TPMS /techinfo (master for truck assignment + contact)' },
     ],
   },

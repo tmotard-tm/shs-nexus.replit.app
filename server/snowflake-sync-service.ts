@@ -738,20 +738,83 @@ export class SnowflakeSyncService {
       await snowflake.connect();
 
       console.log('[Sync] Fetching all techs from Snowflake with contact info and TPMS assignments...');
+      // Roster of record derived from the IT_ANALYTICS HR rosters (2026-07-11).
+      // DRIVELINE_ALL_TECHS was retired as the source: it is a stale downstream
+      // copy that produced false terminations (48 active techs mismarked on the
+      // day of the swap). Reconciliation rule (Tyler):
+      //   1. Active roster first (EMPL_STATUS A/L/P/S) — authoritative, carries
+      //      its own LAST_HIRE_DT; no other source consulted for these techs.
+      //   2. Term roster marks a tech 'T' ONLY if not on the active roster AND
+      //      not superseded by a later hire (rehire: LAST_HIRE_DT > term date;
+      //      LAST_DATE_WORKED is the tiebreak inside TERM_DT).
+      // DISTRICT deliberately comes from TPMS, NOT the HR views: the HR DISTRICT
+      // column holds the finance COST CENTER (e.g. 3132), not the fleet district
+      // (e.g. 7084). TPMS is the only source with the true fleet district;
+      // values are LTRIMmed to the unpadded form the app already stores.
       const query = `
-        SELECT 
-          t.EMPL_ID,
-          t.ENTERPRISE_ID,
-          t.FULL_NAME,
-          t.FIRST_NAME,
-          t.LAST_NAME,
-          t.JOB_TITLE,
-          t.DISTRICT_NO,
-          t.PLANNING_AREA_NM,
-          t.EMPLOYMENT_STATUS,
-          t.EFFDT,
-          t.DATE_LAST_WORKED,
-          -- Contact info from ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW (join by EMPLID)
+        WITH active AS (
+          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+                 EMPL_STATUS, LAST_HIRE_DT, LAST_DATE_WORKED
+          FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_ACTIVE_ROSTER_DAILY_VW
+          WHERE EMPL_STATUS IN ('A','L','P','S') AND ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+        ),
+        term AS (
+          SELECT EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME, TERM_DT, LAST_DATE_WORKED FROM (
+            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, EMPLID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+                   COALESCE(EFFDT, LAST_DATE_WORKED) AS TERM_DT, LAST_DATE_WORKED,
+                   ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ENTERPRISE_ID))
+                                      ORDER BY COALESCE(EFFDT, LAST_DATE_WORKED) DESC NULLS LAST) AS rn
+            FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_TERM_ROSTER_VW
+            WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+          ) WHERE rn = 1
+        ),
+        hire AS (
+          SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, MAX(LAST_HIRE_DT) AS LAST_HIRE_DT
+          FROM IT_ANALYTICS.HR_REPORTING_TECH_NON_SENSITIVE.NS_TECH_HIRE_ROSTER_VW
+          WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+          GROUP BY 1
+        ),
+        tpms_now AS (
+          SELECT EID, DISTRICT, TRUCK_LU, FILE_DATE FROM (
+            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, DISTRICT, TRUCK_LU, FILE_DATE,
+                   ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ENTERPRISE_ID)) ORDER BY FILE_DATE DESC NULLS LAST) AS rn
+            FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
+            WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+          ) WHERE rn = 1
+        ),
+        tpms_last AS (
+          SELECT EID, DISTRICT, TRUCK_LU, FILE_DATE FROM (
+            SELECT UPPER(TRIM(ENTERPRISE_ID)) AS EID, DISTRICT, TRUCK_LU, FILE_DATE,
+                   ROW_NUMBER() OVER (PARTITION BY UPPER(TRIM(ENTERPRISE_ID)) ORDER BY FILE_DATE DESC NULLS LAST) AS rn
+            FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED
+            WHERE ENTERPRISE_ID IS NOT NULL AND TRIM(ENTERPRISE_ID) <> ''
+          ) WHERE rn = 1
+        ),
+        roster AS (
+          SELECT EMPLID, EID, EMPL_NAME, JOBTITLE, PLANNING_AREA_NAME,
+                 EMPL_STATUS AS DERIVED_STATUS, LAST_HIRE_DT AS EFF_DT, LAST_DATE_WORKED
+          FROM active
+          UNION ALL
+          SELECT t.EMPLID, t.EID, t.EMPL_NAME, t.JOBTITLE, t.PLANNING_AREA_NAME,
+                 'T' AS DERIVED_STATUS, t.TERM_DT AS EFF_DT, t.LAST_DATE_WORKED
+          FROM term t
+          LEFT JOIN active a ON t.EID = a.EID
+          LEFT JOIN hire h ON t.EID = h.EID
+          WHERE a.EID IS NULL
+            AND NOT (h.LAST_HIRE_DT IS NOT NULL AND h.LAST_HIRE_DT > t.TERM_DT)
+        )
+        SELECT
+          r.EMPLID AS EMPL_ID,
+          r.EID AS ENTERPRISE_ID,
+          r.EMPL_NAME AS FULL_NAME,
+          TRIM(SPLIT_PART(r.EMPL_NAME, ',', 2)) AS FIRST_NAME,
+          TRIM(SPLIT_PART(r.EMPL_NAME, ',', 1)) AS LAST_NAME,
+          r.JOBTITLE AS JOB_TITLE,
+          NULLIF(LTRIM(COALESCE(tn.DISTRICT, tl.DISTRICT), '0'), '') AS DISTRICT_NO,
+          r.PLANNING_AREA_NAME AS PLANNING_AREA_NM,
+          r.DERIVED_STATUS AS EMPLOYMENT_STATUS,
+          TO_VARCHAR(r.EFF_DT) AS EFFDT,
+          TO_VARCHAR(r.LAST_DATE_WORKED) AS DATE_LAST_WORKED,
           c.SNSTV_HOME_ADDR1,
           c.SNSTV_HOME_ADDR2,
           c.SNSTV_HOME_CITY,
@@ -760,14 +823,13 @@ export class SnowflakeSyncService {
           c.SNSTV_MAIN_PHONE,
           c.SNSTV_CELL_PHONE,
           c.SNSTV_HOME_PHONE,
-          -- TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED — informational-only, may be stale
-          tpms.TRUCK_LU AS LAST_KNOWN_TRUCK_LU,
-          tpms.FILE_DATE AS LAST_KNOWN_TRUCK_FILE_DATE
-        FROM PARTS_SUPPLYCHAIN.FLEET.DRIVELINE_ALL_TECHS t
+          COALESCE(tn.TRUCK_LU, tl.TRUCK_LU) AS LAST_KNOWN_TRUCK_LU,
+          COALESCE(tn.FILE_DATE, tl.FILE_DATE) AS LAST_KNOWN_TRUCK_FILE_DATE
+        FROM roster r
         LEFT JOIN PRD_TECH_RECRUITMENT.BATCH_VIEWS.ORA_TECH_LAST_KNOWN_CONTACT_VW_VIEW c
-          ON t.EMPL_ID = c.EMPLID
-        LEFT JOIN PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT_LAST_ASSIGNED tpms
-          ON t.ENTERPRISE_ID = tpms.ENTERPRISE_ID
+          ON r.EMPLID = c.EMPLID
+        LEFT JOIN tpms_now tn ON r.EID = tn.EID
+        LEFT JOIN tpms_last tl ON r.EID = tl.EID
       `;
 
       const rawRows = await snowflake.executeQuery(query) as SnowflakeAllTechRow[];
@@ -829,11 +891,13 @@ export class SnowflakeSyncService {
         }
       }
 
-      result.success = true;
+      // Honest completion semantics (2026-07-11): batch errors no longer report
+      // success — a partial run is visible, an all-failed run is 'failed'.
+      result.success = result.errors.length === 0;
       result.duration = Date.now() - startTime;
 
       await storage.updateSyncLog(syncLog.id, {
-        status: 'completed',
+        status: result.errors.length > 0 && result.recordsProcessed === 0 ? 'failed' : 'completed',
         completedAt: new Date(),
         recordsProcessed: result.recordsProcessed,
         recordsCreated: result.recordsCreated,

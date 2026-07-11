@@ -3968,7 +3968,9 @@ export class DatabaseStorage implements IStorage {
           firstName: sql`excluded.first_name`,
           lastName: sql`excluded.last_name`,
           jobTitle: sql`excluded.job_title`,
-          districtNo: sql`excluded.district_no`,
+          // Preserve the existing fleet district when the new pull has none
+          // (district comes from TPMS; a tech absent from TPMS keeps their value).
+          districtNo: sql`COALESCE(excluded.district_no, all_techs.district_no)`,
           planningAreaName: sql`excluded.planning_area_name`,
           employmentStatus: sql`excluded.employment_status`,
           effectiveDate: sql`excluded.effective_date`,

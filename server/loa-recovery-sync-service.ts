@@ -741,7 +741,9 @@ async function runLoaRecoverySyncInner(
     const deduped = dedupe(parsed);
     result.dedupedCount = deduped.length;
 
-    // 4. Cross-check against DRIVELINE_ALL_TECHS (employment_status L/P).
+    // 4. Cross-check against all_techs (employment_status L/P) — which since
+    //    2026-07-11 derives from the IT_ANALYTICS active/term rosters
+    //    (DRIVELINE_ALL_TECHS retired: stale copy, false terminations).
     //    `all_techs` mirrors that view via the existing Snowflake sync.
     const entIds = deduped.map((r) => r.enterpriseId);
     const sfMap = new Map<string, string | null>();
