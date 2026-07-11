@@ -2408,7 +2408,10 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
     }
     const conversationId = body?.conversation_id || body?.data?.conversation_id;
     if (!conversationId) {
-      res.status(400).json({ message: "Missing conversation_id" });
+      // Ack (200) rather than 400: ElevenLabs verification/health pings carry no
+      // conversation_id, and a non-2xx here is one of the two triggers that
+      // auto-disabled this webhook on 7/9 and 7/10. Nothing to process, so ack.
+      res.status(200).json({ received: true, ignored: "missing conversation_id" });
       return;
     }
 

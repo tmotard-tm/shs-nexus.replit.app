@@ -63,9 +63,9 @@ if (!process.env.FS_ELEVENLABS_WEBHOOK_SECRET) {
   console.warn("[ElevenLabs] WARNING: FS_ELEVENLABS_WEBHOOK_SECRET not set — signature verification DISABLED");
 }
 // Canonical URL (what ElevenLabs should call):
-app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
+app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json", limit: "50mb" }), elevenLabsWebhookHandler);
 // Backwards-compat alias for tooling that already uses the /api/fs prefix:
-app.post("/api/fs/elevenlabs/webhook", express.raw({ type: "application/json" }), elevenLabsWebhookHandler);
+app.post("/api/fs/elevenlabs/webhook", express.raw({ type: "application/json", limit: "50mb" }), elevenLabsWebhookHandler);
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
