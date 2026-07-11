@@ -352,6 +352,7 @@ interface CheckRow {
   id: string;
   techLdap: string;
   techName: string | null;
+  truckNo?: string | null;
   dailyNetWithRental: string | null;
   recommendation: string;
   scorecardScore: string | null;
@@ -1011,6 +1012,7 @@ export default function NewRentals() {
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
+  const [historySearch, setHistorySearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
   // ─── Holman PO queue (rental POs awaiting authorization) ─────────────────
@@ -1299,6 +1301,18 @@ export default function NewRentals() {
     },
   });
   const checkHistory = checksQuery.data?.rows ?? [];
+
+  // One minimal search over BOTH history tables (Tyler 7/11): truck number
+  // (leading zeros ignored), tech name, or LDAP.
+  const historyQ = historySearch.trim().toLowerCase();
+  const matchesHistory = (ldap?: string | null, name?: string | null, truck?: string | null) => {
+    if (!historyQ) return true;
+    if (String(ldap ?? "").toLowerCase().includes(historyQ)) return true;
+    if (String(name ?? "").toLowerCase().includes(historyQ)) return true;
+    const t = String(truck ?? "").replace(/^0+/, "").toLowerCase();
+    const q = historyQ.replace(/^0+/, "");
+    return t !== "" && q !== "" && t.includes(q);
+  };
 
   const sortedCheckHistory = useMemo(() => {
     if (!checkHistorySort.col || !checkHistorySort.dir) return checkHistory;
@@ -2250,9 +2264,37 @@ export default function NewRentals() {
 
       {/* ── Decision log ──────────────────────────────────────────────────────── */}
       <div style={{ marginBottom: 40 }}>
-        <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 12px" }}>
-          Decision Log
-        </h2>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 12 }}>
+          <h2 style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: 0 }}>
+            Decision Log
+          </h2>
+          <div style={{ position: "relative" }}>
+            <Search size={13} style={{ position: "absolute", left: 9, top: "50%", transform: "translateY(-50%)", color: colors.inkMuted, pointerEvents: "none" }} />
+            <input
+              type="text"
+              value={historySearch}
+              onChange={(e) => setHistorySearch(e.target.value)}
+              placeholder="Filter by truck # or name…"
+              data-testid="input-history-search"
+              style={{
+                fontFamily: fonts.dmSans,
+                fontSize: 12,
+                color: colors.ink,
+                backgroundColor: colors.surface,
+                border: `1px solid ${colors.rule}`,
+                borderRadius: 6,
+                padding: "5px 8px 5px 26px",
+                width: 220,
+                outline: "none",
+              }}
+            />
+          </div>
+          {historyQ && (
+            <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>
+              also filters Check History below
+            </span>
+          )}
+        </div>
 
         {decisionLog.length === 0 ? (
           <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted }}>
@@ -2284,7 +2326,7 @@ export default function NewRentals() {
                 </tr>
               </thead>
               <tbody>
-                {sortedDecisionLog.map((d) => {
+                {sortedDecisionLog.filter((d) => matchesHistory(d.techLdap, d.techName, d.truckNo)).map((d) => {
                   const decisionAsRec = d.decision === "approved" ? "Approve" : d.decision === "denied" ? "Deny" : d.decision;
                   const isOverride = decisionAsRec !== d.recommendation && d.recommendation !== "No Data";
                   // Snapshot values may be null on legacy rows; coerce numerics safely.
@@ -2478,7 +2520,7 @@ export default function NewRentals() {
                 </tr>
               </thead>
               <tbody>
-                {sortedCheckHistory.map((c) => (
+                {sortedCheckHistory.filter((c) => matchesHistory(c.techLdap, c.techName, c.truckNo)).map((c) => (
                   <tr
                     key={c.id}
                     style={{ transition: "background 100ms" }}

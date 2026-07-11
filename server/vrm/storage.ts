@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { eq, and, ilike, or, asc, desc, count, sql, ne, inArray, isNull } from "drizzle-orm";
+import { eq, and, ilike, or, asc, desc, count, sql, ne, inArray, isNull, getTableColumns } from "drizzle-orm";
 import {
   vrmTechs,
   vrmTechStatusHistory,
@@ -1488,8 +1488,13 @@ export async function addRentalChecks(rows: InsertVrmRentalCheck[]) {
 }
 
 export async function listRentalChecks(limit = 100) {
+  // getTableColumns keeps the plain-select shape; truckNo is the tech's
+  // CURRENT TPMS assignment resolved at read time (mirrors listRentalDecisions).
   return db
-    .select()
+    .select({
+      ...getTableColumns(vrmRentalChecks),
+      truckNo: sql<string | null>`(SELECT tp.truck_no FROM tpms_tech_profiles tp WHERE UPPER(tp.enterprise_id) = UPPER(${vrmRentalChecks.techLdap}) LIMIT 1)`,
+    })
     .from(vrmRentalChecks)
     .orderBy(desc(vrmRentalChecks.checkedAt))
     .limit(limit);
