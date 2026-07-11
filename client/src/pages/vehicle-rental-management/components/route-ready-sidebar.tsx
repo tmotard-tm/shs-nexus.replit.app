@@ -1,11 +1,32 @@
+import { useState } from "react";
 import { useLocation } from "wouter";
-import { Truck } from "lucide-react";
+import { Truck, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { navItems, fonts, colors } from "../lib/constants";
+
+const COLLAPSE_KEY = "vrm_sidebar_collapsed";
 
 export function RouteReadySidebar() {
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(COLLAPSE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, String(!prev));
+      } catch {
+        /* private mode etc. — collapse still works for the session */
+      }
+      return !prev;
+    });
+  };
 
   const isActive = (path: string) => {
     if (path === "/vehicle-rental-management") {
@@ -16,25 +37,36 @@ export function RouteReadySidebar() {
 
   return (
     <aside
-      className="flex flex-col shrink-0 h-screen sticky top-0 overflow-y-auto"
+      className="flex flex-col shrink-0 h-screen sticky top-0 overflow-y-auto transition-all duration-150"
       style={{
-        width: 220,
+        width: collapsed ? 64 : 220,
         backgroundColor: colors.sidebarBg,
       }}
     >
-      <div className="px-5 pt-5 pb-6 flex items-center gap-2.5">
-        <Truck className="h-4 w-4 text-white opacity-50" />
-        <span
-          className="text-white"
-          style={{
-            fontFamily: fonts.dmSans,
-            fontWeight: 500,
-            fontSize: 14,
-            opacity: 0.9,
-          }}
+      <div className={`pt-5 pb-6 flex items-center ${collapsed ? "flex-col gap-3 px-0" : "gap-2.5 px-5"}`}>
+        {!collapsed && <Truck className="h-4 w-4 text-white opacity-50 shrink-0" />}
+        {!collapsed && (
+          <span
+            className="text-white flex-1 truncate"
+            style={{
+              fontFamily: fonts.dmSans,
+              fontWeight: 500,
+              fontSize: 14,
+              opacity: 0.9,
+            }}
+          >
+            Rental Reduction
+          </span>
+        )}
+        <button
+          onClick={toggleCollapsed}
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="p-1.5 rounded-md transition-colors duration-100 hover:bg-white/10 shrink-0"
+          style={{ color: colors.inkMuted }}
+          data-testid="button-vrm-sidebar-toggle"
         >
-          Rental Reduction
-        </span>
+          {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
+        </button>
       </div>
 
       <nav className="flex-1 flex flex-col gap-0.5 px-2">
@@ -55,7 +87,8 @@ export function RouteReadySidebar() {
                 }
                 setLocation(item.path);
               }}
-              className="flex items-center gap-3 px-3 py-2 rounded-md text-left w-full transition-colors duration-100"
+              title={collapsed ? item.label : undefined}
+              className={`flex items-center rounded-md text-left w-full transition-colors duration-100 ${collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"}`}
               style={{
                 fontFamily: fonts.dmSans,
                 fontWeight: 400,
@@ -67,8 +100,8 @@ export function RouteReadySidebar() {
               }}
             >
               <Icon className="h-4 w-4 shrink-0" style={{ opacity: active ? 1 : 0.6 }} />
-              <span className="flex-1">{item.label}</span>
-              {item.wip && (
+              {!collapsed && <span className="flex-1">{item.label}</span>}
+              {!collapsed && item.wip && (
                 <span
                   className="px-1.5 py-0.5 rounded-md"
                   style={{
@@ -88,18 +121,20 @@ export function RouteReadySidebar() {
         })}
       </nav>
 
-      <div className="px-5 pb-5 pt-4">
-        <span
-          style={{
-            fontFamily: fonts.dmSans,
-            fontWeight: 300,
-            fontSize: 11,
-            color: colors.inkMuted,
-          }}
-        >
-          Transformco Fleet Ops
-        </span>
-      </div>
+      {!collapsed && (
+        <div className="px-5 pb-5 pt-4">
+          <span
+            style={{
+              fontFamily: fonts.dmSans,
+              fontWeight: 300,
+              fontSize: 11,
+              color: colors.inkMuted,
+            }}
+          >
+            Transformco Fleet Ops
+          </span>
+        </div>
+      )}
     </aside>
   );
 }
