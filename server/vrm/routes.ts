@@ -743,8 +743,10 @@ export function registerVrmRoutes(): Router {
         r.truck_no = ds?.truckNo ?? null;
         r.union_exempt = (ds?.district ? UNION_DISTRICTS.has(String(ds.district).replace(/^0+/, "") || String(ds.district)) : false)
           || (ds?.state ? String(ds.state).toUpperCase() === "CA" : false);
+        r.union_flip = false;
         if (r.union_exempt && r.recommendation === "Deny") {
           r.recommendation = "Approve";
+          r.union_flip = true;
         }
       }
   }
@@ -2494,6 +2496,8 @@ export function registerVrmRoutes(): Router {
     recommendation: string | null;
     score: number | null;
     matchConfidence: string;
+    exemptionLabel?: string | null;
+    exemptionOverrodeDeny?: boolean;
   }> {
     if (!driverName || /^UNKNOWN/i.test(driverName.trim())) {
       return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
@@ -2521,10 +2525,19 @@ export function registerVrmRoutes(): Router {
           scorecard_score: hits[0].scorecard_score,
         };
         await attachEvalContextAndOverrides([evalRow], [String(hits[0].tech_ldap ?? "").toUpperCase()]);
+        // Surface WHY a Deny became Approve (CA state / union district) so the
+        // approver is notified on the queue instead of a silent flip.
+        const exemptionLabel = evalRow.union_exempt
+          ? (String(evalRow.state ?? "").toUpperCase() === "CA"
+              ? "CA"
+              : `UNION ${String(evalRow.district ?? "").replace(/^0+/, "") || evalRow.district}`)
+          : null;
         return {
           techLdap: evalRow.tech_ldap, techName: evalRow.tech_name,
           recommendation: evalRow.recommendation, score: evalRow.scorecard_score,
           matchConfidence: "exact",
+          exemptionLabel,
+          exemptionOverrodeDeny: evalRow.union_flip === true,
         };
       }
       if (hits.length > 1) {

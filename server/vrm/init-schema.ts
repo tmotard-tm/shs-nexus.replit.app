@@ -818,6 +818,10 @@ export async function initVrmSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS holman_rental_po_queue_status_idx
       ON holman_rental_po_queue (status)
   `);
+  // Union/CA exemption visibility on the PO queue (Tyler 7/11): why a Deny
+  // became Approve, so the approver is notified instead of a silent flip.
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_label TEXT;`);
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_overrode_deny BOOLEAN NOT NULL DEFAULT FALSE;`);
 
   console.log("[VRM] Schema initialised");
 }

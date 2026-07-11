@@ -21,6 +21,8 @@ export interface HolmanRentalPoRow {
   profitabilityRecommendation: string | null;
   profitabilityScore: string | null;
   matchConfidence: string | null;
+  exemptionLabel: string | null;
+  exemptionOverrodeDeny: boolean;
   status: string;
   approvedInHolman: boolean;
   holmanApproveAttemptedAt: string | null;
@@ -41,6 +43,8 @@ interface EnrichRow {
   recommendation: string | null;
   score: number | null;
   matchConfidence: string;
+  exemptionLabel?: string | null;
+  exemptionOverrodeDeny?: boolean;
 }
 
 // Postgres returns snake_case column names. The interface + the React UI consume
@@ -65,6 +69,8 @@ const SELECT_COLS = `
   profitability_recommendation AS "profitabilityRecommendation",
   profitability_score AS "profitabilityScore",
   match_confidence AS "matchConfidence",
+  exemption_label AS "exemptionLabel",
+  exemption_overrode_deny AS "exemptionOverrodeDeny",
   status,
   approved_in_holman AS "approvedInHolman",
   holman_approve_attempted_at AS "holmanApproveAttemptedAt",
@@ -96,6 +102,7 @@ export async function upsertHolmanRentalPoQueue(
         additional_requested_amt, approved_amount,
         po_date, submitted_date, approval_process,
         tech_ldap, tech_name, profitability_recommendation, profitability_score, match_confidence,
+        exemption_label, exemption_overrode_deny,
         status, approved_in_holman, scraped_at, last_synced_at
       ) VALUES (
         ${row.poNumber}, ${row.repairNumber || null}, ${row.key},
@@ -103,6 +110,7 @@ export async function upsertHolmanRentalPoQueue(
         ${row.additionalRequestedAmt}, ${row.approvedAmount},
         ${row.poDate || null}, ${row.submittedDate || null}, ${row.approvalProcess || null},
         ${m?.techLdap || null}, ${m?.techName || null}, ${m?.recommendation || null}, ${m?.score || null}, ${m?.matchConfidence || "no_match"},
+        ${m?.exemptionLabel || null}, ${m?.exemptionOverrodeDeny ?? false},
         'pending', false, ${now}, ${now}
       )
       ON CONFLICT (po_number) DO UPDATE SET
@@ -119,6 +127,8 @@ export async function upsertHolmanRentalPoQueue(
         tech_ldap               = COALESCE(EXCLUDED.tech_ldap, holman_rental_po_queue.tech_ldap),
         tech_name               = COALESCE(EXCLUDED.tech_name, holman_rental_po_queue.tech_name),
         profitability_recommendation = COALESCE(EXCLUDED.profitability_recommendation, holman_rental_po_queue.profitability_recommendation),
+        exemption_label         = EXCLUDED.exemption_label,
+        exemption_overrode_deny = EXCLUDED.exemption_overrode_deny,
         profitability_score     = COALESCE(EXCLUDED.profitability_score, holman_rental_po_queue.profitability_score),
         match_confidence        = COALESCE(EXCLUDED.match_confidence, holman_rental_po_queue.match_confidence),
         scraped_at              = EXCLUDED.scraped_at,

@@ -255,6 +255,7 @@ interface ProfitRow {
   new_hire_exempt: boolean;
   scorecard_exempt: boolean;
   union_exempt: boolean;
+  union_flip?: boolean;
   district: string | null;
   state: string | null;
   empl_status?: string | null;
@@ -1531,6 +1532,19 @@ export default function NewRentals() {
       setEvaluatedRows(data.rows ?? []);
       setSnapshotMeta(data.snapshotMeta ?? null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/checks"] });
+      // Notify on CA / union-district techs (Tyler 7/11) — especially when the
+      // exemption overrode a Deny. Never let the flip pass silently.
+      const exempt = (data.rows ?? []).filter((r) => r.union_exempt);
+      if (exempt.length > 0) {
+        const lines = exempt.map((r) => {
+          const trigger = String(r.state ?? "").toUpperCase() === "CA" ? "CA" : `union district ${String(r.district ?? "").replace(/^0+/, "")}`;
+          return `${r.tech_ldap} — ${trigger}${r.union_flip ? " (Deny overridden to Approve)" : ""}`;
+        });
+        toast({
+          title: exempt.some((r) => r.union_flip) ? "Union/CA exemption overrode a Deny" : "Union/CA exemption applies",
+          description: lines.join("; "),
+        });
+      }
     },
   });
 
@@ -2169,7 +2183,7 @@ export default function NewRentals() {
                             const UNION_DISTRICTS = new Set(["6141", "7983", "7323", "8309"]);
                             const districtNorm = (row.district ?? "").replace(/^0+/, "") || (row.district ?? "");
                             const isUnion = !!row.district && UNION_DISTRICTS.has(districtNorm);
-                            const label = isUnion ? "UNION" : "CA — EXEMPT";
+                            const label = (isUnion ? `UNION ${districtNorm}` : "CA — EXEMPT") + (row.union_flip ? " · OVERRODE DENY" : "");
                             return (
                               <div style={{ marginTop: 4 }}>
                                 <span
@@ -2551,6 +2565,28 @@ export default function NewRentals() {
                       </td>
                       <td style={{ padding: "12px 14px" }}>
                         <RecPill rec={rec} />
+                        {po.exemptionLabel && (
+                          <div style={{ marginTop: 4 }}>
+                            <span
+                              title={po.exemptionOverrodeDeny
+                                ? "Snapshot recommendation was Deny — overridden to Approve by the union-district/CA policy (same rule Evaluate applies)."
+                                : "Tech is in a union district or CA; Deny recommendations are overridden by policy."}
+                              style={{
+                                display: "inline-block",
+                                fontFamily: fonts.dmSans,
+                                fontSize: 9,
+                                fontWeight: 600,
+                                color: "#6D28D9",
+                                backgroundColor: "#EDE9FE",
+                                padding: "1px 6px",
+                                borderRadius: 4,
+                                letterSpacing: "0.03em",
+                              }}
+                            >
+                              {po.exemptionLabel}{po.exemptionOverrodeDeny ? " · OVERRODE DENY" : ""}
+                            </span>
+                          </div>
+                        )}
                       </td>
                       <td style={{ padding: "12px 14px" }}>
                         <span style={{
