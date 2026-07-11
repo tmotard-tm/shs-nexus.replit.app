@@ -717,7 +717,7 @@ function DecisionForm({
   const canSubmit = name.trim().length > 0 && rentalVehicleNumber.trim().length > 0;
   return (
     <tr>
-      <td colSpan={12} style={{ padding: "12px 16px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+      <td colSpan={10} style={{ padding: "12px 16px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
         <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
           <span style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 500, color: colors.ink }}>
             {action === "approved" ? "Approve" : "Deny"} rental for <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
@@ -1012,6 +1012,7 @@ export default function NewRentals() {
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
+  const [expandedEvals, setExpandedEvals] = useState<Set<string>>(new Set());
   const [historySearch, setHistorySearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -1620,17 +1621,11 @@ export default function NewRentals() {
                   <SortableTh col="ldap"           label="LDAP"            current={evalSort} onChange={setEvalSort} style={thStyle} />
                   <SortableTh col="name"           label="Name"            current={evalSort} onChange={setEvalSort} style={thStyle} />
                   <SortableTh col="truck"          label="Truck"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <th style={thStyle}>Supervisor</th>
                   <SortableTh col="state"          label="State"           current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="district"       label="District"        current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="tenure"         label="Tenure"          current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="scorecard"      label="Scorecard"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="completes"      label="Completes"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
-                  <SortableTh col="daily_revenue"  label="Daily Revenue"   current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_costs"    label="Daily Costs"     current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_net_pre"  label="Daily Net (pre-rental)" current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
                   <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} />
-                  <SortableTh col="daily_ppt"      label="Daily PPT"       current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "right" }} title="PPT Profit ÷ working days (avg daily PPT profit per day worked, last 90-day window)" />
                   <SortableTh col="recommendation" label="Recommendation"  current={evalSort} onChange={setEvalSort} style={{ ...thStyle, textAlign: "center" }} />
                   <th style={{ ...thStyle, textAlign: "center" }}>Action</th>
                 </tr>
@@ -1656,11 +1651,13 @@ export default function NewRentals() {
                             ? "Suspended"
                             : "On Leave")
                     : null;
+                  const evalRibbonLbl = { fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.05em", color: colors.inkMuted, marginBottom: 3 };
+                  const evalRibbonVal = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
                   return (
                     <ReactFragment key={row.tech_ldap}>
                       {onLoa && (
                         <tr key={`loa-${row.tech_ldap}`}>
-                          <td colSpan={16} style={{ padding: 0, borderBottom: 0 }}>
+                          <td colSpan={10} style={{ padding: 0, borderBottom: 0 }}>
                             <div
                               role="alert"
                               style={{
@@ -1704,35 +1701,33 @@ export default function NewRentals() {
                         </tr>
                       )}
                       <tr
+                        onClick={() => setExpandedEvals((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(row.tech_ldap)) next.delete(row.tech_ldap); else next.add(row.tech_ldap);
+                          return next;
+                        })}
                         style={{
                           transition: "background 100ms",
                           borderLeft: row.recommendation === "Deny" ? `3px solid ${colors.red}` : "3px solid transparent",
+                          cursor: "pointer",
                         }}
                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
                       >
                         <td style={tdStyle}>
-                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
+                            <ChevronRight
+                              size={12}
+                              style={{ color: colors.inkMuted, flexShrink: 0, transform: expandedEvals.has(row.tech_ldap) ? "rotate(90deg)" : "none", transition: "transform 100ms" }}
+                            />
+                          </div>
                         </td>
                         <td style={tdStyle}>
                           <span style={{ fontWeight: 500 }}>{formatPersonNameOr(row.tech_name, "—")}</span>
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.jetbrains, fontSize: 12 }}>
                           {row.truck_no ? String(row.truck_no).replace(/^0+/, "") || row.truck_no : "—"}
-                        </td>
-                        <td style={tdStyle}>
-                          {row.supervisor_name ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                              <span style={{ fontWeight: 500, fontSize: 13 }}>{formatPersonName(row.supervisor_name)}</span>
-                              {row.supervisor_ldap && (
-                                <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted }}>
-                                  {row.supervisor_ldap}
-                                </span>
-                              )}
-                            </div>
-                          ) : (
-                            <span style={{ color: colors.inkMuted }}>—</span>
-                          )}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center", fontFamily: fonts.dmSans, fontSize: 12 }}>
                           {row.state ?? "—"}
@@ -1759,25 +1754,6 @@ export default function NewRentals() {
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           {row.scorecard_score != null ? Number(row.scorecard_score).toFixed(2) : "—"}
                         </td>
-                        <td style={{ ...tdStyle, textAlign: "center" }}>
-                          {isNoData ? "—" : fmtInt(row.completes)}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: "right" }}>
-                          {isNoData ? "—" : fmt$(row.daily_revenue)}
-                        </td>
-                        <td style={{ ...tdStyle, textAlign: "right" }}>
-                          {isNoData ? "—" : fmt$(row.daily_costs)}
-                        </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: "right",
-                            fontWeight: 500,
-                            color: isNoData ? colors.inkMuted : row.daily_net_before_rental < 0 ? colors.red : colors.green,
-                          }}
-                        >
-                          {isNoData ? "—" : fmt$(row.daily_net_before_rental)}
-                        </td>
                         <td
                           style={{
                             ...tdStyle,
@@ -1794,16 +1770,6 @@ export default function NewRentals() {
                               needs +{be} completes/day
                             </div>
                           )}
-                        </td>
-                        <td
-                          style={{
-                            ...tdStyle,
-                            textAlign: "right",
-                            fontWeight: 500,
-                            color: isNoData ? colors.inkMuted : (row.daily_ppt_profit ?? 0) < 0 ? colors.red : colors.green,
-                          }}
-                        >
-                          {isNoData ? "—" : fmt$(row.daily_ppt_profit ?? 0)}
                         </td>
                         <td style={{ ...tdStyle, textAlign: "center" }}>
                           <RecPill rec={row.recommendation} />
@@ -1906,7 +1872,7 @@ export default function NewRentals() {
                               the missing context visible to the approver. */}
                           <div style={{ display: "flex", gap: 6, justifyContent: "center" }}>
                               <button
-                                onClick={() => setFormRow({ ldap: row.tech_ldap, action: "approved" })}
+                                onClick={(ev) => { ev.stopPropagation(); setFormRow({ ldap: row.tech_ldap, action: "approved" }); }}
                                 style={{
                                   fontFamily: fonts.dmSans,
                                   fontSize: 11,
@@ -1925,7 +1891,7 @@ export default function NewRentals() {
                                 <CheckCircle size={12} /> Approve
                               </button>
                               <button
-                                  onClick={() => setFormRow({ ldap: row.tech_ldap, action: "denied" })}
+                                  onClick={(ev) => { ev.stopPropagation(); setFormRow({ ldap: row.tech_ldap, action: "denied" }); }}
                                   style={{
                                     fontFamily: fonts.dmSans,
                                     fontSize: 11,
@@ -1946,6 +1912,53 @@ export default function NewRentals() {
                             </div>
                         </td>
                       </tr>
+                      {expandedEvals.has(row.tech_ldap) && (
+                        <tr>
+                          <td colSpan={10} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 28px", alignItems: "flex-start" }}>
+                              <div>
+                                <div style={evalRibbonLbl}>Supervisor</div>
+                                <div style={evalRibbonVal}>
+                                  {row.supervisor_name ? formatPersonName(row.supervisor_name) : "—"}
+                                  {row.supervisor_ldap && (
+                                    <span style={{ fontFamily: fonts.jetbrains, fontSize: 10, color: colors.inkMuted, marginLeft: 6 }}>
+                                      {row.supervisor_ldap}
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Completes</div>
+                                <div style={evalRibbonVal}>{isNoData ? "—" : fmtInt(row.completes)}</div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Daily Revenue</div>
+                                <div style={evalRibbonVal}>{isNoData ? "—" : fmt$(row.daily_revenue)}</div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Daily Costs</div>
+                                <div style={evalRibbonVal}>{isNoData ? "—" : fmt$(row.daily_costs)}</div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Daily Net (pre-rental)</div>
+                                <div style={{ ...evalRibbonVal, fontWeight: 500, color: isNoData ? colors.inkMuted : row.daily_net_before_rental < 0 ? colors.red : colors.green }}>
+                                  {isNoData ? "—" : fmt$(row.daily_net_before_rental)}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Daily PPT</div>
+                                <div style={{ ...evalRibbonVal, fontWeight: 500, color: isNoData ? colors.inkMuted : (row.daily_ppt_profit ?? 0) < 0 ? colors.red : colors.green }}>
+                                  {isNoData ? "—" : fmt$(row.daily_ppt_profit ?? 0)}
+                                </div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Working Days</div>
+                                <div style={evalRibbonVal}>{isNoData ? "—" : row.working_days}</div>
+                              </div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
                       {formRow?.ldap === row.tech_ldap && (
                         <DecisionForm
                           key={`form-${row.tech_ldap}`}
