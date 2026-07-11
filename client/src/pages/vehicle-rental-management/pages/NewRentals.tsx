@@ -1305,13 +1305,21 @@ export default function NewRentals() {
   // One minimal search over BOTH history tables (Tyler 7/11): truck number
   // (leading zeros ignored), tech name, or LDAP.
   const historyQ = historySearch.trim().toLowerCase();
+  // Token match so word order never matters: "ben erling", "erling ben",
+  // "ERLING,BEN", a bare first or last name, an LDAP, or a truck number
+  // (leading zeros ignored) all hit. Every token must match SOMETHING.
   const matchesHistory = (ldap?: string | null, name?: string | null, truck?: string | null) => {
     if (!historyQ) return true;
-    if (String(ldap ?? "").toLowerCase().includes(historyQ)) return true;
-    if (String(name ?? "").toLowerCase().includes(historyQ)) return true;
-    const t = String(truck ?? "").replace(/^0+/, "").toLowerCase();
-    const q = historyQ.replace(/^0+/, "");
-    return t !== "" && q !== "" && t.includes(q);
+    const ldapNorm = String(ldap ?? "").toLowerCase();
+    const nameNorm = String(name ?? "").toLowerCase().replace(/[,.]/g, " ");
+    const truckNorm = String(truck ?? "").replace(/^0+/, "").toLowerCase();
+    const tokens = historyQ.replace(/[,.]/g, " ").split(/\s+/).filter(Boolean);
+    return tokens.every((tok) => {
+      if (ldapNorm.includes(tok)) return true;
+      if (nameNorm.includes(tok)) return true;
+      const tokTruck = tok.replace(/^0+/, "");
+      return truckNorm !== "" && tokTruck !== "" && truckNorm.includes(tokTruck);
+    });
   };
 
   const sortedCheckHistory = useMemo(() => {
