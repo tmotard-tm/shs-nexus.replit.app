@@ -86,7 +86,12 @@ export async function upsertHolmanRentalPoQueue(
   rows: HolmanPortalPO[],
   enriched: EnrichRow[],
   scrapedAt: Date,
+  opts: { sweepResolved?: boolean } = {},
 ): Promise<void> {
+  // The resolved_holman sweep infers "Holman resolved it" from ABSENCE in the
+  // scraped set. That inference is only valid when the pager walk completed —
+  // a partial scrape would silently and permanently resolve pending POs.
+  const sweepResolved = opts.sweepResolved !== false;
   if (rows.length === 0) return;
   const enrichMap = new Map(enriched.map((e) => [e.poNumber, e]));
   const now = scrapedAt.toISOString();
@@ -152,6 +157,10 @@ export async function upsertHolmanRentalPoQueue(
   }
 
   // Rows that dropped off the Holman queue while still pending = resolved on Holman side
+  if (!sweepResolved) {
+    console.warn(`[VRM/HolmanPO] partial scrape — skipping resolved_holman sweep (${activePOs.length} scraped rows upserted only)`);
+    return;
+  }
   if (activePOs.length > 0) {
     const inList = activePOs.map((p) => `'${p.replace(/'/g, "''")}'`).join(",");
     await db.execute(sql.raw(`

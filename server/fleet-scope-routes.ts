@@ -38,7 +38,7 @@ import twilio from "twilio";
 import multer from "multer";
 import cron from "node-cron";
 import * as XLSX from "xlsx";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHmac, timingSafeEqual } from "node:crypto";
 import { pool as fsCachePool } from "./db";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1925,8 +1925,10 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
     req.user = { id: user.id, username: user.username, role: user.role };
     return next();
   } catch (err: any) {
-    console.error("[FS Auth] Auth error:", err.message);
-    return res.status(401).json({ message: "Authentication failed" });
+    // Mirror requireAuth (e0c0b2db): infra failure is 503 retryable, never
+    // 401 — a 401 here made the client treat a Neon blip as a logout.
+    console.error("[FS Auth] Auth backend error (reported as 503, NOT 401):", err.message);
+    return res.status(503).json({ message: "Authentication backend temporarily unavailable — retry", retryable: true });
   }
 }
 
@@ -2382,16 +2384,17 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
         res.status(401).json({ message: "Malformed ElevenLabs-Signature header" });
         return;
       }
-      const crypto = require("crypto");
-      const expectedSig = crypto
-        .createHmac("sha256", secret)
+      // node:crypto import (top of file) — require() throws inside the ESM
+      // prod bundle, which is why signature verification never executed in
+      // prod (every signed event died in the catch).
+      const expectedSig = createHmac("sha256", secret)
         .update(`${timestamp}.${rawBodyStr}`)
         .digest("hex");
       // Use timing-safe comparison to prevent timing-based signature oracle attacks
       const expectedBuf = Buffer.from(expectedSig, "utf8");
       const receivedBuf = Buffer.from(receivedSig, "utf8");
       const sigValid = expectedBuf.length === receivedBuf.length &&
-        crypto.timingSafeEqual(expectedBuf, receivedBuf);
+        timingSafeEqual(expectedBuf, receivedBuf);
       if (!sigValid) {
         console.warn("[ElevenLabs Webhook] Invalid signature");
         res.status(401).json({ message: "Invalid signature" });

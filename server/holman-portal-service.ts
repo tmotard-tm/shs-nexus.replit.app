@@ -67,6 +67,9 @@ export interface ScrapeResult {
   rows: HolmanPortalPO[];
   scrapedAt: Date;
   error?: string;
+  /** False when the pager walk aborted early (partial rows) — callers must
+   *  NOT treat absence from a partial set as "resolved on Holman". */
+  walkComplete?: boolean;
 }
 
 export interface ApprovalResult {
@@ -648,6 +651,7 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     const allGridRows = [...parseGridRows(html)];
     let pageHtml = html;
     let pagesFetched = 1;
+    let walkComplete = true;
     const MAX_PAGES = 10;
     while (pagesFetched < MAX_PAGES) {
       const nextBtn = pageHtml.match(/<a[^>]*id="KPIDetailsGrid_NextPageBtn"[^>]*>/i)?.[0] ?? "";
@@ -677,7 +681,8 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
       });
       _sessionCookies = mergeCookies(_sessionCookies, pResp);
       if (!pResp.ok || /LoginForm\.aspx/i.test((pResp as any).url ?? "")) {
-        console.warn(`[HolmanPortal] pager POST for page ${pagesFetched + 1} failed (HTTP ${pResp.status}) — continuing with ${pagesFetched} page(s)`);
+        console.warn(`[HolmanPortal] pager POST for page ${pagesFetched + 1} failed (HTTP ${pResp.status}) — continuing with ${pagesFetched} page(s) (walk INCOMPLETE)`);
+        walkComplete = false;
         break;
       }
       pageHtml = await pResp.text();
@@ -687,7 +692,8 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
       pagesFetched++;
     }
     if (pagesFetched >= MAX_PAGES) {
-      console.warn(`[HolmanPortal] stopped at the ${MAX_PAGES}-page cap — grid may hold even more rows`);
+      console.warn(`[HolmanPortal] stopped at the ${MAX_PAGES}-page cap — grid may hold even more rows (walk INCOMPLETE)`);
+      walkComplete = false;
     }
 
     // Dedupe by row key: a row can shift between pages while we walk them.
@@ -737,10 +743,10 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     }
 
     console.log(`[HolmanPortal] ${gridRows.length} grid rows across ${pagesFetched} page(s) → ${pos.length} rental POs`);
-    return { rows: pos, scrapedAt };
+    return { rows: pos, scrapedAt, walkComplete };
   } catch (err: any) {
     console.error("[HolmanPortal] scrapeAwaitingAuth:", err.message);
-    return { rows: [], scrapedAt, error: err.message };
+    return { rows: [], scrapedAt, error: err.message, walkComplete: false };
   }
 }
 

@@ -1941,10 +1941,6 @@ export default function NewRentals() {
                                   {isNoData ? "—" : fmt$(row.daily_ppt_profit ?? 0)}
                                 </div>
                               </div>
-                              <div>
-                                <div style={evalRibbonLbl}>Working Days</div>
-                                <div style={evalRibbonVal}>{isNoData ? "—" : row.working_days}</div>
-                              </div>
                             </div>
                           </td>
                         </tr>

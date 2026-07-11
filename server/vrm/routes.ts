@@ -2672,14 +2672,16 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
     try {
-      const { rows: scraped, scrapedAt, error: scrapeErr } = await scrapeAwaitingAuth(true);
+      const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
         return res.status(502).json({ ok: false, error: scrapeErr });
       }
       const enriched = await Promise.all(
         scraped.map(async (po) => ({ poNumber: po.poNumber, ...(await matchDriverNameToTech(po.driverName)) }))
       );
-      await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt);
+      await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
+        sweepResolved: walkComplete !== false && !scrapeErr,
+      });
       const rows = await listHolmanPoQueue();
       res.json({ ok: true, scrapedCount: scraped.length, rows, scrapeError: scrapeErr ?? null });
     } catch (e: any) {
