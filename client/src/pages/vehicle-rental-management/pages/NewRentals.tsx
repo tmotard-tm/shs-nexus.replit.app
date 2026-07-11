@@ -1012,7 +1012,6 @@ export default function NewRentals() {
   const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
-  const [expandedEvals, setExpandedEvals] = useState<Set<string>>(new Set());
   const [historySearch, setHistorySearch] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -1701,27 +1700,15 @@ export default function NewRentals() {
                         </tr>
                       )}
                       <tr
-                        onClick={() => setExpandedEvals((prev) => {
-                          const next = new Set(prev);
-                          if (next.has(row.tech_ldap)) next.delete(row.tech_ldap); else next.add(row.tech_ldap);
-                          return next;
-                        })}
                         style={{
                           transition: "background 100ms",
                           borderLeft: row.recommendation === "Deny" ? `3px solid ${colors.red}` : "3px solid transparent",
-                          cursor: "pointer",
                         }}
                         onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.surface)}
                         onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "")}
                       >
                         <td style={tdStyle}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                            <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
-                            <ChevronRight
-                              size={12}
-                              style={{ color: colors.inkMuted, flexShrink: 0, transform: expandedEvals.has(row.tech_ldap) ? "rotate(90deg)" : "none", transition: "transform 100ms" }}
-                            />
-                          </div>
+                          <span style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{row.tech_ldap}</span>
                         </td>
                         <td style={tdStyle}>
                           <span style={{ fontWeight: 500 }}>{formatPersonNameOr(row.tech_name, "—")}</span>
@@ -1912,9 +1899,8 @@ export default function NewRentals() {
                             </div>
                         </td>
                       </tr>
-                      {expandedEvals.has(row.tech_ldap) && (
-                        <tr>
-                          <td colSpan={10} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+                      <tr>
+                          <td colSpan={10} style={{ padding: "8px 18px 12px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 28px", alignItems: "flex-start" }}>
                               <div>
                                 <div style={evalRibbonLbl}>Supervisor</div>
@@ -1930,6 +1916,10 @@ export default function NewRentals() {
                               <div>
                                 <div style={evalRibbonLbl}>Completes</div>
                                 <div style={evalRibbonVal}>{isNoData ? "—" : fmtInt(row.completes)}</div>
+                              </div>
+                              <div>
+                                <div style={evalRibbonLbl}>Working Days</div>
+                                <div style={evalRibbonVal}>{isNoData ? "—" : row.working_days}</div>
                               </div>
                               <div>
                                 <div style={evalRibbonLbl}>Daily Revenue</div>
@@ -1958,7 +1948,6 @@ export default function NewRentals() {
                             </div>
                           </td>
                         </tr>
-                      )}
                       {formRow?.ldap === row.tech_ldap && (
                         <DecisionForm
                           key={`form-${row.tech_ldap}`}
