@@ -77,7 +77,14 @@ export const queryClient = new QueryClient({
       refetchInterval: false,
       refetchOnWindowFocus: false,
       staleTime: Infinity,
-      retry: false,
+      // Retry exactly once on 5xx/network failures (e.g. the auth layer's
+      // retryable 503 during a transient DB blip). 4xx — including 401 —
+      // never retries, so real logouts stay immediate.
+      retry: (failureCount: number, error: unknown) => {
+        if (failureCount >= 1) return false;
+        const msg = error instanceof Error ? error.message : String(error);
+        return /^5\d\d:/.test(msg) || /failed to fetch|networkerror|load failed/i.test(msg);
+      },
     },
     mutations: {
       retry: false,

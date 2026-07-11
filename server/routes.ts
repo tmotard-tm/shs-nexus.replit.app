@@ -447,41 +447,101 @@ function requireAuthOrRepairTrackerApiKey(req: any, res: any, next: any): any {
 }
 
 // Authentication middleware
+//
+// Design notes (2026-07-11 auth-dropout fix):
+//  - Validated sessions are cached in memory for SESSION_CACHE_TTL_MS so
+//    steady-state requests cost ZERO DB reads (previously: 2 uncached Neon
+//    reads on every request through a max-10 pool).
+//  - A DB/connection failure during validation is NOT a credential failure.
+//    It now answers 503 (retryable) instead of 401, because a 401 makes the
+//    client clear the session and bounce to /login (the phantom-logout bug).
+//    401 is reserved for: no cookie, unknown session, expired session,
+//    deleted user.
+//  - During a DB outage, a session validated within the stale-grace window
+//    keeps working from cache rather than failing.
+const SESSION_CACHE_TTL_MS = 60_000;
+const SESSION_CACHE_STALE_GRACE_MS = 600_000;
+type CachedSessionUser = { id: string; username: string; role: any; departments: any };
+const sessionCache = new Map<string, { user: CachedSessionUser; expiresAt: Date; cachedAt: number }>();
+
+function invalidateSessionCache(sessionId: string): void {
+  sessionCache.delete(sessionId);
+}
+
+function isDbConnectionError(error: any): boolean {
+  const msg = String(error?.message || "");
+  const code = String(error?.code || "");
+  return (
+    ["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "57P01", "08001", "08003", "08006"].includes(code) ||
+    /connection terminated|connection ended|websocket|socket hang up|timeout exceeded when trying to connect|client has encountered a connection error/i.test(msg)
+  );
+}
+
 async function requireAuth(req: any, res: any, next: any): Promise<any> {
   const cookieHeader = req.headers.cookie;
   const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
-  
+
   if (!sessionId) {
     return res.status(401).json({ message: "Authentication required" });
   }
-  
+
+  const now = Date.now();
+  const cached = sessionCache.get(sessionId);
+  if (cached && now - cached.cachedAt < SESSION_CACHE_TTL_MS) {
+    if (cached.expiresAt < new Date()) {
+      sessionCache.delete(sessionId);
+      storage.deleteSession(sessionId).catch(() => {});
+      return res.status(401).json({ message: "Session expired" });
+    }
+    req.user = cached.user;
+    return next();
+  }
+
   try {
-    const session = await storage.getSession(sessionId);
-    
+    let session;
+    try {
+      session = await storage.getSession(sessionId);
+    } catch (error) {
+      if (!isDbConnectionError(error)) throw error;
+      // One immediate retry on transient connection errors before giving up.
+      session = await storage.getSession(sessionId);
+    }
+
     if (!session || session.expiresAt < new Date()) {
       if (session) {
         await storage.deleteSession(sessionId);
       }
+      sessionCache.delete(sessionId);
       return res.status(401).json({ message: "Session expired" });
     }
-    
+
     // Fetch full user data to get role and other fields
     const user = await storage.getUser(session.userId);
     if (!user) {
+      sessionCache.delete(sessionId);
       return res.status(401).json({ message: "User not found" });
     }
-    
-    req.user = { 
-      id: user.id, 
-      username: user.username, 
+
+    req.user = {
+      id: user.id,
+      username: user.username,
       role: user.role,
       departments: user.departments
     };
-    
+
+    sessionCache.set(sessionId, { user: req.user, expiresAt: session.expiresAt, cachedAt: now });
+
     return next();
   } catch (error) {
-    console.error('Session validation error:', error);
-    return res.status(401).json({ message: "Authentication failed" });
+    // We could not determine whether the session is valid; that is a server
+    // fault, not the user's. Serve from the recent cache if we have it.
+    if (cached && now - cached.cachedAt < SESSION_CACHE_STALE_GRACE_MS && cached.expiresAt >= new Date()) {
+      console.error("Session validation degraded (DB error) — serving from stale cache:", (error as any)?.message || error);
+      req.user = cached.user;
+      return next();
+    }
+    console.error("Session validation error (reported as 503, NOT 401):", error);
+    return res.status(503).json({ message: "Authentication backend temporarily unavailable — retry", retryable: true });
   }
 }
 
@@ -867,6 +927,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
     if (sessionId) {
       try { await storage.deleteSession(sessionId); } catch {}
+      invalidateSessionCache(sessionId);
     }
     res.clearCookie('sessionId', { path: '/' });
 
@@ -881,6 +942,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const sessionId = cookieHeader?.match(/sessionId=([^;]+)/)?.[1];
     if (sessionId) {
       try { await storage.deleteSession(sessionId); } catch {}
+      invalidateSessionCache(sessionId);
     }
     res.clearCookie('sessionId', { path: '/' });
     res.json({ ok: true });
@@ -16408,7 +16470,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       req.user = user;
       return true;
     } catch (error) {
-      res.status(401).json({ message: "Authentication failed" });
+      console.error("requireDeveloperRole validation error (reported as 503, NOT 401):", error);
+      res.status(503).json({ message: "Authentication backend temporarily unavailable — retry", retryable: true });
       return false;
     }
   };
