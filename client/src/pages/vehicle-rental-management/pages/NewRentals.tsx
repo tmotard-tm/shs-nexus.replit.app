@@ -2280,6 +2280,7 @@ export default function NewRentals() {
                   <SortableTh col="daily_net_with" label={`Daily Net (w/ $${rentalPerDay})`} current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "right" }} />
                   <SortableTh col="recommendation" label="Recommendation"  current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
                   <SortableTh col="decision"       label="Decision"        current={decisionLogSort} onChange={setDecisionLogSort} style={{ ...thStyle, textAlign: "center" }} />
+                  <SortableTh col="date"           label="Date"            current={decisionLogSort} onChange={setDecisionLogSort} style={thStyle} />
                 </tr>
               </thead>
               <tbody>
@@ -2373,10 +2374,13 @@ export default function NewRentals() {
                             </div>
                           )}
                         </td>
+                        <td style={{ ...tdStyle, fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, whiteSpace: "nowrap" }}>
+                          {new Date(d.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                        </td>
                       </tr>
                       {isExpanded && (
                         <tr>
-                          <td colSpan={11} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
+                          <td colSpan={12} style={{ padding: "12px 18px", backgroundColor: colors.surface, borderBottom: `1px solid ${colors.rule}` }}>
                             <div style={{ display: "flex", flexWrap: "wrap", gap: "14px 28px", alignItems: "flex-start" }}>
                               <div>
                                 <div style={ribbonLbl}>Supervisor</div>
@@ -2392,12 +2396,6 @@ export default function NewRentals() {
                               <div>
                                 <div style={ribbonLbl}>Decided By</div>
                                 <div style={ribbonVal}>{d.decidedByName || "—"}</div>
-                              </div>
-                              <div>
-                                <div style={ribbonLbl}>Date</div>
-                                <div style={ribbonVal}>
-                                  {new Date(d.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
-                                </div>
                               </div>
                               <div>
                                 <div style={ribbonLbl}>Supervisor SMS</div>
