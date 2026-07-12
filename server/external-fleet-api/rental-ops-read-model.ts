@@ -3,8 +3,8 @@ import { eq, inArray, isNotNull, or } from "drizzle-orm";
 import { toDisplayNumber } from "../vehicle-number-utils";
 import type { ApiWarning } from "./types";
 
-const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
-const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
+export const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
+export const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
 const RENTAL_OPS_CACHE_TTL_MS = 30 * 60 * 1000;
 
 type RentalRow = Record<string, any>;
@@ -59,25 +59,52 @@ export interface OpenRentalsReadModelDependencies {
 }
 
 type CachedReadModel = {
-  data: OpenRentalsReadModel;
+  data: any;
   cachedAt: number;
 };
 
-function ticketDateFilter(fileDate?: string): string {
+const rentalOpsCache = new Map<string, CachedReadModel>();
+
+export function getRentalOpsCache(
+  key: string,
+  now: number = Date.now(),
+): CachedReadModel | null {
+  const entry = rentalOpsCache.get(key);
+  if (!entry) return null;
+  if (now - entry.cachedAt > RENTAL_OPS_CACHE_TTL_MS) {
+    rentalOpsCache.delete(key);
+    return null;
+  }
+  return entry;
+}
+
+export function setRentalOpsCache(
+  key: string,
+  data: any,
+  cachedAt: number = Date.now(),
+): void {
+  rentalOpsCache.set(key, { data, cachedAt });
+}
+
+export function clearRentalOpsCache(): void {
+  rentalOpsCache.clear();
+}
+
+export function ticketDateFilter(fileDate?: string): string {
   if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) {
     return `FILE_DATE = '${fileDate}'`;
   }
   return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_TICKET_TABLE})`;
 }
 
-function openDateFilter(fileDate?: string): string {
+export function openDateFilter(fileDate?: string): string {
   if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) {
     return `FILE_DATE = '${fileDate}'`;
   }
   return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_OPEN_TABLE})`;
 }
 
-function parseRentalDate(value: string | null | undefined): string | null {
+export function parseRentalDate(value: string | null | undefined): string | null {
   if (!value) return null;
   const normalized = String(value).trim();
   if (!normalized || normalized === "null") return null;
@@ -95,25 +122,25 @@ function parseRentalDate(value: string | null | undefined): string | null {
   return normalized.slice(0, 10);
 }
 
-function calcDaysOpen(startDate: string | null, now: number): number {
+export function calcDaysOpen(startDate: string | null, now: number = Date.now()): number {
   if (!startDate) return 0;
   const start = new Date(startDate);
   if (Number.isNaN(start.getTime())) return 0;
   return Math.floor((now - start.getTime()) / 86_400_000);
 }
 
-function mapDivision(division: string | null | undefined): string {
+export function mapDivision(division: string | null | undefined): string {
   return (division || "").trim();
 }
 
-function parseClaimNumber(claimNumber: string): { holmanPo: string } {
+export function parseClaimNumber(claimNumber: string): { holmanPo: string } {
   const clean = (claimNumber || "").trim();
   const hyphenIndex = clean.lastIndexOf("-");
   if (hyphenIndex < 0) return { holmanPo: clean.replace(/\s+/g, "") };
   return { holmanPo: clean.slice(0, hyphenIndex).replace(/\s+/g, "") };
 }
 
-function enterpriseOriginalStart(row: RentalRow): string | null {
+export function entOriginalStart(row: RentalRow): string | null {
   return parseRentalDate(row.ORIGINAL_START_DATE) || parseRentalDate(row.RENTAL_START_DATE);
 }
 
@@ -284,8 +311,6 @@ export async function enrichWithTruckStatus(rows: RentalRow[]): Promise<void> {
 export function createOpenRentalsReadModelBuilder(
   dependencies: OpenRentalsReadModelDependencies,
 ): (input: OpenRentalsInput) => Promise<OpenRentalsReadModel> {
-  const cache = new Map<string, CachedReadModel>();
-
   return async (input) => {
     if (!(await dependencies.isSnowflakeConfigured())) {
       throw new OpenRentalsSourceUnavailableError(
@@ -304,12 +329,11 @@ export function createOpenRentalsReadModelBuilder(
 
     const showRaw = input.view === "raw";
     const cacheKey = `open:${input.fileDate || "latest"}:${showRaw}:${input.includeOos}`;
-    const cached = cache.get(cacheKey);
-    if (cached && dependencies.now() - cached.cachedAt <= RENTAL_OPS_CACHE_TTL_MS) {
+    const cached = getRentalOpsCache(cacheKey, dependencies.now());
+    if (cached) {
       console.log(`[RentalOps] Cache hit: ${cacheKey}`);
       return { ...cached.data, _cachedAt: cached.cachedAt } as OpenRentalsReadModel;
     }
-    if (cached) cache.delete(cacheKey);
 
     const executeSourceQuery = async (query: string): Promise<any[]> => {
       try {
@@ -408,7 +432,7 @@ export function createOpenRentalsReadModelBuilder(
       }
 
       const enterpriseSegment = Array.from(enterpriseByVehicle.entries()).map(([vehicleNumber, row]) => {
-        const originalStartDate = enterpriseOriginalStart(row);
+        const originalStartDate = entOriginalStart(row);
         const currentTicketStart = parseRentalDate(row.RENTAL_START_DATE);
         const { holmanPo } = parseClaimNumber(row.CLAIM_NUMBER || "");
         return {
@@ -515,9 +539,16 @@ export function createOpenRentalsReadModelBuilder(
       };
     }
 
-    cache.set(cacheKey, { data: model, cachedAt: dependencies.now() });
+    setRentalOpsCache(cacheKey, model, dependencies.now());
     return model;
   };
+}
+
+export function toLegacyOpenRentalsResponse(
+  model: OpenRentalsReadModel & { _cachedAt?: number },
+): Omit<OpenRentalsReadModel, "sourceUpdatedAt" | "warnings"> & { _cachedAt?: number } {
+  const { sourceUpdatedAt: _sourceUpdatedAt, warnings: _warnings, ...legacyResult } = model;
+  return legacyResult;
 }
 
 const defaultDependencies: OpenRentalsReadModelDependencies = {

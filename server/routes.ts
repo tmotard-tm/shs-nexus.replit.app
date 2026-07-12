@@ -50,10 +50,22 @@ import { isExternalFleetReadApiEnabled } from "./external-fleet-api/auth";
 import { registerExternalFleetReadApi } from "./external-fleet-api/router";
 import {
   buildOpenRentalsReadModel,
+  calcDaysOpen,
+  entOriginalStart,
+  getRentalOpsCache,
   getOosVehicleSet,
+  mapDivision,
+  openDateFilter,
   OpenRentalsSourceUnavailableError,
+  parseClaimNumber,
+  parseRentalDate,
+  RENTAL_OPEN_TABLE,
+  RENTAL_TICKET_TABLE,
   rentalEnrichEnterpriseIds,
   rentalNameParse,
+  setRentalOpsCache,
+  ticketDateFilter,
+  toLegacyOpenRentalsResponse,
 } from "./external-fleet-api/rental-ops-read-model";
 
 import { mergeRolePermissionWithDefaults, setNestedPermissionValue } from "./permission-utils";
@@ -18208,87 +18220,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Rental Operations (T002) — reads from Snowflake pipeline tables
   // =====================================================================
   // Confirmed Snowflake pipeline table names (updated 2026-03-05)
-  const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
   const RENTAL_CLOSED_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_CLOSED_RENTAL_REPORT";
-  const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
   // All 3 pipeline tables are appended daily with a new file each time.
   // Always restrict to a single file's data per table.
   // When fileDate (YYYY-MM-DD) is provided, use that date; otherwise default to MAX(FILE_DATE).
-  function ticketDateFilter(fileDate?: string): string {
-    if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) return `FILE_DATE = '${fileDate}'`;
-    return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_TICKET_TABLE})`;
-  }
-  function openDateFilter(fileDate?: string): string {
-    if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) return `FILE_DATE = '${fileDate}'`;
-    return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_OPEN_TABLE})`;
-  }
   function closedDateFilter(fileDate?: string): string {
     if (fileDate && /^\d{4}-\d{2}-\d{2}$/.test(fileDate)) return `FILE_DATE = '${fileDate}'`;
     return `FILE_DATE = (SELECT MAX(FILE_DATE) FROM ${RENTAL_CLOSED_TABLE})`;
   }
-
-  function calcDaysOpen(startDate: string | null): number {
-    if (!startDate) return 0;
-    const start = new Date(startDate);
-    if (isNaN(start.getTime())) return 0;
-    return Math.floor((Date.now() - start.getTime()) / 86400000);
-  }
-
-  // Normalize various date formats to ISO YYYY-MM-DD
-  function parseRentalDate(d: string | null | undefined): string | null {
-    if (!d) return null;
-    const s = String(d).trim();
-    if (!s || s === "null") return null;
-    // Already ISO: 2026-02-10 or 2026-02-10 00:00:00
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-    // MM/DD/YYYY or M/D/YYYY
-    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-    if (mdy) return `${mdy[3]}-${mdy[1].padStart(2, "0")}-${mdy[2].padStart(2, "0")}`;
-    // 7-digit MDDYYYY e.g. 7212025 = 07/21/2025
-    if (/^\d{7}$/.test(s)) {
-      return `${s.slice(3)}-${s[0].padStart(2, "0")}-${s.slice(1, 3)}`;
-    }
-    // 8-digit MMDDYYYY
-    if (/^\d{8}$/.test(s)) return `${s.slice(4)}-${s.slice(0, 2)}-${s.slice(2, 4)}`;
-    return s.slice(0, 10);
-  }
-
-  // Return division code as-is — no label mapping
-  function mapDivision(divCode: string | null | undefined): string {
-    return (divCode || "").trim();
-  }
-
-  // Parse Enterprise claim number format: "114771300       -D/R"
-  // Holman PO = digits before the hyphen (trimmed)
-  // Letter after hyphen = alphabet position = rewrite count (D=4, F=6, etc.)
-  // This matches NUMBER_OF_REWRITES column but lets us surface the PO number
-  function parseClaimNumber(claimNum: string): { holmanPo: string } {
-    const clean = (claimNum || "").trim();
-    const hyphenIdx = clean.lastIndexOf("-");
-    if (hyphenIdx < 0) return { holmanPo: clean.replace(/\s+/g, "") };
-    const holmanPo = clean.slice(0, hyphenIdx).replace(/\s+/g, "");
-    return { holmanPo };
-  }
-
-  // Coalesce originalStartDate with rentalStartDate — if ORIGINAL_START_DATE is present
-  // the rental has been rewritten and we track days from the very first start date
-  function entOriginalStart(r: any): string | null {
-    return parseRentalDate(r.ORIGINAL_START_DATE) || parseRentalDate(r.RENTAL_START_DATE);
-  }
-
-  // ── Rental-ops response cache (30-minute TTL keyed by endpoint+params) ──────
-  const RENTAL_OPS_CACHE_TTL_MS = 30 * 60 * 1000;
-  const rentalOpsCache = new Map<string, { data: any; cachedAt: number }>();
-  function getRentalOpsCache(key: string): { data: any; cachedAt: number } | null {
-    const entry = rentalOpsCache.get(key);
-    if (!entry) return null;
-    if (Date.now() - entry.cachedAt > RENTAL_OPS_CACHE_TTL_MS) { rentalOpsCache.delete(key); return null; }
-    return entry;
-  }
-  function setRentalOpsCache(key: string, data: any): void {
-    rentalOpsCache.set(key, { data, cachedAt: Date.now() });
-  }
-  // ──────────────────────────────────────────────────────────────────────────
 
   function handleSnowflakeError(err: any, res: any, table?: string) {
     const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
@@ -18305,8 +18244,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         includeOos: req.query?.includeOos === "true",
         view: req.query?.view === "raw" ? "raw" : "business_logic",
       }) as Awaited<ReturnType<typeof buildOpenRentalsReadModel>> & { _cachedAt?: number };
-      const { sourceUpdatedAt: _sourceUpdatedAt, warnings: _warnings, ...legacyResult } = model;
-      return res.json(legacyResult);
+      return res.json(toLegacyOpenRentalsResponse(model));
     } catch (err: any) {
       if (err instanceof OpenRentalsSourceUnavailableError) {
         if (err.reason === "not_configured") {

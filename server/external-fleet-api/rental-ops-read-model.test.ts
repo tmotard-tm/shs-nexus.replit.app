@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import express from "express";
 
+import * as rentalOpsReadModel from "./rental-ops-read-model";
 import {
   createOpenRentalsReadModelBuilder,
   OpenRentalsSourceUnavailableError,
@@ -116,7 +117,89 @@ function syntheticBuilder() {
   assert.equal(result.data.some((row) => row.vehicleNumberPadded === "00999"), false);
 
   const legacyRouteFacingFixture = {
-    data: result.data,
+    data: [
+      {
+        vehicleNumber: "00123",
+        vehicleNumberPadded: "00123",
+        division: null,
+        renterName: "SAMPLE LATEST",
+        enterpriseId: "ID-00123",
+        district: null,
+        ticketNumber: "TKT-LATEST",
+        poNumber: "700002",
+        claimNumber: "700002-B/R",
+        poDate: "2026-06-20",
+        rentalStartDate: "2026-07-01",
+        originalStartDate: "2026-06-20",
+        isRewrite: true,
+        rentalVendor: "Enterprise Rent-A-Car",
+        ticketStatus: "OPEN",
+        daysOpen: 22,
+        daysAuthorized: 12,
+        initialDaysAuthorized: 5,
+        numberOfExtensions: 2,
+        daysBehind: 1,
+        numberOfRewrites: 1,
+        repairsComplete: null,
+        claimsOffice: null,
+        poCount: 1,
+        hasEnterpriseTicket: true,
+        source: "enterprise",
+        enterpriseIdSource: "synthetic",
+        mainStatus: "MAIN-00123",
+        subStatus: "SUB-00123",
+      },
+      {
+        vehicleNumber: "456",
+        vehicleNumberPadded: "00456",
+        division: null,
+        renterName: "SAMPLE SECOND",
+        enterpriseId: "ID-00456",
+        district: null,
+        ticketNumber: "TKT-SECOND",
+        poNumber: "700003",
+        claimNumber: "700003-C/R",
+        poDate: "2026-07-03",
+        rentalStartDate: "2026-07-03",
+        originalStartDate: "2026-07-03",
+        isRewrite: false,
+        rentalVendor: "Enterprise Rent-A-Car",
+        ticketStatus: "OPEN",
+        daysOpen: 9,
+        daysAuthorized: null,
+        initialDaysAuthorized: null,
+        numberOfExtensions: 0,
+        daysBehind: 0,
+        numberOfRewrites: 0,
+        repairsComplete: null,
+        claimsOffice: null,
+        poCount: 1,
+        hasEnterpriseTicket: true,
+        source: "enterprise",
+        enterpriseIdSource: "synthetic",
+        mainStatus: "MAIN-00456",
+        subStatus: "SUB-00456",
+      },
+      {
+        vehicleNumber: "888",
+        vehicleNumberPadded: "00888",
+        division: "D1",
+        renterName: "SYNTHETIC RENTER",
+        enterpriseId: "SRENTER",
+        district: "001",
+        poNumber: "800005",
+        poDate: "2026-07-10",
+        rentalStartDate: "2026-07-10",
+        rentalVendor: "Avis Sample",
+        daysOpen: 2,
+        poCount: 2,
+        hasEnterpriseTicket: false,
+        source: "holman_non_enterprise",
+        enterpriseIdSource: "direct",
+        mainStatus: "MAIN-00888",
+        subStatus: "SUB-00888",
+      },
+    ],
     total: 3,
     enterpriseCount: 2,
     holmanNonEnterpriseCount: 2,
@@ -127,6 +210,84 @@ function syntheticBuilder() {
     warnings: [],
   };
   assert.deepEqual(result, legacyRouteFacingFixture);
+}
+
+{
+  let sourceQueryCount = 0;
+  const dependencies = {
+    isSnowflakeConfigured: () => true,
+    getSnowflakeService: async () => ({
+      connect: async () => undefined,
+      executeQuery: async (query: string) => {
+        sourceQueryCount++;
+        return query.includes("ENTERPRISE_OPEN_RENTAL_TICKET_REPORT")
+          ? ticketRows.map((row) => ({ ...row }))
+          : holmanRows.map((row) => ({ ...row }));
+      },
+    }),
+    getOosVehicleSet: async () => new Set<string>(),
+    enrichEnterpriseIds: async () => undefined,
+    enrichWithTruckStatus: async () => undefined,
+    sourceUpdatedAt: () => null,
+    now: () => fixedNow,
+  };
+  const firstBuilder = createOpenRentalsReadModelBuilder(dependencies);
+  const secondBuilder = createOpenRentalsReadModelBuilder(dependencies);
+  const input = { fileDate: "2026-07-09", includeOos: true, view: "business_logic" as const };
+
+  await firstBuilder(input);
+  const cached = await secondBuilder(input) as typeof legacyRouteFacingFixture & { _cachedAt?: number };
+
+  assert.equal(sourceQueryCount, 2);
+  assert.equal(typeof cached._cachedAt, "number");
+}
+
+{
+  const clearRentalOpsCache = (rentalOpsReadModel as any).clearRentalOpsCache;
+  const toLegacyOpenRentalsResponse = (rentalOpsReadModel as any).toLegacyOpenRentalsResponse;
+  assert.equal(typeof clearRentalOpsCache, "function");
+  assert.equal(typeof toLegacyOpenRentalsResponse, "function");
+
+  clearRentalOpsCache();
+  let sourceQueryCount = 0;
+  const build = createOpenRentalsReadModelBuilder({
+    isSnowflakeConfigured: () => true,
+    getSnowflakeService: async () => ({
+      connect: async () => undefined,
+      executeQuery: async (query: string) => {
+        sourceQueryCount++;
+        return query.includes("ENTERPRISE_OPEN_RENTAL_TICKET_REPORT")
+          ? ticketRows.map((row) => ({ ...row }))
+          : holmanRows.map((row) => ({ ...row }));
+      },
+    }),
+    getOosVehicleSet: async () => new Set<string>(),
+    enrichEnterpriseIds: async () => undefined,
+    enrichWithTruckStatus: async () => undefined,
+    sourceUpdatedAt: () => null,
+    now: () => fixedNow,
+  });
+  const input = { fileDate: "2026-07-08", includeOos: true, view: "business_logic" as const };
+
+  const miss = await build(input) as Record<string, unknown>;
+  assert.equal(sourceQueryCount, 2);
+  assert.equal("_cachedAt" in miss, false);
+
+  const hit = await build(input) as Record<string, unknown>;
+  assert.equal(sourceQueryCount, 2);
+  assert.equal(typeof hit._cachedAt, "number");
+
+  const legacy = toLegacyOpenRentalsResponse(hit) as Record<string, unknown>;
+  assert.equal("sourceUpdatedAt" in legacy, false);
+  assert.equal("warnings" in legacy, false);
+  assert.equal(typeof legacy._cachedAt, "number");
+  assert.equal(legacy.view, "business_logic");
+  assert.equal(Array.isArray(legacy.data), true);
+
+  clearRentalOpsCache();
+  const afterClear = await build(input) as Record<string, unknown>;
+  assert.equal(sourceQueryCount, 4);
+  assert.equal("_cachedAt" in afterClear, false);
 }
 
 {
