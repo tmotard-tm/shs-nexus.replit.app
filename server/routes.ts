@@ -46,6 +46,8 @@ import { initFleetScopeSchema } from "./fleet-scope-schema-init";
 // SAML SSO INTEGRATION
 import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
+import { isExternalFleetReadApiEnabled } from "./external-fleet-api/auth";
+import { registerExternalFleetReadApi } from "./external-fleet-api/router";
 
 import { mergeRolePermissionWithDefaults, setNestedPermissionValue } from "./permission-utils";
 
@@ -576,6 +578,13 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
 
 export async function registerRoutes(app: Express, existingServer?: Server): Promise<Server> {
   console.log("=== STARTING ROUTE REGISTRATION ===");
+
+  if (isExternalFleetReadApiEnabled()) {
+    registerExternalFleetReadApi(app);
+    console.log("[External Fleet API] Mounted at /api/external/fleet/v1");
+  } else {
+    console.log("[External Fleet API] Disabled");
+  }
 
   // Lightweight ZIP → lat/lng lookup using the Zippopotam API (same as fleet-scope-distance-calculator)
   app.get("/api/zip-coords/:zip", async (req, res) => {
