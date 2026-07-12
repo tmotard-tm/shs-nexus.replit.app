@@ -208,7 +208,7 @@ async function persistSamsaraLocations(locationMap: Map<string, SamsaraLocationD
       await Promise.all(batch.map(async ([vehicleNumber, data]) => {
         try {
           await fsDb!.execute(sql`
-            INSERT INTO samsara_locations (
+            INSERT INTO fs_samsara_locations (
               vehicle_number, samsara_vehicle_id, samsara_vehicle_name,
               latitude, longitude, address, street, city, state, postal,
               samsara_timestamp, source, updated_at
@@ -239,7 +239,8 @@ async function persistSamsaraLocations(locationMap: Map<string, SamsaraLocationD
       }));
     }
     
-    console.log(`[Samsara] Persisted ${persisted} locations to database`);
+    console.log(`[Samsara] Persisted ${persisted}/${locationMap.size} locations to database`);
+    if (persisted < locationMap.size) console.warn(`[Samsara] persist shortfall: ${locationMap.size - persisted} rows failed to write \u2014 check the fs_samsara_locations table/schema`);
   } catch (error: any) {
     console.error('[Samsara] Error persisting locations to database:', error.message);
   }

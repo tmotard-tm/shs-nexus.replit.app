@@ -17276,6 +17276,42 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // (termed/all-techs) failing fails the run; the downstream enrichment steps
   // are best-effort — mirroring run-sync.ts semantics. Each service records
   // its own sync_logs row, so cadence stays auditable in the DB.
+  // POST /samsara/cron/refresh \u2014 heartbeat-triggered Samsara refresh (2026-07-11).
+  // Refreshes fs_samsara_locations (live API -> persist) so the durable fallback
+  // and the "retain last-known location" feature stay current on an Autoscale
+  // deployment, and captures the weekly penetration snapshot when the current
+  // week is missing. Reachable by session users AND x-internal-cron (router-wide
+  // bypass above), so the LIVHR VM heartbeat can drive it.
+  app.post("/samsara/cron/refresh", async (req: any, res) => {
+    const steps: Array<{ step: string; ok: boolean; detail?: any; error?: string }> = [];
+    try {
+      try {
+        const map = await fetchSamsaraLocations();
+        steps.push({ step: "locations", ok: true, detail: { vehicles: map.size } });
+      } catch (e: any) {
+        steps.push({ step: "locations", ok: false, error: e?.message || String(e) });
+      }
+      try {
+        const { captureWeeklySamsaraPenetrationSnapshot, hasCurrentWeekSamsaraPenetrationSnapshot } =
+          await import("./fleet-scope-samsara");
+        const exists = await hasCurrentWeekSamsaraPenetrationSnapshot();
+        if (!exists) {
+          await captureWeeklySamsaraPenetrationSnapshot();
+          steps.push({ step: "penetration_snapshot", ok: true, detail: { captured: true } });
+        } else {
+          steps.push({ step: "penetration_snapshot", ok: true, detail: { captured: false, reason: "current week exists" } });
+        }
+      } catch (e: any) {
+        steps.push({ step: "penetration_snapshot", ok: false, error: e?.message || String(e) });
+      }
+      const success = steps.every((s) => s.ok);
+      res.status(success ? 200 : 500).json({ success, steps });
+    } catch (error: any) {
+      console.error("[SamsaraCron] refresh failed:", error);
+      res.status(500).json({ success: false, steps, message: error?.message || "Samsara refresh failed" });
+    }
+  });
+
   app.post("/roster-sync", async (req: any, res) => {
     const triggeredBy = req.user?.username ? `manual:${req.user.username}` : "scheduled_dispatcher";
     const steps: Array<{ step: string; ok: boolean; summary?: any; error?: string }> = [];
