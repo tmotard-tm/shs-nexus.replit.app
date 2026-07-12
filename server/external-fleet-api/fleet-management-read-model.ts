@@ -70,6 +70,24 @@ export type FleetManagementCachedVehicleServiceLoader = () => Promise<{
   readCachedVehicles(options: { page?: number; pageSize?: number; statusCode?: number }): Promise<CachedVehicleReadResult>;
 }>;
 
+interface DatabaseInfrastructure {
+  sql(strings: TemplateStringsArray, ...values: unknown[]): unknown;
+  db: { execute(query: unknown): Promise<unknown> };
+}
+
+interface OpenRentalsProductionModel {
+  data: Array<Record<string, unknown>>;
+  sourceUpdatedAt: string | null;
+}
+
+interface FleetManagementProductionLoaders {
+  loadCachedVehicleService: FleetManagementCachedVehicleServiceLoader;
+  loadDatabaseInfrastructure(): Promise<DatabaseInfrastructure>;
+  loadOpenRentalsReadModel(): Promise<{
+    buildOpenRentalsReadModel(input: { includeOos: false; view: "business_logic" }): Promise<OpenRentalsProductionModel>;
+  }>;
+}
+
 export interface FleetManagementListingDependencies {
   readPrimaryVehicles(): Promise<SourceSnapshot<FleetManagementSourceVehicle[]>>;
   readFleetOps(): Promise<SourceSnapshot<FleetOpsSourceRow[]>>;
@@ -106,19 +124,21 @@ function iso(value: unknown): string | null {
 async function readAllCachedVehicles(loadService: FleetManagementCachedVehicleServiceLoader): Promise<SourceSnapshot<FleetManagementSourceVehicle[]>> {
   const holmanVehicleSyncService = await loadService();
   const first = await holmanVehicleSyncService.readCachedVehicles({ page: 1, pageSize: 500, statusCode: 0 });
+  if (!first.success) throw new FleetManagementPrimarySourceUnavailableError();
   const vehicles = [...first.vehicles];
   const totalPages = first.pagination?.totalPages ?? 1;
   for (let page = 2; page <= totalPages; page++) {
     const next = await holmanVehicleSyncService.readCachedVehicles({ page, pageSize: 500, statusCode: 0 });
+    if (!next.success) throw new FleetManagementPrimarySourceUnavailableError();
     vehicles.push(...next.vehicles);
   }
-  if (!first.success || vehicles.length === 0) throw new FleetManagementPrimarySourceUnavailableError();
+  if (vehicles.length === 0) throw new FleetManagementPrimarySourceUnavailableError();
   return { data: vehicles, sourceUpdatedAt: first.syncStatus.lastSyncAt ?? null, stale: first.syncStatus.isStale };
 }
 
-async function readFleetOps(): Promise<SourceSnapshot<FleetOpsSourceRow[]>> {
-  const [{ sql }, { db }, { analyzeAlignment }] = await Promise.all([
-    import("drizzle-orm"), import("../db"), import("../alignment-analysis-service"),
+async function readFleetOps(loadDatabase: () => Promise<DatabaseInfrastructure>): Promise<SourceSnapshot<FleetOpsSourceRow[]>> {
+  const [{ sql, db }, { analyzeAlignment }] = await Promise.all([
+    loadDatabase(), import("../alignment-analysis-service"),
   ]);
   const result = await db.execute(sql`
     WITH tpms_latest AS (
@@ -162,40 +182,41 @@ async function readFleetOps(): Promise<SourceSnapshot<FleetOpsSourceRow[]>> {
   return { data, sourceUpdatedAt: null };
 }
 
-async function readSnowflakeVehicles(query: string): Promise<SourceSnapshot<string[]>> {
-  const { getSnowflakeService, isSnowflakeConfigured } = await import("../snowflake-service");
-  if (!isSnowflakeConfigured()) throw new Error("source unavailable");
-  const client = getSnowflakeService();
-  await client.connect();
-  const result = await client.executeQuery(query);
-  const data = result.map((row: any) => String(row.VEHICLE_NUMBER ?? row.TRUCK_NUMBER ?? "")).filter(Boolean);
-  const times = result.map((row: any) => iso(row.FILE_DATE)).filter((value): value is string => !!value).sort();
-  return { data, sourceUpdatedAt: times[0] ?? null };
-}
-
 const loadHolmanVehicleSyncService: FleetManagementCachedVehicleServiceLoader = async () =>
   (await import("../holman-vehicle-sync-service")).holmanVehicleSyncService;
 
+const defaultProductionLoaders: FleetManagementProductionLoaders = {
+  loadCachedVehicleService: loadHolmanVehicleSyncService,
+  loadDatabaseInfrastructure: async () => {
+    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
+    return { sql, db } as DatabaseInfrastructure;
+  },
+  loadOpenRentalsReadModel: async () => import("./rental-ops-read-model"),
+};
+
 export function createFleetManagementProductionDependencies(
-  loadService: FleetManagementCachedVehicleServiceLoader = loadHolmanVehicleSyncService,
+  overrides: Partial<FleetManagementProductionLoaders> | FleetManagementCachedVehicleServiceLoader = {},
 ): FleetManagementListingDependencies {
+  const supplied = typeof overrides === "function" ? { loadCachedVehicleService: overrides } : overrides;
+  const loaders = { ...defaultProductionLoaders, ...supplied };
   return {
-  readPrimaryVehicles: () => readAllCachedVehicles(loadService),
-  readFleetOps,
+  readPrimaryVehicles: () => readAllCachedVehicles(loaders.loadCachedVehicleService),
+  readFleetOps: () => readFleetOps(loaders.loadDatabaseInfrastructure),
   readTpmsSync: async () => {
     const { storage } = await import("../storage");
     const data = await storage.getTpmsSyncState();
     return { data: data as unknown as Record<string, unknown> | null, sourceUpdatedAt: iso(data?.lastSyncAt) };
   },
-  readRentalOps: () => readSnowflakeVehicles(`
-    SELECT VEHICLE_NUMBER, FILE_DATE FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT
-      WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT) AND TICKET_STATUS = 'OPEN'
-    UNION ALL
-    SELECT VEHICLE_NUMBER, FILE_DATE FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT
-      WHERE FILE_DATE = (SELECT MAX(FILE_DATE) FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT)
-  `),
+  readRentalOps: async () => {
+    const { buildOpenRentalsReadModel } = await loaders.loadOpenRentalsReadModel();
+    const model = await buildOpenRentalsReadModel({ includeOos: false, view: "business_logic" });
+    const data = Array.from(new Set(model.data.map((row) =>
+      toDisplayNumber(String(row.vehicleNumberPadded ?? row.vehicleNumber ?? "")),
+    ).filter(Boolean)));
+    return { data, sourceUpdatedAt: model.sourceUpdatedAt };
+  },
   readAmsStatuses: async () => {
-    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
+    const { sql, db } = await loaders.loadDatabaseInfrastructure();
     const result = await db.execute(sql`SELECT vin, ams_truck_status_label, last_ams_sync_at FROM ams_vehicles_cache`);
     const rows = rowsOf<any>(result);
     return {
@@ -204,7 +225,7 @@ export function createFleetManagementProductionDependencies(
     };
   },
   readPoFlags: async () => {
-    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
+    const { sql, db } = await loaders.loadDatabaseInfrastructure();
     const result = await db.execute(sql`
       SELECT vehicle_number,
         COUNT(*) FILTER (WHERE LOWER(COALESCE(po_type, '')) = 'rental' OR UPPER(COALESCE(description, '')) LIKE '%RENTAL%')::int AS rental_count,
@@ -220,16 +241,16 @@ export function createFleetManagementProductionDependencies(
     };
   },
   readRepairShopFlags: async () => {
-    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
-    const result = await db.execute(sql`SELECT truck_number, repair_address, updated_at FROM fs_trucks`);
+    const { sql, db } = await loaders.loadDatabaseInfrastructure();
+    const result = await db.execute(sql`SELECT truck_number, repair_address, last_updated_at FROM fs_trucks`);
     const rows = rowsOf<any>(result);
-    return { data: rows.map((row) => ({ truckNumber: row.truck_number, value: !!String(row.repair_address ?? "").trim() })), sourceUpdatedAt: rows.map((row) => iso(row.updated_at)).filter(Boolean).sort()[0] ?? null };
+    return { data: rows.map((row) => ({ truckNumber: row.truck_number, value: !!String(row.repair_address ?? "").trim() })), sourceUpdatedAt: rows.map((row) => iso(row.last_updated_at)).filter(Boolean).sort()[0] ?? null };
   },
   readOffboardingFlags: async () => {
-    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
-    const result = await db.execute(sql`SELECT truck_number, offboarding_flagged, updated_at FROM fs_trucks`);
+    const { sql, db } = await loaders.loadDatabaseInfrastructure();
+    const result = await db.execute(sql`SELECT truck_number, offboarding_flagged, last_updated_at FROM fs_trucks`);
     const rows = rowsOf<any>(result);
-    return { data: rows.map((row) => ({ truckNumber: row.truck_number, value: !!row.offboarding_flagged })), sourceUpdatedAt: rows.map((row) => iso(row.updated_at)).filter(Boolean).sort()[0] ?? null };
+    return { data: rows.map((row) => ({ truckNumber: row.truck_number, value: !!row.offboarding_flagged })), sourceUpdatedAt: rows.map((row) => iso(row.last_updated_at)).filter(Boolean).sort()[0] ?? null };
   },
   readDtcStatuses: async () => {
     const { getSnowflakeService, isSnowflakeConfigured } = await import("../snowflake-service");
@@ -238,7 +259,7 @@ export function createFleetManagementProductionDependencies(
     return { data: rows.map((row: any) => ({ truckNumber: String(row.TRUCK_NUMBER), severityScore: row.SEVERITY_SCORE == null ? null : Number(row.SEVERITY_SCORE), severityLabel: row.SEVERITY_LABEL ?? null })), sourceUpdatedAt: null };
   },
   readTechnicianStatuses: async () => {
-    const [{ sql }, { db }] = await Promise.all([import("drizzle-orm"), import("../db")]);
+    const { sql, db } = await loaders.loadDatabaseInfrastructure();
     const result = await db.execute(sql`SELECT tech_racfid, employment_status, synced_at FROM all_techs`);
     const rows = rowsOf<any>(result);
     return { data: rows.map((row) => ({ enterpriseId: row.tech_racfid, employmentStatus: row.employment_status ?? null })), sourceUpdatedAt: rows.map((row) => iso(row.synced_at)).filter(Boolean).sort()[0] ?? null };
@@ -322,6 +343,8 @@ export function createFleetManagementListingBuilder(dependencies: FleetManagemen
       const technicianName = String(vehicle.tpmsAssignedTechName ?? "").trim() || String(vehicle.holmanTechName ?? "").trim() || null;
       const conflicting = !!holmanId && !!tpmsId && holmanId.toLowerCase() !== tpmsId.toLowerCase();
       const assignmentStatus = fleet?.rootCause === "status_blocked" ? "blocked"
+        : fleet?.rootCause === "pending" ? "pending"
+        : fleet?.rootCause === "byov_vin_missing" ? "byov"
         : fleet || conflicting || (!!holmanId !== !!tpmsId) ? "mismatch"
         : holmanId && tpmsId ? "synced" : "unassigned";
       const displayedStatuses: Record<string, string | boolean | number | null> = {

@@ -71,6 +71,9 @@ function syntheticDependencies(): FleetManagementListingDependencies {
         amsTechId: "FLEET-AMS",
         rootCause: "external_tpms_change",
       },
+      { truckNumber: "12", rootCause: "pending" },
+      { truckNumber: "99", rootCause: "status_blocked" },
+      { truckNumber: "100", rootCause: "byov_vin_missing" },
     ]),
     readTpmsSync: async () => source({ status: "idle", initialSyncComplete: true }),
     readRentalOps: async () => source(["00012", "061101"]),
@@ -130,17 +133,29 @@ function input(overrides: Partial<FleetManagementListingInput> = {}): FleetManag
 
 {
   const build = createFleetManagementListingBuilder(syntheticDependencies());
-  const sorts: FleetManagementListingInput["sort"][] = ["truckNumber", "vehicleNumber", "technician", "status"];
-  const directions: FleetManagementListingInput["direction"][] = ["asc", "desc"];
-  for (const sort of sorts) {
-    for (const direction of directions) {
-      const requested = input({ sort, direction });
-      const first = await build(requested);
-      const second = await build(requested);
-      assert.deepEqual(first.rows.map((row) => row.truckNumber), second.rows.map((row) => row.truckNumber));
-      assert.equal(new Set(first.rows.map((row) => row.truckNumber)).size, 4);
+  const expected: Record<FleetManagementListingInput["sort"], Record<FleetManagementListingInput["direction"], string[]>> = {
+    truckNumber: { asc: ["00012", "00099", "00100", "61101"], desc: ["61101", "00100", "00099", "00012"] },
+    vehicleNumber: { asc: ["00012", "00099", "00100", "61101"], desc: ["61101", "00100", "00099", "00012"] },
+    technician: { asc: ["00100", "00012", "61101", "00099"], desc: ["00099", "61101", "00012", "00100"] },
+    status: { asc: ["00099", "00100", "61101", "00012"], desc: ["00012", "61101", "00100", "00099"] },
+  };
+  for (const sort of Object.keys(expected) as FleetManagementListingInput["sort"][]) {
+    for (const direction of ["asc", "desc"] as const) {
+      const first = await build(input({ sort, direction }));
+      const second = await build(input({ sort, direction }));
+      assert.deepEqual(first.rows.map((row) => row.truckNumber), expected[sort][direction]);
+      assert.deepEqual(second.rows.map((row) => row.truckNumber), expected[sort][direction]);
     }
   }
+}
+
+{
+  const result = await createFleetManagementListingBuilder(syntheticDependencies())(input());
+  const byTruck = new Map(result.rows.map((row) => [row.truckNumber, row.displayedStatuses.assignmentStatus]));
+  assert.equal(byTruck.get("00099"), "blocked");
+  assert.equal(byTruck.get("00012"), "pending");
+  assert.equal(byTruck.get("00100"), "byov");
+  assert.equal(byTruck.get("61101"), "mismatch");
 }
 
 {
@@ -240,6 +255,84 @@ function input(overrides: Partial<FleetManagementListingInput> = {}): FleetManag
   assert.equal(fetchCalls, 0);
 }
 
+{
+  let pageCalls = 0;
+  const dependencies = createFleetManagementProductionDependencies(async () => ({
+    readCachedVehicles: async ({ page = 1 }) => {
+      pageCalls++;
+      return page === 1
+        ? {
+            success: true,
+            vehicles: [{ vehicleNumber: "1", vin: "SYNTHETIC-PAGE-ONE" }],
+            syncStatus: { dataMode: "cached", isStale: false, lastSyncAt: SOURCE_TIME },
+            pagination: { page: 1, pageSize: 500, totalCount: 2, totalPages: 2 },
+          }
+        : {
+            success: false,
+            vehicles: [{ vehicleNumber: "2", vin: "SYNTHETIC-TRUNCATED" }],
+            syncStatus: { dataMode: "cached", isStale: false, lastSyncAt: SOURCE_TIME },
+            pagination: { page: 2, pageSize: 500, totalCount: 2, totalPages: 2 },
+          };
+    },
+  }));
+  await assert.rejects(() => dependencies.readPrimaryVehicles(), FleetManagementPrimarySourceUnavailableError);
+  assert.equal(pageCalls, 2);
+}
+
+{
+  const queries: string[] = [];
+  const fakeSql = (strings: TemplateStringsArray) => ({ text: strings.join("?") });
+  const dependencies = createFleetManagementProductionDependencies({
+    loadDatabaseInfrastructure: async () => ({
+      sql: fakeSql,
+      db: { execute: async (query: { text: string }) => {
+        queries.push(query.text);
+        return { rows: [] };
+      } },
+    }),
+  });
+  await dependencies.readRepairShopFlags();
+  await dependencies.readOffboardingFlags();
+  assert.equal(queries.length, 2);
+  assert.equal(queries.every((query) => query.includes("last_updated_at")), true);
+  assert.equal(queries.some((query) => /(?:^|\W)updated_at(?:\W|$)/.test(query.replaceAll("last_updated_at", ""))), false);
+}
+
+{
+  const { clearRentalOpsCache, createOpenRentalsReadModelBuilder } = await import("./rental-ops-read-model");
+  clearRentalOpsCache();
+  const ticketRows = [
+    { VEHICLE_NUMBER: "12", RENTAL_START_DATE: "2026-07-01", TICKET_STATUS: "OPEN" },
+    { VEHICLE_NUMBER: "12", RENTAL_START_DATE: "2026-07-02", TICKET_STATUS: "OPEN" },
+    { VEHICLE_NUMBER: "99", RENTAL_START_DATE: "2026-07-03", TICKET_STATUS: "OPEN" },
+  ];
+  const holmanRows = [
+    { VEHICLE_NUMBER: "12", RENTAL_VENDOR: "Hertz", PO_DATE: "2026-07-01" },
+    { VEHICLE_NUMBER: "44", RENTAL_VENDOR: "Enterprise Rent-A-Car", PO_DATE: "2026-07-01" },
+    { VEHICLE_NUMBER: "45", RENTAL_VENDOR: "Toll Charge", PO_DATE: "2026-07-01" },
+    { VEHICLE_NUMBER: "55", RENTAL_VENDOR: "Hertz", PO_DATE: "2026-07-01" },
+  ];
+  const sharedBuilder = createOpenRentalsReadModelBuilder({
+    isSnowflakeConfigured: () => true,
+    getSnowflakeService: async () => ({
+      connect: async () => undefined,
+      executeQuery: async (query: string) => query.includes("ENTERPRISE_OPEN_RENTAL_TICKET_REPORT") ? ticketRows : holmanRows,
+    }),
+    getOosVehicleSet: async () => new Set(["00099"]),
+    enrichEnterpriseIds: async () => undefined,
+    enrichWithTruckStatus: async () => undefined,
+    sourceUpdatedAt: () => SOURCE_TIME,
+    now: () => Date.parse("2026-07-12T10:00:00.000Z"),
+  });
+  const dependencies = createFleetManagementProductionDependencies({
+    loadOpenRentalsReadModel: async () => ({ buildOpenRentalsReadModel: sharedBuilder }),
+  });
+  const rental = await dependencies.readRentalOps();
+  assert.deepEqual(rental.data, ["00012", "00055"]);
+  assert.equal(rental.data.filter((truck) => truck === "00012").length, 1);
+  assert.equal(rental.sourceUpdatedAt, SOURCE_TIME);
+}
+
 const modulesKey = "sample-modules-key-at-least-24";
 const profilesKey = "sample-profiles-key-at-least-24";
 const consumers = [
@@ -291,7 +384,7 @@ async function withRouter(
     assert.deepEqual(reached[0], { page: 1, pageSize: 100, sort: "truckNumber", direction: "asc" });
 
     const badQueries = [
-      "pageSize=0", "pageSize=501", "sort=unknown", "direction=sideways",
+      "page=0", "pageSize=0", "pageSize=501", "sort=unknown", "direction=sideways",
       `query=${"x".repeat(121)}`, "unexpected=value",
     ];
     for (const query of badQueries) {
