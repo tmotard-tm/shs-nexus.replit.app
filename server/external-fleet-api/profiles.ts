@@ -81,29 +81,30 @@ export function createProfileBuilders(dependencies: ProfileBuilderDependencies):
 
   const searchProfiles = async (queryInput: string): Promise<ProfileSearchResult> => {
     const query = queryInput.trim();
+    const directCandidates: ProfileSearchResult["candidates"] = [];
     if (/^[A-Za-z0-9._-]{2,40}$/.test(query)) {
       const exact = await buildTechnicianProfile(query);
       if (exact) {
-        return {
-          matchState: "matched",
-          candidates: [{
-            kind: "technician",
-            enterpriseId: exact.enterpriseId,
-            truckNumber: oneValue(exact.observations.map((item) => toCanonical(item.value.truckNumber) || null)),
-            displayName: exact.displayName,
-          }],
-        };
+        directCandidates.push({
+          kind: "technician",
+          enterpriseId: exact.enterpriseId,
+          truckNumber: oneValue(exact.observations.map((item) => toCanonical(item.value.truckNumber) || null)),
+          displayName: exact.displayName,
+        });
       }
     }
     if (/^\d+$/.test(query)) {
       const truckNumber = toCanonical(query);
       const truck = await buildTruckProfile(truckNumber);
       if (truck) {
-        return {
-          matchState: "matched",
-          candidates: [{ kind: "truck", enterpriseId: null, truckNumber, displayName: null }],
-        };
+        directCandidates.push({ kind: "truck", enterpriseId: null, truckNumber, displayName: null });
       }
+    }
+    if (directCandidates.length) {
+      return {
+        matchState: directCandidates.length === 1 ? "matched" : "ambiguous",
+        candidates: directCandidates,
+      };
     }
     const rows = await dependencies.searchRecords(query);
     const byEnterprise = new Map<string, TpmsLocalRecord[]>();

@@ -43,6 +43,15 @@ export interface TpmsReadModelDependencies {
   now(): number;
 }
 
+export class TpmsSearchSourceUnavailableError extends Error {
+  readonly code = "TPMS_SEARCH_SOURCE_UNAVAILABLE" as const;
+
+  constructor(_cause?: unknown) {
+    super("TPMS profile search sources are unavailable");
+    this.name = "TpmsSearchSourceUnavailableError";
+  }
+}
+
 interface DatabaseInfrastructure {
   sql: any;
   db: { execute(query: unknown): Promise<unknown> };
@@ -269,9 +278,10 @@ async function buildObservations(lookup: TpmsLookup, dependencies: TpmsReadModel
       warnings.push({ code: "SOURCE_STALE", message: `${observation.sourceLayer} TPMS profile data is stale` });
     }
   }
-  const enterprises = new Set(observations.map((item) => item.value.enterpriseId?.toUpperCase()).filter(Boolean));
-  const trucks = new Set(observations.map((item) => toCanonical(item.value.truckNumber)).filter(Boolean));
-  if (enterprises.size > 1 || trucks.size > 1) {
+  const sourceLayers = new Set(observations.map((item) => item.sourceLayer));
+  const enterprises = new Set(observations.map((item) => item.value.enterpriseId?.toUpperCase() || "__UNASSIGNED__"));
+  const trucks = new Set(observations.map((item) => toCanonical(item.value.truckNumber) || "__UNASSIGNED__"));
+  if (sourceLayers.size > 1 && (enterprises.size > 1 || trucks.size > 1)) {
     warnings.push({ code: "PARTIAL_DATA", message: "TPMS source layers report conflicting assignments" });
   }
   return { observations, warnings: uniqueWarnings(warnings) };
@@ -298,14 +308,25 @@ export async function buildTpmsObservationsByTruckNumber(truckNumber: string): P
   return productionBuilders.buildByTruckNumber(truckNumber);
 }
 
+export function createTpmsLocalSearch(dependencies: TpmsReadModelDependencies) {
+  return async (query: string): Promise<TpmsLocalRecord[]> => {
+    const lookup: TpmsLookup = { kind: "query", value: query };
+    const settled = await Promise.allSettled([
+      dependencies.readLive(lookup),
+      dependencies.readCached(lookup),
+      dependencies.readExtract(lookup),
+    ]);
+    if (settled.every((result) => result.status === "rejected")) {
+      throw new TpmsSearchSourceUnavailableError();
+    }
+    return settled.flatMap((result) => result.status === "fulfilled"
+      ? result.value.map((row) => ({ ...valueOf(row), sourceLayer: row.sourceLayer, observedAt: iso(row.observedAt), sourceUpdatedAt: iso(row.sourceUpdatedAt) }))
+      : []);
+  };
+}
+
+const productionSearch = createTpmsLocalSearch(tpmsProductionDependencies);
+
 export async function searchTpmsLocalRecords(query: string): Promise<TpmsLocalRecord[]> {
-  const lookup: TpmsLookup = { kind: "query", value: query };
-  const settled = await Promise.allSettled([
-    tpmsProductionDependencies.readLive(lookup),
-    tpmsProductionDependencies.readCached(lookup),
-    tpmsProductionDependencies.readExtract(lookup),
-  ]);
-  return settled.flatMap((result) => result.status === "fulfilled"
-    ? result.value.map((row) => ({ ...valueOf(row), sourceLayer: row.sourceLayer, observedAt: iso(row.observedAt), sourceUpdatedAt: iso(row.sourceUpdatedAt) }))
-    : []);
+  return productionSearch(query);
 }

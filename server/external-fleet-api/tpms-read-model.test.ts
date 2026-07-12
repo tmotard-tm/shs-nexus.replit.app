@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import express from "express";
 
+import * as tpmsReadModel from "./tpms-read-model";
 import {
   EXTRACT_FRESHNESS_WINDOW_SECONDS,
   createTpmsObservationBuilders,
@@ -108,6 +109,28 @@ function dependencies(args: {
 }
 
 {
+  const builders = createTpmsObservationBuilders(dependencies({
+    live: [record("live", "NULLTRUCK01", "Assigned Sample", "700")],
+    cached: [record("cached", "NULLTRUCK01", "Assigned Sample", null)],
+  }));
+  const result = await builders.buildByEnterpriseId("NULLTRUCK01");
+  assert.deepEqual(result.observations.map((item) => item.value.truckNumber), ["700", null]);
+  assert.equal(result.warnings.some((warning) => warning.code === "PARTIAL_DATA"), true);
+}
+
+{
+  const deps = dependencies({
+    live: [record("live", "ASSIGNED01", "Assigned Sample", "701")],
+  });
+  deps.readCached = async (lookup) => lookup.kind === "truckNumber"
+    ? [record("cached", "UNASSIGNED01", "Unassigned Sample", null)]
+    : [];
+  const result = await createTpmsObservationBuilders(deps).buildByTruckNumber("000701");
+  assert.deepEqual(result.observations.map((item) => item.value.truckNumber), ["701", null]);
+  assert.equal(result.warnings.some((warning) => warning.code === "PARTIAL_DATA"), true);
+}
+
+{
   const staleTime = new Date(NOW - (EXTRACT_FRESHNESS_WINDOW_SECONDS + 1) * 1000).toISOString();
   const builders = createTpmsObservationBuilders(dependencies({
     extract: [record("extract", "EXTRACT01", "Extract Sample", "77", staleTime)],
@@ -197,6 +220,25 @@ const profiles = createProfileBuilders({
 }
 
 {
+  const collisionRows = [
+    record("live", "103", "Numeric Enterprise", "200"),
+    record("cached", "TRUCK103", "Numeric Truck", "103"),
+  ];
+  const collisionObservations = createTpmsObservationBuilders(dependencies({ live: collisionRows }));
+  const collisionProfiles = createProfileBuilders({
+    buildByEnterpriseId: collisionObservations.buildByEnterpriseId,
+    buildByTruckNumber: collisionObservations.buildByTruckNumber,
+    searchRecords: async (query) => collisionRows.filter((row) => matches(row, { kind: "query", value: query })),
+  });
+  const result = await collisionProfiles.searchProfiles("103");
+  assert.equal(result.matchState, "ambiguous");
+  assert.deepEqual(result.candidates, [
+    { kind: "technician", enterpriseId: "103", truckNumber: "200", displayName: "Numeric Enterprise" },
+    { kind: "truck", enterpriseId: null, truckNumber: "103", displayName: null },
+  ]);
+}
+
+{
   const unsafe = record("live", "SAFE01", "Safe Sample", "104", RECENT, {
     email: "forbidden@example.invalid",
     homeAddress: "forbidden-address",
@@ -211,6 +253,32 @@ const profiles = createProfileBuilders({
   for (const forbidden of ["email", "homeAddress", "password", "credential", "ssn", "rawMetadata", "forbidden-"]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
   }
+}
+
+{
+  const createSearch = (tpmsReadModel as any).createTpmsLocalSearch;
+  assert.equal(typeof createSearch, "function");
+  const search = createSearch(dependencies({ failLive: true, failCached: true, failExtract: true }));
+  await assert.rejects(
+    () => search("Outage Sample"),
+    (error: any) => error?.code === "TPMS_SEARCH_SOURCE_UNAVAILABLE"
+      && !String(error).includes("private")
+      && !String(error).includes("credential"),
+  );
+}
+
+{
+  const createSearch = (tpmsReadModel as any).createTpmsLocalSearch;
+  const partialNotFound = createSearch(dependencies({ failLive: true, failCached: true, extract: [] }));
+  assert.deepEqual(await partialNotFound("Missing Sample"), []);
+
+  const partialCandidate = record("extract", "PARTIAL01", "Partial Sample", "105");
+  const partialMatch = createSearch(dependencies({
+    failLive: true,
+    failCached: true,
+    extract: [partialCandidate],
+  }));
+  assert.deepEqual(await partialMatch("Partial Sample"), [partialCandidate]);
 }
 
 const modulesKey = "sample-modules-key-at-least-24";
@@ -281,6 +349,9 @@ async function withRouter(
     const techPath = "/api/external/fleet/v1/profiles/technicians/EXACT01";
     assert.equal((await fetch(`${baseUrl}${techPath}`)).status, 401);
     assert.equal((await fetch(`${baseUrl}${techPath}`, { headers: { Authorization: `Bearer ${modulesKey}` } })).status, 403);
+    const searchPath = "/api/external/fleet/v1/search?query=Exact%20Sample";
+    assert.equal((await fetch(`${baseUrl}${searchPath}`)).status, 401);
+    assert.equal((await fetch(`${baseUrl}${searchPath}`, { headers: { Authorization: `Bearer ${profilesKey}` } })).status, 403);
 
     for (const path of [
       "/profiles/technicians/a",
@@ -307,6 +378,15 @@ async function withRouter(
     assert.equal(matchedBody.apiVersion, "1.0.0");
     assert.equal(matchedBody.data.kind, "technician");
 
+    const truckMatched = await fetch(`${baseUrl}/api/external/fleet/v1/profiles/trucks/000103`, {
+      headers: { Authorization: `Bearer ${profilesKey}` },
+    });
+    assert.equal(truckMatched.status, 200);
+    const truckBody = await truckMatched.json();
+    assert.equal(truckBody.apiVersion, "1.0.0");
+    assert.equal(truckBody.data.kind, "truck");
+    assert.equal(truckBody.data.truckNumber, "103");
+
     const ambiguous = await fetch(`${baseUrl}/api/external/fleet/v1/search?query=Duplicate%20Sample`, {
       headers: { Authorization: `Bearer ${searchKey}` },
     });
@@ -323,6 +403,28 @@ async function withRouter(
     });
     assert.equal(post.status, 405);
     assert.equal(calls, callsBeforePost);
+  });
+}
+
+{
+  const SearchUnavailableError = (tpmsReadModel as any).TpmsSearchSourceUnavailableError;
+  assert.equal(typeof SearchUnavailableError, "function");
+  const builders: ProfileBuilders = {
+    buildTechnicianProfile: async () => null,
+    buildTruckProfile: async () => null,
+    searchProfiles: async () => {
+      throw new SearchUnavailableError(new Error("raw search table credential secret"));
+    },
+  };
+  await withRouter(builders, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/external/fleet/v1/search?query=Outage%20Sample`, {
+      headers: { Authorization: `Bearer ${searchKey}` },
+    });
+    assert.equal(response.status, 503);
+    const text = await response.text();
+    assert.equal(text.includes("raw search table"), false);
+    assert.equal(text.includes("credential"), false);
+    assert.equal(JSON.parse(text).error.code, "SOURCE_UNAVAILABLE");
   });
 }
 

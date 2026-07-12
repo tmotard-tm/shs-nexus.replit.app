@@ -34,6 +34,7 @@ import {
   type TruckProfile,
 } from "./profiles";
 import { toCanonical } from "../vehicle-number-utils";
+import { TpmsSearchSourceUnavailableError } from "./tpms-read-model";
 import { createEnvelope, type ExternalFleetScope, type SourceObservation } from "./types";
 
 const API_PATH = "/api/external/fleet/v1";
@@ -345,7 +346,10 @@ export function createExternalFleetReadRouter(
             : [],
           data,
         }));
-      } catch {
+      } catch (error) {
+        if (error instanceof TpmsSearchSourceUnavailableError) {
+          return res.status(503).json({ error: { code: "SOURCE_UNAVAILABLE", message: "The profile search sources are unavailable" } });
+        }
         return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "The search request could not be completed" } });
       }
     },
