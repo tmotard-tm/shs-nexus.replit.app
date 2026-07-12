@@ -25,7 +25,16 @@ import {
   type FleetManagementListingInput,
   type PagedFleetManagementListing,
 } from "./fleet-management-read-model";
-import { createEnvelope, type ExternalFleetScope } from "./types";
+import {
+  buildTechnicianProfile,
+  buildTruckProfile,
+  searchProfiles,
+  type ProfileBuilders,
+  type TechnicianProfile,
+  type TruckProfile,
+} from "./profiles";
+import { toCanonical } from "../vehicle-number-utils";
+import { createEnvelope, type ExternalFleetScope, type SourceObservation } from "./types";
 
 const API_PATH = "/api/external/fleet/v1";
 const RENTAL_OPS_FRESHNESS_WINDOW_SECONDS = 30 * 60;
@@ -51,6 +60,46 @@ const fleetManagementListingQuery = z.object({
   direction: z.enum(["asc", "desc"]).default("asc"),
   query: z.string().trim().max(120).optional(),
 }).strict();
+
+const enterpriseIdPathSchema = z.string().trim().min(2).max(40)
+  .regex(/^[A-Za-z0-9._-]+$/)
+  .transform((value) => value.toUpperCase());
+
+const truckNumberPathSchema = z.string().trim().min(1).max(20)
+  .regex(/^\d+$/)
+  .transform((value) => toCanonical(value));
+
+const profileSearchQuerySchema = z.object({
+  query: z.string().trim().min(2).max(120),
+}).strict();
+
+const defaultProfileBuilders: ProfileBuilders = {
+  buildTechnicianProfile,
+  buildTruckProfile,
+  searchProfiles,
+};
+
+function profileEnvelope<T extends TechnicianProfile | TruckProfile>(profile: T) {
+  const sourceUpdatedAt = profile.observations
+    .map((observation) => observation.sourceUpdatedAt)
+    .filter((value): value is string => !!value && Number.isFinite(Date.parse(value)))
+    .sort()[0] ?? null;
+  const observations = profile.observations as SourceObservation<unknown>[];
+  const freshness = observations.length === 0 || observations.some((item) => item.freshness.state === "unknown")
+    ? { state: "unknown" as const, observedAt: null, ageSeconds: null }
+    : observations.some((item) => item.freshness.state === "stale")
+      ? {
+          state: "stale" as const,
+          observedAt: sourceUpdatedAt,
+          ageSeconds: Math.max(...observations.map((item) => item.freshness.ageSeconds ?? 0)),
+        }
+      : {
+          state: "fresh" as const,
+          observedAt: sourceUpdatedAt,
+          ageSeconds: Math.max(...observations.map((item) => item.freshness.ageSeconds ?? 0)),
+        };
+  return createEnvelope({ sourceUpdatedAt, freshness, warnings: profile.warnings, data: profile });
+}
 
 function rentalOpsFreshness(sourceUpdatedAt: string | null) {
   if (!sourceUpdatedAt) {
@@ -94,6 +143,7 @@ export function createExternalFleetReadRouter(
   consumers: ExternalFleetConsumer[],
   openRentalsBuilder: OpenRentalsBuilder = buildOpenRentalsReadModel,
   fleetManagementListingBuilder: FleetManagementListingBuilder = buildFleetManagementListing,
+  profileBuilders: ProfileBuilders = defaultProfileBuilders,
 ): Router {
   const router = express.Router();
 
@@ -237,6 +287,66 @@ export function createExternalFleetReadRouter(
             message: "The fleet management listing request could not be completed",
           },
         });
+      }
+    },
+  );
+
+  router.get(
+    "/profiles/technicians/:enterpriseId",
+    requireExternalFleetScope("profiles:read"),
+    async (req, res) => {
+      const parsed = enterpriseIdPathSchema.safeParse(req.params.enterpriseId);
+      if (!parsed.success) {
+        return res.status(400).json({ error: { code: "INVALID_QUERY", message: "The profile identifier is invalid" } });
+      }
+      try {
+        const profile = await profileBuilders.buildTechnicianProfile(parsed.data);
+        if (!profile) return res.status(404).json({ error: { code: "NOT_FOUND", message: "The profile was not found" } });
+        return res.json(profileEnvelope(profile));
+      } catch {
+        return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "The profile request could not be completed" } });
+      }
+    },
+  );
+
+  router.get(
+    "/profiles/trucks/:truckNumber",
+    requireExternalFleetScope("profiles:read"),
+    async (req, res) => {
+      const parsed = truckNumberPathSchema.safeParse(req.params.truckNumber);
+      if (!parsed.success || !parsed.data) {
+        return res.status(400).json({ error: { code: "INVALID_QUERY", message: "The truck identifier is invalid" } });
+      }
+      try {
+        const profile = await profileBuilders.buildTruckProfile(parsed.data);
+        if (!profile) return res.status(404).json({ error: { code: "NOT_FOUND", message: "The profile was not found" } });
+        return res.json(profileEnvelope(profile));
+      } catch {
+        return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "The profile request could not be completed" } });
+      }
+    },
+  );
+
+  router.get(
+    "/search",
+    requireExternalFleetScope("search:read"),
+    async (req, res) => {
+      const parsed = profileSearchQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({ error: { code: "INVALID_QUERY", message: "The query parameters are invalid" } });
+      }
+      try {
+        const data = await profileBuilders.searchProfiles(parsed.data.query);
+        return res.json(createEnvelope({
+          sourceUpdatedAt: null,
+          freshness: { state: "unknown", observedAt: null, ageSeconds: null },
+          warnings: data.matchState === "ambiguous"
+            ? [{ code: "AMBIGUOUS_MATCH", message: "The search matched multiple profiles" }]
+            : [],
+          data,
+        }));
+      } catch {
+        return res.status(500).json({ error: { code: "INTERNAL_ERROR", message: "The search request could not be completed" } });
       }
     },
   );
