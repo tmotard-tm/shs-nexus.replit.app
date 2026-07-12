@@ -13,7 +13,7 @@
     "deploy:integrity": "tsx scripts/guardrails/g4-post-deploy-integrity.ts",
     "deploy:record": "tsx scripts/guardrails/g5-rollback-artifact.ts",
     "rollback": "bash scripts/guardrails/g5-rollback.sh",
-    "test:external-fleet-api": "tsx server/external-fleet-api/types.test.ts && tsx server/external-fleet-api/auth.test.ts && tsx server/external-fleet-api/router.test.ts && tsx server/external-fleet-api/rental-ops-read-model.test.ts"
+    "test:external-fleet-api": "tsx server/external-fleet-api/types.test.ts && tsx server/external-fleet-api/auth.test.ts && tsx server/external-fleet-api/router.test.ts && tsx server/external-fleet-api/rental-ops-read-model.test.ts && tsx server/external-fleet-api/fleet-management-read-model.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

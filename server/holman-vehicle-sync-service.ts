@@ -500,6 +500,15 @@ class HolmanVehicleSyncService {
     }
   }
 
+  async readCachedVehicles(options: {
+    page?: number;
+    pageSize?: number;
+    statusCode?: number;
+  } = {}): Promise<SyncResult> {
+    const { page = 1, pageSize = 500, statusCode = 1 } = options;
+    return this.getCachedVehicles(page, pageSize, statusCode, "Read-only cached fleet data");
+  }
+
   private async getCachedVehicles(
     page: number,
     pageSize: number,
