@@ -48,6 +48,13 @@ import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 import { isExternalFleetReadApiEnabled } from "./external-fleet-api/auth";
 import { registerExternalFleetReadApi } from "./external-fleet-api/router";
+import {
+  buildOpenRentalsReadModel,
+  getOosVehicleSet,
+  OpenRentalsSourceUnavailableError,
+  rentalEnrichEnterpriseIds,
+  rentalNameParse,
+} from "./external-fleet-api/rental-ops-read-model";
 
 import { mergeRolePermissionWithDefaults, setNestedPermissionValue } from "./permission-utils";
 
@@ -18283,25 +18290,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   }
   // ──────────────────────────────────────────────────────────────────────────
 
-  // Returns a Set of 5-digit-padded vehicle numbers that are currently out of service
-  // Used to filter OOS trucks from rental-ops listings by default
-  async function getOosVehicleSet(): Promise<Set<string>> {
-    try {
-      const { holmanVehiclesCache } = await import("@shared/schema");
-      const rows = await db.select({ num: holmanVehiclesCache.holmanVehicleNumber })
-        .from(holmanVehiclesCache)
-        .where(
-          or(
-            eq(holmanVehiclesCache.statusCode, 2),
-            isNotNull(holmanVehiclesCache.outOfServiceDate)
-          )
-        );
-      return new Set(rows.map(r => toDisplayNumber(r.num)));
-    } catch {
-      return new Set(); // graceful degradation if DB unavailable
-    }
-  }
-
   function handleSnowflakeError(err: any, res: any, table?: string) {
     const isTableMissing = err.message?.includes("does not exist") || err.message?.includes("SQL compilation error") || err.code === "002003";
     if (isTableMissing) {
@@ -18310,345 +18298,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     return res.status(500).json({ message: err.message });
   }
 
-  // Parse a combined name string into first + last components.
-  // Handles "FIRST LAST", "FIRST MIDDLE LAST", "LAST, FIRST", and trailing suffixes.
-  function rentalNameParse(fullName: string): { first: string; last: string } {
-    if (!fullName) return { first: '', last: '' };
-    const s = fullName.trim().toUpperCase();
-    const SUFFIXES = new Set(['JR', 'SR', 'II', 'III', 'IV', 'V', 'JR.', 'SR.']);
-    const commaIdx = s.indexOf(',');
-    if (commaIdx > 0) {
-      const last = s.slice(0, commaIdx).trim();
-      const firstRaw = s.slice(commaIdx + 1).trim();
-      const firstTokens = firstRaw.split(/\s+/).filter(Boolean);
-      while (firstTokens.length > 1 && SUFFIXES.has(firstTokens[firstTokens.length - 1])) firstTokens.pop();
-      return { first: firstTokens[0] || '', last };
-    }
-    const tokens = s.split(/\s+/).filter(Boolean);
-    if (!tokens.length) return { first: '', last: '' };
-    if (tokens.length === 1) return { first: '', last: tokens[0] };
-    let endIdx = tokens.length - 1;
-    while (endIdx > 0 && SUFFIXES.has(tokens[endIdx])) endIdx--;
-    return { first: tokens[0], last: tokens[endIdx] };
-  }
-
-  // Enrich Enterprise-segment rows (where source='enterprise' and enterpriseId is null)
-  // by matching RENTER_NAME against TPMS_EXTRACT FULL_NAME.
-  // Mutates rows in place; sets enterpriseId and enterpriseIdSource.
-  // Result sources:
-  //   'name_last_unique'  — exactly 1 TPMS tech with that last name
-  //   'name_full_unique'  — unique match after adding first name
-  //   'name_ambiguous'    — multiple TPMS techs share the name, cannot resolve
-  //   'not_found'         — no TPMS tech has that last name
-  async function rentalEnrichEnterpriseIds(_sf: any, rows: any[]): Promise<void> {
-    const toEnrich = rows.filter(r => r.source === 'enterprise' && !r.enterpriseId);
-    if (!toEnrich.length) return;
-    try {
-      // As of Task #221 we read from the in-process TPMS snapshot rather than
-      // re-issuing a full TPMS_EXTRACT scan on every rental import. The snapshot
-      // is already deduplicated per ENTERPRISE_ID so we don't need the seenEntIds
-      // pass we used to do here — we just iterate the snapshot values.
-      const { ensureSnapshotLoaded, getSnapshot } = await import('./fleet-scope-tpms-snapshot');
-      await ensureSnapshotLoaded();
-      const snapshot = getSnapshot();
-
-      const lastNameMap = new Map<string, Array<{ enterpriseId: string; firstName: string }>>();
-      // Track which enterpriseIds we've already registered under each last name so
-      // that merging two sources (snapshot + Postgres profiles) for the SAME person
-      // doesn't inflate the candidate count and falsely trip the ambiguity branch.
-      const seenIdByLast = new Map<string, Set<string>>();
-      const addCandidate = (eid: string | null | undefined, last: string, first: string) => {
-        const id = (eid || '').trim();
-        if (!id || !last) return;
-        let seen = seenIdByLast.get(last);
-        if (!seen) { seen = new Set<string>(); seenIdByLast.set(last, seen); }
-        const key = id.toUpperCase();
-        if (seen.has(key)) return;
-        seen.add(key);
-        if (!lastNameMap.has(last)) lastNameMap.set(last, []);
-        lastNameMap.get(last)!.push({ enterpriseId: id, firstName: first });
-      };
-
-      // Primary source: in-memory TPMS_EXTRACT snapshot.
-      for (const entry of snapshot.values()) {
-        if (!entry.fullName) continue;
-        const { first, last } = rentalNameParse(String(entry.fullName));
-        if (!last) continue;
-        addCandidate(entry.enterpriseId, last, first);
-      }
-
-      // Fallback source: tpms_tech_profiles (Postgres). TPMS_EXTRACT can be missing
-      // techs that DO exist in our own profiles table (e.g. renter "LATARGI FOWLER"
-      // → enterpriseId LFOWLER), which otherwise leaves their open rental with no
-      // resolvable Enterprise ID and therefore no "Rental" badge anywhere.
-      try {
-        const { tpmsTechProfiles } = await import("@shared/schema");
-        const profileRows = await db
-          .select({
-            enterpriseId: tpmsTechProfiles.enterpriseId,
-            firstName: tpmsTechProfiles.firstName,
-            lastName: tpmsTechProfiles.lastName,
-          })
-          .from(tpmsTechProfiles)
-          .where(isNotNull(tpmsTechProfiles.enterpriseId));
-        for (const p of profileRows) {
-          if (!p.enterpriseId || !p.lastName) continue;
-          // Reuse rentalNameParse so suffix-stripping / casing match the renter side.
-          const last = rentalNameParse(String(p.lastName)).last;
-          const first = p.firstName ? rentalNameParse(`${p.firstName} ${p.lastName}`).first : '';
-          if (!last) continue;
-          addCandidate(p.enterpriseId, last, first);
-        }
-      } catch (e: any) {
-        console.warn('[RentalOps] tpms_tech_profiles enrichment fallback skipped:', e.message);
-      }
-
-      for (const row of toEnrich) {
-        const { first, last } = rentalNameParse(row.renterName || '');
-        if (!last) { row.enterpriseIdSource = 'not_found'; continue; }
-        const candidates = lastNameMap.get(last) || [];
-        if (candidates.length === 0) {
-          row.enterpriseIdSource = 'not_found';
-        } else if (candidates.length === 1) {
-          row.enterpriseId = candidates[0].enterpriseId;
-          row.enterpriseIdSource = 'name_last_unique';
-        } else if (first) {
-          const exact = candidates.filter(c => c.firstName === first);
-          if (exact.length === 1) {
-            row.enterpriseId = exact[0].enterpriseId;
-            row.enterpriseIdSource = 'name_full_unique';
-          } else {
-            row.enterpriseIdSource = 'name_ambiguous';
-          }
-        } else {
-          row.enterpriseIdSource = 'name_ambiguous';
-        }
-      }
-    } catch (err: any) {
-      console.warn('[RentalOps] TPMS name enrichment skipped:', err.message);
-    }
-  }
-
-  // Enrich rental-ops rows with mainStatus/subStatus from Fleet Scope trucks,
-  // joined on the normalized padded vehicle number. Single batched query.
-  const enrichWithTruckStatus = async (rows: any[]) => {
-    const { trucks } = await import("@shared/fleet-scope-schema");
-    const vns = Array.from(new Set(
-      rows.map(r => String(r.vehicleNumberPadded || "").trim()).filter(Boolean)
-    ));
-    const statusByVn = new Map<string, { mainStatus: string | null; subStatus: string | null }>();
-    if (vns.length > 0) {
-      const truckRows = await fsDb
-        .select({ truckNumber: trucks.truckNumber, mainStatus: trucks.mainStatus, subStatus: trucks.subStatus })
-        .from(trucks)
-        .where(inArray(trucks.truckNumber, vns));
-      for (const t of truckRows) {
-        statusByVn.set(t.truckNumber, { mainStatus: t.mainStatus ?? null, subStatus: t.subStatus ?? null });
-      }
-    }
-    for (const r of rows) {
-      const s = statusByVn.get(String(r.vehicleNumberPadded || "").trim());
-      r.mainStatus = s ? s.mainStatus : null;
-      r.subStatus = s ? s.subStatus : null;
-    }
-  };
-
   app.get("/api/rental-ops/open", requireAuthOrRentalOpsApiKey, async (req: any, res) => {
     try {
-      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
-      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
-      const sf = getSnowflakeService();
-      await sf.connect();
-
-      const includeOos = req.query?.includeOos === "true";
-
-      // view=raw returns all Holman PO lines (unfiltered, for reference)
-      // default = business-logic view matching the Excel formula:
-      //   Segment 1: Enterprise ticket table, TICKET_STATUS=OPEN, deduped by vehicle
-      //   Segment 2: Holman open, vendor NOT Enterprise/Toll, NOT in Enterprise ticket table
-      const showRaw = req.query?.view === "raw";
-
-      const openCacheKey = `open:${req.query?.fileDate || 'latest'}:${showRaw}:${includeOos}`;
-      const openCached = getRentalOpsCache(openCacheKey);
-      if (openCached) { console.log(`[RentalOps] Cache hit: ${openCacheKey}`); return res.json({ ...openCached.data, _cachedAt: openCached.cachedAt }); }
-
-      const normVeh = (v: string) => {
-        if (!v) return "";
-        return toDisplayNumber(v);
-      };
-
-      if (showRaw) {
-        // Raw Holman PO lines view (all 800 rows, original behavior)
-        const rows = await sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as any[];
-        const ticketRows = await sf.executeQuery(`SELECT DISTINCT LPAD(VEHICLE_NUMBER, 5, '0') as VN FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)}`).catch(() => []) as any[];
-        const enterpriseVehicles = new Set<string>(ticketRows.map((r: any) => String(r.VN || "").trim()));
-        const byVehicle = new Map<string, any[]>();
-        for (const r of rows) {
-          const vn = normVeh(r.VEHICLE_NUMBER || "");
-          if (!vn) continue;
-          if (!byVehicle.has(vn)) byVehicle.set(vn, []);
-          byVehicle.get(vn)!.push(r);
-        }
-        const data = rows.filter((r: any) => r.VEHICLE_NUMBER).map((r: any) => {
-          const vn = normVeh(r.VEHICLE_NUMBER || "");
-          const group = byVehicle.get(vn) || [];
-          const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
-          return {
-            vehicleNumber: r.VEHICLE_NUMBER,
-            vehicleNumberPadded: vn,
-            division: mapDivision(r.DIVISION),
-            renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
-            enterpriseId: r.ENTERPRISE_ID || null,
-            district: r.DISTRICT || null,
-            poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
-            poDate: parseRentalDate(r.PO_DATE),
-            rentalStartDate: startDate,
-            rentalVendor: r.RENTAL_VENDOR || null,
-            daysOpen: calcDaysOpen(startDate),
-            poCount: group.length,
-            hasEnterpriseTicket: enterpriseVehicles.has(vn),
-            source: "holman_raw",
-          };
-        });
-        await enrichWithTruckStatus(data);
-        const rawResult = { data, total: data.length, totalPOLines: rows.length, view: "raw" };
-        setRentalOpsCache(openCacheKey, rawResult);
-        return res.json(rawResult);
-      }
-
-      // === BUSINESS LOGIC VIEW (matches Excel 333 formula) ===
-      // Fetch Enterprise open tickets + all Holman open POs in parallel
-      const [ticketRows, holmanRows] = await Promise.all([
-        sf.executeQuery(`SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
-        sf.executeQuery(`SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as Promise<any[]>,
-      ]);
-
-      // Build set of all vehicle numbers in Enterprise ticket table (any status) for "not on Enterprise reporting" check
-      const allEntVns = new Set<string>();
-      for (const r of ticketRows) {
-        const vn = normVeh(r.VEHICLE_NUMBER || "");
-        if (vn) allEntVns.add(vn);
-      }
-
-      // SEGMENT 1: Enterprise open tickets, deduplicated by vehicle (latest RENTAL_START_DATE)
-      const entByVehicle = new Map<string, any>();
-      for (const r of ticketRows) {
-        const vn = normVeh(r.VEHICLE_NUMBER || "");
-        if (!vn) continue;
-        const existing = entByVehicle.get(vn);
-        const rDate = new Date(r.RENTAL_START_DATE || "2000-01-01").getTime();
-        const eDate = existing ? new Date(existing.RENTAL_START_DATE || "2000-01-01").getTime() : 0;
-        if (!existing || rDate > eDate) entByVehicle.set(vn, r);
-      }
-
-      const enterpriseSegment = Array.from(entByVehicle.entries()).map(([vn, r]) => {
-        // originalStartDate = COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE)
-        // If ORIGINAL_START_DATE exists → this is a rewrite; track days from the very first rental date
-        // If not → new rental, use RENTAL_START_DATE
-        const originalStartDate = entOriginalStart(r);
-        const currentTicketStart = parseRentalDate(r.RENTAL_START_DATE);
-        const { holmanPo } = parseClaimNumber(r.CLAIM_NUMBER || "");
-        return {
-          vehicleNumber: r.VEHICLE_NUMBER,
-          vehicleNumberPadded: vn,
-          division: null,
-          renterName: (r.RENTER_NAME || "").trim(),
-          enterpriseId: null,
-          district: null,
-          ticketNumber: r.ECARS_2_0_TKT_NBR || null,
-          // Holman PO extracted from claim number (e.g. "114771300       -D/R" → "114771300")
-          poNumber: holmanPo || null,
-          claimNumber: (r.CLAIM_NUMBER || "").trim(),
-          poDate: originalStartDate,
-          rentalStartDate: currentTicketStart,        // current ticket/rewrite start
-          originalStartDate,                          // first rental date (or current if no rewrite)
-          isRewrite: !!(r.ORIGINAL_START_DATE && parseRentalDate(r.ORIGINAL_START_DATE)),
-          rentalVendor: "Enterprise Rent-A-Car",
-          ticketStatus: r.TICKET_STATUS,
-          // daysOpen counted from ORIGINAL_START_DATE so rewrites show full rental age
-          daysOpen: calcDaysOpen(originalStartDate),
-          daysAuthorized: r.DAYS_AUTHORIZED ? parseInt(String(r.DAYS_AUTHORIZED)) : null,
-          initialDaysAuthorized: r.INITIAL_DAYS_AUTHORIZED ? parseInt(String(r.INITIAL_DAYS_AUTHORIZED)) : null,
-          numberOfExtensions: r.NUMBER_OF_EXTENSIONS ? parseInt(String(r.NUMBER_OF_EXTENSIONS)) : 0,
-          daysBehind: r.DAYS_BEHIND ? parseInt(String(r.DAYS_BEHIND)) : 0,
-          numberOfRewrites: r.NUMBER_OF_REWRITES ? parseInt(String(r.NUMBER_OF_REWRITES)) : 0,
-          repairsComplete: r.REPAIRS_COMPLETE || null,
-          claimsOffice: r.CLAIMS_OFFICE_NAME || null,
-          poCount: 1,
-          hasEnterpriseTicket: true,
-          source: "enterprise",
-          enterpriseIdSource: null as string | null,
-        };
-      });
-
-      // SEGMENT 2: Holman non-Enterprise vendor trucks not in Enterprise ticket table at all
-      // Vendor exclusions: Enterprise Rent-A-Car and Enterprise toll charges
-      const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
-      const holmanByVehicle = new Map<string, any[]>();
-      for (const r of holmanRows) {
-        const vn = normVeh(r.VEHICLE_NUMBER || "");
-        if (!vn) continue;
-        if (isEntVendor(r.RENTAL_VENDOR)) continue;   // Enterprise/Toll vendor → skip
-        if (allEntVns.has(vn)) continue;               // Already on Enterprise ticket table → skip
-        if (!holmanByVehicle.has(vn)) holmanByVehicle.set(vn, []);
-        holmanByVehicle.get(vn)!.push(r);
-      }
-
-      const holmanSegment = Array.from(holmanByVehicle.entries()).map(([vn, group]) => {
-        const sorted = group.sort((a: any, b: any) =>
-          new Date(b.PO_DATE || "2000-01-01").getTime() - new Date(a.PO_DATE || "2000-01-01").getTime()
-        );
-        const r = sorted[0];
-        const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
-        return {
-          vehicleNumber: r.VEHICLE_NUMBER,
-          vehicleNumberPadded: vn,
-          division: mapDivision(r.DIVISION),
-          renterName: `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim(),
-          enterpriseId: r.ENTERPRISE_ID || null,
-          district: r.DISTRICT || null,
-          poNumber: (r.PO_NUMBER || "").replace(/^'/, "").trim(),
-          poDate: startDate,
-          rentalStartDate: startDate,
-          rentalVendor: r.RENTAL_VENDOR || null,
-          daysOpen: calcDaysOpen(startDate),
-          poCount: group.length,
-          hasEnterpriseTicket: false,
-          source: "holman_non_enterprise",
-          enterpriseIdSource: (r.ENTERPRISE_ID ? 'direct' : null) as string | null,
-        };
-      });
-
-      let allData = [...enterpriseSegment, ...holmanSegment];
-
-      // Enrich Enterprise segment rows with Enterprise ID resolved from TPMS name matching
-      await rentalEnrichEnterpriseIds(sf, allData);
-
-      let oosCount = 0;
-      if (!includeOos) {
-        const oosVehicles = await getOosVehicleSet();
-        if (oosVehicles.size > 0) {
-          const before = allData.length;
-          allData = allData.filter(v => !oosVehicles.has(toDisplayNumber(v.vehicleNumberPadded || v.vehicleNumber || "")));
-          oosCount = before - allData.length;
-        }
-      }
-      const data = allData;
-
-      await enrichWithTruckStatus(data);
-
-      const openBizResult = {
-        data,
-        total: data.length,
-        enterpriseCount: enterpriseSegment.length,
-        holmanNonEnterpriseCount: holmanSegment.length,
-        totalHolmanPOLines: holmanRows.length,
-        oosFilteredCount: oosCount,
-        view: "business_logic",
-      };
-      setRentalOpsCache(openCacheKey, openBizResult);
-      res.json(openBizResult);
+      const model = await buildOpenRentalsReadModel({
+        fileDate: req.query?.fileDate as string | undefined,
+        includeOos: req.query?.includeOos === "true",
+        view: req.query?.view === "raw" ? "raw" : "business_logic",
+      }) as Awaited<ReturnType<typeof buildOpenRentalsReadModel>> & { _cachedAt?: number };
+      const { sourceUpdatedAt: _sourceUpdatedAt, warnings: _warnings, ...legacyResult } = model;
+      return res.json(legacyResult);
     } catch (err: any) {
+      if (err instanceof OpenRentalsSourceUnavailableError) {
+        if (err.reason === "not_configured") {
+          return res.status(503).json({ message: "Snowflake not configured" });
+        }
+        return handleSnowflakeError(err.sourceCause, res, RENTAL_TICKET_TABLE);
+      }
       return handleSnowflakeError(err, res, RENTAL_TICKET_TABLE);
     }
   });

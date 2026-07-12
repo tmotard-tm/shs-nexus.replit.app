@@ -4,6 +4,7 @@ import express, {
   type Router,
 } from "express";
 import rateLimit from "express-rate-limit";
+import { z } from "zod";
 
 import {
   findAuthorizedConsumer,
@@ -12,9 +13,44 @@ import {
   parseExternalFleetKeyring,
   type ExternalFleetConsumer,
 } from "./auth";
+import {
+  buildOpenRentalsReadModel,
+  OpenRentalsSourceUnavailableError,
+  type OpenRentalsInput,
+  type OpenRentalsReadModel,
+} from "./rental-ops-read-model";
 import { createEnvelope, type ExternalFleetScope } from "./types";
 
 const API_PATH = "/api/external/fleet/v1";
+const RENTAL_OPS_FRESHNESS_WINDOW_SECONDS = 30 * 60;
+
+type OpenRentalsBuilder = (
+  input: OpenRentalsInput,
+) => Promise<OpenRentalsReadModel>;
+
+const openRentalsQuerySchema = z.object({
+  fileDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  includeOos: z.enum(["true", "false"]).default("false"),
+  view: z.enum(["business_logic", "raw"]).default("business_logic"),
+}).strict();
+
+function rentalOpsFreshness(sourceUpdatedAt: string | null) {
+  if (!sourceUpdatedAt) {
+    return { state: "unknown" as const, observedAt: null, ageSeconds: null };
+  }
+  const sourceTime = Date.parse(sourceUpdatedAt);
+  if (!Number.isFinite(sourceTime)) {
+    return { state: "unknown" as const, observedAt: null, ageSeconds: null };
+  }
+  const ageSeconds = Math.max(0, Math.floor((Date.now() - sourceTime) / 1000));
+  return {
+    state: ageSeconds <= RENTAL_OPS_FRESHNESS_WINDOW_SECONDS
+      ? "fresh" as const
+      : "stale" as const,
+    observedAt: sourceUpdatedAt,
+    ageSeconds,
+  };
+}
 
 export function requireExternalFleetScope(
   scope: ExternalFleetScope,
@@ -38,6 +74,7 @@ export function requireExternalFleetScope(
 
 export function createExternalFleetReadRouter(
   consumers: ExternalFleetConsumer[],
+  openRentalsBuilder: OpenRentalsBuilder = buildOpenRentalsReadModel,
 ): Router {
   const router = express.Router();
 
@@ -82,6 +119,59 @@ export function createExternalFleetReadRouter(
     res.locals.externalFleetConsumer = consumer;
     next();
   });
+
+  router.get(
+    "/modules/rental-ops-open-rentals",
+    requireExternalFleetScope("modules:read"),
+    async (req, res) => {
+      const parsed = openRentalsQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: {
+            code: "INVALID_QUERY",
+            message: "The query parameters are invalid",
+          },
+        });
+      }
+
+      try {
+        const model = await openRentalsBuilder({
+          ...(parsed.data.fileDate ? { fileDate: parsed.data.fileDate } : {}),
+          includeOos: parsed.data.includeOos === "true",
+          view: parsed.data.view,
+        });
+        const {
+          sourceUpdatedAt,
+          warnings,
+          _cachedAt: _legacyCachedAt,
+          ...data
+        } = model as OpenRentalsReadModel & { _cachedAt?: number };
+        return res.json(
+          createEnvelope({
+            sourceUpdatedAt,
+            freshness: rentalOpsFreshness(sourceUpdatedAt),
+            warnings,
+            data,
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OpenRentalsSourceUnavailableError) {
+          return res.status(503).json({
+            error: {
+              code: "SOURCE_UNAVAILABLE",
+              message: "The rental operations source is unavailable",
+            },
+          });
+        }
+        return res.status(500).json({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "The rental operations request could not be completed",
+          },
+        });
+      }
+    },
+  );
 
   router.get(
     "/health",
