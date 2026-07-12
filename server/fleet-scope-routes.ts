@@ -8797,13 +8797,42 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // =====================
 
   // Get all vehicles from REPLIT_ALL_VEHICLES with assigned/unassigned counts
-  let allVehiclesCache: { data: any; timestamp: number } | null = null;
-  const ALL_VEHICLES_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  let allVehiclesCache: { data: any; timestamp: number; version: string | null } | null = null;
+  // Primary invalidation is the fs_trucks data VERSION (bumped on every truck
+  // write / rental sync via bumpRemoteCacheVersion) — All Vehicles rebuilds only
+  // when truck data actually changed, not on a blind timer. This long TTL is a
+  // safety backstop that also catches slow-moving upstream changes which do NOT
+  // bump the truck version (daily roster mirror, PO imports, BYOV enrollment).
+  const ALL_VEHICLES_CACHE_TTL = 2 * 60 * 60 * 1000; // 2 hours (backstop only)
+
+  // Cheap single-row read of the fs_trucks version counter the trucks cache
+  // already maintains. Returns null if unavailable, in which case we fall back
+  // to the TTL alone (never worse than the previous time-only behaviour). We
+  // capture the version BEFORE the build; if a write lands mid-build the next
+  // request simply sees the newer version and rebuilds — errs toward fresh,
+  // never toward serving stale.
+  const getAllVehiclesDataVersion = async (): Promise<string | null> => {
+    try {
+      const r = await fsCachePool.query(
+        `SELECT version FROM fs_cache_versions WHERE cache_key = $1`,
+        [FS_TRUCKS_CACHE_KEY],
+      );
+      const v = r.rows?.[0]?.version;
+      return v == null ? null : String(v);
+    } catch {
+      return null;
+    }
+  };
 
   app.get("/all-vehicles", async (req, res) => {
     try {
-      if (allVehiclesCache && (Date.now() - allVehiclesCache.timestamp) < ALL_VEHICLES_CACHE_TTL) {
-        console.log(`[AllVehicles] Returning cached response (age: ${Math.round((Date.now() - allVehiclesCache.timestamp) / 1000)}s)`);
+      const currentVersion = await getAllVehiclesDataVersion();
+      if (
+        allVehiclesCache &&
+        (Date.now() - allVehiclesCache.timestamp) < ALL_VEHICLES_CACHE_TTL &&
+        (currentVersion === null || allVehiclesCache.version === currentVersion)
+      ) {
+        console.log(`[AllVehicles] Serving cached response (age ${Math.round((Date.now() - allVehiclesCache.timestamp) / 1000)}s, truck-version ${allVehiclesCache.version ?? "n/a"})`);
         return res.json(allVehiclesCache.data);
       }
       // Task #487: the four Snowflake roster sources the All Vehicles page used
@@ -10013,7 +10042,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         rentalTruckNumbers: dashboardTrucks.map(t => t.truckNumber)
       };
 
-      allVehiclesCache = { data: responseData, timestamp: Date.now() };
+      allVehiclesCache = { data: responseData, timestamp: Date.now(), version: currentVersion };
       res.json(responseData);
       // Persist the fully-assembled payload (best-effort, non-blocking) so that
       // a cold restart followed by a transient Neon drop on the first request
