@@ -1959,13 +1959,13 @@ async function summarizeCallTranscript(
   }
   const systemPrompt = callType === "tech"
     ? `You are a fleet coordinator assistant. Analyze technician pickup call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Will Pick Up", "No Answer", "Voicemail", "On Hold", "Other Issues"
+"status": one of these exact values: "Will Pick Up", "No Answer", "Call Failed", "Other Issues"
 "summary": 2-3 sentence factual summary of the call
 "estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
 "blockers": any issues preventing pickup, or null
 Respond ONLY with valid JSON, no other text.`
     : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
-"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Voicemail", "On Hold", "Vehicle Not Found", "Other Issues" (there is a transcript so the call connected — pick "No Answer"/"Voicemail"/"On Hold"/"Vehicle Not Found" when no repair status was given; never treat a connected call as failed)
+"status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Call Failed", "Failed"
 "summary": 2-3 sentence factual summary of the call
 "estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
 "blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
@@ -2079,13 +2079,8 @@ async function applyCallResultToTruck(
   }
   try {
     const existingLog = await fleetScopeStorage.getCallLogByConversationId(conversationId);
-    // A transcript means the call connected, so a summarizer "failure" is really
-    // "connected but no usable status" -> CALL_NO_CONTACT (retry). CALL_FAILED is
-    // reserved for the pre-dial path where no ElevenLabs conversation exists.
     const mappedOutcome = (status === "Ready" || status === "Will Pick Up") ? "VEHICLE_READY"
-      : (status === "No Answer" || status === "Voicemail" || status === "On Hold"
-         || status === "Vehicle Not Found" || status === "No Contact"
-         || status === "Call Failed" || status === "Failed") ? "CALL_NO_CONTACT"
+      : (status === "No Answer" || status === "Call Failed" || status === "Failed") ? "CALL_FAILED"
       : "VEHICLE_NOT_READY";
     const today = new Date();
     let nextFollowUp: string | undefined;
@@ -2097,7 +2092,7 @@ async function applyCallResultToTruck(
       const d = new Date(today);
       d.setDate(d.getDate() + 3);
       nextFollowUp = d.toISOString().split("T")[0];
-    } else if (mappedOutcome === "CALL_NO_CONTACT") {
+    } else if (mappedOutcome === "CALL_FAILED") {
       const d = new Date(today);
       d.setDate(d.getDate() + 1);
       nextFollowUp = d.toISOString().split("T")[0];
@@ -2111,8 +2106,8 @@ async function applyCallResultToTruck(
         transcript: transcriptText,
         estimatedReadyDate: estimatedReadyDate || existingLog.estimatedReadyDate,
         blockers: blockers || existingLog.blockers,
-        attemptNumber: mappedOutcome === "CALL_NO_CONTACT" ? currentAttempt + 1 : currentAttempt,
-        nextFollowUpDate: mappedOutcome === "VEHICLE_READY" ? null : (nextFollowUp || existingLog.nextFollowUpDate),
+        attemptNumber: mappedOutcome === "CALL_FAILED" ? currentAttempt + 1 : currentAttempt,
+        nextFollowUpDate: nextFollowUp || existingLog.nextFollowUpDate,
       });
     } else {
       await fleetScopeStorage.createCallLog({

@@ -221,8 +221,6 @@ export default function BatchCaller() {
         return <Badge variant="default" className="bg-yellow-600 text-white no-default-hover-elevate"><Clock className="w-3 h-3 mr-1" />Not Ready</Badge>;
       case "CALL_FAILED":
         return <Badge variant="default" className="bg-red-600 text-white no-default-hover-elevate"><PhoneOff className="w-3 h-3 mr-1" />Failed</Badge>;
-      case "CALL_NO_CONTACT":
-        return <Badge variant="default" className="bg-blue-600 text-white no-default-hover-elevate"><Phone className="w-3 h-3 mr-1" />No Answer</Badge>;
       default:
         return <Badge variant="secondary">{outcome}</Badge>;
     }
@@ -425,7 +423,7 @@ export default function BatchCaller() {
                                   className={`text-xs ${
                                     truck.lastCallStatus === "Ready"
                                       ? "bg-green-600/15 text-green-700 dark:text-green-400"
-                                      : truck.lastCallStatus === "Call Failed" || truck.lastCallStatus === "Failed"
+                                      : truck.lastCallStatus === "No Answer" || truck.lastCallStatus === "Call Failed" || truck.lastCallStatus === "Failed"
                                       ? "bg-red-600/15 text-red-700 dark:text-red-400"
                                       : "bg-yellow-600/15 text-yellow-700 dark:text-yellow-400"
                                   }`}
@@ -447,7 +445,7 @@ export default function BatchCaller() {
                                 className={`text-xs ${
                                   lastStatus === "Ready" || lastStatus === "Will Pick Up"
                                     ? "bg-green-600/15 text-green-700 dark:text-green-400"
-                                    : lastStatus === "Call Failed" || lastStatus === "Failed"
+                                    : lastStatus === "No Answer" || lastStatus === "Call Failed" || lastStatus === "Failed"
                                     ? "bg-red-600/15 text-red-700 dark:text-red-400"
                                     : "bg-yellow-600/15 text-yellow-700 dark:text-yellow-400"
                                 }`}

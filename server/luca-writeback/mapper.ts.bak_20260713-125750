@@ -186,7 +186,7 @@ const OUTCOME_TO_STATUS: Record<string, string> = {
 /** Canonical outcome → fs_call_logs.outcome (Nexus's 3-valued vocabulary). */
 const OUTCOME_TO_LOG_OUTCOME: Record<string, string> = {
   READY_PICKUP: "VEHICLE_READY",
-  NO_ANSWER: "CALL_NO_CONTACT",
+  NO_ANSWER: "CALL_FAILED",
 };
 
 const SUMMARY_MAX = 500;

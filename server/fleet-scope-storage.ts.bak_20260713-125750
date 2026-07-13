@@ -1866,14 +1866,6 @@ export class DatabaseStorage implements IStorage {
           FROM fs_call_logs
           WHERE status = 'completed'
           ORDER BY truck_number, call_type, call_timestamp DESC, id DESC
-        )`,
-        // A truck whose latest completed call is READY is done — no follow-up.
-        sql`(${callLogs.outcome} IS DISTINCT FROM 'VEHICLE_READY')`,
-        // Scope to trucks still in the active rental working set (fs_trucks).
-        // consolidateTrucks drops returned rentals from fs_trucks; their stale
-        // call rows must not keep inflating the follow-up board.
-        sql`regexp_replace(btrim(${callLogs.truckNumber}), '^0+', '') IN (
-          SELECT regexp_replace(btrim(truck_number), '^0+', '') FROM fs_trucks
         )`
       )
     ).orderBy(desc(callLogs.callTimestamp));
