@@ -828,6 +828,7 @@ export type LoaHrNoteRead = typeof loaHrNoteReads.$inferSelect;
 export interface LoaHrNotesSummaryRow {
   enterpriseId: string;
   noteCount: number;
+  unreadCount: number;
   latestNoteAt: string;
   hasUnread: boolean;
 }

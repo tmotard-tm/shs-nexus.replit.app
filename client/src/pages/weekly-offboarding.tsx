@@ -78,6 +78,7 @@ interface LoaTechEntry {
 interface LoaHrNoteSummary {
   enterpriseId: string;
   noteCount: number;
+  unreadCount: number;
   latestNoteAt: string;
   hasUnread: boolean;
 }
@@ -198,6 +199,7 @@ export default function WeeklyOffboarding() {
 
   const { data: loaNotesSummary = [] } = useQuery<LoaHrNoteSummary[]>({
     queryKey: ['/api/loa-hr-notes/summary'],
+    refetchInterval: 30000,
   });
   const loaNotesSummaryMap = new Map(loaNotesSummary.map(s => [s.enterpriseId.toUpperCase(), s]));
 
@@ -1543,12 +1545,14 @@ export default function WeeklyOffboarding() {
                                     size="sm"
                                     className="relative h-8 px-2"
                                     onClick={(ev) => { ev.stopPropagation(); openLoaNotes(e); }}
-                                    title={noteSummary ? `${noteSummary.noteCount} note${noteSummary.noteCount !== 1 ? 's' : ''}${noteSummary.hasUnread ? ' (unread)' : ''}` : 'Add HR note'}
+                                    title={noteSummary ? `${noteSummary.noteCount} note${noteSummary.noteCount !== 1 ? 's' : ''}${noteSummary.unreadCount > 0 ? ` (${noteSummary.unreadCount} unread)` : ''}` : 'Add HR note'}
                                     data-testid={`button-loa-hr-notes-${e.enterpriseId}`}
                                   >
-                                    <MessageSquare className={`h-4 w-4 ${noteSummary ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
-                                    {noteSummary && <span className="ml-1 text-xs font-medium">{noteSummary.noteCount}</span>}
-                                    {noteSummary?.hasUnread && (
+                                    <MessageSquare className={`h-4 w-4 ${noteSummary && noteSummary.unreadCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                                    {noteSummary && noteSummary.unreadCount > 0 && (
+                                      <span className="ml-1 text-xs font-medium text-blue-600 dark:text-blue-400">{noteSummary.unreadCount}</span>
+                                    )}
+                                    {noteSummary && noteSummary.unreadCount > 0 && (
                                       <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-background" />
                                     )}
                                   </Button>

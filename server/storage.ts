@@ -6629,6 +6629,7 @@ export class DatabaseStorage implements IStorage {
       .select({
         enterpriseId: loaHrNotes.enterpriseId,
         noteCount: sql<number>`count(*)::int`,
+        unreadCount: sql<number>`count(*) filter (where ${loaHrNotes.createdAt} > coalesce(${loaHrNoteReads.lastReadAt}, '-infinity'::timestamp))::int`,
         latestNoteAt: sql<Date>`max(${loaHrNotes.createdAt})`,
         lastReadAt: sql<Date | null>`max(${loaHrNoteReads.lastReadAt})`,
       })
@@ -6645,6 +6646,7 @@ export class DatabaseStorage implements IStorage {
       return {
         enterpriseId: r.enterpriseId,
         noteCount: r.noteCount,
+        unreadCount: r.unreadCount,
         latestNoteAt: latest.toISOString(),
         hasUnread: !lastRead || lastRead < latest,
       };
