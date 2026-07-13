@@ -1938,6 +1938,99 @@ async function requireFsAuth(req: any, res: any, next: any): Promise<any> {
 const ELEVENLABS_SHOP_AGENT_ID = "agent_7901kgj8m0w8ep6ar78fzthzr9jv";
 const ELEVENLABS_TECH_AGENT_ID = "agent_4901khvk9569fd2tawwcx0v0hxp5";
 
+// ===== GLOBAL CALL-CONCURRENCY GATE =====
+// ElevenLabs enforces a HARD workspace cap of 30 concurrent conversations for
+// the repair-shop caller (agent_7901). The per-request 5-slot batch pool does
+// NOT protect against this: processCall releases its slot the instant the
+// outbound-call fetch returns a conversation_id (it writes status "in_progress"
+// and returns; the webhook later records the real outcome). So that pool
+// throttles DIAL INITIATIONS (~2s each), NOT CONNECTED CALLS (minutes each) —
+// connected calls pile up past 30. The client also fires many /batch-call/start
+// chunks in PARALLEL (each with its own 5-slot pool), and the two individual
+// call endpoints have no concurrency control at all.
+//
+// This module-level semaphore holds a slot from the moment we DIAL until the
+// CALL ENDS, capping total connected calls across ALL dial paths (batch +
+// call-repair-shop + call-technician). It is a PER-INSTANCE gate; that is
+// acceptable because a Select-All batch run is handled by a single autoscale
+// instance, and the individual endpoints are low-volume manual clicks.
+const FS_MAX_CONCURRENT_CALLS = Math.max(1, Number(process.env.FS_MAX_CONCURRENT_CALLS) || 25); // ElevenLabs workspace hard cap is 30; 25 leaves headroom for retries + other agents on the shared workspace.
+const MAX_SLOT_HOLD_MS = 10 * 60 * 1000; // hard failsafe: never hold a slot longer than 10 min
+const ACQUIRE_MAX_WAIT_MS = 8 * 60 * 1000; // wait up to 8 min for a free slot before giving up on a truck (safe to re-run: the 30-min re-dial guard prevents double-dialing)
+
+let activeCallSlots = 0;
+const callSlotWaiters: Array<{ resolve: (ok: boolean) => void; timer: NodeJS.Timeout }> = [];
+
+// Acquire a global call slot. Resolves true once a slot is held (either
+// immediately, or later when a queued waiter is handed a released slot), or
+// false if maxWaitMs elapses first (caller should then SKIP dialing this truck).
+function acquireCallSlot(maxWaitMs: number): Promise<boolean> {
+  if (activeCallSlots < FS_MAX_CONCURRENT_CALLS) {
+    activeCallSlots++;
+    return Promise.resolve(true);
+  }
+  return new Promise<boolean>((resolve) => {
+    const waiter = {
+      resolve,
+      timer: setTimeout(() => {
+        const idx = callSlotWaiters.indexOf(waiter);
+        if (idx !== -1) callSlotWaiters.splice(idx, 1);
+        resolve(false);
+      }, maxWaitMs),
+    };
+    callSlotWaiters.push(waiter);
+  });
+}
+
+// Release a global call slot. If a waiter is queued, hand the slot directly to
+// it (activeCallSlots stays the SAME — ownership transfers, the waiter now holds
+// it); otherwise decrement the active count. Never drops below zero.
+function releaseCallSlot(): void {
+  const waiter = callSlotWaiters.shift();
+  if (waiter) {
+    clearTimeout(waiter.timer);
+    waiter.resolve(true); // slot ownership transfers; activeCallSlots unchanged
+    return;
+  }
+  activeCallSlots = Math.max(0, activeCallSlots - 1);
+}
+
+// Hold the acquired slot for the LIFETIME of the call, not just the dial. Polls
+// the ElevenLabs conversation status with a side-effect-free GET (it does NOT
+// re-write truck/log outcomes — pollForCallCompletion and the webhook own
+// those) until the conversation is terminal, then releases the slot. A hard
+// safety timer guarantees release even if polling stalls, so a stuck/missed
+// poll can never leak a slot. releaseOnce is idempotent per dial.
+function holdSlotUntilCallEnds(conversationId: string | null, releaseOnce: () => void): void {
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clearTimeout(safety);
+    releaseOnce();
+  };
+  const safety = setTimeout(finish, MAX_SLOT_HOLD_MS);
+  if (!conversationId) { finish(); return; }
+  const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+  if (!apiKey) { finish(); return; }
+  const POLL_INTERVAL_MS = 12_000;
+  const tick = async (): Promise<void> => {
+    if (finished) return;
+    try {
+      const conv = await fetchElevenLabsConversation(conversationId, apiKey);
+      const status = (conv?.status || "").toString().toLowerCase();
+      // Terminal ElevenLabs conversation statuses. Anything else (initiated /
+      // in-progress / processing) means the call is still live — keep holding.
+      if (status === "done" || status === "failed" || status === "ended") { finish(); return; }
+    } catch {
+      // Transient poll error — keep holding; the safety timer still bounds us.
+    }
+    if (finished) return;
+    setTimeout(tick, POLL_INTERVAL_MS);
+  };
+  setTimeout(tick, POLL_INTERVAL_MS);
+}
+
 function buildTranscriptText(transcript: any): string {
   if (Array.isArray(transcript)) {
     return transcript
@@ -5337,6 +5430,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // POST call repair shop via ElevenLabs outbound call
   app.post("/trucks/:id/call-repair-shop", async (req, res) => {
+    // GLOBAL concurrency gate: `released` stays true until a slot is actually
+    // held, so the outer catch's releaseOnce() is a no-op if we error before dialing.
+    let released = true;
+    const releaseOnce = () => { if (released) { return; } released = true; releaseCallSlot(); };
     try {
       if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
@@ -5433,6 +5530,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       console.log(`[CallRepairShop] Calling ${toNumber} for truck ${vehicleNum} (VIN: ${vin}), API key length: ${apiKey.length}, starts with: ${apiKey.substring(0, 4)}...`);
 
+      // GLOBAL concurrency gate — hold a slot from dial until the call ENDS.
+      const gotSlot = await acquireCallSlot(ACQUIRE_MAX_WAIT_MS);
+      if (!gotSlot) {
+        console.log(`[CallRepairShop] concurrency cap — skipped truck ${vehicleNum}, re-run to catch it`);
+        return res.status(503).json({ message: "Global call-concurrency cap reached — call not placed. Re-run to catch this truck (the 30-minute re-dial guard makes a re-run safe)." });
+      }
+      released = false;
+
       const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
         method: "POST",
         headers: {
@@ -5443,6 +5548,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       });
 
       if (!response.ok) {
+        releaseOnce(); // dial failed — never connected, free the slot
         const errorText = await response.text();
         console.error(`[CallRepairShop] ElevenLabs API error ${response.status}:`, errorText);
         try {
@@ -5474,11 +5580,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       res.json({ success: true, toNumber, conversationId, result });
+      // Hold the global concurrency slot until THIS call actually ends (separate
+      // from pollForCallCompletion below, which owns outcome-writing).
+      holdSlotUntilCallEnds(conversationId, releaseOnce);
       // Fire-and-forget: poll ElevenLabs for the completed conversation transcript
       pollForCallCompletion(truck, "repair", toNumber, ELEVENLABS_SHOP_AGENT_ID).catch((err: any) =>
         console.error("[CallRepairShop] Polling error:", err.message)
       );
     } catch (error: any) {
+      releaseOnce(); // no-op unless a slot is held; frees it on unexpected error
       console.error("[CallRepairShop] Error:", error.message);
       res.status(500).json({ message: error.message });
     }
@@ -5486,6 +5596,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   // POST call technician for vehicle pickup via ElevenLabs outbound call
   app.post("/trucks/:id/call-technician", async (req, res) => {
+    // GLOBAL concurrency gate: `released` stays true until a slot is actually
+    // held, so the outer catch's releaseOnce() is a no-op if we error before dialing.
+    let released = true;
+    const releaseOnce = () => { if (released) { return; } released = true; releaseCallSlot(); };
     try {
       if (!process.env.FS_ELEVENLABS_API_KEY) {
         return res.status(500).json({ message: "ElevenLabs API key not configured" });
@@ -5529,6 +5643,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
       console.log(`[CallTechnician] Calling tech ${truck.techName || 'unknown'} at ${toNumber} for truck ${vehicleNum}`);
 
+      // GLOBAL concurrency gate — hold a slot from dial until the call ENDS.
+      const gotSlot = await acquireCallSlot(ACQUIRE_MAX_WAIT_MS);
+      if (!gotSlot) {
+        console.log(`[CallTechnician] concurrency cap — skipped truck ${vehicleNum}, re-run to catch it`);
+        return res.status(503).json({ message: "Global call-concurrency cap reached — call not placed. Re-run to catch this truck (the 30-minute re-dial guard makes a re-run safe)." });
+      }
+      released = false;
+
       const response = await fetch("https://api.elevenlabs.io/v1/convai/twilio/outbound-call", {
         method: "POST",
         headers: {
@@ -5539,6 +5661,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       });
 
       if (!response.ok) {
+        releaseOnce(); // dial failed — never connected, free the slot
         const errorText = await response.text();
         console.error(`[CallTechnician] ElevenLabs API error ${response.status}:`, errorText);
         try {
@@ -5568,11 +5691,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       res.json({ success: true, toNumber, conversationId, result });
+      // Hold the global concurrency slot until THIS call actually ends (separate
+      // from pollForCallCompletion below, which owns outcome-writing).
+      holdSlotUntilCallEnds(conversationId, releaseOnce);
       // Fire-and-forget: poll ElevenLabs for the completed conversation transcript
       pollForCallCompletion(truck, "tech", toNumber, ELEVENLABS_TECH_AGENT_ID).catch((err: any) =>
         console.error("[CallTechnician] Polling error:", err.message)
       );
     } catch (error: any) {
+      releaseOnce(); // no-op unless a slot is held; frees it on unexpected error
       console.error("[CallTechnician] Error:", error.message);
       res.status(500).json({ message: error.message });
     }
@@ -5736,6 +5863,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         let active = 0;
 
         const processCall = async (truckId: string): Promise<void> => {
+          // GLOBAL concurrency gate: `released` stays true until a slot is
+          // actually held, so the outer catch's releaseOnce() is a no-op for
+          // trucks that return early (excluded / re-dial guard / no phone)
+          // before we ever dial.
+          let released = true;
+          const releaseOnce = () => { if (released) { return; } released = true; releaseCallSlot(); };
           try {
             const truck = await fleetScopeStorage.getTruck(truckId);
             if (!truck) {
@@ -5855,6 +5988,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             }
 
             console.log(`[BatchCaller] Calling ${toNumber} for truck ${vehicleNum} (${callType})`);
+            // GLOBAL concurrency gate — hold a slot from dial until the call ENDS.
+            const gotSlot = await acquireCallSlot(ACQUIRE_MAX_WAIT_MS);
+            if (!gotSlot) {
+              console.log(`[BatchCaller] concurrency cap — skipped truck ${vehicleNum}, re-run to catch it`);
+              job.results.push({ truckId, truckNumber: vehicleNum, status: "skipped", error: "Concurrency cap reached — re-run to catch this truck" });
+              job.skipped++;
+              return;
+            }
+            released = false;
             // 60s hard timeout — an unresponsive ElevenLabs connection must not
             // hold a concurrency slot for the full 10-minute slot failsafe.
             const dialAbort = new AbortController();
@@ -5880,6 +6022,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 }).catch((logErr: any) =>
                   console.error(`[BatchCaller] Failed to write timeout guard log for truck ${vehicleNum}:`, logErr?.message)
                 );
+                releaseOnce(); // dial timed out — never connected, free the slot
                 job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: "Timed out after 60s — call status unknown; re-dial blocked for 30 min" });
                 job.failed++;
                 return;
@@ -5905,6 +6048,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallStatus: "Call Failed", lastCallSummary: `Batch call API error` });
               }
 
+              releaseOnce(); // dial failed — never connected, free the slot
               job.results.push({ truckId, truckNumber: vehicleNum, status: "failed", error: `API ${response.status}` });
               job.failed++;
               return;
@@ -5926,7 +6070,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
             job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
             job.completed++;
+            holdSlotUntilCallEnds(conversationId, releaseOnce); // release the slot when THIS call ends
           } catch (err: any) {
+            releaseOnce(); // no-op unless a slot is held; frees it on unexpected error
             job.results.push({ truckId, truckNumber: "?", status: "failed", error: err.message });
             job.failed++;
           }
