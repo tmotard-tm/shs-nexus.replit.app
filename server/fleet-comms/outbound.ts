@@ -56,6 +56,7 @@ export interface SendMessageInput {
   sentBy?: string | null;
   senderName?: string | null;
   force?: boolean; // bypass quiet-hours (send now)
+  dryRun?: boolean; // resolve + gate checks only; no thread/queue/Twilio side effects
 }
 
 export interface SendMessageResult {
@@ -65,6 +66,7 @@ export interface SendMessageResult {
   threadId?: string;
   queueId?: string;
   segments?: number;
+  dryRun?: boolean; // true when status reflects what WOULD happen, not a real send
 }
 
 /** Resolve the destination phone + state + contact for a send. */
@@ -134,6 +136,20 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   }
   if (await isOptedOut(phoneDigits)) {
     return { status: "skipped", reason: "recipient opted out" };
+  }
+
+  // DRY RUN: report what WOULD happen (send now vs quiet-hours queue) after the
+  // real phone/opt-out/quiet-hours gates, with zero side effects (no thread
+  // creation, no manager-CC, no enqueue, no Twilio). Used by the API send
+  // surface for previews before a caller confirms a live send.
+  if (input.dryRun) {
+    const wouldQueue = input.force ? false : !!getNextAllowedSendTime(state);
+    return {
+      status: wouldQueue ? "queued" : "sent",
+      reason: "dry-run",
+      dryRun: true,
+      segments: countSegments(input.body),
+    };
   }
 
   const thread = input.ldap

@@ -631,5 +631,59 @@
       "0008_add_logical_entities.sql"
     ],
     "fingerprint": "47282d85ef6a"
+  },
+  {
+    "deployedAt": "2026-07-13T17:11:43.174Z",
+    "bundleHash": "QfSAE6I_",
+    "gitSha": "993d1e85",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-07-13T17-11-07-248Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "a32569607ab1"
+  },
+  {
+    "deployedAt": "2026-07-13T17:24:46.601Z",
+    "bundleHash": "BNujRdnr",
+    "gitSha": "78bf8672",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-07-13T17-24-09-742Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "8c88c3b4c91f"
+  },
+  {
+    "deployedAt": "2026-07-13T17:29:50.286Z",
+    "bundleHash": "BNujRdnr",
+    "gitSha": "c0526b12",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-07-13T17-29-19-170Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "f144cd154e0c"
   }
 ]

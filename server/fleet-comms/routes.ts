@@ -762,6 +762,163 @@ export function registerCommsRoutes(app: Router): void {
     res.json(batch);
   });
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // AGENT / API SEND SURFACE  (server-to-server; API-key authenticated)
+  // ------------------------------------------------------------------------
+  // A single authenticated route group that exposes every send style through
+  // Fleet Comms so automations (LUCA/TYLER/HERALD) and ad-hoc scripts can send
+  // regardless of shape: one-off, personalized batch (per-recipient body +
+  // phone), or same-body bulk by ldap/truck/district. All reuse the same
+  // sendMessage()/createBulkSend() core, so opt-out (STOP), TCPA quiet-hours
+  // deferral, thread logging, and manager-CC are enforced identically to the UI.
+  //
+  // SAFETY — two independent gates, both required to fire live:
+  //   1. Per-request: `confirm: true` (and not `dryRun: true`).
+  //   2. Global kill switch: env `COMMS_SEND_LIVE` must equal "true".
+  // If either is absent, the request runs as a DRY RUN (resolves recipients,
+  // checks opt-out/quiet-hours, reports what WOULD send) and sends nothing.
+  // ══════════════════════════════════════════════════════════════════════════
+  const SEND_CAP = 300;
+  function commsApiKeyOk(req: any): boolean {
+    const provided = req.headers["x-comms-api-key"] || req.headers["x-api-key"];
+    const expected = process.env.COMMS_SEND_API_KEY;
+    return !!(expected && typeof provided === "string" && provided === expected);
+  }
+  // Auth: a valid COMMS_SEND_API_KEY OR an existing UI session (gate). Key
+  // callers get a synthetic service actor so sends are attributed + audited.
+  async function apiOrGate(req: any, res: any, next: any) {
+    if (commsApiKeyOk(req)) {
+      req.user = req.user || { id: "svc:comms-api", role: "service", username: "comms-api" };
+      return next();
+    }
+    return gate(req, res, next);
+  }
+  // Live only when the global switch is on AND the caller explicitly confirms.
+  function liveAllowed(b: any): boolean {
+    return process.env.COMMS_SEND_LIVE === "true" && b?.confirm === true && b?.dryRun !== true;
+  }
+
+  // POST /comms/api/send — single message (ldap or explicit phone).
+  app.post("/comms/api/send", apiOrGate, async (req: any, res) => {
+    try {
+      const { ldap, phone, category, body, mediaUrl, managerCc, force } = req.body || {};
+      const cat = category || "general_fleet";
+      const hasMedia = Array.isArray(mediaUrl) && mediaUrl.length > 0;
+      if (!isValidCategory(cat)) return res.status(400).json({ message: "Valid category required" });
+      if ((!body || !String(body).trim()) && !hasMedia) return res.status(400).json({ message: "Message body or attachment required" });
+      if (!ldap && !phone) return res.status(400).json({ message: "ldap or phone required" });
+      const live = liveAllowed(req.body);
+      const a = actor(req);
+      const result = await sendMessage({
+        ldap: ldap ?? null,
+        phone: phone ?? null,
+        category: cat,
+        body: body ? String(body) : "",
+        mediaUrl: Array.isArray(mediaUrl) ? mediaUrl : null,
+        managerCc: !!managerCc,
+        force: !!force,
+        sentBy: a.id,
+        senderName: a.name,
+        dryRun: !live,
+      });
+      res.json({ live, ...result });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/send error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // POST /comms/api/send-batch — personalized batch: each message has its own
+  // recipient (ldap or phone) AND its own body. This is the style the UI bulk
+  // send cannot do. { messages: [{ ldap?, phone?, body, category?, mediaUrl?,
+  // managerCc? }], category?, force?, dryRun?, confirm? }
+  app.post("/comms/api/send-batch", apiOrGate, async (req: any, res) => {
+    try {
+      const { messages, category, force } = req.body || {};
+      if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ message: "messages[] required" });
+      if (messages.length > SEND_CAP) return res.status(400).json({ message: `Too many messages (max ${SEND_CAP})` });
+      const defCat = category || "general_fleet";
+      for (let i = 0; i < messages.length; i++) {
+        const m = messages[i] || {};
+        const c = m.category || defCat;
+        const hasMedia = Array.isArray(m.mediaUrl) && m.mediaUrl.length > 0;
+        if (!isValidCategory(c)) return res.status(400).json({ message: `messages[${i}]: invalid category` });
+        if (!m.ldap && !m.phone) return res.status(400).json({ message: `messages[${i}]: ldap or phone required` });
+        if ((!m.body || !String(m.body).trim()) && !hasMedia) return res.status(400).json({ message: `messages[${i}]: body or attachment required` });
+      }
+      const live = liveAllowed(req.body);
+      const a = actor(req);
+      const results: any[] = [];
+      for (const m of messages) {
+        const r = await sendMessage({
+          ldap: m.ldap ?? null,
+          phone: m.phone ?? null,
+          category: m.category || defCat,
+          body: m.body ? String(m.body) : "",
+          mediaUrl: Array.isArray(m.mediaUrl) ? m.mediaUrl : null,
+          managerCc: !!m.managerCc,
+          force: !!force,
+          sentBy: a.id,
+          senderName: a.name,
+          dryRun: !live,
+        });
+        results.push({ ldap: m.ldap ?? null, phone: m.phone ?? null, ...r });
+      }
+      const summary: Record<string, number> = {};
+      for (const r of results) summary[r.status] = (summary[r.status] || 0) + 1;
+      res.json({ live, dryRun: !live, count: results.length, summary, results });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/send-batch error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // POST /comms/api/bulk — same body to an audience resolved by ldaps[],
+  // truckNumbers[], or filter.district (lifecycle-excluded exactly like the UI
+  // bulk send). Dry run returns the resolved recipient list; live queues + kicks
+  // a drain. { category?, body, managerCc?, ldaps?|truckNumbers?|filter, dryRun?, confirm? }
+  app.post("/comms/api/bulk", apiOrGate, async (req: any, res) => {
+    try {
+      const { category, body, managerCc } = req.body || {};
+      const cat = category || "general_fleet";
+      if (!isValidCategory(cat)) return res.status(400).json({ message: "Valid category required" });
+      if (!body || !String(body).trim()) return res.status(400).json({ message: "Message body required" });
+      const { contacts, desc, unresolvedTrucks } = await resolveBulkAudience(req.body);
+      const withPhone = contacts.filter((c) => normalizeDigits(c.phone).length >= 10);
+      const live = liveAllowed(req.body);
+      if (!live) {
+        return res.json({
+          live: false,
+          dryRun: true,
+          matched: contacts.length,
+          withPhone: withPhone.length,
+          missingPhone: contacts.length - withPhone.length,
+          unresolvedTrucks,
+          filterDesc: desc,
+          recipients: withPhone.map((c) => ({ ldap: c.ldap, name: c.name, phone: c.phone })),
+        });
+      }
+      if (!withPhone.length) return res.status(400).json({ message: "No recipients with a valid phone" });
+      const perRecipientBody = renderForContacts(String(body), withPhone);
+      const a = actor(req);
+      const result = await createBulkSend({
+        category: cat,
+        body: String(body),
+        ldaps: withPhone.map((c) => c.ldap),
+        managerCc: !!managerCc,
+        sentBy: a.id,
+        senderName: a.name,
+        filterDesc: desc,
+        perRecipientBody,
+      });
+      processSendQueue(100, "api-bulk-kick").catch(() => {});
+      res.json({ live: true, ...result });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/bulk error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
   // ── Contacts search (compose / link) ────────────────────────────────────
   app.get("/comms/contacts", gate, async (req: any, res) => {
     const search = String(req.query.search || "").trim();
