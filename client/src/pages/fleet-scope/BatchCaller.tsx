@@ -40,7 +40,10 @@ import {
   PhoneOff,
   Filter,
   ChevronDown,
+  ChevronUp,
+  ChevronsUpDown,
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type { Truck, CallLog, MainStatus } from "@shared/fleet-scope-schema";
 import { MAIN_STATUSES } from "@shared/fleet-scope-schema";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
@@ -62,6 +65,204 @@ const mainStatusColors: Record<string, string> = {
   "NLWC - Return Rental": "bg-status-red text-status-red-fg",
   "Truck Swap": "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300",
 };
+
+// ---- Sorting primitives (shared by all three tables) ----
+type SortDir = "asc" | "desc";
+type SortState = { field: string; dir: SortDir };
+
+// Cycle the sort for a table: a new field starts ascending; the active field toggles.
+function makeSortHandler(setSort: React.Dispatch<React.SetStateAction<SortState>>) {
+  return (field: string) =>
+    setSort((prev) =>
+      prev.field === field
+        ? { field, dir: prev.dir === "asc" ? "desc" : "asc" }
+        : { field, dir: "asc" }
+    );
+}
+
+// Generic, stable sort. Accessor returns a comparable primitive (date columns
+// return epoch ms). null / undefined / "" always sort to the BOTTOM regardless
+// of direction. Numbers compare numerically; everything else is a
+// case-insensitive string compare.
+function sortRows<T>(
+  rows: T[],
+  field: string,
+  dir: SortDir,
+  accessor: (row: T, field: string) => string | number | null | undefined
+): T[] {
+  const factor = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = accessor(a, field);
+    const bv = accessor(b, field);
+    const aEmpty = av === null || av === undefined || av === "";
+    const bEmpty = bv === null || bv === undefined || bv === "";
+    if (aEmpty && bEmpty) return 0;
+    if (aEmpty) return 1; // nulls to bottom regardless of direction
+    if (bEmpty) return -1;
+    let cmp: number;
+    if (typeof av === "number" && typeof bv === "number") {
+      cmp = av - bv;
+    } else {
+      cmp = String(av).toLowerCase().localeCompare(String(bv).toLowerCase());
+    }
+    return cmp * factor;
+  });
+}
+
+// A shadcn TableHead that is clickable and shows a sort indicator.
+function SortableHead({
+  label,
+  field,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  field: string;
+  sort: SortState;
+  onSort: (field: string) => void;
+  className?: string;
+}) {
+  const active = sort.field === field;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(field)}
+        className="flex items-center gap-1 cursor-pointer select-none hover:text-foreground transition-colors -my-1 py-1"
+        aria-label={`Sort by ${label}`}
+        data-testid={`sort-${field}`}
+      >
+        {label}
+        {active ? (
+          sort.dir === "asc" ? (
+            <ChevronUp className="h-3.5 w-3.5 shrink-0" />
+          ) : (
+            <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+          )
+        ) : (
+          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 opacity-30" />
+        )}
+      </button>
+    </TableHead>
+  );
+}
+
+// A multi-select filter popover matching the Select & Call status-filter styling.
+function MultiSelectFilter({
+  label,
+  options,
+  selected,
+  onToggle,
+  onClear,
+  renderOption,
+  testidPrefix,
+  width = "w-[170px]",
+}: {
+  label: string;
+  options: string[];
+  selected: Set<string>;
+  onToggle: (v: string) => void;
+  onClear: () => void;
+  renderOption: (v: string) => ReactNode;
+  testidPrefix: string;
+  width?: string;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" className={`${width} justify-between`} data-testid={`button-${testidPrefix}-filter`}>
+          <span className="flex items-center gap-1.5 truncate">
+            <Filter className="h-3.5 w-3.5 shrink-0" />
+            {selected.size === 0 ? label : `${selected.size} selected`}
+          </span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[240px] p-2" align="start">
+        <div className="flex flex-col gap-0.5 max-h-[280px] overflow-auto">
+          {options.length === 0 ? (
+            <span className="px-2 py-1.5 text-xs text-muted-foreground">No options</span>
+          ) : (
+            options.map((o) => (
+              <label
+                key={o}
+                className="flex items-center gap-2 px-2 py-1.5 rounded-md hover-elevate cursor-pointer text-sm"
+                data-testid={`${testidPrefix}-option-${o}`}
+              >
+                <Checkbox checked={selected.has(o)} onCheckedChange={() => onToggle(o)} />
+                {renderOption(o)}
+              </label>
+            ))
+          )}
+          {selected.size > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="mt-1 w-full text-xs"
+              onClick={onClear}
+              data-testid={`button-clear-${testidPrefix}`}
+            >
+              Clear All
+            </Button>
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// Toggle a value inside a Set stored in React state.
+function toggleInSet(setState: React.Dispatch<React.SetStateAction<Set<string>>>, value: string) {
+  setState((prev) => {
+    const next = new Set(prev);
+    if (next.has(value)) next.delete(value);
+    else next.add(value);
+    return next;
+  });
+}
+
+// Sort accessors for the CallLog-backed tables (Follow-Ups & Call History).
+function followUpSortValue(log: CallLog, field: string): string | number | null | undefined {
+  switch (field) {
+    case "truckNumber":
+      return log.truckNumber;
+    case "callType":
+      return log.callType;
+    case "outcome":
+      return log.outcome;
+    case "nextFollowUpDate": {
+      if (!log.nextFollowUpDate) return null;
+      const t = Date.parse(log.nextFollowUpDate);
+      return Number.isNaN(t) ? log.nextFollowUpDate : t;
+    }
+    case "shopNotes":
+      return log.shopNotes;
+    default:
+      return null;
+  }
+}
+
+function historySortValue(log: CallLog, field: string): string | number | null | undefined {
+  switch (field) {
+    case "callTimestamp":
+      return log.callTimestamp ? new Date(log.callTimestamp).getTime() : null;
+    case "truckNumber":
+      return log.truckNumber;
+    case "callType":
+      return log.callType;
+    case "phoneNumber":
+      return log.phoneNumber;
+    case "status":
+      return log.status;
+    case "outcome":
+      return log.outcome;
+    case "shopNotes":
+      return log.shopNotes;
+    default:
+      return null;
+  }
+}
 
 type BatchResult = {
   truckId: string;
@@ -93,6 +294,25 @@ export default function BatchCaller() {
   const [batchStatus, setBatchStatus] = useState<BatchStatus | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const cancelRef = useRef(false);
+
+  // Per-table sort state.
+  const [callSort, setCallSort] = useState<SortState>({ field: "truckNumber", dir: "asc" });
+  const [followSort, setFollowSort] = useState<SortState>({ field: "nextFollowUpDate", dir: "asc" });
+  const [historySort, setHistorySort] = useState<SortState>({ field: "callTimestamp", dir: "desc" });
+  const onCallSort = useMemo(() => makeSortHandler(setCallSort), []);
+  const onFollowSort = useMemo(() => makeSortHandler(setFollowSort), []);
+  const onHistorySort = useMemo(() => makeSortHandler(setHistorySort), []);
+
+  // Follow-Ups filters.
+  const [followOutcomeFilter, setFollowOutcomeFilter] = useState<Set<string>>(new Set());
+  const [followTypeFilter, setFollowTypeFilter] = useState<Set<string>>(new Set());
+  const [followSearch, setFollowSearch] = useState("");
+
+  // Call History filters.
+  const [historyOutcomeFilter, setHistoryOutcomeFilter] = useState<Set<string>>(new Set());
+  const [historyStatusFilter, setHistoryStatusFilter] = useState<Set<string>>(new Set());
+  const [historyTypeFilter, setHistoryTypeFilter] = useState<Set<string>>(new Set());
+  const [historySearch, setHistorySearch] = useState("");
 
   const { data: trucks = [], isLoading: trucksLoading } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
@@ -139,6 +359,83 @@ export default function BatchCaller() {
 
     return result;
   }, [trucks, selectedStatuses, callType, searchTerm]);
+
+  // Sorted view of the (already-filtered) trucks. Selection logic keeps using
+  // filteredTrucks; sorting only reorders what is rendered.
+  const sortedTrucks = useMemo(() => {
+    const accessor = (t: Truck, field: string): string | number | null | undefined => {
+      switch (field) {
+        case "truckNumber":
+          return t.truckNumber;
+        case "mainStatus":
+          return t.mainStatus;
+        case "name":
+          return callType === "shop" ? t.repairAddress : t.techName;
+        case "phone":
+          return callType === "shop" ? t.repairPhone : t.techPhone;
+        case "shopResult":
+          return t.lastCallStatus;
+        case "lastCall": {
+          const d = callType === "shop" ? t.lastCallDate : t.lastTechCallDate;
+          return d ? new Date(d).getTime() : null;
+        }
+        case "lastOutcome":
+          return callType === "shop" ? t.lastCallStatus : t.lastTechCallStatus;
+        default:
+          return null;
+      }
+    };
+    return sortRows(filteredTrucks, callSort.field, callSort.dir, accessor);
+  }, [filteredTrucks, callSort, callType]);
+
+  // Distinct filter options derived from the data.
+  const followOutcomeOptions = useMemo(
+    () => Array.from(new Set(followUps.map((l) => l.outcome).filter((v): v is string => !!v))).sort(),
+    [followUps]
+  );
+  const followTypeOptions = useMemo(
+    () => Array.from(new Set(followUps.map((l) => l.callType).filter((v): v is string => !!v))).sort(),
+    [followUps]
+  );
+  const historyOutcomeOptions = useMemo(
+    () => Array.from(new Set(recentLogs.map((l) => l.outcome).filter((v): v is string => !!v))).sort(),
+    [recentLogs]
+  );
+  const historyStatusOptions = useMemo(
+    () => Array.from(new Set(recentLogs.map((l) => l.status).filter((v): v is string => !!v))).sort(),
+    [recentLogs]
+  );
+  const historyTypeOptions = useMemo(
+    () => Array.from(new Set(recentLogs.map((l) => l.callType).filter((v): v is string => !!v))).sort(),
+    [recentLogs]
+  );
+
+  const displayedFollowUps = useMemo(() => {
+    let r = followUps;
+    if (followOutcomeFilter.size > 0) r = r.filter((l) => l.outcome && followOutcomeFilter.has(l.outcome));
+    if (followTypeFilter.size > 0) r = r.filter((l) => l.callType && followTypeFilter.has(l.callType));
+    if (followSearch.trim()) {
+      const term = followSearch.toLowerCase();
+      r = r.filter((l) => l.truckNumber?.toLowerCase().includes(term));
+    }
+    return sortRows(r, followSort.field, followSort.dir, followUpSortValue);
+  }, [followUps, followOutcomeFilter, followTypeFilter, followSearch, followSort]);
+
+  const displayedLogs = useMemo(() => {
+    let r = recentLogs;
+    if (historyOutcomeFilter.size > 0) r = r.filter((l) => l.outcome && historyOutcomeFilter.has(l.outcome));
+    if (historyStatusFilter.size > 0) r = r.filter((l) => l.status && historyStatusFilter.has(l.status));
+    if (historyTypeFilter.size > 0) r = r.filter((l) => l.callType && historyTypeFilter.has(l.callType));
+    if (historySearch.trim()) {
+      const term = historySearch.toLowerCase();
+      r = r.filter(
+        (l) =>
+          l.truckNumber?.toLowerCase().includes(term) ||
+          l.phoneNumber?.toLowerCase().includes(term)
+      );
+    }
+    return sortRows(r, historySort.field, historySort.dir, historySortValue);
+  }, [recentLogs, historyOutcomeFilter, historyStatusFilter, historyTypeFilter, historySearch, historySort]);
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -380,17 +677,17 @@ export default function BatchCaller() {
                           data-testid="checkbox-select-all"
                         />
                       </TableHead>
-                      <TableHead>Truck #</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>{callType === "shop" ? "Shop / Address" : "Tech"}</TableHead>
-                      <TableHead>Phone</TableHead>
-                      {callType === "tech" && <TableHead>Shop Call Result</TableHead>}
-                      <TableHead>Last Call</TableHead>
-                      <TableHead>Last Outcome</TableHead>
+                      <SortableHead label="Truck #" field="truckNumber" sort={callSort} onSort={onCallSort} />
+                      <SortableHead label="Status" field="mainStatus" sort={callSort} onSort={onCallSort} />
+                      <SortableHead label={callType === "shop" ? "Shop / Address" : "Tech"} field="name" sort={callSort} onSort={onCallSort} />
+                      <SortableHead label="Phone" field="phone" sort={callSort} onSort={onCallSort} />
+                      {callType === "tech" && <SortableHead label="Shop Call Result" field="shopResult" sort={callSort} onSort={onCallSort} />}
+                      <SortableHead label="Last Call" field="lastCall" sort={callSort} onSort={onCallSort} />
+                      <SortableHead label="Last Outcome" field="lastOutcome" sort={callSort} onSort={onCallSort} />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredTrucks.map((truck) => {
+                    {sortedTrucks.map((truck) => {
                       const phone = callType === "shop" ? truck.repairPhone : truck.techPhone;
                       const name = callType === "shop" ? (truck.repairAddress || "—") : truck.techName;
                       const lastStatus = callType === "shop" ? truck.lastCallStatus : truck.lastTechCallStatus;
@@ -574,7 +871,7 @@ export default function BatchCaller() {
 
         <TabsContent value="followups" className="mt-4">
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
+        <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3 flex-wrap">
           <CardTitle className="text-base flex items-center gap-2">
             <Clock className="h-4 w-4" />
             Pending Follow-Ups
@@ -584,6 +881,37 @@ export default function BatchCaller() {
               </Badge>
             )}
           </CardTitle>
+          <div className="flex items-center gap-2 flex-wrap">
+            <MultiSelectFilter
+              label="All Outcomes"
+              options={followOutcomeOptions}
+              selected={followOutcomeFilter}
+              onToggle={(v) => toggleInSet(setFollowOutcomeFilter, v)}
+              onClear={() => setFollowOutcomeFilter(new Set())}
+              renderOption={(o) => getOutcomeBadge(o) ?? <span className="text-sm">{o}</span>}
+              testidPrefix="followup-outcome"
+            />
+            <MultiSelectFilter
+              label="All Types"
+              width="w-[130px]"
+              options={followTypeOptions}
+              selected={followTypeFilter}
+              onToggle={(v) => toggleInSet(setFollowTypeFilter, v)}
+              onClear={() => setFollowTypeFilter(new Set())}
+              renderOption={(t) => <Badge variant="outline" className="text-xs capitalize">{t}</Badge>}
+              testidPrefix="followup-type"
+            />
+            <div className="relative">
+              <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search truck #..."
+                value={followSearch}
+                onChange={(e) => setFollowSearch(e.target.value)}
+                className="pl-8 w-[180px]"
+                data-testid="input-followup-search"
+              />
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           {followUpsLoading ? (
@@ -595,34 +923,45 @@ export default function BatchCaller() {
               No pending follow-ups
             </div>
           ) : (
-            <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-280px))]">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Truck #</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Last Outcome</TableHead>
-                    <TableHead>Follow-Up Date</TableHead>
-                    <TableHead>Notes</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {followUps.map((log) => (
-                    <TableRow key={log.id} data-testid={`row-followup-${log.truckNumber}`}>
-                      <TableCell className="font-medium">{log.truckNumber}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">{log.callType}</Badge>
-                      </TableCell>
-                      <TableCell>{getOutcomeBadge(log.outcome)}</TableCell>
-                      <TableCell className="text-sm">{log.nextFollowUpDate || "—"}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate">
-                        {log.shopNotes || "—"}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+            <>
+              <div className="text-sm text-muted-foreground mb-3" data-testid="text-followup-count">
+                {displayedFollowUps.length} of {followUps.length}
+              </div>
+              {displayedFollowUps.length === 0 ? (
+                <div className="text-center py-4 text-muted-foreground text-sm">
+                  No follow-ups match the current filters
+                </div>
+              ) : (
+                <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-320px))]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <SortableHead label="Truck #" field="truckNumber" sort={followSort} onSort={onFollowSort} />
+                        <SortableHead label="Type" field="callType" sort={followSort} onSort={onFollowSort} />
+                        <SortableHead label="Last Outcome" field="outcome" sort={followSort} onSort={onFollowSort} />
+                        <SortableHead label="Follow-Up Date" field="nextFollowUpDate" sort={followSort} onSort={onFollowSort} />
+                        <SortableHead label="Notes" field="shopNotes" sort={followSort} onSort={onFollowSort} />
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {displayedFollowUps.map((log) => (
+                        <TableRow key={log.id} data-testid={`row-followup-${log.truckNumber}`}>
+                          <TableCell className="font-medium">{log.truckNumber}</TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="text-xs">{log.callType}</Badge>
+                          </TableCell>
+                          <TableCell>{getOutcomeBadge(log.outcome)}</TableCell>
+                          <TableCell className="text-sm">{log.nextFollowUpDate || "—"}</TableCell>
+                          <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate">
+                            {log.shopNotes || "—"}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
@@ -631,29 +970,78 @@ export default function BatchCaller() {
         <TabsContent value="history" className="mt-4">
       {recentLogs.length > 0 ? (
         <Card>
-          <CardHeader className="pb-3">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3 flex-wrap">
             <CardTitle className="text-base flex items-center gap-2">
               <AlertTriangle className="h-4 w-4" />
               Recent Call Logs
               <Badge variant="secondary">{recentLogs.length}</Badge>
             </CardTitle>
+            <div className="flex items-center gap-2 flex-wrap">
+              <MultiSelectFilter
+                label="All Outcomes"
+                options={historyOutcomeOptions}
+                selected={historyOutcomeFilter}
+                onToggle={(v) => toggleInSet(setHistoryOutcomeFilter, v)}
+                onClear={() => setHistoryOutcomeFilter(new Set())}
+                renderOption={(o) => getOutcomeBadge(o) ?? <span className="text-sm">{o}</span>}
+                testidPrefix="history-outcome"
+              />
+              <MultiSelectFilter
+                label="All Statuses"
+                width="w-[140px]"
+                options={historyStatusOptions}
+                selected={historyStatusFilter}
+                onToggle={(v) => toggleInSet(setHistoryStatusFilter, v)}
+                onClear={() => setHistoryStatusFilter(new Set())}
+                renderOption={(s) => <Badge variant="secondary" className="text-xs">{s}</Badge>}
+                testidPrefix="history-status"
+              />
+              <MultiSelectFilter
+                label="All Types"
+                width="w-[130px]"
+                options={historyTypeOptions}
+                selected={historyTypeFilter}
+                onToggle={(v) => toggleInSet(setHistoryTypeFilter, v)}
+                onClear={() => setHistoryTypeFilter(new Set())}
+                renderOption={(t) => <Badge variant="outline" className="text-xs capitalize">{t}</Badge>}
+                testidPrefix="history-type"
+              />
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Truck # / phone..."
+                  value={historySearch}
+                  onChange={(e) => setHistorySearch(e.target.value)}
+                  className="pl-8 w-[180px]"
+                  data-testid="input-history-search"
+                />
+              </div>
+            </div>
           </CardHeader>
           <CardContent>
-            <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-280px))]">
+            <div className="text-sm text-muted-foreground mb-3" data-testid="text-history-count">
+              {displayedLogs.length} of {recentLogs.length}
+            </div>
+            {displayedLogs.length === 0 ? (
+              <div className="text-center py-4 text-muted-foreground text-sm">
+                No call logs match the current filters
+              </div>
+            ) : (
+            <div className="border rounded-md overflow-auto max-h-[max(240px,calc(100dvh-320px))]">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Time</TableHead>
-                    <TableHead>Truck #</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Phone</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Outcome</TableHead>
-                    <TableHead>Notes</TableHead>
+                    <SortableHead label="Time" field="callTimestamp" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Truck #" field="truckNumber" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Type" field="callType" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Phone" field="phoneNumber" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Status" field="status" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Outcome" field="outcome" sort={historySort} onSort={onHistorySort} />
+                    <SortableHead label="Notes" field="shopNotes" sort={historySort} onSort={onHistorySort} />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {recentLogs.map((log) => (
+                  {displayedLogs.map((log) => (
                     <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {log.callTimestamp ? new Date(log.callTimestamp).toLocaleString() : "—"}
@@ -686,6 +1074,7 @@ export default function BatchCaller() {
                 </TableBody>
               </Table>
             </div>
+            )}
           </CardContent>
         </Card>
       ) : (
