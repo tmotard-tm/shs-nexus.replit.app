@@ -68,6 +68,11 @@ import {
   type InsertVehicleNexusData,
   type OffboardingTruckOverride,
   type InsertOffboardingTruckOverride,
+  type LoaHrNote,
+  type InsertLoaHrNote,
+  type LoaHrNotesSummaryRow,
+  loaHrNotes,
+  loaHrNoteReads,
   type RentalQualificationLog,
   type InsertRentalQualificationLog,
   type HolmanPoCache,
@@ -478,6 +483,12 @@ export interface IStorage {
   getAllOffboardingTruckOverrides(): Promise<OffboardingTruckOverride[]>;
   upsertOffboardingTruckOverride(data: InsertOffboardingTruckOverride): Promise<OffboardingTruckOverride>;
   deleteOffboardingTruckOverride(enterpriseId: string): Promise<boolean>;
+
+  // LOA HR Notes (per-technician append-only note threads with per-viewer read state)
+  getLoaHrNotes(enterpriseId: string): Promise<LoaHrNote[]>;
+  addLoaHrNote(note: InsertLoaHrNote): Promise<LoaHrNote>;
+  markLoaHrNotesRead(enterpriseId: string, userId: string): Promise<void>;
+  getLoaHrNotesSummary(userId: string): Promise<LoaHrNotesSummaryRow[]>;
 
   // Rental Qualification Log
   createQualificationLog(data: InsertRentalQualificationLog): Promise<RentalQualificationLog>;
@@ -3604,6 +3615,19 @@ export class MemStorage implements IStorage {
     throw new Error("MemStorage does not support offboarding truck overrides. Use DatabaseStorage.");
   }
 
+  async getLoaHrNotes(_enterpriseId: string): Promise<LoaHrNote[]> {
+    throw new Error("MemStorage does not support LOA HR notes. Use DatabaseStorage.");
+  }
+  async addLoaHrNote(_note: InsertLoaHrNote): Promise<LoaHrNote> {
+    throw new Error("MemStorage does not support LOA HR notes. Use DatabaseStorage.");
+  }
+  async markLoaHrNotesRead(_enterpriseId: string, _userId: string): Promise<void> {
+    throw new Error("MemStorage does not support LOA HR notes. Use DatabaseStorage.");
+  }
+  async getLoaHrNotesSummary(_userId: string): Promise<LoaHrNotesSummaryRow[]> {
+    throw new Error("MemStorage does not support LOA HR notes. Use DatabaseStorage.");
+  }
+
   async createQualificationLog(_data: InsertRentalQualificationLog): Promise<RentalQualificationLog> {
     throw new Error("MemStorage does not support qualification logs. Use DatabaseStorage.");
   }
@@ -6571,6 +6595,60 @@ export class DatabaseStorage implements IStorage {
     const result = await db.delete(offboardingTruckOverrides)
       .where(eq(offboardingTruckOverrides.enterpriseId, enterpriseId));
     return (result.rowCount ?? 0) > 0;
+  }
+
+  // ========================================
+  // LOA HR Notes (append-only thread per technician, per-viewer read state)
+  // ========================================
+
+  async getLoaHrNotes(enterpriseId: string): Promise<LoaHrNote[]> {
+    return await db.select().from(loaHrNotes)
+      .where(eq(loaHrNotes.enterpriseId, enterpriseId.toUpperCase()))
+      .orderBy(loaHrNotes.createdAt);
+  }
+
+  async addLoaHrNote(note: InsertLoaHrNote): Promise<LoaHrNote> {
+    const result = await db.insert(loaHrNotes)
+      .values({ ...note, enterpriseId: note.enterpriseId.toUpperCase() })
+      .returning();
+    return result[0];
+  }
+
+  async markLoaHrNotesRead(enterpriseId: string, userId: string): Promise<void> {
+    const eid = enterpriseId.toUpperCase();
+    await db.insert(loaHrNoteReads)
+      .values({ enterpriseId: eid, userId, lastReadAt: new Date() })
+      .onConflictDoUpdate({
+        target: [loaHrNoteReads.enterpriseId, loaHrNoteReads.userId],
+        set: { lastReadAt: new Date() },
+      });
+  }
+
+  async getLoaHrNotesSummary(userId: string): Promise<LoaHrNotesSummaryRow[]> {
+    const rows = await db
+      .select({
+        enterpriseId: loaHrNotes.enterpriseId,
+        noteCount: sql<number>`count(*)::int`,
+        latestNoteAt: sql<Date>`max(${loaHrNotes.createdAt})`,
+        lastReadAt: sql<Date | null>`max(${loaHrNoteReads.lastReadAt})`,
+      })
+      .from(loaHrNotes)
+      .leftJoin(loaHrNoteReads, and(
+        eq(loaHrNoteReads.enterpriseId, loaHrNotes.enterpriseId),
+        eq(loaHrNoteReads.userId, userId),
+      ))
+      .groupBy(loaHrNotes.enterpriseId);
+
+    return rows.map(r => {
+      const latest = new Date(r.latestNoteAt);
+      const lastRead = r.lastReadAt ? new Date(r.lastReadAt) : null;
+      return {
+        enterpriseId: r.enterpriseId,
+        noteCount: r.noteCount,
+        latestNoteAt: latest.toISOString(),
+        hasUnread: !lastRead || lastRead < latest,
+      };
+    });
   }
 
   // ========================================

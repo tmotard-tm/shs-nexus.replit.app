@@ -13,6 +13,7 @@ run = ["npm", "run", "start"]
 
 [[ports]]
 localPort = 3456
+externalPort = 8080
 
 [[ports]]
 localPort = 5000
@@ -20,6 +21,7 @@ externalPort = 80
 
 [[ports]]
 localPort = 5071
+externalPort = 8008
 
 [[ports]]
 localPort = 10181
@@ -35,7 +37,7 @@ localPort = 22024
 
 [[ports]]
 localPort = 23636
-externalPort = 5000
+externalPort = 3000
 
 [[ports]]
 localPort = 23637

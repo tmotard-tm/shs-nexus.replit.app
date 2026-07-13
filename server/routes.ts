@@ -16866,6 +16866,74 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // ===== LOA HR Notes (per-technician append-only thread + per-viewer read state) =====
+
+  const isValidLoaNotesEid = (eid: string) => /^[A-Za-z0-9_.-]{1,50}$/.test(eid);
+
+  // Batch summary for the LOA table: note count, latest note time, unread flag for the current viewer
+  app.get("/api/loa-hr-notes/summary", requireAuth, async (req: any, res) => {
+    try {
+      const summary = await storage.getLoaHrNotesSummary(req.user.id);
+      res.json(summary);
+    } catch (error: any) {
+      console.error("Error fetching LOA HR notes summary:", error);
+      res.status(500).json({ message: "Failed to fetch HR notes summary", error: error.message });
+    }
+  });
+
+  // Full thread for one technician
+  app.get("/api/loa-hr-notes/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      if (!isValidLoaNotesEid(req.params.enterpriseId)) {
+        return res.status(400).json({ message: "Invalid enterprise ID" });
+      }
+      const notes = await storage.getLoaHrNotes(req.params.enterpriseId);
+      res.json(notes);
+    } catch (error: any) {
+      console.error("Error fetching LOA HR notes:", error);
+      res.status(500).json({ message: "Failed to fetch HR notes", error: error.message });
+    }
+  });
+
+  // Append a note (also marks the thread read for the author)
+  app.post("/api/loa-hr-notes/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      if (!isValidLoaNotesEid(req.params.enterpriseId)) {
+        return res.status(400).json({ message: "Invalid enterprise ID" });
+      }
+      const noteSchema = z.object({ note: z.string().trim().min(1, "Note cannot be empty").max(2000, "Note too long (max 2000 characters)") });
+      const parsed = noteSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({ message: parsed.error.errors[0]?.message || "Invalid note" });
+      }
+      const created = await storage.addLoaHrNote({
+        enterpriseId: req.params.enterpriseId,
+        note: parsed.data.note,
+        authorId: req.user.id,
+        authorName: req.user.username,
+      });
+      await storage.markLoaHrNotesRead(req.params.enterpriseId, req.user.id);
+      res.json(created);
+    } catch (error: any) {
+      console.error("Error adding LOA HR note:", error);
+      res.status(500).json({ message: "Failed to add HR note", error: error.message });
+    }
+  });
+
+  // Mark a thread read for the current viewer
+  app.post("/api/loa-hr-notes/:enterpriseId/read", requireAuth, async (req: any, res) => {
+    try {
+      if (!isValidLoaNotesEid(req.params.enterpriseId)) {
+        return res.status(400).json({ message: "Invalid enterprise ID" });
+      }
+      await storage.markLoaHrNotesRead(req.params.enterpriseId, req.user.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error marking LOA HR notes read:", error);
+      res.status(500).json({ message: "Failed to mark HR notes read", error: error.message });
+    }
+  });
+
   // Weekly Offboarding - Get term roster from Snowflake view with contact info
   // Weekly Offboarding - XLSX Export
   app.get("/api/weekly-offboarding/export.xlsx", requireAuth, async (req: any, res) => {

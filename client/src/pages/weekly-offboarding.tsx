@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -73,6 +73,22 @@ interface LoaTechEntry {
   dailyProfit: number | null;
   completes90d: number | null;
   totalRevenue90d: number | null;
+}
+
+interface LoaHrNoteSummary {
+  enterpriseId: string;
+  noteCount: number;
+  latestNoteAt: string;
+  hasUnread: boolean;
+}
+
+interface LoaHrNote {
+  id: string;
+  enterpriseId: string;
+  note: string;
+  authorId: string;
+  authorName: string;
+  createdAt: string;
 }
 
 export default function WeeklyOffboarding() {
@@ -175,6 +191,56 @@ export default function WeeklyOffboarding() {
   const { data: loaTechs = [], isLoading: loaLoading, refetch: refetchLoa } = useQuery<LoaTechEntry[]>({
     queryKey: ['/api/loa-trucks-to-recover'],
   });
+
+  // ===== LOA HR Notes (per-tech thread with unread indicators) =====
+  const [loaNotesEntry, setLoaNotesEntry] = useState<LoaTechEntry | null>(null);
+  const [loaNoteDraft, setLoaNoteDraft] = useState("");
+
+  const { data: loaNotesSummary = [] } = useQuery<LoaHrNoteSummary[]>({
+    queryKey: ['/api/loa-hr-notes/summary'],
+  });
+  const loaNotesSummaryMap = new Map(loaNotesSummary.map(s => [s.enterpriseId.toUpperCase(), s]));
+
+  const loaNotesEid = loaNotesEntry?.enterpriseId?.toUpperCase() || null;
+  const { data: loaNotesThread = [], isLoading: loaNotesLoading } = useQuery<LoaHrNote[]>({
+    queryKey: ['/api/loa-hr-notes', loaNotesEid],
+    enabled: !!loaNotesEid,
+  });
+
+  const markLoaNotesReadMutation = useMutation({
+    mutationFn: async (enterpriseId: string) => {
+      return await apiRequest('POST', `/api/loa-hr-notes/${enterpriseId}/read`, {});
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/loa-hr-notes/summary'] });
+    },
+    onError: (error: any) => {
+      console.error("Failed to mark HR notes read:", error);
+      toast({ title: "Couldn't update read status", description: "The unread badge may stay until you reopen the thread.", variant: "destructive" });
+    },
+  });
+
+  const addLoaNoteMutation = useMutation({
+    mutationFn: async ({ enterpriseId, note }: { enterpriseId: string; note: string }) => {
+      return await apiRequest('POST', `/api/loa-hr-notes/${enterpriseId}`, { note });
+    },
+    onSuccess: (_data, vars) => {
+      setLoaNoteDraft("");
+      queryClient.invalidateQueries({ queryKey: ['/api/loa-hr-notes', vars.enterpriseId.toUpperCase()] });
+      queryClient.invalidateQueries({ queryKey: ['/api/loa-hr-notes/summary'] });
+    },
+    onError: (error: any) => {
+      toast({ title: "Failed to add note", description: error?.message || "Please try again.", variant: "destructive" });
+    },
+  });
+
+  const openLoaNotes = (entry: LoaTechEntry) => {
+    setLoaNotesEntry(entry);
+    setLoaNoteDraft("");
+    if (entry.enterpriseId) {
+      markLoaNotesReadMutation.mutate(entry.enterpriseId.toUpperCase());
+    }
+  };
 
   // Collect all truck numbers from all tabs for batch fetch (including manual overrides)
   const truckNumbers = Array.from(new Set([
@@ -513,6 +579,15 @@ export default function WeeklyOffboarding() {
       (e.personalNumber || '').toLowerCase().includes(q)
     );
   }).sort((a, b) => {
+    // Unread HR notes pin rows to the top (newest note first), above all other sorting
+    const unreadA = a.enterpriseId ? (loaNotesSummaryMap.get(a.enterpriseId.toUpperCase())?.hasUnread ? 1 : 0) : 0;
+    const unreadB = b.enterpriseId ? (loaNotesSummaryMap.get(b.enterpriseId.toUpperCase())?.hasUnread ? 1 : 0) : 0;
+    if (unreadA !== unreadB) return unreadB - unreadA;
+    if (unreadA && unreadB) {
+      const latestA = new Date(loaNotesSummaryMap.get(a.enterpriseId.toUpperCase())!.latestNoteAt).getTime();
+      const latestB = new Date(loaNotesSummaryMap.get(b.enterpriseId.toUpperCase())!.latestNoteAt).getTime();
+      if (latestA !== latestB) return latestB - latestA;
+    }
     if (loaRentalTop) {
       const ar = a.enterpriseId && openRentalEidSet.has(a.enterpriseId.toUpperCase()) ? 1 : 0;
       const br = b.enterpriseId && openRentalEidSet.has(b.enterpriseId.toUpperCase()) ? 1 : 0;
@@ -1395,6 +1470,7 @@ export default function WeeklyOffboarding() {
                           <TableHead>Employment Status</TableHead>
                           <TableHead>Name</TableHead>
                           <TableHead>Enterprise ID</TableHead>
+                          <TableHead>HR Notes</TableHead>
                           <TableHead
                             className="cursor-pointer select-none hover:bg-muted/50"
                             onClick={() => setLoaRentalTop(prev => !prev)}
@@ -1458,6 +1534,27 @@ export default function WeeklyOffboarding() {
                             </TableCell>
                             <TableCell className="font-medium">{e.fullName || '-'}</TableCell>
                             <TableCell className="font-mono text-sm">{e.enterpriseId}</TableCell>
+                            <TableCell onClick={(ev) => ev.stopPropagation()}>
+                              {(() => {
+                                const noteSummary = e.enterpriseId ? loaNotesSummaryMap.get(e.enterpriseId.toUpperCase()) : undefined;
+                                return (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="relative h-8 px-2"
+                                    onClick={(ev) => { ev.stopPropagation(); openLoaNotes(e); }}
+                                    title={noteSummary ? `${noteSummary.noteCount} note${noteSummary.noteCount !== 1 ? 's' : ''}${noteSummary.hasUnread ? ' (unread)' : ''}` : 'Add HR note'}
+                                    data-testid={`button-loa-hr-notes-${e.enterpriseId}`}
+                                  >
+                                    <MessageSquare className={`h-4 w-4 ${noteSummary ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
+                                    {noteSummary && <span className="ml-1 text-xs font-medium">{noteSummary.noteCount}</span>}
+                                    {noteSummary?.hasUnread && (
+                                      <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-background" />
+                                    )}
+                                  </Button>
+                                );
+                              })()}
+                            </TableCell>
                             <TableCell>
                               {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
                                 <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
@@ -2196,6 +2293,71 @@ export default function WeeklyOffboarding() {
                 </div>
               ) : null}
             </div>
+          )}
+        </SheetContent>
+      </Sheet>
+
+      {/* LOA HR Notes Thread */}
+      <Sheet open={!!loaNotesEntry} onOpenChange={(open) => !open && setLoaNotesEntry(null)}>
+        <SheetContent className="w-[420px] sm:max-w-[420px] flex flex-col" data-testid="sheet-loa-hr-notes">
+          {loaNotesEntry && (
+            <>
+              <SheetHeader>
+                <SheetTitle className="flex items-center gap-2">
+                  <MessageSquare className="h-5 w-5 text-blue-600" />
+                  HR Notes — {loaNotesEntry.fullName || loaNotesEntry.enterpriseId}
+                </SheetTitle>
+                <SheetDescription>
+                  {loaNotesEntry.enterpriseId?.toUpperCase()} • Shared team thread
+                </SheetDescription>
+              </SheetHeader>
+              <div className="flex-1 overflow-y-auto space-y-3 py-4">
+                {loaNotesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <RefreshCw className="h-5 w-5 animate-spin text-muted-foreground" />
+                  </div>
+                ) : loaNotesThread.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-8">No notes yet. Add the first note below.</p>
+                ) : (
+                  loaNotesThread.map((n) => (
+                    <div key={n.id} className="rounded-lg border bg-muted/40 p-3" data-testid={`loa-hr-note-${n.id}`}>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-medium">{n.authorName}</span>
+                        <span className="text-xs text-muted-foreground">{format(new Date(n.createdAt), 'MM/dd/yyyy h:mm a')}</span>
+                      </div>
+                      <p className="text-sm whitespace-pre-wrap">{n.note}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="border-t pt-3 space-y-2">
+                <Textarea
+                  placeholder="Add a note..."
+                  value={loaNoteDraft}
+                  onChange={(ev) => setLoaNoteDraft(ev.target.value)}
+                  rows={3}
+                  maxLength={2000}
+                  data-testid="input-loa-hr-note"
+                />
+                <Button
+                  className="w-full"
+                  disabled={!loaNoteDraft.trim() || addLoaNoteMutation.isPending}
+                  onClick={() => {
+                    if (loaNotesEntry.enterpriseId && loaNoteDraft.trim()) {
+                      addLoaNoteMutation.mutate({ enterpriseId: loaNotesEntry.enterpriseId.toUpperCase(), note: loaNoteDraft.trim() });
+                    }
+                  }}
+                  data-testid="button-add-loa-hr-note"
+                >
+                  {addLoaNoteMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <MessageSquare className="h-4 w-4 mr-2" />
+                  )}
+                  Add Note
+                </Button>
+              </div>
+            </>
           )}
         </SheetContent>
       </Sheet>

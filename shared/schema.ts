@@ -791,6 +791,47 @@ export const insertOffboardingTruckOverrideSchema = createInsertSchema(offboardi
 export type InsertOffboardingTruckOverride = z.infer<typeof insertOffboardingTruckOverrideSchema>;
 export type OffboardingTruckOverride = typeof offboardingTruckOverrides.$inferSelect;
 
+// HR Notes thread for LOA recovery table — append-only notes keyed by technician Enterprise ID
+export const loaHrNotes = pgTable("loa_hr_notes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  enterpriseId: varchar("enterprise_id", { length: 50 }).notNull(), // stored uppercase
+  note: text("note").notNull(),
+  authorId: varchar("author_id").notNull(),
+  authorName: text("author_name").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    enterpriseIdIdx: index("loa_hr_notes_enterprise_id_idx").on(table.enterpriseId),
+    createdAtIdx: index("loa_hr_notes_created_at_idx").on(table.createdAt),
+  };
+});
+
+export const insertLoaHrNoteSchema = createInsertSchema(loaHrNotes).omit({ id: true, createdAt: true });
+export type InsertLoaHrNote = z.infer<typeof insertLoaHrNoteSchema>;
+export type LoaHrNote = typeof loaHrNotes.$inferSelect;
+
+// Per-viewer read state for LOA HR note threads
+export const loaHrNoteReads = pgTable("loa_hr_note_reads", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  enterpriseId: varchar("enterprise_id", { length: 50 }).notNull(), // stored uppercase
+  userId: varchar("user_id").notNull(),
+  lastReadAt: timestamp("last_read_at").defaultNow().notNull(),
+}, (table) => {
+  return {
+    eidUserIdx: uniqueIndex("loa_hr_note_reads_eid_user_idx").on(table.enterpriseId, table.userId),
+  };
+});
+
+export type LoaHrNoteRead = typeof loaHrNoteReads.$inferSelect;
+
+// Summary row returned by the batch summary endpoint
+export interface LoaHrNotesSummaryRow {
+  enterpriseId: string;
+  noteCount: number;
+  latestNoteAt: string;
+  hasUnread: boolean;
+}
+
 export const byovEnrollments = pgTable("byov_enrollments", {
   enterpriseId: text("enterprise_id").primaryKey(),
   fullName: text("full_name"),
