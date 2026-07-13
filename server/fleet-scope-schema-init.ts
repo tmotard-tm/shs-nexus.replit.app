@@ -745,6 +745,18 @@ CREATE TABLE IF NOT EXISTS "fs_luca_writeback_log" (
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_luca_writeback_source_external"
   ON "fs_luca_writeback_log" ("source", "external_id");
 
+-- Persist the last COMPLETED AMS active-sweep so a cold instance (fresh deploy /
+-- autoscale recycle) can hydrate the All Vehicles scorecard immediately instead
+-- of showing "Calculating…" for ~2 minutes while the ~2-min AMS pagination runs.
+-- Single row, id='current'; payload holds { data, activeVins[], vehicleNumberByVin }.
+CREATE TABLE IF NOT EXISTS "ams_sweep_snapshot" (
+  "id"            text PRIMARY KEY,
+  "payload"       jsonb NOT NULL,
+  "vehicle_count" integer NOT NULL DEFAULT 0,
+  "active_count"  integer NOT NULL DEFAULT 0,
+  "built_at"      timestamptz NOT NULL DEFAULT now()
+);
+
 DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decomm_messages' AND column_name='media_url') THEN
     ALTER TABLE "fs_decomm_messages" ADD COLUMN "media_url" text;
