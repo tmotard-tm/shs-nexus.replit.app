@@ -599,8 +599,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   console.log("=== STARTING ROUTE REGISTRATION ===");
 
   if (isExternalFleetReadApiEnabled()) {
-    registerExternalFleetReadApi(app);
-    console.log("[External Fleet API] Mounted at /api/external/fleet/v1");
+    const externalFleetMounted = registerExternalFleetReadApi(app);
+    console.log(
+      externalFleetMounted
+        ? "[External Fleet API] Mounted at /api/external/fleet/v1"
+        : "[External Fleet API] Enabled but NOT mounted: check NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON",
+    );
   } else {
     console.log("[External Fleet API] Disabled");
   }
