@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, Fragment } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,7 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
+  ChevronRight,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Truck, CallLog, MainStatus } from "@shared/fleet-scope-schema";
@@ -264,6 +265,127 @@ function historySortValue(log: CallLog, field: string): string | number | null |
   }
 }
 
+// Format a stored transcript (raw text, or a JSON array of conversation turns)
+// into readable "ROLE: message" lines. Falls back to the raw string.
+function buildTranscriptText(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const trimmed = raw.trim();
+  if (!trimmed) return "";
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (Array.isArray(parsed)) {
+      const lines = parsed
+        .map((turn: any) => {
+          const role = turn?.role ?? turn?.speaker ?? turn?.from ?? "";
+          const text = turn?.message ?? turn?.text ?? turn?.content ?? "";
+          const body = typeof text === "string" ? text : JSON.stringify(text);
+          const who = role ? `${String(role).toUpperCase()}: ` : "";
+          return `${who}${body}`.trim();
+        })
+        .filter((l) => l.length > 0);
+      if (lines.length > 0) return lines.join("\n");
+    }
+  } catch {
+    // Not JSON — treat as plain text.
+  }
+  return trimmed;
+}
+
+// Expandable detail panel for a CallLog row: full summary, ready date, blockers,
+// and an on-demand transcript. Rendered inside a full-width table cell.
+function CallSummaryDetail({ log }: { log: CallLog }) {
+  const [showTranscript, setShowTranscript] = useState(false);
+  const transcript = buildTranscriptText(log.transcript);
+  const summary = log.shopNotes?.trim();
+  return (
+    <div className="flex flex-col gap-3 py-1" data-testid={`detail-log-${log.id}`}>
+      <div>
+        <div className="text-xs font-medium text-muted-foreground mb-1">Call Summary</div>
+        <div className="text-sm whitespace-pre-wrap" data-testid={`text-summary-${log.id}`}>
+          {summary ? (
+            summary
+          ) : (
+            <span className="italic text-muted-foreground">No summary captured</span>
+          )}
+        </div>
+      </div>
+      {(log.estimatedReadyDate || log.blockers) && (
+        <div className="flex flex-wrap gap-x-8 gap-y-2">
+          {log.estimatedReadyDate && (
+            <div>
+              <div className="text-xs font-medium text-muted-foreground">Estimated Ready Date</div>
+              <div className="text-sm">{log.estimatedReadyDate}</div>
+            </div>
+          )}
+          {log.blockers && (
+            <div className="min-w-[200px]">
+              <div className="text-xs font-medium text-muted-foreground">Blockers</div>
+              <div className="text-sm whitespace-pre-wrap">{log.blockers}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {transcript && (
+        <div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            onClick={() => setShowTranscript((v) => !v)}
+            data-testid={`button-transcript-${log.id}`}
+          >
+            {showTranscript ? (
+              <ChevronDown className="h-3.5 w-3.5 mr-1" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 mr-1" />
+            )}
+            {showTranscript ? "Hide transcript" : "Show transcript"}
+          </Button>
+          {showTranscript && (
+            <div
+              className="mt-2 max-h-[300px] overflow-auto rounded-md border bg-muted/40 p-3 text-xs whitespace-pre-wrap font-mono leading-relaxed"
+              data-testid={`text-transcript-${log.id}`}
+            >
+              {transcript}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Expandable detail panel for a Truck's last call (Select & Call table).
+function TruckSummaryDetail({
+  summary,
+  status,
+}: {
+  summary: string | null;
+  status: string | null;
+}) {
+  const text = summary?.trim();
+  return (
+    <div className="flex flex-col gap-2 py-1">
+      {status && (
+        <div>
+          <span className="text-xs font-medium text-muted-foreground">Last Call Status: </span>
+          <span className="text-sm">{status}</span>
+        </div>
+      )}
+      <div>
+        <div className="text-xs font-medium text-muted-foreground mb-1">Last Call Summary</div>
+        <div className="text-sm whitespace-pre-wrap">
+          {text ? (
+            text
+          ) : (
+            <span className="italic text-muted-foreground">No summary captured</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 type BatchResult = {
   truckId: string;
   truckNumber: string;
@@ -314,6 +436,15 @@ export default function BatchCaller() {
   const [historyTypeFilter, setHistoryTypeFilter] = useState<Set<string>>(new Set());
   const [historySearch, setHistorySearch] = useState("");
 
+  // Select & Call last-outcome filter (mirrors the mainStatus filter).
+  const [callOutcomeFilter, setCallOutcomeFilter] = useState<Set<string>>(new Set());
+
+  // Expanded-row tracking, keyed by ROW ID (never index) so sorting/filtering
+  // re-orders don't move which row is open. CallLog ids are numeric -> String().
+  const [expandedFollowUps, setExpandedFollowUps] = useState<Set<string>>(new Set());
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set());
+  const [expandedTrucks, setExpandedTrucks] = useState<Set<string>>(new Set());
+
   const { data: trucks = [], isLoading: trucksLoading } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
   });
@@ -347,6 +478,13 @@ export default function BatchCaller() {
       result = result.filter((t) => t.mainStatus && selectedStatuses.has(t.mainStatus));
     }
 
+    if (callOutcomeFilter.size > 0) {
+      result = result.filter((t) => {
+        const o = callType === "shop" ? t.lastCallStatus : t.lastTechCallStatus;
+        return !!o && callOutcomeFilter.has(o);
+      });
+    }
+
     if (searchTerm.trim()) {
       const term = searchTerm.toLowerCase();
       result = result.filter(
@@ -358,7 +496,7 @@ export default function BatchCaller() {
     }
 
     return result;
-  }, [trucks, selectedStatuses, callType, searchTerm]);
+  }, [trucks, selectedStatuses, callOutcomeFilter, callType, searchTerm]);
 
   // Sorted view of the (already-filtered) trucks. Selection logic keeps using
   // filteredTrucks; sorting only reorders what is rendered.
@@ -389,6 +527,17 @@ export default function BatchCaller() {
   }, [filteredTrucks, callSort, callType]);
 
   // Distinct filter options derived from the data.
+  const callOutcomeOptions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          trucks
+            .map((t) => (callType === "shop" ? t.lastCallStatus : t.lastTechCallStatus))
+            .filter((v): v is string => !!v)
+        )
+      ).sort(),
+    [trucks, callType]
+  );
   const followOutcomeOptions = useMemo(
     () => Array.from(new Set(followUps.map((l) => l.outcome).filter((v): v is string => !!v))).sort(),
     [followUps]
@@ -559,7 +708,7 @@ export default function BatchCaller() {
         <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
           <CardTitle className="text-base">Vehicle Selection</CardTitle>
           <div className="flex items-center gap-2 flex-wrap">
-            <Select value={callType} onValueChange={(v: string) => { setCallType(v as "shop" | "tech"); setSelectedIds(new Set()); }}>
+            <Select value={callType} onValueChange={(v: string) => { setCallType(v as "shop" | "tech"); setSelectedIds(new Set()); setCallOutcomeFilter(new Set()); }}>
               <SelectTrigger className="w-[140px]" data-testid="select-call-type">
                 <SelectValue />
               </SelectTrigger>
@@ -622,6 +771,17 @@ export default function BatchCaller() {
                 </div>
               </PopoverContent>
             </Popover>
+
+            <MultiSelectFilter
+              label="All Outcomes"
+              options={callOutcomeOptions}
+              selected={callOutcomeFilter}
+              onToggle={(v) => toggleInSet(setCallOutcomeFilter, v)}
+              onClear={() => setCallOutcomeFilter(new Set())}
+              renderOption={(o) => <Badge variant="secondary" className="text-xs">{o}</Badge>}
+              testidPrefix="call-outcome"
+              width="w-[170px]"
+            />
 
             <div className="relative">
               <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -692,10 +852,13 @@ export default function BatchCaller() {
                       const name = callType === "shop" ? (truck.repairAddress || "—") : truck.techName;
                       const lastStatus = callType === "shop" ? truck.lastCallStatus : truck.lastTechCallStatus;
                       const lastDate = callType === "shop" ? truck.lastCallDate : truck.lastTechCallDate;
+                      const lastSummary = callType === "shop" ? truck.lastCallSummary : truck.lastTechCallSummary;
+                      const truckOpen = expandedTrucks.has(truck.id);
+                      const callColSpan = callType === "tech" ? 8 : 7;
 
                       return (
+                        <Fragment key={truck.id}>
                         <TableRow
-                          key={truck.id}
                           className="cursor-pointer"
                           onClick={() => toggleSelect(truck.id)}
                           data-testid={`row-truck-${truck.truckNumber}`}
@@ -738,24 +901,55 @@ export default function BatchCaller() {
                             {lastDate ? new Date(lastDate).toLocaleDateString() : "—"}
                           </TableCell>
                           <TableCell>
-                            {lastStatus ? (
-                              <Badge
-                                variant="secondary"
-                                className={`text-xs ${
-                                  lastStatus === "Ready" || lastStatus === "Will Pick Up"
-                                    ? "bg-green-600/15 text-green-700 dark:text-green-400"
-                                    : lastStatus === "Call Failed" || lastStatus === "Failed"
-                                    ? "bg-red-600/15 text-red-700 dark:text-red-400"
-                                    : "bg-yellow-600/15 text-yellow-700 dark:text-yellow-400"
-                                }`}
-                              >
-                                {lastStatus}
-                              </Badge>
-                            ) : (
-                              "—"
-                            )}
+                            <div className="flex items-center gap-1.5">
+                              {lastStatus ? (
+                                <Badge
+                                  variant="secondary"
+                                  className={`text-xs ${
+                                    lastStatus === "Ready" || lastStatus === "Will Pick Up"
+                                      ? "bg-green-600/15 text-green-700 dark:text-green-400"
+                                      : lastStatus === "Call Failed" || lastStatus === "Failed"
+                                      ? "bg-red-600/15 text-red-700 dark:text-red-400"
+                                      : "bg-yellow-600/15 text-yellow-700 dark:text-yellow-400"
+                                  }`}
+                                >
+                                  {lastStatus}
+                                </Badge>
+                              ) : (
+                                <span className="text-muted-foreground">—</span>
+                              )}
+                              {lastSummary?.trim() && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleInSet(setExpandedTrucks, truck.id);
+                                  }}
+                                  className="text-muted-foreground hover:text-foreground shrink-0"
+                                  aria-label={truckOpen ? "Hide last-call summary" : "Show last-call summary"}
+                                  data-testid={`button-expand-truck-${truck.truckNumber}`}
+                                >
+                                  {truckOpen ? (
+                                    <ChevronDown className="h-4 w-4" />
+                                  ) : (
+                                    <ChevronRight className="h-4 w-4" />
+                                  )}
+                                </button>
+                              )}
+                            </div>
                           </TableCell>
                         </TableRow>
+                        {truckOpen && lastSummary?.trim() && (
+                          <TableRow
+                            className="bg-muted/30 hover:bg-muted/30"
+                            data-testid={`row-truck-detail-${truck.truckNumber}`}
+                          >
+                            <TableCell colSpan={callColSpan} className="py-3">
+                              <TruckSummaryDetail summary={lastSummary} status={lastStatus} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
                       );
                     })}
                   </TableBody>
@@ -936,6 +1130,7 @@ export default function BatchCaller() {
                   <Table>
                     <TableHeader>
                       <TableRow>
+                        <TableHead className="w-8" />
                         <SortableHead label="Truck #" field="truckNumber" sort={followSort} onSort={onFollowSort} />
                         <SortableHead label="Type" field="callType" sort={followSort} onSort={onFollowSort} />
                         <SortableHead label="Last Outcome" field="outcome" sort={followSort} onSort={onFollowSort} />
@@ -944,19 +1139,47 @@ export default function BatchCaller() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {displayedFollowUps.map((log) => (
-                        <TableRow key={log.id} data-testid={`row-followup-${log.truckNumber}`}>
+                      {displayedFollowUps.map((log) => {
+                        const rowId = String(log.id);
+                        const isOpen = expandedFollowUps.has(rowId);
+                        return (
+                        <Fragment key={log.id}>
+                        <TableRow
+                          className="cursor-pointer"
+                          onClick={() => toggleInSet(setExpandedFollowUps, rowId)}
+                          data-testid={`row-followup-${log.truckNumber}`}
+                        >
+                          <TableCell className="w-8 align-top">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); toggleInSet(setExpandedFollowUps, rowId); }}
+                              className="text-muted-foreground hover:text-foreground"
+                              aria-label={isOpen ? "Collapse row" : "Expand row"}
+                              data-testid={`button-expand-followup-${log.id}`}
+                            >
+                              {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                            </button>
+                          </TableCell>
                           <TableCell className="font-medium">{log.truckNumber}</TableCell>
                           <TableCell>
                             <Badge variant="outline" className="text-xs">{log.callType}</Badge>
                           </TableCell>
                           <TableCell>{getOutcomeBadge(log.outcome)}</TableCell>
                           <TableCell className="text-sm">{log.nextFollowUpDate || "—"}</TableCell>
-                          <TableCell className="text-sm text-muted-foreground max-w-[300px] truncate">
-                            {log.shopNotes || "—"}
+                          <TableCell className="text-sm text-muted-foreground max-w-[300px]">
+                            <span className="line-clamp-2">{log.shopNotes || "—"}</span>
                           </TableCell>
                         </TableRow>
-                      ))}
+                        {isOpen && (
+                          <TableRow className="bg-muted/30 hover:bg-muted/30" data-testid={`row-followup-detail-${log.id}`}>
+                            <TableCell colSpan={6} className="py-3">
+                              <CallSummaryDetail log={log} />
+                            </TableCell>
+                          </TableRow>
+                        )}
+                        </Fragment>
+                        );
+                      })}
                     </TableBody>
                   </Table>
                 </div>
@@ -1031,6 +1254,7 @@ export default function BatchCaller() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-8" />
                     <SortableHead label="Time" field="callTimestamp" sort={historySort} onSort={onHistorySort} />
                     <SortableHead label="Truck #" field="truckNumber" sort={historySort} onSort={onHistorySort} />
                     <SortableHead label="Type" field="callType" sort={historySort} onSort={onHistorySort} />
@@ -1041,8 +1265,27 @@ export default function BatchCaller() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {displayedLogs.map((log) => (
-                    <TableRow key={log.id} data-testid={`row-log-${log.id}`}>
+                  {displayedLogs.map((log) => {
+                    const rowId = String(log.id);
+                    const isOpen = expandedLogs.has(rowId);
+                    return (
+                    <Fragment key={log.id}>
+                    <TableRow
+                      className="cursor-pointer"
+                      onClick={() => toggleInSet(setExpandedLogs, rowId)}
+                      data-testid={`row-log-${log.id}`}
+                    >
+                      <TableCell className="w-8 align-top">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); toggleInSet(setExpandedLogs, rowId); }}
+                          className="text-muted-foreground hover:text-foreground"
+                          aria-label={isOpen ? "Collapse row" : "Expand row"}
+                          data-testid={`button-expand-log-${log.id}`}
+                        >
+                          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                        </button>
+                      </TableCell>
                       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                         {log.callTimestamp ? new Date(log.callTimestamp).toLocaleString() : "—"}
                       </TableCell>
@@ -1066,11 +1309,20 @@ export default function BatchCaller() {
                         </Badge>
                       </TableCell>
                       <TableCell>{getOutcomeBadge(log.outcome)}</TableCell>
-                      <TableCell className="text-sm text-muted-foreground max-w-[250px] truncate">
-                        {log.shopNotes || "—"}
+                      <TableCell className="text-sm text-muted-foreground max-w-[250px]">
+                        <span className="line-clamp-2">{log.shopNotes || "—"}</span>
                       </TableCell>
                     </TableRow>
-                  ))}
+                    {isOpen && (
+                      <TableRow className="bg-muted/30 hover:bg-muted/30" data-testid={`row-log-detail-${log.id}`}>
+                        <TableCell colSpan={8} className="py-3">
+                          <CallSummaryDetail log={log} />
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    </Fragment>
+                    );
+                  })}
                 </TableBody>
               </Table>
             </div>
