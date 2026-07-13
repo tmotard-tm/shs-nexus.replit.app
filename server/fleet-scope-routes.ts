@@ -2628,7 +2628,14 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       req.path === '/webhooks/twilio-reg' ||
       req.path === '/comms/webhooks/inbound' ||
       req.path === '/comms/webhooks/status' ||
-      req.path.startsWith('/comms/public-media/')
+      req.path.startsWith('/comms/public-media/') ||
+      // Agent/API send surface: keyed server-to-server callers (COMMS_SEND_API_KEY)
+      // bypass the session gate here and are re-authenticated by apiOrGate inside
+      // fleet-comms/routes.ts. UI sessions fall through to requireAuth as normal.
+      (req.path.startsWith('/comms/api/') &&
+        !!process.env.COMMS_SEND_API_KEY &&
+        (req.headers['x-comms-api-key'] === process.env.COMMS_SEND_API_KEY ||
+          req.headers['x-api-key'] === process.env.COMMS_SEND_API_KEY))
     ) {
       return next();
     }
