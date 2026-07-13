@@ -445,3 +445,46 @@ async function withRouter(
     assert.equal(JSON.parse(text).error.code, "INTERNAL_ERROR");
   });
 }
+
+{
+  // escapeLikePattern renders LIKE metacharacters literal so a query such as
+  // "a%" cannot behave as a wildcard.
+  const escapeLikePattern = (tpmsReadModel as any).escapeLikePattern as (v: string) => string;
+  assert.equal(typeof escapeLikePattern, "function");
+  assert.equal(escapeLikePattern("plain"), "plain");
+  assert.equal(escapeLikePattern("a%"), "a\\%");
+  assert.equal(escapeLikePattern("a_b"), "a\\_b");
+  assert.equal(escapeLikePattern("a\\b"), "a\\\\b");
+  assert.equal(escapeLikePattern("%_\\"), "\\%\\_\\\\");
+}
+
+{
+  // The escaped term is what reaches the ILIKE and an ESCAPE clause is declared,
+  // so % and _ are matched literally in the generated SQL.
+  const databaseCondition = (tpmsReadModel as any).databaseCondition as (
+    sql: any,
+    lookup: TpmsLookup,
+    table: "live" | "cached",
+  ) => unknown;
+  assert.equal(typeof databaseCondition, "function");
+  let captured: { strings: string[]; values: unknown[] } = { strings: [], values: [] };
+  const fakeSql = (strings: TemplateStringsArray, ...values: unknown[]) => {
+    captured = { strings: Array.from(strings), values };
+    return { strings, values };
+  };
+  databaseCondition(fakeSql, { kind: "query", value: "a%_b" }, "live");
+  assert.equal(captured.values.includes("%a\\%\\_b%"), true);
+  assert.equal(captured.strings.some((part) => part.includes("ESCAPE '\\'")), true);
+}
+
+{
+  // A broad free-text search is capped so it cannot dump a large roster slice.
+  const createSearch = (tpmsReadModel as any).createTpmsLocalSearch;
+  const LIMIT = (tpmsReadModel as any).TPMS_SEARCH_RESULT_LIMIT as number;
+  assert.equal(typeof LIMIT, "number");
+  const many = Array.from({ length: LIMIT + 250 }, (_unused, index) =>
+    record("live", `BULK${index}`, "Bulk Sample", String(index)));
+  const search = createSearch(dependencies({ live: many }));
+  const rows = await search("Bulk Sample");
+  assert.equal(rows.length, LIMIT);
+}

@@ -414,3 +414,38 @@ async function withRouter(
     assert.equal(JSON.parse(bodyText).error.code, "SOURCE_UNAVAILABLE");
   });
 }
+
+{
+  // When a Snowflake source read returns exactly the row cap, the response must
+  // surface a PARTIAL_DATA warning instead of silently returning a partial slice.
+  const LIMIT = (rentalOpsReadModel as any).RENTAL_SOURCE_ROW_LIMIT as number;
+  assert.equal(typeof LIMIT, "number");
+  const bulkHolman = Array.from({ length: LIMIT }, (_unused, index) => ({
+    VEHICLE_NUMBER: String(10000 + index),
+    RENTAL_VENDOR: "Avis Sample",
+    PO_NUMBER: String(900000 + index),
+    PO_DATE: "2026-07-01",
+  }));
+  const build = createOpenRentalsReadModelBuilder({
+    isSnowflakeConfigured: () => true,
+    getSnowflakeService: async () => ({
+      connect: async () => undefined,
+      executeQuery: async (query: string) =>
+        query.includes("ENTERPRISE_OPEN_RENTAL_TICKET_REPORT")
+          ? []
+          : bulkHolman.map((row) => ({ ...row })),
+    }),
+    getOosVehicleSet: async () => new Set<string>(),
+    enrichEnterpriseIds: async () => undefined,
+    enrichWithTruckStatus: async () => undefined,
+    sourceUpdatedAt: () => null,
+    now: () => fixedNow,
+  });
+  // Unique fileDate keeps this out of the module-level rental-ops cache.
+  const result = await build({ fileDate: "2026-01-02", includeOos: true, view: "business_logic" });
+  assert.equal(result.warnings.some((warning) => warning.code === "PARTIAL_DATA"), true);
+  assert.equal(result.holmanNonEnterpriseCount, LIMIT);
+
+  const rawResult = await build({ fileDate: "2026-01-03", includeOos: true, view: "raw" });
+  assert.equal(rawResult.warnings.some((warning) => warning.code === "PARTIAL_DATA"), true);
+}

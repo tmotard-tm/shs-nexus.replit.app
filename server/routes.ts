@@ -12956,8 +12956,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
          WHERE LAST_DATE_WORKED >= '2026-01-01'
            AND EMPL_NAME IS NOT NULL`
       ) as any[];
-      // rentalNameParse is declared later in this file but hoisted to the top
-      // of the registerRoutes function scope, so it is safely callable here.
+      // rentalNameParse is imported from ./external-fleet-api/rental-ops-read-model.
       // Build names from unique EMPL_NAME values (same semantics as prior DISTINCT EMPL_NAME query)
       const namesSeen = new Set<string>();
       const names: Array<{ raw: string; last: string; first: string }> = [];

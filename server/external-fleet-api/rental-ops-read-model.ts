@@ -6,6 +6,10 @@ import type { ApiWarning } from "./types";
 export const RENTAL_OPEN_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
 export const RENTAL_TICKET_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
 const RENTAL_OPS_CACHE_TTL_MS = 30 * 60 * 1000;
+// Snowflake source reads are capped at this row count. A returned count equal
+// to the cap means the source was likely truncated, so a PARTIAL_DATA warning
+// is surfaced rather than silently returning an incomplete slice.
+export const RENTAL_SOURCE_ROW_LIMIT = 5000;
 
 type RentalRow = Record<string, any>;
 
@@ -348,7 +352,7 @@ export function createOpenRentalsReadModelBuilder(
     let model: OpenRentalsReadModel;
     if (showRaw) {
       const rows = await executeSourceQuery(
-        `SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(input.fileDate)} LIMIT 5000`,
+        `SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(input.fileDate)} LIMIT ${RENTAL_SOURCE_ROW_LIMIT}`,
       );
       const ticketRows = await client
         .executeQuery(
@@ -389,13 +393,20 @@ export function createOpenRentalsReadModelBuilder(
           };
         });
       await dependencies.enrichWithTruckStatus(data);
+      const warnings: ApiWarning[] = [];
+      if (rows.length === RENTAL_SOURCE_ROW_LIMIT) {
+        warnings.push({
+          code: "PARTIAL_DATA",
+          message: `Holman open rental rows were truncated at ${RENTAL_SOURCE_ROW_LIMIT}; results may be incomplete`,
+        });
+      }
       model = {
         data,
         total: data.length,
         totalPOLines: rows.length,
         view: "raw",
         sourceUpdatedAt: await dependencies.sourceUpdatedAt(),
-        warnings: [],
+        warnings,
       };
     } else {
       let ticketRows: RentalRow[];
@@ -403,10 +414,10 @@ export function createOpenRentalsReadModelBuilder(
       try {
         [ticketRows, holmanRows] = await Promise.all([
           client.executeQuery(
-            `SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(input.fileDate)} AND TICKET_STATUS='OPEN' LIMIT 5000`,
+            `SELECT * FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(input.fileDate)} AND TICKET_STATUS='OPEN' LIMIT ${RENTAL_SOURCE_ROW_LIMIT}`,
           ),
           client.executeQuery(
-            `SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(input.fileDate)} LIMIT 5000`,
+            `SELECT * FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(input.fileDate)} LIMIT ${RENTAL_SOURCE_ROW_LIMIT}`,
           ),
         ]);
       } catch (error) {
@@ -526,6 +537,16 @@ export function createOpenRentalsReadModelBuilder(
         }
       }
       await dependencies.enrichWithTruckStatus(allData);
+      const warnings: ApiWarning[] = [];
+      if (
+        ticketRows.length === RENTAL_SOURCE_ROW_LIMIT
+        || holmanRows.length === RENTAL_SOURCE_ROW_LIMIT
+      ) {
+        warnings.push({
+          code: "PARTIAL_DATA",
+          message: `Open rental source rows were truncated at ${RENTAL_SOURCE_ROW_LIMIT}; results may be incomplete`,
+        });
+      }
       model = {
         data: allData,
         total: allData.length,
@@ -535,7 +556,7 @@ export function createOpenRentalsReadModelBuilder(
         oosFilteredCount,
         view: "business_logic",
         sourceUpdatedAt: await dependencies.sourceUpdatedAt(),
-        warnings: [],
+        warnings,
       };
     }
 

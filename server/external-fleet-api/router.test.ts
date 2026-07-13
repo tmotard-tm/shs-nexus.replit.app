@@ -142,3 +142,33 @@ async function withServer<T>(app: Express, run: (baseUrl: string) => Promise<T>)
     assert.equal(await response.text(), "");
   });
 }
+
+{
+  // A malformed keyring secret must leave the API disabled (fail-closed) rather
+  // than throwing and bricking the whole deploy.
+  const app = express();
+  const badEnv = {
+    NEXUS_EXTERNAL_FLEET_READ_API_ENABLED: "true",
+    NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON: "{not-valid-json",
+  } as NodeJS.ProcessEnv;
+  assert.doesNotThrow(() => registerExternalFleetReadApi(app, badEnv));
+  assert.equal(registerExternalFleetReadApi(app, badEnv), false);
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/external/fleet/v1/health`);
+    assert.equal(response.status, 404);
+  });
+}
+
+{
+  // A structurally valid JSON keyring whose entry is invalid (key too short)
+  // must also fail closed instead of throwing.
+  const app = express();
+  const badEnv = {
+    NEXUS_EXTERNAL_FLEET_READ_API_ENABLED: "true",
+    NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON: JSON.stringify([
+      { consumerId: "bad", key: "too-short", scopes: ["modules:read"] },
+    ]),
+  } as NodeJS.ProcessEnv;
+  assert.doesNotThrow(() => registerExternalFleetReadApi(app, badEnv));
+  assert.equal(registerExternalFleetReadApi(app, badEnv), false);
+}

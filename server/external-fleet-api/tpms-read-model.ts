@@ -8,6 +8,16 @@ export const LIVE_FRESHNESS_WINDOW_SECONDS = 6 * 60 * 60;
 export const CACHED_FRESHNESS_WINDOW_SECONDS = 24 * 60 * 60;
 export const EXTRACT_FRESHNESS_WINDOW_SECONDS = 30 * 60 * 60;
 
+// Free-text profile search is capped so a broad query cannot dump a large
+// roster slice in a single response.
+export const TPMS_SEARCH_RESULT_LIMIT = 200;
+
+// Escape LIKE/ILIKE metacharacters so caller-supplied search text is matched
+// literally. The wrapping %...% wildcards are added by the caller after this.
+export function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, (char) => `\\${char}`);
+}
+
 export interface TpmsAssignmentValue {
   enterpriseId: string | null;
   technicianName: string | null;
@@ -94,7 +104,7 @@ async function loadDatabaseInfrastructure(): Promise<DatabaseInfrastructure> {
   return { sql, db };
 }
 
-function databaseCondition(sql: any, lookup: TpmsLookup, table: "live" | "cached") {
+export function databaseCondition(sql: any, lookup: TpmsLookup, table: "live" | "cached") {
   if (lookup.kind === "enterpriseId") {
     return table === "live"
       ? sql`UPPER(TRIM(enterprise_id)) = ${lookup.value}`
@@ -106,11 +116,11 @@ function databaseCondition(sql: any, lookup: TpmsLookup, table: "live" | "cached
       : sql`LTRIM(TRIM(COALESCE(truck_no, CASE WHEN lookup_type = 'truck_number' THEN lookup_key END)), '0') = ${lookup.value}`;
   }
   const upper = lookup.value.toUpperCase();
-  const pattern = `%${lookup.value}%`;
+  const pattern = `%${escapeLikePattern(lookup.value)}%`;
   const truck = /^\d+$/.test(lookup.value) ? toCanonical(lookup.value) : "__NO_TRUCK_MATCH__";
   return table === "live"
-    ? sql`(UPPER(TRIM(enterprise_id)) = ${upper} OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE ${pattern} OR LTRIM(TRIM(COALESCE(truck_no, '')), '0') = ${truck})`
-    : sql`(UPPER(TRIM(COALESCE(enterprise_id, CASE WHEN lookup_type = 'enterprise_id' THEN lookup_key END))) = ${upper} OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE ${pattern} OR LTRIM(TRIM(COALESCE(truck_no, CASE WHEN lookup_type = 'truck_number' THEN lookup_key END, '')), '0') = ${truck})`;
+    ? sql`(UPPER(TRIM(enterprise_id)) = ${upper} OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE ${pattern} ESCAPE '\\' OR LTRIM(TRIM(COALESCE(truck_no, '')), '0') = ${truck})`
+    : sql`(UPPER(TRIM(COALESCE(enterprise_id, CASE WHEN lookup_type = 'enterprise_id' THEN lookup_key END))) = ${upper} OR TRIM(COALESCE(first_name, '') || ' ' || COALESCE(last_name, '')) ILIKE ${pattern} ESCAPE '\\' OR LTRIM(TRIM(COALESCE(truck_no, CASE WHEN lookup_type = 'truck_number' THEN lookup_key END, '')), '0') = ${truck})`;
 }
 
 async function readLive(lookupInput: TpmsLookup): Promise<TpmsLocalRecord[]> {
@@ -321,7 +331,7 @@ export function createTpmsLocalSearch(dependencies: TpmsReadModelDependencies) {
     }
     return settled.flatMap((result) => result.status === "fulfilled"
       ? result.value.map((row) => ({ ...valueOf(row), sourceLayer: row.sourceLayer, observedAt: iso(row.observedAt), sourceUpdatedAt: iso(row.sourceUpdatedAt) }))
-      : []);
+      : []).slice(0, TPMS_SEARCH_RESULT_LIMIT);
   };
 }
 

@@ -210,17 +210,25 @@ export function createExternalFleetReadRouter(
           includeOos: parsed.data.includeOos === "true",
           view: parsed.data.view,
         });
-        const {
-          sourceUpdatedAt,
-          warnings,
-          _cachedAt: _legacyCachedAt,
-          ...data
-        } = model as OpenRentalsReadModel & { _cachedAt?: number };
+        const typed = model as OpenRentalsReadModel & { _cachedAt?: number };
+        // Explicit output allowlist: only the fields the v1 contract exposes
+        // today are forwarded, so a field later added to the shared read-model
+        // for an internal UI can never auto-leak to external callers.
+        const data: Record<string, unknown> = {
+          data: typed.data,
+          total: typed.total,
+          view: typed.view,
+        };
+        if (typed.enterpriseCount !== undefined) data.enterpriseCount = typed.enterpriseCount;
+        if (typed.holmanNonEnterpriseCount !== undefined) data.holmanNonEnterpriseCount = typed.holmanNonEnterpriseCount;
+        if (typed.totalHolmanPOLines !== undefined) data.totalHolmanPOLines = typed.totalHolmanPOLines;
+        if (typed.totalPOLines !== undefined) data.totalPOLines = typed.totalPOLines;
+        if (typed.oosFilteredCount !== undefined) data.oosFilteredCount = typed.oosFilteredCount;
         return res.json(
           createEnvelope({
-            sourceUpdatedAt,
-            freshness: rentalOpsFreshness(sourceUpdatedAt),
-            warnings,
+            sourceUpdatedAt: typed.sourceUpdatedAt,
+            freshness: rentalOpsFreshness(typed.sourceUpdatedAt),
+            warnings: typed.warnings,
             data,
           }),
         );
@@ -388,9 +396,20 @@ export function registerExternalFleetReadApi(
     return false;
   }
 
-  const consumers = parseExternalFleetKeyring(
-    env.NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON,
-  );
+  let consumers: ExternalFleetConsumer[];
+  try {
+    consumers = parseExternalFleetKeyring(
+      env.NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON,
+    );
+  } catch (error) {
+    console.error(
+      "[External Fleet API] NEXUS_EXTERNAL_FLEET_READ_API_KEYRING_JSON is invalid; " +
+        "the external fleet read API stays disabled: " +
+        (error instanceof Error ? error.message : String(error)),
+    );
+    return false;
+  }
+
   app.use(API_PATH, createExternalFleetReadRouter(consumers));
   return true;
 }
