@@ -919,6 +919,58 @@ export function registerCommsRoutes(app: Router): void {
     }
   });
 
+  // POST /comms/api/link-batch — re-home phone-only unmatched threads onto their
+  // contact's tech thread. { links: [{ phone, ldap }] }. For each pair, finds the
+  // unmatched thread by phone digits and links it to the ldap, using the SAME
+  // move-or-convert logic as POST /comms/threads/:id/link. Fixes threads created
+  // by a phone-only send (which land unmatched) so the conversation shows under
+  // the technician's name. Idempotent: a pair with no unmatched thread is a no-op.
+  app.post("/comms/api/link-batch", apiOrGate, async (req: any, res) => {
+    try {
+      const { links } = req.body || {};
+      if (!Array.isArray(links) || !links.length) return res.status(400).json({ message: "links[] required" });
+      if (links.length > SEND_CAP) return res.status(400).json({ message: `Too many (max ${SEND_CAP})` });
+      const results: any[] = [];
+      for (const item of links) {
+        const ldap = String(item?.ldap || "").trim().toUpperCase();
+        const digits = String(item?.phone || "").replace(/\D/g, "").slice(-10);
+        if (!ldap || digits.length < 10) { results.push({ ldap, phone: digits, ok: false, reason: "ldap + 10-digit phone required" }); continue; }
+        const contact = await getContactByLdap(ldap);
+        if (!contact) { results.push({ ldap, phone: digits, ok: false, reason: "unknown tech" }); continue; }
+        const [src] = await fsDb
+          .select()
+          .from(commsThreads)
+          .where(and(
+            eq(commsThreads.kind, "unmatched"),
+            sql`right(regexp_replace(coalesce(${commsThreads.phoneDigits}, ''), '[^0-9]', '', 'g'), 10) = ${digits}`,
+          ))
+          .limit(1);
+        if (!src) { results.push({ ldap, phone: digits, ok: false, reason: "no unmatched thread for phone" }); continue; }
+        const [existingTech] = await fsDb
+          .select()
+          .from(commsThreads)
+          .where(and(eq(commsThreads.kind, "tech"), eq(commsThreads.ldap, ldap)))
+          .limit(1);
+        if (existingTech && existingTech.id !== src.id) {
+          await fsDb.update(commsMessages).set({ threadId: existingTech.id, ldap }).where(eq(commsMessages.threadId, src.id));
+          await fsDb.delete(commsThreads).where(eq(commsThreads.id, src.id));
+          results.push({ ldap, phone: digits, ok: true, threadId: existingTech.id, mode: "merged" });
+        } else {
+          await fsDb
+            .update(commsThreads)
+            .set({ kind: "tech", ldap, contactName: contact.name, district: contact.district, truckNumber: contact.truckNumber })
+            .where(eq(commsThreads.id, src.id));
+          await fsDb.update(commsMessages).set({ ldap }).where(eq(commsMessages.threadId, src.id));
+          results.push({ ldap, phone: digits, ok: true, threadId: src.id, mode: "converted" });
+        }
+      }
+      res.json({ count: results.length, linked: results.filter((r) => r.ok).length, results });
+    } catch (e: any) {
+      console.error("[Fleet-Comms] api/link-batch error:", e?.message);
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
   // ── Contacts search (compose / link) ────────────────────────────────────
   app.get("/comms/contacts", gate, async (req: any, res) => {
     const search = String(req.query.search || "").trim();
