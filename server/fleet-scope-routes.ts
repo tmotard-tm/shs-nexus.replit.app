@@ -4828,7 +4828,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           status,
           estimated_ready_date
         FROM fs_call_logs
-        WHERE call_type = 'repair'
+        WHERE call_type IN ('shop', 'repair')
         ORDER BY truck_id, call_timestamp DESC
       `);
 
@@ -5091,9 +5091,26 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         readyReason?: 'luca' | 'holman' | 'date';
       };
 
-      // Helper: call log is authoritative over denormalized truck fields for luca status/date
+      // Helper: a truck's latest shop call is "unresolved" when its most recent call log is still
+      // in flight (never reached a completed/failed lifecycle). While unresolved, the denormalized
+      // truck.lastCallStatus reflects an OLDER call, so a stale "Ready" must not surface as current.
+      // NOTE: callLogMap.callStatus is the CALL LIFECYCLE (in_progress/completed/failed), NOT the
+      // analyzed "Ready/In Repair" label — that label lives only on truck.lastCallStatus.
+      function latestCallUnresolved(t: (typeof allTrucks)[0]): boolean {
+        const cs = callLogMap[t.id]?.callStatus;
+        return !!cs && cs !== 'completed' && cs !== 'failed';
+      }
+      // Helper: the luca label to DISPLAY. Falls back to a neutral "Calling" while the latest call
+      // is unresolved, so an old label cannot masquerade as the current call result.
       function lucaStatusFor(t: (typeof allTrucks)[0]): string | null {
-        return callLogMap[t.id]?.callStatus ?? t.lastCallStatus ?? null;
+        if (latestCallUnresolved(t)) return 'Calling';
+        return t.lastCallStatus ?? null;
+      }
+      // Helper: is the truck actually READY per its latest call? A newer unresolved (in-flight) call
+      // must not let a stale "Ready" on the truck record qualify it. When there is no shop-call
+      // history at all, fall back to the denormalized label.
+      function lucaReadyFor(t: (typeof allTrucks)[0]): boolean {
+        return !latestCallUnresolved(t) && ((t.lastCallStatus ?? null) === 'Ready');
       }
       function lastCallDateFor(t: (typeof allTrucks)[0]): Date | null {
         return callLogMap[t.id]?.callTimestamp ?? t.lastCallDate ?? null;
@@ -5148,12 +5165,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         // If Holman shows authorization is still pending, don't pull into Step 3 — let it fall to Step 4
         if (isHolmanInAuthorization(hs)) return false;
         const cl = callLogMap[t.id];
-        // Call log authoritative: use cl.callStatus first, then truck denormalized field
-        const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
         // Call log authoritative: use cl.estimatedReadyDate first, then truck fields
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
         const holmanReady = isHolmanRepairComplete(hs);
-        const lucaReady = lucaStatus === 'Ready';
+        // Ready only if the latest call actually confirms it — a newer in-flight call must not let
+        // a stale "Ready" on the truck record qualify here (see lucaReadyFor / latestCallUnresolved).
+        const lucaReady = lucaReadyFor(t);
         // Compare against end-of-day so any ERD time today (not just midnight) qualifies
         const dateReady = erd ? (new Date(erd) <= TODAY_END && !RETURNED_SET.has(t.mainStatus ?? '')) : false;
         return holmanReady || lucaReady || dateReady;
@@ -5174,8 +5191,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const isConflict = t.mainStatus === 'Repairing' || t.mainStatus === 'Confirming Status' || t.mainStatus === 'Decision Pending';
         const cl = callLogMap[t.id];
         const erd = cl?.estimatedReadyDate ?? t.eta ?? t.expectedCompletion ?? null;
-        const lucaStatus = cl?.callStatus ?? t.lastCallStatus ?? null;
-        const lucaReady = lucaStatus === 'Ready';
+        const lucaReady = lucaReadyFor(t);
         const holmanReady = isHolmanRepairComplete(getHolmanStatus(t.truckNumber));
         const readyReason: 'luca' | 'holman' | 'date' = lucaReady ? 'luca' : holmanReady ? 'holman' : 'date';
         const actionText = isConflict
@@ -5579,6 +5595,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       try {
         await fleetScopeStorage.updateTruck(truck.id, {
           lastCallDate: new Date(),
+          // "Calling" clears any prior "Ready" while this new call is in flight; the completion
+          // handler overwrites it with the real analyzed status once the call finishes.
+          lastCallStatus: "Calling",
           lastCallConversationId: conversationId,
           lastCallSummary: null,
         });
@@ -6072,7 +6091,10 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             if (callType === "tech") {
               await fleetScopeStorage.updateTruck(truck.id, { lastTechCallDate: new Date(), lastTechCallConversationId: conversationId, lastTechCallSummary: null });
             } else {
-              await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallConversationId: conversationId, lastCallSummary: null });
+              // Setting lastCallStatus to "Calling" on initiation prevents a prior "Ready" from
+              // persisting on a truck whose new call never completes (stale-Ready bug). The real
+              // outcome overwrites this when the call finishes (see applyCallResultToTruck).
+              await fleetScopeStorage.updateTruck(truck.id, { lastCallDate: new Date(), lastCallStatus: "Calling", lastCallConversationId: conversationId, lastCallSummary: null });
             }
 
             job.results.push({ truckId, truckNumber: vehicleNum, status: "in_progress", conversationId });
