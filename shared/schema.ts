@@ -759,6 +759,7 @@ export const vehicleNexusData = pgTable("vehicle_nexus_data", {
   nexusNewLocationContact: varchar("nexus_new_location_contact", { length: 30 }), // Phone number
   keys: text("keys"), // Present, Not Present, Unknown/Would not Check
   repaired: text("repaired"), // Complete, In Process, Unknown if needed, Declined
+  returnedRental: text("returned_rental"), // Confirmed, Needs a TLT, Unconfirmed, Denied
   comments: text("comments"), // Up to 400 characters
   phoneRecoveryInitiated: text("phone_recovery_initiated"), // yes or no
   toolsPartsLocation: text("tools_parts_location"), // in_the_truck or techs_home

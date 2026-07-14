@@ -6537,6 +6537,7 @@ export class DatabaseStorage implements IStorage {
           nexusNewLocationContact: data.nexusNewLocationContact,
           keys: data.keys,
           repaired: data.repaired,
+          returnedRental: data.returnedRental,
           comments: data.comments,
           phoneRecoveryInitiated: data.phoneRecoveryInitiated,
           toolsPartsLocation: data.toolsPartsLocation,

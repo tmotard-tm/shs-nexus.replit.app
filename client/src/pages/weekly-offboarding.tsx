@@ -130,6 +130,7 @@ export default function WeeklyOffboarding() {
   const [loaNexusContact, setLoaNexusContact] = useState("");
   const [loaNexusKeys, setLoaNexusKeys] = useState("");
   const [loaNexusRepaired, setLoaNexusRepaired] = useState("");
+  const [loaNexusReturnedRental, setLoaNexusReturnedRental] = useState("");
   const [loaNexusComments, setLoaNexusComments] = useState("");
   const [loaManualTruck, setLoaManualTruck] = useState("");
 
@@ -730,6 +731,7 @@ export default function WeeklyOffboarding() {
       setLoaNexusContact(loaNexusData.nexusNewLocationContact || "");
       setLoaNexusKeys(loaNexusData.keys || "");
       setLoaNexusRepaired(loaNexusData.repaired || "");
+      setLoaNexusReturnedRental(loaNexusData.returnedRental || "");
       setLoaNexusComments(loaNexusData.comments || "");
     } else {
       setLoaNexusStatus("");
@@ -737,6 +739,7 @@ export default function WeeklyOffboarding() {
       setLoaNexusContact("");
       setLoaNexusKeys("");
       setLoaNexusRepaired("");
+      setLoaNexusReturnedRental("");
       setLoaNexusComments("");
     }
   }, [loaNexusData, selectedLoaEntry]);
@@ -757,6 +760,7 @@ export default function WeeklyOffboarding() {
       nexusNewLocationContact: string | null;
       keys: string | null;
       repaired: string | null;
+      returnedRental: string | null;
       comments: string | null;
     }) => {
       return await apiRequest('PUT', `/api/vehicle-nexus-data/${data.vehicleNumber}`, data);
@@ -2257,6 +2261,22 @@ export default function WeeklyOffboarding() {
                       </div>
 
                       <div>
+                        <Label className="text-xs text-muted-foreground">Returned Rental</Label>
+                        <Select value={loaNexusReturnedRental} onValueChange={setLoaNexusReturnedRental}>
+                          <SelectTrigger className="mt-1" data-testid="select-loa-returned-rental">
+                            <SelectValue placeholder="Select returned rental status..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">-- None --</SelectItem>
+                            <SelectItem value="confirmed">Confirmed</SelectItem>
+                            <SelectItem value="needs_tlt">Needs a TLT</SelectItem>
+                            <SelectItem value="unconfirmed">Unconfirmed</SelectItem>
+                            <SelectItem value="denied">Denied</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div>
                         <Label className="text-xs text-muted-foreground">Comments</Label>
                         <Textarea
                           value={loaNexusComments}
@@ -2277,6 +2297,7 @@ export default function WeeklyOffboarding() {
                           nexusNewLocationContact: loaNexusContact || null,
                           keys: loaNexusKeys === '__none__' ? null : (loaNexusKeys || null),
                           repaired: loaNexusRepaired === '__none__' ? null : (loaNexusRepaired || null),
+                          returnedRental: loaNexusReturnedRental === '__none__' ? null : (loaNexusReturnedRental || null),
                           comments: loaNexusComments || null,
                         })}
                         disabled={saveLoaNexusMutation.isPending}
