@@ -327,7 +327,13 @@ export function registerCommsRoutes(app: Router): void {
       // Rental Management view isn't flooded with decommissioning history etc.
       const msgCategory = String(req.query.category || "").trim();
       const categoryScoped = !!msgCategory && isValidCategory(msgCategory);
-      if (categoryScoped) msgConds.push(eq(commsMessages.category, msgCategory));
+      // Category isolation keeps a category tab from showing another lane's
+      // OUTBOUND campaign history. Inbound replies always belong to the open
+      // conversation, though: attribution tags a reply general_fleet when the
+      // last-outbound window has lapsed, and hiding it here made replies show
+      // in the inbox list but vanish from the thread. Scope by category OR keep
+      // any inbound message.
+      if (categoryScoped) msgConds.push(or(eq(commsMessages.category, msgCategory), eq(commsMessages.direction, "inbound")));
       if (before) {
         const beforeDate = new Date(before);
         if (!isNaN(beforeDate.getTime())) msgConds.push(sql`${commsMessages.createdAt} < ${beforeDate}`);
