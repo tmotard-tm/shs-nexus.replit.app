@@ -257,6 +257,8 @@ export default function WeeklyOffboarding() {
   const { data: allNexusData = [] } = useQuery<{
     vehicleNumber: string;
     postOffboardedStatus: string | null;
+    returnedRental: string | null;
+    returnedRentalAt: string | null;
     phoneRecoveryInitiated: string | null;
     toolsPartsLocation: string | null;
     partsRecoveryInitiated: string | null;
@@ -275,6 +277,14 @@ export default function WeeklyOffboarding() {
   const nexusDataMap = new Map(
     allNexusData.map(item => [item.vehicleNumber, item])
   );
+
+  // Returned Rental labels for display
+  const returnedRentalLabels: Record<string, string> = {
+    'confirmed': 'Confirmed',
+    'needs_tlt': 'Needs a TLT',
+    'unconfirmed': 'Unconfirmed',
+    'denied': 'Denied',
+  };
 
   // Manual status labels for display
   const manualStatusLabels: Record<string, string> = {
@@ -1566,11 +1576,19 @@ export default function WeeklyOffboarding() {
                               })()}
                             </TableCell>
                             <TableCell>
-                              {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
-                                <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
-                                  Rental
-                                </Badge>
-                              ) : null}
+                              <div className="flex flex-col items-start gap-0.5">
+                                {e.enterpriseId && openRentalEidSet.has(e.enterpriseId.toUpperCase()) ? (
+                                  <Badge className="text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 border-amber-300 dark:border-amber-700">
+                                    Rental
+                                  </Badge>
+                                ) : null}
+                                {loaNexus?.returnedRental && (
+                                  <span className="text-xs text-muted-foreground whitespace-nowrap" data-testid={`text-returned-rental-${e.enterpriseId}`}>
+                                    {returnedRentalLabels[loaNexus.returnedRental] || loaNexus.returnedRental}
+                                    {loaNexus.returnedRentalAt ? ` ${format(new Date(loaNexus.returnedRentalAt), 'dd/MM')}` : ''}
+                                  </span>
+                                )}
+                              </div>
                             </TableCell>
                             <TableCell className="text-sm whitespace-nowrap">
                               {lastWorkedDate ? (

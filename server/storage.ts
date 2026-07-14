@@ -6538,6 +6538,11 @@ export class DatabaseStorage implements IStorage {
           keys: data.keys,
           repaired: data.repaired,
           returnedRental: data.returnedRental,
+          returnedRentalAt: data.returnedRental === undefined
+            ? undefined
+            : (data.returnedRental === null
+              ? null
+              : (existing.returnedRental === data.returnedRental ? existing.returnedRentalAt : new Date())),
           comments: data.comments,
           phoneRecoveryInitiated: data.phoneRecoveryInitiated,
           toolsPartsLocation: data.toolsPartsLocation,
@@ -6556,6 +6561,7 @@ export class DatabaseStorage implements IStorage {
         id: randomUUID(),
         vehicleNumber: storedVehicleNumber,
         vehicleNumberDisplay: displayNumber,
+        returnedRentalAt: data.returnedRental ? new Date() : null,
       }).returning();
       return result[0];
     }
