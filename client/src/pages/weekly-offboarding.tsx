@@ -1549,8 +1549,10 @@ export default function WeeklyOffboarding() {
                                     data-testid={`button-loa-hr-notes-${e.enterpriseId}`}
                                   >
                                     <MessageSquare className={`h-4 w-4 ${noteSummary && noteSummary.unreadCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`} />
-                                    {noteSummary && noteSummary.unreadCount > 0 && (
-                                      <span className="ml-1 text-xs font-medium text-blue-600 dark:text-blue-400">{noteSummary.unreadCount}</span>
+                                    {noteSummary && (
+                                      <span className={`ml-1 text-xs font-medium ${noteSummary.unreadCount > 0 ? 'text-blue-600 dark:text-blue-400' : 'text-muted-foreground'}`}>
+                                        {noteSummary.unreadCount > 0 ? noteSummary.unreadCount : noteSummary.noteCount}
+                                      </span>
                                     )}
                                     {noteSummary && noteSummary.unreadCount > 0 && (
                                       <span className="absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-red-500 border-2 border-background" />
