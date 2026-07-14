@@ -1039,6 +1039,10 @@ export default function NewRentals() {
   const [decidingPoId, setDecidingPoId] = useState<string | null>(null);
   const [poDeciderName, setPoDeciderName] = useState("");
   const [poConfirmAction, setPoConfirmAction] = useState<"approve" | "deny" | null>(null);
+  // While a Holman refresh is in flight (the scrape can outrun the edge-proxy
+  // timeout), poll the queue so new rentals appear even if the POST times out
+  // before it returns — the backend upsert still lands.
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[] }>({
     queryKey: ["/api/vrm/holman-po-queue"],
@@ -1050,6 +1054,7 @@ export default function NewRentals() {
     enabled: canApproveHolman,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    refetchInterval: refreshing ? 5000 : false,
   });
   const poQueue = poQueueData?.rows ?? [];
   // Actionable worklist: pending AND the loud not-done states (blocked / failed) so a PO
@@ -1066,13 +1071,27 @@ export default function NewRentals() {
   const holmanAutoRefreshed = useRef(false);
 
   const refreshPoMut = useMutation({
+    onMutate: () => setRefreshing(true),
     mutationFn: async () => {
       const r = await fetch("/api/vrm/holman-po-queue/refresh", { method: "POST", credentials: "include" });
       if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
       return r.json();
     },
-    onSuccess: () => { refetchPoQueue(); toast({ title: "Holman queue refreshed" }); },
-    onError: (e: any) => toast({ title: "Refresh failed", description: e.message, variant: "destructive" }),
+    // The endpoint returns the fresh queue, so apply it directly. The scrape can
+    // outrun the edge-proxy timeout; on error we keep the polling window (below)
+    // running so the queue still updates once the backend upsert lands — the
+    // "refreshing then nothing changed" symptom was the POST timing out before
+    // onSuccess could fire.
+    onSuccess: (data: any) => {
+      if (data?.rows) qc.setQueryData(["/api/vrm/holman-po-queue"], { rows: data.rows });
+      else refetchPoQueue();
+      setRefreshing(false);
+      toast({ title: "Holman queue refreshed" });
+    },
+    onError: () => {
+      refetchPoQueue();
+      toast({ title: "Still pulling from Holman…", description: "This can take a minute on a full queue. The list updates automatically when it lands." });
+    },
   });
 
   useEffect(() => {
@@ -1081,6 +1100,14 @@ export default function NewRentals() {
     refreshPoMut.mutate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canApproveHolman]);
+
+  // Cap the polling window so the spinner cannot hang forever if the scrape
+  // genuinely fails; by then the queue has refetched several times.
+  useEffect(() => {
+    if (!refreshing) return;
+    const t = setTimeout(() => setRefreshing(false), 150_000);
+    return () => clearTimeout(t);
+  }, [refreshing]);
 
   const approvePoMut = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
@@ -2041,18 +2068,18 @@ export default function NewRentals() {
           </div>
           <button
             onClick={() => refreshPoMut.mutate()}
-            disabled={refreshPoMut.isPending}
+            disabled={refreshing}
             style={{
               display: "flex", alignItems: "center", gap: 6,
               fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 500,
               color: colors.accent, backgroundColor: "transparent",
               border: `1px solid ${colors.accent}`, borderRadius: 8,
-              padding: "6px 14px", cursor: refreshPoMut.isPending ? "not-allowed" : "pointer",
-              opacity: refreshPoMut.isPending ? 0.6 : 1,
+              padding: "6px 14px", cursor: refreshing ? "not-allowed" : "pointer",
+              opacity: refreshing ? 0.6 : 1,
             }}
           >
-            {refreshPoMut.isPending ? <Loader2 size={13} className="animate-spin" /> : null}
-            {refreshPoMut.isPending ? "Pulling from Holman…" : "Refresh from Holman"}
+            {refreshing ? <Loader2 size={13} className="animate-spin" /> : null}
+            {refreshing ? "Pulling from Holman…" : "Refresh from Holman"}
           </button>
         </div>
 
@@ -2122,7 +2149,7 @@ export default function NewRentals() {
           );
         })()}
 
-        {pendingPoQueue.length === 0 && !refreshPoMut.isPending && (
+        {pendingPoQueue.length === 0 && !refreshing && (
           <div style={{
             padding: "24px 20px", border: `1px dashed ${colors.rule}`,
             borderRadius: 10, textAlign: "center",
