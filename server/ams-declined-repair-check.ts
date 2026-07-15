@@ -34,6 +34,48 @@ import {
 const SYNC_TYPE = "ams_declined_repair_check";
 const DECLINED_LABEL = "declined repair";
 
+// Idempotent DDL so the tables exist in every environment (prod DBs are not
+// migrated by drizzle-kit for this feature). Keep in lockstep with the
+// amsStatusDailySnapshots / amsDeclinedRepairFindings defs in shared/schema.ts.
+const ENSURE_TABLES_SQL = `
+CREATE TABLE IF NOT EXISTS ams_status_daily_snapshots (
+  id SERIAL PRIMARY KEY,
+  snapshot_date DATE NOT NULL,
+  vin VARCHAR(50) NOT NULL,
+  truck_number VARCHAR(20),
+  status_label TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ams_status_snapshot_date_vin_uq
+  ON ams_status_daily_snapshots (snapshot_date, vin);
+CREATE INDEX IF NOT EXISTS ams_status_snapshot_date_idx
+  ON ams_status_daily_snapshots (snapshot_date);
+CREATE TABLE IF NOT EXISTS ams_declined_repair_findings (
+  id SERIAL PRIMARY KEY,
+  detected_date DATE NOT NULL,
+  vin VARCHAR(50) NOT NULL,
+  truck_number VARCHAR(20),
+  previous_status TEXT,
+  new_status TEXT NOT NULL,
+  dedup_outcome TEXT NOT NULL,
+  decommissioning_vehicle_id INTEGER,
+  address TEXT,
+  zip_code VARCHAR(20),
+  created_at TIMESTAMP NOT NULL DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ams_declined_finding_date_vin_uq
+  ON ams_declined_repair_findings (detected_date, vin);
+CREATE INDEX IF NOT EXISTS ams_declined_finding_date_idx
+  ON ams_declined_repair_findings (detected_date);
+`;
+
+let tablesEnsured = false;
+async function ensureTables(): Promise<void> {
+  if (tablesEnsured) return;
+  await db.execute(dsql.raw(ENSURE_TABLES_SQL));
+  tablesEnsured = true;
+}
+
 const amsApiService = new AmsApiService();
 
 function etToday(): string {
@@ -195,6 +237,7 @@ export function runAmsDeclinedRepairCheck(
 async function runAmsDeclinedRepairCheckInner(
   triggeredBy: string,
 ): Promise<DeclinedCheckResult> {
+  await ensureTables();
   const today = etToday();
   const [logRow] = await db
     .insert(syncLogs)
@@ -400,6 +443,7 @@ async function runAmsDeclinedRepairCheckInner(
 
 // Report: findings grouped by date (most recent first) + last run info.
 export async function getDeclinedRepairReport(days = 30) {
+  await ensureTables();
   const rows = await db
     .select()
     .from(amsDeclinedRepairFindings)
