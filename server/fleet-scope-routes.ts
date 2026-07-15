@@ -16303,6 +16303,37 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // ── Daily AMS Declined Repair check ──────────────────────────────────────
+  // Snapshot today's AMS statuses, diff vs the previous snapshot, and auto-add
+  // NEW Declined Repair trucks to Decommissioning (with dedup vs decomm list,
+  // exclusion list, and the PO "Decline and Submit for Sale" path).
+  // Reachable by session users AND x-internal-cron (router-wide bypass above)
+  // — the Fleet-Dispatcher repl calls this each morning.
+  app.post("/ams-declined-check/run", async (req: any, res) => {
+    try {
+      const triggeredBy = req.user?.username
+        ? `manual:${req.user.username}`
+        : "scheduled_dispatcher";
+      const { runAmsDeclinedRepairCheck } = await import("./ams-declined-repair-check");
+      const result = await runAmsDeclinedRepairCheck(triggeredBy);
+      res.json(result);
+    } catch (error: any) {
+      console.error("[AMS DeclinedCheck] Run failed:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Daily report: findings grouped by date + snapshot history + last run.
+  app.get("/ams-declined-check/report", async (_req, res) => {
+    try {
+      const { getDeclinedRepairReport } = await import("./ams-declined-repair-check");
+      res.json(await getDeclinedRepairReport());
+    } catch (error: any) {
+      console.error("[AMS DeclinedCheck] Report failed:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // List trucks excluded from PO-driven decommissioning syncs (deleted via X)
   app.get("/decommissioning/excluded", async (_req, res) => {
     try {

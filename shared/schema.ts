@@ -2866,3 +2866,42 @@ export const updateExternalAppSchema = insertExternalAppSchema.partial();
 export type ExternalApp = typeof externalApps.$inferSelect;
 export type InsertExternalApp = z.infer<typeof insertExternalAppSchema>;
 
+
+// ─── Daily AMS truck-status snapshot + Declined Repair findings ─────────────
+// One row per (ET snapshot date, VIN) capturing the AMS truck-status label
+// served by the same VIN→status map the UI uses (AMS + Snowflake supplement).
+export const amsStatusDailySnapshots = pgTable("ams_status_daily_snapshots", {
+  id: serial("id").primaryKey(),
+  snapshotDate: date("snapshot_date").notNull(), // ET calendar date
+  vin: varchar("vin", { length: 50 }).notNull(),
+  truckNumber: varchar("truck_number", { length: 20 }),
+  statusLabel: text("status_label"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("ams_status_snapshot_date_vin_uq").on(t.snapshotDate, t.vin),
+  index("ams_status_snapshot_date_idx").on(t.snapshotDate),
+]);
+
+export type AmsStatusDailySnapshot = typeof amsStatusDailySnapshots.$inferSelect;
+
+// One row per truck newly detected in "Declined Repair" on a given day,
+// with the dedup outcome of the Decommissioning auto-add.
+export const amsDeclinedRepairFindings = pgTable("ams_declined_repair_findings", {
+  id: serial("id").primaryKey(),
+  detectedDate: date("detected_date").notNull(), // ET calendar date
+  vin: varchar("vin", { length: 50 }).notNull(),
+  truckNumber: varchar("truck_number", { length: 20 }),
+  previousStatus: text("previous_status"), // null = VIN not in previous snapshot
+  newStatus: text("new_status").notNull(),
+  // 'added' | 'already_in_decommissioning' | 'already_excluded' | 'covered_by_po_sync' | 'no_truck_number'
+  dedupOutcome: text("dedup_outcome").notNull(),
+  decommissioningVehicleId: integer("decommissioning_vehicle_id"),
+  address: text("address"),
+  zipCode: varchar("zip_code", { length: 20 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (t) => [
+  uniqueIndex("ams_declined_finding_date_vin_uq").on(t.detectedDate, t.vin),
+  index("ams_declined_finding_date_idx").on(t.detectedDate),
+]);
+
+export type AmsDeclinedRepairFinding = typeof amsDeclinedRepairFindings.$inferSelect;

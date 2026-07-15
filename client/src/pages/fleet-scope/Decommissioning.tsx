@@ -36,6 +36,7 @@ import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, 
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocation } from "wouter";
 import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
+import { AmsDeclinedCheckDialog } from "@/components/fleet-scope/AmsDeclinedCheckDialog";
 import ExcelJS from 'exceljs';
 import { downloadExcelWorkbook, addJsonWorksheet, readExcelFileAs2D } from '@/lib/xlsx-utils';
 
@@ -827,6 +828,8 @@ export default function Decommissioning() {
           </Button>
 
           <RestoreDeletedTrucksDialog />
+
+          <AmsDeclinedCheckDialog />
 
 
           <Button
