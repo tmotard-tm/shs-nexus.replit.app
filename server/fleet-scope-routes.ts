@@ -453,8 +453,15 @@ async function scoreSpareVehicleCandidates(
 // ---------------------------------------------------------------------------
 // Shop List Auto-Sync State (in-memory)
 // ---------------------------------------------------------------------------
-const SHAREPOINT_SHOP_LIST_URL =
-  "https://searshc-my.sharepoint.com/:x:/g/personal/sean_chen_transformco_com/IQAOvPvVRs5oQ7Umr4-YOMKCAV8esNjoqf-tktl5NNLmDXk?e=82fLjH&download=1";
+// Shop List auto-sync source. The original workbook lived on Sean Chens
+// personal SharePoint (departed); that share link now returns HTTP 403 on
+// every fetch, so the hardcoded URL is gone. Auto-sync only runs when
+// SHOP_LIST_SYNC_URL is set to a reachable workbook with the same layout
+// (A=date, B=truck#, D=enterpriseId, I=repairLocation). Manual upload via
+// POST /shop-list-import is unaffected.
+const SHAREPOINT_SHOP_LIST_URL = (process.env.SHOP_LIST_SYNC_URL || "").trim();
+const SHOP_LIST_DISABLED_MSG =
+  "Auto-sync disabled: the source workbook was on Sean Chens personal SharePoint and its link now returns 403. Upload the file manually, or set SHOP_LIST_SYNC_URL to a new source.";
 
 interface ShopListRunStatus {
   processedAt: string | null;
@@ -644,6 +651,16 @@ async function applyShopListRows(rows: ShopListRow[], dateFilteredCount = 0): Pr
 // Shop List: fetch from SharePoint and run import (used by scheduled job)
 // ---------------------------------------------------------------------------
 async function runShopListAutoSync(): Promise<ShopListRunStatus> {
+  if (!SHAREPOINT_SHOP_LIST_URL) {
+    return {
+      processedAt: new Date().toISOString(),
+      rowsProcessed: 0,
+      trucksUpdated: 0,
+      rowsSkipped: 0,
+      notFound: [],
+      error: SHOP_LIST_DISABLED_MSG,
+    };
+  }
   try {
     console.log("[ShopListSync] Fetching from SharePoint...");
     const resp = await fetch(SHAREPOINT_SHOP_LIST_URL, {
@@ -2568,11 +2585,16 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // router on purpose: nothing outside /api/fs changes behavior.
   app.use(compression());
 
-  // Schedule Shop List daily sync at 6:00 AM server time (inside registration to ensure FS DB is available)
-  cron.schedule("0 6 * * *", async () => {
-    console.log("[ShopListSync] Starting scheduled daily sync...");
-    shopListLastRun = await runShopListAutoSync();
-  });
+  // Shop List daily sync at 6:00 AM server time. Only scheduled when a
+  // reachable source workbook is configured (SHOP_LIST_SYNC_URL); the old
+  // hardcoded link died with Sean Chens departure and stamped a fresh
+  // HTTP 403 onto the Rentals dashboard every morning.
+  if (SHAREPOINT_SHOP_LIST_URL) {
+    cron.schedule("0 6 * * *", async () => {
+      console.log("[ShopListSync] Starting scheduled daily sync...");
+      shopListLastRun = await runShopListAutoSync();
+    });
+  }
 
   // Samsara Penetration: capture every Friday at 8:00 AM Central
   // (mirrors the All Vehicles tab figures into an 8-week rolling history).
