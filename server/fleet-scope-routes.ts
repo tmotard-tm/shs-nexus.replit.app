@@ -692,6 +692,95 @@ async function runShopListAutoSync(): Promise<ShopListRunStatus> {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Stranded call-log reconcile: close out in_progress rows whose ElevenLabs
+// conversation never actually connected (failed dial, 0 seconds, empty
+// transcript). Those rows pile up when a batch dies mid-flight (the 7/13
+// concurrency blowout stranded 150) because the post-call webhook never
+// fires for a call that never started. Rows with a real transcript are left
+// alone for POST /elevenlabs/backfill so the summarizer path stays the
+// single writer of real outcomes.
+// ---------------------------------------------------------------------------
+interface ReconcileStrandedSummary {
+  examined: number;
+  markedFailed: number;
+  skippedHasTranscript: number;
+  skippedUncertain: number;
+  errors: number;
+  dryRun: boolean;
+}
+
+async function reconcileStrandedCallLogs(opts: { olderThanMinutes?: number; limit?: number; dryRun?: boolean } = {}): Promise<ReconcileStrandedSummary> {
+  const olderThanMinutes = opts.olderThanMinutes ?? 120;
+  const limit = Math.min(opts.limit ?? 200, 500);
+  const dryRun = opts.dryRun ?? false;
+  const apiKey = (process.env.FS_ELEVENLABS_API_KEY || "").trim();
+  const summary: ReconcileStrandedSummary = { examined: 0, markedFailed: 0, skippedHasTranscript: 0, skippedUncertain: 0, errors: 0, dryRun };
+  if (!apiKey) {
+    console.warn("[ReconcileStranded] FS_ELEVENLABS_API_KEY not configured; skipping");
+    return summary;
+  }
+  const cutoff = new Date(Date.now() - olderThanMinutes * 60 * 1000);
+  const stranded = await fleetScopeStorage.getStrandedCallLogs(cutoff, limit);
+  for (const row of stranded) {
+    summary.examined++;
+    try {
+      const convId = row.elevenLabsConversationId;
+      let neverConnected = false;
+      let reason = "";
+      if (!convId) {
+        neverConnected = true;
+        reason = "no conversation id was ever recorded";
+      } else {
+        const conv = await fetchElevenLabsConversation(convId, apiKey);
+        const transcript = conv?.transcript || conv?.data?.transcript || [];
+        const convStatus = conv?.status || conv?.data?.status || "";
+        if (!conv) {
+          neverConnected = true;
+          reason = "conversation not found on ElevenLabs";
+        } else if (Array.isArray(transcript) && transcript.length > 0) {
+          summary.skippedHasTranscript++;
+          console.log(`[ReconcileStranded] Truck ${row.truckNumber} conv ${convId} HAS a transcript; heal it via POST /elevenlabs/backfill`);
+          continue;
+        } else if (convStatus === "failed" || convStatus === "done") {
+          neverConnected = true;
+          reason = `ElevenLabs status ${convStatus} with an empty transcript`;
+        } else {
+          summary.skippedUncertain++;
+          continue;
+        }
+      }
+      if (neverConnected && !dryRun) {
+        await fleetScopeStorage.updateCallLog(row.id, {
+          status: "failed",
+          outcome: "CALL_FAILED",
+          shopNotes: `Call never connected (${reason}). Auto-reconciled ${new Date().toISOString().slice(0, 10)}.`,
+        });
+        // Keep the truck pill truthful when this stranded row is still the
+        // most recent call of this type for the truck; a stale Ready from an
+        // earlier call must not outlive a dial that never went through.
+        if (row.truckId) {
+          const logs = await fleetScopeStorage.getCallLogsByTruckId(row.truckId);
+          const latestOfType = logs.find((l: any) => l.callType === row.callType);
+          if (latestOfType && latestOfType.id === row.id) {
+            if (row.callType === "tech") {
+              await fleetScopeStorage.updateTruck(row.truckId, { lastTechCallStatus: "Call Failed" });
+            } else {
+              await fleetScopeStorage.updateTruck(row.truckId, { lastCallStatus: "Call Failed" });
+            }
+          }
+        }
+      }
+      if (neverConnected) summary.markedFailed++;
+    } catch (err: any) {
+      summary.errors++;
+      console.warn(`[ReconcileStranded] Row ${row.id} (truck ${row.truckNumber}): ${err.message}`);
+    }
+  }
+  console.log(`[ReconcileStranded] examined=${summary.examined} markedFailed=${summary.markedFailed} hasTranscript=${summary.skippedHasTranscript} uncertain=${summary.skippedUncertain} errors=${summary.errors} dryRun=${dryRun}`);
+  return summary;
+}
+
 // Cron is registered inside registerFleetScopeRoutes() to ensure FS DB is available
 
 function getDb() {
@@ -2595,6 +2684,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       shopListLastRun = await runShopListAutoSync();
     });
   }
+
+  // Close out stranded in_progress call logs every morning before the daily
+  // batches so dead dials never linger as phantom Calling rows.
+  cron.schedule("30 6 * * *", async () => {
+    console.log("[ReconcileStranded] Starting scheduled daily reconcile...");
+    await reconcileStrandedCallLogs({ olderThanMinutes: 120, limit: 300 });
+  });
 
   // Samsara Penetration: capture every Friday at 8:00 AM Central
   // (mirrors the All Vehicles tab figures into an 8-week rolling history).
@@ -5831,6 +5927,19 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       res.json({ success: true, truckNumber, conversationId: resolvedConvId, callType: resolvedCallType, status, summary });
     } catch (error: any) {
       console.error("[Backfill] Error:", error.message);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // POST /elevenlabs/reconcile-stranded — close out stuck in_progress call
+  // logs whose dial never became a real conversation. Body (all optional):
+  // { olderThanMinutes?: number = 120, limit?: number = 200, dryRun?: boolean }
+  app.post("/elevenlabs/reconcile-stranded", async (req, res) => {
+    try {
+      const { olderThanMinutes, limit, dryRun } = (req.body || {}) as { olderThanMinutes?: number; limit?: number; dryRun?: boolean };
+      const summary = await reconcileStrandedCallLogs({ olderThanMinutes, limit, dryRun });
+      res.json(summary);
+    } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
   });

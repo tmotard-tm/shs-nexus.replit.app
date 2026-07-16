@@ -1851,6 +1851,13 @@ export class DatabaseStorage implements IStorage {
     return await getDb().select().from(callLogs).where(eq(callLogs.batchId, batchId)).orderBy(desc(callLogs.callTimestamp));
   }
 
+  async getStrandedCallLogs(olderThan: Date, limit: number): Promise<CallLog[]> {
+    return await getDb().select().from(callLogs)
+      .where(and(eq(callLogs.status, "in_progress"), lte(callLogs.callTimestamp, olderThan)))
+      .orderBy(desc(callLogs.callTimestamp))
+      .limit(limit);
+  }
+
   async getPendingFollowUps(): Promise<CallLog[]> {
     const today = new Date().toISOString().split("T")[0];
     // Only the LATEST call per truck+callType counts. Without the DISTINCT ON
