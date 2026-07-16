@@ -2335,6 +2335,25 @@ async function applyCallResultToTruck(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Pre-dial phone guard. The shop directory has historically contained
+// placeholder rows ((222) 222-2222 was dialed 206 times over 4 months) and
+// toll-free corporate numbers that can never be the local shop holding a
+// truck. Reject them at every dial site so bad data costs a skipped call,
+// not a wasted conversation with the wrong business.
+// ---------------------------------------------------------------------------
+const TOLL_FREE_AREA_CODES = new Set(["800", "833", "844", "855", "866", "877", "888"]);
+
+function invalidDialReason(rawPhone: string): string | null {
+  const digits = (rawPhone || "").replace(/\D/g, "");
+  const local = digits.length === 11 && digits.startsWith("1") ? digits.slice(1) : digits;
+  if (local.length !== 10) return "invalid length";
+  if (/^(\d){9}$/.test(local)) return "placeholder number (repeated digits)";
+  if (local === "1234567890" || local === "0123456789") return "placeholder number (sequential digits)";
+  if (TOLL_FREE_AREA_CODES.has(local.slice(0, 3))) return "toll-free number (corporate line, not the local shop)";
+  return null;
+}
+
 async function fetchElevenLabsConversation(conversationId: string, apiKey: string): Promise<any | null> {
   try {
     const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`, {
@@ -5589,6 +5608,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: "No repair shop phone number on file for this truck" });
       }
 
+      const badShopPhone = invalidDialReason(truck.repairPhone);
+      if (badShopPhone) {
+        return res.status(400).json({ message: `Shop phone rejected pre-dial: ${badShopPhone} (${truck.repairPhone.trim()}). Fix the shop number before calling.` });
+      }
+
       // Normalize phone: strip non-digits, ensure +1 prefix
       const digits = truck.repairPhone.replace(/\D/g, "");
       const toNumber = digits.startsWith("1") && digits.length === 11
@@ -5756,6 +5780,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
       if (!truck.techPhone || truck.techPhone.trim() === "") {
         return res.status(400).json({ message: "No technician phone number on file for this truck" });
+      }
+
+      const badTechPhone = invalidDialReason(truck.techPhone);
+      if (badTechPhone) {
+        return res.status(400).json({ message: `Technician phone rejected pre-dial: ${badTechPhone} (${truck.techPhone.trim()}).` });
       }
 
       const digits = truck.techPhone.replace(/\D/g, "");
@@ -6074,6 +6103,12 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
             const digits = phoneNumber.replace(/\D/g, "");
             if (digits.length < 10 || digits.length > 11) {
               job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: "Invalid phone number length" });
+              job.failed++;
+              return;
+            }
+            const badPhone = invalidDialReason(phoneNumber);
+            if (badPhone) {
+              job.results.push({ truckId, truckNumber: truck.truckNumber || "?", status: "failed", error: `Phone rejected pre-dial: ${badPhone}` });
               job.failed++;
               return;
             }
