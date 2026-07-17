@@ -1222,7 +1222,7 @@ export async function addRentalDecision(data: InsertVrmRentalDecision) {
   return row;
 }
 
-export async function listRentalDecisions(limit = 50) {
+export async function listRentalDecisions(limit = 50, sinceDays?: number) {
   // Decision rows + their tech's CURRENT supervisor (from the daily snapshot)
   // + the most-recent SMS notification status (channel='sms') so the UI can
   // render "who was the supervisor" and "did the SMS go out".
@@ -1276,6 +1276,11 @@ export async function listRentalDecisions(limit = 50) {
     .leftJoin(
       vrmProfitabilitySnapshot,
       eq(vrmProfitabilitySnapshot.techLdap, vrmRentalDecisions.techLdap),
+    )
+    .where(
+      sinceDays && sinceDays > 0
+        ? sql`${vrmRentalDecisions.createdAt} >= NOW() - (${sinceDays} * INTERVAL '1 day')`
+        : undefined,
     )
     .orderBy(desc(vrmRentalDecisions.createdAt))
     .limit(limit);

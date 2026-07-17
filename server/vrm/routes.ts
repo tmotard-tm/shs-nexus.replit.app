@@ -1225,9 +1225,15 @@ export function registerVrmRoutes(): Router {
    * GET /api/vrm/profitability/log
    * Returns recent rental approval/denial decisions.
    */
-  router.get("/profitability/log", async (_req, res) => {
+  router.get("/profitability/log", async (req, res) => {
     try {
-      const rows = await listRentalDecisions(100);
+      // ?days=N widens the window (time-based, higher cap) so the Weekly
+      // Rental Requests scorecard can count full trailing weeks — the plain
+      // 100-row cap silently zeroed out weeks 3–4 during busy periods.
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? "")) || 0, 0), 365);
+      const rows = days > 0
+        ? await listRentalDecisions(2000, days)
+        : await listRentalDecisions(100);
       res.json({ rows });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

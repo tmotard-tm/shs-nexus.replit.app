@@ -1292,9 +1292,11 @@ export default function NewRentals() {
   // ── Decision log query ─────────────────────────────────────────────────────
 
   const logQuery = useQuery<{ rows: DecisionRow[] }>({
-    queryKey: ["/api/vrm/profitability/log"],
+    queryKey: ["/api/vrm/profitability/log", { days: 35 }],
     queryFn: async () => {
-      const res = await fetch("/api/vrm/profitability/log");
+      // days=35 covers the 4 trailing Sat–Fri weeks shown in the Weekly
+      // Rental Requests scorecard (the default 100-row cap dropped weeks 3–4).
+      const res = await fetch("/api/vrm/profitability/log?days=35");
       if (!res.ok) throw new Error("Failed to load decision log");
       return res.json();
     },
