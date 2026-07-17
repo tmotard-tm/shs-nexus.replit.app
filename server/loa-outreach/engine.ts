@@ -354,6 +354,9 @@ export async function markLoaFormCompleted(
     .set({
       formCompletedAt: new Date(),
       formTruckNumber,
+      // Truck # fallback (spec): adopt the tech-entered truck onto the outreach
+      // record ONLY when it has none — never overwrite a non-empty truck.
+      truckNumber: dsql`COALESCE(NULLIF(${loaOutreach.truckNumber}, ''), ${formTruckNumber || null})`,
       formData,
       pendingResendAt: null,
       updatedAt: new Date(),

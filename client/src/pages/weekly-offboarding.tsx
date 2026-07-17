@@ -16,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
 import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, Send } from "lucide-react";
 import { QuickSendDialog, type HandoffRecord } from "@/components/fleet-scope/CommsHandoff";
+import { Switch } from "@/components/ui/switch";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -211,6 +212,25 @@ export default function WeeklyOffboarding() {
   });
   const loaOutreachMap = loaOutreachStatus?.statuses || {};
   const [loaQuickSend, setLoaQuickSend] = useState<HandoffRecord | null>(null);
+
+  // LOA outreach automation toggle + last-run health (Task #543). Degrades
+  // gracefully: config is null (panel hidden) when the comms module is off or
+  // the user lacks access.
+  const { data: loaOutreachConfig } = useQuery<{ enabled: boolean; sendEtHour: number; lastRun: { status: string; startedAt: string | null; completedAt: string | null; recordsProcessed: number | null; errorMessage: string | null } | null } | null>({
+    queryKey: ['/api/fs/comms/loa/config'],
+    queryFn: async () => {
+      const res = await fetch('/api/fs/comms/loa/config', { credentials: 'include' });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    retry: false,
+    staleTime: 60000,
+  });
+  const loaToggleMutation = useMutation({
+    mutationFn: (enabled: boolean) => apiRequest('POST', '/api/fs/comms/loa/config', { enabled }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['/api/fs/comms/loa/config'] }),
+    onError: (err: any) => toast({ title: 'Could not update outreach setting', description: err?.message, variant: 'destructive' }),
+  });
 
   // ===== LOA HR Notes (per-tech thread with unread indicators) =====
   const [loaNotesEntry, setLoaNotesEntry] = useState<LoaTechEntry | null>(null);
@@ -1439,6 +1459,29 @@ export default function WeeklyOffboarding() {
                     <AlertCircle className="h-4 w-4 flex-shrink-0" />
                     <span className="text-sm font-medium">Call and Recover all trucks for LOA Techs over 30 days</span>
                   </div>
+                  {loaOutreachConfig && (
+                    <div className="flex flex-col gap-1 px-3 py-2 rounded-md border bg-muted/40" data-testid="panel-loa-outreach-config">
+                      <div className="flex items-center gap-2">
+                        <MessageSquare className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm font-medium whitespace-nowrap">Auto SMS outreach</span>
+                        <Switch
+                          checked={loaOutreachConfig.enabled}
+                          disabled={loaToggleMutation.isPending}
+                          onCheckedChange={(v) => loaToggleMutation.mutate(v)}
+                          data-testid="switch-loa-outreach"
+                        />
+                        <Badge variant={loaOutreachConfig.enabled ? 'default' : 'secondary'}>
+                          {loaOutreachConfig.enabled ? 'On' : 'Off'}
+                        </Badge>
+                      </div>
+                      <span className="text-xs text-muted-foreground whitespace-nowrap" data-testid="text-loa-outreach-lastrun">
+                        {loaOutreachConfig.lastRun
+                          ? `Last run: ${loaOutreachConfig.lastRun.status}${loaOutreachConfig.lastRun.recordsProcessed != null ? ` (${loaOutreachConfig.lastRun.recordsProcessed} sent)` : ''} · ${new Date(loaOutreachConfig.lastRun.completedAt || loaOutreachConfig.lastRun.startedAt || '').toLocaleString()}`
+                          : 'Last run: never'}
+                        {` · sends daily ~${loaOutreachConfig.sendEtHour}:00 ET`}
+                      </span>
+                    </div>
+                  )}
                   <Button
                     variant="outline"
                     size="sm"

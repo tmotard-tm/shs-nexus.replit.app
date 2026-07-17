@@ -13173,6 +13173,25 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         };
       });
 
+      // Truck # fallback (Task #543): when the roster has no truck for a tech,
+      // fill it from the LOA outreach record (which adopts the truck the tech
+      // entered on the public form). Never overwrites a roster-sourced truck.
+      try {
+        const missing = formatted.filter(t => !t.lastKnownTruck && t.enterpriseId).map(t => t.enterpriseId);
+        if (missing.length) {
+          const { getLoaOutreachRows } = await import("./loa-outreach/engine");
+          const rows = await getLoaOutreachRows(missing);
+          const truckByLdap = new Map(rows.filter(r => (r.truckNumber || '').trim()).map(r => [r.ldap, (r.truckNumber || '').trim()]));
+          for (const t of formatted) {
+            if (!t.lastKnownTruck && t.enterpriseId && truckByLdap.has(t.enterpriseId)) {
+              t.lastKnownTruck = truckByLdap.get(t.enterpriseId)!;
+            }
+          }
+        }
+      } catch (fbErr: any) {
+        console.error('[LOA Trucks] Outreach truck fallback failed (non-fatal):', fbErr?.message);
+      }
+
       res.json(formatted);
     } catch (error: any) {
       console.error('[LOA Trucks] Error fetching LOA/Paid Leave/Suspended techs:', error.message);
