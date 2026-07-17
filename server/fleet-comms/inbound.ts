@@ -100,6 +100,31 @@ async function recentManagerCcTarget(phoneDigits: string): Promise<{ threadId: s
   return row ? { threadId: row.threadId, ldap: row.ldap } : null;
 }
 
+/**
+ * Fallback tech attribution via outbound history: if WE recently (72h) sent a
+ * tech-role message to this exact number (e.g. an LOA Rental outreach to the
+ * personal/SNSTV number, which is NOT in the TPMS-sourced contact directory),
+ * the reply belongs to that tech's thread. This is not guessing — the outbound
+ * send already bound this number to a specific tech thread.
+ */
+async function recentTechOutboundTarget(phoneDigits: string): Promise<{ threadId: string; ldap: string | null } | null> {
+  const since = new Date(Date.now() - ATTRIBUTION_WINDOW_MS);
+  const [row] = await fsDb
+    .select({ threadId: commsMessages.threadId, ldap: commsMessages.ldap })
+    .from(commsMessages)
+    .where(
+      and(
+        eq(commsMessages.phoneDigits, phoneDigits),
+        eq(commsMessages.direction, "outbound"),
+        eq(commsMessages.contactRole, "tech"),
+        gt(commsMessages.createdAt, since),
+      ),
+    )
+    .orderBy(desc(commsMessages.createdAt))
+    .limit(1);
+  return row ? { threadId: row.threadId, ldap: row.ldap } : null;
+}
+
 export interface InboundResult {
   action: "message" | "opt_out" | "opt_in" | "deduped";
   threadId?: string;
@@ -136,16 +161,27 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
       const thread = await getOrCreateTechThread(c.ldap, c);
       threadId = thread.id;
       contactRole = "tech";
-    } else if (contacts.length > 1) {
-      // Ambiguous shared number (two+ techs) — per spec, never guess a tech.
-      // Route to the Unmatched holding area so the team links it deliberately.
-      const thread = await getOrCreateUnmatchedThread(phoneDigits, contacts.map((c) => c.name).join(" / "));
-      threadId = thread.id;
-      contactRole = "unknown";
     } else {
-      const thread = await getOrCreateUnmatchedThread(phoneDigits);
-      threadId = thread.id;
-      contactRole = "unknown";
+      // Directory miss (0) or ambiguous shared number (2+): before giving up,
+      // check whether WE recently sent a tech-role message to this number — a
+      // reply from a personal/SNSTV number (not in the TPMS directory) must
+      // still land on the right tech thread and cancel LOA resends.
+      const techTarget = await recentTechOutboundTarget(phoneDigits);
+      if (techTarget && techTarget.ldap) {
+        threadId = techTarget.threadId;
+        ldap = techTarget.ldap;
+        contactRole = "tech";
+      } else if (contacts.length > 1) {
+        // Ambiguous shared number (two+ techs) — per spec, never guess a tech.
+        // Route to the Unmatched holding area so the team links it deliberately.
+        const thread = await getOrCreateUnmatchedThread(phoneDigits, contacts.map((c) => c.name).join(" / "));
+        threadId = thread.id;
+        contactRole = "unknown";
+      } else {
+        const thread = await getOrCreateUnmatchedThread(phoneDigits);
+        threadId = thread.id;
+        contactRole = "unknown";
+      }
     }
   }
 
