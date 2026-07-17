@@ -1268,6 +1268,14 @@ export async function listRentalDecisions(limit = 50, sinceDays?: number) {
       decisionSupervisorName: vrmRentalDecisions.supervisorName,
       decisionSupervisorLdap: vrmRentalDecisions.supervisorLdap,
       decisionSupervisorPhone: vrmRentalDecisions.supervisorPhone,
+      // Full Log "New Rental or Extension" marker for the same tech + request
+      // date (the Weekly Rental Requests scorecard excludes Extensions).
+      newRentalOrExtension: sql<string | null>`(
+        SELECT nrl.new_rental_or_extension FROM vrm_new_rental_log nrl
+        WHERE UPPER(nrl.enterprise_id) = UPPER(${vrmRentalDecisions.techLdap})
+          AND nrl.date_of_request = (${vrmRentalDecisions.createdAt})::date
+        ORDER BY nrl.created_at DESC LIMIT 1
+      )`,
       snapshotSupervisorName: vrmProfitabilitySnapshot.supervisorName,
       snapshotSupervisorLdap: vrmProfitabilitySnapshot.supervisorLdap,
       snapshotSupervisorPhone: vrmProfitabilitySnapshot.supervisorPhone,

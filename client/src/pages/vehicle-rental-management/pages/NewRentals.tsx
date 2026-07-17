@@ -280,6 +280,7 @@ interface DecisionRow {
   techLdap: string;
   techName: string | null;
   truckNo?: string | null;
+  newRentalOrExtension?: string | null;
   dailyNetWithRental: string | null;
   recommendation: string;
   decision: string;
@@ -1431,6 +1432,9 @@ export default function NewRentals() {
           end.setHours(23, 59, 59, 999);
           let approved = 0, denied = 0;
           for (const d of decisionLog) {
+            // Count NEW rentals only — decisions whose Full Log row is marked
+            // "Extension" are excluded from the weekly scorecard.
+            if ((d.newRentalOrExtension || "").trim().toLowerCase() === "extension") continue;
             const dt = new Date(d.createdAt);
             if (dt >= start && dt <= end) {
               if (d.recommendation === "Approve") approved++;
