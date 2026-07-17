@@ -314,6 +314,7 @@ export function registerCommsRoutes(app: Router): void {
           formCompletedAt: r.formCompletedAt,
           reenabledAt: r.reenabledAt,
           pendingResendAt: r.pendingResendAt,
+          resendSentAt: r.resendSentAt,
         };
       }
       for (const ldap of ldaps) {

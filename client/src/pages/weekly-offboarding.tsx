@@ -199,7 +199,7 @@ export default function WeeklyOffboarding() {
   // LOA Rental SMS outreach status per LDAP (Task #543). Degrades gracefully:
   // if the comms module is off/unreachable this stays empty and the column shows dashes.
   const loaLdapsCsv = Array.from(new Set(loaTechs.map(e => e.enterpriseId?.toUpperCase()).filter((s): s is string => !!s))).sort().join(',');
-  const { data: loaOutreachStatus } = useQuery<{ statuses: Record<string, { lastSentAt?: string | null; repliedAt?: string | null; formCompletedAt?: string | null; reenabledAt?: string | null; pendingResendAt?: string | null; threadUnread?: boolean; threadUnreadCount?: number; threadLastMessageAt?: string | null; threadLastDirection?: string | null }> }>({
+  const { data: loaOutreachStatus } = useQuery<{ statuses: Record<string, { lastSentAt?: string | null; repliedAt?: string | null; formCompletedAt?: string | null; reenabledAt?: string | null; pendingResendAt?: string | null; resendSentAt?: string | null; threadUnread?: boolean; threadUnreadCount?: number; threadLastMessageAt?: string | null; threadLastDirection?: string | null }> }>({
     queryKey: ['/api/fs/comms/loa/status', loaLdapsCsv],
     queryFn: async () => {
       const res = await fetch(`/api/fs/comms/loa/status?ldaps=${encodeURIComponent(loaLdapsCsv)}`, { credentials: 'include' });
@@ -1666,16 +1666,18 @@ export default function WeeklyOffboarding() {
                                 const st = e.enterpriseId ? loaOutreachMap[e.enterpriseId.toUpperCase()] : undefined;
                                 const label = st?.formCompletedAt ? 'Form done'
                                   : st?.repliedAt ? 'Replied'
+                                  : st?.resendSentAt ? 'Sent x2'
                                   : st?.lastSentAt ? 'Sent'
                                   : null;
                                 const color = st?.formCompletedAt ? 'bg-green-50 text-green-800 border-green-300 dark:bg-green-950 dark:text-green-200 dark:border-green-700'
                                   : st?.repliedAt ? 'bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-700'
+                                  : st?.resendSentAt ? 'bg-amber-50 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-700'
                                   : 'bg-slate-50 text-slate-700 border-slate-300 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700';
                                 const unreadCount = st?.threadUnread ? Math.max(1, st?.threadUnreadCount ?? 1) : 0;
                                 return (
                                   <div className="flex items-center gap-1 whitespace-nowrap">
                                     {label ? (
-                                      <Badge variant="outline" className={`text-xs ${color}`} title={st?.lastSentAt ? `Last sent ${format(new Date(st.lastSentAt), 'MM/dd HH:mm')}` : undefined} data-testid={`badge-loa-outreach-${e.enterpriseId}`}>
+                                      <Badge variant="outline" className={`text-xs ${color}`} title={[st?.lastSentAt ? `First text ${format(new Date(st.lastSentAt), 'MM/dd HH:mm')}` : null, st?.resendSentAt ? `Follow-up text ${format(new Date(st.resendSentAt), 'MM/dd HH:mm')}` : null].filter(Boolean).join(' · ') || undefined} data-testid={`badge-loa-outreach-${e.enterpriseId}`}>
                                         {label}
                                       </Badge>
                                     ) : (
