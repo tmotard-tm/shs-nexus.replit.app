@@ -1,6 +1,6 @@
-import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poDecisionLog, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, decommExcludedTrucks, callLogs, truckStatusEvents, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoDecisionLogEntry, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
+import { trucks, actions, trackingRecords, pmfImports, pmfRows, pmfStatusEvents, pmfActivityLogs, pmfActivitySyncMeta, metricsSnapshots, spareVehicleDetails, purchaseOrders, poImportMeta, archivedTrucks, rentalImports, truckConsolidations, byovWeeklySnapshots, fleetWeeklySnapshots, pmfStatusWeeklySnapshots, repairWeeklySnapshots, fleetCostRecords, fleetCostImportMeta, approvedCostRecords, approvedCostImportMeta, decommissioningVehicles, decommExcludedTrucks, callLogs, truckStatusEvents, type Truck, type InsertTruck, type Action, type InsertAction, type TrackingRecord, type InsertTrackingRecord, type PmfImport, type PmfRow, type PmfStatusEvent, type PmfActivityLog, type InsertPmfActivityLog, type PmfActivitySyncMeta, type MetricsSnapshot, type InsertMetricsSnapshot, type SpareVehicleDetails, type InsertSpareVehicleDetails, type UpdateSpareVehicleDetails, type PurchaseOrder, type PoImportMeta, type ArchivedTruck, type InsertArchivedTruck, type RentalImport, type InsertRentalImport, type TruckConsolidation, type InsertTruckConsolidation, type ByovWeeklySnapshot, type InsertByovWeeklySnapshot, type FleetWeeklySnapshot, type InsertFleetWeeklySnapshot, type PmfStatusWeeklySnapshot, type InsertPmfStatusWeeklySnapshot, type RepairWeeklySnapshot, type InsertRepairWeeklySnapshot, type FleetCostRecord, type FleetCostImportMeta, type ApprovedCostRecord, type ApprovedCostImportMeta, type DecommissioningVehicle, type InsertDecommissioningVehicle, type CallLog, type InsertCallLog, getCombinedStatus } from "@shared/fleet-scope-schema";
 import { fsDb } from "./fleet-scope-db";
-import { eq, desc, gte, lte, and, inArray, isNull, sql } from "drizzle-orm";
+import { eq, desc, gte, lte, and, inArray, sql } from "drizzle-orm";
 
 function getDb() {
   return fsDb;
@@ -792,28 +792,6 @@ export class DatabaseStorage implements IStorage {
     }
 
     return orders.length;
-  }
-
-  async getPurchaseOrderById(id: string): Promise<PurchaseOrder | undefined> {
-    const [po] = await getDb().select().from(purchaseOrders).where(eq(purchaseOrders.id, id));
-    return po || undefined;
-  }
-
-  async logPoDecisionChange(entry: { poId: string; poNumber: string | null; vehicleNo: string | null; oldValue: string | null; newValue: string | null }): Promise<void> {
-    await getDb().insert(poDecisionLog).values(entry);
-  }
-
-  async getUndigestedDecisionChanges(): Promise<PoDecisionLogEntry[]> {
-    return await getDb()
-      .select()
-      .from(poDecisionLog)
-      .where(isNull(poDecisionLog.digestedAt))
-      .orderBy(poDecisionLog.changedAt);
-  }
-
-  async markDecisionChangesDigested(ids: string[]): Promise<void> {
-    if (ids.length === 0) return;
-    await getDb().update(poDecisionLog).set({ digestedAt: new Date() }).where(inArray(poDecisionLog.id, ids));
   }
 
   async updatePurchaseOrderSubmittedInHolman(id: string, submittedInHolman: string): Promise<void> {

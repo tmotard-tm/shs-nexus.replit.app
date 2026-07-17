@@ -1777,50 +1777,6 @@ setTimeout(() => {
 }, 5000);
 
 // Email notification for pending PO approvals
-async function sendPoDecisionDigestEmail(): Promise<{ sent: boolean; count: number }> {
-  const changes = await fleetScopeStorage.getUndigestedDecisionChanges();
-  if (changes.length === 0) return { sent: false, count: 0 };
-  if (!process.env.FS_SENDGRID_API_KEY) {
-    console.log("[PO Digest] SendGrid API key not configured, skipping digest email");
-    return { sent: false, count: changes.length };
-  }
-  const esc = (v: string | null | undefined) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  const fmt = (v: string | null) => (v && v.trim() ? v : "Pending");
-  const whenEt = (d: Date | null) => (d ? new Date(d).toLocaleString("en-US", { timeZone: "America/New_York" }) : "");
-  const rowsHtml = changes.map(c => `<tr><td style="padding:6px 10px;border:1px solid #ddd;">${esc(c.vehicleNo)}</td><td style="padding:6px 10px;border:1px solid #ddd;">${esc(c.poNumber)}</td><td style="padding:6px 10px;border:1px solid #ddd;">${esc(fmt(c.oldValue))}</td><td style="padding:6px 10px;border:1px solid #ddd;font-weight:bold;">${esc(fmt(c.newValue))}</td><td style="padding:6px 10px;border:1px solid #ddd;white-space:nowrap;">${esc(whenEt(c.changedAt))}</td></tr>`).join("");
-  const textLines = changes.map(c => `Truck ${c.vehicleNo || "?"} (row ${c.poNumber || "?"}): ${fmt(c.oldValue)} -> ${fmt(c.newValue)}`).join("\n");
-  const msg = {
-    to: ["Howard.Anderson@transformco.com"],
-    from: "notifications@shs.com",
-    subject: `PO Final Approval digest - ${changes.length} decision${changes.length === 1 ? "" : "s"} updated`,
-    trackingSettings: { clickTracking: { enable: false, enableText: false } },
-    text: `Final Approval decisions updated:\n\n${textLines}\n\nReview at https://fleet-scope.replit.app/fleet-scope/pos`,
-    html: `
-      <div style="font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto;">
-        <h2 style="color: #333;">PO decision digest</h2>
-        <p>${changes.length} Final Approval decision${changes.length === 1 ? " was" : "s were"} updated.</p>
-        <table style="border-collapse:collapse;font-size:14px;width:100%;">
-          <thead><tr>
-            <th style="padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">Truck</th>
-            <th style="padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">Row</th>
-            <th style="padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">Was</th>
-            <th style="padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">Now</th>
-            <th style="padding:6px 10px;border:1px solid #ddd;background:#f5f5f5;text-align:left;">When (ET)</th>
-          </tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-        <p style="margin-top:20px;"><a href="https://fleet-scope.replit.app/fleet-scope/pos" style="color:#0066cc;">Open Purchase Orders</a></p>
-        <hr style="border:none;border-top:1px solid #eee;margin:20px 0;">
-        <p style="color:#666;font-size:12px;">Automated daily digest from Fleet Scope.</p>
-      </div>`,
-  };
-  sgMail.setApiKey(process.env.FS_SENDGRID_API_KEY);
-  await sgMail.send(msg);
-  await fleetScopeStorage.markDecisionChangesDigested(changes.map(c => c.id));
-  console.log(`[PO Digest] Sent digest with ${changes.length} change(s)`);
-  return { sent: true, count: changes.length };
-}
-
 async function sendPendingApprovalsEmail(pendingCount: number): Promise<void> {
   if (!process.env.FS_SENDGRID_API_KEY) {
     console.log("SendGrid API key not configured, skipping email notification");
@@ -11915,30 +11871,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ message: "finalApproval must be a string" });
       }
       
-      const existingPo = await fleetScopeStorage.getPurchaseOrderById(id);
-      const previousApproval = existingPo?.finalApproval || "";
-
       await fleetScopeStorage.updatePurchaseOrderFinalApproval(id, finalApproval);
-
-      // Audit log feeding the daily decision digest (only when the value actually changed)
-      if (existingPo && previousApproval.trim() !== finalApproval.trim()) {
-        try {
-          let vehicleNo = "";
-          if (existingPo.rawData) {
-            const rd = JSON.parse(existingPo.rawData);
-            vehicleNo = String(rd['Vehicle_No'] || rd['Vehicle No'] || rd['VEHICLE_NO'] || rd['Truck #'] || rd['Truck Number'] || rd['TRUCK_NUMBER'] || "");
-          }
-          await fleetScopeStorage.logPoDecisionChange({
-            poId: existingPo.id,
-            poNumber: existingPo.poNumber || null,
-            vehicleNo: vehicleNo || null,
-            oldValue: previousApproval || null,
-            newValue: finalApproval || null,
-          });
-        } catch (logErr) {
-          console.error("[PO Digest] Failed to log decision change:", logErr);
-        }
-      }
       
       // Auto-sync: If changed to "Decline and Submit for Sale", update corresponding truck in Dashboard
       // and add to Decommissioning table
@@ -12008,33 +11941,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
   
-  // Send the daily Final Approval decision digest to Howard Anderson.
-  // Idempotent: only changes not yet marked digested_at are included, so external
-  // crons (x-internal-cron) and manual calls are always safe to fire.
-  app.post("/pos/decision-digest/send", async (_req, res) => {
-    try {
-      const result = await sendPoDecisionDigestEmail();
-      res.json({ success: true, ...result });
-    } catch (error: any) {
-      console.error("[PO Digest] Error:", error);
-      res.status(500).json({ message: "Failed to send decision digest: " + error.message });
-    }
-  });
-
-  // Best-effort in-process scheduler: send the digest once per ET day after 6 PM.
-  // On autoscale an instance may not be awake all evening - the digested_at marker
-  // makes the next opportunity (or the cron endpoint above) catch up losslessly.
-  let lastDigestDateEt = "";
-  setInterval(() => {
-    const now = new Date();
-    const etHour = Number(now.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
-    const etDate = now.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-    if (etHour >= 18 && lastDigestDateEt !== etDate) {
-      lastDigestDateEt = etDate;
-      sendPoDecisionDigestEmail().catch(err => console.error("[PO Digest] Scheduled send failed:", err));
-    }
-  }, 15 * 60 * 1000);
-
   // Update Submitted in Holman for a purchase order
   app.patch("/pos/:id/submitted-in-holman", async (req, res) => {
     try {

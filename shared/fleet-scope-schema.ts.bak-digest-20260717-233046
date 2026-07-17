@@ -938,20 +938,6 @@ export const poImportMeta = pgTable("fs_po_import_meta", {
   totalRows: integer("total_rows").default(0),
 });
 
-// Audit log of Final Approval changes; digested_at marks inclusion in the daily email digest
-export const poDecisionLog = pgTable("fs_po_decision_log", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  poId: varchar("po_id"),
-  poNumber: varchar("po_number", { length: 100 }),
-  vehicleNo: varchar("vehicle_no", { length: 50 }),
-  oldValue: text("old_value"),
-  newValue: text("new_value"),
-  changedAt: timestamp("changed_at").default(sql`now()`),
-  digestedAt: timestamp("digested_at"),
-});
-
-export type PoDecisionLogEntry = typeof poDecisionLog.$inferSelect;
-
 export const insertPurchaseOrderSchema = createInsertSchema(purchaseOrders).omit({
   id: true,
   importedAt: true,
