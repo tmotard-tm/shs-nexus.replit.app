@@ -181,7 +181,7 @@ export function CommsHandoff({
   );
 }
 
-function QuickSendDialog({
+export function QuickSendDialog({
   record,
   category,
   categoryLabel,

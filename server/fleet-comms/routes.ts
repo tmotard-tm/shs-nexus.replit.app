@@ -288,6 +288,24 @@ export function registerCommsRoutes(app: Router): void {
         .filter(Boolean)
         .slice(0, 500);
       const rows = await getLoaOutreachRows(ldaps);
+      // Live thread state (unread indicator for the LOA table) — one lookup for
+      // ALL requested LDAPs, not just those with an outreach record, so staff
+      // see unread replies even for techs contacted manually.
+      const threadRows = ldaps.length
+        ? await fsDb
+            .select({
+              ldap: commsThreads.ldap,
+              unread: commsThreads.unread,
+              unreadCount: commsThreads.unreadCount,
+              lastMessageAt: commsThreads.lastMessageAt,
+              lastMessageDirection: commsThreads.lastMessageDirection,
+            })
+            .from(commsThreads)
+            .where(and(eq(commsThreads.kind, "tech"), inArray(commsThreads.ldap, ldaps)))
+        : [];
+      const threadByLdap = new Map(
+        threadRows.filter((t) => t.ldap).map((t) => [String(t.ldap).toUpperCase(), t]),
+      );
       const out: Record<string, any> = {};
       for (const r of rows) {
         out[r.ldap] = {
@@ -296,6 +314,17 @@ export function registerCommsRoutes(app: Router): void {
           formCompletedAt: r.formCompletedAt,
           reenabledAt: r.reenabledAt,
           pendingResendAt: r.pendingResendAt,
+        };
+      }
+      for (const ldap of ldaps) {
+        const t = threadByLdap.get(ldap);
+        if (!t) continue;
+        out[ldap] = {
+          ...(out[ldap] || {}),
+          threadUnread: !!t.unread,
+          threadUnreadCount: t.unreadCount ?? 0,
+          threadLastMessageAt: t.lastMessageAt,
+          threadLastDirection: t.lastMessageDirection,
         };
       }
       res.json({ statuses: out });

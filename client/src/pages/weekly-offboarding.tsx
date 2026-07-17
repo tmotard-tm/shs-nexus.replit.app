@@ -14,7 +14,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Separator } from "@/components/ui/separator";
-import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare } from "lucide-react";
+import { UserMinus, Search, RefreshCw, Clock, Calendar, AlertCircle, Download, Loader2, CheckCircle, Truck, HelpCircle, Wrench, CarFront, Package, MapPin, Phone, PhoneOff, Home, Mail, PauseCircle, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, Send } from "lucide-react";
+import { QuickSendDialog, type HandoffRecord } from "@/components/fleet-scope/CommsHandoff";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { TopBar } from "@/components/layout/top-bar";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -197,7 +198,7 @@ export default function WeeklyOffboarding() {
   // LOA Rental SMS outreach status per LDAP (Task #543). Degrades gracefully:
   // if the comms module is off/unreachable this stays empty and the column shows dashes.
   const loaLdapsCsv = Array.from(new Set(loaTechs.map(e => e.enterpriseId?.toUpperCase()).filter((s): s is string => !!s))).sort().join(',');
-  const { data: loaOutreachStatus } = useQuery<{ statuses: Record<string, { lastSentAt: string | null; repliedAt: string | null; formCompletedAt: string | null; reenabledAt: string | null; pendingResendAt: string | null }> }>({
+  const { data: loaOutreachStatus } = useQuery<{ statuses: Record<string, { lastSentAt?: string | null; repliedAt?: string | null; formCompletedAt?: string | null; reenabledAt?: string | null; pendingResendAt?: string | null; threadUnread?: boolean; threadUnreadCount?: number; threadLastMessageAt?: string | null; threadLastDirection?: string | null }> }>({
     queryKey: ['/api/fs/comms/loa/status', loaLdapsCsv],
     queryFn: async () => {
       const res = await fetch(`/api/fs/comms/loa/status?ldaps=${encodeURIComponent(loaLdapsCsv)}`, { credentials: 'include' });
@@ -209,6 +210,7 @@ export default function WeeklyOffboarding() {
     staleTime: 60000,
   });
   const loaOutreachMap = loaOutreachStatus?.statuses || {};
+  const [loaQuickSend, setLoaQuickSend] = useState<HandoffRecord | null>(null);
 
   // ===== LOA HR Notes (per-tech thread with unread indicators) =====
   const [loaNotesEntry, setLoaNotesEntry] = useState<LoaTechEntry | null>(null);
@@ -1626,6 +1628,7 @@ export default function WeeklyOffboarding() {
                                 const color = st?.formCompletedAt ? 'bg-green-50 text-green-800 border-green-300 dark:bg-green-950 dark:text-green-200 dark:border-green-700'
                                   : st?.repliedAt ? 'bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-700'
                                   : 'bg-slate-50 text-slate-700 border-slate-300 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700';
+                                const unreadCount = st?.threadUnread ? Math.max(1, st?.threadUnreadCount ?? 1) : 0;
                                 return (
                                   <div className="flex items-center gap-1 whitespace-nowrap">
                                     {label ? (
@@ -1635,17 +1638,44 @@ export default function WeeklyOffboarding() {
                                     ) : (
                                       <span className="text-xs text-muted-foreground">-</span>
                                     )}
+                                    {unreadCount > 0 && (
+                                      <Badge className="text-xs bg-red-600 text-white hover:bg-red-600 px-1.5" title={st?.threadLastMessageAt ? `Unread reply · last message ${format(new Date(st.threadLastMessageAt), 'MM/dd HH:mm')}` : 'Unread reply'} data-testid={`badge-loa-unread-${e.enterpriseId}`}>
+                                        {unreadCount}
+                                      </Badge>
+                                    )}
                                     {e.enterpriseId && (
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-7 px-1.5"
-                                        title="Open conversation in Fleet Communications"
-                                        onClick={(ev) => { ev.stopPropagation(); window.open(`/fleet-communications?q=${encodeURIComponent(e.enterpriseId!)}`, '_blank'); }}
-                                        data-testid={`button-loa-comms-${e.enterpriseId}`}
-                                      >
-                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
-                                      </Button>
+                                      <>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 px-1.5"
+                                          title="Quick text this technician"
+                                          onClick={(ev) => {
+                                            ev.stopPropagation();
+                                            setLoaQuickSend({
+                                              truckNumber: e.lastKnownTruck || '',
+                                              ldap: e.enterpriseId,
+                                              name: e.fullName || null,
+                                              phone: e.tpmsPhone || e.personalNumber || null,
+                                              district: e.district || null,
+                                            });
+                                          }}
+                                          data-testid={`button-loa-quicktext-${e.enterpriseId}`}
+                                        >
+                                          <Send className="h-3.5 w-3.5 text-muted-foreground" />
+                                        </Button>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-7 px-1.5 relative"
+                                          title="Open conversation in Fleet Communications"
+                                          onClick={(ev) => { ev.stopPropagation(); window.open(`/fleet-communications?q=${encodeURIComponent(e.enterpriseId!)}`, '_blank'); }}
+                                          data-testid={`button-loa-comms-${e.enterpriseId}`}
+                                        >
+                                          <MessageSquare className={`h-3.5 w-3.5 ${unreadCount > 0 ? 'text-red-600' : 'text-muted-foreground'}`} />
+                                          {unreadCount > 0 && <span className="absolute top-0.5 right-0.5 h-1.5 w-1.5 rounded-full bg-red-600" />}
+                                        </Button>
+                                      </>
                                     )}
                                   </div>
                                 );
@@ -2398,6 +2428,14 @@ export default function WeeklyOffboarding() {
           )}
         </SheetContent>
       </Sheet>
+
+      {/* LOA Rental quick-send (Task #543) — same dialog/pipeline as the comms handoff */}
+      <QuickSendDialog
+        record={loaQuickSend}
+        category="loa_rental"
+        categoryLabel="LOA Rental"
+        onClose={() => setLoaQuickSend(null)}
+      />
 
       {/* LOA HR Notes Thread */}
       <Sheet open={!!loaNotesEntry} onOpenChange={(open) => !open && setLoaNotesEntry(null)}>
