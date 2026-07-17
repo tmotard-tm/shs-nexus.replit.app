@@ -1050,53 +1050,82 @@ export default function POs() {
 
   const displayHeaders = useMemo(() => {
     if (rawHeaders.length === 0) return [];
-
-    const norm = (s: string) => s.toLowerCase().replace(/[_\s]/g, '');
-    const isVehicle = (h: string) => { const n = norm(h); return n === 'vehicleno' || n === 'vehiclenumber'; };
-    const isAmount = (h: string) => { const x = h.toLowerCase(); return x.includes('current') && x.includes('requested'); };
-    const isFinalAppr = (h: string) => { const x = h.toLowerCase(); return x.includes('final') && x.includes('appro'); };
-    const isRecGpt = (h: string) => { const n = norm(h); return n.includes('recommendationgpt') || n.includes('reccomendationgpt'); };
-    const isRobDec = (h: string) => { const x = h.toLowerCase(); return x.includes('rob') && x.includes('unsubmitted') && x.includes('decision'); };
-    const isDiff = (h: string) => { const x = h.toLowerCase(); return x.includes('difference') && x.includes('rob'); };
-    const isSubmitted = (h: string) => { const x = h.toLowerCase(); return x.includes('submitted') && x.includes('holman'); };
-    const isId = (h: string) => norm(h) === 'id';
-
-    const g2Start = rawHeaders.findIndex(h => norm(h) === norm('Context_economics'));
-    const g2End = rawHeaders.findIndex(h => norm(h) === norm('High_Cost_Flags'));
-    const inG2 = (idx: number) => g2Start >= 0 && g2End >= 0 && idx >= g2Start && idx <= g2End;
-
-    const vehicle: string[] = [], amount: string[] = [], finalAppr: string[] = [];
-    const recGpt: string[] = [], robDec: string[] = [], diff: string[] = [];
-    const group2: string[] = [], idCol: string[] = [], rest: string[] = [];
-
-    rawHeaders.forEach((h, idx) => {
-      if (!h || String(h).trim() === '') return; // drop blank/junk header columns
-      if (isVehicle(h)) vehicle.push(h);
-      else if (isAmount(h)) amount.push(h);
-      else if (isFinalAppr(h)) finalAppr.push(h);
-      else if (isSubmitted(h)) { /* shown via virtual __SUBMITTED_IN_HOLMAN__ */ }
-      else if (isRecGpt(h)) recGpt.push(h);
-      else if (isRobDec(h)) robDec.push(h);
-      else if (isDiff(h)) diff.push(h);
-      else if (isId(h)) idCol.push(h);
-      else if (inG2(idx)) group2.push(h);
-      else rest.push(h);
-    });
-
-    // Scan order: truck -> amount -> decision -> reasoning -> economics -> other -> bookkeeping
-    return [
-      ...vehicle,
-      ...amount,
-      ...finalAppr,
-      "__SUBMITTED_IN_HOLMAN__",
-      ...recGpt,
-      ...robDec,
-      ...diff,
-      ...group2,
-      ...rest,
-      ...idCol,
-      "__IMPORTED_AT__",
+    
+    const priorityGroup1 = [
+      "Final_Reccomendation GPT",
+      "Final_Recommendation GPT",
+      "Final Recommendation GPT",
+      "Rob's unsubmitted decision / differences if any to GPT",
+      "Robs unsubmitted decision / differences if any to GPT",
+      "Difference Rob would do",
+      "Approval_Recommendation",
+      "Approval Recommendation",
+      "Final_Approval",
+      "Final Approval",
     ];
+    
+    const priorityGroup2Start = "Context_economics";
+    const priorityGroup2End = "High_Cost_Flags";
+    
+    const normalize = (s: string) => s.toLowerCase().replace(/[_\s]/g, '');
+    
+    const findIndex = (arr: string[], target: string) => {
+      const normalizedTarget = normalize(target);
+      return arr.findIndex(h => normalize(h) === normalizedTarget);
+    };
+    
+    const group2StartIdx = rawHeaders.findIndex(h => 
+      normalize(h) === normalize(priorityGroup2Start)
+    );
+    const group2EndIdx = rawHeaders.findIndex(h => 
+      normalize(h) === normalize(priorityGroup2End)
+    );
+    
+    const idColumn: string[] = [];
+    const group1Columns: string[] = [];
+    const group2Columns: string[] = [];
+    const remainingColumns: string[] = [];
+    
+    const group1Set = new Set(priorityGroup1.map(normalize));
+    
+    rawHeaders.forEach((header, idx) => {
+      const normalizedHeader = normalize(header);
+      
+      if (normalizedHeader === 'id') {
+        idColumn.push(header);
+      } else if (group1Set.has(normalizedHeader)) {
+        group1Columns.push(header);
+      } else if (group2StartIdx >= 0 && group2EndIdx >= 0 && idx >= group2StartIdx && idx <= group2EndIdx) {
+        group2Columns.push(header);
+      } else {
+        remainingColumns.push(header);
+      }
+    });
+    
+    const sortedGroup1 = group1Columns.sort((a, b) => {
+      const aIdx = priorityGroup1.findIndex(p => normalize(p) === normalize(a));
+      const bIdx = priorityGroup1.findIndex(p => normalize(p) === normalize(b));
+      return aIdx - bIdx;
+    });
+    
+    // Add "Imported At" as a special column after ID, and "Submitted in Holman" after Final Approval
+    // Insert "__SUBMITTED_IN_HOLMAN__" just after Final Approval columns in sortedGroup1
+    const finalApprovalIdx = sortedGroup1.findIndex(h => 
+      h.toLowerCase().includes("final_approval") || h.toLowerCase().includes("final approval")
+    );
+    
+    let resultGroup1 = sortedGroup1;
+    if (finalApprovalIdx >= 0) {
+      resultGroup1 = [
+        ...sortedGroup1.slice(0, finalApprovalIdx + 1),
+        "__SUBMITTED_IN_HOLMAN__",
+        ...sortedGroup1.slice(finalApprovalIdx + 1)
+      ];
+    } else {
+      resultGroup1 = [...sortedGroup1, "__SUBMITTED_IN_HOLMAN__"];
+    }
+    
+    return [...idColumn, "__IMPORTED_AT__", ...resultGroup1, ...group2Columns, ...remainingColumns];
   }, [rawHeaders]);
 
   const robDecisionOptions = useMemo(() => {
@@ -1612,7 +1641,7 @@ export default function POs() {
                             return (
                               <th 
                                 key={header} 
-                                className={`sticky top-0 z-10 font-semibold px-2 py-2 text-left border-b ${wrapThis ? 'max-w-[280px]' : 'whitespace-nowrap'} ${bgClass} ${isFilterableVehicleNo ? 'left-0 z-20' : ''}`}
+                                className={`sticky top-0 z-10 font-semibold px-2 py-2 text-left border-b ${wrapThis ? 'max-w-[200px]' : 'whitespace-nowrap'} ${bgClass}`}
                               >
                                 <div className="flex flex-col gap-1">
                                   <span>{header}</span>
@@ -1739,7 +1768,7 @@ export default function POs() {
                               return (
                                 <td 
                                   key={header} 
-                                  className={`px-2 py-1.5 max-w-[240px] ${highlight}`}
+                                  className={`px-2 py-1.5 ${highlight}`}
                                 >
                                   <FinalApprovalCell order={order} options={approvalOptions} />
                                 </td>
@@ -1749,7 +1778,7 @@ export default function POs() {
                             return (
                               <td 
                                 key={header} 
-                                className={`px-2 py-1.5 ${wrapThis ? 'max-w-[280px]' : 'whitespace-nowrap'} ${highlight} ${isVehicleNoColumn(header) ? 'sticky left-0 z-10 bg-background font-medium' : ''}`}
+                                className={`px-2 py-1.5 ${wrapThis ? 'max-w-[200px]' : 'whitespace-nowrap'} ${highlight}`}
                               >
                                 {String(order.rawData?.[header] ?? "")}
                               </td>
