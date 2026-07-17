@@ -16751,6 +16751,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
             'in_process': 'In Process',
             'unknown_if_needed': 'Unknown if needed',
             'declined': 'Declined',
+            // Tech-facing options from the LOA Rental self-service form (Task #543)
+            'returned_it': 'I returned it',
+            'never_had_rental': 'I never had a rental before going on leave',
+            'hr_will_return': 'I received communication from HR and will be returning it',
+            'wont_return': "I won't /can't return the rental",
           };
           
           const statusMap: Record<string, string> = {
@@ -16819,6 +16824,125 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     } catch (error: any) {
       console.error("Error updating vehicle nexus data:", error);
       res.status(500).json({ message: "Failed to update vehicle nexus data", error: error.message });
+    }
+  });
+
+  // ── LOA Rental self-service form (Task #543) — PUBLIC, tokenized, no login ──
+  // The SMS link opens /loa-form/:token. Step 1 verifies LDAP + Truck # against
+  // the outreach record; step 2 writes the six answers into vehicle_nexus_data
+  // (same store the LOA sidebar reads) and permanently stops automated texting.
+  const LOA_FORM_KEYS_VALUES = new Set(["present", "not_present", "unknown"]);
+  const LOA_FORM_REPAIRED_VALUES = new Set(["returned_it", "never_had_rental", "hr_will_return", "wont_return"]);
+  const LOA_FORM_RETURNED_VALUES = new Set(["confirmed", "needs_tlt", "unconfirmed", "denied"]);
+  const normTruck = (v: string) => String(v || "").replace(/\D/g, "").replace(/^0+/, "");
+
+  async function loadLoaFormRow(token: string) {
+    const { getLoaOutreachRowByToken, isFormExcluded } = await import("./loa-outreach/engine");
+    const row = await getLoaOutreachRowByToken(token);
+    if (!row) return { row: null as any, completed: false };
+    return { row, completed: isFormExcluded(row) };
+  }
+
+  app.get("/api/public/loa-form/:token", async (req, res) => {
+    try {
+      const { row, completed } = await loadLoaFormRow(req.params.token);
+      if (!row) return res.status(404).json({ valid: false, message: "This link is invalid or has expired." });
+      res.json({ valid: true, completed, hasTruckOnFile: !!(row.truckNumber || "").trim() });
+    } catch (error: any) {
+      console.error("Error loading LOA form:", error);
+      res.status(500).json({ valid: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  app.post("/api/public/loa-form/:token/verify", async (req, res) => {
+    try {
+      const { row, completed } = await loadLoaFormRow(req.params.token);
+      if (!row) return res.status(404).json({ verified: false, message: "This link is invalid or has expired." });
+      if (completed) return res.status(409).json({ verified: false, completed: true, message: "This form has already been submitted." });
+      const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      const truck = String(req.body?.truckNumber || "").trim();
+      if (!ldap || !truck) return res.status(400).json({ verified: false, message: "Please enter both your LDAP and truck number." });
+      if (ldap !== row.ldap) return res.status(403).json({ verified: false, message: "The information entered does not match our records." });
+      const onFile = (row.truckNumber || "").trim();
+      if (onFile && normTruck(onFile) !== normTruck(truck)) {
+        return res.status(403).json({ verified: false, message: "The information entered does not match our records." });
+      }
+      res.json({ verified: true, techName: row.techName || "", truckNumber: onFile || truck });
+    } catch (error: any) {
+      console.error("Error verifying LOA form:", error);
+      res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  app.post("/api/public/loa-form/:token/submit", async (req, res) => {
+    try {
+      const { row, completed } = await loadLoaFormRow(req.params.token);
+      if (!row) return res.status(404).json({ success: false, message: "This link is invalid or has expired." });
+      if (completed) return res.status(409).json({ success: false, completed: true, message: "This form has already been submitted." });
+
+      const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      const enteredTruck = String(req.body?.truckNumber || "").trim();
+      if (!ldap || !enteredTruck) return res.status(400).json({ success: false, message: "Please enter both your LDAP and truck number." });
+      if (ldap !== row.ldap) return res.status(403).json({ success: false, message: "The information entered does not match our records." });
+      const onFile = (row.truckNumber || "").trim();
+      if (onFile && normTruck(onFile) !== normTruck(enteredTruck)) {
+        return res.status(403).json({ success: false, message: "The information entered does not match our records." });
+      }
+      // Truck # fallback: only when the outreach record has no truck on file.
+      const targetTruck = onFile || enteredTruck;
+      if (!targetTruck) return res.status(400).json({ success: false, message: "Please enter your truck number." });
+
+      const nexusNewLocation = String(req.body?.nexusNewLocation || "").trim().slice(0, 500);
+      const nexusNewLocationContact = String(req.body?.nexusNewLocationContact || "").trim().slice(0, 30);
+      const keysVal = String(req.body?.keys || "").trim();
+      const repairedVal = String(req.body?.repaired || "").trim();
+      const returnedVal = String(req.body?.returnedRental || "").trim();
+      const commentsVal = String(req.body?.comments || "").trim().slice(0, 400);
+      if (keysVal && !LOA_FORM_KEYS_VALUES.has(keysVal)) return res.status(400).json({ success: false, message: "Invalid keys selection." });
+      if (repairedVal && !LOA_FORM_REPAIRED_VALUES.has(repairedVal)) return res.status(400).json({ success: false, message: "Invalid repaired selection." });
+      if (returnedVal && !LOA_FORM_RETURNED_VALUES.has(returnedVal)) return res.status(400).json({ success: false, message: "Invalid returned rental selection." });
+
+      await storage.upsertVehicleNexusData({
+        vehicleNumber: targetTruck,
+        nexusNewLocation: nexusNewLocation || null,
+        nexusNewLocationContact: nexusNewLocationContact || null,
+        keys: keysVal || null,
+        repaired: repairedVal || null,
+        returnedRental: returnedVal || null,
+        comments: commentsVal || null,
+        updatedBy: `loa-form:${ldap}`,
+      });
+
+      const formData = {
+        nexusNewLocation, nexusNewLocationContact,
+        keys: keysVal, repaired: repairedVal, returnedRental: returnedVal, comments: commentsVal,
+      };
+      const { markLoaFormCompleted } = await import("./loa-outreach/engine");
+      await markLoaFormCompleted(ldap, targetTruck, formData);
+
+      // Note the submission on the tech's comms thread so the team sees it.
+      try {
+        const { getContactByLdap, getOrCreateTechThread, appendMessage } = await import("./fleet-comms/storage");
+        const contact = await getContactByLdap(ldap);
+        const thread = await getOrCreateTechThread(ldap, contact ?? { ldap, name: row.techName || ldap } as any);
+        await appendMessage({
+          threadId: thread.id,
+          ldap,
+          category: "loa_rental",
+          direction: "inbound",
+          contactRole: "tech",
+          body: `[LOA Rental form submitted] Truck ${targetTruck}. Location: ${nexusNewLocation || "—"}. Contact: ${nexusNewLocationContact || "—"}. Keys: ${keysVal || "—"}. Repaired: ${repairedVal || "—"}. Returned rental: ${returnedVal || "—"}. Comments: ${commentsVal || "—"}`,
+          phone: null,
+          status: "received",
+        });
+      } catch (noteErr) {
+        console.error("LOA form: failed to append thread note:", noteErr);
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error submitting LOA form:", error);
+      res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
     }
   });
 

@@ -173,6 +173,26 @@ export function registerCommsRoutes(app: Router): void {
     }
   });
 
+  // LOA Rental outreach (Task #543). One cron route, fired every 5 min by the
+  // dispatcher: drains due resends on every tick, and runs the daily send only
+  // inside the 10 AM ET hour (DST handled server-side by the ET-hour gate).
+  app.post("/comms/cron/loa-outreach", async (req: any, res) => {
+    if (!isInternalCron(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { runLoaOutreach, processLoaResends, etHour, LOA_SEND_ET_HOUR } = await import(
+        "../loa-outreach/engine"
+      );
+      const resends = await processLoaResends();
+      let daily: any = { skipped: true, reason: "outside_send_window" };
+      if (etHour() === LOA_SEND_ET_HOUR) {
+        daily = await runLoaOutreach("scheduled_dispatcher");
+      }
+      res.json({ success: true, resends, daily });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
+
   // ── Config / categories ─────────────────────────────────────────────────
   app.get("/comms/config", gate, async (req: any, res) => {
     const enabled = await retryOnceOnTransient(() => getBooleanSetting(FEATURE_FLAG, false));
@@ -189,6 +209,114 @@ export function registerCommsRoutes(app: Router): void {
     const { enabled } = req.body || {};
     await setSetting(FEATURE_FLAG, !!enabled, actor(req).id ?? undefined);
     res.json({ enabled: !!enabled });
+  });
+
+  // ── LOA Rental outreach — staff routes (Task #543) ──────────────────────
+  app.get("/comms/loa/config", gate, async (_req: any, res) => {
+    try {
+      const { getLoaOutreachHealth, LOA_SEND_ET_HOUR } = await import("../loa-outreach/engine");
+      const health = await getLoaOutreachHealth();
+      res.json({ ...health, sendEtHour: LOA_SEND_ET_HOUR });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  app.post("/comms/loa/config", gate, async (req: any, res) => {
+    if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { LOA_OUTREACH_FLAG } = await import("../loa-outreach/engine");
+      const { enabled } = req.body || {};
+      await setSetting(LOA_OUTREACH_FLAG, !!enabled, actor(req).id ?? undefined);
+      res.json({ enabled: !!enabled });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // Preview: render the SMS (with a REAL per-tech form link) without sending.
+  // Works while the automation toggle is OFF — the staff end-to-end test path.
+  app.get("/comms/loa/preview", gate, async (req: any, res) => {
+    try {
+      const {
+        getLoaTemplateBody,
+        getOrCreateOutreachRow,
+        formLinkForToken,
+      } = await import("../loa-outreach/engine");
+      const { renderTemplate } = await import("./lib");
+      const ldap = String(req.query.ldap || "").trim().toUpperCase();
+      if (!ldap) return res.status(400).json({ message: "ldap required" });
+      const name = String(req.query.name || "").trim();
+      const truck = String(req.query.truck || "").trim();
+      const template = await getLoaTemplateBody();
+      const row = await getOrCreateOutreachRow(ldap, name || null, truck || null);
+      const formLink = formLinkForToken(row.token);
+      const body = renderTemplate(template, {
+        name: name || row.techName,
+        ldap,
+        truck: truck || row.truckNumber,
+        formLink,
+      });
+      res.json({ ldap, body, formLink, template });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // Manual run. Default dryRun=true (resolve + render, send nothing);
+  // { "dryRun": false } sends for real (force bypasses flag + daily watermark).
+  app.post("/comms/loa/run", gate, async (req: any, res) => {
+    if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { runLoaOutreach } = await import("../loa-outreach/engine");
+      const dryRun = req.body?.dryRun !== false;
+      const force = !!req.body?.force;
+      const result = await runLoaOutreach(actor(req).id || "manual", { force, dryRun });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
+
+  // Per-tech outreach status for the LOA table row indicators.
+  app.get("/comms/loa/status", gate, async (req: any, res) => {
+    try {
+      const { getLoaOutreachRows } = await import("../loa-outreach/engine");
+      const ldaps = String(req.query.ldaps || "")
+        .split(",")
+        .map((s) => s.trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 500);
+      const rows = await getLoaOutreachRows(ldaps);
+      const out: Record<string, any> = {};
+      for (const r of rows) {
+        out[r.ldap] = {
+          lastSentAt: r.lastSentAt,
+          repliedAt: r.repliedAt,
+          formCompletedAt: r.formCompletedAt,
+          reenabledAt: r.reenabledAt,
+          pendingResendAt: r.pendingResendAt,
+        };
+      }
+      res.json({ statuses: out });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
+  });
+
+  // Staff escape hatch: resume automated outreach after a form submission.
+  app.post("/comms/loa/reenable", gate, async (req: any, res) => {
+    if (!isPrivileged(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { reenableLoaOutreach } = await import("../loa-outreach/engine");
+      const ldap = String(req.body?.ldap || "").trim().toUpperCase();
+      if (!ldap) return res.status(400).json({ message: "ldap required" });
+      const ok = await reenableLoaOutreach(ldap, actor(req).id || "staff");
+      if (!ok) return res.status(404).json({ message: "No outreach record for that LDAP" });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message });
+    }
   });
 
   // ── Inbox: thread list ──────────────────────────────────────────────────

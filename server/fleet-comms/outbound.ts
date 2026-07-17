@@ -49,6 +49,13 @@ function statusCallbackUrl(): string | undefined {
 export interface SendMessageInput {
   ldap?: string | null;
   phone?: string | null; // explicit override; else resolved from contact
+  /**
+   * When true, send to input.phone EXACTLY (skips the contact-phone preference
+   * in resolveTarget, and the queue drain won't re-resolve either). Used by LOA
+   * Rental outreach to reach a tech's personal number, which is never the
+   * contact's TPMS number. Requires input.phone.
+   */
+  phoneLocked?: boolean;
   category: string;
   body: string;
   mediaUrl?: string[] | null;
@@ -83,7 +90,9 @@ async function resolveTarget(input: SendMessageInput): Promise<{
   // can never win. input.phone is only used when there is no known contact
   // number (manual/unmatched sends, or a contact with an empty phone on file).
   const contactPhone = contact?.phone && contact.phone.trim() ? contact.phone : null;
-  const phone = contactPhone ?? input.phone ?? null;
+  const phone = input.phoneLocked
+    ? (input.phone ?? null)
+    : (contactPhone ?? input.phone ?? null);
   return {
     contact,
     phone,
@@ -101,6 +110,7 @@ async function enqueue(params: {
   body: string;
   mediaUrl?: string[] | null;
   managerCc: boolean;
+  phoneLocked?: boolean;
   scheduledFor: Date | null;
   sentBy?: string | null;
   senderName?: string | null;
@@ -116,6 +126,7 @@ async function enqueue(params: {
       body: params.body,
       mediaUrl: params.mediaUrl && params.mediaUrl.length ? JSON.stringify(params.mediaUrl) : null,
       managerCc: params.managerCc,
+      phoneLocked: !!params.phoneLocked,
       scheduledFor: params.scheduledFor,
       status: "pending",
       createdBy: params.sentBy ?? null,
@@ -175,6 +186,7 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
       body: input.body,
       mediaUrl: input.mediaUrl ?? null,
       managerCc: false, // already handled above
+      phoneLocked: !!input.phoneLocked,
       scheduledFor: quietUntil,
       sentBy: input.sentBy,
       senderName: input.senderName,
@@ -355,7 +367,7 @@ export async function processSendQueue(
       // the opt-out check + thread routing below use the re-resolved digits).
       let sendPhone = row.phone;
       let sendDigits = row.phoneDigits || normalizeDigits(row.phone);
-      if (row.ldap) {
+      if (row.ldap && !row.phoneLocked) {
         const cur = await getContactByLdap(row.ldap);
         const curPhone = cur?.phone && cur.phone.trim() ? cur.phone : null;
         if (curPhone && normalizeDigits(curPhone).length >= 10) {

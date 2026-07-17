@@ -169,6 +169,34 @@ CREATE TABLE IF NOT EXISTS "fs_comms_send_queue" (
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_status" ON "fs_comms_send_queue" ("status", "scheduled_for");
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_send_queue_batch" ON "fs_comms_send_queue" ("batch_id");
 
+-- LOA Rental outreach (Task #543): the drain must NOT re-resolve locked rows to
+-- the contact's current TPMS number (used for personal-number sends).
+ALTER TABLE "fs_comms_send_queue" ADD COLUMN IF NOT EXISTS "phone_locked" boolean NOT NULL DEFAULT false;
+
+-- LOA Rental SMS outreach state — one row per technician (Task #543).
+CREATE TABLE IF NOT EXISTS "fs_loa_outreach" (
+  "ldap" varchar(60) PRIMARY KEY,
+  "token" varchar(64) NOT NULL,
+  "tech_name" text,
+  "truck_number" text,
+  "last_cycle_date" text,
+  "last_sent_at" timestamp,
+  "last_sent_phones" text,
+  "last_body" text,
+  "pending_resend_at" timestamp,
+  "resend_sent_at" timestamp,
+  "replied_at" timestamp,
+  "form_completed_at" timestamp,
+  "form_truck_number" text,
+  "form_data" jsonb,
+  "reenabled_at" timestamp,
+  "reenabled_by" text,
+  "created_at" timestamp DEFAULT now(),
+  "updated_at" timestamp DEFAULT now()
+);
+CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_loa_outreach_token" ON "fs_loa_outreach" ("token");
+CREATE INDEX IF NOT EXISTS "idx_fs_loa_outreach_pending_resend" ON "fs_loa_outreach" ("pending_resend_at") WHERE "pending_resend_at" IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS "fs_comms_send_batches" (
   "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   "category" text NOT NULL,

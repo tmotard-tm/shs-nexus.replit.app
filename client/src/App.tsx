@@ -51,6 +51,7 @@ import ByovBulkUpload from "@/pages/byov-bulk-upload";
 import LoaDistributionList from "@/pages/loa-distribution-list";
 import ByovDriftCheck from "@/pages/byov-drift-check";
 import OffboardingReturn from "@/pages/offboarding-return";
+import LoaRentalForm from "@/pages/loa-rental-form";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
@@ -210,6 +211,11 @@ function Router() {
 
       <Route path="/offboarding/return">
         <OffboardingReturn />
+      </Route>
+
+      {/* LOA Rental self-service form — public, tokenized (Task #543) */}
+      <Route path="/loa-form/:token">
+        <LoaRentalForm />
       </Route>
       
       {/* Task work routes - deep linking for specific task IDs */}

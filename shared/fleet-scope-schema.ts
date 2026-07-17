@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, real, timestamp, boolean, serial } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, real, timestamp, boolean, serial, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
@@ -1496,6 +1496,7 @@ export const COMMS_CATEGORIES = [
   "rental_management",
   "vehicle_assignments",
   "offboarding",
+  "loa_rental",
   "general_fleet",
 ] as const;
 export type CommsCategory = (typeof COMMS_CATEGORIES)[number];
@@ -1507,6 +1508,7 @@ export const COMMS_CATEGORY_LABELS: Record<CommsCategory, string> = {
   rental_management: "Rental Management",
   vehicle_assignments: "Vehicle Assignments",
   offboarding: "Offboarding",
+  loa_rental: "LOA Rental",
   general_fleet: "General Fleet",
 };
 
@@ -1646,6 +1648,10 @@ export const commsSendQueue = pgTable("fs_comms_send_queue", {
   body: text("body").notNull(),
   mediaUrl: text("media_url"), // JSON array of URLs, or null
   managerCc: boolean("manager_cc").notNull().default(false),
+  // When true, the drain must send to THIS row's phone as-enqueued and must NOT
+  // re-resolve to the contact's current TPMS number. Used by LOA Rental outreach
+  // to reach a tech's personal number (which is never in fs_comms_contacts).
+  phoneLocked: boolean("phone_locked").notNull().default(false),
   scheduledFor: timestamp("scheduled_for"), // quiet-hours deferral target
   status: text("status").notNull().default("pending"), // pending|claimed|sent|failed|skipped|cancelled
   claimedAt: timestamp("claimed_at"),
@@ -1676,3 +1682,32 @@ export const commsSendBatches = pgTable("fs_comms_send_batches", {
   updatedAt: timestamp("updated_at").default(sql`now()`),
 });
 export type CommsSendBatch = typeof commsSendBatches.$inferSelect;
+
+// ============================================================================
+// LOA Rental SMS outreach (Task #543)
+// One state row per technician (LDAP). Tracks the unguessable public-form
+// token, the daily-send watermark, the single pending resend, reply/form
+// completion, and the staff re-enable escape hatch. Raw-SQL managed (DDL in
+// server/fleet-comms/schema-init.ts), NOT drizzle-kit push.
+// ============================================================================
+export const loaOutreach = pgTable("fs_loa_outreach", {
+  ldap: varchar("ldap", { length: 60 }).primaryKey(), // UPPER(TRIM(ENTERPRISE_ID))
+  token: varchar("token", { length: 64 }).notNull(), // unguessable public-form token
+  techName: text("tech_name"),
+  truckNumber: text("truck_number"), // truck on file at last send (may be empty)
+  lastCycleDate: text("last_cycle_date"), // ET yyyy-mm-dd of last daily send (per-day idempotency)
+  lastSentAt: timestamp("last_sent_at"),
+  lastSentPhones: text("last_sent_phones"), // digits, comma-separated, for the audit trail
+  lastBody: text("last_body"), // rendered body of the last daily send (resend sends the same text)
+  pendingResendAt: timestamp("pending_resend_at"), // when the single resend is due; null = none pending
+  resendSentAt: timestamp("resend_sent_at"),
+  repliedAt: timestamp("replied_at"), // any inbound reply (cancels the pending resend)
+  formCompletedAt: timestamp("form_completed_at"), // form submitted → permanently excluded
+  formTruckNumber: text("form_truck_number"), // truck # the tech entered on the form
+  formData: jsonb("form_data"), // the six submitted answers, verbatim
+  reenabledAt: timestamp("reenabled_at"), // staff re-enable; wins when >= formCompletedAt
+  reenabledBy: text("reenabled_by"),
+  createdAt: timestamp("created_at").default(sql`now()`),
+  updatedAt: timestamp("updated_at").default(sql`now()`),
+});
+export type LoaOutreachRow = typeof loaOutreach.$inferSelect;

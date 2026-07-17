@@ -194,6 +194,22 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/loa-trucks-to-recover'],
   });
 
+  // LOA Rental SMS outreach status per LDAP (Task #543). Degrades gracefully:
+  // if the comms module is off/unreachable this stays empty and the column shows dashes.
+  const loaLdapsCsv = Array.from(new Set(loaTechs.map(e => e.enterpriseId?.toUpperCase()).filter((s): s is string => !!s))).sort().join(',');
+  const { data: loaOutreachStatus } = useQuery<{ statuses: Record<string, { lastSentAt: string | null; repliedAt: string | null; formCompletedAt: string | null; reenabledAt: string | null; pendingResendAt: string | null }> }>({
+    queryKey: ['/api/fs/comms/loa/status', loaLdapsCsv],
+    queryFn: async () => {
+      const res = await fetch(`/api/fs/comms/loa/status?ldaps=${encodeURIComponent(loaLdapsCsv)}`, { credentials: 'include' });
+      if (!res.ok) return { statuses: {} };
+      return res.json();
+    },
+    enabled: loaLdapsCsv.length > 0,
+    retry: false,
+    staleTime: 60000,
+  });
+  const loaOutreachMap = loaOutreachStatus?.statuses || {};
+
   // ===== LOA HR Notes (per-tech thread with unread indicators) =====
   const [loaNotesEntry, setLoaNotesEntry] = useState<LoaTechEntry | null>(null);
   const [loaNoteDraft, setLoaNoteDraft] = useState("");
@@ -1517,6 +1533,7 @@ export default function WeeklyOffboarding() {
                             </div>
                           </TableHead>
                           <TableHead>Truck</TableHead>
+                          <TableHead>SMS Outreach</TableHead>
                           <TableHead>District</TableHead>
                           <TableHead>Phone (TPMS)</TableHead>
                           <TableHead>Personal Number</TableHead>
@@ -1599,6 +1616,41 @@ export default function WeeklyOffboarding() {
                               ) : <span className="text-muted-foreground">-</span>}
                             </TableCell>
                             <TableCell className="font-mono text-sm">{e.lastKnownTruck || <span className="text-muted-foreground">-</span>}</TableCell>
+                            <TableCell onClick={(ev) => ev.stopPropagation()}>
+                              {(() => {
+                                const st = e.enterpriseId ? loaOutreachMap[e.enterpriseId.toUpperCase()] : undefined;
+                                const label = st?.formCompletedAt ? 'Form done'
+                                  : st?.repliedAt ? 'Replied'
+                                  : st?.lastSentAt ? 'Sent'
+                                  : null;
+                                const color = st?.formCompletedAt ? 'bg-green-50 text-green-800 border-green-300 dark:bg-green-950 dark:text-green-200 dark:border-green-700'
+                                  : st?.repliedAt ? 'bg-blue-50 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-700'
+                                  : 'bg-slate-50 text-slate-700 border-slate-300 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700';
+                                return (
+                                  <div className="flex items-center gap-1 whitespace-nowrap">
+                                    {label ? (
+                                      <Badge variant="outline" className={`text-xs ${color}`} title={st?.lastSentAt ? `Last sent ${format(new Date(st.lastSentAt), 'MM/dd HH:mm')}` : undefined} data-testid={`badge-loa-outreach-${e.enterpriseId}`}>
+                                        {label}
+                                      </Badge>
+                                    ) : (
+                                      <span className="text-xs text-muted-foreground">-</span>
+                                    )}
+                                    {e.enterpriseId && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="h-7 px-1.5"
+                                        title="Open conversation in Fleet Communications"
+                                        onClick={(ev) => { ev.stopPropagation(); window.open(`/fleet-communications?q=${encodeURIComponent(e.enterpriseId!)}`, '_blank'); }}
+                                        data-testid={`button-loa-comms-${e.enterpriseId}`}
+                                      >
+                                        <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                                      </Button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
+                            </TableCell>
                             <TableCell className="text-sm">
                               {e.district || '-'}
                               {e.district && lookupCostCenter(e.district) && (
@@ -2274,6 +2326,11 @@ export default function WeeklyOffboarding() {
                             <SelectItem value="in_process">In Process</SelectItem>
                             <SelectItem value="unknown_if_needed">Unknown if needed</SelectItem>
                             <SelectItem value="declined">Declined</SelectItem>
+                            {/* Tech-submitted values from the LOA Rental self-service form (Task #543) */}
+                            <SelectItem value="returned_it">I returned it</SelectItem>
+                            <SelectItem value="never_had_rental">I never had a rental before going on leave</SelectItem>
+                            <SelectItem value="hr_will_return">I received communication from HR and will be returning it</SelectItem>
+                            <SelectItem value="wont_return">I won't /can't return the rental</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

@@ -36,6 +36,7 @@ export const TEMPLATE_TOKENS = [
   "district",
   "ldap",
   "managerName",
+  "formLink",
 ] as const;
 export type TemplateToken = (typeof TEMPLATE_TOKENS)[number];
 
@@ -65,6 +66,7 @@ export interface TemplateContext {
   district?: string | null;
   ldap?: string | null;
   managerName?: string | null;
+  formLink?: string | null; // LOA Rental outreach — per-tech public form URL
 }
 
 /** Render whitelisted tokens against a contact context. Unknown tokens left as-is. */
@@ -77,6 +79,7 @@ export function renderTemplate(body: string, ctx: TemplateContext): string {
     district: ctx.district || "",
     ldap: ctx.ldap || "",
     managerName: ctx.managerName || "",
+    formLink: ctx.formLink || "",
   };
   return body.replace(TOKEN_RE, (full, tok: string) =>
     Object.prototype.hasOwnProperty.call(values, tok) ? values[tok] : full,

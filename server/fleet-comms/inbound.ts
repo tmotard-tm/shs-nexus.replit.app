@@ -177,6 +177,17 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
 
   if (deduped) return { action: "deduped", threadId, contactRole };
 
+  // LOA Rental outreach (Task #543): any real inbound reply from a matched tech
+  // cancels that tech's pending automated resend.
+  if (ldap) {
+    try {
+      const { markLoaReplied } = await import("../loa-outreach/engine");
+      await markLoaReplied(ldap);
+    } catch (err) {
+      console.error("[Comms Inbound] LOA reply hook failed:", err);
+    }
+  }
+
   // Notify the inbox UI (thread id as the room key).
   try {
     broadcastMessage(`comms:${threadId}`, { type: "comms_message", message });

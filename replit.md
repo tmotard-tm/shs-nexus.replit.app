@@ -63,6 +63,10 @@ A single team SMS inbox that consolidates Registration + Decommissioning two-way
 -   **Cutover order**: (1) publish with the flag OFF, (2) create the sync + queue Scheduled Deployments, (3) run the one-off migrate, (4) pilot as developer/admin, (5) point the shared `FS_TWILIO_PHONE_NUMBER` inbound + status webhooks at `/api/fs/comms/webhooks/*`, (6) flip `comms_module_enabled` ON.
 -   **Env vars**: `FS_TWILIO_ACCOUNT_SID` / `FS_TWILIO_AUTH_TOKEN` / `FS_TWILIO_PHONE_NUMBER` (shared sender + signature validation), `COMMS_CONTACTS_STALE_HOURS` (optional, default 30).
 
+## LOA Rental SMS outreach
+
+Automated daily SMS (10 AM ET) to LOA techs (Employment Status L/P/S with an open rental or truck to recover) with a tokenized public form link. Engine: `server/loa-outreach/engine.ts` (flag `loa_rental_outreach_enabled`, default OFF; advisory lock `loa-rental-outreach`; per-day watermark via completed `sync_logs` type `loa_rental_outreach`; +6h resend if no reply; permanent stop on inbound reply or form submit, staff re-enable available). Sends go through the comms send-queue with `phone_locked` (TPMS mobile → SNSTV fallback). Tracking table `fs_loa_outreach` (raw-SQL init, not drizzle-kit). Public form: `/loa-form/:token` (`client/src/pages/loa-rental-form.tsx`), API `/api/public/loa-form/:token` (GET + verify + submit) — verify requires LDAP + truck match (truck adopted only when record has none); submit writes `vehicle_nexus_data` (tech-facing `repaired` values `returned_it`/`never_had_rental`/`hr_will_return`/`wont_return`) and notes the tech's comms thread (category `loa_rental`). Staff routes under `/api/fs/comms/loa/*` (config/preview/run/status/reenable); cron `POST /api/fs/comms/cron/loa-outreach`. Uses `COMMS_PUBLIC_BASE_URL` (falls back to `SAML_BASE_URL`) for the link host.
+
 ## LUCA write-back (LUCA to FleetScope, Phase 3 of the LUCA plan)
 
 Polls the LIVHR / fleet-agents app for LUCA's rental-recovery shop-call results and writes them onto `fs_trucks`, so the rentals dashboard shows what LUCA did and humans follow up on the same record. The producer side lives on LIVHR (its `server/routes/luca-outbox.ts`): `GET /api/luca/pending-tasks` plus `PATCH /api/luca/pending-tasks/:id/synced`, bearer-authed by LIVHR's `LUCA_OUTBOX_API_KEY` secret.
@@ -147,6 +151,7 @@ Replit allows ONE deployment per Repl, and this Repl's slot is taken by the Auto
 -   09:00 UTC → `POST /api/fs/comms/cron/sync` (contacts sync; cron-only route)
 -   10:00 UTC → `POST /api/fs/roster-sync` (in-process equivalent of run-sync.ts MINUS its final rental step)
 -   11:00 UTC → `POST /api/fs/rental-sync` (existing manual route; all guards + advisory lock apply)
+-   **TODO (one-line Fleet-Dispatcher addition)**: every run → `POST /api/fs/comms/cron/loa-outreach` (internal-cron route; drains LOA resends each tick and runs the daily LOA Rental outreach send only during the 10 AM ET hour — see "LOA Rental SMS outreach" below). Until added, run manually via `POST /api/fs/comms/loa/run`.
 -   **TODO (one-line Fleet-Dispatcher addition)**: 11:30 UTC → `POST /api/fs/ams-declined-check/run` — daily AMS Declined Repair snapshot/diff + Decommissioning auto-add (see below). Until added, run it manually from the Decommissioning page ("Daily Declined Check" → "Run now").
 
 ## Daily AMS Declined Repair check
