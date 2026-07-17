@@ -1587,86 +1587,7 @@ export default function POs() {
                   </Button>
                 </div>
               ) : (
-                                <>
-                <div className="flex flex-wrap items-end gap-3 px-3 py-2 border-b bg-muted/30">
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Truck #</span>
-                    <Input type="text" placeholder="Search" value={vehicleNoFilter} onChange={(e) => setVehicleNoFilter(e.target.value)} className="h-8 w-28 text-xs" data-testid="filter-vehicle-no" />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Final Approval</span>
-                    <Select value={finalApprovalFilter} onValueChange={setFinalApprovalFilter}>
-                      <SelectTrigger className="h-8 w-40 text-xs" data-testid="filter-final-approval"><SelectValue placeholder="All" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All</SelectItem>
-                        <SelectItem value="__blank__">Pending</SelectItem>
-                        {finalApprovalOptions.map(opt => (
-                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Rob's decision</span>
-                    <Select value={robDecisionFilter} onValueChange={setRobDecisionFilter}>
-                      <SelectTrigger className="h-8 w-40 text-xs" data-testid="filter-rob-decision"><SelectValue placeholder="All" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All</SelectItem>
-                        <SelectItem value="__blank__">(Blank)</SelectItem>
-                        {robDecisionOptions.map(opt => (
-                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Difference</span>
-                    <Select value={differenceFilter} onValueChange={setDifferenceFilter}>
-                      <SelectTrigger className="h-8 w-36 text-xs" data-testid="filter-difference"><SelectValue placeholder="All" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All</SelectItem>
-                        <SelectItem value="__blank__">(Blank)</SelectItem>
-                        {differenceOptions.map(opt => (
-                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Submitted</span>
-                    <Select value={submittedHolmanFilter} onValueChange={setSubmittedHolmanFilter}>
-                      <SelectTrigger className="h-8 w-28 text-xs" data-testid="filter-submitted-holman"><SelectValue placeholder="All" /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__all__">All</SelectItem>
-                        <SelectItem value="__blank__">(Blank)</SelectItem>
-                        <SelectItem value="Yes">Yes</SelectItem>
-                        <SelectItem value="No">No</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {spareVanColumnName && (
-                    <div className="flex flex-col gap-1">
-                      <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Spare van</span>
-                      <Select value={spareVanFilter} onValueChange={setSpareVanFilter}>
-                        <SelectTrigger className="h-8 w-24 text-xs" data-testid="filter-spare-van"><SelectValue placeholder="All" /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="__all__">All</SelectItem>
-                          <SelectItem value="yes">Yes</SelectItem>
-                          <SelectItem value="__blank__">(Blank)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div className="ml-auto flex items-center gap-2 pb-1">
-                    <span className="text-xs text-muted-foreground" data-testid="text-filter-count">{filteredOrders.length} of {orders.length}</span>
-                    {hasActiveOrderFilters && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setVehicleNoFilter(""); setFinalApprovalFilter("__all__"); setRobDecisionFilter("__all__"); setDifferenceFilter("__all__"); setSubmittedHolmanFilter("__all__"); setSpareVanFilter("__all__"); }} data-testid="button-clear-filters">
-                        Clear
-                      </Button>
-                    )}
-                  </div>
-                </div>
-<div className="overflow-auto" style={{ scrollbarWidth: 'thin', maxHeight: 'calc(100vh - 320px)', minHeight: '500px' }}>
+                <div className="overflow-auto" style={{ scrollbarWidth: 'thin', maxHeight: 'calc(100vh - 320px)', minHeight: '500px' }}>
                   <table className="text-sm min-w-max border-separate border-spacing-0">
                     <thead>
                       <tr>
@@ -1688,7 +1609,20 @@ export default function POs() {
                                   key={header} 
                                   className="sticky top-0 z-[3] font-medium text-xs px-2 py-1.5 whitespace-nowrap bg-muted text-left border-b border-r"
                                 >
-                                  Submitted in Holman
+                                  <div className="flex flex-col gap-1">
+                                    <span>Submitted in Holman</span>
+                                    <Select value={submittedHolmanFilter} onValueChange={setSubmittedHolmanFilter}>
+                                      <SelectTrigger className="h-6 text-xs w-full min-w-[92px] px-2 py-0" data-testid="filter-submitted-holman">
+                                        <SelectValue placeholder="All" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__all__">All</SelectItem>
+                                        <SelectItem value="__blank__">(Blank)</SelectItem>
+                                        <SelectItem value="Yes">Yes</SelectItem>
+                                        <SelectItem value="No">No</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
                                 </th>
                               );
                             }
@@ -1714,7 +1648,70 @@ export default function POs() {
                               >
                                 <div className="flex flex-col gap-1">
                                   <span className="leading-tight break-words line-clamp-2" title={header}>{header.replace(/_/g, " ")}</span>
-                                  
+                                  {isFilterableVehicleNo && (
+                                    <Input
+                                      type="text"
+                                      placeholder="#"
+                                      value={vehicleNoFilter}
+                                      onChange={(e) => setVehicleNoFilter(e.target.value)}
+                                      className="h-6 text-xs w-full min-w-[56px] max-w-[72px] px-2 py-0"
+                                      data-testid="filter-vehicle-no"
+                                    />
+                                  )}
+                                  {isFilterableSpareVan && (
+                                    <Select value={spareVanFilter} onValueChange={setSpareVanFilter}>
+                                      <SelectTrigger className="h-6 text-xs w-full min-w-[80px] px-2 py-0" data-testid="filter-spare-van">
+                                        <SelectValue placeholder="All" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__all__">All</SelectItem>
+                                        <SelectItem value="yes">Yes</SelectItem>
+                                        <SelectItem value="__blank__">(Blank)</SelectItem>
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                  {isFilterableRobDecision && (
+                                    <Select value={robDecisionFilter} onValueChange={setRobDecisionFilter}>
+                                      <SelectTrigger className="h-6 text-xs w-full min-w-[92px] px-2 py-0" data-testid="filter-rob-decision">
+                                        <SelectValue placeholder="All" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__all__">All</SelectItem>
+                                        <SelectItem value="__blank__">(Blank)</SelectItem>
+                                        {robDecisionOptions.map(opt => (
+                                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                  {isFilterableDifference && (
+                                    <Select value={differenceFilter} onValueChange={setDifferenceFilter}>
+                                      <SelectTrigger className="h-6 text-xs w-full min-w-[92px] px-2 py-0" data-testid="filter-difference">
+                                        <SelectValue placeholder="All" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__all__">All</SelectItem>
+                                        <SelectItem value="__blank__">(Blank)</SelectItem>
+                                        {differenceOptions.map(opt => (
+                                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
+                                  {isFilterableFinalApproval && (
+                                    <Select value={finalApprovalFilter} onValueChange={setFinalApprovalFilter}>
+                                      <SelectTrigger className="h-6 text-xs w-full min-w-[92px] px-2 py-0" data-testid="filter-final-approval">
+                                        <SelectValue placeholder="All" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__all__">All</SelectItem>
+                                        <SelectItem value="__blank__">Pending</SelectItem>
+                                        {finalApprovalOptions.map(opt => (
+                                          <SelectItem key={opt} value={opt}><span className="block max-w-[340px] truncate" title={opt}>{opt}</span></SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  )}
                                 </div>
                               </th>
                             );
@@ -1812,7 +1809,6 @@ export default function POs() {
                     </tbody>
                   </table>
                 </div>
-                </>
               )}
             </CardContent>
           </Card>
