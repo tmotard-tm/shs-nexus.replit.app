@@ -183,7 +183,7 @@ export interface IStorage {
   updateApprovedCostImportMeta(headers: string[], keyColumn: string, totalRows: number, importedBy?: string): Promise<ApprovedCostImportMeta>;
   
   // Truck Consolidation operations
-  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates?: boolean): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
+  consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string }>, consolidatedBy: string, preserveExistingDates?: boolean): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }>;
   getTruckConsolidations(limit?: number): Promise<TruckConsolidation[]>;
   
   // PMF Activity Log operations
@@ -1423,7 +1423,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Truck Consolidation operations
-  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }> {
+  async consolidateTrucks(entries: Array<{ truckNumber: string; dateInRepair?: string; renterName?: string }>, consolidatedBy: string, preserveExistingDates = false): Promise<{ added: string[]; removed: string[]; unchanged: number; updated: number; consolidationId: string }> {
     // Get current trucks in the system
     const currentTrucks = await this.getAllTrucks();
     const currentTruckNumbers = new Set(currentTrucks.map(t => t.truckNumber.trim().toUpperCase()));
@@ -1460,6 +1460,7 @@ export class DatabaseStorage implements IStorage {
         subStatus: "SHS Researching",
         shsOwner: "Oscar S",
         datePutInRepair: entry?.dateInRepair || null,
+        renterName: entry?.renterName || null,
       });
     }
     
@@ -1479,11 +1480,19 @@ export class DatabaseStorage implements IStorage {
       if (currentTruckNumbers.has(truckNum)) {
         const entry = inputMap.get(truckNum);
         const truck = currentTrucks.find(t => t.truckNumber.trim().toUpperCase() === truckNum);
-        if (truck && entry?.dateInRepair) {
-          if (preserveExistingDates && truck.datePutInRepair) continue;
-          await this.updateTruck(truck.id, {
-            datePutInRepair: entry.dateInRepair,
-          });
+        if (!truck) continue;
+        const updates: Record<string, any> = {};
+        if (entry?.dateInRepair && !(preserveExistingDates && truck.datePutInRepair)) {
+          updates.datePutInRepair = entry.dateInRepair;
+        }
+        // Renter name mirrors the Rental Ops report on every sync so the
+        // Rentals dashboard literally matches Rental Ops. A manually entered
+        // name (renter_name_manual) is never clobbered by the feed.
+        if (entry?.renterName && !truck.renterNameManual && (truck.renterName || "") !== entry.renterName) {
+          updates.renterName = entry.renterName;
+        }
+        if (Object.keys(updates).length > 0) {
+          await this.updateTruck(truck.id, updates);
           updatedCount++;
         }
       }

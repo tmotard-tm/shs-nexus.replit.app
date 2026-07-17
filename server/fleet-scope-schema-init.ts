@@ -568,6 +568,21 @@ END $$;
 DO $$ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'renter_name'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "renter_name" text;
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'renter_name_manual'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "renter_name_manual" boolean DEFAULT false;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
     WHERE table_name = 'fs_trucks' AND column_name = 'main_status_changed_at'
   ) THEN
     ALTER TABLE "fs_trucks" ADD COLUMN "main_status_changed_at" timestamp;

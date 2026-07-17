@@ -6573,6 +6573,13 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       }
 
       const validated = updateTruckSchema.parse(req.body);
+
+      // A renterName arriving without an explicit manual flag is a human edit:
+      // non-empty pins it as manual (sync will not overwrite); empty releases
+      // the field back to the Rental Ops sync on its next run.
+      if ((validated as any).renterName !== undefined && (validated as any).renterNameManual === undefined) {
+        (validated as any).renterNameManual = String((validated as any).renterName || "").trim() !== "";
+      }
       
       // Auto-update registrationLastUpdate when registrationStickerValid changes
       if (validated.registrationStickerValid !== undefined && 

@@ -406,6 +406,8 @@ async function runRentalSync(
     truckNumber: vn,
     // Use same date as daysOpen counter: COALESCE(ORIGINAL_START_DATE, RENTAL_START_DATE)
     dateInRepair: entOriginalStart(r) ?? undefined,
+    // Same renter the Rental Ops dashboard shows for this ticket
+    renterName: (r.RENTER_NAME ? String(r.RENTER_NAME).trim() : "") || undefined,
   }));
 
   // SEGMENT 2: Holman non-Enterprise vehicles not in Enterprise ticket table
@@ -428,9 +430,14 @@ async function runRentalSync(
     const r = sorted[0];
     // Use same date as daysOpen counter: PO_DATE falling back to RENTAL_START_DATE
     const startDate = parseRentalDate(r.PO_DATE || r.RENTAL_START_DATE);
+    // Holman open report carries FIRST_NAME + LAST_NAME (RENTER_NAME on some rows)
+    const renter = (r.RENTER_NAME
+      ? String(r.RENTER_NAME).trim()
+      : `${r.FIRST_NAME || ""} ${r.LAST_NAME || ""}`.trim());
     return {
       truckNumber: vn,
       dateInRepair: startDate ?? undefined,
+      renterName: renter || undefined,
     };
   });
 

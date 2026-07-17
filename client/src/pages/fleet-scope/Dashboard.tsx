@@ -2249,6 +2249,7 @@ export default function Dashboard() {
       "Local Repair Contact Name",
       "Confirmed Set of Expired Tags",
       "Confirmed Declined Repair",
+      "Renter",
       "Tech Name",
       "Tech Phone",
       "Pick Up Slot Booked",
@@ -2279,6 +2280,7 @@ export default function Dashboard() {
       truck.contactName || "",
       truck.confirmedSetOfExpiredTags ? "Yes" : "No",
       truck.confirmedDeclinedRepair || "",
+      truck.renterName || "",
       truck.techName || "",
       truck.techPhone || "",
       truck.pickUpSlotBooked ? "Yes" : "No",
@@ -2355,6 +2357,7 @@ export default function Dashboard() {
       "Confirmed Set of Expired Tags": truck.confirmedSetOfExpiredTags ? "Yes" : "No",
       "Confirmed Declined Repair": truck.confirmedDeclinedRepair || "",
       "Assigned": truck.snowflakeAssigned === true ? "Yes" : truck.snowflakeAssigned === false ? "No" : "",
+      "Renter": truck.renterName || "",
       "Tech Name": truck.techName || "",
       "Enterprise ID": techEnterpriseIds[truck.truckNumber] || "",
       "Tech Specialty": techSpecialties[truck.truckNumber] || "",
@@ -3419,7 +3422,7 @@ export default function Dashboard() {
                             </th>
                             <th className="px-2 py-2 text-left text-xs font-medium uppercase tracking-labels text-muted-foreground hidden sm:table-cell" data-testid="header-tech-name">
                               <div className="space-y-1">
-                                <span>Tech Name</span>
+                                <span>Renter</span>
                                 <MultiSelectFilter
                                   options={["BYOV", "Non-BYOV"]}
                                   selectedValues={byovFilter}
@@ -3719,7 +3722,33 @@ export default function Dashboard() {
                               <td className="px-2 py-2 text-sm hidden sm:table-cell" data-testid={`text-tech-name-${index}`}>
                                 <div>
                                   <div className="flex items-center gap-1 flex-wrap">
-                                    {truck.techName || <span className="text-muted-foreground">—</span>}
+                                    {editingCell?.truckId === truck.id && editingCell?.field === "renterName" ? (
+                                      <Input
+                                        value={editValue}
+                                        onChange={(e) => setEditValue(e.target.value)}
+                                        onBlur={() => handleTextSave(truck.id, "renterName")}
+                                        onKeyDown={(e) => {
+                                          if (e.key === "Enter") handleTextSave(truck.id, "renterName");
+                                          if (e.key === "Escape") setEditingCell(null);
+                                        }}
+                                        className="h-7 text-sm px-1 w-36"
+                                        autoFocus
+                                        data-testid={`input-renter-name-${index}`}
+                                      />
+                                    ) : (
+                                      <span
+                                        className="cursor-pointer hover:bg-muted/50 px-1 py-0.5 rounded"
+                                        title={truck.renterNameManual ? "Renter (entered manually) - click to edit" : "Renter per the Rental Ops report - click to correct"}
+                                        onClick={() => startEditing(truck.id, "renterName", truck.renterName)}
+                                        data-testid={`edit-renter-name-${index}`}
+                                      >
+                                        {truck.renterName || <span className="text-muted-foreground italic">unknown - click to add</span>}
+                                        {truck.renterNameManual ? <span className="ml-1 text-[10px] font-bold text-blue-600 dark:text-blue-400" title="Manually entered">M</span> : null}
+                                        {truck.techName && truck.techName.trim() && truck.techName.trim() !== (truck.renterName || "").trim() ? (
+                                          <span className="ml-1 text-[11px] text-muted-foreground">(TPMS: {truck.techName})</span>
+                                        ) : null}
+                                      </span>
+                                    )}
                                     {truck.offboardingFlagged && (
                                       <span
                                         className="shrink-0 inline-flex items-center justify-center w-5 h-5 rounded bg-red-100 dark:bg-red-900/40 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 text-[10px] font-bold leading-none"

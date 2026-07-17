@@ -513,6 +513,11 @@ export const trucks = pgTable("fs_trucks", {
   eta: text("eta"), // Estimated time of arrival date
   
   // Rental tracking fields
+  // Renter per the Rental Ops report (Enterprise RENTER_NAME / Holman first+last),
+  // written by every rental sync. renter_name_manual marks a human-entered value
+  // the sync must never clobber. Distinct from techName (TPMS assignment).
+  renterName: text("renter_name"),
+  renterNameManual: boolean("renter_name_manual").default(false),
   rentalStartDate: text("rental_start_date"),
   expectedReturnDate: text("expected_return_date"),
   rentalStatus: text("rental_status"),
