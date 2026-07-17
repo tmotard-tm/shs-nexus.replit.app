@@ -17181,6 +17181,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }));
       }
 
+      // Open-rental Enterprise-ID set for the "Rental" column — the exact same
+      // population that drives the on-screen Rental badge. Degrades gracefully:
+      // if Snowflake is unavailable the column is left blank rather than failing
+      // the whole export.
+      let openRentalEids = new Set<string>();
+      try {
+        openRentalEids = new Set(await computeOpenRentalEidSet(false));
+      } catch (e: any) {
+        console.warn("[Weekly Offboarding export] Rental column unavailable:", e.message);
+      }
+
       const manualStatusLabels: Record<string, string> = {
         'reserved_for_new_hire': 'Reserved for new hire', 'in_repair': 'In repair',
         'declined_repair': 'Declined repair', 'available_for_rental_pmf': 'Available to assign or send to PMF',
@@ -17203,6 +17214,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         { header: 'Status',          key: 'emplStatus',     width: 14 },
         { header: 'Effective Date',  key: 'effdt',          width: 16 },
         { header: 'Last Date Worked',key: 'lastDateWorked', width: 18 },
+        { header: 'Rental',          key: 'rental',         width: 10 },
         { header: 'Planning Area',   key: 'planningArea',   width: 16 },
         { header: 'Owner',           key: 'owner',          width: 26 },
         { header: 'Tech Specialty',  key: 'techSpecialty',  width: 20 },
@@ -17244,6 +17256,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           emplStatus: row.EMPL_STATUS || '',
           effdt: toDateStr(row.EFFDT),
           lastDateWorked: toDateStr(row.LAST_DATE_WORKED),
+          rental: openRentalEids.has((row.ENTERPRISE_ID || '').trim().toUpperCase()) ? 'Yes' : '',
           planningArea: row.PLANNING_AREA || '',
           owner: getOwner(row.PLANNING_AREA),
           techSpecialty: row.TECH_SPECIALTY || '',
@@ -17260,7 +17273,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       // Freeze + auto-filter
-      sheet.autoFilter = { from: 'A1', to: 'Q1' };
+      sheet.autoFilter = { from: 'A1', to: 'R1' };
 
       const timestamp = new Date().toISOString().split('T')[0];
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -18763,12 +18776,88 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // Returns the set of Enterprise IDs currently in open rentals (for cross-app badge on Weekly Offboarding).
   // Uses the same TPMS name-matching logic as the main open-rentals endpoint.
+  // Shared computation of the open-rental Enterprise-ID set. Used by the
+  // /api/rental-ops/open-enterprise-ids route (UI "Rental" badge) AND the
+  // Weekly Offboarding XLSX export so both always show the same population.
+  // Cached under the same key as the route; throws when Snowflake is unavailable.
+  async function computeOpenRentalEidSet(managedScope: boolean, fileDate?: string): Promise<string[]> {
+    const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+    if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
+    const sf = getSnowflakeService();
+    await sf.connect();
+
+    const eidCacheKey = `open-eid:${fileDate || 'latest'}:${managedScope ? 'managed' : 'all'}`;
+    const eidCached = getRentalOpsCache(eidCacheKey);
+    if (eidCached) return ((eidCached.data as any).enterpriseIds || []) as string[];
+
+    const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
+    // Mirrors isEntVendor in server/rental-ops-sync.ts: empty, Enterprise, and Toll
+    // vendors are all treated as "Enterprise" (excluded from the Holman segment).
+    const isEntVendor = (v: string | null | undefined) => {
+      const s = (v || '').trim();
+      return !s || /enterprise/i.test(s) || /toll/i.test(s);
+    };
+
+    const [ticketRows, holmanRows] = await Promise.all([
+      sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(fileDate)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
+      sf.executeQuery(`SELECT VEHICLE_NUMBER, ENTERPRISE_ID, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(fileDate)} LIMIT 5000`) as Promise<any[]>,
+    ]);
+
+    // Deduplicate enterprise ticket rows by vehicle (keep latest rental start date)
+    const entByVehicle = new Map<string, any>();
+    for (const r of ticketRows) {
+      const vn = normV(r.VEHICLE_NUMBER || '');
+      if (!vn) continue;
+      const existing = entByVehicle.get(vn);
+      const rDate = new Date(r.RENTAL_START_DATE || '2000-01-01').getTime();
+      const eDate = existing ? new Date(existing.RENTAL_START_DATE || '2000-01-01').getTime() : 0;
+      if (!existing || rDate > eDate) entByVehicle.set(vn, r);
+    }
+
+    // Build rows for TPMS name enrichment
+    const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
+      renterName: (r.RENTER_NAME || '').trim(),
+      enterpriseId: null as string | null,
+      source: 'enterprise',
+    }));
+    await rentalEnrichEnterpriseIds(sf, enrichRows);
+
+    // Collect all resolved Enterprise IDs (normalized to upper-case for consistent matching)
+    const entIds = new Set<string>();
+    for (const row of enrichRows) {
+      if (row.enterpriseId) entIds.add(String(row.enterpriseId).trim().toUpperCase());
+    }
+
+    // Add Holman segment direct Enterprise IDs. This is a membership Set, so the
+    // list-only de-dupe guards (vendor=Enterprise, or vehicle already covered by an
+    // Enterprise ticket) must NOT drop rows here — doing so silently loses real
+    // open-rental renters from the badge set. Only exclude Toll rows, which are
+    // toll charges rather than vehicle rentals.
+    for (const r of holmanRows) {
+      const vendor = r.RENTAL_VENDOR || '';
+      if (managedScope) {
+        // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
+        // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
+        // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
+        // inflate the default membership set.
+        if (isEntVendor(vendor)) continue;
+        if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
+      } else {
+        if (/toll/i.test(vendor)) continue;
+      }
+      const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
+      if (eid) entIds.add(eid);
+    }
+
+    const eidResult = { enterpriseIds: Array.from(entIds) };
+    setRentalOpsCache(eidCacheKey, eidResult);
+    return eidResult.enterpriseIds;
+  }
+
   app.get("/api/rental-ops/open-enterprise-ids", requireAuth, async (req: any, res) => {
     try {
-      const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
+      const { isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", enterpriseIds: [] });
-      const sf = getSnowflakeService();
-      await sf.connect();
 
       // `scope=managed` (used by the Fleet Communications module) applies the SAME
       // Enterprise-first / Holman-non-Enterprise de-dupe that the Rental Ops -> Fleet
@@ -18783,68 +18872,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const eidCached = getRentalOpsCache(eidCacheKey);
       if (eidCached) return res.json({ ...eidCached.data, _cachedAt: eidCached.cachedAt });
 
-      const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
-      // Mirrors isEntVendor in server/rental-ops-sync.ts: empty, Enterprise, and Toll
-      // vendors are all treated as "Enterprise" (excluded from the Holman segment).
-      const isEntVendor = (v: string | null | undefined) => {
-        const s = (v || '').trim();
-        return !s || /enterprise/i.test(s) || /toll/i.test(s);
-      };
-
-      const [ticketRows, holmanRows] = await Promise.all([
-        sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(req.query?.fileDate as string)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
-        sf.executeQuery(`SELECT VEHICLE_NUMBER, ENTERPRISE_ID, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(req.query?.fileDate as string)} LIMIT 5000`) as Promise<any[]>,
-      ]);
-
-      // Deduplicate enterprise ticket rows by vehicle (keep latest rental start date)
-      const entByVehicle = new Map<string, any>();
-      for (const r of ticketRows) {
-        const vn = normV(r.VEHICLE_NUMBER || '');
-        if (!vn) continue;
-        const existing = entByVehicle.get(vn);
-        const rDate = new Date(r.RENTAL_START_DATE || '2000-01-01').getTime();
-        const eDate = existing ? new Date(existing.RENTAL_START_DATE || '2000-01-01').getTime() : 0;
-        if (!existing || rDate > eDate) entByVehicle.set(vn, r);
-      }
-
-      // Build rows for TPMS name enrichment
-      const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
-        renterName: (r.RENTER_NAME || '').trim(),
-        enterpriseId: null as string | null,
-        source: 'enterprise',
-      }));
-      await rentalEnrichEnterpriseIds(sf, enrichRows);
-
-      // Collect all resolved Enterprise IDs (normalized to upper-case for consistent matching)
-      const entIds = new Set<string>();
-      for (const row of enrichRows) {
-        if (row.enterpriseId) entIds.add(String(row.enterpriseId).trim().toUpperCase());
-      }
-
-      // Add Holman segment direct Enterprise IDs. This is a membership Set, so the
-      // list-only de-dupe guards (vendor=Enterprise, or vehicle already covered by an
-      // Enterprise ticket) must NOT drop rows here — doing so silently loses real
-      // open-rental renters from the badge set. Only exclude Toll rows, which are
-      // toll charges rather than vehicle rentals.
-      for (const r of holmanRows) {
-        const vendor = r.RENTAL_VENDOR || '';
-        if (managedScope) {
-          // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
-          // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
-          // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
-          // inflate the default membership set.
-          if (isEntVendor(vendor)) continue;
-          if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
-        } else {
-          if (/toll/i.test(vendor)) continue;
-        }
-        const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
-        if (eid) entIds.add(eid);
-      }
-
-      const eidResult = { enterpriseIds: Array.from(entIds) };
-      setRentalOpsCache(eidCacheKey, eidResult);
-      res.json(eidResult);
+      const enterpriseIds = await computeOpenRentalEidSet(managedScope, req.query?.fileDate as string | undefined);
+      res.json({ enterpriseIds });
     } catch (err: any) {
       return handleSnowflakeError(err, res);
     }
