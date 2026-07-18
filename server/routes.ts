@@ -12024,6 +12024,68 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Bulk create onboarding hires (manual import)
+  // Onboarding one-call assign (Tyler 2026-07-18): fires the SAME assignTech
+  // function the Fleet Management Assign button calls, from the onboarding page,
+  // WITHOUT touching Fleet Management's code. Own dynamic import; the FM handler
+  // and its shared import are left completely untouched. Runs the same district
+  // guard (block a cross-district assign, exactly like clicking Assign on FM),
+  // then assignTech does the TPMS/Holman/AMS work; the row is stamped on TPMS
+  // success. NOTE: districtGuardForAssign is a SEPARATE exported copy of the
+  // guard logic used only here — FM keeps its own inline guard untouched
+  // (Tyler-confirmed: match the behavior, do not touch FM).
+  app.post("/api/onboarding-hires/:id/assign", requireAuth, async (req: any, res) => {
+    try {
+      const truckNumber = String(req.body?.truckNumber ?? "").trim();
+      const notes = typeof req.body?.notes === "string" ? req.body.notes.trim() : "";
+      if (!truckNumber) return res.status(400).json({ message: "truckNumber is required" });
+
+      const hire = await storage.getOnboardingHire(req.params.id);
+      if (!hire) return res.status(404).json({ message: "Hire not found" });
+      const ldapId = (hire.enterpriseId ?? "").trim();
+      if (!ldapId) {
+        return res.status(422).json({ message: "This hire has no Enterprise ID yet (enrichment pending). It is required for assignment." });
+      }
+
+      const { fleetOpsService, districtGuardForAssign } = await import("./fleet-operations-service");
+
+      const guard = await districtGuardForAssign(truckNumber, ldapId, hire.district ?? undefined);
+      if (guard.blocked) return res.status(409).json({ message: guard.message });
+
+      const requestedBy = req.user?.username || "unknown";
+      const result = await fleetOpsService.assignTech({
+        truckNumber,
+        ldapId,
+        districtNo: hire.district ?? undefined,
+        techName: hire.employeeName || ldapId,
+        requestedBy,
+        notes: notes || `Weekly Onboarding assign (hire ${req.params.id}, by ${requestedBy})`,
+        assignmentType: "assigned",
+        amsStatusId: 1,
+      });
+      if ("locked" in result && result.locked) {
+        return res.status(409).json({ message: result.message });
+      }
+      if (!("overallSuccess" in result)) return res.status(500).json({ message: "Unexpected result" });
+
+      // Stamp the onboarding row only when TPMS committed (explicit 2-field
+      // whitelist, not a req.body spread).
+      let hireStamped = false;
+      if (result.tpms?.status === "success") {
+        await storage.updateOnboardingHire(hire.id, {
+          truckAssigned: true,
+          assignedTruckNo: truckNumber,
+          ...(notes ? { notes } : {}),
+        });
+        hireStamped = true;
+      }
+
+      const statusCode = result.overallSuccess ? 200 : result.partialSuccess ? 207 : 500;
+      res.status(statusCode).json({ ...result, hireStamped });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/onboarding-hires/bulk", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);

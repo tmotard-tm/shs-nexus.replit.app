@@ -1,6 +1,6 @@
 import { storage } from "./storage";
 import { db } from "./db";
-import { eq, and, lte, or, sql } from "drizzle-orm";
+import { eq, and, lte, or, sql, inArray } from "drizzle-orm";
 import {
   holmanVehiclesCache,
   amsVehiclesCache,
@@ -20,6 +20,7 @@ import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent }
 const FREEZE_TPMS_CACHE_WRITES: boolean = true;
 import { toCanonical, toHolmanRef, toTpmsRef, toDisplayNumber, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { sendEmail } from "./email-service";
+import { holmanApiService } from "./holman-api-service";
 
 interface RepairData {
   repairStatus?: number;
@@ -940,6 +941,76 @@ async function resolveCurrentTechTruck(ldapId: string): Promise<string | null> {
   } catch {}
 
   return null;
+}
+
+// Leaf pure formatter, DUPLICATED (not moved) from the routes.ts closure copy
+// at routes.ts:8001 — routes.ts keeps its own copy + all 12 call sites
+// untouched. Deterministic strip+pad, divergence risk ~0.
+function padDistrictForApi(input: string | undefined | null): string {
+  const digits = String(input ?? "").trim().replace(/\D/g, "");
+  if (!digits) return "";
+  return digits.padStart(7, "0").slice(-7);
+}
+
+/**
+ * District guard for the onboarding assign route ONLY
+ * (/api/onboarding-hires/:id/assign). DUPLICATED from the inline guard in the
+ * /api/fleet-ops/assign handler in routes.ts. The Fleet Management handler keeps
+ * its OWN inline copy, completely UNTOUCHED (Tyler 2026-07-18: match the assign
+ * behavior, do NOT touch Fleet Management's code) — this separate copy lets the
+ * onboarding route enforce the same district block without modifying FM.
+ * Behavior: resolve tech district from tpms_tech_profiles by enterprise id, fall
+ * back to the caller districtNo (new hires have no profile yet), compare with the
+ * vehicle's cached district, re-check LIVE Holman before blocking.
+ *
+ * HARD REQUIREMENT (Tyler 2026-07-18, verbatim): "That district guard has to
+ * stay in place ... currently we have to change the district before assigning
+ * and that is INTENTIONAL." Block-on-district-mismatch is a deliberate rule:
+ * never weaken, bypass, or add a force/skip flag. Keep this copy in sync with
+ * the FM inline guard if that one ever changes.
+ */
+export async function districtGuardForAssign(
+  truckNumber: string,
+  ldapId: string,
+  districtNo: string | null | undefined,
+): Promise<{ blocked: boolean; message?: string }> {
+  const _ldapNorm = String(ldapId).trim().toUpperCase();
+  const techProfileRows = await db
+    .select({ districtNo: tpmsTechProfiles.districtNo })
+    .from(tpmsTechProfiles)
+    .where(sql`UPPER(${tpmsTechProfiles.enterpriseId}) = UPPER(${_ldapNorm})`)
+    .limit(1);
+  const techDistrict = padDistrictForApi(
+    String(techProfileRows[0]?.districtNo ?? districtNo ?? ""),
+  );
+  if (techDistrict) {
+    const districtCandidates = Array.from(new Set(
+      [truckNumber, toHolmanRef(truckNumber), toDisplayNumber(truckNumber), toCanonical(truckNumber)]
+        .map((c) => String(c || "").trim())
+        .filter(Boolean),
+    ));
+    const districtRows = await db
+      .select({ district: holmanVehiclesCache.district })
+      .from(holmanVehiclesCache)
+      .where(inArray(holmanVehiclesCache.holmanVehicleNumber, districtCandidates))
+      .limit(1);
+    const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
+    if (vehicleDistrict && vehicleDistrict !== techDistrict) {
+      let liveDistrictOk = false;
+      try {
+        const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
+        const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
+        if (livePrefix && livePrefix === techDistrict) liveDistrictOk = true;
+      } catch (e: any) {
+        console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+      }
+      if (!liveDistrictOk) {
+        return { blocked: true, message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning." };
+      }
+      console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${techDistrict}, allowing assign for ${truckNumber}`);
+    }
+  }
+  return { blocked: false };
 }
 
 // Acquire an operation lock on a vehicle row atomically.
