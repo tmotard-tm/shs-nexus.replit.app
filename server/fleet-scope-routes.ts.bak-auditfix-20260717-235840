@@ -1778,13 +1778,12 @@ setTimeout(() => {
 
 // Email notification for pending PO approvals
 async function sendPoDecisionDigestEmail(): Promise<{ sent: boolean; count: number }> {
+  const changes = await fleetScopeStorage.getUndigestedDecisionChanges();
+  if (changes.length === 0) return { sent: false, count: 0 };
   if (!process.env.FS_SENDGRID_API_KEY) {
     console.log("[PO Digest] SendGrid API key not configured, skipping digest email");
-    return { sent: false, count: 0 };
+    return { sent: false, count: changes.length };
   }
-  // Atomic claim: only one instance/caller can ever own a batch of rows.
-  const changes = await fleetScopeStorage.claimUndigestedDecisionChanges();
-  if (changes.length === 0) return { sent: false, count: 0 };
   const esc = (v: string | null | undefined) => String(v ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   const fmt = (v: string | null) => (v && v.trim() ? v : "Pending");
   const whenEt = (d: Date | null) => (d ? new Date(d).toLocaleString("en-US", { timeZone: "America/New_York" }) : "");
@@ -1816,14 +1815,8 @@ async function sendPoDecisionDigestEmail(): Promise<{ sent: boolean; count: numb
       </div>`,
   };
   sgMail.setApiKey(process.env.FS_SENDGRID_API_KEY);
-  try {
-    await sgMail.send(msg);
-  } catch (sendErr) {
-    // Release the claim so the rows are retried on the next trigger.
-    await fleetScopeStorage.unclaimDecisionChanges(changes.map(c => c.id)).catch(unclaimErr =>
-      console.error("[PO Digest] CRITICAL: failed to unclaim after send failure:", unclaimErr));
-    throw sendErr;
-  }
+  await sgMail.send(msg);
+  await fleetScopeStorage.markDecisionChangesDigested(changes.map(c => c.id));
   console.log(`[PO Digest] Sent digest with ${changes.length} change(s)`);
   return { sent: true, count: changes.length };
 }
@@ -12032,18 +12025,15 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   // On autoscale an instance may not be awake all evening - the digested_at marker
   // makes the next opportunity (or the cron endpoint above) catch up losslessly.
   let lastDigestDateEt = "";
-  if (process.env.NODE_ENV === "production" || process.env.REPLIT_DEPLOYMENT) {
-    setInterval(() => {
-      const now = new Date();
-      const etHour = Number(now.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
-      const etDate = now.toLocaleDateString("en-US", { timeZone: "America/New_York" });
-      if (etHour >= 18 && lastDigestDateEt !== etDate) {
-        sendPoDecisionDigestEmail()
-          .then(() => { lastDigestDateEt = etDate; })
-          .catch(err => console.error("[PO Digest] Scheduled send failed, will retry in 15 min:", err));
-      }
-    }, 15 * 60 * 1000);
-  }
+  setInterval(() => {
+    const now = new Date();
+    const etHour = Number(now.toLocaleString("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }));
+    const etDate = now.toLocaleDateString("en-US", { timeZone: "America/New_York" });
+    if (etHour >= 18 && lastDigestDateEt !== etDate) {
+      lastDigestDateEt = etDate;
+      sendPoDecisionDigestEmail().catch(err => console.error("[PO Digest] Scheduled send failed:", err));
+    }
+  }, 15 * 60 * 1000);
 
   // Update Submitted in Holman for a purchase order
   app.patch("/pos/:id/submitted-in-holman", async (req, res) => {

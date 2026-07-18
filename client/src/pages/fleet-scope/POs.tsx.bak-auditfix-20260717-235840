@@ -1325,7 +1325,7 @@ export default function POs() {
               </Button>
               <Button
                 onClick={handleExportExcel}
-                disabled={orders.length === 0}
+                disabled={filteredOrders.length === 0}
                 variant="outline"
                 className="gap-2"
                 data-testid="button-export"
@@ -1660,7 +1660,7 @@ export default function POs() {
                   <div className="ml-auto flex items-center gap-2 pb-1">
                     <span className="text-xs text-muted-foreground" data-testid="text-filter-count">{filteredOrders.length} of {orders.length}</span>
                     {hasActiveOrderFilters && (
-                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setSearchQuery(""); setVehicleNoFilter(""); setFinalApprovalFilter("__all__"); setRobDecisionFilter("__all__"); setDifferenceFilter("__all__"); setSubmittedHolmanFilter("__all__"); setSpareVanFilter("__all__"); }} data-testid="button-clear-filters">
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => { setVehicleNoFilter(""); setFinalApprovalFilter("__all__"); setRobDecisionFilter("__all__"); setDifferenceFilter("__all__"); setSubmittedHolmanFilter("__all__"); setSpareVanFilter("__all__"); }} data-testid="button-clear-filters">
                         Clear
                       </Button>
                     )}
@@ -1710,7 +1710,7 @@ export default function POs() {
                             return (
                               <th 
                                 key={header} 
-                                className={`sticky top-0 font-medium text-xs px-2 py-1.5 text-left border-b border-r align-bottom ${wrapThis ? 'max-w-[240px]' : 'max-w-[88px]'} ${bgClass} ${header.replace(/[_\s]/g, '').toLowerCase() === 'id' ? 'left-0 z-[4] w-12' : ''} ${isFilterableVehicleNo ? 'left-12 z-[4]' : ''} ${header.replace(/[_\s]/g, '').toLowerCase() === 'id' || isFilterableVehicleNo ? '' : 'z-[3]'}`}
+                                className={`sticky top-0 z-[3] font-medium text-xs px-2 py-1.5 text-left border-b border-r align-bottom ${wrapThis ? 'max-w-[240px]' : 'max-w-[88px]'} ${bgClass} ${header.replace(/[_\s]/g, '').toLowerCase() === 'id' ? 'left-0 z-[4] w-12' : ''} ${isFilterableVehicleNo ? 'left-12 z-[4]' : ''}`}
                               >
                                 <div className="flex flex-col gap-1">
                                   <span className="leading-tight break-words line-clamp-2" title={header}>{header.replace(/_/g, " ")}</span>

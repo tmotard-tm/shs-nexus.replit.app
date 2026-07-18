@@ -159,3 +159,20 @@ Replit allows ONE deployment per Repl, and this Repl's slot is taken by the Auto
 Snapshots the full VIN→AMS-truck-status map (same source as the UI: AMS API + Snowflake supplement) into `ams_status_daily_snapshots` (one row per ET date + VIN), diffs against the most recent PRIOR snapshot date (handles missed days), and records trucks NEWLY in "Declined Repair" in `ams_declined_repair_findings`. Each new finding is auto-added to Decommissioning UNLESS its normalized truck number (digits, leading zeros stripped) is already in `fs_decommissioning_vehicles`, `fs_decomm_excluded_trucks`, or covered by the PO "Decline and Submit for Sale" sync path — the dedup outcome is stored on the finding, so the daily NEW count stays accurate. Auto-added rows get comments prefixed `[AMS Daily Check <date>]`, Address from AMS Current Location (per-VIN read for street, full-fleet cache fallback), and the extracted 5-digit zip (ZIP+4 stripped; blank when none). First-ever run = baseline, zero findings. Runs are idempotent per day (unique date+VIN indexes) and recorded in `sync_logs` (`sync_type='ams_declined_repair_check'`). Module: `server/ams-declined-repair-check.ts`; routes `POST /api/fs/ams-declined-check/run` (session or `x-internal-cron`) + `GET /api/fs/ams-declined-check/report`; UI dialog on the Decommissioning page. VIN→truck number comes from the local `fs_all_vehicles_mirror`; VINs without a mapping are reported as `no_truck_number` and NOT added.
 
 The `/comms/cron/*` routes are registered OUTSIDE the comms `gate` deliberately (the dispatcher has no session user); they grant exactly these two operations, so the cron secret does NOT gain send/bulk powers. The standalone `server/run-sync.ts` / `server/run-rental-sync.ts` scripts remain valid entry points if a real per-Repl schedule ever becomes possible. Sync cadence remains auditable in `sync_logs` (triggered_by = `scheduled_dispatcher`).
+
+## Adding a scheduled sync job (wake-up-call pattern) — 2026-07-18 (Tyler directive)
+
+Nexus runs on an AUTOSCALE deployment (instances scale to zero, so in-process `setInterval`/`node-cron` timers do NOT fire dependably), and Replit allows only ONE deployment per Repl (this Repl's slot is the web app), so a Nexus-side Scheduled Deployment cannot be created. Do NOT rely on either. Do NOT re-point Nexus's own deployment onto a Reserved VM just to run timers: that risks re-breaking the app for no reason (Tyler, 2026-07-18).
+
+The ONLY supported way to run recurring/background work for Nexus is a wake-up call: an EXTERNAL, always-on scheduler POSTs a Nexus internal-cron route.
+- Auth: header `x-internal-cron: <NEXUS_CRON_SECRET>` (dedicated, revocable key; see `server/fleet-scope-routes.ts` ~2830-2832). SESSION_SECRET may also be accepted as a legacy value. This bypasses session auth for that route only and grants no send/bulk powers.
+- The route must be registered OUTSIDE the session/comms gates, be idempotent, take a Postgres advisory lock if it mutates shared state, and log to `sync_logs`. Existing examples: `POST /api/fs/rental-sync` (11:00 UTC), `/api/fs/roster-sync` (10:00 UTC), `/api/fs/comms/cron/drain` (every run), `/api/fs/luca-writeback/run` (every 15 min), `/api/fs/ams-declined-check/run`.
+
+Scheduler HOST (Tyler directive, 2026-07-18): standardize the schedule on the Fleet Agents / LIVHR RESERVED VM (fleetagents.replit.app), which is already always-on, instead of the current separate tiny "Fleet-Dispatcher" Repl or any new autoscale scheduler. Consolidate the Fleet-Dispatcher cron table onto the Fleet Agents VM scheduler so there is ONE always-on caller and one fewer dev-space to maintain.
+
+To add a NEW recurring Nexus job:
+1. Build the work behind an internal-cron route on Nexus (guard with `x-internal-cron` = NEXUS_CRON_SECRET; idempotent; advisory-locked if it writes; log to `sync_logs`).
+2. Add a wake-up POST to that route from the Fleet Agents reserved-VM scheduler at the desired cron.
+3. Verify in `sync_logs` and via the job's health/report route.
+
+NEVER add a Nexus Scheduled Deployment or an in-process timer as the primary trigger.
