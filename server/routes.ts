@@ -467,6 +467,24 @@ function requireAuthOrRepairTrackerApiKey(req: any, res: any, next: any): any {
   return requireAuth(req, res, next);
 }
 
+// Auth middleware for the LUCA feed endpoints (server-to-server): a valid
+// session OR a Bearer/x-api-key matching VRM_LUCA_FEED_KEY (falls back to the
+// repair-tracker key so no new secret is strictly required). Scoped to the two
+// GET /api/vrm/rental-operations/luca-* endpoints only.
+function requireAuthOrLucaFeedKey(req: any, res: any, next: any): any {
+  const expected = process.env.VRM_LUCA_FEED_KEY || process.env.VRM_REPAIR_TRACKER_API_KEY;
+  const authHeader = req.headers.authorization;
+  const bearer = typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+    ? authHeader.slice("Bearer ".length).trim()
+    : null;
+  const xkey = typeof req.headers["x-api-key"] === "string" ? req.headers["x-api-key"] : null;
+  if (expected && ((bearer && bearer === expected) || (xkey && xkey === expected))) {
+    req.user = { id: "svc:luca-feed", role: "service", departments: [] };
+    return next();
+  }
+  return requireAuth(req, res, next);
+}
+
 // Authentication middleware
 //
 // Design notes (2026-07-11 auth-dropout fix):
@@ -710,6 +728,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     app.use("/api/vrm", (req, res, next) => {
       if (req.method === "GET" && req.path === "/repair-tracker/full") {
         return requireAuthOrRepairTrackerApiKey(req, res, next);
+      }
+      if (req.method === "GET" && (req.path === "/rental-operations/luca-rental-list" || req.path === "/rental-operations/luca-feed")) {
+        return requireAuthOrLucaFeedKey(req, res, next);
       }
       return requireAuth(req, res, next);
     }, vrmRouter);
@@ -12099,33 +12120,38 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const palKey = (process.env.PAL_TRANSPORT_API_KEY || "").trim();
       if (!palUrl || !palKey) return res.status(200).json({ configured: false });
 
-      const truckNumber = String(req.body?.truckNumber ?? "").trim();
-      const pickup = String(req.body?.pickup ?? "").trim();
-      const dropoff = String(req.body?.dropoff ?? "").trim();
-      const neededBy = String(req.body?.neededBy ?? "").trim();
-      const pullFromFleet = req.body?.pullFromFleet === true;
-      const notes = String(req.body?.notes ?? "").trim();
-      if (!truckNumber) return res.status(400).json({ message: "truckNumber is required" });
+      const b = req.body || {};
+      const clean = (v: any) => String(v ?? "").trim();
+      const truck = clean(b.truck) || clean(b.truckNumber);
+      if (!truck) return res.status(400).json({ message: "truck is required" });
 
       const hire = await storage.getOnboardingHire(req.params.id);
       if (!hire) return res.status(404).json({ message: "Hire not found" });
 
       const requestedBy = req.user?.username || "Nexus user";
 
-      // PAL's field whitelist has no needed-by / pull-from-fleet slot, so fold
-      // them into internalNotes where the transport team will see them.
-      const internalNotesParts: string[] = [];
-      if (neededBy) internalNotesParts.push(`Needed by: ${neededBy}`);
-      internalNotesParts.push(`Pull from Fleet: ${pullFromFleet ? "yes" : "no"}`);
-      if (notes) internalNotesParts.push(notes);
-      internalNotesParts.push(`(via Nexus Weekly Onboarding, hire ${hire.id})`);
+      // Pipeline urgency only (standard/urgent/asap/hold). PAL sets the exception
+      // flags (action_required/cancelled/completed) elsewhere, never at creation.
+      const ALLOWED_STATUS = ["standard", "urgent", "asap", "hold"];
+      const reqStatus = clean(b.status).toLowerCase();
+      const status = ALLOWED_STATUS.includes(reqStatus) ? reqStatus : "standard";
 
+      // 1:1 with PAL's New Transport form / external.js whitelist. Tag the notes
+      // with the onboarding origin so the board shows where the request came from.
+      const originNote = `(via Nexus Weekly Onboarding, hire ${hire.id})`;
       const payload: Record<string, unknown> = {
-        truck: truckNumber,
-        fromAddr: pickup,
-        toAddr: dropoff,
-        dropoffTechName: hire.employeeName || "",
-        internalNotes: internalNotesParts.join(" | "),
+        truck,
+        vin: clean(b.vin),
+        status,
+        fromAddr: clean(b.fromAddr),
+        fromContactName: clean(b.fromContactName),
+        fromContact: clean(b.fromContact),
+        toAddr: clean(b.toAddr),
+        dropoffTechName: clean(b.dropoffTechName) || (hire.employeeName || ""),
+        dropoffTechPhone: clean(b.dropoffTechPhone),
+        keysPresent: clean(b.keysPresent),
+        vanStarts: clean(b.vanStarts),
+        internalNotes: [clean(b.internalNotes), originNote].filter(Boolean).join(" | "),
         requestedBy,
       };
 

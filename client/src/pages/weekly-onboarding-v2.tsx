@@ -43,6 +43,43 @@ function parseTransportId(notes: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+// PAL New Transport form, mirrored 1:1 so an onboarding request maps cleanly
+// into the PAL record. status = pipeline urgency; the exception flags
+// (action_required/cancelled/completed) are set on the PAL record elsewhere,
+// never at creation, so they are intentionally not offered here.
+const EMPTY_TFORM = {
+  status: "standard", truck: "", vin: "",
+  fromAddr: "", fromContactName: "", fromContact: "",
+  toAddr: "", dropoffTechName: "", dropoffTechPhone: "",
+  keysPresent: "", vanStarts: "", internalNotes: "",
+};
+// Labels + dot colors match PAL's STATUS_CONFIG. Note urgent renders as "Quickly".
+const TRANSPORT_URGENCY: Array<{ key: string; label: string; dot: string }> = [
+  { key: "standard", label: "Standard", dot: "#9ca3af" },
+  { key: "urgent", label: "Quickly", dot: "#EAB308" },
+  { key: "asap", label: "ASAP", dot: "#F97316" },
+  { key: "hold", label: "Hold", dot: "#3B82F6" },
+];
+
+// Yes / No / Unknown toggle matching PAL's YNRadio, which stores YES/NO/UNKNOWN.
+function YesNoUnknown({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="flex gap-1.5">
+      {([["YES", "Yes"], ["NO", "No"], ["UNKNOWN", "Unknown"]] as Array<[string, string]>).map(([val, label]) => (
+        <button
+          key={val}
+          type="button"
+          onClick={() => onChange(value === val ? "" : val)}
+          aria-pressed={value === val}
+          className={`rounded-md border px-2.5 py-1 text-xs transition ${value === val ? "border-primary bg-primary/10 text-foreground" : "border-input text-muted-foreground hover:bg-muted"}`}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // District to Owner mapping based on last 4 digits (ported verbatim from legacy)
 const districtOwnerMap: Record<string, string> = {
   '3132': 'Rob & Andrea',
@@ -276,15 +313,11 @@ export default function WeeklyOnboardingV2() {
   const [assignResult, setAssignResult] = useState<any | null>(null);
   const [precheckTruck, setPrecheckTruck] = useState("");
 
-  // ── Transport request state (Wave 2: PAL proxy) ──
+  // ── Transport request state (Wave 2: PAL proxy). tForm mirrors PAL's New
+  // Transport form field-for-field so the request maps 1:1 into the PAL record. ──
   const [transportDialogOpen, setTransportDialogOpen] = useState(false);
-  const [transportStep, setTransportStep] = useState<"confirm" | "form">("confirm");
-  const [tTruck, setTTruck] = useState("");
-  const [tPickup, setTPickup] = useState("");
-  const [tDropoff, setTDropoff] = useState("");
-  const [tNeededBy, setTNeededBy] = useState("");
-  const [tPullFromFleet, setTPullFromFleet] = useState(false);
-  const [tNotes, setTNotes] = useState("");
+  const [tForm, setTForm] = useState({ ...EMPTY_TFORM });
+  const setT = (k: string, v: string) => setTForm(prev => ({ ...prev, [k]: v }));
 
   const pendingMap = usePendingAssignMap();
 
@@ -526,9 +559,8 @@ export default function WeeklyOnboardingV2() {
 
   // ── Transport request → PAL proxy (Wave 2) ──
   const transportMutation = useMutation({
-    mutationFn: async (vars: { id: string; truckNumber: string; pickup: string; dropoff: string; neededBy: string; pullFromFleet: boolean; notes: string }) => {
-      const { id, ...body } = vars;
-      const res = await apiRequest("POST", `/api/onboarding-hires/${id}/transport`, body);
+    mutationFn: async (vars: { id: string; form: typeof EMPTY_TFORM }) => {
+      const res = await apiRequest("POST", `/api/onboarding-hires/${vars.id}/transport`, vars.form);
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -826,13 +858,14 @@ export default function WeeklyOnboardingV2() {
   }
   function openTransportDialog(hireId: string) {
     const h = hires.find(x => x.id === hireId);
-    setTTruck(pickedVehicle?.assetId ? String(pickedVehicle.assetId) : (h?.assignedTruckNo || ""));
-    setTPickup("");
-    setTDropoff(h ? [h.locationCity, h.workState].filter(Boolean).join(", ") : "");
-    setTNeededBy("");
-    setTPullFromFleet(false);
-    setTNotes("");
-    setTransportStep("confirm");
+    // Truck goes TO the new hire, so the hire's location is the DROP-OFF and the
+    // hire is the drop-off contact; pickup is where the truck sits now (manual).
+    setTForm({
+      ...EMPTY_TFORM,
+      truck: pickedVehicle?.assetId ? String(pickedVehicle.assetId) : (h?.assignedTruckNo || ""),
+      toAddr: h ? [h.address, h.locationCity, h.workState, h.zipcode].filter(Boolean).join(", ") : "",
+      dropoffTechName: h?.employeeName || "",
+    });
     setAssignDialogOpen(false);
     setTransportDialogOpen(true);
     setActiveHireId(hireId);
@@ -845,9 +878,7 @@ export default function WeeklyOnboardingV2() {
     setTruckNumber("");
     setNotes("");
     setTransportDialogOpen(false);
-    setTransportStep("confirm");
-    setTTruck(""); setTPickup(""); setTDropoff("");
-    setTNeededBy(""); setTPullFromFleet(false); setTNotes("");
+    setTForm({ ...EMPTY_TFORM });
   }
 
   const toggleWeek = (key: number) => {
@@ -1148,6 +1179,17 @@ export default function WeeklyOnboardingV2() {
       notes: notes.trim(),
     });
   };
+
+  // Transport form validation — mirrors PAL: truck plus a contact name AND phone
+  // at BOTH ends (Premier needs someone to call at pickup and drop-off).
+  const transportMissing = ([
+    [!tForm.truck.trim(), "Truck #"],
+    [!tForm.fromContactName.trim(), "Pickup contact name"],
+    [!tForm.fromContact.trim(), "Pickup contact phone"],
+    [!tForm.dropoffTechName.trim(), "Drop-off contact name"],
+    [!tForm.dropoffTechPhone.trim(), "Drop-off contact phone"],
+  ] as Array<[boolean, string]>).filter(([bad]) => bad).map(([, label]) => label);
+  const transportCanCreate = transportMissing.length === 0;
 
   // ── Render ──
   const needTotal = paRows.reduce((n, r) => n + r.need, 0);
@@ -1840,92 +1882,122 @@ export default function WeeklyOnboardingV2() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Transport request dialog (Wave 2: PAL proxy) — two-step confirm→form ── */}
+      {/* ── Transport request dialog — mirrors PAL's New Transport form so the
+             request maps 1:1 into the PAL record (Urgency/status included) ── */}
       <Dialog open={!!activeHire && transportDialogOpen} onOpenChange={(o) => { if (!o) closeAllDialogs(); }}>
-        <DialogContent className="sm:max-w-[600px]">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[720px]">
           {activeHire && (
             <>
               <DialogHeader>
                 <DialogTitle>
-                  <span className="flex items-center gap-2">
-                    <Truck className="h-5 w-5" />
-                    Request Transport for {activeHire.employeeName}
-                  </span>
+                  <span className="flex items-center gap-2"><Truck className="h-5 w-5" /> New Transport Request — {activeHire.employeeName}</span>
                 </DialogTitle>
                 <DialogDescription>
-                  Creates a request on the PAL Transport board under your name.
-                  {activeHire.locationCity ? ` Dropoff prefilled to ${activeHire.locationCity}, ${activeHire.workState || ""}.` : ""}
+                  Same fields as the PAL Transport form; the request lands on the PAL board under your name. Drop-off is prefilled to the hire's location.
                 </DialogDescription>
               </DialogHeader>
 
-              {transportStep === "confirm" ? (
-                <div className="space-y-4 py-2">
-                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
-                    <p>
-                      You're about to open a transport request for <b>{activeHire.employeeName}</b>
-                      {tTruck ? <> (truck <b>{tTruck}</b>)</> : null}. It lands on the PAL Transport
-                      board attributed to you. No email is sent to the vendor from here.
-                    </p>
+              <div className="space-y-4 py-1">
+                {/* Truck + VIN */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tf-truck">Truck # <span className="text-red-500">*</span></Label>
+                    <Input id="tf-truck" value={tForm.truck} onChange={(e) => setT("truck", e.target.value)} placeholder="Truck number" data-testid="input-transport-truck" />
                   </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={closeAllDialogs}>Cancel</Button>
-                    <Button onClick={() => setTransportStep("form")} data-testid="button-transport-continue">Continue</Button>
-                  </DialogFooter>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="tf-vin">VIN</Label>
+                    <Input id="tf-vin" value={tForm.vin} onChange={(e) => setT("vin", e.target.value)} placeholder="VIN" />
+                  </div>
                 </div>
-              ) : (
-                <div className="space-y-4 py-2">
-                  <div className="space-y-2">
-                    <Label htmlFor="tTruck">Truck Number</Label>
-                    <Input id="tTruck" value={tTruck} onChange={(e) => setTTruck(e.target.value)} placeholder="Truck to transport" data-testid="input-transport-truck" />
+
+                {/* Urgency = PAL status (standard/urgent/asap/hold) */}
+                <div className="space-y-1.5">
+                  <Label>Urgency</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {TRANSPORT_URGENCY.map((u) => (
+                      <button
+                        key={u.key}
+                        type="button"
+                        onClick={() => setT("status", u.key)}
+                        aria-pressed={tForm.status === u.key}
+                        data-testid={`urgency-${u.key}`}
+                        className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs font-semibold uppercase tracking-wide transition ${tForm.status === u.key ? "border-primary bg-primary/10 text-foreground" : "border-input text-muted-foreground hover:bg-muted"}`}
+                      >
+                        <span className="h-2 w-2 rounded-full" style={{ background: u.dot }} />
+                        {u.label}
+                      </button>
+                    ))}
                   </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="tPickup">Pickup (from)</Label>
-                      <Input id="tPickup" value={tPickup} onChange={(e) => setTPickup(e.target.value)} placeholder="Pickup address / location" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="tDropoff">Dropoff (to)</Label>
-                      <Input id="tDropoff" value={tDropoff} onChange={(e) => setTDropoff(e.target.value)} placeholder="Dropoff address / location" data-testid="input-transport-dropoff" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label htmlFor="tNeededBy">Needed by</Label>
-                      <Input id="tNeededBy" type="date" value={tNeededBy} onChange={(e) => setTNeededBy(e.target.value)} />
-                    </div>
-                    <label className="flex items-end gap-2 pb-2 text-sm">
-                      <Checkbox checked={tPullFromFleet} onCheckedChange={(v) => setTPullFromFleet(v === true)} data-testid="checkbox-transport-pullfleet" />
-                      Pull from Fleet
-                    </label>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tNotes">Notes</Label>
-                    <Textarea id="tNotes" value={tNotes} onChange={(e) => setTNotes(e.target.value)} rows={3} placeholder="Anything the transport team needs to know..." />
-                  </div>
-                  <div className="rounded-lg border bg-muted/30 p-2.5 text-[11px] text-muted-foreground">
-                    Dropoff tech <b>{activeHire.employeeName}</b> and you (the requester) ride along with the request.
-                    Needed-by and Pull-from-Fleet are appended to the transport notes (PAL has no dedicated field for them).
-                  </div>
-                  <DialogFooter>
-                    <Button variant="outline" onClick={() => setTransportStep("confirm")}>Back</Button>
-                    <Button
-                      onClick={() => transportMutation.mutate({
-                        id: activeHire.id,
-                        truckNumber: tTruck.trim(),
-                        pickup: tPickup.trim(),
-                        dropoff: tDropoff.trim(),
-                        neededBy: tNeededBy.trim(),
-                        pullFromFleet: tPullFromFleet,
-                        notes: tNotes.trim(),
-                      })}
-                      disabled={!tTruck.trim() || transportMutation.isPending}
-                      data-testid="button-send-transport"
-                    >
-                      {transportMutation.isPending ? "Sending…" : "Send transport request"}
-                    </Button>
-                  </DialogFooter>
                 </div>
-              )}
+
+                {/* Pickup / Repair location + contacts */}
+                <div className="space-y-2 rounded-lg border p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-primary">Pickup / Repair Location</p>
+                  <Input value={tForm.fromAddr} onChange={(e) => setT("fromAddr", e.target.value)} placeholder="Pickup address (street, city, state, zip)" />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="tf-fcn">Contact Name (Pickup) <span className="text-red-500">*</span></Label>
+                      <Input id="tf-fcn" value={tForm.fromContactName} onChange={(e) => setT("fromContactName", e.target.value)} placeholder="Who to call at pickup" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="tf-fc">Contact Phone (Pickup) <span className="text-red-500">*</span></Label>
+                      <Input id="tf-fc" value={tForm.fromContact} onChange={(e) => setT("fromContact", e.target.value)} placeholder="Phone at pickup" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Drop-off location + contacts */}
+                <div className="space-y-2 rounded-lg border p-3">
+                  <p className="font-mono text-[10px] uppercase tracking-widest text-primary">Drop-off Location</p>
+                  <Input value={tForm.toAddr} onChange={(e) => setT("toAddr", e.target.value)} placeholder="Drop-off address" data-testid="input-transport-dropoff" />
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="tf-dtn">Contact Name (Drop-off) <span className="text-red-500">*</span></Label>
+                      <Input id="tf-dtn" value={tForm.dropoffTechName} onChange={(e) => setT("dropoffTechName", e.target.value)} placeholder="Who to call at drop-off" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="tf-dtp">Contact Phone (Drop-off) <span className="text-red-500">*</span></Label>
+                      <Input id="tf-dtp" value={tForm.dropoffTechPhone} onChange={(e) => setT("dropoffTechPhone", e.target.value)} placeholder="Phone at drop-off" />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Keys / Van / Requested by */}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label>Keys Present</Label>
+                    <YesNoUnknown value={tForm.keysPresent} onChange={(v) => setT("keysPresent", v)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Van Starts</Label>
+                    <YesNoUnknown value={tForm.vanStarts} onChange={(v) => setT("vanStarts", v)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Requested By</Label>
+                    <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">you (signed-in)</div>
+                  </div>
+                </div>
+
+                {/* Internal notes */}
+                <div className="space-y-1.5">
+                  <Label htmlFor="tf-notes">Internal Notes</Label>
+                  <Textarea id="tf-notes" value={tForm.internalNotes} onChange={(e) => setT("internalNotes", e.target.value)} rows={2} placeholder="Internal team notes..." />
+                </div>
+              </div>
+
+              <DialogFooter className="flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+                {!transportCanCreate && (
+                  <span className="mr-auto text-[11px] text-amber-600 dark:text-amber-400">Required: {transportMissing.join(", ")}</span>
+                )}
+                <Button variant="outline" onClick={closeAllDialogs}>Cancel</Button>
+                <Button
+                  onClick={() => transportMutation.mutate({ id: activeHire.id, form: tForm })}
+                  disabled={!transportCanCreate || transportMutation.isPending}
+                  data-testid="button-send-transport"
+                >
+                  {transportMutation.isPending ? "Sending…" : "Create Transport"}
+                </Button>
+              </DialogFooter>
             </>
           )}
         </DialogContent>
