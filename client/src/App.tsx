@@ -56,7 +56,8 @@ import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
 import FleetAlignment from "@/pages/fleet-alignment";
-import WeeklyOnboarding from "@/pages/weekly-onboarding";
+import WeeklyOnboarding from "@/pages/weekly-onboarding-v2";
+import WeeklyOnboardingLegacy from "@/pages/weekly-onboarding";
 import WeeklyOffboarding from "@/pages/weekly-offboarding";
 import RentalOperations from "@/pages/rental-operations";
 import VehicleRentalManagement from "@/pages/vehicle-rental-management";
@@ -237,6 +238,12 @@ function Router() {
       <Route path="/weekly-onboarding">
         <ProtectedRoute>
           <WeeklyOnboarding />
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/weekly-onboarding-legacy">
+        <ProtectedRoute>
+          <WeeklyOnboardingLegacy />
         </ProtectedRoute>
       </Route>
 

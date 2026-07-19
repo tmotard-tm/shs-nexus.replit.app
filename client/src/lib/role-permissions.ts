@@ -494,6 +494,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/integrations': () => perms.sidebar.management.integrations,
     '/tech-roster': () => perms.sidebar.management.techRoster,
     '/weekly-onboarding': () => perms.sidebar.management.weeklyOnboarding,
+    '/weekly-onboarding-legacy': () => perms.sidebar.management.weeklyOnboarding,
     '/weekly-offboarding': () => perms.sidebar.management.weeklyOffboarding,
     '/communication-hub': () => perms.sidebar.management.communicationHub,
     '/fleet-communications': () => perms.sidebar.activities.fleetCommunications,

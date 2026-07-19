@@ -176,3 +176,12 @@ To add a NEW recurring Nexus job:
 3. Verify in `sync_logs` and via the job's health/report route.
 
 NEVER add a Nexus Scheduled Deployment or an in-process timer as the primary trigger.
+
+
+## Weekly Onboarding page (v2 swap, 2026-07)
+
+- `/weekly-onboarding` = week-grouped redesign (`client/src/pages/weekly-onboarding-v2.tsx`).
+- `/weekly-onboarding-legacy` = the previous flat table (`weekly-onboarding.tsx`), URL-only fallback, same permission. Remove only after v2 has survived 2+ weeks of real use.
+- Truck assignment on the v2 page: `POST /api/onboarding-hires/:id/assign` — a self-contained route that fires the SAME `fleetOpsService.assignTech` as /api/fleet-ops/assign (TPMS + Holman + AMS, Holman 202 polled via /api/holman/submissions/:id) and enforces the same district block via `districtGuardForAssign`, a behavior-matched duplicate of FM's inline guard. Fleet Management's code (UI AND backend handler) is untouched; the reuse is calling assignTech directly. Stamps truckAssigned/assignedTruckNo on the hire in the same call when TPMS succeeds. Type a truck number; no page flip.
+- Display rules locked to shared/onboarding-status.ts (BYOV = 88-prefix truck) and the 31-district districtOwnerMap; truck numbers render plain.
+- Every truck-number change goes through the real pipeline (no DB-only bookkeeping write/clear; Tyler-confirmed 2026-07-18). Notes editing stays a plain PATCH.
