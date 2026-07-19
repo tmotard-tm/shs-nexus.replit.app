@@ -12128,7 +12128,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const hire = await storage.getOnboardingHire(req.params.id);
       if (!hire) return res.status(404).json({ message: "Hire not found" });
 
-      const requestedBy = req.user?.username || "Nexus user";
+      // Attribute by real name, not the LDAP username. Corporate email is
+      // first.last@... -> "First Last" (trailing digits stripped); fall back to
+      // the username when the email has no parseable name.
+      const uname = String(req.user?.username ?? "").trim();
+      const dbUser = await storage.getUserByUsername(uname).catch(() => null);
+      const emailLocal = String(dbUser?.email ?? "").split("@")[0] || "";
+      let requestedBy = uname || "Nexus user";
+      if (emailLocal.includes(".")) {
+        const nm = emailLocal.split(".")
+          .map((p: string) => p.replace(/\d+$/, ""))
+          .filter(Boolean)
+          .map((p: string) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+          .join(" ")
+          .trim();
+        if (nm) requestedBy = nm;
+      }
 
       // Pipeline urgency only (standard/urgent/asap/hold). PAL sets the exception
       // flags (action_required/cancelled/completed) elsewhere, never at creation.

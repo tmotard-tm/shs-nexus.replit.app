@@ -44,6 +44,25 @@ function parseTransportId(notes: string | null | undefined): string | null {
   return m ? m[1] : null;
 }
 
+// Corporate emails are first.last@... — resolve the signed-in user to a display
+// name (First Last) so transport requests are attributed by name, not the LDAP
+// username. Trailing digits (jennifer.dyer2) are stripped; falls back to the
+// username when the email has no parseable name. The server re-resolves the same
+// way for the actual attribution, so this is display-only.
+function requesterDisplayName(u: { username?: string | null; email?: string | null } | null | undefined): string {
+  const local = String(u?.email ?? "").split("@")[0] || "";
+  if (local.includes(".")) {
+    const name = local.split(".")
+      .map((p) => p.replace(/\d+$/, ""))
+      .filter(Boolean)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+      .join(" ")
+      .trim();
+    if (name) return name;
+  }
+  return String(u?.username ?? "").trim() || "you (signed-in)";
+}
+
 // PAL New Transport form, mirrored 1:1 so an onboarding request maps cleanly
 // into the PAL record. status = pipeline urgency; the exception flags
 // (action_required/cancelled/completed) are set on the PAL record elsewhere,
@@ -1976,7 +1995,7 @@ export default function WeeklyOnboardingV2() {
                   </div>
                   <div className="space-y-1.5">
                     <Label>Requested By</Label>
-                    <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">{authUser?.username || "you (signed-in)"}</div>
+                    <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">{requesterDisplayName(authUser)}</div>
                   </div>
                 </div>
 
