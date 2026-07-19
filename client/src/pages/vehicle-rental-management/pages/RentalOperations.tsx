@@ -11,11 +11,11 @@
  * columns, filters, cohort tabs, color rules, detail drawer, and CSV — but
  * marks are server-side (durable) and data is live from the VRM data plane.
  */
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
-  AlertTriangle, CircleDollarSign, Wrench, Gavel,
+  AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -91,11 +91,19 @@ interface MasterModel {
   sourceHealth: { clocks: SourceClock[]; lastSyncAt: string | null; lastImportAt: string | null; lastFileDate: string | null };
   generatedAt: string;
 }
+interface PoLineItem { seq: number | null; description: string | null; repairType: string | null; ataGroup: string | null; qty: number | null; cost: number | null; }
+interface PoRecord {
+  poNumber: string; poDate: string | null; poStatus: string | null; vendorType: string;
+  vendorName: string | null; vendorAddress?: string | null; vendorCity?: string | null; vendorState?: string | null;
+  poType?: string | null; repairDate?: string | null; paidDate?: string | null; approver?: string | null;
+  odometer?: number | null; totalAmount: number | null; lineItems: PoLineItem[];
+}
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
   actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string }>;
-  poHistory: Array<{ po_number: string; po_date: string | null; po_status: string | null; vendor_name: string | null; vendor_type: string | null; description: string | null; approved_amount: string | null; source: string; upload_timestamp: string | null }>;
+  poHistory: PoRecord[];
+  poSource?: string;
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -495,22 +503,40 @@ export default function RentalOperations() {
 // ── detail slide-over ─────────────────────────────────────────────────────────
 function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: () => void; onMark: (k: string, m: string, cur: string | null) => void }) {
   const { data, isLoading } = useQuery<CaseDetail>({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`], staleTime: 30_000 });
+  // ESC closes; lock body scroll while the modal is open (matches the board overlay)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.removeEventListener("keydown", onKey); document.body.style.overflow = prev; };
+  }, [onClose]);
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [note, setNote] = useState("");
+  const [openPo, setOpenPo] = useState<string | null>(null);
   const c = data?.case;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
+  const notes = (data?.actions || []).filter((a) => a.action_type === "note");
   const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
+  const addNote = useMutation({
+    mutationFn: (text: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/actions`, { action_type: "note", note: text }),
+    onSuccess: () => { setNote(""); qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); },
+    onError: (e: any) => toast({ title: "Comment failed", description: String(e?.message || e), variant: "destructive" }),
+  });
 
   const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
   const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", justifyContent: "flex-end" }}>
-      <div style={{ flex: 1, background: "rgba(0,0,0,0.22)" }} onClick={onClose} />
-      <div style={{ width: 560, maxWidth: "94vw", height: "100%", background: colors.background, overflowY: "auto", boxShadow: "-6px 0 30px rgba(0,0,0,0.16)", padding: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(15,23,42,0.55)", padding: 24 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: 900, maxWidth: "94vw", maxHeight: "90vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 16, overflowY: "auto", boxShadow: "0 24px 70px rgba(0,0,0,0.4)", position: "relative" }}>
+        <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
           <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
-          <button type="button" onClick={onClose} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}><X size={20} /></button>
+          <button type="button" onClick={onClose} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
         </div>
+        <div style={{ padding: 24 }}>
         {isLoading || !c ? <div style={{ color: colors.inkMuted, fontFamily: fonts.dmSans }}>Loading…</div> : (
           <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             {/* identity */}
@@ -546,32 +572,80 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
                 })}
               </div>
             </section>
-            {/* PO history */}
+            {/* comments */}
             <section>
-              <div style={label}>PO history ({data!.poHistory.length})</div>
-              <div style={{ marginTop: 6, border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontFamily: fonts.dmSans, fontSize: 11.5 }}>
-                  <thead><tr style={{ background: colors.surface }}>
-                    {["PO", "Date", "Status", "Vendor", "Type", "Amount"].map((h) => <th key={h} style={{ textAlign: "left", padding: "6px 8px", color: colors.inkMuted, fontWeight: 500, borderBottom: `1px solid ${colors.rule}`, fontSize: 10 }}>{h}</th>)}
-                  </tr></thead>
-                  <tbody>
-                    {data!.poHistory.slice(0, 60).map((p, i) => (
-                      <tr key={i} style={{ opacity: p.po_status === "VOID" ? 0.5 : 1 }}>
-                        <td style={{ padding: "5px 8px", fontFamily: fonts.jetbrains, borderBottom: `1px solid ${colors.rule}` }}>{p.po_number}</td>
-                        <td style={{ padding: "5px 8px", borderBottom: `1px solid ${colors.rule}` }}>{fmtDate(p.po_date)}</td>
-                        <td style={{ padding: "5px 8px", borderBottom: `1px solid ${colors.rule}`, color: p.po_status === "APPROVED" ? colors.green : colors.inkSoft, fontWeight: p.po_status === "APPROVED" ? 600 : 400 }}>{p.po_status}</td>
-                        <td style={{ padding: "5px 8px", borderBottom: `1px solid ${colors.rule}` }} title={p.vendor_name || ""}>{(p.vendor_name || "").slice(0, 26)}</td>
-                        <td style={{ padding: "5px 8px", borderBottom: `1px solid ${colors.rule}`, color: colors.inkMuted }}>{p.vendor_type}</td>
-                        <td style={{ padding: "5px 8px", borderBottom: `1px solid ${colors.rule}`, fontFamily: fonts.jetbrains, textAlign: "right" }}>{money2(p.approved_amount)}</td>
-                      </tr>
-                    ))}
-                    {data!.poHistory.length === 0 && <tr><td colSpan={6} style={{ padding: 12, textAlign: "center", color: colors.inkMuted }}>No PO history in the Holman ETL for this vehicle.</td></tr>}
-                  </tbody>
-                </table>
+              <div style={label}>Comments ({notes.length})</div>
+              <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+                <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Add a comment…" rows={2}
+                  style={{ flex: 1, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 8, resize: "vertical" }} />
+                <button type="button" disabled={!note.trim() || addNote.isPending} onClick={() => addNote.mutate(note.trim())}
+                  style={{ fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 600, padding: "0 16px", borderRadius: 8, border: `1px solid ${colors.accent}`, background: colors.accent, color: "#fff", cursor: "pointer", opacity: (!note.trim() || addNote.isPending) ? 0.5 : 1 }}>
+                  {addNote.isPending ? "…" : "Add"}
+                </button>
+              </div>
+              <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                {notes.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No comments yet.</div>}
+                {notes.map((n) => (
+                  <div key={n.id} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px" }}>
+                    <div style={{ fontSize: 12.5, color: colors.ink, whiteSpace: "pre-wrap" }}>{n.note}</div>
+                    <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains }}>{n.actor || "unknown"} · {fmtDate(n.created_at)}</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+            {/* PO history — full 3-year, grouped, expandable line items */}
+            <section>
+              <div style={label}>PO history — {data!.poHistory.length} POs · 3 years {data!.poSource === "cached_fallback" ? "(cached)" : "(live)"}</div>
+              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+                {data!.poHistory.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No PO history in the Holman ETL for this vehicle.</div>}
+                {data!.poHistory.map((p) => {
+                  const isOpen = openPo === p.poNumber;
+                  const sc = p.poStatus === "APPROVED" ? colors.green : p.poStatus === "VOID" ? colors.inkMuted : colors.inkSoft;
+                  return (
+                    <div key={p.poNumber} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden", opacity: p.poStatus === "VOID" ? 0.6 : 1 }}>
+                      <button type="button" onClick={() => setOpenPo(isOpen ? null : p.poNumber)}
+                        style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", background: colors.surface, border: "none", cursor: "pointer", textAlign: "left", fontFamily: fonts.dmSans }}>
+                        <ChevronRight size={13} style={{ color: colors.inkMuted, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", flexShrink: 0 }} />
+                        <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.ink }}>{p.poNumber}</span>
+                        <span style={{ fontSize: 11, color: colors.inkMuted }}>{fmtDate(p.poDate)}</span>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: sc, textTransform: "uppercase" }}>{p.poStatus}</span>
+                        <span style={{ fontSize: 12, color: colors.ink, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.vendorName}</span>
+                        <span style={{ fontSize: 9.5, color: colors.inkMuted, textTransform: "uppercase" }}>{p.vendorType}</span>
+                        <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>{money2(p.totalAmount)}</span>
+                      </button>
+                      {isOpen && (
+                        <div style={{ padding: "8px 12px 10px 34px", background: colors.background, borderTop: `1px solid ${colors.rule}` }}>
+                          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6 }}>
+                            {[p.vendorAddress, p.vendorCity, p.vendorState].filter(Boolean).join(", ") || "no vendor address"}
+                            {p.approver ? ` · approver ${p.approver}` : ""}{p.odometer ? ` · ${p.odometer.toLocaleString()} mi` : ""}
+                            {p.repairDate ? ` · repair ${fmtDate(p.repairDate)}` : ""}{p.paidDate ? ` · paid ${fmtDate(p.paidDate)}` : ""}{p.poType ? ` · ${p.poType}` : ""}
+                          </div>
+                          {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>Line items not available (cached view).</div> : (
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, fontFamily: fonts.dmSans }}>
+                              <tbody>
+                                {p.lineItems.map((li, j) => (
+                                  <tr key={j}>
+                                    <td style={{ padding: "3px 6px 3px 0", color: colors.ink }}>{li.qty != null ? `${li.qty}× ` : ""}{li.description || li.repairType || "—"}</td>
+                                    <td style={{ padding: "3px 6px", color: colors.inkMuted, fontSize: 10.5 }}>{li.ataGroup || li.repairType || ""}</td>
+                                    <td style={{ padding: "3px 0", textAlign: "right", fontFamily: fonts.jetbrains, color: colors.ink }}>{money2(li.cost)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>
+                Holman message trail, PO notes, and shop phone come from the on-demand portal scrape (next build).
               </div>
             </section>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

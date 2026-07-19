@@ -332,21 +332,39 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   `);
   if (!cRes.rows.length) return null;
   const caseRow = cRes.rows[0] as any;
-  const [ident, actions, poHist] = await Promise.all([
+  const [ident, actions] = await Promise.all([
     db.execute(sql`SELECT * FROM vrm_rental_identity_resolutions WHERE case_key = ${caseKey} LIMIT 1`),
     db.execute(sql`SELECT id, action_type, mark_value, note, assigned_to, actor,
                      to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
                    FROM vrm_rental_operation_actions WHERE case_key = ${caseKey} ORDER BY created_at DESC`),
-    db.execute(sql`SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
-                     vendor_type, description, approved_amount, source,
-                     to_char(upload_timestamp,'YYYY-MM-DD"T"HH24:MI:SSZ') AS upload_timestamp
-                   FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${caseKey}
-                   ORDER BY po_date DESC NULLS LAST`),
   ]);
+
+  // full 3-year PO history w/ line items — live from Snowflake, cached-table fallback
+  let poHistory: any[] = [];
+  let poSource = "snowflake_live";
+  try {
+    const { getTruckPoHistory } = await import("./po-history");
+    poHistory = await getTruckPoHistory(caseKey);
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] live PO history failed, using cached table:", e?.message || e);
+    poSource = "cached_fallback";
+    const poHist = await db.execute(sql`
+      SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
+             vendor_type, vendor_city, vendor_state, description, approved_amount
+      FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${caseKey}
+      ORDER BY po_date DESC NULLS LAST`);
+    poHistory = (poHist.rows as any[]).map((p) => ({
+      poNumber: p.po_number, poDate: p.po_date, poStatus: p.po_status, vendorType: p.vendor_type,
+      vendorName: p.vendor_name, vendorCity: p.vendor_city, vendorState: p.vendor_state,
+      totalAmount: p.approved_amount == null ? null : Number(p.approved_amount), lineItems: [],
+    }));
+  }
+
   return {
     case: caseRow,
     identity: ident.rows[0] ?? null,
     actions: actions.rows,
-    poHistory: poHist.rows,
+    poHistory,
+    poSource,
   };
 }

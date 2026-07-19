@@ -59,6 +59,74 @@ export interface PoHistoryResult {
   openRepairTrucks: number;
 }
 
+export interface PoLineItem { seq: number | null; description: string | null; repairType: string | null; ataGroup: string | null; qty: number | null; cost: number | null; }
+export interface PoRecord {
+  poNumber: string; poDate: string | null; poStatus: string | null; vendorType: string;
+  vendorName: string | null; vendorAddress: string | null; vendorCity: string | null; vendorState: string | null;
+  poType: string | null; repairDate: string | null; paidDate: string | null; approver: string | null;
+  odometer: number | null; totalAmount: number | null; lineItems: PoLineItem[];
+}
+
+/** Full 3-year PO history for ONE truck, grouped by PO with line items, latest
+ * upload per PO. Queried on-demand for the detail modal (fresh, uncapped). */
+export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoRecord[]> {
+  const variants = new Set<string>();
+  variants.add(caseKey); variants.add(toCanonical(caseKey)); variants.add(toDisplayNumber(caseKey)); variants.add(toHolmanRef(caseKey));
+  const inList = Array.from(variants).filter(Boolean).map((v) => `'${v.replace(/'/g, "''")}'`).join(",");
+
+  const svc = getSnowflakeService();
+  await svc.connect();
+  const rows: any[] = await svc.executeQuery(`
+    WITH scoped AS (
+      SELECT *, MAX(UPLOAD_TIMESTAMP) OVER (PARTITION BY PO_NUMBER) AS MAXUP
+      FROM ${PO_TABLE}
+      WHERE HOLMAN_VEHICLE_NUMBER IN (${inList})
+        AND PO_DATE >= DATEADD(year, -${years}, CURRENT_DATE)
+    )
+    SELECT PO_NUMBER, PO_STATUS, PO_DATE, REPAIR_DATE, PO_PAID_DATE_TRUNCATED, PO_TYPE_DESCRIPTION,
+           VENDOR_NAME, VENDOR_ADDRESS_LINE_1, VENDOR_CITY, VENDOR_STATE, MAINTENANCE_APPROVER,
+           PURCHASE_ORDER_ODOMETER, TOTAL_LINE_ITEM_AMOUNT, PO_LINE_SEQ, REPAIR_TYPE_DESCRIPTION,
+           ATA_GROUP_DESC, DESCRIPTION, QUANITY, LINE_ITEM_COST
+    FROM scoped WHERE UPLOAD_TIMESTAMP = MAXUP
+    ORDER BY PO_DATE DESC, PO_NUMBER, PO_LINE_SEQ
+  `);
+
+  const byPo = new Map<string, PoRecord>();
+  const order: string[] = [];
+  for (const r of rows) {
+    const po = String(r.PO_NUMBER ?? "").trim();
+    if (!po) continue;
+    let rec = byPo.get(po);
+    if (!rec) {
+      const status = (r.PO_STATUS ? String(r.PO_STATUS) : "").trim().toUpperCase() || null;
+      rec = {
+        poNumber: po, poDate: toIsoDate(r.PO_DATE), poStatus: status,
+        vendorType: classifyVendor(r.VENDOR_NAME, r.DESCRIPTION),
+        vendorName: r.VENDOR_NAME ? String(r.VENDOR_NAME).trim() : null,
+        vendorAddress: r.VENDOR_ADDRESS_LINE_1 ? String(r.VENDOR_ADDRESS_LINE_1).trim() : null,
+        vendorCity: r.VENDOR_CITY ? String(r.VENDOR_CITY).trim() : null,
+        vendorState: r.VENDOR_STATE ? String(r.VENDOR_STATE).trim() : null,
+        poType: r.PO_TYPE_DESCRIPTION ? String(r.PO_TYPE_DESCRIPTION).trim() : null,
+        repairDate: toIsoDate(r.REPAIR_DATE), paidDate: toIsoDate(r.PO_PAID_DATE_TRUNCATED),
+        approver: r.MAINTENANCE_APPROVER ? String(r.MAINTENANCE_APPROVER).trim() : null,
+        odometer: numOrNull(r.PURCHASE_ORDER_ODOMETER), totalAmount: 0, lineItems: [],
+      };
+      byPo.set(po, rec); order.push(po);
+    }
+    const lineCost = numOrNull(r.LINE_ITEM_COST);
+    rec.lineItems.push({
+      seq: numOrNull(r.PO_LINE_SEQ),
+      description: r.DESCRIPTION ? String(r.DESCRIPTION).trim() : null,
+      repairType: r.REPAIR_TYPE_DESCRIPTION ? String(r.REPAIR_TYPE_DESCRIPTION).trim() : null,
+      ataGroup: r.ATA_GROUP_DESC ? String(r.ATA_GROUP_DESC).trim() : null,
+      qty: numOrNull(r.QUANITY), cost: lineCost,
+    });
+    const lineTotal = numOrNull(r.TOTAL_LINE_ITEM_AMOUNT);
+    if (lineTotal != null) rec.totalAmount = (rec.totalAmount ?? 0) + lineTotal;
+  }
+  return order.map((po) => byPo.get(po)!);
+}
+
 /** Land PO history for the currently-open rental trucks (or a given subset). */
 export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryResult> {
   await db.execute(sql`SELECT 1`); // pool warm-up
