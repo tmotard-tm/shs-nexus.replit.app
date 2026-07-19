@@ -1079,67 +1079,65 @@ export default function WeeklyOnboardingV2() {
         breadcrumbs={["Home", "Fleet", "Weekly Onboarding"]}
       />
 
-      <main className="p-6">
+      {/* Grey page background so the white cards have contrast in light mode
+          (Tyler 2026-07-19: pure white was "blinding") — matches the mockup's
+          light-mode --bg #f2f3f5; dark mode falls through to the app shell. */}
+      <main className="min-h-screen bg-[#f2f3f5] p-6 dark:bg-transparent">
         <div className="mx-auto space-y-4" style={{ maxWidth: "min(1760px, 100vw - 40px)" }}>
 
           {/* Header card — sync line + action buttons, legacy copy verbatim */}
           <Card>
             <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <UserPlus className="h-6 w-6 text-purple-600" />
+              {/* Symmetric header (Tyler 2026-07-19): sync-status lives in the
+                  LEFT title block like the mockup's top-sub; the button row is a
+                  clean, evenly-sized group so nothing hangs lopsided. */}
+              <div className="flex flex-wrap items-start justify-between gap-4">
+                <div className="flex items-start gap-3">
+                  <UserPlus className="mt-0.5 h-6 w-6 shrink-0 text-purple-600" />
                   <div>
                     <CardTitle data-testid="text-onboarding-title">Weekly Onboarding Truck Assignment</CardTitle>
                     <CardDescription>
                       New tech hires starting from January 4, 2026 - assign trucks to new hires
                     </CardDescription>
+                    {/* sync + BYOV status lines (moved out of the button row) */}
+                    <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11.5px] text-muted-foreground">
+                      {syncMutation.isPending ? (
+                        <span className="flex items-center gap-1.5"><RefreshCw className="h-3.5 w-3.5 animate-spin" />Syncing from HR system...</span>
+                      ) : syncFailed ? (
+                        <span className="flex items-center gap-1.5">
+                          <AlertCircle className="h-3.5 w-3.5 text-yellow-600" />
+                          <span className="text-yellow-600">Sync failed</span>
+                          <Button size="sm" variant="ghost" className="h-6 px-2 py-0 text-[11.5px]" onClick={() => syncMutation.mutate()} data-testid="button-retry-sync">
+                            <RefreshCw className="h-3 w-3 mr-1" />Retry
+                          </Button>
+                        </span>
+                      ) : lastSync?.completedAt ? (
+                        <span className="flex items-center gap-1.5"><span className="h-1.5 w-1.5 rounded-full bg-green-500" />Last synced: {format(new Date(lastSync.completedAt), 'MMM d, yyyy h:mm a')}</span>
+                      ) : null}
+                      {latestByovCheck && (
+                        <span data-testid="text-byov-last-checked">BYOV checked {formatDistanceToNow(new Date(latestByovCheck), { addSuffix: true })}</span>
+                      )}
+                    </div>
                   </div>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  {syncMutation.isPending ? (
-                    <div className="flex items-center gap-2">
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      <span>Syncing from HR system...</span>
-                    </div>
-                  ) : syncFailed ? (
-                    <div className="flex items-center gap-2">
-                      <AlertCircle className="h-4 w-4 text-yellow-600" />
-                      <span className="text-yellow-600">Sync failed</span>
-                      <Button size="sm" variant="outline" onClick={() => syncMutation.mutate()} data-testid="button-retry-sync">
-                        <RefreshCw className="h-3 w-3 mr-1" />
-                        Retry
-                      </Button>
-                    </div>
-                  ) : lastSync?.completedAt ? (
-                    <div className="flex items-center gap-2">
-                      <Clock className="h-4 w-4" />
-                      <span>Last synced: {format(new Date(lastSync.completedAt), 'MMM d, yyyy h:mm a')}</span>
-                    </div>
-                  ) : null}
+                {/* Clean, evenly-sized button group (matches the mockup) */}
+                <div className="flex flex-shrink-0 flex-wrap items-center gap-2">
                   <Button size="sm" variant="outline" onClick={() => enrichMutation.mutate()} disabled={enrichMutation.isPending} data-testid="button-enrich-data">
                     {enrichMutation.isPending ? (
-                      <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Enriching...</>
+                      <><RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />Enriching...</>
                     ) : (
-                      <><RefreshCw className="h-3 w-3 mr-1" />Enrich from Snowflake</>
+                      <><RefreshCw className="h-3 w-3 mr-1.5" />Enrich from Snowflake</>
                     )}
                   </Button>
-                  <div className="flex flex-col items-end gap-0.5">
-                    <Button size="sm" variant="outline" onClick={() => byovIntentSyncMutation.mutate()} disabled={byovIntentSyncMutation.isPending} data-testid="button-sync-byov-intent">
-                      {byovIntentSyncMutation.isPending ? (
-                        <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Syncing BYOV...</>
-                      ) : (
-                        <><IdCard className="h-3 w-3 mr-1" />Sync BYOV Intent</>
-                      )}
-                    </Button>
-                    {latestByovCheck && (
-                      <span className="text-[11px] text-muted-foreground" data-testid="text-byov-last-checked">
-                        BYOV checked {formatDistanceToNow(new Date(latestByovCheck), { addSuffix: true })}
-                      </span>
+                  <Button size="sm" variant="outline" onClick={() => byovIntentSyncMutation.mutate()} disabled={byovIntentSyncMutation.isPending} data-testid="button-sync-byov-intent">
+                    {byovIntentSyncMutation.isPending ? (
+                      <><RefreshCw className="h-3 w-3 mr-1.5 animate-spin" />Syncing BYOV...</>
+                    ) : (
+                      <><IdCard className="h-3 w-3 mr-1.5" />Sync BYOV Intent</>
                     )}
-                  </div>
+                  </Button>
                   <Button size="sm" variant="outline" onClick={handleExportXlsx} data-testid="button-export-xlsx">
-                    <Download className="h-3 w-3 mr-1" />
-                    Export XLSX
+                    <Download className="h-3 w-3 mr-1.5" />Export XLSX
                   </Button>
                 </div>
               </div>
