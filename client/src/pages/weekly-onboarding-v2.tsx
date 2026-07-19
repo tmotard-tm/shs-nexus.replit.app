@@ -28,6 +28,7 @@ import { format, formatDistanceToNow } from "date-fns";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import type { OnboardingHire } from "@shared/schema";
 import { deriveOnboardingStatus as deriveStatus } from "@shared/onboarding-status";
 import { groupHiresByWeek, weekLabel, getWeekNum, parseLocalDate } from "@shared/onboarding-weeks";
@@ -319,6 +320,7 @@ export default function WeeklyOnboardingV2() {
   const [tForm, setTForm] = useState({ ...EMPTY_TFORM });
   const setT = (k: string, v: string) => setTForm(prev => ({ ...prev, [k]: v }));
 
+  const { user: authUser } = useAuth();
   const pendingMap = usePendingAssignMap();
 
   // ── Queries (legacy verbatim) ──
@@ -1974,7 +1976,7 @@ export default function WeeklyOnboardingV2() {
                   </div>
                   <div className="space-y-1.5">
                     <Label>Requested By</Label>
-                    <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">you (signed-in)</div>
+                    <div className="flex h-9 items-center rounded-md border bg-muted px-3 text-sm text-muted-foreground">{authUser?.username || "you (signed-in)"}</div>
                   </div>
                 </div>
 
