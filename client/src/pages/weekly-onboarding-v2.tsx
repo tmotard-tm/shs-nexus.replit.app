@@ -1586,9 +1586,11 @@ export default function WeeklyOnboardingV2() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Assign dialog (endpoint-backed; replaces the record modal in place) ── */}
+      {/* ── Assign dialog (endpoint-backed; rich context so it reads as the NEW
+             menu, matching the mockup — Tyler 2026-07-19: a bare truck#+notes
+             form looked like the legacy dialog) ── */}
       <Dialog open={!!activeHire && assignDialogOpen} onOpenChange={(o) => { if (!o) closeAllDialogs(); }}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="sm:max-w-[600px]">
           {activeHire && (
             <>
               <DialogHeader>
@@ -1605,32 +1607,33 @@ export default function WeeklyOnboardingV2() {
               </DialogHeader>
 
               <div className="space-y-4 py-2">
-                {!(activeHire.enterpriseId ?? "").trim() && (
-                  <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-400">
-                    This hire has no Enterprise ID yet (enrichment pending). It is required for assignment.
-                  </div>
-                )}
-
-                {/* PMF quick-picks, ranked nearest first (cap 8; full list in the record modal) */}
-                {(() => {
-                  const ranked = rankedFor(activeHire).slice(0, 8);
-                  if (!ranked.length) return null;
-                  return (
-                    <div className="flex flex-wrap gap-1.5">
-                      {ranked.map((r, i) => (
-                        <button
-                          key={i}
-                          type="button"
-                          title={`${[r.v.year, r.v.make || r.v.Make, r.v.model || r.v.Model].filter(Boolean).join(" ")}${r.v.licensePlate ? ` · ${r.v.licensePlate}` : ""}${r.miles != null ? ` · ~${Math.round(r.miles)} mi` : ""}`}
-                          onClick={() => setTruckNumber(String(r.v.assetId || ""))}
-                          className="rounded border px-2 py-0.5 font-mono text-[11px] text-primary hover:bg-muted"
-                        >
-                          {r.v.assetId || "?"}{r.miles != null ? ` ~${Math.round(r.miles)}mi` : ""}
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })()}
+                {/* PMF quick-picks (nearest first) — always-present header + a
+                    fallback line so the dialog never collapses to a bare form. */}
+                <div>
+                  <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Available trucks · PMF, nearest first</p>
+                  {(() => {
+                    const ranked = rankedFor(activeHire).slice(0, 8);
+                    const hireState = (activeHire.workState || "").toUpperCase().trim();
+                    if (!ranked.length) {
+                      return <p className="text-xs text-muted-foreground">No PMF trucks available in {hireState || "this state"} right now — type a truck number, or source one from Fleet Management.</p>;
+                    }
+                    return (
+                      <div className="flex flex-wrap gap-1.5">
+                        {ranked.map((r, i) => (
+                          <button
+                            key={i}
+                            type="button"
+                            title={`${[r.v.year, r.v.make || r.v.Make, r.v.model || r.v.Model].filter(Boolean).join(" ")}${r.v.licensePlate ? ` · ${r.v.licensePlate}` : ""}${r.miles != null ? ` · ~${Math.round(r.miles)} mi` : ""}`}
+                            onClick={() => setTruckNumber(String(r.v.assetId || ""))}
+                            className={`rounded border px-2 py-0.5 font-mono text-[11px] hover:bg-muted ${String(truckNumber) === String(r.v.assetId) ? "border-primary text-primary" : "text-primary/90"}`}
+                          >
+                            {r.v.assetId || "?"}{r.miles != null ? ` ~${Math.round(r.miles)}mi` : ""}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="truckNumber">Truck Number</Label>
@@ -1656,6 +1659,22 @@ export default function WeeklyOnboardingV2() {
                     ) : null
                   )}
                 </div>
+                {/* Readonly context — WHO this assigns to and WHERE (matches the
+                    mockup so the dialog reads as rich/new, not a bare form). */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label>Enterprise / LDAP ID</Label>
+                    <Input readOnly value={activeHire.enterpriseId ? String(activeHire.enterpriseId).toUpperCase() : ""} placeholder="missing" className="bg-muted font-mono" />
+                    <p className={`text-[11px] ${activeHire.enterpriseId ? "text-muted-foreground" : "text-amber-600 dark:text-amber-400"}`}>
+                      {activeHire.enterpriseId ? "From the hire record; a new hire's TPMS profile is created on assign." : "No Enterprise ID yet (enrichment pending). Required, so assign is blocked."}
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>District</Label>
+                    <Input readOnly value={activeHire.district || ""} className="bg-muted font-mono" />
+                    <p className="text-[11px] text-muted-foreground">Sent as districtNo; the same district guard as Fleet Management runs against it.</p>
+                  </div>
+                </div>
                 <div className="space-y-2">
                   <Label htmlFor="assignNotes">Notes (optional)</Label>
                   <Textarea
@@ -1667,6 +1686,19 @@ export default function WeeklyOnboardingV2() {
                     data-testid="input-notes"
                   />
                 </div>
+
+                {/* After-assignment preview (matches the mockup; hidden once a real result lands) */}
+                {!assignResult && (
+                  <div className="rounded-lg border bg-muted/30 p-2.5 text-xs">
+                    <p className="mb-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">After assignment</p>
+                    <div className="flex flex-wrap gap-x-4 gap-y-1">
+                      <span>TPMS &rarr; <b>Assigned</b></span>
+                      <span>Holman &rarr; <b>Assigned</b></span>
+                      <span>AMS &rarr; <b>Assigned to Tech</b></span>
+                      <span>Onboarding row &rarr; <b>stamped on TPMS success</b></span>
+                    </div>
+                  </div>
+                )}
 
                 {/* Result lanes after submit (TPMS / HOLMAN / AMS / WMS) */}
                 {assignResult && (
