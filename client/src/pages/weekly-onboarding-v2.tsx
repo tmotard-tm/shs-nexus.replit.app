@@ -260,6 +260,9 @@ export default function WeeklyOnboardingV2() {
   );
   const [popKey, setPopKey] = useState<string | null>(null);
   const [expandedWeeks, setExpandedWeeks] = useState<Set<number>>(new Set());
+  // Weeks the user explicitly collapsed; overrides the filter auto-open below so
+  // a collapse sticks even while a filter is active (the default view is filtered).
+  const [collapsedWeeks, setCollapsedWeeks] = useState<Set<number>>(new Set());
   const [paFilter, setPaFilter] = useState<string | null>(null);
   const [paPanelOpen, setPaPanelOpen] = useState(false); // collapsed by default (Decision 8)
 
@@ -798,6 +801,7 @@ export default function WeeklyOnboardingV2() {
   const clearAllFilters = () => {
     setStatusFilter("all"); setByovIntentFilter("all"); setOwnerFilter("all");
     setPaFilter(null); setColFilters({}); setSort({ k: null, dir: 1 }); setSearchQuery("");
+    setCollapsedWeeks(new Set());
   };
 
   // ── Modal helpers (one dialog visible at a time; assign replaces record in place) ──
@@ -847,11 +851,17 @@ export default function WeeklyOnboardingV2() {
   }
 
   const toggleWeek = (key: number) => {
-    setExpandedWeeks(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
+    // Effective open state mirrors isOpen in render: (expanded OR auto-open when
+    // filtering) AND not explicitly collapsed. A manual collapse must beat the
+    // filter auto-open, else weeks can never close in the default filtered view.
+    const open = (expandedWeeks.has(key) || filtersActive()) && !collapsedWeeks.has(key);
+    if (open) {
+      setCollapsedWeeks(prev => { const n = new Set(prev); n.add(key); return n; });
+      setExpandedWeeks(prev => { const n = new Set(prev); n.delete(key); return n; });
+    } else {
+      setCollapsedWeeks(prev => { const n = new Set(prev); n.delete(key); return n; });
+      setExpandedWeeks(prev => { const n = new Set(prev); n.add(key); return n; });
+    }
   };
 
   const cycleSort = (k: string) => {
@@ -1406,7 +1416,7 @@ export default function WeeklyOnboardingV2() {
                 return <div className="py-12 text-center text-muted-foreground"><p>No results match your search criteria.</p></div>;
               }
               return sections.map(({ g, visible }) => {
-                const isOpen = expandedWeeks.has(g.key) || anyFilters;
+                const isOpen = (expandedWeeks.has(g.key) || anyFilters) && !collapsedWeeks.has(g.key);
                 const wkAssigned = g.hires.filter(h => h.truckAssigned).length;
                 return (
                   <section key={g.key} className="overflow-hidden rounded-lg border">
