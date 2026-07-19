@@ -123,7 +123,17 @@ function parseApiError(error: any): string {
   try {
     const parsed = JSON.parse(stripped);
     if (parsed && typeof parsed.message === "string") return parsed.message;
-  } catch { /* not JSON — fall through */ }
+    // The all-systems-failed 500 returns the OperationResult (no top-level
+    // message). Summarize the lanes instead of dumping raw JSON into the toast
+    // (review fix 2026-07-18).
+    if (parsed && typeof parsed === "object" && ("overallSuccess" in parsed || "tpms" in parsed)) {
+      const lanes = ["tpms", "holman", "ams"]
+        .map((s) => (parsed[s]?.status ? `${s.toUpperCase()} ${parsed[s].status}` : null))
+        .filter(Boolean);
+      return `Assignment failed, no system committed${lanes.length ? ` (${lanes.join(", ")})` : ""}.`;
+    }
+    if (parsed && typeof parsed === "object") return "The server returned an error without a readable message.";
+  } catch { /* not JSON: fall through to the raw text */ }
   return stripped;
 }
 
@@ -401,12 +411,15 @@ export default function WeeklyOnboardingV2() {
 
   const enrichMutation = useMutation({
     mutationFn: async () => {
-      return await apiRequest('POST', '/api/snowflake/enrich/onboarding-hires');
+      // .json() so onSuccess sees enrichedCount (legacy returned the raw
+      // Response, giving "Updated undefined records" — review fix 2026-07-18).
+      const res = await apiRequest('POST', '/api/snowflake/enrich/onboarding-hires');
+      return res.json();
     },
     onSuccess: (data: any) => {
       toast({
         title: "Enrichment Complete",
-        description: `Updated ${data.enrichedCount} records with Snowflake data`,
+        description: `Updated ${data?.enrichedCount ?? 0} records with Snowflake data`,
       });
       queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
     },
@@ -697,7 +710,10 @@ export default function WeeklyOnboardingV2() {
       const f = colFilters[c.k];
       if (f == null) continue;
       if (c.type === "text") { if (f && c.val && !String(c.val(h)).toLowerCase().includes(String(f).toLowerCase())) return false; }
-      else if (c.type === "set") { if (f instanceof Set && f.size && c.val && !f.has(c.val(h))) return false; }
+      // An empty Set = the "None" choice, which must match ZERO rows (review
+      // fix 2026-07-18: previously `f.size` was falsy on empty, skipping the
+      // filter so "None" showed everything).
+      else if (c.type === "set" && f instanceof Set) { if (f.size === 0) return false; if (c.val && !f.has(c.val(h))) return false; }
       else if (c.type === "tri") { if ((f === "has" || f === "none") && c.val && c.val(h) !== f) return false; }
     }
     return true;
@@ -1298,8 +1314,21 @@ export default function WeeklyOnboardingV2() {
             </div>
           ) : (
             (() => {
+              // Default within-week order = serviceDate ascending (matches the
+              // legacy page; review fix 2026-07-18 — the query returns desc, so
+              // without this v2 showed newest-first). An explicit column sort
+              // overrides.
+              const defaultSort = (rows: OnboardingHire[]) =>
+                [...rows].sort((a, b) => {
+                  const da = a.serviceDate ? String(a.serviceDate) : "";
+                  const db = b.serviceDate ? String(b.serviceDate) : "";
+                  return da < db ? -1 : da > db ? 1 : 0;
+                });
               const sections = weekGroups
-                .map(g => ({ g, visible: sortRows(g.hires.filter(rowMatches)) }))
+                .map(g => {
+                  const matched = g.hires.filter(rowMatches);
+                  return { g, visible: sort.k ? sortRows(matched) : defaultSort(matched) };
+                })
                 .filter(({ visible }) => !anyFilters || visible.length > 0);
               if (!sections.length) {
                 return <div className="py-12 text-center text-muted-foreground"><p>No results match your search criteria.</p></div>;

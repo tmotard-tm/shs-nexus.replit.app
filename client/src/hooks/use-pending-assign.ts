@@ -33,12 +33,25 @@ const listeners = new Set<() => void>();
 function emitChange() { listeners.forEach((l) => l()); }
 function subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
 
-// useSyncExternalStore requires a STABLE snapshot between store changes, so we
-// cache the last computed snapshot and only recompute after a write (or on the
-// first read). Recomputing fresh objects every call would infinite-loop React.
+// useSyncExternalStore requires a STABLE snapshot between store changes:
+// returning a fresh object every call infinite-loops React. But we ALSO must
+// prune expired entries on every read, or an entry whose 2-min TTL lapses
+// mid-session lingers until the next write (review fix 2026-07-18). Solution:
+// prune every read, but return the SAME cached reference when the pruned
+// content is unchanged, and mint a new one only when it actually differs.
 let snapshotCache: PendingAssignMap | null = null;
+function sameMap(a: PendingAssignMap, b: PendingAssignMap): boolean {
+  const ak = Object.keys(a), bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  for (const k of ak) {
+    if (!b[k] || b[k].tn !== a[k].tn || b[k].startedAt !== a[k].startedAt) return false;
+  }
+  return true;
+}
 function getSnapshot(): PendingAssignMap {
-  if (snapshotCache === null) snapshotCache = pruneExpiredPendingAssigns(readRaw());
+  const pruned = pruneExpiredPendingAssigns(readRaw());
+  if (snapshotCache !== null && sameMap(snapshotCache, pruned)) return snapshotCache;
+  snapshotCache = pruned;
   return snapshotCache;
 }
 function invalidateSnapshot() { snapshotCache = null; emitChange(); }
