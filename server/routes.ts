@@ -12086,6 +12086,82 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // ── Transport request proxy -> PAL Transport (Wave 2) ─────────────────────
+  // Self-contained, mirrors the assign route: requireAuth, load the hire, POST
+  // to PAL's external transport API with the logged-in Nexus user as the
+  // requester, then stamp the hire's notes with the returned PAL id (no schema
+  // change). Absent secrets -> { configured:false } so the client shows the same
+  // "not configured" toast pattern as the BYOV intent sync. Fleet Management and
+  // the assign path are untouched.
+  app.post("/api/onboarding-hires/:id/transport", requireAuth, async (req: any, res) => {
+    try {
+      const palUrl = (process.env.PAL_TRANSPORT_URL || "").trim().replace(/\/+$/, "");
+      const palKey = (process.env.PAL_TRANSPORT_API_KEY || "").trim();
+      if (!palUrl || !palKey) return res.status(200).json({ configured: false });
+
+      const truckNumber = String(req.body?.truckNumber ?? "").trim();
+      const pickup = String(req.body?.pickup ?? "").trim();
+      const dropoff = String(req.body?.dropoff ?? "").trim();
+      const neededBy = String(req.body?.neededBy ?? "").trim();
+      const pullFromFleet = req.body?.pullFromFleet === true;
+      const notes = String(req.body?.notes ?? "").trim();
+      if (!truckNumber) return res.status(400).json({ message: "truckNumber is required" });
+
+      const hire = await storage.getOnboardingHire(req.params.id);
+      if (!hire) return res.status(404).json({ message: "Hire not found" });
+
+      const requestedBy = req.user?.name || req.user?.username || "Nexus user";
+
+      // PAL's field whitelist has no needed-by / pull-from-fleet slot, so fold
+      // them into internalNotes where the transport team will see them.
+      const internalNotesParts: string[] = [];
+      if (neededBy) internalNotesParts.push(`Needed by: ${neededBy}`);
+      internalNotesParts.push(`Pull from Fleet: ${pullFromFleet ? "yes" : "no"}`);
+      if (notes) internalNotesParts.push(notes);
+      internalNotesParts.push(`(via Nexus Weekly Onboarding, hire ${hire.id})`);
+
+      const payload: Record<string, unknown> = {
+        truck: truckNumber,
+        fromAddr: pickup,
+        toAddr: dropoff,
+        dropoffTechName: hire.employeeName || "",
+        internalNotes: internalNotesParts.join(" | "),
+        requestedBy,
+      };
+
+      let palResp: any;
+      try {
+        palResp = await fetch(`${palUrl}/api/external/transport-requests`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-api-key": palKey },
+          body: JSON.stringify(payload),
+        });
+      } catch (e: any) {
+        return res.status(502).json({ message: `Could not reach the transport service: ${e?.message || e}` });
+      }
+
+      const palJson: any = await palResp.json().catch(() => ({}));
+      // PAL itself unconfigured (503) -> surface as not-configured to the client.
+      if (palResp.status === 503) return res.status(200).json({ configured: false, message: palJson?.error });
+      if (!palResp.ok || palJson?.ok !== true) {
+        const msg = palJson?.error || `Transport service returned ${palResp.status}`;
+        const passthrough = palResp.status >= 400 && palResp.status < 500 && palResp.status !== 401;
+        return res.status(passthrough ? palResp.status : 502).json({ message: msg });
+      }
+
+      const record = palJson.record || {};
+      const palId = record.id ?? "";
+      const dateStr = new Date().toISOString().split("T")[0];
+      const marker = `[PAL transport ${palId} requested ${dateStr} by ${requestedBy}]`;
+      const newNotes = hire.notes ? `${hire.notes}\n${marker}` : marker;
+      await storage.updateOnboardingHire(hire.id, { notes: newNotes });
+
+      return res.status(201).json({ configured: true, ok: true, palId, record });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/onboarding-hires/bulk", requireAuth, async (req: any, res) => {
     try {
       const currentUser = await storage.getUserByUsername(req.user.username);

@@ -34,6 +34,15 @@ import { groupHiresByWeek, weekLabel, getWeekNum, parseLocalDate } from "@shared
 import { usePendingAssignMap, setPendingAssign, clearPendingAssign } from "@/hooks/use-pending-assign";
 import { expandedCityCoordinates } from "@/data/expanded-city-coordinates";
 
+// A successful transport request stamps the hire's notes with
+// "[PAL transport <id> requested <date> by <who>]" (see the server route). Pull
+// the PAL id back out so rows and the record modal can badge an existing request.
+function parseTransportId(notes: string | null | undefined): string | null {
+  if (!notes) return null;
+  const m = String(notes).match(/\[PAL transport ([^\s\]]+)/);
+  return m ? m[1] : null;
+}
+
 // District to Owner mapping based on last 4 digits (ported verbatim from legacy)
 const districtOwnerMap: Record<string, string> = {
   '3132': 'Rob & Andrea',
@@ -263,6 +272,16 @@ export default function WeeklyOnboardingV2() {
   const [recordNotes, setRecordNotes] = useState("");
   const [assignResult, setAssignResult] = useState<any | null>(null);
   const [precheckTruck, setPrecheckTruck] = useState("");
+
+  // ── Transport request state (Wave 2: PAL proxy) ──
+  const [transportDialogOpen, setTransportDialogOpen] = useState(false);
+  const [transportStep, setTransportStep] = useState<"confirm" | "form">("confirm");
+  const [tTruck, setTTruck] = useState("");
+  const [tPickup, setTPickup] = useState("");
+  const [tDropoff, setTDropoff] = useState("");
+  const [tNeededBy, setTNeededBy] = useState("");
+  const [tPullFromFleet, setTPullFromFleet] = useState(false);
+  const [tNotes, setTNotes] = useState("");
 
   const pendingMap = usePendingAssignMap();
 
@@ -499,6 +518,34 @@ export default function WeeklyOnboardingV2() {
       // truck-scoped lock; surface whatever the server sent verbatim.
       clearPendingAssign(id);
       toast({ title: "Assignment blocked", description: parseApiError(error), variant: "destructive" });
+    },
+  });
+
+  // ── Transport request → PAL proxy (Wave 2) ──
+  const transportMutation = useMutation({
+    mutationFn: async (vars: { id: string; truckNumber: string; pickup: string; dropoff: string; neededBy: string; pullFromFleet: boolean; notes: string }) => {
+      const { id, ...body } = vars;
+      const res = await apiRequest("POST", `/api/onboarding-hires/${id}/transport`, body);
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      if (data?.configured === false) {
+        toast({
+          title: "Transport Not Configured",
+          description: "Set PAL_TRANSPORT_URL and PAL_TRANSPORT_API_KEY in Nexus Secrets to enable transport requests.",
+          variant: "destructive",
+        });
+        return;
+      }
+      toast({
+        title: "Transport requested",
+        description: `PAL request ${data?.palId ?? "created"}${data?.record?.truck ? ` · truck ${data.record.truck}` : ""} is on the transport board under your name.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
+      closeAllDialogs();
+    },
+    onError: (error: any) => {
+      toast({ title: "Transport request failed", description: parseApiError(error), variant: "destructive" });
     },
   });
 
@@ -771,6 +818,18 @@ export default function WeeklyOnboardingV2() {
     setAssignDialogOpen(true);
     setActiveHireId(hireId);
   }
+  function openTransportDialog(hireId: string) {
+    const h = hires.find(x => x.id === hireId);
+    setTTruck(pickedVehicle?.assetId ? String(pickedVehicle.assetId) : (h?.assignedTruckNo || ""));
+    setTPickup("");
+    setTDropoff(h ? [h.locationCity, h.workState].filter(Boolean).join(", ") : "");
+    setTNeededBy("");
+    setTPullFromFleet(false);
+    setTNotes("");
+    setTransportStep("confirm");
+    setTransportDialogOpen(true);
+    setActiveHireId(hireId);
+  }
   function closeAllDialogs() {
     setActiveHireId(null);
     setPickedVehicle(null);
@@ -778,6 +837,8 @@ export default function WeeklyOnboardingV2() {
     setAssignResult(null);
     setTruckNumber("");
     setNotes("");
+    setTransportDialogOpen(false);
+    setTransportStep("confirm");
   }
 
   const toggleWeek = (key: number) => {
@@ -1018,6 +1079,14 @@ export default function WeeklyOnboardingV2() {
           ) : (
             <span className={hire.assignedTruckNo ? "" : "font-normal text-muted-foreground"}>{hire.assignedTruckNo || '-'}</span>
           )}
+          {parseTransportId(hire.notes) && (
+            <span
+              className="ml-1.5 inline-flex items-center gap-1 rounded bg-blue-50 px-1 py-0.5 align-middle text-[10px] font-normal text-blue-600 dark:bg-blue-950 dark:text-blue-300"
+              title={`Transport requested (PAL ${parseTransportId(hire.notes)})`}
+            >
+              <Truck className="h-2.5 w-2.5" />{parseTransportId(hire.notes)}
+            </span>
+          )}
         </div>
         {/* Actions — fixed two-slot grid so Assign never drags Transport around */}
         <div
@@ -1026,8 +1095,8 @@ export default function WeeklyOnboardingV2() {
           onClick={(e) => e.stopPropagation()}
         >
           <span className="justify-self-end">
-            {/* Transport lands in Wave 2 (PAL proxy + secrets); visible but inert until then */}
-            <Button size="sm" variant="outline" disabled title="Transport wiring lands in Wave 2">
+            {/* Transport → PAL proxy (Wave 2). Requests a vehicle move for this hire. */}
+            <Button size="sm" variant="outline" onClick={() => openTransportDialog(hire.id)} title="Request vehicle transport for this hire" data-testid={`button-transport-${hire.id}`}>
               Transport
             </Button>
           </span>
@@ -1401,7 +1470,7 @@ export default function WeeklyOnboardingV2() {
       </main>
 
       {/* ── Record modal (centered, wide; board stays visible behind) ── */}
-      <Dialog open={!!activeHire && !assignDialogOpen} onOpenChange={(o) => { if (!o) closeAllDialogs(); }}>
+      <Dialog open={!!activeHire && !assignDialogOpen && !transportDialogOpen} onOpenChange={(o) => { if (!o) closeAllDialogs(); }}>
         <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-[900px]">
           {activeHire && (
             <>
@@ -1413,6 +1482,11 @@ export default function WeeklyOnboardingV2() {
                     <span className="rounded border px-1.5 py-0.5 font-mono text-[11px] font-normal text-muted-foreground">D {activeHire.district || "-"}</span>
                     <StatusBadge hire={activeHire} />
                     {deriveStatus(activeHire) === "pending" && activeHire.byovIntent && <IntentBadge hire={activeHire} />}
+                    {parseTransportId(activeHire.notes) && (
+                      <span className="inline-flex items-center gap-1 rounded border border-blue-300 bg-blue-50 px-1.5 py-0.5 text-[11px] font-normal text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                        <Truck className="h-3 w-3" /> TRANSPORT ✓ {parseTransportId(activeHire.notes)}
+                      </span>
+                    )}
                   </span>
                 </DialogTitle>
                 <DialogDescription>Hire record</DialogDescription>
@@ -1571,6 +1645,9 @@ export default function WeeklyOnboardingV2() {
 
               <DialogFooter>
                 <Button variant="outline" onClick={closeAllDialogs}>Close</Button>
+                <Button variant="outline" onClick={() => openTransportDialog(activeHire.id)} data-testid="button-transport-record">
+                  {parseTransportId(activeHire.notes) ? "Request another transport" : "Request transport"}
+                </Button>
                 {activePending ? (
                   <Button disabled>Assignment in progress…</Button>
                 ) : (
@@ -1743,6 +1820,97 @@ export default function WeeklyOnboardingV2() {
                   {onboardingAssignMutation.isPending ? "Assigning…" : "Assign to All Systems"}
                 </Button>
               </DialogFooter>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Transport request dialog (Wave 2: PAL proxy) — two-step confirm→form ── */}
+      <Dialog open={!!activeHire && transportDialogOpen} onOpenChange={(o) => { if (!o) closeAllDialogs(); }}>
+        <DialogContent className="sm:max-w-[600px]">
+          {activeHire && (
+            <>
+              <DialogHeader>
+                <DialogTitle>
+                  <span className="flex items-center gap-2">
+                    <Truck className="h-5 w-5" />
+                    Request Transport for {activeHire.employeeName}
+                  </span>
+                </DialogTitle>
+                <DialogDescription>
+                  Creates a request on the PAL Transport board under your name.
+                  {activeHire.locationCity ? ` Dropoff prefilled to ${activeHire.locationCity}, ${activeHire.workState || ""}.` : ""}
+                </DialogDescription>
+              </DialogHeader>
+
+              {transportStep === "confirm" ? (
+                <div className="space-y-4 py-2">
+                  <div className="rounded-lg border bg-muted/30 p-3 text-sm">
+                    <p>
+                      You're about to open a transport request for <b>{activeHire.employeeName}</b>
+                      {tTruck ? <> (truck <b>{tTruck}</b>)</> : null}. It lands on the PAL Transport
+                      board attributed to you. No email is sent to the vendor from here.
+                    </p>
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={closeAllDialogs}>Cancel</Button>
+                    <Button onClick={() => setTransportStep("form")} data-testid="button-transport-continue">Continue</Button>
+                  </DialogFooter>
+                </div>
+              ) : (
+                <div className="space-y-4 py-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="tTruck">Truck Number</Label>
+                    <Input id="tTruck" value={tTruck} onChange={(e) => setTTruck(e.target.value)} placeholder="Truck to transport" data-testid="input-transport-truck" />
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="tPickup">Pickup (from)</Label>
+                      <Input id="tPickup" value={tPickup} onChange={(e) => setTPickup(e.target.value)} placeholder="Pickup address / location" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tDropoff">Dropoff (to)</Label>
+                      <Input id="tDropoff" value={tDropoff} onChange={(e) => setTDropoff(e.target.value)} placeholder="Dropoff address / location" data-testid="input-transport-dropoff" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="tNeededBy">Needed by</Label>
+                      <Input id="tNeededBy" type="date" value={tNeededBy} onChange={(e) => setTNeededBy(e.target.value)} />
+                    </div>
+                    <label className="flex items-end gap-2 pb-2 text-sm">
+                      <Checkbox checked={tPullFromFleet} onCheckedChange={(v) => setTPullFromFleet(v === true)} data-testid="checkbox-transport-pullfleet" />
+                      Pull from Fleet
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="tNotes">Notes</Label>
+                    <Textarea id="tNotes" value={tNotes} onChange={(e) => setTNotes(e.target.value)} rows={3} placeholder="Anything the transport team needs to know..." />
+                  </div>
+                  <div className="rounded-lg border bg-muted/30 p-2.5 text-[11px] text-muted-foreground">
+                    Dropoff tech <b>{activeHire.employeeName}</b> and you (the requester) ride along with the request.
+                    Needed-by and Pull-from-Fleet are appended to the transport notes (PAL has no dedicated field for them).
+                  </div>
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setTransportStep("confirm")}>Back</Button>
+                    <Button
+                      onClick={() => transportMutation.mutate({
+                        id: activeHire.id,
+                        truckNumber: tTruck.trim(),
+                        pickup: tPickup.trim(),
+                        dropoff: tDropoff.trim(),
+                        neededBy: tNeededBy.trim(),
+                        pullFromFleet: tPullFromFleet,
+                        notes: tNotes.trim(),
+                      })}
+                      disabled={!tTruck.trim() || transportMutation.isPending}
+                      data-testid="button-send-transport"
+                    >
+                      {transportMutation.isPending ? "Sending…" : "Send transport request"}
+                    </Button>
+                  </DialogFooter>
+                </div>
+              )}
             </>
           )}
         </DialogContent>
