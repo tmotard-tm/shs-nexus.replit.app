@@ -5,6 +5,7 @@
  */
 import { db } from "../db";
 import { sql } from "drizzle-orm";
+import { initRentalOperationsSchema } from "./rental-operations/schema";
 
 export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`
@@ -822,6 +823,9 @@ export async function initVrmSchema(): Promise<void> {
   // became Approve, so the approver is notified instead of a silent flip.
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_label TEXT;`);
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_overrode_deny BOOLEAN NOT NULL DEFAULT FALSE;`);
+
+  // VRM Rental Operations V2 (clean-room) — additive tables, own module.
+  await initRentalOperationsSchema();
 
   console.log("[VRM] Schema initialised");
 }

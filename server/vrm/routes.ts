@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { db } from "../db";
 import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
+import { registerRentalOperationsRoutes } from "./rental-operations/routes";
 import {
   listTechs,
   resolveRosterLdapsByName,
@@ -2833,6 +2834,9 @@ export function registerVrmRoutes(): Router {
       res.status(500).json({ ok: false, error: e.message });
     }
   });
+
+  // VRM Rental Operations V2 (clean-room) — additive routes under /rental-operations/*
+  registerRentalOperationsRoutes(router);
 
   return router;
 }
