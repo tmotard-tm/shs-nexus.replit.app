@@ -64,7 +64,7 @@ export interface PoRecord {
   poNumber: string; poDate: string | null; poStatus: string | null; vendorType: string;
   vendorName: string | null; vendorAddress: string | null; vendorCity: string | null; vendorState: string | null;
   poType: string | null; repairDate: string | null; paidDate: string | null; approver: string | null;
-  odometer: number | null; totalAmount: number | null; lineItems: PoLineItem[];
+  odometer: number | null; totalAmount: number | null; uploadTimestamp: string | null; lineItems: PoLineItem[];
 }
 
 /** Full 3-year PO history for ONE truck, grouped by PO with line items, latest
@@ -86,7 +86,7 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
     SELECT PO_NUMBER, PO_STATUS, PO_DATE, REPAIR_DATE, PO_PAID_DATE_TRUNCATED, PO_TYPE_DESCRIPTION,
            VENDOR_NAME, VENDOR_ADDRESS_LINE_1, VENDOR_CITY, VENDOR_STATE, MAINTENANCE_APPROVER,
            PURCHASE_ORDER_ODOMETER, TOTAL_LINE_ITEM_AMOUNT, PO_LINE_SEQ, REPAIR_TYPE_DESCRIPTION,
-           ATA_GROUP_DESC, DESCRIPTION, QUANITY, LINE_ITEM_COST
+           ATA_GROUP_DESC, DESCRIPTION, QUANITY, LINE_ITEM_COST, UPLOAD_TIMESTAMP
     FROM scoped WHERE UPLOAD_TIMESTAMP = MAXUP
     ORDER BY PO_DATE DESC, PO_NUMBER, PO_LINE_SEQ
   `);
@@ -109,7 +109,8 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
         poType: r.PO_TYPE_DESCRIPTION ? String(r.PO_TYPE_DESCRIPTION).trim() : null,
         repairDate: toIsoDate(r.REPAIR_DATE), paidDate: toIsoDate(r.PO_PAID_DATE_TRUNCATED),
         approver: r.MAINTENANCE_APPROVER ? String(r.MAINTENANCE_APPROVER).trim() : null,
-        odometer: numOrNull(r.PURCHASE_ORDER_ODOMETER), totalAmount: 0, lineItems: [],
+        odometer: numOrNull(r.PURCHASE_ORDER_ODOMETER), totalAmount: 0,
+        uploadTimestamp: toIsoTs(r.UPLOAD_TIMESTAMP), lineItems: [],
       };
       byPo.set(po, rec); order.push(po);
     }

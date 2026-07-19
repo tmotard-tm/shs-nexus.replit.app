@@ -96,7 +96,7 @@ interface PoRecord {
   poNumber: string; poDate: string | null; poStatus: string | null; vendorType: string;
   vendorName: string | null; vendorAddress?: string | null; vendorCity?: string | null; vendorState?: string | null;
   poType?: string | null; repairDate?: string | null; paidDate?: string | null; approver?: string | null;
-  odometer?: number | null; totalAmount: number | null; lineItems: PoLineItem[];
+  odometer?: number | null; totalAmount: number | null; uploadTimestamp?: string | null; lineItems: PoLineItem[];
 }
 interface CaseDetail {
   case: Record<string, any>;
@@ -115,6 +115,13 @@ function fmtDate(s: string | null | undefined): string {
   if (!s) return "";
   const m = String(s).match(/(\d{4})-(\d{2})-(\d{2})/);
   return m ? `${m[2]}/${m[3]}/${m[1].slice(2)}` : String(s);
+}
+function fmtDateTime(s: string | null | undefined): string {
+  if (!s) return "";
+  const t = Date.parse(s);
+  if (Number.isNaN(t)) return fmtDate(s);
+  const d = new Date(t);
+  return `${fmtDate(s)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 function fmtDuration(days: number | null): string {
   if (days == null) return "";
@@ -327,7 +334,7 @@ export default function RentalOperations() {
         <div>
           <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0, color: colors.ink }}>Rental Operations Control Center</h1>
           <div style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
-            {data!.total} open rentals · {data!.cohorts.open_repair ?? 0} with an open repair ticket · {(data!.identityStates.REVIEW ?? 0) + (data!.identityStates.EXCEPTION ?? 0)} identities need review
+            {data!.total} rentals ({data!.total - data!.pendedCount} open{data!.pendedCount ? ` + ${data!.pendedCount} pended` : ""}) · {data!.cohorts.open_repair ?? 0} with an open repair ticket · {(data!.identityStates.REVIEW ?? 0) + (data!.identityStates.EXCEPTION ?? 0)} identities need review
           </div>
           <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains }}>
             last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
@@ -519,6 +526,10 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
   const notes = (data?.actions || []).filter((a) => a.action_type === "note");
+  const poList = data?.poHistory || [];
+  // current shop = the most-recent APPROVED repair PO (open), else the latest repair PO (fallback)
+  const currentShop = poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED") || poList.find((p) => p.vendorType === "repair") || null;
+  const dataAsOf = poList.reduce<string | null>((mx, p) => (p.uploadTimestamp && (!mx || p.uploadTimestamp > mx) ? p.uploadTimestamp : mx), null);
   const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
   const addNote = useMutation({
     mutationFn: (text: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/actions`, { action_type: "note", note: text }),
@@ -562,6 +573,23 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
               <div><div style={label}>Daily cost</div><div style={val}>{money2(c.rate_authorized)}</div></div>
               <div><div style={label}>Renting location</div><div style={val}>{[c.renting_city, c.renting_state].filter(Boolean).join(", ") || "—"}</div></div>
             </section>
+            {/* current shop contact (from the PO) */}
+            <section>
+              <div style={{ ...label, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span>Current shop</span>
+                {currentShop?.uploadTimestamp && <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: fonts.jetbrains, fontSize: 10 }}>PO data synced {fmtDateTime(currentShop.uploadTimestamp)}</span>}
+              </div>
+              {currentShop ? (
+                <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${currentShop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
+                  <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{currentShop.vendorName}
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: currentShop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{currentShop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
+                  </div>
+                  <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
+                  <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}</div>
+                  <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 4 }}>Shop phone comes from the on-demand portal scrape (next build).</div>
+                </div>
+              ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
+            </section>
             {/* marks */}
             <section>
               <div style={label}>Operator mark</div>
@@ -595,7 +623,7 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
             </section>
             {/* PO history — full 3-year, grouped, expandable line items */}
             <section>
-              <div style={label}>PO history — {data!.poHistory.length} POs · 3 years {data!.poSource === "cached_fallback" ? "(cached)" : "(live)"}</div>
+              <div style={label}>PO history — {poList.length} POs · 3 years · data as of {dataAsOf ? fmtDateTime(dataAsOf) : "—"} {data!.poSource === "cached_fallback" ? "(cached)" : ""}</div>
               <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
                 {data!.poHistory.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No PO history in the Holman ETL for this vehicle.</div>}
                 {data!.poHistory.map((p) => {
@@ -619,6 +647,7 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
                             {[p.vendorAddress, p.vendorCity, p.vendorState].filter(Boolean).join(", ") || "no vendor address"}
                             {p.approver ? ` · approver ${p.approver}` : ""}{p.odometer ? ` · ${p.odometer.toLocaleString()} mi` : ""}
                             {p.repairDate ? ` · repair ${fmtDate(p.repairDate)}` : ""}{p.paidDate ? ` · paid ${fmtDate(p.paidDate)}` : ""}{p.poType ? ` · ${p.poType}` : ""}
+                            {p.uploadTimestamp ? ` · synced ${fmtDateTime(p.uploadTimestamp)}` : ""}
                           </div>
                           {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>Line items not available (cached view).</div> : (
                             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, fontFamily: fonts.dmSans }}>
