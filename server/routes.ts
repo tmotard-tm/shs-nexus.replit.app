@@ -12110,7 +12110,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const hire = await storage.getOnboardingHire(req.params.id);
       if (!hire) return res.status(404).json({ message: "Hire not found" });
 
-      const requestedBy = req.user?.name || req.user?.username || "Nexus user";
+      const requestedBy = req.user?.username || "Nexus user";
 
       // PAL's field whitelist has no needed-by / pull-from-fleet slot, so fold
       // them into internalNotes where the transport team will see them.
@@ -12141,8 +12141,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       const palJson: any = await palResp.json().catch(() => ({}));
-      // PAL itself unconfigured (503) -> surface as not-configured to the client.
-      if (palResp.status === 503) return res.status(200).json({ configured: false, message: palJson?.error });
+      // PAL fail-closes with 503 + a "not configured" error when ITS OWN key is
+      // unset; treat only that as configured:false. A bodiless / other 503 is a
+      // transient Replit outage (cold start or mid-deploy) -> report as an outage.
+      if (palResp.status === 503 && /not configured/i.test(String(palJson?.error || ""))) {
+        return res.status(200).json({ configured: false, message: palJson?.error });
+      }
       if (!palResp.ok || palJson?.ok !== true) {
         const msg = palJson?.error || `Transport service returned ${palResp.status}`;
         const passthrough = palResp.status >= 400 && palResp.status < 500 && palResp.status !== 401;
@@ -12151,12 +12155,22 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
       const record = palJson.record || {};
       const palId = record.id ?? "";
-      const dateStr = new Date().toISOString().split("T")[0];
-      const marker = `[PAL transport ${palId} requested ${dateStr} by ${requestedBy}]`;
-      const newNotes = hire.notes ? `${hire.notes}\n${marker}` : marker;
-      await storage.updateOnboardingHire(hire.id, { notes: newNotes });
+      // PAL already committed the transport (it is NOT idempotent). The notes
+      // marker is best-effort bookkeeping: a transient DB blip here must NOT turn
+      // a created request into a 500, because a retry would create a DUPLICATE
+      // transport. Stamp in its own try/catch and always return 201 with palId.
+      let noteStamped = false;
+      try {
+        const dateStr = new Date().toISOString().split("T")[0];
+        const marker = `[PAL transport ${palId} requested ${dateStr} by ${requestedBy}]`;
+        const newNotes = hire.notes ? `${hire.notes}\n${marker}` : marker;
+        await storage.updateOnboardingHire(hire.id, { notes: newNotes });
+        noteStamped = true;
+      } catch (e: any) {
+        console.warn(`[transport] PAL request ${palId} created but notes stamp failed for hire ${hire.id}: ${e?.message || e}`);
+      }
 
-      return res.status(201).json({ configured: true, ok: true, palId, record });
+      return res.status(201).json({ configured: true, ok: true, palId, noteStamped, record });
     } catch (err: any) {
       res.status(500).json({ message: err.message });
     }

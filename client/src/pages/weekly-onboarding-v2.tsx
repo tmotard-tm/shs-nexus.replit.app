@@ -539,7 +539,7 @@ export default function WeeklyOnboardingV2() {
       }
       toast({
         title: "Transport requested",
-        description: `PAL request ${data?.palId ?? "created"}${data?.record?.truck ? ` · truck ${data.record.truck}` : ""} is on the transport board under your name.`,
+        description: `PAL request ${data?.palId || "created"}${data?.record?.truck ? ` · truck ${data.record.truck}` : ""} is on the transport board under your name.`,
       });
       queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
       closeAllDialogs();
@@ -806,6 +806,7 @@ export default function WeeklyOnboardingV2() {
     const h = hires.find(x => x.id === hireId);
     setPickedVehicle(null);
     setAssignDialogOpen(false);
+    setTransportDialogOpen(false);
     setRecordNotes(h?.notes || "");
     setActiveHireId(hireId);
   }
@@ -815,6 +816,7 @@ export default function WeeklyOnboardingV2() {
     setTruckNumber(pickedVehicle?.assetId ? String(pickedVehicle.assetId) : (h?.assignedTruckNo || ""));
     setNotes(h?.notes || "");
     setAssignResult(null);
+    setTransportDialogOpen(false);
     setAssignDialogOpen(true);
     setActiveHireId(hireId);
   }
@@ -827,6 +829,7 @@ export default function WeeklyOnboardingV2() {
     setTPullFromFleet(false);
     setTNotes("");
     setTransportStep("confirm");
+    setAssignDialogOpen(false);
     setTransportDialogOpen(true);
     setActiveHireId(hireId);
   }
@@ -839,6 +842,8 @@ export default function WeeklyOnboardingV2() {
     setNotes("");
     setTransportDialogOpen(false);
     setTransportStep("confirm");
+    setTTruck(""); setTPickup(""); setTDropoff("");
+    setTNeededBy(""); setTPullFromFleet(false); setTNotes("");
   }
 
   const toggleWeek = (key: number) => {
