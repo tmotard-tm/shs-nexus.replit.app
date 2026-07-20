@@ -114,3 +114,9 @@ id = "IllAKkAOLXmfLrRbjEvJL"
 uri = "file://exports/reconciliation-nightly-2026-06-22.csv"
 type = "table"
 title = "Reconciliation — Nightly Run 6/22/2026 7:50 AM (710 items)"
+
+[[outputs]]
+id = "cqGsvtFfQSbW0hAqhGrxM"
+uri = "file://drafts/insert_missing_holman_pos_2026-07-20.sql.txt"
+type = "text"
+title = "DRAFT — Backfill missing Holman open POs (review before running)"
