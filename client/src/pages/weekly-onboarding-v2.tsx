@@ -249,6 +249,14 @@ function IntentBadge({ hire }: { hire: OnboardingHire }) {
       </Badge>
     );
   }
+  // "Unverified" (never checked, or the last check is >7 days stale / the BYOV
+  // Dashboard was down) is distinct from a confirmed "NA" (not enrolled), so an
+  // outage or an unchecked hire can't be mistaken for fleet-eligible.
+  const checkedMs = hire.byovIntentCheckedAt ? new Date(hire.byovIntentCheckedAt).getTime() : 0;
+  const unverified = !checkedMs || (Date.now() - checkedMs) > 7 * 24 * 60 * 60 * 1000;
+  if (unverified) {
+    return <span className="text-xs font-medium text-amber-600 dark:text-amber-400" title="BYOV intent not verified: never checked or stale. Run Sync BYOV Intent before treating this hire as fleet-eligible." data-testid={`badge-intent-unverified-${hire.id}`}>Unverified</span>;
+  }
   return <span className="text-xs text-muted-foreground" data-testid={`badge-intent-na-${hire.id}`}>NA</span>;
 }
 

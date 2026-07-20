@@ -129,6 +129,12 @@ export default function WeeklyOnboarding() {
 
   const assignMutation = useMutation({
     mutationFn: async ({ id, truckAssigned, assignedTruckNo, notes }: { id: string; truckAssigned: boolean; assignedTruckNo: string; notes: string }) => {
+      // Assign for real (same TPMS/Holman/AMS route as the v2 page and Fleet
+      // Management), so a legacy assign is never bookkeeping-only and can't leave
+      // a tech truckless. A no-truck edit (notes only / clear) keeps the PATCH.
+      if (truckAssigned && assignedTruckNo.trim()) {
+        return await apiRequest('POST', `/api/onboarding-hires/${id}/assign`, { truckNumber: assignedTruckNo.trim(), notes });
+      }
       return await apiRequest('PATCH', `/api/onboarding-hires/${id}`, { truckAssigned, assignedTruckNo, notes });
     },
     onSuccess: () => {
