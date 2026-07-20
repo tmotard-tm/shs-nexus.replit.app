@@ -12095,6 +12095,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         await storage.updateOnboardingHire(hire.id, {
           truckAssigned: true,
           assignedTruckNo: truckNumber,
+          // Mark as a human assignment so the nightly TPMS-snapshot enrichment
+          // (snowflake-sync-service.ts skips truckAssignmentSource === "manual")
+          // never reverts it to a stale snapshot value.
+          truckAssignmentSource: "manual",
+          assignedBy: requestedBy,
+          assignedAt: new Date(),
           ...(notes ? { notes } : {}),
         });
         hireStamped = true;
@@ -12183,6 +12189,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const hire = await storage.getOnboardingHire(req.params.id);
       if (!hire) return res.status(404).json({ message: "Hire not found" });
 
+      // Idempotency guard. PAL is not idempotent, so block a repeat transport for
+      // the same hire within 30 minutes -- covers a retry after a slow or timed-out
+      // first request that PAL may have already committed. Backed by the notes
+      // markers (shared DB), so it holds across autoscale instances.
+      const priorMarkers = String(hire.notes ?? "").match(/\[PAL transport[^\]]*\]/g) || [];
+      const priorTimes = priorMarkers
+        .map((mk) => { const m = mk.match(/requested (\S+)/); return m ? Date.parse(m[1]) : NaN; })
+        .filter((t) => !Number.isNaN(t));
+      const lastReq = priorTimes.length ? Math.max(...priorTimes) : 0;
+      if (lastReq && Date.now() - lastReq < 30 * 60 * 1000) {
+        return res.status(409).json({ message: "A transport was already requested for this hire in the last 30 minutes. Check the PAL board before requesting another." });
+      }
+
       // Attribute by real name, not the LDAP username. Corporate email is
       // first.last@... -> "First Last" (trailing digits stripped); fall back to
       // the username when the email has no parseable name.
@@ -12231,6 +12250,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           method: "POST",
           headers: { "Content-Type": "application/json", "x-api-key": palKey },
           body: JSON.stringify(payload),
+          // Fail fast on a slow/cold PAL rather than hanging toward 60s+, which is
+          // when a user retries and creates a duplicate move.
+          signal: AbortSignal.timeout(20000),
         });
       } catch (e: any) {
         return res.status(502).json({ message: `Could not reach the transport service: ${e?.message || e}` });
@@ -12257,8 +12279,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // transport. Stamp in its own try/catch and always return 201 with palId.
       let noteStamped = false;
       try {
-        const dateStr = new Date().toISOString().split("T")[0];
-        const marker = `[PAL transport ${palId} requested ${dateStr} by ${requestedBy}]`;
+        const marker = `[PAL transport ${palId} requested ${new Date().toISOString()} by ${requestedBy}]`;
         const newNotes = hire.notes ? `${hire.notes}\n${marker}` : marker;
         await storage.updateOnboardingHire(hire.id, { notes: newNotes });
         noteStamped = true;
