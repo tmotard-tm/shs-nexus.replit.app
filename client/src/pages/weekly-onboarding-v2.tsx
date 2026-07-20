@@ -338,6 +338,7 @@ export default function WeeklyOnboardingV2() {
   const [transportDialogOpen, setTransportDialogOpen] = useState(false);
   const [tForm, setTForm] = useState({ ...EMPTY_TFORM });
   const setT = (k: string, v: string) => setTForm(prev => ({ ...prev, [k]: v }));
+  const [truckLookup, setTruckLookup] = useState<{ loading: boolean; msg: string | null }>({ loading: false, msg: null });
 
   const { user: authUser } = useAuth();
   const pendingMap = usePendingAssignMap();
@@ -888,6 +889,7 @@ export default function WeeklyOnboardingV2() {
       dropoffTechName: h?.employeeName || "",
     });
     setAssignDialogOpen(false);
+    setTruckLookup({ loading: false, msg: null });
     setTransportDialogOpen(true);
     setActiveHireId(hireId);
   }
@@ -900,6 +902,37 @@ export default function WeeklyOnboardingV2() {
     setNotes("");
     setTransportDialogOpen(false);
     setTForm({ ...EMPTY_TFORM });
+    setTruckLookup({ loading: false, msg: null });
+  }
+
+  // Look up the truck's current info from the DB (VIN, current location, current
+  // tech as the pickup contact) and auto-fill the transport form — the onboarding
+  // equivalent of PAL's "Extract Data". Read-only holman_vehicles_cache lookup.
+  async function lookupTruckInfo() {
+    const t = tForm.truck.trim();
+    if (!t) return;
+    setTruckLookup({ loading: true, msg: null });
+    try {
+      const res = await fetch(`/api/onboarding-hires/truck-info/${encodeURIComponent(t)}`, { credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) { setTruckLookup({ loading: false, msg: data?.message || `Lookup failed (${res.status})` }); return; }
+      if (!data?.found) { setTruckLookup({ loading: false, msg: `Truck ${data?.truck || t} isn't in the Holman cache. Enter the pickup details manually.` }); return; }
+      setTForm(prev => ({
+        ...prev,
+        vin: data.vin || prev.vin,
+        fromAddr: data.location || prev.fromAddr,
+        fromContactName: data.currentTechName || prev.fromContactName,
+        fromContact: data.currentTechPhone || prev.fromContact,
+      }));
+      const bits = [
+        data.vin ? `VIN ${data.vin}` : null,
+        data.currentTechName ? `currently with ${data.currentTechName}` : null,
+        data.location ? `in ${data.location}` : null,
+      ].filter(Boolean).join(" · ");
+      setTruckLookup({ loading: false, msg: `Extracted truck ${data.truck}${bits ? `: ${bits}` : ""}` });
+    } catch (e: any) {
+      setTruckLookup({ loading: false, msg: `Lookup error: ${e?.message || e}` });
+    }
   }
 
   const toggleWeek = (key: number) => {
@@ -1923,7 +1956,13 @@ export default function WeeklyOnboardingV2() {
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
                     <Label htmlFor="tf-truck">Truck # <span className="text-red-500">*</span></Label>
-                    <Input id="tf-truck" value={tForm.truck} onChange={(e) => setT("truck", e.target.value)} placeholder="Truck number" data-testid="input-transport-truck" />
+                    <div className="flex gap-2">
+                      <Input id="tf-truck" value={tForm.truck} onChange={(e) => setT("truck", e.target.value)} placeholder="Truck number" data-testid="input-transport-truck" className="flex-1" />
+                      <Button type="button" variant="outline" size="sm" onClick={lookupTruckInfo} disabled={!tForm.truck.trim() || truckLookup.loading} title="Pull VIN, current location, and current tech from the DB" data-testid="button-truck-lookup">
+                        {truckLookup.loading ? "…" : "Extract"}
+                      </Button>
+                    </div>
+                    {truckLookup.msg && <p className="text-[11px] text-muted-foreground">{truckLookup.msg}</p>}
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="tf-vin">VIN</Label>

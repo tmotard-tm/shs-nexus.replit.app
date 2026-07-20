@@ -12107,6 +12107,61 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Look up a truck's CURRENT info from the DB for the onboarding transport form
+  // (the onboarding equivalent of PAL's "Extract Data"): VIN + current location
+  // for the pickup + the current tech as the pickup contact. Read-only
+  // holman_vehicles_cache lookup, same truck-number candidate matching the FM
+  // precheck uses. Self-contained; Fleet Management is untouched.
+  app.get("/api/onboarding-hires/truck-info/:truckNumber", requireAuth, async (req: any, res) => {
+    try {
+      const raw = String(req.params.truckNumber ?? "").trim();
+      if (!raw) return res.status(400).json({ found: false, message: "truck is required" });
+      const { db: dbConn } = await import("./db");
+      const { holmanVehiclesCache } = await import("@shared/schema");
+      const { toHolmanRef, toDisplayNumber, toCanonical } = await import("./vehicle-number-utils");
+      const { eq } = await import("drizzle-orm");
+
+      const candidates = Array.from(new Set([
+        toHolmanRef(raw), toDisplayNumber(raw), raw, toCanonical(raw),
+      ])).filter(Boolean);
+
+      let row: any = null;
+      for (const c of candidates) {
+        const rows = await dbConn.select({
+          holmanVehicleNumber: holmanVehiclesCache.holmanVehicleNumber,
+          vin: holmanVehiclesCache.vin,
+          city: holmanVehiclesCache.city,
+          state: holmanVehiclesCache.state,
+          driverPhone: holmanVehiclesCache.driverPhone,
+          holmanTechName: holmanVehiclesCache.holmanTechName,
+          holmanTechAssigned: holmanVehiclesCache.holmanTechAssigned,
+          holmanAssignedStatusCd: holmanVehiclesCache.holmanAssignedStatusCd,
+        }).from(holmanVehiclesCache)
+          .where(eq(holmanVehiclesCache.holmanVehicleNumber, c))
+          .limit(1);
+        if (rows[0]) { row = rows[0]; break; }
+      }
+
+      if (!row) return res.status(200).json({ found: false, truck: toDisplayNumber(raw) });
+
+      const location = [row.city, row.state].filter(Boolean).join(", ");
+      return res.status(200).json({
+        found: true,
+        truck: row.holmanVehicleNumber,
+        vin: row.vin ?? "",
+        city: row.city ?? "",
+        state: row.state ?? "",
+        location,
+        currentTechName: row.holmanTechName ?? "",
+        currentTechPhone: row.driverPhone ?? "",
+        currentTechLdap: row.holmanTechAssigned ?? "",
+        statusCd: row.holmanAssignedStatusCd ?? "",
+      });
+    } catch (err: any) {
+      res.status(500).json({ found: false, message: err.message });
+    }
+  });
+
   // ── Transport request proxy -> PAL Transport (Wave 2) ─────────────────────
   // Self-contained, mirrors the assign route: requireAuth, load the hire, POST
   // to PAL's external transport API with the logged-in Nexus user as the
