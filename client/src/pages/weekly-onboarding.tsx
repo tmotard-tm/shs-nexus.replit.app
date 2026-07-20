@@ -133,15 +133,21 @@ export default function WeeklyOnboarding() {
       // Management), so a legacy assign is never bookkeeping-only and can't leave
       // a tech truckless. A no-truck edit (notes only / clear) keeps the PATCH.
       if (truckAssigned && assignedTruckNo.trim()) {
-        return await apiRequest('POST', `/api/onboarding-hires/${id}/assign`, { truckNumber: assignedTruckNo.trim(), notes });
+        const res = await apiRequest('POST', `/api/onboarding-hires/${id}/assign`, { truckNumber: assignedTruckNo.trim(), notes });
+        return await res.json();
       }
       return await apiRequest('PATCH', `/api/onboarding-hires/${id}`, { truckAssigned, assignedTruckNo, notes });
     },
-    onSuccess: () => {
-      toast({
-        title: "Updated",
-        description: "Truck assignment updated successfully",
-      });
+    onSuccess: (result: any) => {
+      const isOp = result && typeof result === "object" && "overallSuccess" in result;
+      if (isOp && !result.overallSuccess) {
+        toast({
+          title: result.partialSuccess ? "Partial success (207)" : "Assignment issue",
+          description: `TPMS ${result.tpms?.status ?? "-"} / Holman ${result.holman?.status ?? "-"} / AMS ${result.ams?.status ?? "-"} -- check the systems that did not complete`,
+        });
+      } else {
+        toast({ title: "Updated", description: "Truck assignment updated successfully" });
+      }
       queryClient.invalidateQueries({ queryKey: ['/api/onboarding-hires'] });
       setAssignDialogOpen(false);
       setSelectedHire(null);

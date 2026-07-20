@@ -12133,6 +12133,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           AND UPPER(h.holman_tech_assigned) IN (
             SELECT UPPER(enterprise_id) FROM onboarding_hires WHERE enterprise_id IS NOT NULL
           )
+        ORDER BY UPPER(h.holman_tech_assigned), h.holman_vehicle_number
       `);
       const attemptRes: any = await dbConn.execute(sql`
         SELECT DISTINCT ON (UPPER(to_ldap))
@@ -12158,7 +12159,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       for (const r of attemptRows) {
         const eid = r.eid ? String(r.eid) : "";
         if (!eid) continue;
-        const ok = String(r.tpms_status) === "success";
+        const ok = String(r.holman_status) === "success";
         const entry = byEid[eid] || (byEid[eid] = { liveTruck: null, liveTech: null, attemptTruck: null, attemptOk: null, attemptAt: null });
         entry.attemptTruck = r.truck ?? null;
         entry.attemptOk = ok;
@@ -12313,6 +12314,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           signal: AbortSignal.timeout(20000),
         });
       } catch (e: any) {
+        // A timeout/abort is AMBIGUOUS -- PAL may already have committed the move
+        // -- so reserve a marker to block a duplicate retry within the 30-min
+        // window (its hyphen keeps it out of the transport chip). A clean
+        // connection failure means PAL never received it, so leave it retryable.
+        if (e?.name === "TimeoutError" || e?.name === "AbortError") {
+          try {
+            const mk = `[PAL transport-pending requested ${new Date().toISOString()} by ${requestedBy}]`;
+            await storage.updateOnboardingHire(hire.id, { notes: hire.notes ? `${hire.notes}\n${mk}` : mk });
+          } catch { /* best-effort reservation */ }
+          return res.status(504).json({ message: "The transport service timed out. It may already have been created -- check the PAL board before requesting another." });
+        }
         return res.status(502).json({ message: `Could not reach the transport service: ${e?.message || e}` });
       }
 
