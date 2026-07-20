@@ -354,6 +354,13 @@ export default function WeeklyOnboardingV2() {
     queryKey: ['/api/pmf/vehicles/available'],
   });
   const availableVehicles = pmfData?.vehicles || [];
+  // Fleet-Management assignment reflection: per-hire live Holman truck (by
+  // enterprise id) + last assign attempt (incl. errors), so FM assignments and
+  // failed attempts surface on the tab without waiting on the nightly TPMS snapshot.
+  const { data: fleetStatus } = useQuery<{ byEid: Record<string, { liveTruck: string | null; liveTech: string | null; attemptTruck: string | null; attemptOk: boolean | null; attemptAt: string | null }> }>({
+    queryKey: ['/api/onboarding-hires/fleet-status'],
+  });
+  const fleetFor = (h: OnboardingHire) => fleetStatus?.byEid?.[String(h.enterpriseId ?? "").toUpperCase()] ?? null;
   const lastSync = syncLogs.find(log => log.syncType === 'onboarding_hires');
   const [syncFailed, setSyncFailed] = useState(false);
 
@@ -1176,9 +1183,22 @@ export default function WeeklyOnboardingV2() {
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-500" />
               {pending.tn}
             </span>
-          ) : (
-            <span className={hire.assignedTruckNo ? "" : "font-normal text-muted-foreground"}>{hire.assignedTruckNo || '-'}</span>
-          )}
+          ) : hire.assignedTruckNo ? (
+            <span>{hire.assignedTruckNo}</span>
+          ) : (() => {
+            const fs = fleetFor(hire);
+            if (fs?.liveTruck) return (
+              <span className="text-blue-600 dark:text-blue-400" title={`Assigned in Holman${fs.liveTech ? ` to ${fs.liveTech}` : ""} via Fleet Management — the onboarding row updates on the next sync`}>
+                {fs.liveTruck}<span className="ml-0.5 text-[9px] font-normal uppercase">fleet</span>
+              </span>
+            );
+            if (fs?.attemptTruck && fs.attemptOk === false) return (
+              <span className="text-amber-600 dark:text-amber-400" title="Last Fleet Management assign attempt errored — re-check in Fleet Management">
+                ⚠ {fs.attemptTruck}<span className="ml-0.5 text-[9px] font-normal uppercase">attempted</span>
+              </span>
+            );
+            return <span className="font-normal text-muted-foreground">-</span>;
+          })()}
           {parseTransportId(hire.notes) && (
             <span
               className="ml-1.5 inline-flex items-center gap-1 rounded bg-blue-50 px-1 py-0.5 align-middle text-[10px] font-normal text-blue-600 dark:bg-blue-950 dark:text-blue-300"
@@ -1667,6 +1687,22 @@ export default function WeeklyOnboardingV2() {
                     </div>
                   ) : (
                     <div>
+                      {(() => {
+                        const fs = fleetFor(activeHire);
+                        if (fs?.liveTruck) return (
+                          <div className="mb-2 rounded-lg border border-blue-300 bg-blue-50 p-2.5 text-sm dark:border-blue-800 dark:bg-blue-950">
+                            <p className="font-semibold text-blue-700 dark:text-blue-400">Truck {fs.liveTruck} — assigned in Fleet Management</p>
+                            <p className="mt-0.5 text-[12px] text-muted-foreground">Holman shows this tech on {fs.liveTruck}{fs.liveTech ? ` (${fs.liveTech})` : ""}. The onboarding row updates on the next sync.</p>
+                          </div>
+                        );
+                        if (fs?.attemptTruck && fs.attemptOk === false) return (
+                          <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-sm dark:border-amber-800 dark:bg-amber-950">
+                            <p className="font-semibold text-amber-700 dark:text-amber-400">Truck {fs.attemptTruck} — Fleet Management assign errored</p>
+                            <p className="mt-0.5 text-[12px] text-muted-foreground">The last assign attempt for this hire did not complete{fs.attemptAt ? ` (${format(new Date(fs.attemptAt), "MMM d, h:mm a")})` : ""}. Re-check in Fleet Management.</p>
+                          </div>
+                        );
+                        return null;
+                      })()}
                       <p className="mb-1.5 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                         Available vehicles · PMF, nearest first
                       </p>

@@ -12113,6 +12113,64 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // Reflect Fleet-Management assignments on the onboarding tab. For each hire
+  // (matched by enterprise id) resolve (a) the truck currently assigned in Holman
+  // -- which updates the instant an FM assign lands, unlike the nightly TPMS
+  // snapshot -- and (b) the most recent assign ATTEMPT from the op log, so an
+  // errored FM assign still shows the number that was tried. Read-only, two batch
+  // queries; Fleet Management is untouched.
+  app.get("/api/onboarding-hires/fleet-status", requireAuth, async (_req: any, res) => {
+    try {
+      const { db: dbConn } = await import("./db");
+      const { sql } = await import("drizzle-orm");
+
+      const liveRes: any = await dbConn.execute(sql`
+        SELECT UPPER(h.holman_tech_assigned) AS eid,
+               h.holman_vehicle_number AS truck,
+               h.holman_tech_name AS tech
+        FROM holman_vehicles_cache h
+        WHERE h.holman_tech_assigned IS NOT NULL
+          AND UPPER(h.holman_tech_assigned) IN (
+            SELECT UPPER(enterprise_id) FROM onboarding_hires WHERE enterprise_id IS NOT NULL
+          )
+      `);
+      const attemptRes: any = await dbConn.execute(sql`
+        SELECT DISTINCT ON (UPPER(to_ldap))
+               UPPER(to_ldap) AS eid, truck_number AS truck,
+               tpms_status, holman_status, ams_status, created_at
+        FROM fleet_operation_log
+        WHERE operation_type = 'assign' AND to_ldap IS NOT NULL
+          AND UPPER(to_ldap) IN (
+            SELECT UPPER(enterprise_id) FROM onboarding_hires WHERE enterprise_id IS NOT NULL
+          )
+        ORDER BY UPPER(to_ldap), created_at DESC
+      `);
+
+      const liveRows: any[] = (liveRes?.rows ?? liveRes ?? []) as any[];
+      const attemptRows: any[] = (attemptRes?.rows ?? attemptRes ?? []) as any[];
+
+      const byEid: Record<string, any> = {};
+      for (const r of liveRows) {
+        const eid = r.eid ? String(r.eid) : "";
+        if (!eid || byEid[eid]?.liveTruck) continue;
+        byEid[eid] = { liveTruck: r.truck ?? null, liveTech: r.tech ?? null, attemptTruck: null, attemptOk: null, attemptAt: null };
+      }
+      for (const r of attemptRows) {
+        const eid = r.eid ? String(r.eid) : "";
+        if (!eid) continue;
+        const ok = String(r.tpms_status) === "success";
+        const entry = byEid[eid] || (byEid[eid] = { liveTruck: null, liveTech: null, attemptTruck: null, attemptOk: null, attemptAt: null });
+        entry.attemptTruck = r.truck ?? null;
+        entry.attemptOk = ok;
+        entry.attemptAt = r.created_at ?? null;
+      }
+
+      res.json({ byEid });
+    } catch (err: any) {
+      res.status(500).json({ byEid: {}, message: err.message });
+    }
+  });
+
   // Look up a truck's CURRENT info from the DB for the onboarding transport form
   // (the onboarding equivalent of PAL's "Extract Data"): VIN + current location
   // for the pickup + the current tech as the pickup contact. Read-only
