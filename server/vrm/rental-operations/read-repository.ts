@@ -107,7 +107,7 @@ export interface MasterRow {
   portal_msg_count: number | null; // Holman message-trail entries (portal scrape)
   portal_shop_phone: string | null;// shop phone from the portal scrape
   has_portal: boolean;             // has a scraped Holman portal row
-  callable: boolean;               // LUCA should call this shop (effective target below)
+  callable: boolean;               // LUCA should call this shop (effective target below); never true for PENDED (ticket already closing)
   // current repair shop (most recent APPROVED repair PO, else latest repair PO)
   shop_name: string | null;
   shop_address: string | null;
@@ -335,7 +335,9 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       callShopPoStatus = r.shop_po_status ?? null;
       callOpenRepair = openPo > 0;
     }
-    const callable = !!callTargetTruck && callOpenRepair && !!callShopPhone;
+    // PENDED = the renter already turned the vehicle in / the ticket is closing —
+    // never callable regardless of repair/phone status, redirect included.
+    const callable = !!callTargetTruck && callOpenRepair && !!callShopPhone && r.ticket_status !== "PENDED";
 
     if (typeMismatch) mismatchCount++;
     if (costOver) costOverCount++;
@@ -441,6 +443,8 @@ export async function getSourceHealth(): Promise<SourceHealthModel> {
  * The LUCA call feed: the callable open-repair shops with a verified phone —
  * the same universe the VRM Rental Operations grid shows, this is the SoT LUCA
  * dials instead of FleetScope. Rules encoded in the master model:
+ *  - PENDED (renter already turned the vehicle in / ticket closing) is excluded
+ *    entirely — LUCA never works a rental that's already wrapping up.
  *  - Normal rental → call the shop repairing the RENTAL truck.
  *  - Declined Repair / Sent To Auction → we no longer own the rental van, so the
  *    call redirects to the shop repairing the tech's ASSIGNED truck
@@ -451,13 +455,15 @@ export async function getSourceHealth(): Promise<SourceHealthModel> {
  */
 export async function getLucaFeed(): Promise<any> {
   const m = await getRentalOpsMaster({});
-  const callable = m.rows.filter((r) => r.callable);
-  const declinedAuction = m.rows.filter((r) => r.ams_bucket === "declined" || r.ams_bucket === "auction");
+  const rows = m.rows.filter((r) => r.ticket_status !== "PENDED");
+  const callable = rows.filter((r) => r.callable);
+  const declinedAuction = rows.filter((r) => r.ams_bucket === "declined" || r.ams_bucket === "auction");
   const redirected = callable.filter((r) => r.redirect_to_assigned).length;
   return {
     generatedAt: m.generatedAt,
     source: "vrm_rental_operations",
     total: callable.length,
+    pendedExcluded: m.rows.length - rows.length,
     redirectedToAssignedTruck: redirected,
     declinedAuctionCount: declinedAuction.length,
     declinedAuctionExcluded: declinedAuction.filter((r) => !r.callable).length,
@@ -494,6 +500,9 @@ export async function getLucaFeed(): Promise<any> {
  * (replacing the Snowflake view). It must return EVERY present rental (not just
  * the callable ones — LUCA closes rentals that drop off the feed), with
  * TRUCK_STATUS = ams_status so LUCA's own declined/auction exclusion keeps working.
+ * PENDED tickets (renter already turned the vehicle in / ticket closing) are
+ * excluded here too — LUCA shouldn't track or work a rental that's already
+ * wrapping up, matching FleetScope's own Snowflake query (TICKET_STATUS='OPEN').
  */
 export async function getLucaRentalList(): Promise<any> {
   await db.execute(sql`SELECT 1`);
@@ -508,7 +517,7 @@ export async function getLucaRentalList(): Promise<any> {
       i.confidence AS eid_confidence
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
-    WHERE c.present_in_latest = true
+    WHERE c.present_in_latest = true AND COALESCE(c.ticket_status, '') <> 'PENDED'
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
   `);
   const rentals = (res.rows as any[]).map((r) => ({
