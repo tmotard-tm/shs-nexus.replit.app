@@ -235,5 +235,25 @@ export async function initRentalOperationsSchema(): Promise<void> {
     );
   `);
 
-  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections)");
+  // ── holman_portal_hist: per-truck Holman portal scrape (message trail + PO
+  // notes + vendor phone/address) — the detail the Snowflake ETL lacks. Imported
+  // from the swarm snapshot; refreshed later by the on-demand scrape. scraped_at
+  // is the freshness gate so the daily sync never clobbers it.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_holman_portal_hist (
+      truck_no      VARCHAR(10) PRIMARY KEY,   -- 5-padded, joins cases.case_key
+      hist          JSONB NOT NULL,            -- raw merged event array (PO + MSG)
+      source        VARCHAR(20),               -- swarm2 | swarm3 | on_demand_scrape
+      scraped_at    DATE,
+      po_count      INTEGER DEFAULT 0,
+      msg_count     INTEGER DEFAULT 0,
+      shop_name     TEXT,
+      shop_phone    VARCHAR(40),
+      shop_address  TEXT,
+      shop_src      VARCHAR(20),               -- open PO | last PO
+      imported_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/portal_hist)");
 }

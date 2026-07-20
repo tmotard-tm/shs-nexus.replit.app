@@ -95,6 +95,19 @@ export interface MasterRow {
   has_open_repair: boolean | null;
   repair_cohort: string;           // open_repair | no_open_repair | no_history
   open_po_count: number;
+  po_count: number;
+  last_rental_date: string | null;
+  has_rental_auth: boolean;
+  no_rental_auth: boolean;         // no APPROVED rental PO (and has some history)
+  tpms_tech: string | null;        // TPMS-assigned tech for this truck
+  renter_own_truck: string | null; // the renter's own assigned truck
+  wrong_truck: boolean;            // renter is driving a truck other than their own
+  odometer: number | null;
+  odometer_date: string | null;
+  portal_msg_count: number | null; // Holman message-trail entries (portal scrape)
+  portal_shop_phone: string | null;// shop phone from the portal scrape
+  has_portal: boolean;             // has a scraped Holman portal row
+  callable: boolean;               // LUCA should call this shop (effective target below)
   // current repair shop (most recent APPROVED repair PO, else latest repair PO)
   shop_name: string | null;
   shop_address: string | null;
@@ -104,6 +117,17 @@ export interface MasterRow {
   shop_po_number: string | null;
   shop_po_status: string | null;
   shop_po_date: string | null;
+  // effective LUCA call target. For a Declined/Auction rental we no longer own
+  // the rental van, so the shop to call is the one repairing the tech's ASSIGNED
+  // truck (renter_own_truck), NOT the rental truck. These fields resolve that.
+  assigned_truck: string | null;   // renter's own assigned truck, 5-padded
+  redirect_to_assigned: boolean;   // declined/auction + distinct assigned truck → call THAT shop
+  call_target_truck: string | null;// the truck whose shop LUCA actually dials (rental or assigned)
+  call_shop_name: string | null;
+  call_shop_phone: string | null;
+  call_shop_address: string | null;
+  call_shop_po_number: string | null;
+  call_shop_po_status: string | null;
   // AMS
   ams_status: string | null;
   ams_bucket: string;              // auction | declined | in_repair | in_use | spare | reserved | other | unknown
@@ -166,12 +190,30 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       (i.override_employee_id IS NOT NULL) AS identity_is_override,
       m.mark_value AS operator_mark, m.note AS mark_note, m.actor AS mark_actor,
       to_char(m.created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS mark_at,
-      po.open_po_count, po.any_po_count,
+      po.open_po_count, po.any_po_count, po.last_rental_date, po.has_rental_auth,
       shop.vendor_name AS shop_name, shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
       shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
-      shop.po_number AS shop_po_number, shop.po_status AS shop_po_status, shop.po_date AS shop_po_date
+      shop.po_number AS shop_po_number, shop.po_status AS shop_po_status, shop.po_date AS shop_po_date,
+      hv.tpms_assigned_tech_name AS tpms_tech, hv.odometer, hv.odometer_date,
+      COALESCE(atr.truck_lu, atr.last_known_truck_lu) AS renter_own_truck,
+      ownp.own_pad AS assigned_truck,
+      ph.msg_count AS portal_msg_count, ph.shop_phone AS portal_shop_phone,
+      (ph.truck_no IS NOT NULL) AS has_portal,
+      aph.shop_phone AS assigned_portal_phone,
+      apo.open_po_count AS assigned_open_po,
+      ashop.vendor_name AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
+      ashop.vendor_city AS assigned_shop_city, ashop.vendor_state AS assigned_shop_state,
+      ashop.vendor_zip AS assigned_shop_zip, ashop.po_number AS assigned_shop_po_number,
+      ashop.po_status AS assigned_shop_po_status, ashop.po_date AS assigned_shop_po_date
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+    LEFT JOIN holman_vehicles_cache hv ON hv.vehicle_number_display = c.case_key
+    LEFT JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    LEFT JOIN LATERAL (
+      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+    ) ownp ON true
+    LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
+    LEFT JOIN vrm_holman_portal_hist aph ON aph.truck_no = ownp.own_pad
     LEFT JOIN LATERAL (
       SELECT mark_value, note, actor, created_at
       FROM vrm_rental_operation_actions a
@@ -181,7 +223,9 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     LEFT JOIN LATERAL (
       SELECT
         count(*) FILTER (WHERE p.vendor_type='repair' AND p.po_status='APPROVED') AS open_po_count,
-        count(*) AS any_po_count
+        count(*) AS any_po_count,
+        to_char(max(p.po_date) FILTER (WHERE p.vendor_type='rental_placeholder'),'YYYY-MM-DD') AS last_rental_date,
+        bool_or(p.vendor_type='rental_placeholder' AND p.po_status='APPROVED') AS has_rental_auth
       FROM vrm_rental_operations_po_history p
       WHERE p.vehicle_number_padded = c.case_key
     ) po ON true
@@ -193,6 +237,19 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST
       LIMIT 1
     ) shop ON true
+    LEFT JOIN LATERAL (
+      SELECT count(*) FILTER (WHERE p.vendor_type='repair' AND p.po_status='APPROVED') AS open_po_count
+      FROM vrm_rental_operations_po_history p
+      WHERE p.vehicle_number_padded = ownp.own_pad
+    ) apo ON true
+    LEFT JOIN LATERAL (
+      SELECT vendor_name, vendor_address, vendor_city, vendor_state, vendor_zip,
+             po_status, po_number, to_char(po_date,'YYYY-MM-DD') AS po_date
+      FROM vrm_rental_operations_po_history s
+      WHERE s.vehicle_number_padded = ownp.own_pad AND s.vendor_type = 'repair'
+      ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST
+      LIMIT 1
+    ) ashop ON true
     ${includeDropped ? sql`` : sql`WHERE c.present_in_latest = true`}
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
   `);
@@ -230,8 +287,55 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     const openPo = Number(r.open_po_count || 0);
     const hasOpenRepair = anyPo === 0 ? null : openPo > 0;
     const cohort = anyPo === 0 ? "no_history" : (openPo > 0 ? "open_repair" : "no_open_repair");
+    const strip = (s: string | null | undefined) => (s ? String(s).replace(/^0+/, "") : "");
+    const ownTruck = r.renter_own_truck ? String(r.renter_own_truck) : null;
+    const wrongTruck = !!(ownTruck && strip(ownTruck) !== strip(r.case_key));
+    const hasRentalAuth = !!r.has_rental_auth;
+    const noRentalAuth = !hasRentalAuth && cohort !== "no_history";
+    const odo = r.odometer == null ? null : Number(r.odometer);
 
     const amsBucket = amsBucketOf(r.ams_status);
+
+    // ── effective LUCA call target (assigned-truck redirect) ──────────────────
+    const isDeclAuction = amsBucket === "declined" || amsBucket === "auction";
+    const assignedTruck = r.assigned_truck ? String(r.assigned_truck) : null;
+    const assignedOpenPo = Number(r.assigned_open_po || 0);
+    // The rental truck is callable on its OWN repair only if we still own it
+    // (not declined/auction) and it has an open repair PO + a verified phone.
+    const rentalOwnCallable = !isDeclAuction && openPo > 0 && !!r.portal_shop_phone;
+    // Redirect to the tech's ASSIGNED truck's shop when the rental truck is not
+    // workable on its own but the tech is driving a DIFFERENT truck and their own
+    // truck has an open repair + phone. Covers BOTH (a) declined/auction (we no
+    // longer own the rental van) AND (b) a non-declined rental whose repair is
+    // actually on the tech's own truck. The rental truck's own repair wins when
+    // it exists (that's the van the rental is written against).
+    const assignedCallable = !!assignedTruck && wrongTruck && assignedOpenPo > 0 && !!r.assigned_portal_phone;
+    const redirectToAssigned = !rentalOwnCallable && assignedCallable;
+    let callTargetTruck: string | null;
+    let callShopName: string | null, callShopPhone: string | null, callShopAddress: string | null;
+    let callShopPoNumber: string | null, callShopPoStatus: string | null, callOpenRepair: boolean;
+    if (redirectToAssigned) {
+      callTargetTruck = assignedTruck;
+      callShopName = r.assigned_shop_name ?? null;
+      callShopPhone = r.assigned_portal_phone ?? null;
+      callShopAddress = r.assigned_shop_address ?? null;
+      callShopPoNumber = r.assigned_shop_po_number ?? null;
+      callShopPoStatus = r.assigned_shop_po_status ?? null;
+      callOpenRepair = assignedOpenPo > 0;
+    } else if (isDeclAuction) {
+      // declined/auction with no distinct assigned truck to redirect to → excluded
+      callTargetTruck = null; callShopName = null; callShopPhone = null; callShopAddress = null;
+      callShopPoNumber = null; callShopPoStatus = null; callOpenRepair = false;
+    } else {
+      callTargetTruck = r.case_key;
+      callShopName = r.shop_name ?? null;
+      callShopPhone = r.portal_shop_phone ?? null;
+      callShopAddress = r.shop_address ?? null;
+      callShopPoNumber = r.shop_po_number ?? null;
+      callShopPoStatus = r.shop_po_status ?? null;
+      callOpenRepair = openPo > 0;
+    }
+    const callable = !!callTargetTruck && callOpenRepair && !!callShopPhone;
 
     if (typeMismatch) mismatchCount++;
     if (costOver) costOverCount++;
@@ -259,10 +363,20 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       tech_name: r.tech_name, tech_district: r.tech_district, identity_reason: r.identity_reason,
       identity_is_override: !!r.identity_is_override,
       has_open_repair: hasOpenRepair, repair_cohort: cohort, open_po_count: openPo,
+      po_count: anyPo, last_rental_date: r.last_rental_date ?? null,
+      has_rental_auth: hasRentalAuth, no_rental_auth: noRentalAuth,
+      tpms_tech: r.tpms_tech ?? null, renter_own_truck: ownTruck, wrong_truck: wrongTruck,
+      odometer: odo, odometer_date: r.odometer_date ?? null,
+      portal_msg_count: r.portal_msg_count == null ? null : Number(r.portal_msg_count),
+      portal_shop_phone: r.portal_shop_phone ?? null, has_portal: !!r.has_portal,
+      callable,
       shop_name: r.shop_name ?? null, shop_address: r.shop_address ?? null, shop_city: r.shop_city ?? null,
       shop_state: r.shop_state ?? null, shop_zip: r.shop_zip ?? null,
       shop_po_number: r.shop_po_number ?? null, shop_po_status: r.shop_po_status ?? null,
       shop_po_date: r.shop_po_date ?? null,
+      assigned_truck: assignedTruck, redirect_to_assigned: redirectToAssigned,
+      call_target_truck: callTargetTruck, call_shop_name: callShopName, call_shop_phone: callShopPhone,
+      call_shop_address: callShopAddress, call_shop_po_number: callShopPoNumber, call_shop_po_status: callShopPoStatus,
       ams_status: r.ams_status ?? null, ams_bucket: amsBucket,
       operator_mark: r.operator_mark ?? null, mark_note: r.mark_note ?? null,
       mark_actor: r.mark_actor ?? null, mark_at: r.mark_at ?? null,
@@ -323,6 +437,106 @@ export async function getSourceHealth(): Promise<SourceHealthModel> {
   };
 }
 
+/**
+ * The LUCA call feed: the callable open-repair shops with a verified phone —
+ * the same universe the VRM Rental Operations grid shows, this is the SoT LUCA
+ * dials instead of FleetScope. Rules encoded in the master model:
+ *  - Normal rental → call the shop repairing the RENTAL truck.
+ *  - Declined Repair / Sent To Auction → we no longer own the rental van, so the
+ *    call redirects to the shop repairing the tech's ASSIGNED truck
+ *    (renter_own_truck). Declined/auction with no distinct assigned truck is
+ *    excluded (nothing to call).
+ * Every shop row carries `truck` = the truck whose shop is dialed (call target),
+ * plus rental_truck / assigned_truck / redirect_to_assigned for context.
+ */
+export async function getLucaFeed(): Promise<any> {
+  const m = await getRentalOpsMaster({});
+  const callable = m.rows.filter((r) => r.callable);
+  const declinedAuction = m.rows.filter((r) => r.ams_bucket === "declined" || r.ams_bucket === "auction");
+  const redirected = callable.filter((r) => r.redirect_to_assigned).length;
+  return {
+    generatedAt: m.generatedAt,
+    source: "vrm_rental_operations",
+    total: callable.length,
+    redirectedToAssignedTruck: redirected,
+    declinedAuctionCount: declinedAuction.length,
+    declinedAuctionExcluded: declinedAuction.filter((r) => !r.callable).length,
+    lastSyncAt: m.sourceHealth.lastSyncAt,
+    shops: callable.map((r) => ({
+      truck: r.call_target_truck,          // the truck whose shop LUCA dials
+      rental_truck: r.case_key,            // the physical rental van on the ticket
+      assigned_truck: r.assigned_truck,    // the tech's own assigned truck
+      redirect_to_assigned: r.redirect_to_assigned,
+      renter: r.renter_name_raw,
+      employee_id: r.employee_id,
+      employment_status: r.employee_status,
+      tpms_tech: r.tpms_tech,
+      renter_own_truck: r.renter_own_truck,
+      wrong_truck: r.wrong_truck,
+      shop_name: r.call_shop_name,
+      shop_phone: r.call_shop_phone,
+      shop_address: r.call_shop_address,
+      shop_po: r.call_shop_po_number,
+      shop_po_status: r.call_shop_po_status,
+      ams_status: r.ams_status,
+      days_open: r.days_open,
+      days_authorized: r.days_authorized,
+      number_of_extensions: r.number_of_extensions,
+      rental_class: r.rental_class,
+      last_rental: r.last_rental_date,
+    })),
+  };
+}
+
+/**
+ * The FULL active-rental list in LUCA's VW_NEXUS_RENTAL_LIST column contract —
+ * this is what LUCA's syncActiveRentalsFromNexus() reads to populate fleet_rentals
+ * (replacing the Snowflake view). It must return EVERY present rental (not just
+ * the callable ones — LUCA closes rentals that drop off the feed), with
+ * TRUCK_STATUS = ams_status so LUCA's own declined/auction exclusion keeps working.
+ */
+export async function getLucaRentalList(): Promise<any> {
+  await db.execute(sql`SELECT 1`);
+  const res = await db.execute(sql`
+    SELECT
+      c.case_key, c.vehicle_number, c.source, c.renter_name_raw, c.rental_vendor,
+      c.ticket_number, c.claim_number, c.po_number, c.ticket_status,
+      to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date,
+      c.days_open, c.days_authorized, c.days_behind, c.number_of_extensions,
+      c.number_of_rewrites, c.repairs_complete, c.claims_office, c.ams_status,
+      COALESCE(i.override_employee_id, i.resolved_employee_id) AS employee_id,
+      i.confidence AS eid_confidence
+    FROM vrm_rental_operations_cases c
+    LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+    WHERE c.present_in_latest = true
+    ORDER BY c.days_open DESC NULLS LAST, c.case_key
+  `);
+  const rentals = (res.rows as any[]).map((r) => ({
+    VEHICLE_NUMBER: r.case_key,
+    SOURCE: r.source,
+    RENTER_NAME: r.renter_name_raw,
+    RENTAL_VENDOR: r.rental_vendor,
+    TICKET_NUMBER: r.ticket_number,
+    CLAIM_NUMBER: r.claim_number,
+    PO_NUMBER: r.po_number,
+    RENTAL_START_DATE: r.rental_start_date,
+    DAYS_OPEN: r.days_open == null ? null : Number(r.days_open),
+    DAYS_AUTHORIZED: r.days_authorized == null ? null : Number(r.days_authorized),
+    DAYS_BEHIND: r.days_behind == null ? null : Number(r.days_behind),
+    NUMBER_OF_EXTENSIONS: r.number_of_extensions == null ? null : Number(r.number_of_extensions),
+    NUMBER_OF_REWRITES: r.number_of_rewrites == null ? null : Number(r.number_of_rewrites),
+    REPAIRS_COMPLETE: r.repairs_complete,
+    CLAIMS_OFFICE_NAME: r.claims_office,
+    ENTERPRISE_ID: r.employee_id,
+    EID_MATCH_CONFIDENCE: r.eid_confidence,
+    PRIMARY_ZIP: null,               // not tracked in VRM cases; LUCA falls back to conservative TCPA
+    TRUCK_STATUS: r.ams_status,      // LUCA maps this → fleetscopeStatus → declined-signal
+    TICKET_STATUS: r.ticket_status,  // OPEN | PENDED (extra; LUCA ignores unknown keys)
+  }));
+  const sh = await getSourceHealth();
+  return { generatedAt: new Date().toISOString(), source: "vrm_rental_operations", total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate, rentals };
+}
+
 export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const cRes = await db.execute(sql`
     SELECT c.*, to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date_s,
@@ -360,11 +574,50 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     }));
   }
 
+  // Holman portal snapshot: message trail + per-PO notes + shop phone (the
+  // detail the Snowflake ETL lacks). Extract compact fields server-side.
+  let portal: any = null;
+  try {
+    const pRes = await db.execute(sql`
+      SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD') AS scraped_at,
+             shop_name, shop_phone, shop_address, shop_src, po_count, msg_count
+      FROM vrm_holman_portal_hist WHERE truck_no = ${caseKey} LIMIT 1`);
+    if (pRes.rows.length) {
+      const p = pRes.rows[0] as any;
+      const hist: any[] = Array.isArray(p.hist) ? p.hist : [];
+      const dnum = (s: any) => { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; };
+      const messages = hist.filter((e) => e.type === "MSG")
+        .map((e) => ({ date: e.poMsgDate ?? null, notes: e.notes ?? null }))
+        .filter((m) => m.notes)
+        .sort((a, b) => dnum(b.date) - dnum(a.date));
+      const poDetail: Record<string, any> = {};
+      for (const e of hist) {
+        if (e.type === "PO" && e.poNumber && e.poNumber !== "0" && !poDetail[e.poNumber]) {
+          poDetail[e.poNumber] = {
+            notes: e.notes ?? null, poNotes: e.poNotes ?? null, lineItems: e.lineItems ?? null,
+            vendorPhone: e.vendorPhone ?? null, vendorAddress: e.vendorAddress ?? null,
+            meter: e.meter ?? null, createdBy: e.createdBy ?? null,
+            estimatedReadyDate: e.estimatedReadyDate ?? null, workCompletedDate: e.workCompletedDate ?? null,
+            rentalRequestExists: e.rentalRequestExists ?? false, openRentalRequestWindow: e.openRentalRequestWindow ?? null,
+          };
+        }
+      }
+      portal = {
+        source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0),
+        shop: { name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src },
+        messages, poDetail,
+      };
+    }
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] portal hist read failed (non-fatal):", e?.message || e);
+  }
+
   return {
     case: caseRow,
     identity: ident.rows[0] ?? null,
     actions: actions.rows,
     poHistory,
     poSource,
+    portal,
   };
 }

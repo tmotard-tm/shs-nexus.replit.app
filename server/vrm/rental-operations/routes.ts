@@ -10,7 +10,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth } from "./read-repository";
+import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList } from "./read-repository";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -41,6 +41,59 @@ export function registerRentalOperationsRoutes(router: Router): void {
       res.json(detail);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "detail read failed" });
+    }
+  });
+
+  // GET the LUCA call feed — callable open-repair shops (declined/auction
+  // redirected to the tech's assigned-truck shop). What the LUCA agent reads
+  // instead of FleetScope.
+  router.get("/rental-operations/luca-feed", async (_req, res) => {
+    try {
+      res.json(await getLucaFeed());
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] luca-feed failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "luca-feed failed" });
+    }
+  });
+
+  // POST hand ONE callable case's shop to the LUCA agent to call. VRM resolves
+  // the effective shop (incl. the assigned-truck redirect) and proxies to LIVHR
+  // with the server-side agent token. LUCA's own gates decide dry-run vs live.
+  router.post("/rental-operations/master/:caseKey/call", async (req, res) => {
+    try {
+      const { dispatchCall } = await import("./luca-dispatch");
+      const result = await dispatchCall(req.params.caseKey);
+      res.json({ ok: result?.ok !== false, result });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] call failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "call failed" });
+    }
+  });
+
+  // POST hand a set of callable cases (the LUCA queue) to LUCA to work.
+  router.post("/rental-operations/call-batch", async (req, res) => {
+    try {
+      const caseKeys = Array.isArray(req.body?.caseKeys) ? req.body.caseKeys.map(String) : [];
+      if (!caseKeys.length) return res.status(400).json({ error: "caseKeys[] required" });
+      const { dispatchBatch } = await import("./luca-dispatch");
+      const result = await dispatchBatch(caseKeys);
+      res.json({ ok: true, result });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] call-batch failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "call-batch failed" });
+    }
+  });
+
+  // GET the FULL active-rental list in LUCA's VW_NEXUS_RENTAL_LIST contract.
+  // This is what LUCA's syncActiveRentalsFromNexus() reads to populate its
+  // fleet_rentals book (replacing the Snowflake view). Returns EVERY present
+  // rental — LUCA closes any that drop off — with TRUCK_STATUS = ams_status.
+  router.get("/rental-operations/luca-rental-list", async (_req, res) => {
+    try {
+      res.json(await getLucaRentalList());
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] luca-rental-list failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "luca-rental-list failed" });
     }
   });
 
@@ -168,6 +221,34 @@ export function registerRentalOperationsRoutes(router: Router): void {
     } catch (e: any) {
       console.error("[VRM/RentalOps] refresh-ams failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "refresh-ams failed" });
+    }
+  });
+
+  // POST on-demand Holman scrape for ONE truck — pulls full svc-history (POs +
+  // message trail + notes + shop phone), force-refreshing the portal snapshot.
+  router.post("/rental-operations/master/:caseKey/scrape", async (req, res) => {
+    try {
+      const { scrapeAndStore } = await import("./scrape-service");
+      const report = await scrapeAndStore([req.params.caseKey], { force: true });
+      res.json({ ok: true, report });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] scrape failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "scrape failed" });
+    }
+  });
+
+  // POST scrape all present rentals with no portal row yet (fills gaps).
+  // Fire-and-forget: 20+ trucks x ~20s each is too long for one HTTP request.
+  router.post("/rental-operations/scrape-missing", async (_req, res) => {
+    try {
+      const { findScrapeGaps, scrapeAndStore } = await import("./scrape-service");
+      const gaps = await findScrapeGaps();
+      scrapeAndStore(gaps, { force: false })
+        .then((r) => console.log("[VRM/RentalOps] scrape-missing done:", JSON.stringify(r)))
+        .catch((e) => console.error("[VRM/RentalOps] scrape-missing failed:", e?.message || e));
+      res.json({ ok: true, started: gaps.length, trucks: gaps });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "scrape-missing failed" });
     }
   });
 

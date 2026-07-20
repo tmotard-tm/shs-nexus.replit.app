@@ -19,6 +19,7 @@ export interface AmsEnrichResult {
   withVin: number;
   withStatus: number;
   usedCachedOnly: boolean;
+  skipped?: boolean;
 }
 
 export async function enrichCasesWithAms(opts: { cachedOnly?: boolean } = {}): Promise<AmsEnrichResult> {
@@ -49,6 +50,14 @@ export async function enrichCasesWithAms(opts: { cachedOnly?: boolean } = {}): P
     amsByVin = await cacheMod.getAmsTruckStatusMap().catch(() => ({}));
   }
 
+  // GUARD: if the AMS map is empty (cache cold or the full build failed), do NOT
+  // write — a blanket null overwrite would wipe every truck's ams_status and
+  // kill the Declined/Auction flag. Preserve what's there and bail.
+  if (Object.keys(amsByVin).length === 0) {
+    console.warn("[VRM/RentalOps] AMS map empty (cold cache / build failed) — skipping enrichment to preserve existing ams_status");
+    return { cases: cases.length, withVin: 0, withStatus: 0, usedCachedOnly, skipped: true };
+  }
+
   const now = new Date().toISOString();
   let withVin = 0, withStatus = 0;
   await db.transaction(async (tx) => {
@@ -58,9 +67,12 @@ export async function enrichCasesWithAms(opts: { cachedOnly?: boolean } = {}): P
       if (vin) withVin++;
       const status = vin ? (amsByVin[vin] ?? null) : null;
       if (status) withStatus++;
+      // never wipe a good status back to null on a per-truck miss; keep the prior value
       await tx.execute(sql`
         UPDATE vrm_rental_operations_cases
-        SET vin = ${vin}, ams_status = ${status}, ams_status_at = ${now}, updated_at = NOW()
+        SET vin = COALESCE(${vin}, vin),
+            ams_status = COALESCE(${status}, ams_status),
+            ams_status_at = ${now}, updated_at = NOW()
         WHERE case_key = ${key}
       `);
     }

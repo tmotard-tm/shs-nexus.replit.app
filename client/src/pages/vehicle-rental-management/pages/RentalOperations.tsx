@@ -15,7 +15,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
-  AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight,
+  AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -62,6 +62,19 @@ interface MasterRow {
   has_open_repair: boolean | null;
   repair_cohort: string;
   open_po_count: number;
+  po_count: number;
+  last_rental_date: string | null;
+  has_rental_auth: boolean;
+  no_rental_auth: boolean;
+  tpms_tech: string | null;
+  renter_own_truck: string | null;
+  wrong_truck: boolean;
+  odometer: number | null;
+  odometer_date: string | null;
+  portal_msg_count: number | null;
+  portal_shop_phone: string | null;
+  has_portal: boolean;
+  callable: boolean;
   shop_name: string | null;
   shop_address: string | null;
   shop_city: string | null;
@@ -70,6 +83,14 @@ interface MasterRow {
   shop_po_number: string | null;
   shop_po_status: string | null;
   shop_po_date: string | null;
+  assigned_truck: string | null;
+  redirect_to_assigned: boolean;
+  call_target_truck: string | null;
+  call_shop_name: string | null;
+  call_shop_phone: string | null;
+  call_shop_address: string | null;
+  call_shop_po_number: string | null;
+  call_shop_po_status: string | null;
   ams_status: string | null;
   ams_bucket: string;
   operator_mark: string | null;
@@ -98,12 +119,20 @@ interface PoRecord {
   poType?: string | null; repairDate?: string | null; paidDate?: string | null; approver?: string | null;
   odometer?: number | null; totalAmount: number | null; uploadTimestamp?: string | null; lineItems: PoLineItem[];
 }
+interface PoDetailPortal { notes: string | null; poNotes: Array<{ transDate?: string; notes?: string }> | null; lineItems: any[] | null; vendorPhone: string | null; vendorAddress: string | null; meter: any; createdBy: string | null; estimatedReadyDate: string | null; workCompletedDate: string | null; rentalRequestExists: boolean; openRentalRequestWindow: string | null }
+interface PortalData {
+  source: string; scrapedAt: string | null; msgCount: number; poCount: number;
+  shop: { name: string | null; phone: string | null; address: string | null; src: string | null };
+  messages: Array<{ date: string | null; notes: string | null }>;
+  poDetail: Record<string, PoDetailPortal>;
+}
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
   actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string }>;
   poHistory: PoRecord[];
   poSource?: string;
+  portal?: PortalData | null;
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -122,6 +151,10 @@ function fmtDateTime(s: string | null | undefined): string {
   if (Number.isNaN(t)) return fmtDate(s);
   const d = new Date(t);
   return `${fmtDate(s)} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+function fmtPhone(p: string | null | undefined): string {
+  const d = String(p ?? "").replace(/\D/g, "");
+  return d.length === 10 ? `(${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}` : (p || "");
 }
 function fmtDuration(days: number | null): string {
   if (days == null) return "";
@@ -165,10 +198,14 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 
 const COHORTS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All Rentals" },
+  { key: "luca_queue", label: "LUCA Call Queue" },
+  { key: "workable", label: "Workable · we own these" },
+  { key: "declined_auction", label: "Declined / Auction · no call" },
   { key: "open_repair", label: "Open Repair Ticket" },
   { key: "no_open_repair", label: "No Open Repair" },
   { key: "no_history", label: "No Portal History" },
 ];
+const isDeclinedAuction = (b: string) => b === "declined" || b === "auction";
 
 export default function RentalOperations() {
   const qc = useQueryClient();
@@ -186,7 +223,7 @@ export default function RentalOperations() {
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
   const [markF, setMarkF] = useState("");
-  const [pendedOnly, setPendedOnly] = useState(false);
+  const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
@@ -195,17 +232,41 @@ export default function RentalOperations() {
 
   const rows = data?.rows ?? [];
 
+  // Default matches the Rentals Ops Dashboard (OPEN only). PENDED (turned-in /
+  // closing tickets) are ingested but opt-in, so the headline count ties out.
+  const basePool = useMemo(() => rows.filter((r) => includePended || r.ticket_status !== "PENDED"), [rows, includePended]);
+  const pendedTotal = useMemo(() => rows.filter((r) => r.ticket_status === "PENDED").length, [rows]);
+  // counts computed over the current pool so tab badges + KPIs always match the grid
+  const stats = useMemo(() => {
+    const cohorts: Record<string, number> = { open_repair: 0, no_open_repair: 0, no_history: 0 };
+    const categories: Record<string, number> = { SEDAN: 0, "SUV/VAN/TRUCK": 0, unknown: 0 };
+    const amsBuckets: Record<string, number> = {};
+    const identityStates: Record<string, number> = {};
+    let mismatch = 0, costOver = 0, callable = 0;
+    for (const r of basePool) {
+      cohorts[r.repair_cohort] = (cohorts[r.repair_cohort] || 0) + 1;
+      const cat = r.class_bucket || r.actual_bucket || "unknown";
+      categories[cat] = (categories[cat] || 0) + 1;
+      amsBuckets[r.ams_bucket] = (amsBuckets[r.ams_bucket] || 0) + 1;
+      if (r.identity_state) identityStates[r.identity_state] = (identityStates[r.identity_state] || 0) + 1;
+      if (r.type_mismatch) mismatch++;
+      if (r.cost_over) costOver++;
+      if (r.callable) callable++;
+    }
+    return { cohorts, categories, amsBuckets, identityStates, mismatch, costOver, callable };
+  }, [basePool]);
+
   // distinct filter options
   const amsOptions = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const r of rows) { const k = r.ams_status || "NOT IN VIEW"; c[k] = (c[k] || 0) + 1; }
+    for (const r of basePool) { const k = r.ams_status || "NOT IN VIEW"; c[k] = (c[k] || 0) + 1; }
     return Object.entries(c).sort((a, b) => b[1] - a[1]);
-  }, [rows]);
+  }, [basePool]);
   const classOptions = useMemo(() => {
     const c: Record<string, number> = {};
-    for (const r of rows) { if (r.rental_class) c[r.rental_class] = (c[r.rental_class] || 0) + 1; }
+    for (const r of basePool) { if (r.rental_class) c[r.rental_class] = (c[r.rental_class] || 0) + 1; }
     return Object.entries(c).sort((a, b) => b[1] - a[1]);
-  }, [rows]);
+  }, [basePool]);
 
   const isNewHire = (r: MasterRow) => {
     const d = daysSince(r.employee_status_date);
@@ -215,8 +276,11 @@ export default function RentalOperations() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return rows.filter((r) => {
-      if (cohort !== "all" && r.repair_cohort !== cohort) return false;
+    return basePool.filter((r) => {
+      if (cohort === "luca_queue") { if (!r.callable) return false; }
+      else if (cohort === "workable") { if (isDeclinedAuction(r.ams_bucket)) return false; }
+      else if (cohort === "declined_auction") { if (!isDeclinedAuction(r.ams_bucket)) return false; }
+      else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
         const hay = `${r.case_key} ${r.renter_name_raw} ${r.shop_name || ""} ${r.veh_desc || ""} ${r.rental_class || ""} ${r.tech_name || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
@@ -228,13 +292,12 @@ export default function RentalOperations() {
         const m = r.operator_mark || "none";
         if (markF === "none" ? m !== "none" : m !== markF) return false;
       }
-      if (pendedOnly && r.ticket_status !== "PENDED") return false;
       if (mismatchOnly && !r.type_mismatch) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, cohort, search, amsF, catF, classF, markF, pendedOnly, mismatchOnly, newHireOnly, urgentEmpOnly]);
+  }, [basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -242,6 +305,7 @@ export default function RentalOperations() {
       hire: (r) => r.employee_status_date, veh: (r) => r.veh_desc, cls: (r) => r.rental_class,
       cost: (r) => r.daily_cost, ams: (r) => r.ams_status, shop: (r) => r.shop_name,
       days: (r) => r.days_open, ext: (r) => r.number_of_extensions, days_open: (r) => r.days_open,
+      tpms: (r) => r.tpms_tech, lastrental: (r) => r.last_rental_date, npos: (r) => r.po_count,
     };
     const cmp = sort.col ? makeSortComparator(acc[sort.col] ?? ((r) => (r as any)[sort.col!]), sort.dir) : null;
     return cmp ? [...filtered].sort(cmp) : filtered;
@@ -268,6 +332,48 @@ export default function RentalOperations() {
     },
     onError: (e: any) => toast({ title: "Import failed", description: String(e?.message || e), variant: "destructive" }),
   });
+  const scrapeMissingMut = useMutation({
+    mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/scrape-missing"),
+    onSuccess: async (res: any) => { const j = await res.json().catch(() => ({})); toast({ title: "Scraping missing trucks from Holman", description: `${j?.started ?? 0} queued · runs in the background, refresh in a few minutes` }); },
+    onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const missingCount = useMemo(() => rows.filter((r) => !r.has_portal).length, [rows]);
+
+  // ── LUCA caller: hand a callable shop (or the whole queue) to the LUCA agent ─
+  const callMut = useMutation({
+    mutationFn: (caseKey: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/call`),
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      const dialed = j?.result?.dialed, dry = j?.result?.dryRun;
+      toast({ title: dialed ? "LUCA is calling the shop" : (dry ? "Queued (LUCA in dry-run)" : "Handed to LUCA"), description: j?.result?.message || (dry ? "LUCA_OUTREACH_LIVE is off — logged, no live dial" : `conv ${j?.result?.conversationId || "—"}`) });
+    },
+    onError: (e: any) => toast({ title: "Call failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const callAllMut = useMutation({
+    mutationFn: (caseKeys: string[]) => apiRequest("POST", "/api/vrm/rental-operations/call-batch", { caseKeys }),
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      toast({ title: "LUCA working the queue", description: `${j?.result?.dispatched ?? 0} handed to LUCA${j?.result?.dryRun ? " (dry-run — no live dial)" : ""}` });
+    },
+    onError: (e: any) => toast({ title: "Batch call failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const lucaQueue = useMemo(() => basePool.filter((r) => r.callable), [basePool]);
+  const callAllRedirects = useMemo(() => lucaQueue.filter((r) => r.redirect_to_assigned).length, [lucaQueue]);
+  const workableStats = useMemo(() => {
+    const pool = basePool.filter((r) => !isDeclinedAuction(r.ams_bucket));
+    const callableNow = pool.filter((r) => r.callable).length;
+    const needPhone = pool.filter((r) => !r.callable && r.repair_cohort === "open_repair").length;
+    const noOpenRepair = pool.filter((r) => r.repair_cohort !== "open_repair").length;
+    return { total: pool.length, callableNow, needPhone, noOpenRepair };
+  }, [basePool]);
+  const doCall = (r: MasterRow) => {
+    const tgt = r.redirect_to_assigned ? `assigned truck ${r.call_target_truck}` : `truck ${r.call_target_truck}`;
+    if (window.confirm(`Hand ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)}) to the LUCA agent for ${tgt}?\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.`)) callMut.mutate(r.case_key);
+  };
+  const doCallAll = () => {
+    if (!lucaQueue.length) return;
+    if (window.confirm(`Hand all ${lucaQueue.length} callable shops to the LUCA agent to work?\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
+  };
 
   const doMark = (caseKey: string, mark: string, current: string | null) => {
     markMut.mutate({ caseKey, mark: current === mark ? "none" : mark });
@@ -275,12 +381,14 @@ export default function RentalOperations() {
 
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_city", "shop_state", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence"];
+    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
+      r.tpms_tech || "", r.wrong_truck ? "YES" : "", r.renter_own_truck || "",
       r.veh_desc || "", r.actual_vehicle_type || "", r.rental_class || "", r.daily_cost ?? "", r.class_median ?? "",
       r.type_mismatch ? "YES" : "", r.cost_over ? "YES" : "", r.ams_status || "", r.repair_cohort,
-      r.shop_name || "", r.shop_po_status || "", r.shop_city || "", r.shop_state || "",
+      r.shop_name || "", r.shop_po_status || "", r.portal_shop_phone || "", r.shop_city || "", r.shop_state || "",
+      r.last_rental_date || "", r.no_rental_auth ? "YES" : "", r.po_count ?? "", r.odometer ?? "",
       r.days_open ?? "", r.number_of_extensions ?? "", r.ticket_status === "PENDED" ? "YES" : "",
       r.operator_mark || "", r.identity_state || "", r.identity_confidence || "",
     ].map((c) => esc(String(c))));
@@ -321,10 +429,10 @@ export default function RentalOperations() {
 
   const sh = data!.sourceHealth;
   const kpis = [
-    { label: "Open rentals", value: data!.total, icon: CircleDollarSign, fg: colors.ink },
-    { label: "Open repair ticket", value: data!.cohorts.open_repair ?? 0, icon: Wrench, fg: colors.blue },
-    { label: "Auction / Declined (AMS)", value: (data!.amsBuckets.auction ?? 0) + (data!.amsBuckets.declined ?? 0), icon: Gavel, fg: colors.red },
-    { label: "Type mismatch", value: data!.mismatchCount, icon: AlertTriangle, fg: colors.amber },
+    { label: includePended ? "Rentals (incl. pended)" : "Open rentals", value: basePool.length, icon: CircleDollarSign, fg: colors.ink },
+    { label: "Open repair ticket", value: stats.cohorts.open_repair ?? 0, icon: Wrench, fg: colors.blue },
+    { label: "Auction / Declined (AMS)", value: (stats.amsBuckets.auction ?? 0) + (stats.amsBuckets.declined ?? 0), icon: Gavel, fg: colors.red },
+    { label: "Type mismatch", value: stats.mismatch, icon: AlertTriangle, fg: colors.amber },
   ];
 
   return (
@@ -334,7 +442,7 @@ export default function RentalOperations() {
         <div>
           <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0, color: colors.ink }}>Rental Operations Control Center</h1>
           <div style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
-            {data!.total} rentals ({data!.total - data!.pendedCount} open{data!.pendedCount ? ` + ${data!.pendedCount} pended` : ""}) · {data!.cohorts.open_repair ?? 0} with an open repair ticket · {(data!.identityStates.REVIEW ?? 0) + (data!.identityStates.EXCEPTION ?? 0)} identities need review
+            {basePool.length} {includePended ? "rentals (incl. pended)" : "open rentals"} · {stats.cohorts.open_repair ?? 0} with an open repair ticket · {(stats.identityStates.REVIEW ?? 0) + (stats.identityStates.EXCEPTION ?? 0)} identities need review{!includePended && pendedTotal ? ` · ${pendedTotal} pended hidden (matches Rentals Ops Dashboard)` : ""}
           </div>
           <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains }}>
             last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
@@ -349,6 +457,12 @@ export default function RentalOperations() {
             <Upload size={13} /> {importMut.isPending ? "Importing…" : "Import report"}
           </button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importMut.mutate(f); e.target.value = ""; }} />
+          {missingCount > 0 && (
+            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={scrapeMissingMut.isPending} title="Pull POs + comments + shop phone from Holman for every truck we haven't scraped yet"
+              style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: colors.amber, borderColor: colors.amber }}>
+              <RefreshCw size={13} style={{ animation: scrapeMissingMut.isPending ? "spin 1s linear infinite" : undefined }} /> Scrape {missingCount} missing
+            </button>
+          )}
           <button type="button" onClick={exportCsv} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Download size={13} /> CSV
           </button>
@@ -370,10 +484,25 @@ export default function RentalOperations() {
       {/* Cohort tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
         {COHORTS.map((c) => {
-          const n = c.key === "all" ? data!.total : (data!.cohorts[c.key] ?? 0);
+          const declAuc = (stats.amsBuckets.declined ?? 0) + (stats.amsBuckets.auction ?? 0);
+          const n = c.key === "all" ? basePool.length
+            : c.key === "luca_queue" ? stats.callable
+            : c.key === "workable" ? (basePool.length - declAuc)
+            : c.key === "declined_auction" ? declAuc
+            : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
+          const danger = c.key === "declined_auction";
+          const go = c.key === "luca_queue";
+          const own = c.key === "workable";
+          const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.accent;
+          const restColor = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.inkSoft;
+          const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.rule;
           return (
-            <button key={c.key} type="button" onClick={() => setCohort(c.key)} style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : colors.inkSoft, background: active ? colors.accent : colors.surface, border: `1px solid ${active ? colors.accent : colors.rule}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
+            <button key={c.key} type="button" onClick={() => setCohort(c.key)}
+              title={danger ? "AMS says Declined Repair or Sent To Auction — do NOT route these to a shop-calling agent"
+                : go ? "Open repair + verified shop phone + not declined/auction — this is the feed LUCA calls"
+                : own ? "Every rental we still own (NOT Declined Repair / Sent To Auction) — these are the ones that can be worked. Ready ones show a Call button; the rest are missing a phone or an open repair." : undefined}
+              style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : restColor, background: active ? accentC : colors.surface, border: `1px solid ${active ? accentC : restBorder}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
               {c.label} <span style={{ opacity: 0.7 }}>{n}</span>
             </button>
           );
@@ -392,8 +521,8 @@ export default function RentalOperations() {
         </select>
         <select value={catF} onChange={(e) => setCatF(e.target.value)} style={selStyle}>
           <option value="">all categories</option>
-          <option value="SEDAN">SEDAN ({data!.categories.SEDAN ?? 0})</option>
-          <option value="SUV/VAN/TRUCK">SUV/VAN/TRUCK ({data!.categories["SUV/VAN/TRUCK"] ?? 0})</option>
+          <option value="SEDAN">SEDAN ({stats.categories.SEDAN ?? 0})</option>
+          <option value="SUV/VAN/TRUCK">SUV/VAN/TRUCK ({stats.categories["SUV/VAN/TRUCK"] ?? 0})</option>
         </select>
         <select value={classF} onChange={(e) => setClassF(e.target.value)} style={selStyle}>
           <option value="">all rental classes</option>
@@ -406,12 +535,51 @@ export default function RentalOperations() {
           <option value="closed">Closed</option>
           <option value="pickup">Pick up</option>
         </select>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={pendedOnly} onChange={(e) => setPendedOnly(e.target.checked)} /> PENDED</label>
+        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }} title="PENDED = renter turned the vehicle in / ticket closing. Off by default so the count matches the Rentals Ops Dashboard."><input type="checkbox" checked={includePended} onChange={(e) => setIncludePended(e.target.checked)} /> include PENDED{pendedTotal ? ` (${pendedTotal})` : ""}</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> mismatch</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave</label>
         <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{sorted.length} shown{isFetching ? " · refreshing…" : ""}</span>
       </div>
+
+      {/* LUCA Call Queue banner — the callable-shops feed handed to the LUCA agent */}
+      {cohort === "luca_queue" && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.green}`, background: "rgba(34,197,94,.06)", borderRadius: 12 }}>
+          <div>
+            <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink, display: "inline-flex", alignItems: "center", gap: 7 }}>
+              <PhoneCall size={15} style={{ color: colors.green }} /> LUCA Call Queue — {lucaQueue.length} callable shop{lucaQueue.length === 1 ? "" : "s"}
+            </div>
+            <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 720 }}>
+              This is the exact feed the LUCA agent dials (agent_3201 luca-shop): open repair ticket + verified shop phone. Declined / Sent-to-Auction rentals are redirected to the shop repairing the tech's <b>assigned</b> truck{callAllRedirects ? `, ${callAllRedirects} here` : ""}; declined/auction with no assigned truck are excluded. Same source as <code>/api/vrm/rental-operations/luca-feed</code>.
+            </div>
+          </div>
+          <button type="button" onClick={doCallAll} disabled={callAllMut.isPending || !lucaQueue.length}
+            style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 700, color: "#fff", background: colors.green, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "9px 18px", cursor: lucaQueue.length ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 7, opacity: callAllMut.isPending ? 0.7 : 1 }}>
+            <PhoneCall size={15} /> {callAllMut.isPending ? "Handing to LUCA…" : `Call all ${lucaQueue.length} with LUCA`}
+          </button>
+        </div>
+      )}
+
+      {/* Workable banner — the ones we still own (NOT declined/auction), the peer of the red tab */}
+      {cohort === "workable" && (
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.blue}`, background: "rgba(59,130,246,.06)", borderRadius: 12 }}>
+          <div>
+            <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink }}>
+              Workable — {workableStats.total} rental{workableStats.total === 1 ? "" : "s"} we still own
+            </div>
+            <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 760 }}>
+              Everything NOT flagged Declined Repair / Sent To Auction in AMS. Of these: <b style={{ color: colors.green }}>{workableStats.callableNow} callable now</b> (open repair + verified phone, in the LUCA Call Queue), <b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b> (open repair, no shop phone yet — Scrape from Holman), and <b style={{ color: colors.inkMuted }}>{workableStats.noOpenRepair} with no open repair ticket</b>. Ready rows show a Call button.
+            </div>
+          </div>
+          {workableStats.needPhone > 0 && (
+            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={scrapeMissingMut.isPending}
+              title="Pull POs + shop phone from Holman for the workable trucks missing a phone"
+              style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600, color: colors.amber, background: colors.surface, border: `1px solid ${colors.amber}`, borderRadius: 10, padding: "8px 14px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <RefreshCw size={13} style={{ animation: scrapeMissingMut.isPending ? "spin 1s linear infinite" : undefined }} /> Scrape phones
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       <div style={{ overflow: "auto", border: `1px solid ${colors.rule}`, borderRadius: 12, maxHeight: "calc(100vh - 360px)" }}>
@@ -423,13 +591,17 @@ export default function RentalOperations() {
               <Th col="tech" label="Tech" />
               <Th col="emp" label="Employment" />
               <Th col="hire" label="Status Date" />
+              <Th col="tpms" label="TPMS Assigned" />
               <Th col="veh" label="Vehicle" />
               <Th col="cls" label="Rental Class" />
               <Th col="cost" label="Daily Cost" style={{ textAlign: "right" }} />
               <Th col="ams" label="AMS" />
               <Th col="shop" label="Shop" />
+              <Th col="lastrental" label="Last Rental" />
               <Th col="days" label="Days" style={{ textAlign: "right" }} />
               <Th col="ext" label="Ext" style={{ textAlign: "right" }} />
+              <Th col="npos" label="POs" style={{ textAlign: "right" }} />
+              <th style={{ ...thStyle, textAlign: "center" }}>LUCA</th>
               <th style={{ ...thStyle, textAlign: "center" }}>Mark</th>
             </tr>
           </thead>
@@ -448,6 +620,7 @@ export default function RentalOperations() {
                     {r.identity_state === "EXCEPTION" && <Chip text="no ID" fg={colors.red} bg={colors.redLight} />}
                     {r.identity_state === "REVIEW" && <Chip text="review" fg={colors.amber} bg={colors.amberLight} />}
                     {r.identity_confidence === "medium" && r.identity_state === "RESOLVED" && <Chip text="fuzzy" fg={colors.inkMuted} bg={colors.surface} />}
+                    {r.no_rental_auth && <Chip text="no rental auth" fg={colors.amber} bg={colors.amberLight} />}
                   </td>
                   <td style={tdStyle}>
                     {isUrgentEmp(r)
@@ -460,6 +633,10 @@ export default function RentalOperations() {
                         {fmtDate(r.employee_status_date)}<span style={{ color: colors.inkMuted }}> · {fmtDuration(hireDays)}</span>
                       </span>
                     ) : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 12 }}>
+                    {r.tpms_tech ? <span style={{ color: r.wrong_truck ? colors.red : colors.inkSoft, fontWeight: r.wrong_truck ? 600 : 400 }}>{r.tpms_tech}</span> : <span style={{ color: colors.inkMuted }}>none</span>}
+                    {r.wrong_truck && r.renter_own_truck && <div style={{ fontSize: 10, color: colors.red }}>renter drives {r.renter_own_truck}</div>}
                   </td>
                   <td style={tdStyle}>
                     {r.veh_desc || <span style={{ color: colors.red }}>-</span>}
@@ -481,9 +658,27 @@ export default function RentalOperations() {
                     {r.shop_name ? (
                       <span>{r.shop_name}{r.shop_po_status && <span style={{ color: r.shop_po_status === "APPROVED" ? colors.green : colors.inkMuted, fontSize: 10, marginLeft: 6 }}>{r.shop_po_status === "APPROVED" ? "open PO" : "last PO"}</span>}</span>
                     ) : <span style={{ color: colors.inkMuted }}>none</span>}
+                    {r.portal_shop_phone
+                      ? <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains }}>{fmtPhone(r.portal_shop_phone)}</div>
+                      : r.shop_name && !isDeclinedAuction(r.ams_bucket) ? <div style={{ fontSize: 10, color: colors.amber }}>{r.has_portal ? "no phone on file" : "not scraped"}</div> : null}
+                    {r.redirect_to_assigned && (
+                      <div style={{ fontSize: 10.5, color: colors.green, marginTop: 3, display: "flex", alignItems: "center", gap: 3 }} title={`We no longer own the rental van (${r.ams_status}). LUCA calls the shop repairing the tech's assigned truck ${r.call_target_truck}.`}>
+                        <CornerDownRight size={11} /> call assigned #{r.call_target_truck}: {r.call_shop_name || "?"}{r.call_shop_phone ? ` · ${fmtPhone(r.call_shop_phone)}` : ""}
+                      </div>
+                    )}
                   </td>
+                  <td style={{ ...tdStyle, fontSize: 12, fontFamily: fonts.jetbrains }}>{r.last_rental_date ? fmtDate(r.last_rental_date) : <span style={{ color: colors.inkMuted }}>—</span>}</td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.days_open ?? ""}</td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.number_of_extensions ?? ""}</td>
+                  <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12, color: r.po_count ? colors.ink : colors.inkMuted }}>{r.po_count || "—"}</td>
+                  <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    {r.callable ? (
+                      <button type="button" title={`Hand ${r.call_shop_name || "shop"} (${fmtPhone(r.call_shop_phone)}) to LUCA${r.redirect_to_assigned ? ` — assigned truck ${r.call_target_truck}` : ""}`} onClick={() => doCall(r)} disabled={callMut.isPending}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: "#fff", background: colors.green, border: `1px solid ${colors.green}`, borderRadius: 7, padding: "4px 9px", cursor: "pointer" }}>
+                        <PhoneCall size={12} /> Call
+                      </button>
+                    ) : <span style={{ color: colors.inkMuted, fontSize: 11 }}>—</span>}
+                  </td>
                   <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: "inline-flex", gap: 3 }}>
                       {(["open", "closed", "pickup"] as const).map((m) => {
@@ -496,19 +691,19 @@ export default function RentalOperations() {
                 </tr>
               );
             })}
-            {sorted.length === 0 && <tr><td colSpan={13} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={17} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
           </tbody>
         </table>
       </div>
 
-      {panelKey && <DetailPanel caseKey={panelKey} onClose={() => setPanelKey(null)} onMark={doMark} />}
+      {panelKey && <DetailPanel caseKey={panelKey} row={rows.find((r) => r.case_key === panelKey)} onClose={() => setPanelKey(null)} onMark={doMark} />}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
 }
 
 // ── detail slide-over ─────────────────────────────────────────────────────────
-function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: () => void; onMark: (k: string, m: string, cur: string | null) => void }) {
+function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?: MasterRow; onClose: () => void; onMark: (k: string, m: string, cur: string | null) => void }) {
   const { data, isLoading } = useQuery<CaseDetail>({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`], staleTime: 30_000 });
   // ESC closes; lock body scroll while the modal is open (matches the board overlay)
   useEffect(() => {
@@ -530,11 +725,22 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
   // current shop = the most-recent APPROVED repair PO (open), else the latest repair PO (fallback)
   const currentShop = poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED") || poList.find((p) => p.vendorType === "repair") || null;
   const dataAsOf = poList.reduce<string | null>((mx, p) => (p.uploadTimestamp && (!mx || p.uploadTimestamp > mx) ? p.uploadTimestamp : mx), null);
+  const portal = data?.portal ?? null;
   const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
   const addNote = useMutation({
     mutationFn: (text: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/actions`, { action_type: "note", note: text }),
     onSuccess: () => { setNote(""); qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); },
     onError: (e: any) => toast({ title: "Comment failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const scrapeMut = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/scrape`),
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      await qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] });
+      const rp = j?.report;
+      toast({ title: rp?.stored ? "Refreshed from Holman" : "Holman returned no history", description: rp ? `${rp.stored} stored · ${rp.empty} empty` : "" });
+    },
+    onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
   const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
@@ -545,7 +751,13 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
       <div onClick={(e) => e.stopPropagation()} style={{ width: 900, maxWidth: "94vw", maxHeight: "90vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 16, overflowY: "auto", boxShadow: "0 24px 70px rgba(0,0,0,0.4)", position: "relative" }}>
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
           <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
-          <button type="button" onClick={onClose} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} title="Pull this truck's current POs + comments live from Holman"
+              style={{ background: colors.surface, border: `1px solid ${colors.accent}`, borderRadius: 8, cursor: "pointer", color: colors.accent, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
+              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? "Scraping Holman…" : "Refresh from Holman"}
+            </button>
+            <button type="button" onClick={onClose} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
+          </div>
         </div>
         <div style={{ padding: 24 }}>
         {isLoading || !c ? <div style={{ color: colors.inkMuted, fontFamily: fonts.dmSans }}>Loading…</div> : (
@@ -572,6 +784,9 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
               <div><div style={label}>Rental class</div><div style={val}>{c.rental_class || "—"}</div></div>
               <div><div style={label}>Daily cost</div><div style={val}>{money2(c.rate_authorized)}</div></div>
               <div><div style={label}>Renting location</div><div style={val}>{[c.renting_city, c.renting_state].filter(Boolean).join(", ") || "—"}</div></div>
+              <div><div style={label}>TPMS assigned</div><div style={{ ...val, color: row?.wrong_truck ? colors.red : colors.ink }}>{row?.tpms_tech || "none"}{row?.wrong_truck && row?.renter_own_truck ? ` · renter drives ${row.renter_own_truck}` : ""}</div></div>
+              <div><div style={label}>Odometer</div><div style={val}>{row?.odometer ? `${row.odometer.toLocaleString()} mi` : "—"}{row?.odometer_date ? ` (${fmtDate(row.odometer_date)})` : ""}</div></div>
+              <div><div style={label}>Last rental PO</div><div style={val}>{row?.last_rental_date ? fmtDate(row.last_rental_date) : "—"}{row && !row.has_rental_auth ? " · no approved rental auth" : ""}</div></div>
             </section>
             {/* current shop contact (from the PO) */}
             <section>
@@ -584,9 +799,14 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
                   <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{currentShop.vendorName}
                     <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: currentShop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{currentShop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
                   </div>
-                  <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
-                  <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}</div>
-                  <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 4 }}>Shop phone comes from the on-demand portal scrape (next build).</div>
+                  <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || portal?.shop?.address || "no address on PO"}</div>
+                  {(() => {
+                    const ph = portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone;
+                    return ph
+                      ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}</div>
+                      : <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
+                  })()}
+                  <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
               ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
             </section>
@@ -662,16 +882,46 @@ function DetailPanel({ caseKey, onClose, onMark }: { caseKey: string; onClose: (
                               </tbody>
                             </table>
                           )}
+                          {portal?.poDetail?.[p.poNumber] && (() => {
+                            const pd = portal.poDetail[p.poNumber];
+                            const noteRows = (pd.poNotes && pd.poNotes.length) ? pd.poNotes : (pd.notes ? pd.notes.split(/<br\s*\/?>/i).map((t: string) => ({ notes: t })) : []);
+                            return (
+                              <div style={{ marginTop: 7 }}>
+                                {pd.vendorPhone && <div style={{ fontSize: 11, color: colors.inkSoft }}>shop {fmtPhone(pd.vendorPhone)}{pd.vendorAddress ? ` · ${pd.vendorAddress}` : ""}</div>}
+                                {(pd.createdBy || pd.estimatedReadyDate || pd.workCompletedDate) && <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>{pd.createdBy ? `by ${pd.createdBy}` : ""}{pd.estimatedReadyDate ? ` · est ready ${pd.estimatedReadyDate}` : ""}{pd.workCompletedDate ? ` · done ${pd.workCompletedDate}` : ""}</div>}
+                                {noteRows.length > 0 && (
+                                  <div style={{ marginTop: 6 }}>
+                                    <div style={{ fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Notes</div>
+                                    {noteRows.filter((nr: any) => (nr.notes || "").trim()).map((nr: any, k: number) => (
+                                      <div key={k} style={{ fontSize: 11.5, color: colors.ink, marginTop: 2, whiteSpace: "pre-wrap" }}>{nr.transDate ? <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{nr.transDate}: </span> : null}{nr.notes}</div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
                   );
                 })}
               </div>
-              <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>
-                Holman message trail, PO notes, and shop phone come from the on-demand portal scrape (next build).
-              </div>
+              {portal && <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>PO notes + shop phone are from the Holman portal (scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : "—"}); the PO list itself is live from the Snowflake feed.</div>}
             </section>
+            {/* Holman message trail — the comment history, from the portal */}
+            {portal && portal.messages.length > 0 && (
+              <section>
+                <div style={label}>Holman message trail ({portal.messages.length}) · scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : ""}</div>
+                <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
+                  {portal.messages.map((mg, k) => (
+                    <div key={k} style={{ fontSize: 11.5, color: colors.ink, borderBottom: k < portal.messages.length - 1 ? `1px solid ${colors.rule}` : "none", paddingBottom: 5 }}>
+                      <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 10.5 }}>{mg.date}</span>
+                      <div style={{ whiteSpace: "pre-wrap", marginTop: 1 }}>{mg.notes}</div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            )}
           </div>
         )}
         </div>

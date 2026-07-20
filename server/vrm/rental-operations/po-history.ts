@@ -132,11 +132,27 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
 export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryResult> {
   await db.execute(sql`SELECT 1`); // pool warm-up
 
-  // which trucks? default = every present case
+  // which trucks? default = every present case, PLUS the assigned trucks
+  // (renter_own_truck) of every Declined/Auction case — LUCA redirects those
+  // calls to the shop repairing the tech's own truck, so its PO must land too.
   let caseKeys = caseKeysIn;
   if (!caseKeys) {
     const r = await db.execute(sql`SELECT vehicle_number_padded FROM vrm_rental_operations_cases WHERE present_in_latest = true`);
     caseKeys = (r.rows as any[]).map((x) => x.vehicle_number_padded);
+    const assigned = await db.execute(sql`
+      SELECT DISTINCT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+      FROM vrm_rental_operations_cases c
+      JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+      JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      WHERE c.present_in_latest = true
+        AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
+        AND COALESCE(atr.truck_lu, atr.last_known_truck_lu) IS NOT NULL
+    `);
+    const seen = new Set(caseKeys);
+    for (const a of assigned.rows as any[]) {
+      const p = a.own_pad ? String(a.own_pad) : null;
+      if (p && !seen.has(p)) { caseKeys.push(p); seen.add(p); }
+    }
   }
   if (!caseKeys.length) return { trucks: 0, posLanded: 0, openRepairTrucks: 0 };
 
