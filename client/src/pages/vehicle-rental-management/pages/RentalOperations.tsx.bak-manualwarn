@@ -507,16 +507,11 @@ export default function RentalOperations() {
   }, [basePool]);
   const doCall = (r: MasterRow) => {
     const tgt = r.redirect_to_assigned ? `assigned truck ${r.call_target_truck}` : `truck ${r.call_target_truck}`;
-    const autonomous = !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket);
-    const warning = autonomous
-      ? "HEADS UP: the autonomous LUCA agent already works this truck on its own cadence. Calling from here places a SECOND, duplicate call and can double-dial the same shop.\n\nOnly do this if you need a call RIGHT NOW and cannot wait for the agent's next pass."
-      : "This truck is Declined Repair / Sent To Auction, which the autonomous agent SKIPS. The manual button is the correct tool here: it dials the shop holding the tech's ASSIGNED truck, not the rental van.";
-    if (window.confirm(`${warning}\n\nShop: ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)})\nCalling about: ${tgt}\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.\n\nPlace this call anyway?`)) callMut.mutate(r.case_key);
+    if (window.confirm(`Hand ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)}) to the LUCA agent for ${tgt}?\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.`)) callMut.mutate(r.case_key);
   };
   const doCallAll = () => {
     if (!lucaQueue.length) return;
-    const autoCount = lucaQueue.filter((r) => !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket)).length;
-    if (window.confirm(`HEADS UP: the autonomous LUCA agent already works ${autoCount} of these ${lucaQueue.length} shops on its own cadence. Firing the batch from here places DUPLICATE calls to those shops.\n\nThe ${lucaQueue.length - autoCount} declined/auction redirects are the ones the agent skips, so those are the ones this button is really for.\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.\n\nSend all ${lucaQueue.length} anyway?`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
+    if (window.confirm(`Hand all ${lucaQueue.length} callable shops to the LUCA agent to work?\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
   };
 
   const doMark = (caseKey: string, mark: string, current: string | null) => {
