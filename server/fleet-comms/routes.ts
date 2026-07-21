@@ -193,6 +193,25 @@ export function registerCommsRoutes(app: Router): void {
     }
   });
 
+  // Rightsize phone-change watch (Tyler directive 7/21). Fired every 5 min by
+  // the scheduler; the engine itself gates on the ET send hour, a per-ET-day
+  // idempotency check and an app_settings flag (default OFF), so a 5-minute
+  // cadence costs one cheap query per tick. Pass {"dryRun":true} to preview the
+  // exact recipients and message bodies without sending anything.
+  app.post("/comms/cron/rightsize-phone-watch", async (req: any, res) => {
+    if (!isInternalCron(req)) return res.status(403).json({ message: "Forbidden" });
+    try {
+      const { runPhoneWatch } = await import("../rightsize-phone-watch/engine");
+      const result = await runPhoneWatch("scheduled_dispatcher", {
+        dryRun: req.body?.dryRun === true,
+        force: req.body?.force === true,
+      });
+      res.json({ success: true, ...result });
+    } catch (e: any) {
+      res.status(500).json({ success: false, message: e?.message });
+    }
+  });
+
   // ── Config / categories ─────────────────────────────────────────────────
   app.get("/comms/config", gate, async (req: any, res) => {
     const enabled = await retryOnceOnTransient(() => getBooleanSetting(FEATURE_FLAG, false));
