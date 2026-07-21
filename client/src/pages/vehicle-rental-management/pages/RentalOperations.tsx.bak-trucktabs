@@ -910,87 +910,6 @@ function amsTintOf(b: string): string {
     : colors.surface;
 }
 
-// ── the ASSIGNED truck's tab: same shape as the rental tab, for the vehicle the
-// technician actually owns. Tyler's rule lives here — a tech in a rental whose
-// own truck has NO open repair PO means nobody is repairing anything, so the
-// rental may be pointless and it escalates.
-function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scraping }: {
-  assigned?: AssignedTruckDetail | null; assignedTruckNo: string | null; caseKey: string;
-  onScrape: (truck: string) => void; scraping: boolean;
-}) {
-  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
-  const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
-  if (!assigned) {
-    return (
-      <div style={{ padding: 12, borderRadius: 10, border: `1px solid ${colors.rule}`, background: colors.surface, fontSize: 12.5, color: colors.inkSoft }}>
-        Assigned truck <b>{assignedTruckNo ?? "unknown"}</b> did not load. Reopen the case; if it stays
-        empty the Holman feed has no rows for that truck.
-      </div>
-    );
-  }
-  const shop = assigned.poHistory.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
-    || assigned.poHistory.find((p) => p.vendorType === "repair") || null;
-  const hasOpenRepair = assigned.poHistory.some((p) => p.vendorType === "repair" && p.poStatus === "APPROVED");
-  const ams = assigned.amsStatus ?? null;
-  const amsB = amsBucketOfLabel(ams);
-  const pointless = !hasOpenRepair && (amsB === "assigned" || amsB === "in_use" || amsB === "spare");
-  const phone = shop ? (assigned.portal?.poDetail?.[shop.poNumber]?.vendorPhone || assigned.portal?.shop?.phone) : assigned.portal?.shop?.phone;
-  return (
-    <>
-      {/* summary grid — same shape as the rental tab's ticket/economics grid */}
-      <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div><div style={label}>Truck</div><div style={val}>{assigned.truck} · tech's assigned truck</div></div>
-        <div><div style={label}>AMS status</div><div style={{ ...val, color: ams ? amsColorOf(amsB) : colors.inkMuted }}>{ams || "unknown"}</div></div>
-        <div><div style={label}>Open repair PO</div><div style={{ ...val, color: hasOpenRepair ? colors.green : colors.red }}>{hasOpenRepair ? "yes — rental explained" : "none — escalate"}</div></div>
-        <div><div style={label}>PO history</div><div style={val}>{assigned.poHistory.length} POs · 3 years</div></div>
-        <div><div style={label}>Ticket</div><div style={{ ...val, color: colors.inkMuted }}>not a rental</div></div>
-        <div><div style={label}>Renting location</div><div style={{ ...val, color: colors.inkMuted }}>—</div></div>
-      </section>
-
-      {/* current shop contact (from the PO) */}
-      <section>
-        <div style={label}>Current shop</div>
-        {shop ? (
-          <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${shop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
-            <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{shop.vendorName}
-              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: shop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>
-                {shop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}
-              </span>
-            </div>
-            <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[shop.vendorAddress, shop.vendorCity, shop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
-            {phone
-              ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(phone)}<SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} /></div>
-              : <button type="button" onClick={() => onScrape(assigned.truck)} disabled={scraping}
-                  style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>
-                  {scraping ? `Scraping ${assigned.truck}…` : `No phone yet — pull truck ${assigned.truck} from Holman`}
-                </button>}
-            <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {shop.poNumber} · dated {fmtDate(shop.poDate)}</div>
-          </div>
-        ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
-      </section>
-
-      <PoHistorySection heading="PO history" poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
-
-      {assigned.portal && assigned.portal.messages.length > 0 && (
-        <section>
-          <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
-            <span>Holman message trail ({assigned.portal.messages.length})</span>
-            <SourceBadge kind="scrape" detail={assigned.portal.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} />
-          </div>
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
-            {assigned.portal.messages.map((mg, k) => (
-              <div key={k} style={{ fontSize: 11.5, color: colors.ink, borderBottom: k < assigned.portal!.messages.length - 1 ? `1px solid ${colors.rule}` : "none", paddingBottom: 5 }}>
-                <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 10.5 }}>{mg.date}</span>
-                <div style={{ whiteSpace: "pre-wrap", marginTop: 1 }}>{mg.notes}</div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-    </>
-  );
-}
-
 // ── PO tabs: rental van vs the renter's ASSIGNED truck ───────────────────────
 // Tyler's rule: when a tech in a rental is assigned to a DIFFERENT truck, that
 // truck must be checked for a repair PO — no PO means the rental may be
@@ -1234,10 +1153,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const qc = useQueryClient();
   const { toast } = useToast();
   const [note, setNote] = useState("");
-  const [truckTab, setTruckTab] = useState<"rental" | "assigned">("rental");
-  // Every Holman scrape targets the truck currently on screen, never the case key.
-  const activeTruck = truckTab === "assigned" && data?.assignedTruck?.truck
-    ? data.assignedTruck.truck : caseKey;
   const c = data?.case;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
@@ -1253,7 +1168,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
     onError: (e: any) => toast({ title: "Comment failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const scrapeMut = useMutation({
-    mutationFn: (truck: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${truck}/scrape`),
+    mutationFn: () => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/scrape`),
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       await qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] });
@@ -1277,9 +1192,9 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
           <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={() => scrapeMut.mutate(activeTruck)} disabled={scrapeMut.isPending} title={`Pull truck ${activeTruck}'s current POs + comments live from Holman`}
+            <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} title="Pull this truck's current POs + comments live from Holman"
               style={{ background: colors.surface, border: `1px solid ${colors.accent}`, borderRadius: 8, cursor: "pointer", color: colors.accent, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
-              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? `Scraping ${activeTruck}…` : `Refresh ${activeTruck} from Holman`}
+              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? "Scraping Holman…" : "Refresh from Holman"}
             </button>
             <button type="button" onClick={onClose} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
           </div>
@@ -1314,38 +1229,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 </button>
               )}
             </section>
-            {/* ── TRUCK TABS: the rental van, and the truck this tech is
-                 actually assigned to. Same sections under each. ───────────── */}
-            {(() => {
-              const at = row?.assigned_truck ?? null;
-              const strip2 = (s: any) => String(s ?? "").replace(/^0+/, "");
-              const distinct = !!at && strip2(at) !== strip2(caseKey);
-              const btn = (k: "rental" | "assigned", text: string, sub: string, warn: boolean) => (
-                <button type="button" onClick={() => setTruckTab(k)}
-                  style={{ flex: 1, textAlign: "left", fontFamily: fonts.dmSans, padding: "8px 12px", borderRadius: 10, cursor: "pointer",
-                    border: `1px solid ${truckTab === k ? (warn ? colors.amber : colors.accent) : colors.rule}`,
-                    background: truckTab === k ? (warn ? colors.amberLight : colors.accentLight) : colors.surface }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: truckTab === k ? (warn ? colors.amber : colors.accent) : colors.ink }}>{text}</div>
-                  <div style={{ fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>{sub}</div>
-                </button>
-              );
-              return (
-                <div style={{ display: "flex", gap: 8 }}>
-                  {btn("rental", `Truck ${caseKey}`, "the rental van", false)}
-                  {distinct
-                    ? btn("assigned", `Truck ${at}`, "tech's assigned truck", true)
-                    : (
-                      <div style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px dashed ${colors.rule}`, background: colors.background }}
-                        title={at ? "This tech is assigned to the same truck they are renting against." : "Identity unresolved, so we cannot say which truck this tech is assigned to."}>
-                        <div style={{ fontSize: 13.5, fontWeight: 600, color: colors.inkMuted }}>{at ? `Truck ${at}` : "No assigned truck"}</div>
-                        <div style={{ fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>{at ? "same as the rental" : "identity unresolved"}</div>
-                      </div>
-                    )}
-                </div>
-              );
-            })()}
-
-            {truckTab === "rental" && (<>
             {/* ticket + vehicle economics */}
             <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div><div style={label}>Ticket</div><div style={val}>{c.ticket_number || c.po_number || "—"} · {c.ticket_status}</div></div>
@@ -1374,7 +1257,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                     const ph = portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone;
                     return ph
                       ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}<SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} /></div>
-                      : <button type="button" onClick={() => scrapeMut.mutate(caseKey)} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
+                      : <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
                   })()}
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
@@ -1417,7 +1300,12 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 truck this tech is actually assigned to. The assigned tab answers
                 even when there is nothing to show, so a hidden section can never
                 be mistaken for a missing feature. */}
-            <PoHistorySection heading="PO history" poList={data!.poHistory} poSource={data!.poSource} portal={portal} />
+            <PoTabs
+              caseKey={caseKey}
+              assignedTruckNo={row?.assigned_truck ?? null}
+              identityState={row?.identity_state ?? null}
+              casePoList={data!.poHistory} casePoSource={data!.poSource} casePortal={portal}
+              assigned={assigned} />
             {/* Holman message trail — the comment history, from the portal */}
             {portal && portal.messages.length > 0 && (
               <section>
@@ -1434,12 +1322,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   ))}
                 </div>
               </section>
-            )}
-            </>)}
-
-            {truckTab === "assigned" && (
-              <AssignedTruckTab assigned={assigned} assignedTruckNo={row?.assigned_truck ?? null} caseKey={caseKey}
-                onScrape={(t) => scrapeMut.mutate(t)} scraping={scrapeMut.isPending} />
             )}
           </div>
         )}

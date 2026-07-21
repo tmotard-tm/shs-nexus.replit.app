@@ -717,29 +717,6 @@ async function readCallLog(trucks: string[]): Promise<any[]> {
   }
 }
 
-/** AMS status for ONE truck, via the same holman_vehicles_cache VIN lookup +
- * AMS cache map that ams-enrich.ts uses. Cached-only: the drawer must never wait
- * on the full AMS build (~2 min, paginated). Returns null on any miss so the UI
- * can say "unknown" rather than imply a status we do not have. Never throws. */
-async function readAmsStatusForTruck(truckPadded: string): Promise<string | null> {
-  try {
-    const hv = await db.execute(sql`
-      SELECT vin FROM holman_vehicles_cache
-      WHERE vin IS NOT NULL AND vin <> ''
-        AND lpad(ltrim(regexp_replace(COALESCE(holman_vehicle_number,''), '[^0-9]', '', 'g'), '0'), 5, '0') = ${truckPadded}
-      LIMIT 1`);
-    const raw = (hv.rows[0] as any)?.vin;
-    if (!raw) return null;
-    const vin = String(raw).trim().toUpperCase();
-    const cacheMod = await import("../../ams-truck-status-cache");
-    const map = cacheMod.getAmsTruckStatusMapCachedOnly() ?? {};
-    return map[vin] ?? null;
-  } catch (e: any) {
-    console.warn("[VRM/RentalOps] assigned-truck AMS lookup failed (non-fatal):", e?.message || e);
-    return null;
-  }
-}
-
 export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const cRes = await db.execute(sql`
     SELECT c.*, to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date_s,
@@ -783,13 +760,12 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   // PO history (Snowflake live w/ cached fallback) + portal snapshot for the
   // rental-case truck AND the renter's assigned truck, plus the merged call
   // log — all in parallel so the two Snowflake fetches never serialize.
-  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms] = await Promise.all([
+  const [casePo, assignedPo, casePortal, assignedPortal, callLog] = await Promise.all([
     fetchPoHistoryWithFallback(caseKey),
     hasAssigned ? fetchPoHistoryWithFallback(assignedTruckNo!) : Promise.resolve(null),
     readPortalSnapshot(caseKey),
     hasAssigned ? readPortalSnapshot(assignedTruckNo!) : Promise.resolve(null),
     readCallLog(hasAssigned ? [caseKey, assignedTruckNo!] : [caseKey]),
-    hasAssigned ? readAmsStatusForTruck(assignedTruckNo!) : Promise.resolve(null),
   ]);
 
   return {
@@ -800,7 +776,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poSource: casePo.poSource,
     portal: casePortal,
     ...(hasAssigned && assignedPo
-      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms } }
+      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal } }
       : {}),
     callLog,
   };

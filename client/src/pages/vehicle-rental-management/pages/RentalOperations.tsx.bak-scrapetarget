@@ -914,9 +914,8 @@ function amsTintOf(b: string): string {
 // technician actually owns. Tyler's rule lives here — a tech in a rental whose
 // own truck has NO open repair PO means nobody is repairing anything, so the
 // rental may be pointless and it escalates.
-function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scraping }: {
+function AssignedTruckTab({ assigned, assignedTruckNo, caseKey }: {
   assigned?: AssignedTruckDetail | null; assignedTruckNo: string | null; caseKey: string;
-  onScrape: (truck: string) => void; scraping: boolean;
 }) {
   const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
   const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
@@ -958,12 +957,7 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
               </span>
             </div>
             <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[shop.vendorAddress, shop.vendorCity, shop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
-            {phone
-              ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(phone)}<SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} /></div>
-              : <button type="button" onClick={() => onScrape(assigned.truck)} disabled={scraping}
-                  style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>
-                  {scraping ? `Scraping ${assigned.truck}…` : `No phone yet — pull truck ${assigned.truck} from Holman`}
-                </button>}
+            {phone && <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(phone)}<SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} /></div>}
             <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {shop.poNumber} · dated {fmtDate(shop.poDate)}</div>
           </div>
         ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
@@ -1235,9 +1229,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const { toast } = useToast();
   const [note, setNote] = useState("");
   const [truckTab, setTruckTab] = useState<"rental" | "assigned">("rental");
-  // Every Holman scrape targets the truck currently on screen, never the case key.
-  const activeTruck = truckTab === "assigned" && data?.assignedTruck?.truck
-    ? data.assignedTruck.truck : caseKey;
   const c = data?.case;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
@@ -1253,7 +1244,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
     onError: (e: any) => toast({ title: "Comment failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const scrapeMut = useMutation({
-    mutationFn: (truck: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${truck}/scrape`),
+    mutationFn: () => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/scrape`),
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       await qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] });
@@ -1277,9 +1268,9 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
         <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", alignItems: "center", padding: "18px 24px", background: colors.background, borderBottom: `1px solid ${colors.rule}` }}>
           <h2 style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, margin: 0, color: colors.ink }}>Truck {caseKey}</h2>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" onClick={() => scrapeMut.mutate(activeTruck)} disabled={scrapeMut.isPending} title={`Pull truck ${activeTruck}'s current POs + comments live from Holman`}
+            <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} title="Pull this truck's current POs + comments live from Holman"
               style={{ background: colors.surface, border: `1px solid ${colors.accent}`, borderRadius: 8, cursor: "pointer", color: colors.accent, padding: "5px 10px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 600 }}>
-              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? `Scraping ${activeTruck}…` : `Refresh ${activeTruck} from Holman`}
+              <RefreshCw size={13} style={{ animation: scrapeMut.isPending ? "spin 1s linear infinite" : undefined }} /> {scrapeMut.isPending ? "Scraping Holman…" : "Refresh from Holman"}
             </button>
             <button type="button" onClick={onClose} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: "5px 8px", display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12 }}><X size={16} /> Close</button>
           </div>
@@ -1374,7 +1365,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                     const ph = portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone;
                     return ph
                       ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}<SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} /></div>
-                      : <button type="button" onClick={() => scrapeMut.mutate(caseKey)} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
+                      : <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
                   })()}
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
@@ -1438,8 +1429,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
             </>)}
 
             {truckTab === "assigned" && (
-              <AssignedTruckTab assigned={assigned} assignedTruckNo={row?.assigned_truck ?? null} caseKey={caseKey}
-                onScrape={(t) => scrapeMut.mutate(t)} scraping={scrapeMut.isPending} />
+              <AssignedTruckTab assigned={assigned} assignedTruckNo={row?.assigned_truck ?? null} caseKey={caseKey} />
             )}
           </div>
         )}

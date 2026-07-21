@@ -143,7 +143,7 @@ interface CallLogItem {
   truck?: string | null;        // which truck the call was about (case or assigned)
   shopName?: string | null;
 }
-interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; }
+interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; }
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
@@ -507,11 +507,16 @@ export default function RentalOperations() {
   }, [basePool]);
   const doCall = (r: MasterRow) => {
     const tgt = r.redirect_to_assigned ? `assigned truck ${r.call_target_truck}` : `truck ${r.call_target_truck}`;
-    if (window.confirm(`Hand ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)}) to the LUCA agent for ${tgt}?\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.`)) callMut.mutate(r.case_key);
+    const autonomous = !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket);
+    const warning = autonomous
+      ? "HEADS UP: the autonomous LUCA agent already works this truck on its own cadence. Calling from here places a SECOND, duplicate call and can double-dial the same shop.\n\nOnly do this if you need a call RIGHT NOW and cannot wait for the agent's next pass."
+      : "This truck is Declined Repair / Sent To Auction, which the autonomous agent SKIPS. The manual button is the correct tool here: it dials the shop holding the tech's ASSIGNED truck, not the rental van.";
+    if (window.confirm(`${warning}\n\nShop: ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)})\nCalling about: ${tgt}\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.\n\nPlace this call anyway?`)) callMut.mutate(r.case_key);
   };
   const doCallAll = () => {
     if (!lucaQueue.length) return;
-    if (window.confirm(`Hand all ${lucaQueue.length} callable shops to the LUCA agent to work?\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
+    const autoCount = lucaQueue.filter((r) => !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket)).length;
+    if (window.confirm(`HEADS UP: the autonomous LUCA agent already works ${autoCount} of these ${lucaQueue.length} shops on its own cadence. Firing the batch from here places DUPLICATE calls to those shops.\n\nThe ${lucaQueue.length - autoCount} declined/auction redirects are the ones the agent skips, so those are the ones this button is really for.\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.\n\nSend all ${lucaQueue.length} anyway?`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
   };
 
   const doMark = (caseKey: string, mark: string, current: string | null) => {
@@ -877,6 +882,222 @@ export default function RentalOperations() {
   );
 }
 
+// AMS label -> bucket/colour, mirroring the server's amsBucketOf so the assigned
+// truck's pill reads the same as the AMS pills in the grid.
+function amsBucketOfLabel(status: string | null): string {
+  const s = (status || "").toLowerCase();
+  if (!s) return "unknown";
+  if (s.includes("auction")) return "auction";
+  if (s.includes("declin")) return "declined";
+  if (s.includes("repair")) return "in_repair";
+  if (s.includes("in use") || s.includes("in-use")) return "in_use";
+  if (s.includes("spare")) return "spare";
+  if (s.includes("reserved") || s.includes("new hire")) return "reserved";
+  if (s.includes("byov")) return "byov";
+  if (s.includes("assign")) return "assigned";
+  return "other";
+}
+function amsColorOf(b: string): string {
+  return b === "auction" || b === "declined" ? colors.red
+    : b === "in_repair" ? colors.amber
+    : b === "assigned" || b === "in_use" ? colors.green
+    : colors.inkSoft;
+}
+function amsTintOf(b: string): string {
+  return b === "auction" || b === "declined" ? colors.redLight
+    : b === "in_repair" ? colors.amberLight
+    : b === "assigned" || b === "in_use" ? colors.greenLight
+    : colors.surface;
+}
+
+// ── the ASSIGNED truck's tab: same shape as the rental tab, for the vehicle the
+// technician actually owns. Tyler's rule lives here — a tech in a rental whose
+// own truck has NO open repair PO means nobody is repairing anything, so the
+// rental may be pointless and it escalates.
+function AssignedTruckTab({ assigned, assignedTruckNo, caseKey }: {
+  assigned?: AssignedTruckDetail | null; assignedTruckNo: string | null; caseKey: string;
+}) {
+  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
+  if (!assigned) {
+    return (
+      <div style={{ padding: 12, borderRadius: 10, border: `1px solid ${colors.rule}`, background: colors.surface, fontSize: 12.5, color: colors.inkSoft }}>
+        Assigned truck <b>{assignedTruckNo ?? "unknown"}</b> did not load. Reopen the case; if it stays
+        empty the Holman feed has no rows for that truck.
+      </div>
+    );
+  }
+  const shop = assigned.poHistory.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
+    || assigned.poHistory.find((p) => p.vendorType === "repair") || null;
+  const hasOpenRepair = assigned.poHistory.some((p) => p.vendorType === "repair" && p.poStatus === "APPROVED");
+  const ams = assigned.amsStatus ?? null;
+  const amsB = amsBucketOfLabel(ams);
+  const pointless = !hasOpenRepair && (amsB === "assigned" || amsB === "in_use" || amsB === "spare");
+  const phone = shop ? (assigned.portal?.poDetail?.[shop.poNumber]?.vendorPhone || assigned.portal?.shop?.phone) : assigned.portal?.shop?.phone;
+  return (
+    <>
+      {/* verdict — Tyler's mismatch rule, from AMS and the PO together */}
+      <div style={{ padding: "10px 13px", borderRadius: 10, border: `1px solid ${pointless ? colors.red : hasOpenRepair ? colors.green : colors.amber}`,
+        background: pointless ? "rgba(239,68,68,.07)" : hasOpenRepair ? "rgba(34,197,94,.06)" : "rgba(245,158,11,.07)", fontSize: 12.5, color: colors.inkSoft }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 3 }}>
+          <span>This tech is renting <b>{caseKey}</b> and is assigned to <b>{assigned.truck}</b>.</span>
+          <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", borderRadius: 999, padding: "2px 9px",
+            color: ams ? amsColorOf(amsB) : colors.inkMuted, background: ams ? amsTintOf(amsB) : colors.surface, border: `1px solid ${ams ? amsColorOf(amsB) : colors.rule}` }}
+            title="AMS status of the ASSIGNED truck (cached). 'unknown' means AMS has no cached status for its VIN, not that the truck is missing.">
+            AMS {ams || "unknown"}
+          </span>
+        </div>
+        {hasOpenRepair
+          ? "That truck has an open repair PO, so the rental is explained."
+          : pointless
+            ? `AMS shows that truck ${ams} and it has NO open repair PO — nobody is repairing anything, so this rental is likely pointless. Escalate.`
+            : "That truck has NO open repair PO — nothing is being repaired, so this rental may be pointless. Escalate."}
+      </div>
+
+      {/* current shop for the assigned truck */}
+      <section>
+        <div style={label}>Current shop · truck {assigned.truck}</div>
+        {shop ? (
+          <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${shop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
+            <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{shop.vendorName}
+              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: shop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>
+                {shop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}
+              </span>
+            </div>
+            <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[shop.vendorAddress, shop.vendorCity, shop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
+            {phone && <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(phone)}<SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} /></div>}
+            <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {shop.poNumber} · dated {fmtDate(shop.poDate)}</div>
+          </div>
+        ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO on this truck in the last 3 years.</div>}
+      </section>
+
+      <PoHistorySection heading={`PO history · truck ${assigned.truck}`} poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
+
+      {assigned.portal && assigned.portal.messages.length > 0 && (
+        <section>
+          <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+            <span>Holman message trail · truck {assigned.truck} ({assigned.portal.messages.length})</span>
+            <SourceBadge kind="scrape" detail={assigned.portal.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} />
+          </div>
+          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
+            {assigned.portal.messages.map((mg, k) => (
+              <div key={k} style={{ fontSize: 11.5, color: colors.ink, borderBottom: k < assigned.portal!.messages.length - 1 ? `1px solid ${colors.rule}` : "none", paddingBottom: 5 }}>
+                <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 10.5 }}>{mg.date}</span>
+                <div style={{ whiteSpace: "pre-wrap", marginTop: 1 }}>{mg.notes}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </>
+  );
+}
+
+// ── PO tabs: rental van vs the renter's ASSIGNED truck ───────────────────────
+// Tyler's rule: when a tech in a rental is assigned to a DIFFERENT truck, that
+// truck must be checked for a repair PO — no PO means the rental may be
+// pointless and it escalates. That check needs to be one click away on every
+// case, not a section that silently disappears on the 323 cases where the
+// answer is "same truck" or "identity unresolved".
+function PoTabs({ caseKey, assignedTruckNo, identityState, casePoList, casePoSource, casePortal, assigned }: {
+  caseKey: string;
+  assignedTruckNo: string | null;
+  identityState: string | null;
+  casePoList: PoRecord[];
+  casePoSource?: string;
+  casePortal?: PortalData | null;
+  assigned?: AssignedTruckDetail | null;
+}) {
+  const strip = (s: any) => String(s ?? "").replace(/^0+/, "");
+  const sameTruck = !!assignedTruckNo && strip(assignedTruckNo) === strip(caseKey);
+  const unresolved = !assignedTruckNo;
+  const [tab, setTab] = useState<"rental" | "assigned">("rental");
+
+  const assignedLabel = unresolved
+    ? "Assigned truck · none"
+    : sameTruck
+      ? "Assigned truck · same"
+      : `Assigned truck ${assigned?.truck ?? assignedTruckNo}`;
+  const assignedCount = !unresolved && !sameTruck && assigned ? assigned.poHistory.length : null;
+
+  const tabBtn = (key: "rental" | "assigned", text: string, count: number | null, warn: boolean) => (
+    <button type="button" onClick={() => setTab(key)}
+      style={{ fontFamily: fonts.dmSans, fontSize: 12, fontWeight: tab === key ? 700 : 500,
+        color: tab === key ? "#fff" : warn ? colors.amber : colors.inkSoft,
+        background: tab === key ? (warn ? colors.amber : colors.accent) : "transparent",
+        border: `1px solid ${tab === key ? (warn ? colors.amber : colors.accent) : colors.rule}`,
+        borderRadius: 999, padding: "4px 12px", cursor: "pointer" }}>
+      {text}{count != null ? ` (${count})` : ""}
+    </button>
+  );
+
+  return (
+    <section>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+        {tabBtn("rental", `Rental truck ${caseKey}`, casePoList.length, false)}
+        {tabBtn("assigned", assignedLabel, assignedCount, !unresolved && !sameTruck)}
+      </div>
+
+      {tab === "rental" && (
+        <PoHistorySection heading="PO history" poList={casePoList} poSource={casePoSource} portal={casePortal} />
+      )}
+
+      {tab === "assigned" && unresolved && (
+        <div style={{ padding: 12, borderRadius: 10, border: `1px solid ${colors.rule}`, background: colors.surface, fontSize: 12.5, color: colors.inkSoft }}>
+          <b style={{ color: colors.ink }}>No assigned truck to check.</b> This renter's identity is
+          {" "}<b>{identityState ?? "unresolved"}</b>, so we cannot say which truck they are assigned to.
+          Pin the right employee in the Renter / identity section above and this tab will fill in.
+        </div>
+      )}
+
+      {tab === "assigned" && sameTruck && (
+        <div style={{ padding: 12, borderRadius: 10, border: `1px solid ${colors.rule}`, background: colors.surface, fontSize: 12.5, color: colors.inkSoft }}>
+          <b style={{ color: colors.ink }}>This tech is assigned to this same truck ({caseKey}).</b>{" "}
+          There is no second vehicle to check — the POs in the Rental truck tab are their truck's POs.
+          Tyler's mismatch rule does not apply to this case.
+        </div>
+      )}
+
+      {tab === "assigned" && !unresolved && !sameTruck && (
+        assigned ? (
+          <>
+            {(() => {
+              const hasOpenRepair = assigned.poHistory.some((p) => p.vendorType === "repair" && p.poStatus === "APPROVED");
+              const ams = assigned.amsStatus ?? null;
+              const amsB = amsBucketOfLabel(ams);
+              // AMS says it is with the tech AND no repair PO = the strongest
+              // "this rental is pointless" signal available without a call.
+              const pointless = !hasOpenRepair && (amsB === "assigned" || amsB === "in_use" || amsB === "spare");
+              return (
+                <div style={{ padding: "8px 12px", borderRadius: 10, border: `1px solid ${pointless ? colors.red : colors.amber}`, background: pointless ? "rgba(239,68,68,.07)" : "rgba(245,158,11,.07)", fontSize: 12.5, color: colors.inkSoft, marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 4 }}>
+                    <span>This tech is in rental <b>{caseKey}</b> but is assigned to truck <b>{assigned.truck}</b>.</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.04em", borderRadius: 999, padding: "2px 9px", color: ams ? amsColorOf(amsB) : colors.inkMuted, background: ams ? amsTintOf(amsB) : colors.surface, border: `1px solid ${ams ? amsColorOf(amsB) : colors.rule}` }}
+                      title="AMS status of the ASSIGNED truck (cached). 'unknown' means AMS has no cached status for its VIN, not that the truck is missing.">
+                      AMS {ams || "unknown"}
+                    </span>
+                  </div>
+                  {hasOpenRepair
+                    ? "That truck has an open repair PO, so the rental is explained."
+                    : pointless
+                      ? `AMS shows that truck ${ams} and it has NO open repair PO — nobody is repairing anything, so this rental is likely pointless. Escalate.`
+                      : "That truck has NO open repair PO — nothing is being repaired, so this rental may be pointless. Escalate."}
+                </div>
+              );
+            })()}
+            <PoHistorySection heading={`Truck ${assigned.truck} — PO history`}
+              poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
+          </>
+        ) : (
+          <div style={{ padding: 12, borderRadius: 10, border: `1px solid ${colors.rule}`, background: colors.surface, fontSize: 12.5, color: colors.inkSoft }}>
+            Assigned truck <b>{assignedTruckNo}</b> differs from the rental van, but its PO history did not
+            load. Reopen the case; if it stays empty the Holman feed has no rows for that truck.
+          </div>
+        )
+      )}
+    </section>
+  );
+}
+
 // ── PO history section (shared by the rental-case truck and the renter's
 // assigned truck — same renderer, different heading/data) ─────────────────────
 function PoHistorySection({ heading, poList, poSource, portal }: { heading: string; poList: PoRecord[]; poSource?: string; portal?: PortalData | null }) {
@@ -1014,6 +1235,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const qc = useQueryClient();
   const { toast } = useToast();
   const [note, setNote] = useState("");
+  const [truckTab, setTruckTab] = useState<"rental" | "assigned">("rental");
   const c = data?.case;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
@@ -1090,6 +1312,38 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 </button>
               )}
             </section>
+            {/* ── TRUCK TABS: the rental van, and the truck this tech is
+                 actually assigned to. Same sections under each. ───────────── */}
+            {(() => {
+              const at = row?.assigned_truck ?? null;
+              const strip2 = (s: any) => String(s ?? "").replace(/^0+/, "");
+              const distinct = !!at && strip2(at) !== strip2(caseKey);
+              const btn = (k: "rental" | "assigned", text: string, sub: string, warn: boolean) => (
+                <button type="button" onClick={() => setTruckTab(k)}
+                  style={{ flex: 1, textAlign: "left", fontFamily: fonts.dmSans, padding: "8px 12px", borderRadius: 10, cursor: "pointer",
+                    border: `1px solid ${truckTab === k ? (warn ? colors.amber : colors.accent) : colors.rule}`,
+                    background: truckTab === k ? (warn ? colors.amberLight : colors.accentLight) : colors.surface }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: truckTab === k ? (warn ? colors.amber : colors.accent) : colors.ink }}>{text}</div>
+                  <div style={{ fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>{sub}</div>
+                </button>
+              );
+              return (
+                <div style={{ display: "flex", gap: 8 }}>
+                  {btn("rental", `Truck ${caseKey}`, "the rental van", false)}
+                  {distinct
+                    ? btn("assigned", `Truck ${at}`, "tech's assigned truck", true)
+                    : (
+                      <div style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px dashed ${colors.rule}`, background: colors.background }}
+                        title={at ? "This tech is assigned to the same truck they are renting against." : "Identity unresolved, so we cannot say which truck this tech is assigned to."}>
+                        <div style={{ fontSize: 13.5, fontWeight: 600, color: colors.inkMuted }}>{at ? `Truck ${at}` : "No assigned truck"}</div>
+                        <div style={{ fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>{at ? "same as the rental" : "identity unresolved"}</div>
+                      </div>
+                    )}
+                </div>
+              );
+            })()}
+
+            {truckTab === "rental" && (<>
             {/* ticket + vehicle economics */}
             <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div><div style={label}>Ticket</div><div style={val}>{c.ticket_number || c.po_number || "—"} · {c.ticket_status}</div></div>
@@ -1157,17 +1411,11 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
             </section>
             {/* call log — LUCA dispatches + shop-call outcomes, next to PO history */}
             <CallLogSection items={data!.callLog || []} caseKey={caseKey} />
-            {/* PO history — full 3-year, grouped, expandable line items. When the
-                renter's ASSIGNED truck differs from the rental van, a second
-                section shows the assigned truck's POs with the same renderer. */}
-            <PoHistorySection
-              heading={assigned ? `Rental truck ${caseKey} — PO history` : "PO history"}
-              poList={data!.poHistory} poSource={data!.poSource} portal={portal} />
-            {assigned && (
-              <PoHistorySection
-                heading={`Assigned truck ${assigned.truck} — PO history`}
-                poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
-            )}
+            {/* PO history — two ALWAYS-PRESENT tabs: the rental van, and the
+                truck this tech is actually assigned to. The assigned tab answers
+                even when there is nothing to show, so a hidden section can never
+                be mistaken for a missing feature. */}
+            <PoHistorySection heading="PO history" poList={data!.poHistory} poSource={data!.poSource} portal={portal} />
             {/* Holman message trail — the comment history, from the portal */}
             {portal && portal.messages.length > 0 && (
               <section>
@@ -1184,6 +1432,11 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   ))}
                 </div>
               </section>
+            )}
+            </>)}
+
+            {truckTab === "assigned" && (
+              <AssignedTruckTab assigned={assigned} assignedTruckNo={row?.assigned_truck ?? null} caseKey={caseKey} />
             )}
           </div>
         )}
