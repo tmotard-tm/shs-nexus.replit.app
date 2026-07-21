@@ -59,8 +59,9 @@ export interface LucaOutboxTask {
 }
 
 /**
- * One item from the (future) LIVHR call-outcome feed. Shape mirrors LIVHR's
- * IngestCallOutcomeResult + the fleet_call_logs columns it persists.
+ * One item from the LIVHR call-outcome feed (GET /api/luca/call-outcomes).
+ * Shape mirrors LIVHR's IngestCallOutcomeResult + the fleet_call_logs columns
+ * it persists.
  */
 export interface LucaCallOutcomeItem {
   conversationId: string;
@@ -74,6 +75,12 @@ export interface LucaCallOutcomeItem {
   callTimestamp?: string | null;
   shopName?: string | null;
   toPhone?: string | null;
+  /**
+   * Full post-call transcript (LIVHR fleet_call_logs.transcript). Null when
+   * the call never connected. Stored verbatim on fs_call_logs.transcript so
+   * the vehicle record carries the whole call, not just the summary.
+   */
+  transcript?: string | null;
 }
 
 // ─── Output shapes ───────────────────────────────────────────────────────────
@@ -107,6 +114,7 @@ export interface CallLogWrite {
   shopNotes: string;
   estimatedReadyDate: string | null;
   blockers: string | null;
+  transcript: string | null;
   attemptNumber: number;
 }
 
@@ -411,6 +419,11 @@ export function mapCallOutcome(item: LucaCallOutcomeItem): MappedWriteback {
     shopNotes: truncateSummary(`[LUCA] ${summaryText}`),
     estimatedReadyDate: eta,
     blockers: clean(item.blockers),
+    // Full transcript passes through untruncated — fs_call_logs.transcript is
+    // text and the drawer renders it behind an expand toggle.
+    transcript: typeof item.transcript === "string" && item.transcript.trim() !== ""
+      ? item.transcript
+      : null,
     attemptNumber: 1,
   };
   base.actionNote = truncateSummary(

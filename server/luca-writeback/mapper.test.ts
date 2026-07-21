@@ -101,6 +101,7 @@ const readyOutcome: LucaCallOutcomeItem = {
   estimatedReadyDate: null,
   blockers: null,
   callTimestamp: "2026-07-06T15:00:00.000Z",
+  transcript: "AGENT: Calling about vehicle 6611.\nSHOP: All set, ready for pickup.",
 };
 
 const etaOutcome: LucaCallOutcomeItem = {
@@ -211,6 +212,20 @@ test("happy path — READY_PICKUP maps to 'Ready' + VEHICLE_READY call log", () 
   assert.equal(m.callLog!.outcome, "VEHICLE_READY");
   assert.equal(m.callLog!.callType, "repair"); // /queue/today's authoritative filter
   assert.equal(m.callLog!.batchId, "LUCA");
+  assert.equal(
+    m.callLog!.transcript,
+    "AGENT: Calling about vehicle 6611.\nSHOP: All set, ready for pickup.",
+  );
+});
+
+test("transcript passes through untruncated; missing/blank transcript stays null", () => {
+  const long = "SHOP: line\n".repeat(500); // ~5.5K chars — must NOT be truncated
+  const withLong = mapCallOutcome({ ...readyOutcome, conversationId: "c7", transcript: long });
+  assert.equal(withLong.callLog!.transcript, long);
+  const absent = mapCallOutcome({ ...readyOutcome, conversationId: "c8", transcript: undefined });
+  assert.equal(absent.callLog!.transcript, null);
+  const blank = mapCallOutcome({ ...readyOutcome, conversationId: "c9", transcript: "   " });
+  assert.equal(blank.callLog!.transcript, null);
 });
 
 test("HAS_ETA carries eta onto the truck and the call log", () => {
@@ -222,10 +237,10 @@ test("HAS_ETA carries eta onto the truck and the call log", () => {
   assert.equal(m.callLog!.blockers, "final alignment pending");
 });
 
-test("NO_ANSWER maps to CALL_FAILED log outcome", () => {
+test("NO_ANSWER maps to CALL_NO_CONTACT log outcome (retryable, matches the webhook vocabulary)", () => {
   const m = mapCallOutcome({ ...readyOutcome, conversationId: "c2", outcome: "NO_ANSWER" });
   assert.equal(m.truckWrite!.lastCallStatus, "No Answer");
-  assert.equal(m.callLog!.outcome, "CALL_FAILED");
+  assert.equal(m.callLog!.outcome, "CALL_NO_CONTACT");
 });
 
 test("REPAIR_DECLINED call outcome NEVER writes main_status (terminal gate is case-file-only)", () => {
