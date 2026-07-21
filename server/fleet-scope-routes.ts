@@ -5066,17 +5066,21 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       // statuses (Repairing, Confirming Status, Decision Pending, etc.).
       // HOLMAN_ETL_PO_DETAILS is sourced from Holman's fleet management system
       // (same Snowflake data used by fleet sync / the scraper pipeline).
-      // Key: zero-padded 6-digit vehicle number (matches HOLMAN_VEHICLE_NUMBER format).
+      // PO_STATUS domain is PAID/VOID/APPROVED/HOLD/BILL HOLD/SUSPENDED/null —
+      // "open" = APPROVED (HOLD = awaiting approval, still an open repair).
+      // HOLMAN_VEHICLE_NUMBER is stored in Holman's raw form (mostly unpadded,
+      // some rows retain leading zeros), so both the map keys and the lookup
+      // normalize by stripping leading zeros.
       const holmanRepairStartMap: Record<string, Date> = {};
       try {
         const repairPORows = await executeQuery<{ HOLMAN_VEHICLE_NUMBER: string; EARLIEST_PO_DATE: string }>(`
           SELECT HOLMAN_VEHICLE_NUMBER, MIN(PO_DATE) AS EARLIEST_PO_DATE
           FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS
-          WHERE PO_STATUS IN ('Open', 'Pending', 'In Progress')
+          WHERE UPPER(PO_STATUS) IN ('APPROVED', 'HOLD')
           GROUP BY HOLMAN_VEHICLE_NUMBER
         `);
         for (const row of repairPORows) {
-          const num = (row.HOLMAN_VEHICLE_NUMBER || '').toString().trim();
+          const num = (row.HOLMAN_VEHICLE_NUMBER || '').toString().trim().replace(/^0+/, '');
           const dt = row.EARLIEST_PO_DATE ? new Date(row.EARLIEST_PO_DATE) : null;
           if (num && dt && !isNaN(dt.getTime())) {
             holmanRepairStartMap[num] = dt;
@@ -5219,8 +5223,8 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         const ms = truck.mainStatus ?? '';
         // Step 1: Snowflake Holman open PO date (repair trucks)
         if (REPAIR_STATUSES.has(ms)) {
-          const padded = truck.truckNumber.padStart(6, '0');
-          const holmanDate = holmanRepairStartMap[padded];
+          const canonical = truck.truckNumber.trim().replace(/^0+/, '');
+          const holmanDate = holmanRepairStartMap[canonical];
           if (holmanDate) return daysSince(holmanDate);
         }
         // Step 2: local status event log (mirrors fs_pmf_status_events pattern)
