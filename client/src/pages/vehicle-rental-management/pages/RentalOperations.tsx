@@ -914,9 +914,9 @@ function amsTintOf(b: string): string {
 // technician actually owns. Tyler's rule lives here — a tech in a rental whose
 // own truck has NO open repair PO means nobody is repairing anything, so the
 // rental may be pointless and it escalates.
-function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scraping }: {
+function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scraping, callItems }: {
   assigned?: AssignedTruckDetail | null; assignedTruckNo: string | null; caseKey: string;
-  onScrape: (truck: string) => void; scraping: boolean;
+  onScrape: (truck: string) => void; scraping: boolean; callItems: CallLogItem[];
 }) {
   const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
   const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
@@ -969,7 +969,8 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
         ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
       </section>
 
-      <PoHistorySection heading="PO history" poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
+      <PoAndCallTabs truck={assigned.truck} poList={assigned.poHistory} poSource={assigned.poSource}
+        portal={assigned.portal} callItems={callItems} />
 
       {assigned.portal && assigned.portal.messages.length > 0 && (
         <section>
@@ -1093,6 +1094,38 @@ function PoTabs({ caseKey, assignedTruckNo, identityState, casePoList, casePoSou
           </div>
         )
       )}
+    </section>
+  );
+}
+
+// ── per-truck sub-tabs: POs (default) and Call Logs ──────────────────────────
+// POs are why you open a case; call history is a lookup. Calls are filtered to
+// THIS truck so the rental tab does not show the assigned truck's calls.
+function PoAndCallTabs({ truck, poList, poSource, portal, callItems }: {
+  truck: string; poList: PoRecord[]; poSource?: string; portal?: PortalData | null; callItems: CallLogItem[];
+}) {
+  const [sub, setSub] = useState<"pos" | "calls">("pos");
+  const strip = (s: any) => String(s ?? "").replace(/^0+/, "");
+  const mine = callItems.filter((c) => !c.truck || strip(c.truck) === strip(truck));
+  const btn = (k: "pos" | "calls", text: string, n: number) => (
+    <button type="button" onClick={() => setSub(k)}
+      style={{ fontFamily: fonts.dmSans, fontSize: 12, fontWeight: sub === k ? 700 : 500,
+        color: sub === k ? "#fff" : colors.inkSoft,
+        background: sub === k ? colors.accent : "transparent",
+        border: `1px solid ${sub === k ? colors.accent : colors.rule}`,
+        borderRadius: 999, padding: "4px 14px", cursor: "pointer" }}>
+      {text} <span style={{ opacity: 0.75 }}>{n}</span>
+    </button>
+  );
+  return (
+    <section>
+      <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+        {btn("pos", "POs", poList.length)}
+        {btn("calls", "Call Logs", mine.length)}
+      </div>
+      {sub === "pos"
+        ? <PoHistorySection heading="PO history" poList={poList} poSource={poSource} portal={portal} />
+        : <CallLogSection items={mine} caseKey={truck} />}
     </section>
   );
 }
@@ -1411,13 +1444,12 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 ))}
               </div>
             </section>
-            {/* call log — LUCA dispatches + shop-call outcomes, next to PO history */}
-            <CallLogSection items={data!.callLog || []} caseKey={caseKey} />
             {/* PO history — two ALWAYS-PRESENT tabs: the rental van, and the
                 truck this tech is actually assigned to. The assigned tab answers
                 even when there is nothing to show, so a hidden section can never
                 be mistaken for a missing feature. */}
-            <PoHistorySection heading="PO history" poList={data!.poHistory} poSource={data!.poSource} portal={portal} />
+            <PoAndCallTabs truck={caseKey} poList={data!.poHistory} poSource={data!.poSource} portal={portal}
+              callItems={data!.callLog || []} />
             {/* Holman message trail — the comment history, from the portal */}
             {portal && portal.messages.length > 0 && (
               <section>
@@ -1439,7 +1471,8 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
 
             {truckTab === "assigned" && (
               <AssignedTruckTab assigned={assigned} assignedTruckNo={row?.assigned_truck ?? null} caseKey={caseKey}
-                onScrape={(t) => scrapeMut.mutate(t)} scraping={scrapeMut.isPending} />
+                onScrape={(t) => scrapeMut.mutate(t)} scraping={scrapeMut.isPending}
+                callItems={data!.callLog || []} />
             )}
           </div>
         )}
