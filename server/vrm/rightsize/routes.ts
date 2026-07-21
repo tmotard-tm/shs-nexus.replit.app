@@ -19,9 +19,12 @@ function actorOf(req: any): string {
 const STAGES = ["DONE", "RETURNED", "COMMITTED", "PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS", "QUESTION", "PASS_EXCUSED", "NON_RESPONDER", "NEW_REPLY"];
 
 export function registerRightsizeRoutes(router: Router): void {
-  // Rolling refresh: every 30 minutes so the huddle deck always has fresh data.
-  // Set RIGHTSIZE_TRACKER_DISABLED=true to turn the interval off without a code
-  // change; the manual Sync button keeps working either way.
+  // Rolling refresh: replies are now classified on arrival by the Twilio inbound
+  // webhook (server/fleet-comms/inbound.ts), so this 30-minute pass is the
+  // SAFETY NET, not the primary path - it catches anything the webhook missed
+  // and is what keeps the KPI snapshots ticking. Set RIGHTSIZE_TRACKER_DISABLED
+  // =true to turn the interval off without a code change; the manual Sync button
+  // and the real-time path keep working either way.
   if (!timerStarted && process.env.RIGHTSIZE_TRACKER_DISABLED !== "true") {
     timerStarted = true;
     setInterval(() => {
@@ -84,6 +87,7 @@ export function registerRightsizeRoutes(router: Router): void {
         db.execute(sql`
           SELECT id, message_id, to_char(message_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS message_at,
                  message_text, old_stage, new_stage, action, reason, actor,
+                 verdict_source, model_id, confidence,
                  to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_at
           FROM vrm_rightsize_events WHERE ldap = ${ldap} ORDER BY created_at DESC LIMIT 100
         `),

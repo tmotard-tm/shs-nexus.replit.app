@@ -224,6 +224,23 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
     }
   }
 
+  // VRM Rightsize tracker: classify this reply NOW rather than letting it sit
+  // until the next 30-minute sweep, so the tracker (and the huddle deck reading
+  // it) is current within seconds of a technician replying.
+  //
+  // Strictly fire-and-forget. fireRightsizeClassification never throws and is
+  // never awaited: the tracker is a downstream consumer and must not be able to
+  // delay, fail, or error this handler back to Twilio. The 30-minute sweep in
+  // server/vrm/rightsize/sync.ts stays in place as the safety net for anything
+  // this path misses, and the pipeline is idempotent, so both seeing the same
+  // message is a no-op.
+  try {
+    const { fireRightsizeClassification } = await import("../vrm/rightsize/realtime");
+    fireRightsizeClassification(String(message.id));
+  } catch (err) {
+    console.error("[Comms Inbound] rightsize hook failed:", err);
+  }
+
   // Notify the inbox UI (thread id as the room key).
   try {
     broadcastMessage(`comms:${threadId}`, { type: "comms_message", message });

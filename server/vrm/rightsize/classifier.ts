@@ -96,6 +96,29 @@ const RX = {
   dateWord: /\b(today|tonight|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|this week(end)?|next week|\d{1,2}\/\d{1,2})\b/i,
 };
 
+/**
+ * True when the body carries PERFECT-TENSE swap/return language, regardless of
+ * whether a future/date token elsewhere in the sentence made classifyReply
+ * downgrade it to COMMITTED.
+ *
+ * The proven case is "All swapped out on Friday": "Friday" trips futureTense, so
+ * the perfect-tense DONE rule is suppressed and the reply scores COMMITTED -
+ * but the technician is reporting a swap that already happened. The regex has
+ * no way to tell that from "I'll swap out on Friday", and widening it to try is
+ * exactly how a promise gets banked as secured dollars.
+ *
+ * So this predicate changes NO verdict on its own. It exists only to mark a
+ * reply as tense-ambiguous so the pipeline can ask the LLM for a SECOND opinion
+ * (see resolveVerdict in ./llm.ts), which can add a DONE/RETURNED proposal for
+ * a human without ever disturbing the regex's own verdict.
+ */
+export function hasPerfectTenseSwapLanguage(body: unknown): boolean {
+  const text = normalizeMessageText(body).trim();
+  if (!text || TAPBACK.test(text)) return false;
+  if (RX.perfectDone.test(text)) return true;
+  return RX.returned.test(text) && !RX.returnTrap.test(text);
+}
+
 export function classifyReply(input: ClassifyInput): ClassifyResult {
   // Punctuation is normalized ONCE, before any rule runs, so every regex below
   // sees the ASCII form of whatever the phone typed.

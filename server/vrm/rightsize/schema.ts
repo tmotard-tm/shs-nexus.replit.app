@@ -59,12 +59,24 @@ export async function initRightsizeSchema(): Promise<void> {
       new_stage      VARCHAR(30),
       action         VARCHAR(30) NOT NULL,          -- auto_advance | propose_review | manual_verify | note | none
       reason         TEXT,
-      actor          VARCHAR(120),                  -- svc:rightsize-sync | session user
+      actor          VARCHAR(120),                  -- svc:rightsize-sync | svc:rightsize-webhook | session user
+      verdict_source VARCHAR(20),                   -- regex | bedrock  (which brain ruled)
+      model_id       VARCHAR(160),                  -- bedrock inference profile, when verdict_source='bedrock'
+      confidence     NUMERIC(4,3),                  -- model self-reported confidence, when applicable
       created_at     TIMESTAMPTZ DEFAULT NOW()
     );
   `);
+  // Provenance columns, added after the table shipped: every classifier verdict
+  // records WHICH brain made the call (and which model), so a wrong stage can
+  // always be traced back to the regex rule or the Bedrock response that caused
+  // it. Additive and idempotent, so boot is safe on an existing database.
+  await db.execute(sql`ALTER TABLE vrm_rightsize_events ADD COLUMN IF NOT EXISTS verdict_source VARCHAR(20);`);
+  await db.execute(sql`ALTER TABLE vrm_rightsize_events ADD COLUMN IF NOT EXISTS model_id VARCHAR(160);`);
+  await db.execute(sql`ALTER TABLE vrm_rightsize_events ADD COLUMN IF NOT EXISTS confidence NUMERIC(4,3);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_rsz_events_ldap ON vrm_rightsize_events (ldap, created_at DESC);`);
   await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS uq_vrm_rsz_events_msg ON vrm_rightsize_events (message_id, action) WHERE message_id IS NOT NULL;`);
+  // The real-time path looks a message up by id before doing anything else.
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_rsz_events_msgid ON vrm_rightsize_events (message_id);`);
 
   // KPI snapshot per sync run: the huddle deck reads movement from these.
   await db.execute(sql`

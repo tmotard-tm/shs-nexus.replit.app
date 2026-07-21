@@ -1,19 +1,37 @@
 /**
- * Rightsize tracker sync: every 30 minutes, read NEW inbound fs_comms messages
- * (ALL categories - the 7/15 category-leak lesson), attribute the message to a
- * tech by ANY number that tech owns (the 7/20 person-centric fix), run the
- * conservative classifier, append events, update the tracked techs, and
- * snapshot KPIs for the huddle deck.
+ * Rightsize tracker pipeline.
+ *
+ * TWO triggers, ONE code path:
+ *   - real time: the Twilio inbound webhook calls classifyInboundNow() the
+ *     moment a reply is durably persisted (see server/fleet-comms/inbound.ts →
+ *     ./realtime.ts), so the tracker is current in seconds instead of up to 30
+ *     minutes.
+ *   - every 30 minutes: runRightsizeSync() sweeps everything since the
+ *     watermark as the safety net for anything the webhook missed (webhook
+ *     failure, backfill, messages written by other paths).
+ * Both reach the database through processInboundMessage(). There is exactly one
+ * classification code path.
+ *
+ * Idempotency: a message that already produced an event row is a full no-op, so
+ * the batch sweep can never re-flag a review a human already cleared, and the
+ * unique index on (message_id, action) is the second line of defence. The
+ * real-time path never writes the watermark, so it can never move it backwards.
  *
  * Reads fs_comms_* and all_techs; writes ONLY vrm_rightsize_*. An advisory
- * lock makes concurrent runs (interval + manual button) a no-op.
+ * lock makes concurrent batch runs (interval + manual button) a no-op.
  *
  * Nothing inbound is ever dropped: anything we cannot attribute lands in
  * vrm_rightsize_unmatched_inbound for human review instead of disappearing.
  */
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { classifyReply, isTapback, type ClassifyResult } from "./classifier";
+import {
+  resolveVerdict,
+  stageMutationFor,
+  llmMaxPerRun,
+  type RightsizeVerdict,
+  type VerdictDeps,
+} from "./llm";
 import { buildPhoneIndex, resolveInboundLdap, PHONE_OWNERS_SQL, type PhoneIndex, type PhoneOwnerRow } from "./phone";
 
 const LOCK_KEY = 771_2026; // arbitrary app-scoped advisory lock id
@@ -100,6 +118,247 @@ export async function computeKpis(): Promise<RightsizeKpis> {
   };
 }
 
+// --------------------------------------------------------------- shared path
+
+/** One inbound row, in the shape both triggers hand to processInboundMessage. */
+export interface InboundMessageRow {
+  id: string;
+  body: string | null;
+  category: string | null;
+  message_ldap: string | null;
+  phone_digits: string | null;
+  phone: string | null;
+  /** Raw naive fs_comms created_at, 'YYYY-MM-DD HH24:MI:SS' - the watermark unit. */
+  created_raw: string;
+  /** Same instant as an ISO Z string, for timestamptz columns. */
+  created_utc: string;
+}
+
+export interface ProcessContext {
+  phoneIndex: PhoneIndex;
+  /** Written into vrm_rightsize_events.actor so the trigger is auditable. */
+  actor: string;
+  /** Shared Bedrock budget + injection seams. */
+  deps?: VerdictDeps;
+}
+
+export type ProcessOutcome =
+  | "already_processed"
+  | "unmatched"
+  | "untracked_renter"
+  | "outside_universe"
+  | "classified";
+
+export interface ProcessResult {
+  outcome: ProcessOutcome;
+  ldap?: string;
+  advanced?: boolean;
+  flagged?: boolean;
+  verdict?: RightsizeVerdict;
+}
+
+/** The columns both triggers select, so the row shapes cannot drift apart. */
+export const INBOUND_MESSAGE_COLUMNS = sql`
+  m.id, m.body, m.category, m.ldap AS message_ldap, m.phone_digits, m.phone,
+  to_char(m.created_at,'YYYY-MM-DD HH24:MI:SS') AS created_raw,
+  to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_utc
+`;
+
+/**
+ * Classify ONE inbound message and apply its consequences. Called by the Twilio
+ * webhook (in real time) and by the 30-minute sweep (as the safety net).
+ *
+ * Idempotent by design: if this message already produced an event row it is a
+ * complete no-op, so a webhook-processed message is not re-processed - and
+ * crucially not re-flagged for review - when the sweep sees it again.
+ */
+export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessContext): Promise<ProcessResult> {
+  const messageId = String(m.id);
+
+  // Already handled by the other trigger. The event row is written last (below),
+  // so its presence means the whole unit of work completed.
+  const seen = await db.execute(sql`SELECT 1 FROM vrm_rightsize_events WHERE message_id = ${messageId} LIMIT 1`);
+  if (seen.rows.length) return { outcome: "already_processed" };
+
+  const resolved = resolveInboundLdap(
+    { ldap: m.message_ldap, phoneDigits: m.phone_digits, phone: m.phone },
+    ctx.phoneIndex,
+  );
+  const ldap = resolved.ldap ?? "";
+  if (!ldap) {
+    // NEVER silently drop. An unattributable reply is logged for review.
+    await db.execute(sql`
+      INSERT INTO vrm_rightsize_unmatched_inbound (message_id, phone_digits, body, category, message_at, note)
+      VALUES (${messageId}, ${m.phone_digits ?? m.phone ?? null}, ${String(m.body ?? "").slice(0, 2000)},
+              ${m.category ?? null}, ${m.created_utc}::timestamptz, ${resolved.note})
+      ON CONFLICT (message_id) DO NOTHING
+    `);
+    return { outcome: "unmatched" };
+  }
+
+  const tRes = await db.execute(sql`SELECT ldap, stage, proposed_stage FROM vrm_rightsize_techs WHERE ldap = ${ldap}`);
+  const tracked = tRes.rows[0] as any | undefined;
+
+  if (!tracked) {
+    // A reply from someone outside the tracked universe. If they are an
+    // open-rental renter (present in rental ops cases), pull them in as
+    // NEW_REPLY for review; otherwise ignore (general fleet traffic).
+    const isRenter = await db.execute(sql`
+      SELECT 1 FROM vrm_rental_identity_resolutions i
+      JOIN all_techs a ON a.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      WHERE UPPER(TRIM(a.tech_racfid)) = ${ldap} LIMIT 1
+    `);
+    if (isRenter.rows.length) {
+      await db.execute(sql`
+        INSERT INTO vrm_rightsize_techs (ldap, stage, stage_source, round, needs_review, review_reason, last_inbound_at, last_inbound_text, updated_at)
+        VALUES (${ldap}, 'NEW_REPLY', 'auto', 0, TRUE, 'inbound from an open-rental renter not in the campaign universe',
+                ${m.created_utc}::timestamptz, ${String(m.body ?? "").slice(0, 500)}, NOW())
+        ON CONFLICT (ldap) DO NOTHING
+      `);
+      await db.execute(sql`
+        INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source)
+        VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${String(m.body ?? "").slice(0, 1000)}, NULL, 'NEW_REPLY', 'propose_review', 'untracked renter replied', ${ctx.actor}, 'regex')
+        ON CONFLICT DO NOTHING
+      `);
+      return { outcome: "untracked_renter", ldap };
+    }
+    // Attributable, but outside the campaign universe (general fleet traffic).
+    // Still recorded - pre-resolved so it does not inflate the open unmatched
+    // count - because nothing inbound goes unlogged.
+    await db.execute(sql`
+      INSERT INTO vrm_rightsize_unmatched_inbound (message_id, phone_digits, body, category, message_at, resolved, note)
+      VALUES (${messageId}, ${m.phone_digits ?? m.phone ?? null}, ${String(m.body ?? "").slice(0, 2000)},
+              ${m.category ?? null}, ${m.created_utc}::timestamptz, TRUE,
+              ${`attributed to ${ldap} (${resolved.via}) but not in the rightsize universe`})
+      ON CONFLICT (message_id) DO NOTHING
+    `);
+    return { outcome: "outside_universe", ldap };
+  }
+
+  const rawBody = String(m.body || "");
+  // Regex first; Bedrock only for what the regex could not resolve; tapbacks
+  // never reach either brain as the technician's words. One policy, in ./llm.ts.
+  const verdict = await resolveVerdict(rawBody, tracked.stage, {
+    ...(ctx.deps ?? {}),
+    loadOutboundContext: ctx.deps?.loadOutboundContext ?? (() => lastOutboundTo(ldap, m.created_utc)),
+  });
+
+  await db.execute(sql`
+    UPDATE vrm_rightsize_techs
+    SET last_inbound_at = GREATEST(COALESCE(last_inbound_at, 'epoch'::timestamptz), ${m.created_utc}::timestamptz),
+        last_inbound_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
+    WHERE ldap = ${ldap}
+  `);
+
+  // stageMutationFor is the single write boundary: DONE/RETURNED can only ever
+  // come out of it as a proposal, whichever brain produced the verdict.
+  const mutation = stageMutationFor(verdict, tracked.stage);
+  let advanced = false, flagged = false;
+  if (mutation.kind === "advance") {
+    await db.execute(sql`
+      UPDATE vrm_rightsize_techs
+      SET stage = ${mutation.stage}, stage_source = ${verdict.source === "bedrock" ? "auto_llm" : "auto"}, stage_changed_at = NOW(),
+          decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)},
+          commit_date_text = COALESCE(${verdict.commitDateText ?? null}, commit_date_text), updated_at = NOW()
+      WHERE ldap = ${ldap}
+    `);
+    advanced = true;
+  } else if (mutation.kind === "propose") {
+    await db.execute(sql`
+      UPDATE vrm_rightsize_techs
+      SET proposed_stage = ${mutation.stage}, needs_review = TRUE, review_reason = ${verdict.reason},
+          decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
+      WHERE ldap = ${ldap}
+    `);
+    flagged = true;
+  }
+
+  // A tense-ambiguous reply ("All swapped out on Friday") keeps its regex
+  // verdict above AND carries a Bedrock DONE/RETURNED proposal. It is written
+  // as a proposal + needs_review - never to `stage` - so a completed swap
+  // cannot hide inside a COMMITTED without anyone noticing.
+  const second = verdict.secondOpinion;
+  if (second?.proposal) {
+    const secondMutation = stageMutationFor(second, tracked.stage);
+    if (secondMutation.kind === "propose") {
+      await db.execute(sql`
+        UPDATE vrm_rightsize_techs
+        SET proposed_stage = ${secondMutation.stage}, needs_review = TRUE, review_reason = ${second.reason},
+            decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
+        WHERE ldap = ${ldap}
+      `);
+      flagged = true;
+      await db.execute(sql`
+        INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
+        VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
+                ${tracked.stage}, ${secondMutation.stage}, 'propose_review', ${second.reason},
+                ${ctx.actor}, ${second.source}, ${second.modelId ?? null}, ${second.confidence ?? null})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
+
+  // Written LAST and on purpose: this row is the idempotency marker, so it only
+  // exists once the whole unit of work above succeeded.
+  const action = verdict.mode === "auto" ? "auto_advance" : verdict.mode === "review" ? "propose_review" : "none";
+  await db.execute(sql`
+    INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
+    VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
+            ${tracked.stage}, ${verdict.proposal}, ${action},
+            ${resolved.via === "message_ldap" ? verdict.reason : `${verdict.reason} [attributed via ${resolved.via}: ${resolved.phone}]`},
+            ${ctx.actor}, ${verdict.source}, ${verdict.modelId ?? null}, ${verdict.confidence ?? null})
+    ON CONFLICT DO NOTHING
+  `);
+
+  return { outcome: "classified", ldap, advanced, flagged, verdict };
+}
+
+/** The outbound message the technician is replying to, for LLM context only. */
+async function lastOutboundTo(ldap: string, beforeUtc: string): Promise<string | null> {
+  try {
+    const r = await db.execute(sql`
+      SELECT body FROM fs_comms_messages
+      WHERE direction = 'outbound' AND ldap = ${ldap}
+        AND (created_at AT TIME ZONE 'UTC') <= ${beforeUtc}::timestamptz
+      ORDER BY created_at DESC LIMIT 1
+    `);
+    const body = (r.rows[0] as any)?.body;
+    return body ? String(body) : null;
+  } catch {
+    return null; // context is a nicety, never a reason to fail a classification
+  }
+}
+
+/**
+ * Real-time entry point: classify a single freshly-arrived inbound message.
+ * Deliberately does NOT touch the watermark (the batch sweep owns it, and this
+ * path must never move it forwards past messages it did not read) and does NOT
+ * write a KPI snapshot (those are per-sync-run, not per-message).
+ */
+export async function classifyInboundNow(messageId: string): Promise<ProcessResult | { outcome: "not_found" }> {
+  const r = await db.execute(sql`
+    SELECT ${INBOUND_MESSAGE_COLUMNS}
+    FROM fs_comms_messages m
+    WHERE m.id = ${String(messageId)} AND m.direction = 'inbound'
+    LIMIT 1
+  `);
+  const row = r.rows[0] as unknown as InboundMessageRow | undefined;
+  if (!row) return { outcome: "not_found" };
+  const result = await processInboundMessage(row, {
+    phoneIndex: await loadPhoneIndex(),
+    actor: "svc:rightsize-webhook",
+    deps: { budget: { remaining: 1 } },
+  });
+  console.log("[VRM/Rightsize] realtime:", JSON.stringify({
+    messageId, outcome: result.outcome, ldap: result.ldap ?? null,
+    stage: result.verdict?.proposal ?? null, source: result.verdict?.source ?? null,
+    advanced: result.advanced ?? false, flagged: result.flagged ?? false,
+  }));
+  return result;
+}
+
+// ----------------------------------------------------------- batch safety net
+
 export async function runRightsizeSync(opts: { trigger: string }): Promise<any> {
   const lock = await db.execute(sql`SELECT pg_try_advisory_lock(${LOCK_KEY}) AS ok`);
   if (!(lock.rows[0] as any)?.ok) return { skipped: true, reason: "another sync holds the lock" };
@@ -109,13 +368,14 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
 
     // Every number each tech owns, resolved once for the whole run.
     const phoneIndex = await loadPhoneIndex();
+    // One shared Bedrock budget for the run. The webhook already handled most
+    // of these in real time, so the sweep normally spends almost nothing.
+    const budget = { remaining: llmMaxPerRun() };
 
     // New inbound across ALL categories. Attribution is person-centric: the
     // ldap stamped on the message wins, otherwise ANY number the tech owns.
     const msgs = await db.execute(sql`
-      SELECT m.id, m.body, m.category, m.ldap AS message_ldap, m.phone_digits, m.phone,
-             to_char(m.created_at,'YYYY-MM-DD HH24:MI:SS') AS created_raw,
-             to_char(m.created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') AS created_utc
+      SELECT ${INBOUND_MESSAGE_COLUMNS}
       FROM fs_comms_messages m
       WHERE m.direction = 'inbound'
         AND m.created_at > ${watermark}::timestamp
@@ -124,108 +384,31 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
     `);
 
     let processed = 0, advanced = 0, flagged = 0, untracked = 0, unmatched = 0;
+    let alreadyDone = 0, errors = 0, llmCalls = 0;
     let newWatermark = watermark;
-    for (const m of msgs.rows as any[]) {
-      newWatermark = m.created_raw > newWatermark ? m.created_raw : newWatermark;
-      const resolved = resolveInboundLdap(
-        { ldap: m.message_ldap, phoneDigits: m.phone_digits, phone: m.phone },
-        phoneIndex,
-      );
-      const ldap = resolved.ldap ?? "";
-      if (!ldap) {
-        // NEVER silently drop. An unattributable reply is logged for review.
-        await db.execute(sql`
-          INSERT INTO vrm_rightsize_unmatched_inbound (message_id, phone_digits, body, category, message_at, note)
-          VALUES (${String(m.id)}, ${m.phone_digits ?? m.phone ?? null}, ${String(m.body ?? "").slice(0, 2000)},
-                  ${m.category ?? null}, ${m.created_utc}::timestamptz, ${resolved.note})
-          ON CONFLICT (message_id) DO NOTHING
-        `);
-        unmatched += 1;
-        continue;
-      }
-      const tRes = await db.execute(sql`SELECT ldap, stage, proposed_stage FROM vrm_rightsize_techs WHERE ldap = ${ldap}`);
-      const tracked = tRes.rows[0] as any | undefined;
-      processed += 1;
-
-      if (!tracked) {
-        // A reply from someone outside the tracked universe. If they are an
-        // open-rental renter (present in rental ops cases), pull them in as
-        // NEW_REPLY for review; otherwise ignore (general fleet traffic).
-        const isRenter = await db.execute(sql`
-          SELECT 1 FROM vrm_rental_identity_resolutions i
-          JOIN all_techs a ON a.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-          WHERE UPPER(TRIM(a.tech_racfid)) = ${ldap} LIMIT 1
-        `);
-        if (isRenter.rows.length) {
-          await db.execute(sql`
-            INSERT INTO vrm_rightsize_techs (ldap, stage, stage_source, round, needs_review, review_reason, last_inbound_at, last_inbound_text, updated_at)
-            VALUES (${ldap}, 'NEW_REPLY', 'auto', 0, TRUE, 'inbound from an open-rental renter not in the campaign universe',
-                    ${m.created_utc}::timestamptz, ${String(m.body).slice(0, 500)}, NOW())
-            ON CONFLICT (ldap) DO NOTHING
-          `);
-          await db.execute(sql`
-            INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor)
-            VALUES (${ldap}, ${m.id}, ${m.created_utc}::timestamptz, ${String(m.body).slice(0, 1000)}, NULL, 'NEW_REPLY', 'propose_review', 'untracked renter replied', 'svc:rightsize-sync')
-            ON CONFLICT DO NOTHING
-          `);
-          untracked += 1;
-        } else {
-          // Attributable, but outside the campaign universe (general fleet
-          // traffic). Still recorded - pre-resolved so it does not inflate the
-          // open unmatched count - because nothing inbound goes unlogged.
-          await db.execute(sql`
-            INSERT INTO vrm_rightsize_unmatched_inbound (message_id, phone_digits, body, category, message_at, resolved, note)
-            VALUES (${String(m.id)}, ${m.phone_digits ?? m.phone ?? null}, ${String(m.body ?? "").slice(0, 2000)},
-                    ${m.category ?? null}, ${m.created_utc}::timestamptz, TRUE,
-                    ${`attributed to ${ldap} (${resolved.via}) but not in the rightsize universe`})
-            ON CONFLICT (message_id) DO NOTHING
-          `);
+    // Once a message fails, the watermark stops advancing so the failure is
+    // retried next run instead of being skipped forever.
+    let watermarkFrozen = false;
+    for (const row of msgs.rows as unknown as InboundMessageRow[]) {
+      const before = budget.remaining;
+      try {
+        const r = await processInboundMessage(row, { phoneIndex, actor: "svc:rightsize-sync", deps: { budget } });
+        if (r.outcome === "already_processed") alreadyDone += 1;
+        else if (r.outcome === "unmatched") unmatched += 1;
+        else if (r.outcome === "untracked_renter") { untracked += 1; processed += 1; }
+        else if (r.outcome === "outside_universe") processed += 1;
+        else if (r.outcome === "classified") {
+          processed += 1;
+          if (r.advanced) advanced += 1;
+          if (r.flagged) flagged += 1;
         }
-        continue;
+        if (!watermarkFrozen && row.created_raw > newWatermark) newWatermark = row.created_raw;
+      } catch (e: any) {
+        errors += 1;
+        watermarkFrozen = true;
+        console.error(`[VRM/Rightsize] message ${row.id} failed:`, e?.message || e);
       }
-
-      // An iMessage tapback ("Liked "...""), quotes OUR outbound text back at
-      // us. It is engagement - last_inbound and the event below still record it
-      // - but the quoted words are ours, so it can never move or propose a
-      // stage. Same guard the re-verify pass uses; one shared definition.
-      const rawBody = String(m.body || "");
-      const tapback = isTapback(rawBody);
-      const verdict: ClassifyResult = tapback
-        ? { proposal: null, mode: "none", reason: "imessage tapback quoting our outbound text; acknowledgement only, no verdict" }
-        : classifyReply({ body: rawBody, currentStage: tracked.stage });
-      await db.execute(sql`
-        UPDATE vrm_rightsize_techs
-        SET last_inbound_at = GREATEST(COALESCE(last_inbound_at, 'epoch'::timestamptz), ${m.created_utc}::timestamptz),
-            last_inbound_text = ${String(m.body).slice(0, 500)}, updated_at = NOW()
-        WHERE ldap = ${ldap}
-      `);
-      const action = verdict.mode === "auto" ? "auto_advance" : verdict.mode === "review" ? "propose_review" : "none";
-      await db.execute(sql`
-        INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor)
-        VALUES (${ldap}, ${m.id}, ${m.created_utc}::timestamptz, ${String(m.body).slice(0, 1000)},
-                ${tracked.stage}, ${verdict.proposal}, ${action},
-                ${resolved.via === "message_ldap" ? verdict.reason : `${verdict.reason} [attributed via ${resolved.via}: ${resolved.phone}]`},
-                'svc:rightsize-sync')
-        ON CONFLICT DO NOTHING
-      `);
-      if (verdict.mode === "auto" && verdict.proposal && verdict.proposal !== tracked.stage) {
-        await db.execute(sql`
-          UPDATE vrm_rightsize_techs
-          SET stage = ${verdict.proposal}, stage_source = 'auto', stage_changed_at = NOW(),
-              decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${String(m.body).slice(0, 500)},
-              commit_date_text = COALESCE(${verdict.commitDateText ?? null}, commit_date_text), updated_at = NOW()
-          WHERE ldap = ${ldap}
-        `);
-        advanced += 1;
-      } else if (verdict.mode === "review" && verdict.proposal) {
-        await db.execute(sql`
-          UPDATE vrm_rightsize_techs
-          SET proposed_stage = ${verdict.proposal}, needs_review = TRUE, review_reason = ${verdict.reason},
-              decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${String(m.body).slice(0, 500)}, updated_at = NOW()
-          WHERE ldap = ${ldap}
-        `);
-        flagged += 1;
-      }
+      llmCalls += before - budget.remaining;
     }
 
     await db.execute(sql`
@@ -239,7 +422,11 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
 
     const kpis = await computeKpis();
     await db.execute(sql`INSERT INTO vrm_rightsize_snapshots (trigger, kpis) VALUES (${opts.trigger}, ${JSON.stringify(kpis)}::jsonb)`);
-    const result = { ok: true, trigger: opts.trigger, newMessages: msgs.rows.length, processed, advanced, flagged, untracked, unmatched, watermark: newWatermark, kpis };
+    const result = {
+      ok: true, trigger: opts.trigger, newMessages: msgs.rows.length,
+      processed, advanced, flagged, untracked, unmatched,
+      alreadyDone, errors, llmCalls, watermark: newWatermark, kpis,
+    };
     console.log("[VRM/Rightsize] sync:", JSON.stringify({ ...result, kpis: undefined }));
     return result;
   } finally {
