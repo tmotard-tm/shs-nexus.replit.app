@@ -15,7 +15,7 @@
     "rollback": "bash scripts/guardrails/g5-rollback.sh",
     "test:external-fleet-api": "tsx server/external-fleet-api/types.test.ts && tsx server/external-fleet-api/auth.test.ts && tsx server/external-fleet-api/router.test.ts && tsx server/external-fleet-api/rental-ops-read-model.test.ts && tsx server/external-fleet-api/fleet-management-read-model.test.ts && tsx server/external-fleet-api/tpms-read-model.test.ts",
     "test:vrm-rental-ops": "tsx server/vrm/rental-operations/vendor-class.test.ts",
-    "test:vrm-rightsize": "tsx server/vrm/rightsize/classifier.test.ts && tsx server/vrm/rightsize/phone.test.ts && tsx server/vrm/rightsize/pipeline.test.ts"
+    "test:vrm-rightsize": "tsx server/vrm/rightsize/classifier.test.ts && tsx server/vrm/rightsize/phone.test.ts && tsx server/vrm/rightsize/workload.test.ts && tsx server/vrm/rightsize/pipeline.test.ts"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",

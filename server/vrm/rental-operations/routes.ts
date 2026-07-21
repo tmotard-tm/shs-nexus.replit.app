@@ -15,9 +15,23 @@ import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, get
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
 
+/**
+ * Who is making this change.
+ *
+ * `req.session` does not exist on this app — auth is cookie -> storage.getSession
+ * -> `req.user = { id, username, role, departments }` (server/routes.ts
+ * requireAuth), and the service middlewares set `req.user = { id: "svc:..." }`.
+ * The old `req.session?.userId` read was therefore ALWAYS undefined, so every
+ * operator mark and identity override recorded its actor as "unknown".
+ *
+ * req.user WINS over the body on purpose: a live session must not be able to
+ * sign somebody else's name to an action. The body fields stay as the fallback
+ * for the no-session server-to-server callers.
+ */
 function actorOf(req: any): string {
+  const u = req.user ?? {};
   const b = req.body ?? {};
-  return (b.actor || b.decidedByName || req.session?.userId || "unknown").toString().trim() || "unknown";
+  return (u.username || u.id || b.actor || b.decidedByName || "unknown").toString().trim() || "unknown";
 }
 
 export function registerRentalOperationsRoutes(router: Router): void {

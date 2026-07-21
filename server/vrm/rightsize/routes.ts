@@ -7,16 +7,35 @@ import type { Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { runRightsizeSync, computeKpis } from "./sync";
+import { setVerifiedStage, isRightsizeStage, RIGHTSIZE_STAGES } from "./stage-write";
+import { VAN_STATUS_JOIN, VAN_STATUS_COLUMNS, vanFieldsOf, type VanStatusRow } from "./workload";
 
 const REFRESH_MS = 30 * 60 * 1000;
 let timerStarted = false;
 
+/**
+ * Who is making this change.
+ *
+ * `req.session` does not exist on this app — auth is cookie -> storage.getSession
+ * -> `req.user = { id, username, role, departments }` (server/routes.ts
+ * requireAuth). The old `req.session?.userId` read was therefore ALWAYS
+ * undefined, so every human stage verification landed in the audit log as
+ * "unknown" and the thread drawer printed "unknown" back at the operator. This
+ * is the only path that can move DONE/RETURNED, i.e. the numbers leadership
+ * sees, so it cannot be anonymous.
+ *
+ * req.user WINS over req.body.actor on purpose: a live session must not be able
+ * to sign somebody else's name to a stage change. The body is kept only as the
+ * fallback for the no-session server-to-server callers (the service middlewares
+ * set req.user = { id: "svc:..." } with no username, which resolves to that id).
+ */
 function actorOf(req: any): string {
+  const u = req.user ?? {};
   const b = req.body ?? {};
-  return (b.actor || req.session?.userId || "unknown").toString().trim() || "unknown";
+  return (u.username || u.id || b.actor || "unknown").toString().trim() || "unknown";
 }
 
-const STAGES = ["DONE", "RETURNED", "COMMITTED", "PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS", "QUESTION", "PASS_EXCUSED", "NON_RESPONDER", "NEW_REPLY"];
+const STAGES = RIGHTSIZE_STAGES as readonly string[];
 
 export function registerRightsizeRoutes(router: Router): void {
   // Rolling refresh: replies are now classified on arrival by the Twilio inbound
@@ -56,12 +75,15 @@ export function registerRightsizeRoutes(router: Router): void {
   });
 
   // Full tech list with filters handled client-side (285-ish rows, one query).
+  // Carries the van-status / workload dimension (see ./workload.ts) so the page
+  // can separate "has not answered us" from "physically cannot comply".
   router.get("/rightsize/techs", async (_req, res) => {
     try {
       const r = await db.execute(sql`
         SELECT t.*, to_char(t.stage_changed_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS stage_changed_at_s,
                to_char(t.decisive_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS decisive_at_s,
                to_char(t.last_inbound_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_inbound_at_s,
+               ${VAN_STATUS_COLUMNS},
                EXISTS (
                  SELECT 1 FROM fs_comms_messages o
                  WHERE o.direction = 'outbound'
@@ -69,9 +91,11 @@ export function registerRightsizeRoutes(router: Router): void {
                    AND (o.created_at AT TIME ZONE 'UTC') > t.last_inbound_at
                ) AS replied_after
         FROM vrm_rightsize_techs t
+        ${VAN_STATUS_JOIN}
         ORDER BY t.needs_review DESC, t.updated_at DESC
       `);
-      res.json({ techs: r.rows, total: r.rows.length });
+      const techs = (r.rows as unknown as VanStatusRow[]).map((row) => ({ ...row, ...vanFieldsOf(row) }));
+      res.json({ techs, total: techs.length });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "techs read failed" });
     }
@@ -113,22 +137,10 @@ export function registerRightsizeRoutes(router: Router): void {
     try {
       const ldap = req.params.ldap.toUpperCase();
       const { stage, note } = req.body ?? {};
-      if (!STAGES.includes(stage)) return res.status(400).json({ error: `stage must be one of ${STAGES.join(", ")}` });
-      const actor = actorOf(req);
-      const cur = await db.execute(sql`SELECT stage FROM vrm_rightsize_techs WHERE ldap = ${ldap}`);
-      if (!cur.rows.length) return res.status(404).json({ error: "not tracked" });
-      const oldStage = (cur.rows[0] as any).stage;
-      await db.execute(sql`
-        UPDATE vrm_rightsize_techs
-        SET stage = ${stage}, stage_source = 'manual', stage_changed_at = NOW(),
-            proposed_stage = NULL, needs_review = FALSE, review_reason = NULL, updated_at = NOW()
-        WHERE ldap = ${ldap}
-      `);
-      await db.execute(sql`
-        INSERT INTO vrm_rightsize_events (ldap, old_stage, new_stage, action, reason, actor)
-        VALUES (${ldap}, ${oldStage}, ${stage}, 'manual_verify', ${note ?? null}, ${actor})
-      `);
-      res.json({ ok: true, ldap, stage, actor });
+      if (!isRightsizeStage(stage)) return res.status(400).json({ error: `stage must be one of ${STAGES.join(", ")}` });
+      const result = await setVerifiedStage({ ldap, stage, actor: actorOf(req), note });
+      if (!result) return res.status(404).json({ error: "not tracked" });
+      res.json(result);
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "stage update failed" });
     }

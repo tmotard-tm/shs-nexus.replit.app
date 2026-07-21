@@ -27,6 +27,12 @@ interface Kpis {
   securedMonthly: number; addressableMonthly: number; securedPct: number;
   proposedSecuredCount: number; proposedSecuredMonthly: number;
   needsReview: number; awaitingReply: number; lastInboundAt: string | null;
+  // van-status / workload dimension — presentation only, never in the $ math
+  vanStatuses?: Record<string, number>;
+  cannotWorkCount?: number; cannotWorkMonthly?: number;
+  nonResponderTotal?: number;
+  nonResponderActionable?: number; nonResponderActionableMonthly?: number;
+  nonResponderCannotWork?: number; nonResponderCannotWorkMonthly?: number;
 }
 interface SummaryResp { kpis: Kpis; state: Record<string, string>; yesterday: { kpis: Kpis; taken_at: string } | null; generatedAt: string }
 interface TechRow {
@@ -37,22 +43,38 @@ interface TechRow {
   decisive_at_s: string | null; decisive_text: string | null; commit_date_text: string | null;
   vehicle: string | null; car_class: string | null; daily_rate: string | null;
   last_inbound_at_s: string | null; last_inbound_text: string | null; replied_after: boolean;
+  /** the tech's OWN van, from the rental-ops feed (server/vrm/rightsize/workload.ts) */
+  own_truck: string | null; ams_status: string | null;
+  van_status: string; van_status_label: string;
+  workload: "cannot_work" | "workable";
 }
 
 type SortDir = "asc" | "desc" | null;
 interface SortState { col: string | null; dir: SortDir }
 
 const SEDAN_FLOOR = 54.99;
-const GROUPS: Array<{ key: string; label: string; stages: string[]; fg: string; bg: string; next: string }> = [
+/**
+ * MECE rows in certainty order. `stages` matches the verified stage; the
+ * optional `workload` narrows a row to one side of the van-status split, which
+ * is how "No response" stops counting techs whose van is at auction, declined,
+ * or already replaced by a spare. Every tech still lands in exactly one row and
+ * every dollar is still counted once — the split is presentation, not math.
+ */
+const GROUPS: Array<{ key: string; label: string; stages: string[]; workload?: "cannot_work" | "workable"; fg: string; bg: string; next: string }> = [
   { key: "secured", label: "Secured", stages: ["DONE", "RETURNED"], fg: colors.green, bg: colors.greenLight, next: "Reconcile vs Enterprise billing — Tyler, 7/23" },
   { key: "committed", label: "Committed", stages: ["COMMITTED"], fg: colors.blue, bg: colors.blueLight, next: "Chase dated commitments as they lapse — tracker flags, Tyler approves nudges daily" },
   { key: "blocked", label: "Blocked", stages: ["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"], fg: colors.amber, bg: colors.amberLight, next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 7/22" },
   { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY"], fg: colors.purple, bg: colors.purpleLight, next: "Answer every open question same-day — see Awaiting reply" },
-  { key: "silent", label: "No response", stages: ["NON_RESPONDER"], fg: colors.red, bg: colors.redLight, next: "TL escalation + next blast wave — Tyler, 7/21" },
+  { key: "silent", label: "No response · can act", stages: ["NON_RESPONDER"], workload: "workable", fg: colors.red, bg: colors.redLight, next: "TL escalation + next blast wave — Tyler, 7/22" },
+  { key: "cannotwork", label: "Cannot work · van at auction, declined, or spare", stages: ["NON_RESPONDER"], workload: "cannot_work", fg: colors.inkMuted, bg: colors.surface, next: "No right-size ask and no TL escalation — route to vehicle replacement / rental return — Tyler w/ Rob Anderson, 7/24" },
 ];
+/** colour lookup by stage alone (badges); the No-response colour is the default. */
 const stageGroup = (s: string) => GROUPS.find((g) => g.stages.includes(s)) ?? GROUPS[4];
-// certainty order (Secured → No response); drives both the MECE table and the stage sort
-const STAGE_ORDER = GROUPS.flatMap((g) => g.stages);
+/** the MECE row a tech belongs to — stage AND van-status workload. */
+const rowGroup = (t: TechRow) =>
+  GROUPS.find((g) => g.stages.includes(t.stage) && (!g.workload || g.workload === (t.workload ?? "workable"))) ?? GROUPS[4];
+// certainty order (Secured → Cannot work); drives both the MECE table and the stage sort
+const STAGE_ORDER = Array.from(new Set(GROUPS.flatMap((g) => g.stages)));
 const stageRank = (s: string) => { const i = STAGE_ORDER.indexOf(s); return i < 0 ? 999 : i; };
 const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const techMonthly = (stage: string, rate: number | null) => {
@@ -178,6 +200,7 @@ export default function RightsizeTracker() {
   const [roundF, setRoundF] = useState<string[]>([]);
   const [classF, setClassF] = useState<string[]>([]);
   const [sourceF, setSourceF] = useState<string[]>([]);
+  const [vanF, setVanF] = useState<string[]>([]);         // van status (own truck)
   const [flagF, setFlagF] = useState<string[]>([]);       // needs review / awaiting reply
   const [sort, setSort] = useState<SortState>({ col: "monthly", dir: "desc" });
   const [groupSort, setGroupSort] = useState<SortState>({ col: null, dir: null });
@@ -206,11 +229,14 @@ export default function RightsizeTracker() {
     const roll: Record<string, { count: number; dollars: number; stages: Record<string, number> }> = {};
     for (const g of GROUPS) roll[g.key] = { count: 0, dollars: 0, stages: {} };
     for (const t of techs) {
-      const g = stageGroup(t.stage);
+      const g = rowGroup(t);
       const rate = t.daily_rate == null ? null : Number(t.daily_rate);
       roll[g.key].count += 1;
       roll[g.key].dollars += techMonthly(t.stage, rate);
-      roll[g.key].stages[t.stage] = (roll[g.key].stages[t.stage] || 0) + 1;
+      // The two NON_RESPONDER rows would both read "NON_RESPONDER n", which says
+      // nothing. Break them down by van status instead — that IS the reason.
+      const mixKey = g.stages.length === 1 && g.workload ? (t.van_status_label ?? t.van_status ?? "unknown") : t.stage;
+      roll[g.key].stages[mixKey] = (roll[g.key].stages[mixKey] || 0) + 1;
     }
     return roll;
   }, [techs]);
@@ -221,8 +247,9 @@ export default function RightsizeTracker() {
     const qq = q.trim().toUpperCase();
     return (t: TechRow, skip?: string) => {
       if (skip !== "q" && qq && !(`${t.ldap} ${t.tech_name ?? ""} ${t.tl_name ?? ""} ${t.district ?? ""} ${t.vehicle ?? ""} ${t.car_class ?? ""}`.toUpperCase().includes(qq))) return false;
-      if (skip !== "group" && groupF.length && !groupF.includes(stageGroup(t.stage).key)) return false;
+      if (skip !== "group" && groupF.length && !groupF.includes(rowGroup(t).key)) return false;
       if (skip !== "stage" && stageF.length && !stageF.includes(t.stage)) return false;
+      if (skip !== "van" && vanF.length && !vanF.includes(t.van_status_label ?? "")) return false;
       if (skip !== "district" && districtF.length && !districtF.includes(t.district ?? "")) return false;
       if (skip !== "tl" && tlF.length && !tlF.includes(t.tl_name ?? "")) return false;
       if (skip !== "round" && roundF.length && !roundF.includes(String(t.round))) return false;
@@ -237,7 +264,7 @@ export default function RightsizeTracker() {
       }
       return true;
     };
-  }, [q, groupF, stageF, districtF, tlF, roundF, classF, sourceF, flagF]);
+  }, [q, groupF, stageF, districtF, tlF, roundF, classF, sourceF, vanF, flagF]);
 
   const filtered = useMemo(() => techs.filter((t) => passes(t)), [techs, passes]);
 
@@ -254,6 +281,7 @@ export default function RightsizeTracker() {
       rate: (t) => (t.daily_rate == null ? null : Number(t.daily_rate)),
       monthly: (t) => techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate)),
       lastreply: (t) => t.last_inbound_at_s,
+      van: (t) => t.van_status_label,
       flag: (t) => (t.needs_review ? 0 : isAwaiting(t) ? 1 : 2),
       decisive: (t) => t.decisive_text ?? t.last_inbound_text,
     };
@@ -271,6 +299,7 @@ export default function RightsizeTracker() {
       round: countPairs(pool("round"), (t) => String(t.round)).sort((a, b) => Number(a[0]) - Number(b[0])),
       class: countPairs(pool("class"), (t) => t.car_class),
       source: countPairs(pool("source"), (t) => t.stage_source),
+      van: countPairs(pool("van"), (t) => t.van_status_label),
       flag: (() => {
         const p = pool("flag");
         return [
@@ -301,8 +330,8 @@ export default function RightsizeTracker() {
   const totalDollars = GROUPS.reduce((s, g) => s + groupRoll[g.key].dollars, 0);
   const shownDollars = useMemo(() => sorted.reduce((s, t) => s + techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate)), 0), [sorted]);
   const deltaSecured = yk && k ? k.securedMonthly - yk.securedMonthly : null;
-  const activeFilters = groupF.length + stageF.length + districtF.length + tlF.length + roundF.length + classF.length + sourceF.length + flagF.length + (q.trim() ? 1 : 0);
-  const clearAll = () => { setQ(""); setGroupF([]); setStageF([]); setDistrictF([]); setTlF([]); setRoundF([]); setClassF([]); setSourceF([]); setFlagF([]); };
+  const activeFilters = groupF.length + stageF.length + districtF.length + tlF.length + roundF.length + classF.length + sourceF.length + vanF.length + flagF.length + (q.trim() ? 1 : 0);
+  const clearAll = () => { setQ(""); setGroupF([]); setStageF([]); setDistrictF([]); setTlF([]); setRoundF([]); setClassF([]); setSourceF([]); setVanF([]); setFlagF([]); };
   const toggleIn = (vals: string[], key: string) => (vals.includes(key) ? vals.filter((v) => v !== key) : [...vals, key]);
 
   // MECE group rows, certainty order by default, sortable on demand
@@ -324,9 +353,10 @@ export default function RightsizeTracker() {
   // CSV = exactly what is on screen: current filter set, current sort order.
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const head = ["ldap", "name", "stage", "group", "proposed", "needs_review", "review_reason", "awaiting_reply", "district", "round", "tl", "vehicle", "car_class", "daily_rate", "monthly_value", "stage_source", "last_inbound", "decisive_text"];
+    const head = ["ldap", "name", "stage", "group", "workload", "own_truck", "van_status", "proposed", "needs_review", "review_reason", "awaiting_reply", "district", "round", "tl", "vehicle", "car_class", "daily_rate", "monthly_value", "stage_source", "last_inbound", "decisive_text"];
     const body = sorted.map((t) => [
-      t.ldap, t.tech_name ?? "", t.stage, stageGroup(t.stage).label, t.proposed_stage ?? "",
+      t.ldap, t.tech_name ?? "", t.stage, rowGroup(t).label,
+      t.workload ?? "", t.own_truck ?? "", t.van_status_label ?? "", t.proposed_stage ?? "",
       t.needs_review ? "YES" : "", t.review_reason ?? "", isAwaiting(t) ? "YES" : "",
       t.district ?? "", t.round ?? "", t.tl_name ?? "", t.vehicle ?? "", t.car_class ?? "", t.daily_rate ?? "",
       Math.round(techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate))),
@@ -373,6 +403,14 @@ export default function RightsizeTracker() {
           {deltaSecured != null && deltaSecured !== 0 && <span style={{ color: deltaSecured > 0 ? colors.green : colors.red, fontWeight: 700 }}> {deltaSecured > 0 ? "+" : ""}{money0(deltaSecured)} today</span>}
           {" · "}{k.proposedSecuredCount > 0 ? <>plus <b>{k.proposedSecuredCount}</b> field-reported swaps/returns worth <b>{money0(k.proposedSecuredMonthly)}</b>/mo pending verification</> : "no unverified movement pending"}
           {" · "}<b>{k.awaitingReply}</b> techs awaiting our reply.
+          {(k.nonResponderTotal ?? 0) > 0 && (
+            <div style={{ marginTop: 4, fontSize: 12.5, color: colors.inkSoft }}>
+              Truly unanswered: <b>{k.nonResponderActionable}</b> techs worth <b>{money0(k.nonResponderActionableMonthly ?? 0)}</b>/mo.
+              The other <b>{k.nonResponderCannotWork}</b> ({money0(k.nonResponderCannotWorkMonthly ?? 0)}/mo) cannot work the ask — van at
+              auction, repair declined, or already replaced by a spare. Their spend stays in the {money0(k.addressableMonthly)} addressable
+              denominator; this is a next-action split, not a change to the dollar math.
+            </div>
+          )}
         </div>
       )}
 
@@ -539,6 +577,7 @@ export default function RightsizeTracker() {
         <MultiSelect label="rounds" options={opts.round} values={roundF} onChange={setRoundF} style={ctl} />
         <MultiSelect label="classes" options={opts.class} values={classF} onChange={setClassF} style={ctl} />
         <MultiSelect label="sources" options={opts.source} values={sourceF} onChange={setSourceF} style={ctl} />
+        <MultiSelect label="van statuses" options={opts.van} values={vanF} onChange={setVanF} style={ctl} />
         <MultiSelect label="flags" options={opts.flag} values={flagF} onChange={setFlagF} style={ctl} />
         <button type="button" onClick={() => setFlagF(toggleIn(flagF, "needs review"))}
           style={{ fontSize: 11.5, fontWeight: 600, color: flagF.includes("needs review") ? colors.amber : colors.inkSoft, background: flagF.includes("needs review") ? colors.amberLight : "transparent", border: `1px solid ${flagF.includes("needs review") ? colors.amber : colors.rule}`, borderRadius: 999, padding: "4px 12px", cursor: "pointer" }}>
@@ -570,18 +609,19 @@ export default function RightsizeTracker() {
               <SortHeader col="monthly" text="$ / mo" sort={sort} setSort={setSort} sticky thStyle={{ width: 78 }} />
               <SortHeader col="tl" text="TL" sort={sort} setSort={setSort} sticky thStyle={{ width: 130 }} />
               <SortHeader col="lastreply" text="Last reply" sort={sort} setSort={setSort} sticky thStyle={{ width: 78 }} />
+              <SortHeader col="van" text="Own van" sort={sort} setSort={setSort} sticky thStyle={{ width: 150 }} />
               <SortHeader col="flag" text="Flag" sort={sort} setSort={setSort} sticky thStyle={{ width: 92 }} />
               <SortHeader col="decisive" text="Decisive message" sort={sort} setSort={setSort} sticky />
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 && (
-              <tr><td colSpan={13} style={{ padding: "18px 12px", color: colors.inkMuted, fontSize: 12 }}>
+              <tr><td colSpan={14} style={{ padding: "18px 12px", color: colors.inkMuted, fontSize: 12 }}>
                 No techs match the current filters. {activeFilters > 0 && <button type="button" onClick={clearAll} style={{ color: colors.accent, background: "transparent", border: "none", cursor: "pointer", font: "inherit" }}>Clear filters</button>}
               </td></tr>
             )}
             {sorted.map((t) => {
-              const g = stageGroup(t.stage);
+              const g = rowGroup(t);
               const rate = t.daily_rate == null ? null : Number(t.daily_rate);
               return (
                 <tr key={t.ldap} onClick={() => setOpenLdap(t.ldap)} style={{ borderTop: `1px solid ${colors.rule}`, cursor: "pointer" }}>
@@ -599,6 +639,11 @@ export default function RightsizeTracker() {
                   <td style={{ ...td, fontFamily: fonts.jetbrains }}>{money0(techMonthly(t.stage, rate))}</td>
                   <td style={{ ...td, fontSize: 11.5 }} title={t.tl_name ?? ""}>{t.tl_name ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 11 }}>{fmtAge(t.last_inbound_at_s)}</td>
+                  <td style={{ ...td, fontSize: 11 }} title={`${t.own_truck ?? "no truck"} · ${t.ams_status ?? "no AMS status"}`}>
+                    <span style={{ color: t.workload === "cannot_work" ? colors.red : colors.inkSoft, fontWeight: t.workload === "cannot_work" ? 700 : 400 }}>
+                      {t.van_status_label ?? "—"}
+                    </span>
+                  </td>
                   <td style={{ ...td, fontSize: 10.5, fontWeight: 700 }}>
                     {t.needs_review ? <span style={{ color: colors.amber }}>REVIEW</span> : isAwaiting(t) ? <span style={{ color: colors.purple }}>REPLY</span> : <span style={{ color: colors.inkMuted, fontWeight: 500 }}>—</span>}
                   </td>

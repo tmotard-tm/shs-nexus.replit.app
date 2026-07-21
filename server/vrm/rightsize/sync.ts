@@ -33,6 +33,7 @@ import {
   type VerdictDeps,
 } from "./llm";
 import { buildPhoneIndex, resolveInboundLdap, PHONE_OWNERS_SQL, type PhoneIndex, type PhoneOwnerRow } from "./phone";
+import { VAN_STATUS_JOIN, VAN_STATUS_COLUMNS, vanFieldsOf, type VanStatusRow } from "./workload";
 
 const LOCK_KEY = 771_2026; // arbitrary app-scoped advisory lock id
 const SEDAN_FLOOR = 54.99;
@@ -49,6 +50,20 @@ export interface RightsizeKpis {
   awaitingReply: number;
   unmatchedInbound: number;    // inbound we could not attribute, awaiting review
   lastInboundAt: string | null;
+  // ---- van-status / workload dimension (PRESENTATION ONLY) ----------------
+  // These NEVER feed securedMonthly / addressableMonthly / securedPct. They are
+  // reported so the "No response" cohort can be split into people who can act
+  // and people whose van outcome makes the ask wrong. Reclassifying a tech as
+  // cannot-work must not shrink the denominator: that would inflate secured%
+  // without a single extra dollar being saved.
+  vanStatuses: Record<string, number>;         // whole universe, by van status
+  cannotWorkCount: number;                     // whole universe
+  cannotWorkMonthly: number;                   // STATED FIGURE, still in addressable
+  nonResponderTotal: number;                   // NON_RESPONDER, all of them
+  nonResponderActionable: number;              // NON_RESPONDER that can actually act
+  nonResponderActionableMonthly: number;
+  nonResponderCannotWork: number;
+  nonResponderCannotWorkMonthly: number;
 }
 
 /**
@@ -68,19 +83,27 @@ function perTechMonthly(stage: string, rate: number | null): number {
 
 export async function computeKpis(): Promise<RightsizeKpis> {
   const r = await db.execute(sql`
-    SELECT ldap, stage, proposed_stage, needs_review, daily_rate,
-           to_char(last_inbound_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_inbound_at
-    FROM vrm_rightsize_techs
+    SELECT t.ldap, t.stage, t.proposed_stage, t.needs_review, t.daily_rate,
+           to_char(t.last_inbound_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS last_inbound_at,
+           ${VAN_STATUS_COLUMNS}
+    FROM vrm_rightsize_techs t
+    ${VAN_STATUS_JOIN}
   `);
   const rows = r.rows as any[];
   const stages: Record<string, number> = {};
+  const vanStatuses: Record<string, number> = {};
   let secured = 0, addressable = 0, propCount = 0, propMonthly = 0, review = 0;
+  let cannotWorkCount = 0, cannotWorkMonthly = 0;
+  let nrTotal = 0, nrActionable = 0, nrActionable$ = 0, nrCannot = 0, nrCannot$ = 0;
   let lastInbound: string | null = null;
   for (const t of rows) {
     stages[t.stage] = (stages[t.stage] || 0) + 1;
     const rate = t.daily_rate == null ? null : Number(t.daily_rate);
     const effStage = t.stage;
-    addressable += perTechMonthly(effStage === "RETURNED" ? "RETURNED" : "OTHER", rate);
+    // The dollar math below is deliberately blind to van status. Every tech
+    // stays in `addressable` no matter how they are presented on the page.
+    const monthly = perTechMonthly(effStage === "RETURNED" ? "RETURNED" : "OTHER", rate);
+    addressable += monthly;
     if (effStage === "DONE" || effStage === "RETURNED") secured += perTechMonthly(effStage, rate);
     if (t.needs_review) review += 1;
     if ((t.proposed_stage === "DONE" || t.proposed_stage === "RETURNED") && t.stage !== "DONE" && t.stage !== "RETURNED") {
@@ -88,6 +111,15 @@ export async function computeKpis(): Promise<RightsizeKpis> {
       propMonthly += perTechMonthly(t.proposed_stage, rate);
     }
     if (t.last_inbound_at && (!lastInbound || t.last_inbound_at > lastInbound)) lastInbound = t.last_inbound_at;
+
+    const van = vanFieldsOf(t as VanStatusRow);
+    vanStatuses[van.van_status] = (vanStatuses[van.van_status] || 0) + 1;
+    if (van.workload === "cannot_work") { cannotWorkCount += 1; cannotWorkMonthly += monthly; }
+    if (effStage === "NON_RESPONDER") {
+      nrTotal += 1;
+      if (van.workload === "cannot_work") { nrCannot += 1; nrCannot$ += monthly; }
+      else { nrActionable += 1; nrActionable$ += monthly; }
+    }
   }
   // Awaiting reply: tracked techs whose latest inbound has no later outbound in
   // the same thread family (by ldap or phone). Kept SQL-side and bounded.
@@ -115,6 +147,11 @@ export async function computeKpis(): Promise<RightsizeKpis> {
     proposedSecuredCount: propCount, proposedSecuredMonthly: Math.round(propMonthly),
     needsReview: review, awaitingReply, unmatchedInbound,
     lastInboundAt: lastInbound,
+    vanStatuses,
+    cannotWorkCount, cannotWorkMonthly: Math.round(cannotWorkMonthly),
+    nonResponderTotal: nrTotal,
+    nonResponderActionable: nrActionable, nonResponderActionableMonthly: Math.round(nrActionable$),
+    nonResponderCannotWork: nrCannot, nonResponderCannotWorkMonthly: Math.round(nrCannot$),
   };
 }
 
