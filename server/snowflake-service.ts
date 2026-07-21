@@ -14,6 +14,8 @@ interface SnowflakeConfig {
 export class SnowflakeService {
   private config: SnowflakeConfig;
   private connection: any = null;
+  private connected = false;
+  private connectPromise: Promise<void> | null = null;
   private privateKeyPem: string;
 
   constructor(config: SnowflakeConfig) {
@@ -105,13 +107,28 @@ export class SnowflakeService {
     }
   }
 
+  // Callers must never see a connection handle before its handshake finishes:
+  // snowflake.createConnection() returns synchronously, so a second caller that
+  // checked a raw `this.connection` would proceed against an unconnected handle
+  // and fail with "Unable to perform operation because a connection was never
+  // established". Concurrent cold-start callers all await the same in-flight
+  // promise instead; it is cleared once settled so a failed attempt can retry.
   async connect(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      if (this.connection) {
-        resolve();
-        return;
-      }
+    if (this.connected && this.connection) {
+      return;
+    }
 
+    if (!this.connectPromise) {
+      this.connectPromise = this.openConnection().finally(() => {
+        this.connectPromise = null;
+      });
+    }
+
+    return this.connectPromise;
+  }
+
+  private openConnection(): Promise<void> {
+    return new Promise((resolve, reject) => {
       // Strip .snowflakecomputing.com suffix if present to avoid duplication
       // The SDK will append it automatically
       let accountIdentifier = this.config.account;
@@ -139,13 +156,16 @@ export class SnowflakeService {
         connectionConfig.role = this.config.role;
       }
 
-      this.connection = snowflake.createConnection(connectionConfig);
+      const connection = snowflake.createConnection(connectionConfig);
 
-      this.connection.connect((err: any, conn: any) => {
+      connection.connect((err: any, conn: any) => {
         if (err) {
+          this.resetConnection();
           console.error('[Snowflake] Connection error:', err.message);
           reject(new Error(`Failed to connect to Snowflake: ${err.message}`));
         } else {
+          this.connection = connection;
+          this.connected = true;
           console.log('[Snowflake] Successfully connected');
           resolve();
         }
@@ -153,25 +173,44 @@ export class SnowflakeService {
     });
   }
 
+  private resetConnection(): void {
+    this.connection = null;
+    this.connected = false;
+  }
+
   async disconnect(): Promise<void> {
+    // Let any in-flight handshake settle first, otherwise it would land after
+    // the destroy below and leave a live connection we think we already closed.
+    if (this.connectPromise) {
+      await this.connectPromise.catch(() => {});
+    }
+
+    const connection = this.connection;
+    this.resetConnection();
+
+    if (!connection) {
+      return;
+    }
+
     return new Promise((resolve) => {
-      if (this.connection) {
-        this.connection.destroy((err: any) => {
-          if (err) {
-            console.error('[Snowflake] Error during disconnect:', err.message);
-          }
-          this.connection = null;
-          resolve();
-        });
-      } else {
+      connection.destroy((err: any) => {
+        if (err) {
+          console.error('[Snowflake] Error during disconnect:', err.message);
+        }
         resolve();
-      }
+      });
     });
   }
 
   async executeQuery(sqlText: string, binds?: any[], retryOnConnectionError = true): Promise<any[]> {
-    if (!this.connection) {
-      await this.connect();
+    // Always go through connect(): it is a no-op once connected, and joins the
+    // in-flight handshake otherwise. Testing `this.connection` here instead
+    // would race a concurrent cold start and execute on an unconnected handle.
+    await this.connect();
+
+    const connection = this.connection;
+    if (!connection) {
+      throw new Error('Query execution failed: Snowflake connection unavailable after connect()');
     }
 
     return new Promise((resolve, reject) => {
@@ -203,8 +242,8 @@ export class SnowflakeService {
             if (isConnectionError && retryOnConnectionError) {
               console.log('[Snowflake] Connection terminated, attempting to reconnect...');
               // Reset the connection so connect() will create a new one
-              this.connection = null;
-              
+              this.resetConnection();
+
               try {
                 // Retry the query with a fresh connection (but don't retry again if this fails)
                 const result = await this.executeQuery(sqlText, binds, false);
@@ -226,7 +265,7 @@ export class SnowflakeService {
         options.binds = binds;
       }
       
-      this.connection.execute(options);
+      connection.execute(options);
     });
   }
 
