@@ -6,6 +6,7 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { initRentalOperationsSchema } from "./rental-operations/schema";
+import { initRightsizeSchema } from "./rightsize/schema";
 
 export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`
@@ -826,6 +827,7 @@ export async function initVrmSchema(): Promise<void> {
 
   // VRM Rental Operations V2 (clean-room) — additive tables, own module.
   await initRentalOperationsSchema();
+  await initRightsizeSchema();
 
   console.log("[VRM] Schema initialised");
 }

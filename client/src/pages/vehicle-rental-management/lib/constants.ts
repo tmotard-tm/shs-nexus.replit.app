@@ -1,5 +1,6 @@
 import {
   TrendingUp,
+  MessagesSquare,
   ClipboardList,
   Wrench,
   Gauge,
@@ -108,5 +109,6 @@ export const navItems: NavItem[] = [
   { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
   { label: "Rental Denial Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
   { label: "Rental Operations", path: "/vehicle-rental-management/rental-operations", icon: Gauge },
+  { label: "Rightsize Tracker", path: "/vehicle-rental-management/rightsize-tracker", icon: MessagesSquare },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];
