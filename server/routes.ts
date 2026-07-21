@@ -17256,9 +17256,19 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const repairedVal = String(req.body?.repaired || "").trim();
       const returnedVal = String(req.body?.returnedRental || "").trim();
       const commentsVal = String(req.body?.comments || "").trim().slice(0, 400);
-      if (keysVal && !LOA_FORM_KEYS_VALUES.has(keysVal)) return res.status(400).json({ success: false, message: "Invalid keys selection." });
-      if (repairedVal && !LOA_FORM_REPAIRED_VALUES.has(repairedVal)) return res.status(400).json({ success: false, message: "Invalid repaired selection." });
-      if (returnedVal && !LOA_FORM_RETURNED_VALUES.has(returnedVal)) return res.status(400).json({ success: false, message: "Invalid returned rental selection." });
+      // All fields except Comments are required (Task #547).
+      const missing: string[] = [];
+      if (!nexusNewLocation) missing.push("truck location address");
+      if (!nexusNewLocationContact) missing.push("location contact number");
+      if (!keysVal) missing.push("Keys");
+      if (!repairedVal) missing.push("Rental status");
+      if (!returnedVal) missing.push("rental return confirmation");
+      if (missing.length > 0) {
+        return res.status(400).json({ success: false, message: `Please fill in all required fields: ${missing.join(", ")}.` });
+      }
+      if (!LOA_FORM_KEYS_VALUES.has(keysVal)) return res.status(400).json({ success: false, message: "Invalid keys selection." });
+      if (!LOA_FORM_REPAIRED_VALUES.has(repairedVal)) return res.status(400).json({ success: false, message: "Invalid repaired selection." });
+      if (!LOA_FORM_RETURNED_VALUES.has(returnedVal)) return res.status(400).json({ success: false, message: "Invalid returned rental selection." });
 
       await storage.upsertVehicleNexusData({
         vehicleNumber: targetTruck,

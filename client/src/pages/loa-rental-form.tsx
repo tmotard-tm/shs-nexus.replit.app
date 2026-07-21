@@ -48,6 +48,27 @@ export default function LoaRentalForm() {
   const [repaired, setRepaired] = useState("");
   const [returnedRental, setReturnedRental] = useState("");
   const [comments, setComments] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+
+  // All fields except Comments are required (Task #547).
+  const validateForm = () => {
+    const errors: Record<string, string> = {};
+    if (!location.trim()) errors.location = "Please enter the address where your truck is located.";
+    if (!locationContact.trim()) errors.locationContact = "Please enter a contact number for this location.";
+    if (!keys) errors.keys = "Please select an option for Keys.";
+    if (!repaired) errors.repaired = "Please select your rental status.";
+    if (!returnedRental) errors.returnedRental = "Please select an option.";
+    setFieldErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const clearFieldError = (field: string) =>
+    setFieldErrors((prev) => {
+      if (!(field in prev)) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
 
   const { data: linkInfo, isLoading } = useQuery<{ valid: boolean; completed?: boolean; message?: string }>({
     queryKey: ["/api/public/loa-form", token],
@@ -181,41 +202,66 @@ export default function LoaRentalForm() {
     );
   }
 
+  const requiredMark = <span className="text-red-500" aria-hidden="true"> *</span>;
+
   return shell(
     <form
       className="space-y-4"
+      noValidate
       onSubmit={(e) => {
         e.preventDefault();
+        if (!validateForm()) {
+          setSubmitError("");
+          return;
+        }
         submitMutation.mutate();
       }}
     >
       <div>
-        <Label htmlFor="loa-location">What is the address of where your truck is located?</Label>
+        <Label htmlFor="loa-location">What is the address of where your truck is located?{requiredMark}</Label>
         <Input
           id="loa-location"
           value={location}
-          onChange={(e) => setLocation(e.target.value)}
+          onChange={(e) => {
+            setLocation(e.target.value);
+            clearFieldError("location");
+          }}
           placeholder="Street, city, state, zip"
-          className="mt-1"
+          className={`mt-1 ${fieldErrors.location ? "border-red-500" : ""}`}
+          aria-invalid={!!fieldErrors.location}
           data-testid="input-loa-location"
         />
+        {fieldErrors.location && (
+          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-location">{fieldErrors.location}</p>
+        )}
       </div>
       <div>
-        <Label htmlFor="loa-contact">What is the contact number for this location?</Label>
+        <Label htmlFor="loa-contact">What is the contact number for this location?{requiredMark}</Label>
         <Input
           id="loa-contact"
           value={locationContact}
-          onChange={(e) => setLocationContact(e.target.value)}
+          onChange={(e) => {
+            setLocationContact(e.target.value);
+            clearFieldError("locationContact");
+          }}
           placeholder="Phone number"
           inputMode="tel"
-          className="mt-1"
+          className={`mt-1 ${fieldErrors.locationContact ? "border-red-500" : ""}`}
+          aria-invalid={!!fieldErrors.locationContact}
           data-testid="input-loa-contact"
         />
+        {fieldErrors.locationContact && (
+          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-contact">{fieldErrors.locationContact}</p>
+        )}
       </div>
       <div>
-        <Label>Keys</Label>
-        <Select value={keys} onValueChange={setKeys}>
-          <SelectTrigger className="mt-1" data-testid="select-loa-keys">
+        <Label>Keys{requiredMark}</Label>
+        <Select value={keys} onValueChange={(v) => { setKeys(v); clearFieldError("keys"); }}>
+          <SelectTrigger
+            className={`mt-1 ${fieldErrors.keys ? "border-red-500" : ""}`}
+            aria-invalid={!!fieldErrors.keys}
+            data-testid="select-loa-keys"
+          >
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -224,11 +270,18 @@ export default function LoaRentalForm() {
             <SelectItem value="unknown">Unknown/Would not Check</SelectItem>
           </SelectContent>
         </Select>
+        {fieldErrors.keys && (
+          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-keys">{fieldErrors.keys}</p>
+        )}
       </div>
       <div>
-        <Label>Rental status</Label>
-        <Select value={repaired} onValueChange={setRepaired}>
-          <SelectTrigger className="mt-1" data-testid="select-loa-repaired">
+        <Label>Rental status{requiredMark}</Label>
+        <Select value={repaired} onValueChange={(v) => { setRepaired(v); clearFieldError("repaired"); }}>
+          <SelectTrigger
+            className={`mt-1 ${fieldErrors.repaired ? "border-red-500" : ""}`}
+            aria-invalid={!!fieldErrors.repaired}
+            data-testid="select-loa-repaired"
+          >
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -238,11 +291,18 @@ export default function LoaRentalForm() {
             <SelectItem value="wont_return">I won't /can't return the rental</SelectItem>
           </SelectContent>
         </Select>
+        {fieldErrors.repaired && (
+          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-repaired">{fieldErrors.repaired}</p>
+        )}
       </div>
       <div>
-        <Label>Your rental must be returned</Label>
-        <Select value={returnedRental} onValueChange={setReturnedRental}>
-          <SelectTrigger className="mt-1" data-testid="select-loa-returned">
+        <Label>Your rental must be returned{requiredMark}</Label>
+        <Select value={returnedRental} onValueChange={(v) => { setReturnedRental(v); clearFieldError("returnedRental"); }}>
+          <SelectTrigger
+            className={`mt-1 ${fieldErrors.returnedRental ? "border-red-500" : ""}`}
+            aria-invalid={!!fieldErrors.returnedRental}
+            data-testid="select-loa-returned"
+          >
             <SelectValue placeholder="Select..." />
           </SelectTrigger>
           <SelectContent>
@@ -252,6 +312,9 @@ export default function LoaRentalForm() {
             <SelectItem value="denied">Denied</SelectItem>
           </SelectContent>
         </Select>
+        {fieldErrors.returnedRental && (
+          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-returned">{fieldErrors.returnedRental}</p>
+        )}
       </div>
       <div>
         <Label htmlFor="loa-comments">Comments</Label>
