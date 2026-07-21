@@ -729,7 +729,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (req.method === "GET" && req.path === "/repair-tracker/full") {
         return requireAuthOrRepairTrackerApiKey(req, res, next);
       }
-      if (req.method === "GET" && (req.path === "/rental-operations/luca-rental-list" || req.path === "/rental-operations/luca-feed")) {
+      // LUCA agent feed path. po-history/:truck is the receipt behind the shop of
+      // record on luca-rental-list, so it rides the SAME agent-token guard (the
+      // startsWith is required because the truck number is a path param).
+      if (req.method === "GET" && (
+        req.path === "/rental-operations/luca-rental-list" ||
+        req.path === "/rental-operations/luca-feed" ||
+        req.path.startsWith("/rental-operations/po-history/")
+      )) {
         return requireAuthOrLucaFeedKey(req, res, next);
       }
       return requireAuth(req, res, next);

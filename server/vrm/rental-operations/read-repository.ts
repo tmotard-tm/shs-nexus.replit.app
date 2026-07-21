@@ -66,6 +66,16 @@ const QUALIFYING_REPAIR_PO_S = sql`(s.vendor_type = 'repair' OR (s.vendor_type =
 // then highest po_number as a deterministic tiebreak (Holman PO numbers are
 // monotonic, and two POs can share a date).
 const MOST_RECENT_SHOP_ORDER = sql`ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST, s.po_number DESC`;
+// STRICT date ordering — "the MOST RECENT repair shop PO", full stop. Used by the
+// LUCA feed (luca-rental-list SHOP_* + po-history is_current_shop) ONLY.
+//
+// Divergence, deliberate and flagged (premortem VC-2): MOST_RECENT_SHOP_ORDER
+// above sorts APPROVED-first, so a months-old still-APPROVED PO outranks last
+// week's real repair — on truck 22350 that picks the 2026-01-01 PO over the
+// 2026-02-26 one. The board/drawer keep the old ordering in this change (that
+// needs a Tyler ruling); the LUCA feed does NOT, and ships SHOP_PO_DATE so the
+// consumer can see the age of what it got.
+const MOST_RECENT_REPAIR_PO_ORDER = sql`ORDER BY s.po_date DESC NULLS LAST, s.po_number DESC`;
 
 // LUCA workload buckets (Tyler's workload rule) live in ./workload — pure, so
 // they are unit-testable without a DB. Re-exported here for callers.
@@ -555,7 +565,39 @@ export async function getLucaFeed(): Promise<any> {
  * PENDED tickets (renter already turned the vehicle in / ticket closing) are
  * excluded here too — LUCA shouldn't track or work a rental that's already
  * wrapping up, matching FleetScope's own Snowflake query (TICKET_STATUS='OPEN').
+ *
+ * SHOP OF RECORD (added 2026-07-21). Each row now carries SHOP_NAME / SHOP_PHONE /
+ * SHOP_ADDRESS / SHOP_PO_NUMBER / SHOP_PO_DATE / SHOP_PO_STATUS / SHOP_SOURCE,
+ * derived from the qualifying repair PO under Tyler's rule (vendor-class.ts).
+ * Before this, LUCA took its shop from the FleetScope mirror: 352 of 383 active
+ * rentals, 57 of which disagreed with VRM, and 38 of which named a PARTS supplier
+ * (JASPER ENGINES, HOLMAN PARTS DISTRIBUTION) as the "shop" — 30 with a dialable
+ * number. A parts warehouse can never appear here: 'parts' is not a qualifying
+ * repair vendor_type, and there is NO fallback to a non-repair vendor. Null shop
+ * (no qualifying repair PO) is the correct answer, not a substitute vendor.
  */
+
+/** Normalized vendor key for cross-source identity checks (portal vs ETL). */
+function vendorKey(s: string | null | undefined): string {
+  return String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+/** 10-digit US phone or null. Rejects the portal's placeholder junk (5555555555,
+ * 0000000000 and friends) so LUCA never dials a filler number. */
+function cleanPhone(s: string | null | undefined): string | null {
+  let d = String(s ?? "").replace(/\D/g, "");
+  if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
+  if (d.length !== 10) return null;
+  if (/^(\d)\1{9}$/.test(d)) return null;
+  return d;
+}
+function composeAddress(r: any): string | null {
+  const line = [r.shop_address, [r.shop_city, r.shop_state].filter(Boolean).join(" "), r.shop_zip]
+    .map((p: any) => (p == null ? "" : String(p).trim()))
+    .filter(Boolean)
+    .join(", ");
+  return line || null;
+}
+
 export async function getLucaRentalList(): Promise<any> {
   await db.execute(sql`SELECT 1`);
   const res = await db.execute(sql`
@@ -566,13 +608,63 @@ export async function getLucaRentalList(): Promise<any> {
       c.days_open, c.days_authorized, c.days_behind, c.number_of_extensions,
       c.number_of_rewrites, c.repairs_complete, c.claims_office, c.ams_status,
       COALESCE(i.override_employee_id, i.resolved_employee_id) AS employee_id,
-      i.confidence AS eid_confidence
+      i.confidence AS eid_confidence,
+      shop.vendor_name AS shop_name, shop.po_number AS shop_po_number,
+      shop.po_status AS shop_po_status, shop.po_date AS shop_po_date,
+      shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
+      shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
+      popho.phone AS po_phone, popho.vendor AS po_phone_vendor,
+      ph.shop_phone AS portal_shop_phone, ph.shop_name AS portal_shop_name
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+    LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
+    -- Shop of record: the MOST RECENT qualifying repair PO (strict date order).
+    LEFT JOIN LATERAL (
+      SELECT vendor_name, vendor_address, vendor_city, vendor_state, vendor_zip,
+             po_status, po_number, to_char(po_date,'YYYY-MM-DD') AS po_date
+      FROM vrm_rental_operations_po_history s
+      WHERE s.vehicle_number_padded = c.case_key AND ${QUALIFYING_REPAIR_PO_S}
+      ${MOST_RECENT_REPAIR_PO_ORDER}
+      LIMIT 1
+    ) shop ON true
+    -- Phone for THAT EXACT PO out of the portal scrape (premortem VC-1: the
+    -- portal's own top-level shop_phone is picked by a SECOND, independent
+    -- picker — on truck 22350 it is SPEED AWAY SMOG's number while the repair
+    -- PO vendor is PEP BOYS. Matching on po_number keeps name and phone on the
+    -- same vendor; the JS below still verifies the vendor name before use.
+    LEFT JOIN LATERAL (
+      SELECT e->>'vendorPhone' AS phone, e->>'vendorName' AS vendor
+      FROM vrm_holman_portal_hist ph2
+      CROSS JOIN LATERAL jsonb_array_elements(ph2.hist) e
+      WHERE ph2.truck_no = c.case_key
+        AND e->>'type' = 'PO'
+        AND e->>'poNumber' = shop.po_number
+        AND COALESCE(e->>'vendorPhone','') <> ''
+      LIMIT 1
+    ) popho ON true
     WHERE c.present_in_latest = true AND COALESCE(c.ticket_status, '') <> 'PENDED'
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
   `);
-  const rentals = (res.rows as any[]).map((r) => ({
+  let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneRejected = 0;
+  const rentals = (res.rows as any[]).map((r) => {
+    const shopName: string | null = r.shop_name ? String(r.shop_name).trim() : null;
+    if (shopName) shopWithPo++;
+    // The phone must belong to the vendor whose NAME we return, or be null.
+    let shopPhone: string | null = null;
+    if (shopName) {
+      const poPhone = cleanPhone(r.po_phone);
+      if (poPhone && vendorKey(r.po_phone_vendor) === vendorKey(shopName)) {
+        shopPhone = poPhone; phoneFromPo++;
+      } else {
+        const portalPhone = cleanPhone(r.portal_shop_phone);
+        if (portalPhone && vendorKey(r.portal_shop_name) === vendorKey(shopName)) {
+          shopPhone = portalPhone; phoneFromPortal++;
+        } else if (r.po_phone || r.portal_shop_phone) {
+          phoneRejected++;   // a phone existed but belonged to a different vendor
+        }
+      }
+    }
+    return {
     VEHICLE_NUMBER: r.case_key,
     SOURCE: r.source,
     RENTER_NAME: r.renter_name_raw,
@@ -593,9 +685,89 @@ export async function getLucaRentalList(): Promise<any> {
     PRIMARY_ZIP: null,               // not tracked in VRM cases; LUCA falls back to conservative TCPA
     TRUCK_STATUS: r.ams_status,      // LUCA maps this → fleetscopeStatus → declined-signal
     TICKET_STATUS: r.ticket_status,  // OPEN | PENDED (extra; LUCA ignores unknown keys)
-  }));
+    // ── shop of record (VRM repair PO — Tyler's rule). All null together when
+    //    the truck has no qualifying repair PO. NEVER a parts/tow/rental vendor.
+    SHOP_NAME: shopName,
+    SHOP_PHONE: shopPhone,
+    SHOP_ADDRESS: shopName ? composeAddress(r) : null,
+    SHOP_PO_NUMBER: shopName ? (r.shop_po_number ?? null) : null,
+    SHOP_PO_DATE: shopName ? (r.shop_po_date ?? null) : null,
+    SHOP_PO_STATUS: shopName ? (r.shop_po_status ?? null) : null,
+    SHOP_SOURCE: shopName ? "vrm_repair_po" : null,
+    };
+  });
   const sh = await getSourceHealth();
-  return { generatedAt: new Date().toISOString(), source: "vrm_rental_operations", total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate, rentals };
+  console.log(
+    `[VRM/RentalOps] luca-rental-list: ${rentals.length} rentals · shop-of-record ${shopWithPo} ` +
+    `(phone: ${phoneFromPo} from PO, ${phoneFromPortal} from portal, ${phoneRejected} rejected as wrong-vendor/junk)`,
+  );
+  return {
+    generatedAt: new Date().toISOString(), source: "vrm_rental_operations",
+    total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate,
+    shopOfRecord: { withShop: shopWithPo, withPhone: phoneFromPo + phoneFromPortal, phoneFromPo, phoneFromPortal, phoneRejected },
+    rentals,
+  };
+}
+
+/**
+ * FULL classified PO history for ONE truck, newest first — the receipt behind
+ * the shop of record. Deliberately returns EVERY vendor_type (tow, parts,
+ * rental_placeholder, toll, other), so a human or the agent can SEE the lines
+ * that were excluded and why, not just the winner.
+ *
+ * Reads the landed mirror (vrm_rental_operations_po_history), not Snowflake:
+ * it is already classified by vendor-class.ts, it is the same table the board
+ * and the shop LATERAL read, and it answers in milliseconds under an agent call.
+ * Bounded at 100 POs (the deepest active-rental truck carries ~150 POs over 3y;
+ * 100 covers well past the current repair for every truck in the book while
+ * keeping the payload sane for an agent context window).
+ *
+ * `is_current_shop` marks the ONE row that won under Tyler's rule with the same
+ * strict most-recent-repair-PO ordering the luca-rental-list feed uses, so the
+ * two endpoints can never disagree about the same truck.
+ */
+export async function getClassifiedPoHistory(truck: string, limit = 100): Promise<any> {
+  const cap = Math.max(1, Math.min(500, Number(limit) || 100));
+  const pad = String(truck ?? "").replace(/\D/g, "");
+  const caseKey = pad ? pad.replace(/^0+/, "").padStart(5, "0") : "";
+  if (!caseKey) return { truck: String(truck ?? ""), count: 0, total: 0, truncated: false, current_shop_po: null, pos: [] };
+
+  const win = await db.execute(sql`
+    SELECT s.po_number
+    FROM vrm_rental_operations_po_history s
+    WHERE s.vehicle_number_padded = ${caseKey} AND ${QUALIFYING_REPAIR_PO_S}
+    ${MOST_RECENT_REPAIR_PO_ORDER}
+    LIMIT 1
+  `);
+  const currentPo = (win.rows[0] as any)?.po_number ?? null;
+
+  const tot = await db.execute(sql`
+    SELECT count(*)::int AS n FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${caseKey}
+  `);
+  const total = Number((tot.rows[0] as any)?.n || 0);
+
+  const res = await db.execute(sql`
+    SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status,
+           vendor_name, vendor_type, has_parts_labor, approved_amount, description
+    FROM vrm_rental_operations_po_history
+    WHERE vehicle_number_padded = ${caseKey}
+    ORDER BY po_date DESC NULLS LAST, po_number DESC
+    LIMIT ${cap}
+  `);
+  const pos = (res.rows as any[]).map((p) => ({
+    po_number: p.po_number,
+    po_date: p.po_date ?? null,
+    po_status: p.po_status ?? null,
+    vendor_name: p.vendor_name ?? null,
+    vendor_type: p.vendor_type ?? null,
+    has_parts_labor: p.has_parts_labor === true,
+    amount: p.approved_amount == null ? null : Number(p.approved_amount),
+    description: p.description ?? null,
+    is_current_shop: currentPo != null && p.po_number === currentPo,
+  }));
+  // current_shop_po is computed over the FULL history, so a consumer can still
+  // see which PO won even in the rare case it fell outside the `limit` window.
+  return { truck: caseKey, count: pos.length, total, truncated: total > pos.length, current_shop_po: currentPo, pos };
 }
 
 /** Full 3-year PO history w/ line items — live from Snowflake, cached-table

@@ -10,7 +10,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList } from "./read-repository";
+import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory } from "./read-repository";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -108,6 +108,22 @@ export function registerRentalOperationsRoutes(router: Router): void {
     } catch (e: any) {
       console.error("[VRM/RentalOps] luca-rental-list failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "luca-rental-list failed" });
+    }
+  });
+
+  // GET the FULL classified PO history for ONE truck, newest first — the receipt
+  // behind the shop of record on luca-rental-list. Every vendor_type is returned
+  // (tow / parts / rental_placeholder / toll), so a human or the agent can see
+  // what was EXCLUDED and why, with is_current_shop marking the PO that won under
+  // Tyler's rule. Same agent-token guard as luca-rental-list (server/routes.ts).
+  // Bounded at 100 POs by default; ?limit= accepts 1..500.
+  router.get("/rental-operations/po-history/:truck", async (req, res) => {
+    try {
+      const limit = req.query.limit ? Number(req.query.limit) : 100;
+      res.json(await getClassifiedPoHistory(req.params.truck, limit));
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] po-history failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "po-history failed" });
     }
   });
 
