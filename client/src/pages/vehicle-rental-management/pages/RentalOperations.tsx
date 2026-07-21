@@ -126,6 +126,19 @@ interface PortalData {
   messages: Array<{ date: string | null; notes: string | null }>;
   poDetail: Record<string, PoDetailPortal>;
 }
+interface CallLogItem {
+  at: string | null;
+  source: string;               // luca_dispatch | luca_outcome | nexus_batch
+  status: string | null;
+  outcome: string | null;
+  summary: string | null;       // shop_notes / dispatch message
+  transcript: string | null;
+  conversationId: string | null;
+  dryRun: boolean | null;
+  truck?: string | null;        // which truck the call was about (case or assigned)
+  shopName?: string | null;
+}
+interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; }
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
@@ -133,6 +146,8 @@ interface CaseDetail {
   poHistory: PoRecord[];
   poSource?: string;
   portal?: PortalData | null;
+  assignedTruck?: AssignedTruckDetail | null;
+  callLog?: CallLogItem[];
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -256,6 +271,31 @@ function MultiSelect({ label, options, values, onChange, style }: {
     </div>
   );
 }
+
+// ── provenance badge — tags where a piece of data came from, at a glance ─────
+// snowflake = Holman ETL via Snowflake · scrape = Holman portal scraper ·
+// cached = stale cached-table fallback · luca = LUCA agent · batch = Nexus batch
+type BadgeKind = "snowflake" | "scrape" | "cached" | "luca" | "batch";
+const BADGES: Record<BadgeKind, { label: string; fg: string; bg: string; hint: string }> = {
+  snowflake: { label: "ETL", fg: colors.blue, bg: colors.blueLight, hint: "Live from the Holman ETL (Snowflake)" },
+  scrape: { label: "SCRAPER", fg: colors.amber, bg: colors.amberLight, hint: "Scraped from the Holman portal" },
+  cached: { label: "CACHED", fg: colors.inkMuted, bg: colors.surface, hint: "Cached fallback — Snowflake was unavailable" },
+  luca: { label: "LUCA", fg: colors.green, bg: colors.greenLight, hint: "LUCA shop-calling agent" },
+  batch: { label: "BATCH", fg: colors.inkSoft, bg: colors.surface, hint: "Nexus batch shop-call run" },
+};
+function SourceBadge({ kind, detail }: { kind: BadgeKind; detail?: string }) {
+  const b = BADGES[kind];
+  return (
+    <span title={b.hint + (detail ? ` · ${detail}` : "")}
+      style={{ display: "inline-flex", alignItems: "center", verticalAlign: "middle", fontFamily: fonts.dmSans, fontSize: 9, fontWeight: 700, color: b.fg, background: b.bg, border: `1px solid ${b.fg}`, borderRadius: 999, padding: "0 6px", textTransform: "uppercase", letterSpacing: "0.05em", marginLeft: 6, lineHeight: "14px", whiteSpace: "nowrap" }}>
+      {b.label}{detail ? <span style={{ fontWeight: 500, marginLeft: 4, textTransform: "none", letterSpacing: 0 }}>{detail}</span> : null}
+    </span>
+  );
+}
+
+// shared drawer helpers (used by DetailPanel + its sections)
+const panelLabel: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
+const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
 
 export default function RentalOperations() {
   const qc = useQueryClient();
@@ -760,6 +800,129 @@ export default function RentalOperations() {
   );
 }
 
+// ── PO history section (shared by the rental-case truck and the renter's
+// assigned truck — same renderer, different heading/data) ─────────────────────
+function PoHistorySection({ heading, poList, poSource, portal }: { heading: string; poList: PoRecord[]; poSource?: string; portal?: PortalData | null }) {
+  const [openPo, setOpenPo] = useState<string | null>(null);
+  const dataAsOf = poList.reduce<string | null>((mx, p) => (p.uploadTimestamp && (!mx || p.uploadTimestamp > mx) ? p.uploadTimestamp : mx), null);
+  const cached = poSource === "cached_fallback";
+  return (
+    <section>
+      <div style={{ ...panelLabel, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+        <span>{heading} — {poList.length} POs · 3 years · data as of {dataAsOf ? fmtDateTime(dataAsOf) : "—"}</span>
+        <SourceBadge kind={cached ? "cached" : "snowflake"} />
+      </div>
+      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+        {poList.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No PO history in the Holman ETL for this vehicle.</div>}
+        {poList.map((p) => {
+          const isOpen = openPo === p.poNumber;
+          const sc = p.poStatus === "APPROVED" ? colors.green : p.poStatus === "VOID" ? colors.inkMuted : colors.inkSoft;
+          return (
+            <div key={p.poNumber} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden", opacity: p.poStatus === "VOID" ? 0.6 : 1 }}>
+              <button type="button" onClick={() => setOpenPo(isOpen ? null : p.poNumber)}
+                style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", background: colors.surface, border: "none", cursor: "pointer", textAlign: "left", fontFamily: fonts.dmSans }}>
+                <ChevronRight size={13} style={{ color: colors.inkMuted, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", flexShrink: 0 }} />
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.ink }}>{p.poNumber}</span>
+                <span style={{ fontSize: 11, color: colors.inkMuted }}>{fmtDate(p.poDate)}</span>
+                <span style={{ fontSize: 10, fontWeight: 700, color: sc, textTransform: "uppercase" }}>{p.poStatus}</span>
+                <span style={{ fontSize: 12, color: colors.ink, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.vendorName}</span>
+                <span style={{ fontSize: 9.5, color: colors.inkMuted, textTransform: "uppercase" }}>{p.vendorType}</span>
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>{money2(p.totalAmount)}</span>
+              </button>
+              {isOpen && (
+                <div style={{ padding: "8px 12px 10px 34px", background: colors.background, borderTop: `1px solid ${colors.rule}` }}>
+                  <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6 }}>
+                    {[p.vendorAddress, p.vendorCity, p.vendorState].filter(Boolean).join(", ") || "no vendor address"}
+                    {p.approver ? ` · approver ${p.approver}` : ""}{p.odometer ? ` · ${p.odometer.toLocaleString()} mi` : ""}
+                    {p.repairDate ? ` · repair ${fmtDate(p.repairDate)}` : ""}{p.paidDate ? ` · paid ${fmtDate(p.paidDate)}` : ""}{p.poType ? ` · ${p.poType}` : ""}
+                    {p.uploadTimestamp ? ` · synced ${fmtDateTime(p.uploadTimestamp)}` : ""}
+                  </div>
+                  {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>Line items not available (cached view).</div> : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, fontFamily: fonts.dmSans }}>
+                      <tbody>
+                        {p.lineItems.map((li, j) => (
+                          <tr key={j}>
+                            <td style={{ padding: "3px 6px 3px 0", color: colors.ink }}>{li.qty != null ? `${li.qty}× ` : ""}{li.description || li.repairType || "—"}</td>
+                            <td style={{ padding: "3px 6px", color: colors.inkMuted, fontSize: 10.5 }}>{li.ataGroup || li.repairType || ""}</td>
+                            <td style={{ padding: "3px 0", textAlign: "right", fontFamily: fonts.jetbrains, color: colors.ink }}>{money2(li.cost)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  {portal?.poDetail?.[p.poNumber] && (() => {
+                    const pd = portal.poDetail[p.poNumber];
+                    const noteRows = (pd.poNotes && pd.poNotes.length) ? pd.poNotes : (pd.notes ? pd.notes.split(/<br\s*\/?>/i).map((t: string) => ({ notes: t })) : []);
+                    return (
+                      <div style={{ marginTop: 7 }}>
+                        <div style={{ fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", display: "flex", alignItems: "center" }}>
+                          Holman portal <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />
+                        </div>
+                        {pd.vendorPhone && <div style={{ fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>shop {fmtPhone(pd.vendorPhone)}{pd.vendorAddress ? ` · ${pd.vendorAddress}` : ""}</div>}
+                        {(pd.createdBy || pd.estimatedReadyDate || pd.workCompletedDate) && <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>{pd.createdBy ? `by ${pd.createdBy}` : ""}{pd.estimatedReadyDate ? ` · est ready ${pd.estimatedReadyDate}` : ""}{pd.workCompletedDate ? ` · done ${pd.workCompletedDate}` : ""}</div>}
+                        {noteRows.length > 0 && (
+                          <div style={{ marginTop: 6 }}>
+                            <div style={{ fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Notes</div>
+                            {noteRows.filter((nr: any) => (nr.notes || "").trim()).map((nr: any, k: number) => (
+                              <div key={k} style={{ fontSize: 11.5, color: colors.ink, marginTop: 2, whiteSpace: "pre-wrap" }}>{nr.transDate ? <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{nr.transDate}: </span> : null}{nr.notes}</div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {portal && <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>PO notes + shop phone are from the Holman portal scraper (scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : "—"}); the PO list itself is {poSource === "cached_fallback" ? "the cached Snowflake fallback" : "live from the Snowflake feed"}.</div>}
+    </section>
+  );
+}
+
+// ── call log — LUCA dispatches (vrm call_log) + shop-call outcomes (fs_call_logs)
+function CallLogSection({ items, caseKey }: { items: CallLogItem[]; caseKey: string }) {
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
+  const strip = (s: any) => String(s ?? "").replace(/^0+/, "");
+  return (
+    <section>
+      <div style={{ ...panelLabel }}>Call log — {items.length} call{items.length === 1 ? "" : "s"} (LUCA dispatches + shop-call outcomes)</div>
+      <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
+        {items.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No LUCA or batch shop calls logged for this vehicle yet.</div>}
+        {items.map((cl, i) => {
+          const isLuca = cl.source === "luca_dispatch" || cl.source === "luca_outcome";
+          const otherTruck = cl.truck && strip(cl.truck) !== strip(caseKey);
+          const isOpen = openIdx === i;
+          return (
+            <div key={i} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px", background: colors.surface }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>{cl.at ? fmtDateTime(cl.at) : "—"}</span>
+                <SourceBadge kind={isLuca ? "luca" : "batch"} detail={cl.source === "luca_dispatch" ? "dispatch" : cl.source === "luca_outcome" ? "outcome" : undefined} />
+                {cl.dryRun === true && <span style={{ fontSize: 9.5, fontWeight: 700, color: colors.amber, textTransform: "uppercase", letterSpacing: "0.04em" }}>dry-run</span>}
+                {otherTruck && <span style={{ fontSize: 10.5, color: colors.inkSoft, fontFamily: fonts.jetbrains }} title="This call was about the renter's assigned truck, not the rental van">truck {cl.truck}</span>}
+                {(cl.outcome || cl.status) && <span style={{ fontSize: 11, fontWeight: 600, color: colors.ink }}>{cl.outcome || cl.status}</span>}
+                {cl.shopName && <span style={{ fontSize: 11, color: colors.inkSoft, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 240 }}>{cl.shopName}</span>}
+                {cl.transcript && (
+                  <button type="button" onClick={() => setOpenIdx(isOpen ? null : i)}
+                    style={{ marginLeft: "auto", fontFamily: fonts.dmSans, fontSize: 10.5, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
+                    {isOpen ? "hide transcript" : "transcript"}
+                  </button>
+                )}
+              </div>
+              {cl.summary && <div style={{ fontSize: 11.5, color: colors.ink, marginTop: 3, whiteSpace: "pre-wrap" }}>{cl.summary}</div>}
+              {isOpen && cl.transcript && (
+                <pre style={{ marginTop: 6, fontFamily: fonts.jetbrains, fontSize: 10.5, color: colors.inkSoft, whiteSpace: "pre-wrap", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 6, padding: 8, maxHeight: 260, overflowY: "auto", margin: "6px 0 0" }}>{cl.transcript}</pre>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 // ── detail slide-over ─────────────────────────────────────────────────────────
 function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?: MasterRow; onClose: () => void; onMark: (k: string, m: string, cur: string | null) => void }) {
   const { data, isLoading } = useQuery<CaseDetail>({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`], staleTime: 30_000 });
@@ -774,7 +937,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const qc = useQueryClient();
   const { toast } = useToast();
   const [note, setNote] = useState("");
-  const [openPo, setOpenPo] = useState<string | null>(null);
   const c = data?.case;
   const id = data?.identity;
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
@@ -782,9 +944,8 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const poList = data?.poHistory || [];
   // current shop = the most-recent APPROVED repair PO (open), else the latest repair PO (fallback)
   const currentShop = poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED") || poList.find((p) => p.vendorType === "repair") || null;
-  const dataAsOf = poList.reduce<string | null>((mx, p) => (p.uploadTimestamp && (!mx || p.uploadTimestamp > mx) ? p.uploadTimestamp : mx), null);
   const portal = data?.portal ?? null;
-  const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
+  const assigned = data?.assignedTruck ?? null;
   const addNote = useMutation({
     mutationFn: (text: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/actions`, { action_type: "note", note: text }),
     onSuccess: () => { setNote(""); qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); },
@@ -801,7 +962,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
     onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
-  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
+  const label = panelLabel;
   const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
 
   return (
@@ -861,7 +1022,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   {(() => {
                     const ph = portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone;
                     return ph
-                      ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}</div>
+                      ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}<SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} /></div>
                       : <button type="button" onClick={() => scrapeMut.mutate()} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
                   })()}
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
@@ -899,77 +1060,26 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 ))}
               </div>
             </section>
-            {/* PO history — full 3-year, grouped, expandable line items */}
-            <section>
-              <div style={label}>PO history — {poList.length} POs · 3 years · data as of {dataAsOf ? fmtDateTime(dataAsOf) : "—"} {data!.poSource === "cached_fallback" ? "(cached)" : ""}</div>
-              <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 5 }}>
-                {data!.poHistory.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 12 }}>No PO history in the Holman ETL for this vehicle.</div>}
-                {data!.poHistory.map((p) => {
-                  const isOpen = openPo === p.poNumber;
-                  const sc = p.poStatus === "APPROVED" ? colors.green : p.poStatus === "VOID" ? colors.inkMuted : colors.inkSoft;
-                  return (
-                    <div key={p.poNumber} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden", opacity: p.poStatus === "VOID" ? 0.6 : 1 }}>
-                      <button type="button" onClick={() => setOpenPo(isOpen ? null : p.poNumber)}
-                        style={{ width: "100%", display: "flex", alignItems: "center", gap: 9, padding: "7px 10px", background: colors.surface, border: "none", cursor: "pointer", textAlign: "left", fontFamily: fonts.dmSans }}>
-                        <ChevronRight size={13} style={{ color: colors.inkMuted, transform: isOpen ? "rotate(90deg)" : "none", transition: "transform .12s", flexShrink: 0 }} />
-                        <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.ink }}>{p.poNumber}</span>
-                        <span style={{ fontSize: 11, color: colors.inkMuted }}>{fmtDate(p.poDate)}</span>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: sc, textTransform: "uppercase" }}>{p.poStatus}</span>
-                        <span style={{ fontSize: 12, color: colors.ink, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.vendorName}</span>
-                        <span style={{ fontSize: 9.5, color: colors.inkMuted, textTransform: "uppercase" }}>{p.vendorType}</span>
-                        <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>{money2(p.totalAmount)}</span>
-                      </button>
-                      {isOpen && (
-                        <div style={{ padding: "8px 12px 10px 34px", background: colors.background, borderTop: `1px solid ${colors.rule}` }}>
-                          <div style={{ fontSize: 11, color: colors.inkSoft, marginBottom: 6 }}>
-                            {[p.vendorAddress, p.vendorCity, p.vendorState].filter(Boolean).join(", ") || "no vendor address"}
-                            {p.approver ? ` · approver ${p.approver}` : ""}{p.odometer ? ` · ${p.odometer.toLocaleString()} mi` : ""}
-                            {p.repairDate ? ` · repair ${fmtDate(p.repairDate)}` : ""}{p.paidDate ? ` · paid ${fmtDate(p.paidDate)}` : ""}{p.poType ? ` · ${p.poType}` : ""}
-                            {p.uploadTimestamp ? ` · synced ${fmtDateTime(p.uploadTimestamp)}` : ""}
-                          </div>
-                          {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>Line items not available (cached view).</div> : (
-                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, fontFamily: fonts.dmSans }}>
-                              <tbody>
-                                {p.lineItems.map((li, j) => (
-                                  <tr key={j}>
-                                    <td style={{ padding: "3px 6px 3px 0", color: colors.ink }}>{li.qty != null ? `${li.qty}× ` : ""}{li.description || li.repairType || "—"}</td>
-                                    <td style={{ padding: "3px 6px", color: colors.inkMuted, fontSize: 10.5 }}>{li.ataGroup || li.repairType || ""}</td>
-                                    <td style={{ padding: "3px 0", textAlign: "right", fontFamily: fonts.jetbrains, color: colors.ink }}>{money2(li.cost)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          )}
-                          {portal?.poDetail?.[p.poNumber] && (() => {
-                            const pd = portal.poDetail[p.poNumber];
-                            const noteRows = (pd.poNotes && pd.poNotes.length) ? pd.poNotes : (pd.notes ? pd.notes.split(/<br\s*\/?>/i).map((t: string) => ({ notes: t })) : []);
-                            return (
-                              <div style={{ marginTop: 7 }}>
-                                {pd.vendorPhone && <div style={{ fontSize: 11, color: colors.inkSoft }}>shop {fmtPhone(pd.vendorPhone)}{pd.vendorAddress ? ` · ${pd.vendorAddress}` : ""}</div>}
-                                {(pd.createdBy || pd.estimatedReadyDate || pd.workCompletedDate) && <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>{pd.createdBy ? `by ${pd.createdBy}` : ""}{pd.estimatedReadyDate ? ` · est ready ${pd.estimatedReadyDate}` : ""}{pd.workCompletedDate ? ` · done ${pd.workCompletedDate}` : ""}</div>}
-                                {noteRows.length > 0 && (
-                                  <div style={{ marginTop: 6 }}>
-                                    <div style={{ fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Notes</div>
-                                    {noteRows.filter((nr: any) => (nr.notes || "").trim()).map((nr: any, k: number) => (
-                                      <div key={k} style={{ fontSize: 11.5, color: colors.ink, marginTop: 2, whiteSpace: "pre-wrap" }}>{nr.transDate ? <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{nr.transDate}: </span> : null}{nr.notes}</div>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              {portal && <div style={{ marginTop: 8, fontSize: 10.5, color: colors.inkMuted }}>PO notes + shop phone are from the Holman portal (scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : "—"}); the PO list itself is live from the Snowflake feed.</div>}
-            </section>
+            {/* call log — LUCA dispatches + shop-call outcomes, next to PO history */}
+            <CallLogSection items={data!.callLog || []} caseKey={caseKey} />
+            {/* PO history — full 3-year, grouped, expandable line items. When the
+                renter's ASSIGNED truck differs from the rental van, a second
+                section shows the assigned truck's POs with the same renderer. */}
+            <PoHistorySection
+              heading={assigned ? `Rental truck ${caseKey} — PO history` : "PO history"}
+              poList={data!.poHistory} poSource={data!.poSource} portal={portal} />
+            {assigned && (
+              <PoHistorySection
+                heading={`Assigned truck ${assigned.truck} — PO history`}
+                poList={assigned.poHistory} poSource={assigned.poSource} portal={assigned.portal} />
+            )}
             {/* Holman message trail — the comment history, from the portal */}
             {portal && portal.messages.length > 0 && (
               <section>
-                <div style={label}>Holman message trail ({portal.messages.length}) · scraped {portal.scrapedAt ? fmtDate(portal.scrapedAt) : ""}</div>
+                <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
+                  <span>Holman message trail ({portal.messages.length})</span>
+                  <SourceBadge kind="scrape" detail={portal.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />
+                </div>
                 <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 6, maxHeight: 340, overflowY: "auto", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 10 }}>
                   {portal.messages.map((mg, k) => (
                     <div key={k} style={{ fontSize: 11.5, color: colors.ink, borderBottom: k < portal.messages.length - 1 ? `1px solid ${colors.rule}` : "none", paddingBottom: 5 }}>

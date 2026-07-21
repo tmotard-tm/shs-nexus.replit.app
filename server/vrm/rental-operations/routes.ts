@@ -62,7 +62,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.post("/rental-operations/master/:caseKey/call", async (req, res) => {
     try {
       const { dispatchCall } = await import("./luca-dispatch");
-      const result = await dispatchCall(req.params.caseKey);
+      const result = await dispatchCall(req.params.caseKey, actorOf(req));
       res.json({ ok: result?.ok !== false, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] call failed:", e?.message || e);
@@ -76,7 +76,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
       const caseKeys = Array.isArray(req.body?.caseKeys) ? req.body.caseKeys.map(String) : [];
       if (!caseKeys.length) return res.status(400).json({ error: "caseKeys[] required" });
       const { dispatchBatch } = await import("./luca-dispatch");
-      const result = await dispatchBatch(caseKeys);
+      const result = await dispatchBatch(caseKeys, actorOf(req));
       res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] call-batch failed:", e?.message || e);

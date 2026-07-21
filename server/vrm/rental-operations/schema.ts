@@ -235,6 +235,29 @@ export async function initRentalOperationsSchema(): Promise<void> {
     );
   `);
 
+  // ── call_log: LUCA dispatches recorded on the vehicle record. One row per
+  // hand-off to LUCA (dispatch attempt), keyed by conversation_id when LIVHR
+  // returned one (UNIQUE allows multiple NULLs for failed dispatches). The
+  // drawer merges these with fs_call_logs outcome rows into one call log.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_operations_call_log (
+      id              SERIAL PRIMARY KEY,
+      case_key        VARCHAR(10),               -- rental case the dispatch came from
+      target_truck    VARCHAR(10) NOT NULL,      -- the truck whose shop was dialed (rental or assigned)
+      conversation_id VARCHAR(80) UNIQUE,        -- ElevenLabs conversation id (null if dispatch failed)
+      dispatched_by   VARCHAR(120),
+      dry_run         BOOLEAN,
+      dialed          BOOLEAN,
+      shop_name       TEXT,
+      shop_phone      VARCHAR(40),
+      note            TEXT,                      -- LIVHR response message
+      source          VARCHAR(30) NOT NULL DEFAULT 'luca_dispatch',
+      created_at      TIMESTAMPTZ DEFAULT NOW()
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_ro_calllog_truck ON vrm_rental_operations_call_log (target_truck, created_at DESC);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_ro_calllog_case ON vrm_rental_operations_call_log (case_key, created_at DESC);`);
+
   // ── holman_portal_hist: per-truck Holman portal scrape (message trail + PO
   // notes + vendor phone/address) — the detail the Snowflake ETL lacks. Imported
   // from the swarm snapshot; refreshed later by the on-demand scrape. scraped_at
@@ -255,5 +278,5 @@ export async function initRentalOperationsSchema(): Promise<void> {
     );
   `);
 
-  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/portal_hist)");
+  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/call_log/portal_hist)");
 }

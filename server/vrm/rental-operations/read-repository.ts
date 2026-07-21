@@ -546,6 +546,124 @@ export async function getLucaRentalList(): Promise<any> {
   return { generatedAt: new Date().toISOString(), source: "vrm_rental_operations", total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate, rentals };
 }
 
+/** Full 3-year PO history w/ line items — live from Snowflake, cached-table
+ * fallback. Shared by the rental-case truck and the renter's assigned truck. */
+async function fetchPoHistoryWithFallback(truck: string): Promise<{ poHistory: any[]; poSource: string }> {
+  try {
+    const { getTruckPoHistory } = await import("./po-history");
+    return { poHistory: await getTruckPoHistory(truck), poSource: "snowflake_live" };
+  } catch (e: any) {
+    console.warn(`[VRM/RentalOps] live PO history failed for ${truck}, using cached table:`, e?.message || e);
+    const poHist = await db.execute(sql`
+      SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
+             vendor_type, vendor_city, vendor_state, description, approved_amount
+      FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${truck}
+      ORDER BY po_date DESC NULLS LAST`);
+    const poHistory = (poHist.rows as any[]).map((p) => ({
+      poNumber: p.po_number, poDate: p.po_date, poStatus: p.po_status, vendorType: p.vendor_type,
+      vendorName: p.vendor_name, vendorCity: p.vendor_city, vendorState: p.vendor_state,
+      totalAmount: p.approved_amount == null ? null : Number(p.approved_amount), lineItems: [],
+    }));
+    return { poHistory, poSource: "cached_fallback" };
+  }
+}
+
+/** Holman portal snapshot for ONE truck: message trail + per-PO notes + shop
+ * phone (the detail the Snowflake ETL lacks). Compact fields, never throws. */
+async function readPortalSnapshot(truck: string): Promise<any | null> {
+  try {
+    const pRes = await db.execute(sql`
+      SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD') AS scraped_at,
+             shop_name, shop_phone, shop_address, shop_src, po_count, msg_count
+      FROM vrm_holman_portal_hist WHERE truck_no = ${truck} LIMIT 1`);
+    if (!pRes.rows.length) return null;
+    const p = pRes.rows[0] as any;
+    const hist: any[] = Array.isArray(p.hist) ? p.hist : [];
+    const dnum = (s: any) => { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; };
+    const messages = hist.filter((e) => e.type === "MSG")
+      .map((e) => ({ date: e.poMsgDate ?? null, notes: e.notes ?? null }))
+      .filter((m) => m.notes)
+      .sort((a, b) => dnum(b.date) - dnum(a.date));
+    const poDetail: Record<string, any> = {};
+    for (const e of hist) {
+      if (e.type === "PO" && e.poNumber && e.poNumber !== "0" && !poDetail[e.poNumber]) {
+        poDetail[e.poNumber] = {
+          notes: e.notes ?? null, poNotes: e.poNotes ?? null, lineItems: e.lineItems ?? null,
+          vendorPhone: e.vendorPhone ?? null, vendorAddress: e.vendorAddress ?? null,
+          meter: e.meter ?? null, createdBy: e.createdBy ?? null,
+          estimatedReadyDate: e.estimatedReadyDate ?? null, workCompletedDate: e.workCompletedDate ?? null,
+          rentalRequestExists: e.rentalRequestExists ?? false, openRentalRequestWindow: e.openRentalRequestWindow ?? null,
+        };
+      }
+    }
+    return {
+      source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0),
+      shop: { name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src },
+      messages, poDetail,
+    };
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] portal hist read failed (non-fatal):", e?.message || e);
+    return null;
+  }
+}
+
+/** Merged call log for a set of trucks: VRM dispatch rows (luca_dispatch) +
+ * fs_call_logs outcome rows (batch_id='LUCA' → luca_outcome, else nexus_batch).
+ * fs_call_logs.truck_number may be padded or not — match on ltrim-zeros both
+ * sides. Newest first, capped 25. Never throws. */
+async function readCallLog(trucks: string[]): Promise<any[]> {
+  try {
+    const stripped = Array.from(new Set(trucks.map((t) => String(t ?? "").replace(/^0+/, "")).filter(Boolean)));
+    if (!stripped.length) return [];
+    const inList = sql.join(stripped.map((s) => sql`${s}`), sql`, `);
+    const res = await db.execute(sql`
+      SELECT * FROM (
+        SELECT to_char(l.created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS at,
+               l.source,
+               CASE WHEN l.dialed THEN 'dialed' ELSE 'dispatched' END AS status,
+               NULL::text AS outcome,
+               l.note AS summary,
+               NULL::text AS transcript,
+               l.conversation_id,
+               l.dry_run,
+               l.target_truck AS truck,
+               l.shop_name
+        FROM vrm_rental_operations_call_log l
+        WHERE ltrim(l.target_truck, '0') IN (${inList})
+        UNION ALL
+        SELECT to_char(f.call_timestamp,'YYYY-MM-DD"T"HH24:MI:SSZ') AS at,
+               CASE WHEN f.batch_id = 'LUCA' THEN 'luca_outcome' ELSE 'nexus_batch' END AS source,
+               f.status,
+               f.outcome,
+               f.shop_notes AS summary,
+               f.transcript,
+               f.elevenlabs_conversation_id AS conversation_id,
+               NULL::boolean AS dry_run,
+               f.truck_number AS truck,
+               NULL::text AS shop_name
+        FROM fs_call_logs f
+        WHERE ltrim(f.truck_number, '0') IN (${inList})
+          AND (f.batch_id = 'LUCA' OR f.call_type IN ('shop','repair'))
+      ) x ORDER BY at DESC NULLS LAST LIMIT 25
+    `);
+    return (res.rows as any[]).map((r) => ({
+      at: r.at ?? null,
+      source: r.source,
+      status: r.status ?? null,
+      outcome: r.outcome ?? null,
+      summary: r.summary ?? null,
+      transcript: r.transcript ?? null,
+      conversationId: r.conversation_id ?? null,
+      dryRun: r.dry_run ?? null,
+      truck: r.truck ?? null,
+      shopName: r.shop_name ?? null,
+    }));
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] call-log read failed (non-fatal):", e?.message || e);
+    return [];
+  }
+}
+
 export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const cRes = await db.execute(sql`
     SELECT c.*, to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date_s,
@@ -555,78 +673,58 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   `);
   if (!cRes.rows.length) return null;
   const caseRow = cRes.rows[0] as any;
-  const [ident, actions] = await Promise.all([
+  const [ident, actions, ownRes] = await Promise.all([
     db.execute(sql`SELECT * FROM vrm_rental_identity_resolutions WHERE case_key = ${caseKey} LIMIT 1`),
     db.execute(sql`SELECT id, action_type, mark_value, note, assigned_to, actor,
                      to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
                    FROM vrm_rental_operation_actions WHERE case_key = ${caseKey} ORDER BY created_at DESC`),
+    // the renter's ASSIGNED truck — same all_techs join + 5-pad expression as
+    // getRentalOpsMaster's ownp LATERAL (override employee id wins)
+    db.execute(sql`
+      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+      FROM vrm_rental_identity_resolutions i
+      JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      WHERE i.case_key = ${caseKey} LIMIT 1
+    `),
   ]);
 
-  // full 3-year PO history w/ line items — live from Snowflake, cached-table fallback
-  let poHistory: any[] = [];
-  let poSource = "snowflake_live";
-  try {
-    const { getTruckPoHistory } = await import("./po-history");
-    poHistory = await getTruckPoHistory(caseKey);
-  } catch (e: any) {
-    console.warn("[VRM/RentalOps] live PO history failed, using cached table:", e?.message || e);
-    poSource = "cached_fallback";
-    const poHist = await db.execute(sql`
-      SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
-             vendor_type, vendor_city, vendor_state, description, approved_amount
-      FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${caseKey}
-      ORDER BY po_date DESC NULLS LAST`);
-    poHistory = (poHist.rows as any[]).map((p) => ({
-      poNumber: p.po_number, poDate: p.po_date, poStatus: p.po_status, vendorType: p.vendor_type,
-      vendorName: p.vendor_name, vendorCity: p.vendor_city, vendorState: p.vendor_state,
-      totalAmount: p.approved_amount == null ? null : Number(p.approved_amount), lineItems: [],
-    }));
+  const strip = (s: string) => String(s).replace(/^0+/, "");
+  const assignedTruckNo: string | null = (ownRes.rows[0] as any)?.own_pad ?? null;
+  const hasAssigned = !!assignedTruckNo && strip(assignedTruckNo) !== strip(caseKey);
+
+  // Warm the shared Snowflake connection ONCE before firing two PO fetches in
+  // parallel: connect()'s in-flight guard is connection-object presence, not
+  // handshake completion, so two racing cold connects make the second query
+  // throw "connection was never established" and fall back to cached. If the
+  // warm-up itself fails, both fetches degrade to the cached table as before.
+  if (hasAssigned) {
+    try {
+      const { getSnowflakeService } = await import("../../snowflake-service");
+      await getSnowflakeService().connect();
+    } catch { /* fetchPoHistoryWithFallback handles it */ }
   }
 
-  // Holman portal snapshot: message trail + per-PO notes + shop phone (the
-  // detail the Snowflake ETL lacks). Extract compact fields server-side.
-  let portal: any = null;
-  try {
-    const pRes = await db.execute(sql`
-      SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD') AS scraped_at,
-             shop_name, shop_phone, shop_address, shop_src, po_count, msg_count
-      FROM vrm_holman_portal_hist WHERE truck_no = ${caseKey} LIMIT 1`);
-    if (pRes.rows.length) {
-      const p = pRes.rows[0] as any;
-      const hist: any[] = Array.isArray(p.hist) ? p.hist : [];
-      const dnum = (s: any) => { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; };
-      const messages = hist.filter((e) => e.type === "MSG")
-        .map((e) => ({ date: e.poMsgDate ?? null, notes: e.notes ?? null }))
-        .filter((m) => m.notes)
-        .sort((a, b) => dnum(b.date) - dnum(a.date));
-      const poDetail: Record<string, any> = {};
-      for (const e of hist) {
-        if (e.type === "PO" && e.poNumber && e.poNumber !== "0" && !poDetail[e.poNumber]) {
-          poDetail[e.poNumber] = {
-            notes: e.notes ?? null, poNotes: e.poNotes ?? null, lineItems: e.lineItems ?? null,
-            vendorPhone: e.vendorPhone ?? null, vendorAddress: e.vendorAddress ?? null,
-            meter: e.meter ?? null, createdBy: e.createdBy ?? null,
-            estimatedReadyDate: e.estimatedReadyDate ?? null, workCompletedDate: e.workCompletedDate ?? null,
-            rentalRequestExists: e.rentalRequestExists ?? false, openRentalRequestWindow: e.openRentalRequestWindow ?? null,
-          };
-        }
-      }
-      portal = {
-        source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0),
-        shop: { name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src },
-        messages, poDetail,
-      };
-    }
-  } catch (e: any) {
-    console.warn("[VRM/RentalOps] portal hist read failed (non-fatal):", e?.message || e);
-  }
+  // PO history (Snowflake live w/ cached fallback) + portal snapshot for the
+  // rental-case truck AND the renter's assigned truck, plus the merged call
+  // log — all in parallel so the two Snowflake fetches never serialize.
+  const [casePo, assignedPo, casePortal, assignedPortal, callLog] = await Promise.all([
+    fetchPoHistoryWithFallback(caseKey),
+    hasAssigned ? fetchPoHistoryWithFallback(assignedTruckNo!) : Promise.resolve(null),
+    readPortalSnapshot(caseKey),
+    hasAssigned ? readPortalSnapshot(assignedTruckNo!) : Promise.resolve(null),
+    readCallLog(hasAssigned ? [caseKey, assignedTruckNo!] : [caseKey]),
+  ]);
 
   return {
     case: caseRow,
     identity: ident.rows[0] ?? null,
     actions: actions.rows,
-    poHistory,
-    poSource,
-    portal,
+    poHistory: casePo.poHistory,
+    poSource: casePo.poSource,
+    portal: casePortal,
+    ...(hasAssigned && assignedPo
+      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal } }
+      : {}),
+    callLog,
   };
 }

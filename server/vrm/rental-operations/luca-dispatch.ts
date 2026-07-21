@@ -12,6 +12,8 @@
  * Cutover posture: if the LIVHR endpoint isn't deployed yet, or the token isn't
  * set, this returns a clear, non-throwing status the UI can show — nothing dials.
  */
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, type MasterRow } from "./read-repository";
 
 const LUCA_BASE_URL = (process.env.LUCA_BASE_URL || process.env.LIVHR_BASE_URL || "https://fleetagents.replit.app").replace(/\/+$/, "");
@@ -84,8 +86,26 @@ async function postToLuca(spec: CallSpec): Promise<any> {
   }
 }
 
+/** Record the dispatch on the vehicle record (vrm_rental_operations_call_log).
+ * conversation_id may be null on failed dispatches — insert anyway (UNIQUE
+ * allows multiple NULLs). Never throws: a log failure must not break the call. */
+async function logDispatch(row: MasterRow, result: any, actor?: string | null): Promise<void> {
+  try {
+    await db.execute(sql`
+      INSERT INTO vrm_rental_operations_call_log
+        (case_key, target_truck, conversation_id, dispatched_by, dry_run, dialed, shop_name, shop_phone, note, source)
+      VALUES (${row.case_key}, ${row.call_target_truck ?? row.case_key}, ${result?.conversationId ?? null},
+              ${actor ?? null}, ${result?.dryRun === true}, ${result?.dialed === true},
+              ${row.call_shop_name ?? null}, ${row.call_shop_phone ?? null}, ${result?.message ?? null}, 'luca_dispatch')
+      ON CONFLICT (conversation_id) DO NOTHING
+    `);
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] call-log insert failed (non-fatal):", e?.message || e);
+  }
+}
+
 /** Hand ONE callable case to LUCA. */
-export async function dispatchCall(caseKey: string): Promise<any> {
+export async function dispatchCall(caseKey: string, actor?: string | null): Promise<any> {
   const m = await getRentalOpsMaster({});
   const row = m.rows.find((r) => r.case_key === caseKey);
   if (!row) return { ok: false, message: `case ${caseKey} not found` };
@@ -93,11 +113,12 @@ export async function dispatchCall(caseKey: string): Promise<any> {
     return { ok: false, message: `case ${caseKey} is not callable (no verified shop phone${row.redirect_to_assigned ? " on the assigned truck" : ""})` };
   }
   const result = await postToLuca(buildCallSpec(row));
+  await logDispatch(row, result, actor);
   return { caseKey, callTarget: row.call_target_truck, redirect: row.redirect_to_assigned, shop: row.call_shop_name, ...result };
 }
 
 /** Hand a set of callable cases to LUCA (concurrency-limited, request-bound). */
-export async function dispatchBatch(caseKeys: string[]): Promise<any> {
+export async function dispatchBatch(caseKeys: string[], actor?: string | null): Promise<any> {
   const m = await getRentalOpsMaster({});
   const wanted = new Set(caseKeys);
   const targets = m.rows.filter((r) => wanted.has(r.case_key) && r.callable && r.call_shop_phone);
@@ -107,6 +128,7 @@ export async function dispatchBatch(caseKeys: string[]): Promise<any> {
     const slice = targets.slice(i, i + CONCURRENCY);
     const settled = await Promise.all(slice.map(async (r) => {
       const res = await postToLuca(buildCallSpec(r));
+      await logDispatch(r, res, actor);
       return { caseKey: r.case_key, callTarget: r.call_target_truck, redirect: r.redirect_to_assigned, shop: r.call_shop_name, result: res };
     }));
     for (const s of settled) {
