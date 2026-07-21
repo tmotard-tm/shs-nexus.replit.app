@@ -195,6 +195,10 @@ export async function initRentalOperationsSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_rental_operations_po_history ADD COLUMN IF NOT EXISTS vendor_city VARCHAR(80);`);
   await db.execute(sql`ALTER TABLE vrm_rental_operations_po_history ADD COLUMN IF NOT EXISTS vendor_state VARCHAR(10);`);
   await db.execute(sql`ALTER TABLE vrm_rental_operations_po_history ADD COLUMN IF NOT EXISTS vendor_zip VARCHAR(20);`);
+  // Tyler's PO rule: a tow/roadside-named vendor still counts as the repair shop
+  // when PARTS and/or LABOR are on the PO. Landed from the Snowflake aggregation
+  // (COUNT of REPAIR_TYPE_DESCRIPTION IN ('PARTS','LABOR') per PO).
+  await db.execute(sql`ALTER TABLE vrm_rental_operations_po_history ADD COLUMN IF NOT EXISTS has_parts_labor BOOLEAN;`);
   // AMS status on cases (enriched per sync from the AMS truck-status cache by VIN)
   await db.execute(sql`ALTER TABLE vrm_rental_operations_cases ADD COLUMN IF NOT EXISTS ams_status VARCHAR(60);`);
   await db.execute(sql`ALTER TABLE vrm_rental_operations_cases ADD COLUMN IF NOT EXISTS ams_status_at TIMESTAMPTZ;`);

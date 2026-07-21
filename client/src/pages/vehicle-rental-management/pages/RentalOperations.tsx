@@ -84,6 +84,10 @@ interface MasterRow {
   shop_po_status: string | null;
   shop_po_date: string | null;
   assigned_truck: string | null;
+  assigned_truck_mismatch: boolean;
+  assigned_truck_open_po_count: number;
+  assigned_truck_has_repair_po: boolean | null;
+  workload_bucket: "cannot_work" | "mismatch_no_po" | "workable";
   redirect_to_assigned: boolean;
   call_target_truck: string | null;
   call_shop_name: string | null;
@@ -108,6 +112,7 @@ interface MasterModel {
   rows: MasterRow[]; total: number;
   cohorts: Record<string, number>; identityStates: Record<string, number>;
   categories: Record<string, number>; amsBuckets: Record<string, number>;
+  workloadBuckets?: Record<string, number>;
   mismatchCount: number; costOverCount: number; pendedCount: number;
   sourceHealth: { clocks: SourceClock[]; lastSyncAt: string | null; lastImportAt: string | null; lastFileDate: string | null };
   generatedAt: string;
@@ -211,9 +216,16 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
   };
 }
 
+// Tyler's LUCA workload rule: an explicit CAN-work / CANNOT-work split, plus
+// the escalation cohort (renter assigned a different truck that has no
+// qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
+const WORKLOAD_TABS = new Set(["can_work", "cannot_work", "mismatch_no_po"]);
 const COHORTS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All Rentals" },
   { key: "luca_queue", label: "LUCA Call Queue" },
+  { key: "can_work", label: "Can work" },
+  { key: "cannot_work", label: "Cannot work · declined" },
+  { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
   { key: "workable", label: "Workable · we own these" },
   { key: "declined", label: "Declined · no call" },
   { key: "auction", label: "Auction · no call" },
@@ -332,8 +344,13 @@ export default function RentalOperations() {
     const categories: Record<string, number> = { SEDAN: 0, "SUV/VAN/TRUCK": 0, unknown: 0 };
     const amsBuckets: Record<string, number> = {};
     const identityStates: Record<string, number> = {};
+    // Tyler's workload rule — counted over the current pool so the tab badges
+    // always tie out to what the grid actually shows.
+    const workload: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
     let mismatch = 0, costOver = 0, callable = 0;
     for (const r of basePool) {
+      const wb = r.workload_bucket || "workable";
+      workload[wb] = (workload[wb] || 0) + 1;
       cohorts[r.repair_cohort] = (cohorts[r.repair_cohort] || 0) + 1;
       const cat = r.class_bucket || r.actual_bucket || "unknown";
       categories[cat] = (categories[cat] || 0) + 1;
@@ -343,7 +360,7 @@ export default function RentalOperations() {
       if (r.cost_over) costOver++;
       if (r.callable) callable++;
     }
-    return { cohorts, categories, amsBuckets, identityStates, mismatch, costOver, callable };
+    return { cohorts, categories, amsBuckets, identityStates, workload, mismatch, costOver, callable };
   }, [basePool]);
 
   // distinct filter options
@@ -372,6 +389,10 @@ export default function RentalOperations() {
     const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
     return pool.filter((r) => {
       if (cohort === "luca_queue") { if (!r.callable) return false; }
+      // Tyler's workload split (server-derived buckets, MECE across the pool)
+      else if (cohort === "can_work") { if ((r.workload_bucket || "workable") === "cannot_work") return false; }
+      else if (cohort === "cannot_work") { if ((r.workload_bucket || "workable") !== "cannot_work") return false; }
+      else if (cohort === "mismatch_no_po") { if ((r.workload_bucket || "workable") !== "mismatch_no_po") return false; }
       else if (cohort === "workable") { if (isDeclinedAuction(r.ams_bucket)) return false; }
       else if (cohort === "declined") { if (r.ams_bucket !== "declined") return false; }
       else if (cohort === "auction") { if (r.ams_bucket !== "auction") return false; }
@@ -440,6 +461,10 @@ export default function RentalOperations() {
     mutationFn: (caseKey: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/call`),
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
+      if (j?.ok === false || j?.result?.ok === false) {
+        toast({ title: "Call NOT dispatched", description: j?.result?.message || "LUCA rejected the hand-off", variant: "destructive" });
+        return;
+      }
       const dialed = j?.result?.dialed, dry = j?.result?.dryRun;
       toast({ title: dialed ? "LUCA is calling the shop" : (dry ? "Queued (LUCA in dry-run)" : "Handed to LUCA"), description: j?.result?.message || (dry ? "LUCA_OUTREACH_LIVE is off — logged, no live dial" : `conv ${j?.result?.conversationId || "—"}`) });
     },
@@ -449,7 +474,8 @@ export default function RentalOperations() {
     mutationFn: (caseKeys: string[]) => apiRequest("POST", "/api/vrm/rental-operations/call-batch", { caseKeys }),
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
-      toast({ title: "LUCA working the queue", description: `${j?.result?.dispatched ?? 0} handed to LUCA${j?.result?.dryRun ? " (dry-run — no live dial)" : ""}` });
+      const r = j?.result || {};
+      toast({ title: r.failed ? `LUCA queue: ${r.failed} of ${r.total} failed` : "LUCA working the queue", description: `${r.dispatched ?? 0} handed to LUCA${r.failed ? `, ${r.failed} failed (open a case call log for details)` : ""}${r.dryRun ? " (dry-run — no live dial)" : ""}`, variant: r.failed ? "destructive" : undefined });
     },
     onError: (e: any) => toast({ title: "Batch call failed", description: String(e?.message || e), variant: "destructive" }),
   });
@@ -477,16 +503,19 @@ export default function RentalOperations() {
 
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence"];
+    const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
+      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
       r.tpms_tech || "", r.wrong_truck ? "YES" : "", r.renter_own_truck || "",
       r.veh_desc || "", r.actual_vehicle_type || "", r.rental_class || "", r.daily_cost ?? "", r.class_median ?? "",
       r.type_mismatch ? "YES" : "", r.cost_over ? "YES" : "", r.ams_status || "", r.repair_cohort,
-      r.shop_name || "", r.shop_po_status || "", r.portal_shop_phone || "", r.shop_city || "", r.shop_state || "",
+      r.shop_name || "", r.shop_po_status || "", r.call_shop_phone || r.portal_shop_phone || "", r.shop_city || "", r.shop_state || "",
       r.last_rental_date || "", r.no_rental_auth ? "YES" : "", r.po_count ?? "", r.odometer ?? "",
       r.days_open ?? "", r.number_of_extensions ?? "", r.ticket_status === "PENDED" ? "YES" : "",
       r.operator_mark || "", r.identity_state || "", r.identity_confidence || "",
+      r.workload_bucket || "", r.assigned_truck || "",
+      r.assigned_truck_has_repair_po == null ? "" : (r.assigned_truck_has_repair_po ? "YES" : "NO"),
     ].map((c) => esc(String(c))));
     const csv = [headers.join(","), ...body.map((r) => r.join(","))].join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -583,16 +612,19 @@ export default function RentalOperations() {
           const declAuc = (stats.amsBuckets.declined ?? 0) + (stats.amsBuckets.auction ?? 0);
           const n = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
+            : c.key === "can_work" ? (basePool.length - (stats.workload.cannot_work ?? 0))
+            : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
+            : c.key === "mismatch_no_po" ? (stats.workload.mismatch_no_po ?? 0)
             : c.key === "workable" ? (basePool.length - declAuc)
             : c.key === "declined" ? (stats.amsBuckets.declined ?? 0)
             : c.key === "auction" ? (stats.amsBuckets.auction ?? 0)
             : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
-          const danger = c.key === "declined" || c.key === "auction";
-          const go = c.key === "luca_queue";
+          const danger = c.key === "declined" || c.key === "auction" || c.key === "cannot_work";
+          const go = c.key === "luca_queue" || c.key === "can_work";
           const own = c.key === "workable";
-          const pended = c.key === "pended";
+          const pended = c.key === "pended" || c.key === "mismatch_no_po";
           const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.accent;
           const restColor = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.inkSoft;
           const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.rule;
@@ -600,8 +632,11 @@ export default function RentalOperations() {
             <button key={c.key} type="button" onClick={() => setCohort(c.key)}
               title={c.key === "declined" ? "AMS says Declined Repair — do NOT route these to a shop-calling agent"
                 : c.key === "auction" ? "AMS says Sent To Auction — do NOT route these to a shop-calling agent"
-                : pended ? "PENDED = renter turned the vehicle in / ticket closing. This tab always shows the full pended list, regardless of the include-PENDED toggle."
-                : go ? "Open repair + verified shop phone + not declined/auction — this is the feed LUCA calls"
+                : c.key === "can_work" ? "LUCA's workable list: every rental NOT in a Declined Repair / Sent To Auction status."
+                : c.key === "cannot_work" ? "Declined Repair / Sent To Auction — we no longer own these vans. Hands off: no shop calls."
+                : c.key === "mismatch_no_po" ? "ESCALATION COHORT: the renter is assigned a DIFFERENT truck than the one the rental is written against, and that assigned truck has NO qualifying repair PO. Nobody is repairing anything — route to the proper channel."
+                : c.key === "pended" ? "PENDED = renter turned the vehicle in / ticket closing. This tab always shows the full pended list, regardless of the include-PENDED toggle."
+                : c.key === "luca_queue" ? "Open repair + verified shop phone + not declined/auction — this is the feed LUCA calls"
                 : own ? "Every rental we still own (NOT Declined Repair / Sent To Auction) — these are the ones that can be worked. Ready ones show a Call button; the rest are missing a phone or an open repair." : undefined}
               style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : restColor, background: active ? accentC : colors.surface, border: `1px solid ${active ? accentC : restBorder}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
               {c.label} <span style={{ opacity: 0.7 }}>{n}</span>
@@ -609,6 +644,30 @@ export default function RentalOperations() {
           );
         })}
       </div>
+
+      {/* Workload banner — the governing sentence for whichever workload tab is on */}
+      {WORKLOAD_TABS.has(cohort) && (
+        <div style={{ marginBottom: 12, padding: "11px 15px", borderRadius: 12, fontSize: 12.5, lineHeight: 1.5,
+          border: `1px solid ${cohort === "cannot_work" ? colors.red : cohort === "mismatch_no_po" ? colors.amber : colors.green}`,
+          background: cohort === "cannot_work" ? "rgba(239,68,68,.06)" : cohort === "mismatch_no_po" ? "rgba(245,158,11,.07)" : "rgba(34,197,94,.06)",
+          color: colors.inkSoft }}>
+          {cohort === "can_work" && (
+            <><strong style={{ color: colors.green }}>{basePool.length - (stats.workload.cannot_work ?? 0)} of {basePool.length} rentals are workable.</strong>{" "}
+              Everything that is not Declined Repair / Sent To Auction. {stats.callable} of them are callable right now (open repair + verified shop phone);
+              {" "}{stats.workload.mismatch_no_po ?? 0} sit in the mismatch escalation cohort.</>
+          )}
+          {cohort === "cannot_work" && (
+            <><strong style={{ color: colors.red }}>{stats.workload.cannot_work ?? 0} rentals cannot be worked.</strong>{" "}
+              AMS shows Declined Repair or Sent To Auction, so we no longer own the van. LUCA never calls a shop for these, and no shop call should be placed manually either.</>
+          )}
+          {cohort === "mismatch_no_po" && (
+            <><strong style={{ color: colors.amber }}>{stats.workload.mismatch_no_po ?? 0} rentals need escalation.</strong>{" "}
+              The renter is assigned a <em>different</em> truck than the one this rental is written against, and that assigned truck has no qualifying repair PO
+              (towing / roadside POs do not count unless parts or labor are on them). Nothing is in a shop, so nothing will close on its own.
+              {" "}<span style={{ color: colors.inkMuted }}>Escalation routing is a Tyler decision and is not automated — work this list manually for now.</span></>
+          )}
+        </div>
+      )}
 
       {/* Filter bar */}
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
@@ -962,6 +1021,11 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
     onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
+  const overrideMut = useMutation({
+    mutationFn: (employee_id: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/identity-override`, { employee_id }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); toast({ title: "Identity updated" }); },
+    onError: (e: any) => toast({ title: "Override failed", description: String(e?.message || e), variant: "destructive" }),
+  });
   const label = panelLabel;
   const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
 
@@ -990,9 +1054,22 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   : <span style={{ color: id?.state === "EXCEPTION" ? colors.red : colors.amber }}>{id?.state}: {id?.reason || "needs review"}</span>}
               </div>
               {(id?.state === "REVIEW" || id?.state === "EXCEPTION") && Array.isArray(id?.candidates) && id.candidates.length > 0 && (
-                <div style={{ marginTop: 6, fontSize: 11.5, color: colors.inkMuted, fontFamily: fonts.jetbrains }}>
-                  candidates: {id.candidates.map((x: any) => `${x.employee_id}[${x.employment_status}${x.event_date ? " " + x.event_date : ""}]`).join(" · ")}
+                <div style={{ marginTop: 6, display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {id.candidates.map((x: any) => (
+                    <button key={x.employee_id} type="button" disabled={overrideMut.isPending}
+                      title="Pin this employee id as the renter (manual identity override)"
+                      onClick={() => { if (window.confirm(`Pin this rental to employee ${x.employee_id} (${x.tech_name || x.name || "?"}, ${x.employment_status})?`)) overrideMut.mutate(String(x.employee_id)); }}
+                      style={{ fontFamily: fonts.jetbrains, fontSize: 11, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>
+                      use {x.employee_id} [{x.employment_status}{x.event_date ? " " + x.event_date : ""}]{(x.tech_name || x.name) ? ` ${x.tech_name || x.name}` : ""}
+                    </button>
+                  ))}
                 </div>
+              )}
+              {id?.override_employee_id && (
+                <button type="button" onClick={() => { if (window.confirm("Clear the manual identity override and return to auto-resolution?")) overrideMut.mutate(""); }}
+                  style={{ marginTop: 5, fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
+                  clear manual override
+                </button>
               )}
             </section>
             {/* ticket + vehicle economics */}

@@ -14,24 +14,19 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getSnowflakeService } from "../../snowflake-service";
 import { toDisplayNumber, toCanonical, toHolmanRef } from "../../vehicle-number-utils";
+import { classifyPoVendor, type PoClassLine } from "./vendor-class";
 
 const PO_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS";
 
-// vendor classification (plan §2.4): exclude tow + parts + rental placeholders
-// so the "current shop" and open-repair cohort reflect real repair vendors.
-const TOLL_RE = /\bTOLL/i;
-const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|JUMP\s?START|LOCKOUT|WINCH/i;
-const PARTS_RE = /\bJASPER\b|HOLMAN PARTS|PARTS DISTRIBUTION|\bNAPA\b|AUTOZONE|O'?REILLY|ADVANCE AUTO|GENUINE PARTS|WORLDPAC/i;
-const RENTAL_RE = /ENTERPRISE RENT|\bNATIONAL\b|RENT-?A-?CAR|\bHERTZ\b|\bAVIS\b|\bRENTAL\b/i;
-
-export function classifyVendor(vendorName: string | null, description: string | null): string {
-  const v = `${vendorName || ""} ${description || ""}`;
-  if (TOLL_RE.test(v)) return "toll";                 // Enterprise Tolls / toll charges, not a shop
-  if (RENTAL_RE.test(v)) return "rental_placeholder";
-  if (TOW_RE.test(v)) return "tow";
-  if (PARTS_RE.test(v)) return "parts";
-  if (!vendorName || !vendorName.trim()) return "other";
-  return "repair";
+/**
+ * Vendor classification now lives in ./vendor-class (see Tyler's PO rule there).
+ * This wrapper is kept for back-compat callers, with the bug fixed: the PO
+ * DESCRIPTION / ATA groups are NEVER fed to the vendor-NAME regexes. A real
+ * repair shop whose PO carried a ROADSIDE ata-group line used to be classified
+ * 'tow' and dropped out of the repair cohort entirely.
+ */
+export function classifyVendor(vendorName: string | null, _description?: string | null): string {
+  return classifyPoVendor({ vendorName }).vendorType;
 }
 
 // Snowflake returns DATE/TIMESTAMP columns as JS Date objects (or Snowflake
@@ -57,6 +52,8 @@ export interface PoHistoryResult {
   trucks: number;
   posLanded: number;
   openRepairTrucks: number;
+  byVendorType?: Record<string, number>;
+  towNamedWithPartsLabor?: number;   // Tyler's exception hits (tow name + parts/labor -> repair)
 }
 
 export interface PoLineItem { seq: number | null; description: string | null; repairType: string | null; ataGroup: string | null; qty: number | null; cost: number | null; }
@@ -65,6 +62,7 @@ export interface PoRecord {
   vendorName: string | null; vendorAddress: string | null; vendorCity: string | null; vendorState: string | null;
   poType: string | null; repairDate: string | null; paidDate: string | null; approver: string | null;
   odometer: number | null; totalAmount: number | null; uploadTimestamp: string | null; lineItems: PoLineItem[];
+  hasPartsOrLabor: boolean;   // Tyler's tow/roadside exception key
 }
 
 /** Full 3-year PO history for ONE truck, grouped by PO with line items, latest
@@ -101,7 +99,9 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
       const status = (r.PO_STATUS ? String(r.PO_STATUS) : "").trim().toUpperCase() || null;
       rec = {
         poNumber: po, poDate: toIsoDate(r.PO_DATE), poStatus: status,
-        vendorType: classifyVendor(r.VENDOR_NAME, r.DESCRIPTION),
+        // vendorType/hasPartsOrLabor are finalized AFTER all line items are
+        // collected — classification depends on the whole PO, not row 1.
+        vendorType: "other", hasPartsOrLabor: false,
         vendorName: r.VENDOR_NAME ? String(r.VENDOR_NAME).trim() : null,
         vendorAddress: r.VENDOR_ADDRESS_LINE_1 ? String(r.VENDOR_ADDRESS_LINE_1).trim() : null,
         vendorCity: r.VENDOR_CITY ? String(r.VENDOR_CITY).trim() : null,
@@ -125,7 +125,13 @@ export async function getTruckPoHistory(caseKey: string, years = 3): Promise<PoR
     const lineTotal = numOrNull(r.TOTAL_LINE_ITEM_AMOUNT);
     if (lineTotal != null) rec.totalAmount = (rec.totalAmount ?? 0) + lineTotal;
   }
-  return order.map((po) => byPo.get(po)!);
+  const out = order.map((po) => byPo.get(po)!);
+  for (const rec of out) {
+    const cls = classifyPoVendor({ vendorName: rec.vendorName, lines: rec.lineItems as PoClassLine[] });
+    rec.vendorType = cls.vendorType;
+    rec.hasPartsOrLabor = cls.hasPartsOrLabor;
+  }
+  return out;
 }
 
 /** Land PO history for the currently-open rental trucks (or a given subset). */
@@ -193,6 +199,12 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
       MAX(DRIVER_LAST_NAME)      AS DRIVER,
       MAX(ENTERPRISE_ID)         AS EID,
       MAX(UPLOAD_TIMESTAMP)      AS UPLOAD_TS,
+      -- Tyler's PO rule inputs: PARTS/LABOR presence is the tow/roadside
+      -- EXCEPTION key; the rental/roadside-only test kills placeholder POs.
+      COUNT(CASE WHEN REPAIR_TYPE_DESCRIPTION IN ('PARTS','LABOR') THEN 1 END) AS PL_CNT,
+      COUNT(CASE WHEN REPAIR_TYPE_DESCRIPTION IN ('RENTAL','ROADSIDE') THEN 1 END) AS RR_CNT,
+      COUNT(CASE WHEN REPAIR_TYPE_DESCRIPTION = 'ROADSIDE' THEN 1 END) AS ROADSIDE_CNT,
+      COUNT(REPAIR_TYPE_DESCRIPTION) AS LINE_CNT,
       LISTAGG(DISTINCT ATA_GROUP_DESC, '; ') WITHIN GROUP (ORDER BY ATA_GROUP_DESC) AS DESCR
     FROM scoped
     WHERE UPLOAD_TIMESTAMP = MAXUP
@@ -202,10 +214,22 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
   // normalize + classify, then upsert (chunked)
   const mapped = rows.map((r: any) => {
     const vehPad = toDisplayNumber(String(r.HOLMAN_VEHICLE_NUMBER ?? ""));
-    const vendorType = classifyVendor(r.VENDOR_NAME, r.DESCR);
+    const lineCnt = Number(r.LINE_CNT || 0);
+    const rrCnt = Number(r.RR_CNT || 0);
+    // NOTE: DESCR (the ATA-group LISTAGG) is stored for display ONLY. It must
+    // never reach the vendor-NAME regexes — that misfiled every repair shop
+    // whose PO carried a ROADSIDE ata group as 'tow'.
+    const cls = classifyPoVendor({
+      vendorName: r.VENDOR_NAME,
+      hasPartsOrLabor: Number(r.PL_CNT || 0) > 0,
+      allRentalRoadside: lineCnt > 0 && rrCnt === lineCnt,
+      anyRoadside: Number(r.ROADSIDE_CNT || 0) > 0,
+    });
+    const vendorType = cls.vendorType;
     const status = (r.PO_STATUS ? String(r.PO_STATUS) : "").trim().toUpperCase() || null;
     return {
       vehPad,
+      hasPartsLabor: cls.hasPartsOrLabor,
       po: String(r.PO_NUMBER ?? "").trim(),
       status,
       date: toIsoDate(r.PO_DATE),
@@ -231,13 +255,16 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
           INSERT INTO vrm_rental_operations_po_history (
             vehicle_number_padded, po_number, po_date, po_status, vendor_name, vendor_type,
             vendor_address, vendor_city, vendor_state, vendor_zip, description, approved_amount,
-            maintenance_approver, driver_last_name, enterprise_id, upload_timestamp, source, raw_json
+            maintenance_approver, driver_last_name, enterprise_id, upload_timestamp, source, raw_json,
+            has_parts_labor
           ) VALUES (
             ${p.vehPad}, ${p.po}, ${p.date}, ${p.status}, ${p.vendor}, ${p.vendorType},
             ${p.addr}, ${p.city}, ${p.vstate}, ${p.zip}, ${p.descr}, ${p.total},
-            ${p.approver}, ${p.driver}, ${p.eid}, ${p.upload}, 'holman_etl', ${JSON.stringify(p)}::jsonb
+            ${p.approver}, ${p.driver}, ${p.eid}, ${p.upload}, 'holman_etl', ${JSON.stringify(p)}::jsonb,
+            ${p.hasPartsLabor}
           )
           ON CONFLICT (vehicle_number_padded, po_number, source) DO UPDATE SET
+            has_parts_labor=EXCLUDED.has_parts_labor,
             po_date=EXCLUDED.po_date, po_status=EXCLUDED.po_status, vendor_name=EXCLUDED.vendor_name,
             vendor_type=EXCLUDED.vendor_type, vendor_address=EXCLUDED.vendor_address,
             vendor_city=EXCLUDED.vendor_city, vendor_state=EXCLUDED.vendor_state, vendor_zip=EXCLUDED.vendor_zip,
@@ -251,7 +278,20 @@ export async function landPoHistory(caseKeysIn?: string[]): Promise<PoHistoryRes
   });
 
   const openRepair = new Set<string>();
-  for (const p of mapped) if (p.vendorType === "repair" && p.status === "APPROVED") openRepair.add(p.vehPad);
+  const byType: Record<string, number> = {};
+  let towWithPartsLabor = 0;
+  for (const p of mapped) {
+    byType[p.vendorType] = (byType[p.vendorType] || 0) + 1;
+    if (p.vendorType === "repair" && p.status === "APPROVED") openRepair.add(p.vehPad);
+    if (p.hasPartsLabor && /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|JUMP\s?START|LOCKOUT|WINCH/i.test(p.vendor || "")) towWithPartsLabor++;
+  }
+  // durable-ish observability: every land run reports what it classified, so a
+  // classification regression is visible in the logs without a DB diff.
+  console.log(
+    `[VRM/RentalOps] PO land: ${mapped.length} POs over ${caseKeys.length} trucks · ` +
+    `types ${JSON.stringify(byType)} · tow-named-but-parts/labor kept as repair: ${towWithPartsLabor} · ` +
+    `open-repair trucks ${openRepair.size}`,
+  );
 
-  return { trucks: caseKeys.length, posLanded: mapped.length, openRepairTrucks: openRepair.size };
+  return { trucks: caseKeys.length, posLanded: mapped.length, openRepairTrucks: openRepair.size, byVendorType: byType, towNamedWithPartsLabor: towWithPartsLabor };
 }

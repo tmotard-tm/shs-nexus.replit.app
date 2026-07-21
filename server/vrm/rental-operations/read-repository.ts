@@ -7,6 +7,7 @@
  */
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
+import { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
 
 // ── board classifier (ported 1:1 from make_rental_fleet_gallery.py) ──────────
 const VAN_SUV_TRUCK = /SUV|VAN|P\/UP|PICKUP|TRUCK/i;
@@ -51,6 +52,24 @@ function median(nums: number[]): number | null {
   const mid = Math.floor(s.length / 2);
   return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
 }
+
+// ── Tyler's PO rule, in SQL ─────────────────────────────────────────────────
+// "…pulls the most recent repair shop PO ignoring any towing companies or
+//  roadside assistance PO's unless parts and/or labor are included on the PO."
+// vendor_type is now produced by server/vrm/rental-operations/vendor-class.ts,
+// which already applies the parts/labor exception at land time. The second
+// clause is a safety net for rows landed BEFORE has_parts_labor existed, so a
+// stale 'tow' row that actually carries parts/labor still qualifies.
+const QUALIFYING_REPAIR_PO = sql`(p.vendor_type = 'repair' OR (p.vendor_type = 'tow' AND p.has_parts_labor IS TRUE))`;
+const QUALIFYING_REPAIR_PO_S = sql`(s.vendor_type = 'repair' OR (s.vendor_type = 'tow' AND s.has_parts_labor IS TRUE))`;
+// "MOST RECENT repair shop PO": open (APPROVED) POs win, then newest po_date,
+// then highest po_number as a deterministic tiebreak (Holman PO numbers are
+// monotonic, and two POs can share a date).
+const MOST_RECENT_SHOP_ORDER = sql`ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST, s.po_number DESC`;
+
+// LUCA workload buckets (Tyler's workload rule) live in ./workload — pure, so
+// they are unit-testable without a DB. Re-exported here for callers.
+export { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
 
 export interface MasterRow {
   case_key: string;
@@ -121,6 +140,15 @@ export interface MasterRow {
   // the rental van, so the shop to call is the one repairing the tech's ASSIGNED
   // truck (renter_own_truck), NOT the rental truck. These fields resolve that.
   assigned_truck: string | null;   // renter's own assigned truck, 5-padded
+  // ── LUCA workload (Tyler's workload rule) ────────────────────────────────
+  // "As long as the technician shown as the renter is also the technician
+  //  assigned to the truck [normal]; if a DIFFERENT truck is assigned to the
+  //  same technician with a rental, that assigned truck must be checked for a
+  //  repair PO. If there is not one, it must be escalated."
+  assigned_truck_mismatch: boolean;            // renter is assigned a DIFFERENT truck
+  assigned_truck_open_po_count: number;        // qualifying open repair POs on the assigned truck
+  assigned_truck_has_repair_po: boolean | null;// null when there is no assigned truck
+  workload_bucket: WorkloadBucket;             // cannot_work | mismatch_no_po | workable
   redirect_to_assigned: boolean;   // declined/auction + distinct assigned truck → call THAT shop
   call_target_truck: string | null;// the truck whose shop LUCA actually dials (rental or assigned)
   call_shop_name: string | null;
@@ -148,6 +176,7 @@ export interface MasterModel {
   identityStates: Record<string, number>;
   categories: Record<string, number>;
   amsBuckets: Record<string, number>;
+  workloadBuckets: Record<string, number>;   // cannot_work | mismatch_no_po | workable
   mismatchCount: number;
   costOverCount: number;
   pendedCount: number;
@@ -222,7 +251,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     ) m ON true
     LEFT JOIN LATERAL (
       SELECT
-        count(*) FILTER (WHERE p.vendor_type='repair' AND p.po_status='APPROVED') AS open_po_count,
+        count(*) FILTER (WHERE ${QUALIFYING_REPAIR_PO} AND p.po_status='APPROVED') AS open_po_count,
         count(*) AS any_po_count,
         to_char(max(p.po_date) FILTER (WHERE p.vendor_type='rental_placeholder'),'YYYY-MM-DD') AS last_rental_date,
         bool_or(p.vendor_type='rental_placeholder' AND p.po_status='APPROVED') AS has_rental_auth
@@ -233,12 +262,12 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       SELECT vendor_name, vendor_address, vendor_city, vendor_state, vendor_zip,
              po_status, po_number, to_char(po_date,'YYYY-MM-DD') AS po_date
       FROM vrm_rental_operations_po_history s
-      WHERE s.vehicle_number_padded = c.case_key AND s.vendor_type = 'repair'
-      ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST
+      WHERE s.vehicle_number_padded = c.case_key AND ${QUALIFYING_REPAIR_PO_S}
+      ${MOST_RECENT_SHOP_ORDER}
       LIMIT 1
     ) shop ON true
     LEFT JOIN LATERAL (
-      SELECT count(*) FILTER (WHERE p.vendor_type='repair' AND p.po_status='APPROVED') AS open_po_count
+      SELECT count(*) FILTER (WHERE ${QUALIFYING_REPAIR_PO} AND p.po_status='APPROVED') AS open_po_count
       FROM vrm_rental_operations_po_history p
       WHERE p.vehicle_number_padded = ownp.own_pad
     ) apo ON true
@@ -246,8 +275,8 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       SELECT vendor_name, vendor_address, vendor_city, vendor_state, vendor_zip,
              po_status, po_number, to_char(po_date,'YYYY-MM-DD') AS po_date
       FROM vrm_rental_operations_po_history s
-      WHERE s.vehicle_number_padded = ownp.own_pad AND s.vendor_type = 'repair'
-      ORDER BY (s.po_status = 'APPROVED') DESC, s.po_date DESC NULLS LAST
+      WHERE s.vehicle_number_padded = ownp.own_pad AND ${QUALIFYING_REPAIR_PO_S}
+      ${MOST_RECENT_SHOP_ORDER}
       LIMIT 1
     ) ashop ON true
     ${includeDropped ? sql`` : sql`WHERE c.present_in_latest = true`}
@@ -272,6 +301,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
   const identityStates: Record<string, number> = {};
   const categories: Record<string, number> = { SEDAN: 0, "SUV/VAN/TRUCK": 0, unknown: 0 };
   const amsBuckets: Record<string, number> = {};
+  const workloadBuckets: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
   let mismatchCount = 0, costOverCount = 0, pendedCount = 0;
 
   const rows: MasterRow[] = raw.map((r) => {
@@ -300,6 +330,13 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     const isDeclAuction = amsBucket === "declined" || amsBucket === "auction";
     const assignedTruck = r.assigned_truck ? String(r.assigned_truck) : null;
     const assignedOpenPo = Number(r.assigned_open_po || 0);
+    // ── LUCA workload rule ───────────────────────────────────────────────────
+    // Congruent = the renter's assigned truck IS the rental-case truck. A
+    // mismatch means the tech is assigned a DIFFERENT truck, so THAT truck is
+    // the one that must carry a qualifying repair PO. No PO there = escalate.
+    const assignedMismatch = !!(assignedTruck && strip(assignedTruck) !== strip(r.case_key));
+    const assignedHasRepairPo = assignedTruck ? assignedOpenPo > 0 : null;
+    const workloadBucket = deriveWorkloadBucket({ amsBucket, assignedTruck, assignedMismatch, assignedHasRepairPo });
     // The rental truck is callable on its OWN repair only if we still own it
     // (not declined/auction) and it has an open repair PO + a verified phone.
     const rentalOwnCallable = !isDeclAuction && openPo > 0 && !!r.portal_shop_phone;
@@ -347,6 +384,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     const catKey = classBucket || actBucket || "unknown";
     categories[catKey] = (categories[catKey] || 0) + 1;
     amsBuckets[amsBucket] = (amsBuckets[amsBucket] || 0) + 1;
+    workloadBuckets[workloadBucket] = (workloadBuckets[workloadBucket] || 0) + 1;
 
     return {
       case_key: r.case_key, vehicle_number: r.vehicle_number, source: r.source,
@@ -376,7 +414,12 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       shop_state: r.shop_state ?? null, shop_zip: r.shop_zip ?? null,
       shop_po_number: r.shop_po_number ?? null, shop_po_status: r.shop_po_status ?? null,
       shop_po_date: r.shop_po_date ?? null,
-      assigned_truck: assignedTruck, redirect_to_assigned: redirectToAssigned,
+      assigned_truck: assignedTruck,
+      assigned_truck_mismatch: assignedMismatch,
+      assigned_truck_open_po_count: assignedOpenPo,
+      assigned_truck_has_repair_po: assignedHasRepairPo,
+      workload_bucket: workloadBucket,
+      redirect_to_assigned: redirectToAssigned,
       call_target_truck: callTargetTruck, call_shop_name: callShopName, call_shop_phone: callShopPhone,
       call_shop_address: callShopAddress, call_shop_po_number: callShopPoNumber, call_shop_po_status: callShopPoStatus,
       ams_status: r.ams_status ?? null, ams_bucket: amsBucket,
@@ -387,7 +430,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
   });
 
   return {
-    rows, total: rows.length, cohorts, identityStates, categories, amsBuckets,
+    rows, total: rows.length, cohorts, identityStates, categories, amsBuckets, workloadBuckets,
     mismatchCount, costOverCount, pendedCount,
     sourceHealth: await getSourceHealth(), generatedAt: new Date().toISOString(),
   };
@@ -467,6 +510,13 @@ export async function getLucaFeed(): Promise<any> {
     redirectedToAssignedTruck: redirected,
     declinedAuctionCount: declinedAuction.length,
     declinedAuctionExcluded: declinedAuction.filter((r) => !r.callable).length,
+    // Tyler's workload rule, reported alongside the call feed (recording only —
+    // the call decision is still `callable`, unchanged).
+    workloadBuckets: m.workloadBuckets,
+    mismatchNoPo: rows.filter((r) => r.workload_bucket === "mismatch_no_po").map((r) => ({
+      rental_truck: r.case_key, assigned_truck: r.assigned_truck, renter: r.renter_name_raw,
+      employee_id: r.employee_id, ams_status: r.ams_status, days_open: r.days_open,
+    })),
     lastSyncAt: m.sourceHealth.lastSyncAt,
     shops: callable.map((r) => ({
       truck: r.call_target_truck,          // the truck whose shop LUCA dials
@@ -479,6 +529,8 @@ export async function getLucaFeed(): Promise<any> {
       tpms_tech: r.tpms_tech,
       renter_own_truck: r.renter_own_truck,
       wrong_truck: r.wrong_truck,
+      workload_bucket: r.workload_bucket,
+      assigned_truck_has_repair_po: r.assigned_truck_has_repair_po,
       shop_name: r.call_shop_name,
       shop_phone: r.call_shop_phone,
       shop_address: r.call_shop_address,
@@ -556,12 +608,13 @@ async function fetchPoHistoryWithFallback(truck: string): Promise<{ poHistory: a
     console.warn(`[VRM/RentalOps] live PO history failed for ${truck}, using cached table:`, e?.message || e);
     const poHist = await db.execute(sql`
       SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
-             vendor_type, vendor_city, vendor_state, description, approved_amount
+             vendor_type, vendor_city, vendor_state, description, approved_amount, has_parts_labor
       FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${truck}
-      ORDER BY po_date DESC NULLS LAST`);
+      ORDER BY po_date DESC NULLS LAST, po_number DESC`);
     const poHistory = (poHist.rows as any[]).map((p) => ({
       poNumber: p.po_number, poDate: p.po_date, poStatus: p.po_status, vendorType: p.vendor_type,
       vendorName: p.vendor_name, vendorCity: p.vendor_city, vendorState: p.vendor_state,
+      hasPartsOrLabor: p.has_parts_labor === true,
       totalAmount: p.approved_amount == null ? null : Number(p.approved_amount), lineItems: [],
     }));
     return { poHistory, poSource: "cached_fallback" };

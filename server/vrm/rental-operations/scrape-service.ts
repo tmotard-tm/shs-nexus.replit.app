@@ -13,6 +13,7 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { toCanonical, toDisplayNumber } from "../../vehicle-number-utils";
 import type { SvcHistoryResult } from "./holman-svc-scrape";
+import { classifyPoVendor, type PoClassLine } from "./vendor-class";
 
 const BATCH = 8;                 // vehicles per worker invocation (Chromium is sequential)
 const WORKER_TIMEOUT_MS = 300_000;
@@ -25,10 +26,11 @@ function trimEvent(e: any) {
   for (const k of keep) if (e[k] !== undefined && e[k] !== null && e[k] !== "") o[k] = e[k];
   return o;
 }
-const RENTAL = /ENTERPRISE|\bNATIONAL\b|RENT-?A-?CAR|\bHERTZ\b|\bAVIS\b|\bRENTAL\b|\bTOLL/i;
-const TOW = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|JUMP\s?START|LOCKOUT|WINCH/i;
-const PARTS = /\bJASPER\b|HOLMAN PARTS|PARTS DISTRIBUTION|\bNAPA\b|AUTOZONE|O'?REILLY|ADVANCE AUTO|GENUINE PARTS/i;
-const isRealShop = (v: string) => !!v && !RENTAL.test(v) && !TOW.test(v) && !PARTS.test(v);
+// Shop selection uses the SAME classifier as the ETL land (Tyler's PO rule):
+// tow/roadside vendors are skipped UNLESS parts and/or labor are on the PO.
+// The portal's lineItems carry `typeDesc` (PARTS | LABOR | RENTAL | ROADSIDE | …).
+const isRealShop = (p: any) =>
+  classifyPoVendor({ vendorName: p?.vendorName ?? null, lines: (p?.lineItems as PoClassLine[]) ?? null }).vendorType === "repair";
 function parseDate(s: any): number { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; }
 
 function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
@@ -60,10 +62,13 @@ function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
 
 async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): Promise<void> {
   const events = (rawHist || []).map(trimEvent);
+  // MOST RECENT first (Tyler: "pulls the most recent repair shop PO"), with a
+  // deterministic poNumber tiebreak so equal repair dates never order randomly.
   const pos = events.filter((e) => e.type === "PO" && e.poNumber && e.poNumber !== "0")
-    .sort((a, b) => parseDate(b.repairDate) - parseDate(a.repairDate));
+    .sort((a, b) => (parseDate(b.repairDate) - parseDate(a.repairDate))
+      || String(b.poNumber ?? "").localeCompare(String(a.poNumber ?? ""), undefined, { numeric: true }));
   const msgCount = events.filter((e) => e.type === "MSG").length;
-  const shopPos = pos.filter((p) => isRealShop(p.vendorName || ""));
+  const shopPos = pos.filter(isRealShop);
   const openShop = shopPos.find((p) => String(p.status || "").toUpperCase() === "APPROVED");
   const pick = openShop || shopPos[0] || null;
   await db.execute(sql`
