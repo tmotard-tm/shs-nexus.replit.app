@@ -219,12 +219,11 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 // Tyler's LUCA workload rule: an explicit CAN-work / CANNOT-work split, plus
 // the escalation cohort (renter assigned a different truck that has no
 // qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
-const WORKLOAD_TABS = new Set(["can_work", "cannot_work", "mismatch_no_po"]);
+const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po"]);
 const COHORTS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All Rentals" },
   { key: "luca_queue", label: "LUCA Call Queue" },
-  { key: "can_work", label: "Can work" },
-  { key: "cannot_work", label: "Cannot work · declined" },
+  { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
   { key: "workable", label: "Workable · we own these" },
   { key: "declined", label: "Declined · no call" },
@@ -235,6 +234,19 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "no_history", label: "No Portal History" },
 ];
 const isDeclinedAuction = (b: string) => b === "declined" || b === "auction";
+
+/** THE workload derivation. Used by BOTH the chip counts and the row filter so a
+ * chip can never advertise a number and then open a grid that disagrees.
+ * cannot_work comes from ams_bucket (the same field the Declined/Auction chips
+ * count). The server's workload_bucket only splits escalation out of the rest;
+ * when the running server predates that field, rows fall through to workable and
+ * the escalation chip renders "—" instead of a misleading 0. */
+type WorkloadBucket = "cannot_work" | "mismatch_no_po" | "workable";
+function workloadBucketOf(r: { ams_bucket: string; workload_bucket?: string | null }): WorkloadBucket {
+  if (isDeclinedAuction(r.ams_bucket)) return "cannot_work";
+  if (r.workload_bucket === "mismatch_no_po") return "mismatch_no_po";
+  return "workable";
+}
 
 // ── multi-select filter (checkbox dropdown; empty selection = show all) ──────
 function MultiSelect({ label, options, values, onChange, style }: {
@@ -348,8 +360,14 @@ export default function RentalOperations() {
     // always tie out to what the grid actually shows.
     const workload: Record<string, number> = { workable: 0, cannot_work: 0, mismatch_no_po: 0 };
     let mismatch = 0, costOver = 0, callable = 0;
+    let sawServerWorkload = false;
     for (const r of basePool) {
-      const wb = r.workload_bucket || "workable";
+      // cannot_work is derived from ams_bucket — the SAME field the Declined and
+      // Auction chips count — so the three can never disagree. The server's
+      // workload_bucket only splits escalation out of the remainder; when it is
+      // absent (older server build) we must not silently call everything workable.
+      if (r.workload_bucket) sawServerWorkload = true;
+      const wb = workloadBucketOf(r);
       workload[wb] = (workload[wb] || 0) + 1;
       cohorts[r.repair_cohort] = (cohorts[r.repair_cohort] || 0) + 1;
       const cat = r.class_bucket || r.actual_bucket || "unknown";
@@ -360,7 +378,7 @@ export default function RentalOperations() {
       if (r.cost_over) costOver++;
       if (r.callable) callable++;
     }
-    return { cohorts, categories, amsBuckets, identityStates, workload, mismatch, costOver, callable };
+    return { cohorts, categories, amsBuckets, identityStates, workload, mismatch, costOver, callable, sawServerWorkload };
   }, [basePool]);
 
   // distinct filter options
@@ -389,10 +407,9 @@ export default function RentalOperations() {
     const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
     return pool.filter((r) => {
       if (cohort === "luca_queue") { if (!r.callable) return false; }
-      // Tyler's workload split (server-derived buckets, MECE across the pool)
-      else if (cohort === "can_work") { if ((r.workload_bucket || "workable") === "cannot_work") return false; }
-      else if (cohort === "cannot_work") { if ((r.workload_bucket || "workable") !== "cannot_work") return false; }
-      else if (cohort === "mismatch_no_po") { if ((r.workload_bucket || "workable") !== "mismatch_no_po") return false; }
+      // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
+      else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
+      else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
       else if (cohort === "workable") { if (isDeclinedAuction(r.ams_bucket)) return false; }
       else if (cohort === "declined") { if (r.ams_bucket !== "declined") return false; }
       else if (cohort === "auction") { if (r.ams_bucket !== "auction") return false; }
@@ -610,11 +627,10 @@ export default function RentalOperations() {
       <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
         {COHORTS.map((c) => {
           const declAuc = (stats.amsBuckets.declined ?? 0) + (stats.amsBuckets.auction ?? 0);
-          const n = c.key === "all" ? basePool.length
+          const n: number | string = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
-            : c.key === "can_work" ? (basePool.length - (stats.workload.cannot_work ?? 0))
             : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
-            : c.key === "mismatch_no_po" ? (stats.workload.mismatch_no_po ?? 0)
+            : c.key === "mismatch_no_po" ? (stats.sawServerWorkload ? (stats.workload.mismatch_no_po ?? 0) : "—")
             : c.key === "workable" ? (basePool.length - declAuc)
             : c.key === "declined" ? (stats.amsBuckets.declined ?? 0)
             : c.key === "auction" ? (stats.amsBuckets.auction ?? 0)
@@ -622,7 +638,7 @@ export default function RentalOperations() {
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
           const danger = c.key === "declined" || c.key === "auction" || c.key === "cannot_work";
-          const go = c.key === "luca_queue" || c.key === "can_work";
+          const go = c.key === "luca_queue";
           const own = c.key === "workable";
           const pended = c.key === "pended" || c.key === "mismatch_no_po";
           const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.accent;
@@ -630,13 +646,14 @@ export default function RentalOperations() {
           const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.rule;
           return (
             <button key={c.key} type="button" onClick={() => setCohort(c.key)}
-              title={c.key === "declined" ? "AMS says Declined Repair — do NOT route these to a shop-calling agent"
-                : c.key === "auction" ? "AMS says Sent To Auction — do NOT route these to a shop-calling agent"
-                : c.key === "can_work" ? "LUCA's workable list: every rental NOT in a Declined Repair / Sent To Auction status."
+              title={c.key === "declined" ? "AMS says Declined Repair — we no longer own the van, so its shop is never called. A few may still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck, not this van."
+                : c.key === "auction" ? "AMS says Sent To Auction — we no longer own the van, so its shop is never called. A few may still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck, not this van."
                 : c.key === "cannot_work" ? "Declined Repair / Sent To Auction — we no longer own these vans. Hands off: no shop calls."
-                : c.key === "mismatch_no_po" ? "ESCALATION COHORT: the renter is assigned a DIFFERENT truck than the one the rental is written against, and that assigned truck has NO qualifying repair PO. Nobody is repairing anything — route to the proper channel."
-                : c.key === "pended" ? "PENDED = renter turned the vehicle in / ticket closing. This tab always shows the full pended list, regardless of the include-PENDED toggle."
-                : c.key === "luca_queue" ? "Open repair + verified shop phone + not declined/auction — this is the feed LUCA calls"
+                : c.key === "mismatch_no_po" ? (stats.sawServerWorkload
+                    ? "ESCALATION COHORT: the renter is assigned a DIFFERENT truck than the one the rental is written against, and that assigned truck has NO qualifying repair PO. Nobody is repairing anything — route to the proper channel."
+                    : "Unavailable: the running server has not sent workload_bucket, so this cohort cannot be counted. Restart the Nexus server to populate it. It is shown as — rather than 0 so an empty answer is never mistaken for 'none found'.")
+                : c.key === "pended" ? "PENDED = renter turned the vehicle in / ticket closing. These sit OUTSIDE the All Rentals total unless 'include PENDED' is checked, so the totals here and on the other chips will not add up to All Rentals. Some pended trucks are also Declined/Auction, so the toggle moves the Cannot-work count too."
+                : c.key === "luca_queue" ? "Open repair + a verified shop phone — this is the feed LUCA calls. Mostly workable trucks, plus any declined/auction rental whose renter has an ASSIGNED truck in a shop: we no longer own the rental van, so the call is redirected to the assigned truck's shop. Those still show under Declined/Auction, because the van itself is never called."
                 : own ? "Every rental we still own (NOT Declined Repair / Sent To Auction) — these are the ones that can be worked. Ready ones show a Call button; the rest are missing a phone or an open repair." : undefined}
               style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : restColor, background: active ? accentC : colors.surface, border: `1px solid ${active ? accentC : restBorder}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
               {c.label} <span style={{ opacity: 0.7 }}>{n}</span>
@@ -651,16 +668,17 @@ export default function RentalOperations() {
           border: `1px solid ${cohort === "cannot_work" ? colors.red : cohort === "mismatch_no_po" ? colors.amber : colors.green}`,
           background: cohort === "cannot_work" ? "rgba(239,68,68,.06)" : cohort === "mismatch_no_po" ? "rgba(245,158,11,.07)" : "rgba(34,197,94,.06)",
           color: colors.inkSoft }}>
-          {cohort === "can_work" && (
-            <><strong style={{ color: colors.green }}>{basePool.length - (stats.workload.cannot_work ?? 0)} of {basePool.length} rentals are workable.</strong>{" "}
-              Everything that is not Declined Repair / Sent To Auction. {stats.callable} of them are callable right now (open repair + verified shop phone);
-              {" "}{stats.workload.mismatch_no_po ?? 0} sit in the mismatch escalation cohort.</>
-          )}
           {cohort === "cannot_work" && (
             <><strong style={{ color: colors.red }}>{stats.workload.cannot_work ?? 0} rentals cannot be worked.</strong>{" "}
-              AMS shows Declined Repair or Sent To Auction, so we no longer own the van. LUCA never calls a shop for these, and no shop call should be placed manually either.</>
+              AMS shows Declined Repair or Sent To Auction, so we no longer own the van. LUCA never calls a shop for these, and no shop call should be placed manually either.
+              {" "}<span style={{ color: colors.inkMuted }}>This counts {stats.amsBuckets.declined ?? 0} declined + {stats.amsBuckets.auction ?? 0} auction in the current pool; turning on <em>include PENDED</em> raises it, because some turned-in trucks are also auction-bound.</span></>
           )}
-          {cohort === "mismatch_no_po" && (
+          {cohort === "mismatch_no_po" && !stats.sawServerWorkload && (
+            <><strong style={{ color: colors.amber }}>Escalation cohort unavailable.</strong>{" "}
+              The running server has not sent <code>workload_bucket</code>, so this list cannot be computed. Restart the Nexus server to populate it.
+              It shows <strong>—</strong> rather than 0 so a missing answer is never read as "none found".</>
+          )}
+          {cohort === "mismatch_no_po" && stats.sawServerWorkload && (
             <><strong style={{ color: colors.amber }}>{stats.workload.mismatch_no_po ?? 0} rentals need escalation.</strong>{" "}
               The renter is assigned a <em>different</em> truck than the one this rental is written against, and that assigned truck has no qualifying repair PO
               (towing / roadside POs do not count unless parts or labor are on them). Nothing is in a shop, so nothing will close on its own.
