@@ -13,7 +13,7 @@
  */
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { classifyReply } from "./classifier";
+import { classifyReply, isTapback, type ClassifyResult } from "./classifier";
 import { buildPhoneIndex, resolveInboundLdap, PHONE_OWNERS_SQL, type PhoneIndex, type PhoneOwnerRow } from "./phone";
 
 const LOCK_KEY = 771_2026; // arbitrary app-scoped advisory lock id
@@ -184,7 +184,15 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
         continue;
       }
 
-      const verdict = classifyReply({ body: String(m.body || ""), currentStage: tracked.stage });
+      // An iMessage tapback ("Liked "...""), quotes OUR outbound text back at
+      // us. It is engagement - last_inbound and the event below still record it
+      // - but the quoted words are ours, so it can never move or propose a
+      // stage. Same guard the re-verify pass uses; one shared definition.
+      const rawBody = String(m.body || "");
+      const tapback = isTapback(rawBody);
+      const verdict: ClassifyResult = tapback
+        ? { proposal: null, mode: "none", reason: "imessage tapback quoting our outbound text; acknowledgement only, no verdict" }
+        : classifyReply({ body: rawBody, currentStage: tracked.stage });
       await db.execute(sql`
         UPDATE vrm_rightsize_techs
         SET last_inbound_at = GREATEST(COALESCE(last_inbound_at, 'epoch'::timestamptz), ${m.created_utc}::timestamptz),

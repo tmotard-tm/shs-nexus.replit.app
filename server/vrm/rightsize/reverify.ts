@@ -19,7 +19,7 @@
 import { Pool } from "pg";
 import { db, pool as appPool } from "../../db";
 import { sql } from "drizzle-orm";
-import { classifyReply } from "./classifier";
+import { classifyReply, isTapback } from "./classifier";
 import { normalizePhone, normalizeLdap } from "./phone";
 
 export interface ReverifyOptions {
@@ -71,10 +71,11 @@ const MAX_EVIDENCE = 25;
  * iMessage tapbacks arrive as inbound SMS that quote OUR outbound text
  * ("Liked "Thank you for the photos..."") . They are proof of life but they are
  * not the tech's own words, so they must not be the message we classify - the
- * quoted outbound copy would otherwise decide the verdict. Evidence selection
- * only; the classifier itself is untouched.
+ * quoted outbound copy would otherwise decide the verdict.
+ *
+ * Detection now lives in classifier.ts (isTapback) so the 30-minute sync and
+ * this pass share ONE definition. Used here for evidence selection only.
  */
-const REACTION_ECHO = /^(liked|loved|laughed at|emphasized|disliked|questioned)\s+[""“”']/i;
 
 /** Numbers a tech owns, from the comms source (contacts + HR roster). */
 async function loadKnownNumbers(comms: Queryable, ldaps: string[]): Promise<Map<string, Set<string>>> {
@@ -159,7 +160,7 @@ export async function reverifyNonResponders(opts: ReverifyOptions = {}): Promise
       // empty-bodied MMS and tapbacks still count as proof of life.
       const newestFirst = [...hits].reverse();
       const decisive =
-        newestFirst.find((h) => h.body.trim().length > 0 && !REACTION_ECHO.test(h.body.trim())) ??
+        newestFirst.find((h) => h.body.trim().length > 0 && !isTapback(h.body)) ??
         newestFirst.find((h) => h.body.trim().length > 0) ??
         hits[hits.length - 1];
       const verdict = classifyReply({ body: decisive.body, currentStage: t.stage });
