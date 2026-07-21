@@ -912,6 +912,51 @@ async function readAmsStatusForTruck(truckPadded: string): Promise<string | null
   }
 }
 
+/**
+ * The truck the renter on THIS case is actually assigned to (5-padded), or null.
+ *
+ * Same all_techs join + 5-pad expression as getRentalOpsMaster's ownp LATERAL
+ * (override employee id wins). Exported so the write path can verify a note's
+ * target truck against the server's own answer instead of trusting the client.
+ */
+export async function resolveAssignedTruckForCase(caseKey: string): Promise<string | null> {
+  const r = await db.execute(sql`
+    SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+    FROM vrm_rental_identity_resolutions i
+    JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    WHERE i.case_key = ${caseKey} LIMIT 1
+  `);
+  return (r.rows[0] as any)?.own_pad ?? null;
+}
+
+/**
+ * Investigation notes written ABOUT one truck, newest first.
+ *
+ * Scoped to the TRUCK, not the case, on purpose: the escalation cohort is "the
+ * renter is assigned to truck X and X has no repair PO", and the answer a human
+ * digs up ("at auction", "PO declined 7/15, waiting on Rob") is a fact about
+ * truck X that outlives this rental. Rentals close, re-open under a new case_key
+ * and get re-ingested; case-scoped notes would strand the investigation exactly
+ * when the next person needs it. Each row carries the case it was written from
+ * so provenance is never lost. Capped at 50. Never throws.
+ */
+async function readTruckNotes(truck: string): Promise<any[]> {
+  try {
+    const res = await db.execute(sql`
+      SELECT id, case_key, note, actor,
+             to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
+      FROM vrm_rental_operation_actions
+      WHERE action_type = 'note' AND target_truck = ${truck}
+      ORDER BY created_at DESC LIMIT 50`);
+    return (res.rows as any[]).map((n) => ({
+      id: n.id, caseKey: n.case_key, note: n.note, actor: n.actor ?? null, createdAt: n.created_at,
+    }));
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] truck notes read failed (non-fatal):", e?.message || e);
+    return [];
+  }
+}
+
 export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const cRes = await db.execute(sql`
     SELECT c.*, to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date_s,
@@ -923,9 +968,14 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const caseRow = cRes.rows[0] as any;
   const [ident, actions, ownRes] = await Promise.all([
     db.execute(sql`SELECT * FROM vrm_rental_identity_resolutions WHERE case_key = ${caseKey} LIMIT 1`),
+    // case-level actions ONLY. target_truck IS NOT NULL rows are notes about a
+    // specific vehicle (the assigned-truck section renders those) and must not
+    // double-render in the case Comments list.
     db.execute(sql`SELECT id, action_type, mark_value, note, assigned_to, actor,
                      to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
-                   FROM vrm_rental_operation_actions WHERE case_key = ${caseKey} ORDER BY created_at DESC`),
+                   FROM vrm_rental_operation_actions
+                   WHERE case_key = ${caseKey} AND target_truck IS NULL
+                   ORDER BY created_at DESC`),
     // the renter's ASSIGNED truck — same all_techs join + 5-pad expression as
     // getRentalOpsMaster's ownp LATERAL (override employee id wins)
     db.execute(sql`
@@ -955,13 +1005,14 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   // PO history (Snowflake live w/ cached fallback) + portal snapshot for the
   // rental-case truck AND the renter's assigned truck, plus the merged call
   // log — all in parallel so the two Snowflake fetches never serialize.
-  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms] = await Promise.all([
+  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms, assignedNotes] = await Promise.all([
     fetchPoHistoryWithFallback(caseKey),
     hasAssigned ? fetchPoHistoryWithFallback(assignedTruckNo!) : Promise.resolve(null),
     readPortalSnapshot(caseKey),
     hasAssigned ? readPortalSnapshot(assignedTruckNo!) : Promise.resolve(null),
     readCallLog(hasAssigned ? [caseKey, assignedTruckNo!] : [caseKey]),
     hasAssigned ? readAmsStatusForTruck(assignedTruckNo!) : Promise.resolve(null),
+    hasAssigned ? readTruckNotes(assignedTruckNo!) : Promise.resolve([]),
   ]);
 
   return {
@@ -972,7 +1023,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poSource: casePo.poSource,
     portal: casePortal,
     ...(hasAssigned && assignedPo
-      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms } }
+      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms, notes: assignedNotes } }
       : {}),
     callLog,
   };

@@ -143,7 +143,11 @@ interface CallLogItem {
   truck?: string | null;        // which truck the call was about (case or assigned)
   shopName?: string | null;
 }
-interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; }
+// An investigation note written ABOUT a truck (not about one rental case).
+// caseKey is the rental case it was written from — kept so provenance survives
+// when the same truck comes back under a different rental.
+interface TruckNote { id: string; caseKey: string | null; note: string | null; actor: string | null; createdAt: string | null; }
+interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; notes?: TruckNote[]; }
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
@@ -972,6 +976,11 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
       <PoAndCallTabs truck={assigned.truck} poList={assigned.poHistory} poSource={assigned.poSource}
         portal={assigned.portal} callItems={callItems} />
 
+      {/* what a human found out about THIS truck — sits directly under its PO
+          history because "no open repair PO" is the question the note answers */}
+      <AssignedTruckNotes caseKey={caseKey} truck={assigned.truck} notes={assigned.notes || []}
+        hasOpenRepair={hasOpenRepair} />
+
       {assigned.portal && assigned.portal.messages.length > 0 && (
         <section>
           <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
@@ -989,6 +998,72 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
         </section>
       )}
     </>
+  );
+}
+
+// ── investigation notes on the ASSIGNED truck ────────────────────────────────
+// Only reachable when the assigned truck differs from the rental van (the parent
+// tab is gated on exactly that), which is Tyler's escalation cohort: 55 mismatch
+// cases on dev, 41 with no repair PO on the assigned truck. Someone has to go
+// find out why — "van is at auction", "PO declined 7/15, waiting on Rob" — and
+// the next person must not redo that work. Notes follow the TRUCK, so they are
+// still here when this rental closes and the tech turns up on a new case.
+function AssignedTruckNotes({ caseKey, truck, notes, hasOpenRepair }: {
+  caseKey: string; truck: string; notes: TruckNote[]; hasOpenRepair: boolean;
+}) {
+  const qc = useQueryClient();
+  const { toast } = useToast();
+  const [text, setText] = useState("");
+  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
+  const strip = (s: any) => String(s ?? "").replace(/^0+/, "");
+  const add = useMutation({
+    mutationFn: (note: string) =>
+      apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/truck-notes`, { note, target_truck: truck }),
+    onSuccess: () => { setText(""); qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); },
+    onError: (e: any) => toast({ title: "Note failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  // uninvestigated + no open repair PO = the row that still owes an answer
+  const owed = notes.length === 0 && !hasOpenRepair;
+  return (
+    <section>
+      <div style={{ ...label, display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <span>Investigation notes · truck {truck} ({notes.length})</span>
+        <span style={{ fontSize: 10, fontWeight: 700, borderRadius: 999, padding: "1px 8px",
+          color: notes.length ? colors.green : owed ? colors.red : colors.inkMuted,
+          background: notes.length ? colors.greenLight : owed ? colors.redLight : colors.surface,
+          border: `1px solid ${notes.length ? colors.green : owed ? colors.red : colors.rule}` }}>
+          {notes.length ? "investigated" : owed ? "not investigated" : "no notes"}
+        </span>
+      </div>
+      <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 3 }}>
+        What you found out about truck {truck}. Kept on the truck, so it carries across rentals.
+      </div>
+      <div style={{ marginTop: 6, display: "flex", gap: 8 }}>
+        <textarea value={text} onChange={(e) => setText(e.target.value)} rows={2} maxLength={4000}
+          placeholder={`Why is truck ${truck} not being repaired? (at auction, PO declined, tech says it is at the dealer…)`}
+          style={{ flex: 1, minWidth: 0, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: 8, resize: "vertical" }} />
+        <button type="button" disabled={!text.trim() || add.isPending} onClick={() => add.mutate(text.trim())}
+          style={{ fontFamily: fonts.dmSans, fontSize: 12, fontWeight: 600, padding: "0 16px", borderRadius: 8, border: `1px solid ${colors.accent}`, background: colors.accent, color: "#fff", cursor: "pointer", opacity: (!text.trim() || add.isPending) ? 0.5 : 1 }}>
+          {add.isPending ? "…" : "Add"}
+        </button>
+      </div>
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, maxHeight: 320, overflowY: "auto" }}>
+        {notes.length === 0 && (
+          <div style={{ color: colors.inkMuted, fontSize: 12 }}>
+            No one has recorded anything about truck {truck} yet.
+          </div>
+        )}
+        {notes.map((n) => (
+          <div key={n.id} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px" }}>
+            <div style={{ fontSize: 12.5, color: colors.ink, whiteSpace: "pre-wrap", overflowWrap: "anywhere", wordBreak: "break-word" }}>{n.note}</div>
+            <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains, overflowWrap: "anywhere" }}>
+              {n.actor || "unknown"} · {n.createdAt ? fmtDateTime(n.createdAt) : "—"}
+              {n.caseKey && strip(n.caseKey) !== strip(caseKey) ? ` · from rental ${n.caseKey}` : ""}
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -1366,7 +1441,10 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 <div style={{ display: "flex", gap: 8 }}>
                   {btn("rental", `Truck ${caseKey}`, "the rental van", false)}
                   {distinct
-                    ? btn("assigned", `Truck ${at}`, "tech's assigned truck", true)
+                    ? btn("assigned", `Truck ${at}`,
+                        // at a glance: has anyone already investigated this mismatch?
+                        `tech's assigned truck · ${(assigned?.notes?.length ?? 0) > 0 ? `${assigned!.notes!.length} note${assigned!.notes!.length === 1 ? "" : "s"}` : "no notes"}`,
+                        true)
                     : (
                       <div style={{ flex: 1, padding: "8px 12px", borderRadius: 10, border: `1px dashed ${colors.rule}`, background: colors.background }}
                         title={at ? "This tech is assigned to the same truck they are renting against." : "Identity unresolved, so we cannot say which truck this tech is assigned to."}>

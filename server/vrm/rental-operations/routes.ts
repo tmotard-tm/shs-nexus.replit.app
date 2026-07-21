@@ -175,6 +175,52 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST an investigation note ABOUT the renter's ASSIGNED truck (the mismatch
+  // escalation cohort: renter is on this rental but assigned to a different
+  // truck, and that truck has no repair PO). Same vrm_rental_operation_actions
+  // table and same 'note' action_type as the case Comments — the only difference
+  // is target_truck, which scopes the note to the vehicle instead of the case.
+  //
+  // The target truck is RESOLVED SERVER-SIDE from the case's identity; an
+  // arbitrary truck number in the body is never trusted. If the body sends one it
+  // is treated as a confirmation and must match (guards against a stale drawer
+  // writing a note onto the wrong truck after an identity override).
+  router.post("/rental-operations/master/:caseKey/truck-notes", async (req, res) => {
+    try {
+      const caseKey = req.params.caseKey;
+      const note = String(req.body?.note ?? "").trim();
+      if (!note) return res.status(400).json({ error: "note required" });
+      if (note.length > 4000) return res.status(400).json({ error: "note too long (4000 char max)" });
+
+      const caseRow = await db.execute(sql`SELECT id FROM vrm_rental_operations_cases WHERE case_key = ${caseKey} LIMIT 1`);
+      if (!caseRow.rows.length) return res.status(404).json({ error: "case not found" });
+      const caseId = (caseRow.rows[0] as any)?.id ?? null;
+
+      const { resolveAssignedTruckForCase } = await import("./read-repository");
+      const assignedTruck = await resolveAssignedTruckForCase(caseKey);
+      const strip = (s: any) => String(s ?? "").replace(/^0+/, "");
+      if (!assignedTruck) return res.status(409).json({ error: "this case has no resolved assigned truck to attach a note to" });
+      if (strip(assignedTruck) === strip(caseKey)) {
+        return res.status(409).json({ error: "the renter is assigned to the rental truck itself — use the case comments" });
+      }
+      const claimed = req.body?.target_truck;
+      if (claimed && strip(claimed) !== strip(assignedTruck)) {
+        return res.status(409).json({ error: `assigned truck is ${assignedTruck}, not ${claimed} — reopen the case and retry` });
+      }
+
+      const actor = actorOf(req);
+      const ins = await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, note, target_truck, actor)
+        VALUES (${caseKey}, ${caseId}, 'note', ${note}, ${assignedTruck}, ${actor})
+        RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
+      `);
+      res.json({ ok: true, targetTruck: assignedTruck, actor, note: ins.rows[0] });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] truck-note failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "truck-note failed" });
+    }
+  });
+
   // POST an identity override — pin an employee_id when auto-resolution is
   // REVIEW/EXCEPTION or wrong. Empty employee_id clears the override.
   router.post("/rental-operations/master/:caseKey/identity-override", async (req, res) => {

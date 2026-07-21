@@ -144,6 +144,13 @@ export async function initRentalOperationsSchema(): Promise<void> {
     );
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_ro_actions_case ON vrm_rental_operation_actions (case_key, created_at DESC);`);
+  // target_truck: scopes ONE action to a specific vehicle instead of the rental
+  // case as a whole. Set only by the assigned-truck note path (Tyler's mismatch
+  // escalation cohort: renter assigned to a different truck with no repair PO on
+  // it). NULL = the existing case-level action, which reads and renders exactly
+  // as before — the case-level queries filter `target_truck IS NULL`.
+  await db.execute(sql`ALTER TABLE vrm_rental_operation_actions ADD COLUMN IF NOT EXISTS target_truck VARCHAR(10);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_ro_actions_truck ON vrm_rental_operation_actions (target_truck, created_at DESC) WHERE target_truck IS NOT NULL;`);
 
   // ── source_health: latest run per source → drives the two-clock display ────
   await db.execute(sql`
