@@ -11,11 +11,132 @@ interface SnowflakeConfig {
   role?: string;
 }
 
+// Error codes that mean the session/handle is dead and must be thrown away.
+// Codes beat message substrings: they are stable across SDK releases and
+// cover wordings we would otherwise have to enumerate by hand.
+// Server-side session state — snowflake-sdk/lib/constants/gs_errors.js
+const DEAD_SESSION_ERROR_CODES = new Set([
+  '390104', // SESSION_TOKEN_INVALID
+  '390111', // GONE_SESSION
+  '390112', // SESSION_TOKEN_EXPIRED
+  '390114', // MASTER_TOKEN_EXPIRED — the SDK cannot silently renew past this
+  '390195', // ID_TOKEN_INVALID
+  '390318', // OAUTH_TOKEN_EXPIRED
+  // SDK client-side — snowflake-sdk/lib/constants/error_messages.js
+  '401001', // Network error. Could not reach Snowflake.
+  '405503', // Connection already terminated. Cannot connect again.
+  '406501', // Not connected, so nothing to destroy.
+  '407001', // Unable to perform operation because a connection was never established.
+  '407002', // Unable to perform operation using terminated connection.
+]);
+
+// OS/socket failures. These arrive as a string `code`, often on a nested cause
+// rather than the error the SDK hands us.
+const SOCKET_ERROR_CODES = new Set([
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'ECONNABORTED',
+  'EPIPE',
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'EHOSTUNREACH',
+  'EHOSTDOWN',
+  'ENETUNREACH',
+  'ENETDOWN',
+  'ENOTFOUND',
+  'EAI_AGAIN',
+  'ERR_STREAM_PREMATURE_CLOSE',
+  'UND_ERR_SOCKET',
+]);
+
+// Last-resort net for wordings that carry no usable code.
+const DEAD_SESSION_MESSAGE_PATTERNS = [
+  'terminated connection',
+  'connection lost',
+  'connection was closed',
+  'connection is closed',
+  'connection closed',
+  'connection was never established',
+  'connection already terminated',
+  'authentication token has expired',
+  'session token has expired',
+  'session no longer exists',
+  'session does not exist',
+  'network error',
+  'socket hang up',
+  'client network socket disconnected',
+  'econnreset',
+  'epipe',
+];
+
+// SDK errors nest the real cause (cause / originalError / data). Flatten a few
+// levels so a code buried one hop down still counts.
+function collectErrorCodes(err: any): string[] {
+  const codes: string[] = [];
+  let current = err;
+  for (let depth = 0; current && typeof current === 'object' && depth < 4; depth++) {
+    if (current.code !== undefined && current.code !== null) codes.push(String(current.code));
+    if (current.errorCode !== undefined && current.errorCode !== null) codes.push(String(current.errorCode));
+    current = current.cause ?? current.originalError ?? current.data;
+  }
+  return codes;
+}
+
+// Exported for testing: this predicate decides whether a failure tears down the
+// pooled connection, so it is worth asserting against real error shapes.
+export function isDeadSessionError(err: any): boolean {
+  const codes = collectErrorCodes(err);
+  if (codes.some(code => DEAD_SESSION_ERROR_CODES.has(code) || SOCKET_ERROR_CODES.has(code))) {
+    return true;
+  }
+  const message = String(err?.message ?? '').toLowerCase();
+  return DEAD_SESSION_MESSAGE_PATTERNS.some(pattern => message.includes(pattern));
+}
+
+// The handle's own opinion, which beats every heuristic above: isUp() is a
+// synchronous read of the SDK's session flag, so it is free to call per query.
+// Unknown/mocked handles are assumed usable so this can never invent an outage.
+function isConnectionUsable(connection: any): boolean {
+  if (!connection) return false;
+  if (typeof connection.isUp !== 'function') return true;
+  try {
+    return connection.isUp() !== false;
+  } catch {
+    return false;
+  }
+}
+
+// Fire-and-forget teardown for a handle we have already concluded is bad.
+// Without this a long-lived process leaks a socket + SDK timers per session
+// death, which on an always-on Reserved VM accumulates for months.
+// Backstop for a session that dies with a signature we do not recognise.
+// isUp() only reports the SDK's own state machine, so a server-side-expired
+// session still claims to be up; if the code/message checks also miss, nothing
+// above would ever evict the handle. After this many query failures in a row
+// with no intervening success we drop it regardless of why. Worst case that
+// costs one extra handshake per N genuinely-bad queries; the alternative is a
+// wedge that lasts until the process restarts.
+const MAX_CONSECUTIVE_QUERY_FAILURES = 5;
+
+function destroyQuietly(connection: any): void {
+  try {
+    if (typeof connection?.destroy !== 'function') return;
+    connection.destroy((err: any) => {
+      if (err) {
+        console.warn('[Snowflake] Error destroying stale connection:', err.message);
+      }
+    });
+  } catch (err: any) {
+    console.warn('[Snowflake] Failed to destroy stale connection:', err?.message);
+  }
+}
+
 export class SnowflakeService {
   private config: SnowflakeConfig;
   private connection: any = null;
   private connected = false;
   private connectPromise: Promise<void> | null = null;
+  private consecutiveQueryFailures = 0;
   private privateKeyPem: string;
 
   constructor(config: SnowflakeConfig) {
@@ -113,9 +234,20 @@ export class SnowflakeService {
   // and fail with "Unable to perform operation because a connection was never
   // established". Concurrent cold-start callers all await the same in-flight
   // promise instead; it is cleared once settled so a failed attempt can retry.
+  //
+  // The `connected` short-circuit is validated, never assumed: a session can
+  // die between queries (JWT/master-token expiry, idle revocation, proxy or
+  // socket reset) with no error ever passing through executeQuery. Asking the
+  // handle whether it is still up costs nothing and is what stops a dead
+  // connection from being handed to every later caller for the life of the
+  // process.
   async connect(): Promise<void> {
     if (this.connected && this.connection) {
-      return;
+      if (isConnectionUsable(this.connection)) {
+        return;
+      }
+      console.warn('[Snowflake] Cached connection is no longer up; reconnecting');
+      this.resetConnection(this.connection);
     }
 
     if (!this.connectPromise) {
@@ -173,9 +305,26 @@ export class SnowflakeService {
     });
   }
 
-  private resetConnection(): void {
+  // Detach the current handle and return it for the caller to dispose of.
+  // `stale` is an identity guard: a concurrent caller may already have replaced
+  // the handle with a healthy one, and only whoever owns `stale` may tear it
+  // down. Without the guard, one slow failure could evict a good connection.
+  private takeConnection(stale?: any): any {
+    if (stale && this.connection !== stale) {
+      return null;
+    }
+    const connection = this.connection;
     this.connection = null;
     this.connected = false;
+    this.consecutiveQueryFailures = 0;
+    return connection;
+  }
+
+  private resetConnection(stale?: any): void {
+    const connection = this.takeConnection(stale);
+    if (connection) {
+      destroyQuietly(connection);
+    }
   }
 
   async disconnect(): Promise<void> {
@@ -185,8 +334,7 @@ export class SnowflakeService {
       await this.connectPromise.catch(() => {});
     }
 
-    const connection = this.connection;
-    this.resetConnection();
+    const connection = this.takeConnection();
 
     if (!connection) {
       return;
@@ -234,15 +382,35 @@ export class SnowflakeService {
               `firstLine="${firstLine.slice(0, 120)}"`,
             );
             
-            // Check if this is a connection termination error and we should retry
-            const isConnectionError = err.message?.includes('terminated connection') ||
-                                       err.message?.includes('Connection lost') ||
-                                       err.message?.includes('connection was closed');
-            
+            // Decide whether the SESSION died, not merely the query. Ask the
+            // handle first (authoritative, free) and fall back to codes and
+            // then message text. Narrow substring matching used to miss token
+            // expiry, socket resets and 390xxx session errors, which left a
+            // dead handle installed that every later caller then reused.
+            const handleDown = !isConnectionUsable(connection);
+
+            // Only count the streak while this handle is still the installed
+            // one; failures on a handle someone else already evicted say
+            // nothing about its replacement.
+            let exhausted = false;
+            if (this.connection === connection) {
+              this.consecutiveQueryFailures += 1;
+              exhausted = this.consecutiveQueryFailures >= MAX_CONSECUTIVE_QUERY_FAILURES;
+              if (exhausted) {
+                console.warn(
+                  `[Snowflake] ${this.consecutiveQueryFailures} consecutive query failures on this handle; treating it as dead`,
+                );
+              }
+            }
+
+            const isConnectionError = handleDown || isDeadSessionError(err) || exhausted;
+
             if (isConnectionError && retryOnConnectionError) {
-              console.log('[Snowflake] Connection terminated, attempting to reconnect...');
-              // Reset the connection so connect() will create a new one
-              this.resetConnection();
+              console.log(
+                `[Snowflake] Session appears dead (${handleDown ? 'handle down' : 'error signature'}), reconnecting...`,
+              );
+              // Drop the dead handle so connect() establishes a new one.
+              this.resetConnection(connection);
 
               try {
                 // Retry the query with a fresh connection (but don't retry again if this fails)
@@ -252,10 +420,19 @@ export class SnowflakeService {
                 console.error('[Snowflake] Retry after reconnect failed:', retryErr.message);
                 reject(new Error(`Query execution failed after reconnect: ${retryErr.message}`));
               }
-            } else {
-              reject(new Error(`Query execution failed: ${err.message}`));
+              return;
             }
+
+            if (isConnectionError) {
+              // This attempt WAS the retry, so no reconnect follows. Still evict
+              // the handle: leaving a suspect connection installed is exactly
+              // how the service used to wedge for the rest of the process.
+              this.resetConnection(connection);
+            }
+            reject(new Error(`Query execution failed: ${err.message}`));
           } else {
+            // A completed query proves the session is alive; clear the streak.
+            this.consecutiveQueryFailures = 0;
             resolve(rows || []);
           }
         }
