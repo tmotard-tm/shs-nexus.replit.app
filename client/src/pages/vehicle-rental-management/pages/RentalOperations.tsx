@@ -200,12 +200,62 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All Rentals" },
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "workable", label: "Workable · we own these" },
-  { key: "declined_auction", label: "Declined / Auction · no call" },
+  { key: "declined", label: "Declined · no call" },
+  { key: "auction", label: "Auction · no call" },
+  { key: "pended", label: "Pended · turned in" },
   { key: "open_repair", label: "Open Repair Ticket" },
   { key: "no_open_repair", label: "No Open Repair" },
   { key: "no_history", label: "No Portal History" },
 ];
 const isDeclinedAuction = (b: string) => b === "declined" || b === "auction";
+
+// ── multi-select filter (checkbox dropdown; empty selection = show all) ──────
+function MultiSelect({ label, options, values, onChange, style }: {
+  label: string;
+  options: Array<[string, number]>;
+  values: string[];
+  onChange: (next: string[]) => void;
+  style: React.CSSProperties;
+}) {
+  const [open, setOpen] = useState(false);
+  const boxRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  const toggle = (k: string) =>
+    onChange(values.includes(k) ? values.filter((v) => v !== k) : [...values, k]);
+  const summary = values.length === 0 ? `all ${label}` : values.length === 1 ? values[0] : `${values.length} ${label}`;
+  return (
+    <div ref={boxRef} style={{ position: "relative", display: "inline-block" }}>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+        style={{ ...style, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, ...(values.length ? { borderColor: colors.accent, color: colors.accent } : {}) }}>
+        {summary} <ChevronRight size={12} style={{ transform: open ? "rotate(90deg)" : undefined, transition: "transform 120ms" }} />
+      </button>
+      {open && (
+        <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 30, minWidth: 230, maxHeight: 320, overflowY: "auto", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, boxShadow: "0 8px 24px rgba(0,0,0,0.12)", padding: 6 }}>
+          {values.length > 0 && (
+            <button type="button" onClick={() => onChange([])}
+              style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.accent, background: "transparent", border: "none", cursor: "pointer", padding: "6px 8px", width: "100%", textAlign: "left" }}>
+              clear · show all {label}
+            </button>
+          )}
+          {options.map(([k, n]) => (
+            <label key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderRadius: 6, cursor: "pointer", fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>
+              <input type="checkbox" checked={values.includes(k)} onChange={() => toggle(k)} />
+              <span style={{ flex: 1 }}>{k}</span>
+              <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{n}</span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function RentalOperations() {
   const qc = useQueryClient();
@@ -219,7 +269,7 @@ export default function RentalOperations() {
 
   const [cohort, setCohort] = useState<string>("all");
   const [search, setSearch] = useState("");
-  const [amsF, setAmsF] = useState("");
+  const [amsF, setAmsF] = useState<string[]>([]);
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
   const [markF, setMarkF] = useState("");
@@ -276,16 +326,22 @@ export default function RentalOperations() {
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return basePool.filter((r) => {
+    // The Pended tab reads from the raw row set: basePool excludes PENDED
+    // unless the include-PENDED toggle is on, but this tab should always show
+    // the turned-in list regardless of the toggle.
+    const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
+    return pool.filter((r) => {
       if (cohort === "luca_queue") { if (!r.callable) return false; }
       else if (cohort === "workable") { if (isDeclinedAuction(r.ams_bucket)) return false; }
-      else if (cohort === "declined_auction") { if (!isDeclinedAuction(r.ams_bucket)) return false; }
+      else if (cohort === "declined") { if (r.ams_bucket !== "declined") return false; }
+      else if (cohort === "auction") { if (r.ams_bucket !== "auction") return false; }
+      else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
         const hay = `${r.case_key} ${r.renter_name_raw} ${r.shop_name || ""} ${r.veh_desc || ""} ${r.rental_class || ""} ${r.tech_name || ""}`.toLowerCase();
         if (!hay.includes(q)) return false;
       }
-      if (amsF && (r.ams_status || "NOT IN VIEW") !== amsF) return false;
+      if (amsF.length > 0 && !amsF.includes(r.ams_status || "NOT IN VIEW")) return false;
       if (catF && (r.class_bucket || r.actual_bucket || "unknown") !== catF) return false;
       if (classF && r.rental_class !== classF) return false;
       if (markF) {
@@ -297,7 +353,7 @@ export default function RentalOperations() {
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly]);
+  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -488,18 +544,23 @@ export default function RentalOperations() {
           const n = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
             : c.key === "workable" ? (basePool.length - declAuc)
-            : c.key === "declined_auction" ? declAuc
+            : c.key === "declined" ? (stats.amsBuckets.declined ?? 0)
+            : c.key === "auction" ? (stats.amsBuckets.auction ?? 0)
+            : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
-          const danger = c.key === "declined_auction";
+          const danger = c.key === "declined" || c.key === "auction";
           const go = c.key === "luca_queue";
           const own = c.key === "workable";
-          const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.accent;
-          const restColor = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.inkSoft;
-          const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : colors.rule;
+          const pended = c.key === "pended";
+          const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.accent;
+          const restColor = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.inkSoft;
+          const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.rule;
           return (
             <button key={c.key} type="button" onClick={() => setCohort(c.key)}
-              title={danger ? "AMS says Declined Repair or Sent To Auction — do NOT route these to a shop-calling agent"
+              title={c.key === "declined" ? "AMS says Declined Repair — do NOT route these to a shop-calling agent"
+                : c.key === "auction" ? "AMS says Sent To Auction — do NOT route these to a shop-calling agent"
+                : pended ? "PENDED = renter turned the vehicle in / ticket closing. This tab always shows the full pended list, regardless of the include-PENDED toggle."
                 : go ? "Open repair + verified shop phone + not declined/auction — this is the feed LUCA calls"
                 : own ? "Every rental we still own (NOT Declined Repair / Sent To Auction) — these are the ones that can be worked. Ready ones show a Call button; the rest are missing a phone or an open repair." : undefined}
               style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : restColor, background: active ? accentC : colors.surface, border: `1px solid ${active ? accentC : restBorder}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
@@ -515,10 +576,7 @@ export default function RentalOperations() {
           <Search size={14} style={{ position: "absolute", left: 10, top: 9, color: colors.inkMuted }} />
           <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
         </div>
-        <select value={amsF} onChange={(e) => setAmsF(e.target.value)} style={selStyle}>
-          <option value="">all AMS statuses</option>
-          {amsOptions.map(([k, n]) => <option key={k} value={k}>{k} ({n})</option>)}
-        </select>
+        <MultiSelect label="AMS statuses" options={amsOptions} values={amsF} onChange={setAmsF} style={selStyle} />
         <select value={catF} onChange={(e) => setCatF(e.target.value)} style={selStyle}>
           <option value="">all categories</option>
           <option value="SEDAN">SEDAN ({stats.categories.SEDAN ?? 0})</option>
