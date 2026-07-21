@@ -11,6 +11,8 @@
  * comms database while the tracker writes stay on DATABASE_URL. Only SELECTs
  * are ever issued against that connection.
  */
+export {};
+
 async function main() {
   const dryRun = process.argv.includes("--dry-run");
   const commsUrl = process.env.RIGHTSIZE_COMMS_DATABASE_URL || null;
