@@ -151,7 +151,7 @@ Replit allows ONE deployment per Repl, and this Repl's slot is taken by the Auto
 -   09:00 UTC → `POST /api/fs/comms/cron/sync` (contacts sync; cron-only route)
 -   10:00 UTC → `POST /api/fs/roster-sync` (in-process equivalent of run-sync.ts MINUS its final rental step)
 -   11:00 UTC → `POST /api/fs/rental-sync` (existing manual route; all guards + advisory lock apply)
--   **TODO (one-line Fleet-Dispatcher addition)**: every run → `POST /api/fs/comms/cron/loa-outreach` (internal-cron route; drains LOA resends each tick and runs the daily LOA Rental outreach send only during the 10 AM ET hour — see "LOA Rental SMS outreach" below). Until added, run manually via `POST /api/fs/comms/loa/run`.
+-   **TODO (one-line Fleet-Dispatcher addition)**: every run → `POST /api/fs/comms/cron/loa-outreach` (internal-cron route; drains LOA resends each tick and runs the daily LOA Rental outreach send only during the 10 AM ET hour — see "LOA Rental SMS outreach" below). Until added, run manually via `POST /api/fs/comms/loa/run` (session) or the cron route with body `{"forceDaily":true}` (internal-cron header; bypasses ET-hour gate + daily watermark, flag + advisory lock still apply).
 -   **TODO (one-line Fleet-Dispatcher addition)**: 11:30 UTC → `POST /api/fs/ams-declined-check/run` — daily AMS Declined Repair snapshot/diff + Decommissioning auto-add (see below). Until added, run it manually from the Decommissioning page ("Daily Declined Check" → "Run now").
 
 ## Right-size phone-change watch (2026-07-21, Tyler directive)

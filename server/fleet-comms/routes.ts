@@ -184,7 +184,16 @@ export function registerCommsRoutes(app: Router): void {
       );
       const resends = await processLoaResends();
       let daily: any = { skipped: true, reason: "outside_send_window" };
-      if (etHour() === LOA_SEND_ET_HOUR) {
+      // {"forceDaily":true} = operator escape hatch: run the daily send now,
+      // regardless of the ET hour and the once-per-day watermark. Still
+      // internal-cron-authed; the engine's flag + advisory lock still apply.
+      const forceDaily = req.body?.forceDaily === true;
+      if (forceDaily) {
+        // {"dryRun":true} alongside forceDaily = resolve + render recipients,
+        // send nothing (prod-safe preview before a real forced send).
+        const dryRun = req.body?.dryRun === true;
+        daily = await runLoaOutreach("manual_cron_force", { force: true, dryRun });
+      } else if (etHour() === LOA_SEND_ET_HOUR) {
         daily = await runLoaOutreach("scheduled_dispatcher");
       }
       res.json({ success: true, resends, daily });
