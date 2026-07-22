@@ -92,7 +92,10 @@ export async function upsertHolmanRentalPoQueue(
   // scraped set. That inference is only valid when the pager walk completed —
   // a partial scrape would silently and permanently resolve pending POs.
   const sweepResolved = opts.sweepResolved !== false;
-  if (rows.length === 0) return;
+  // NOTE: do NOT bail out when rows is empty. An empty awaiting-authorization page
+  // is the normal result of clearing every PO in Holman, and it is exactly when the
+  // resolved_holman sweep below matters most. Bailing here left the final POs stuck
+  // on screen forever. Only sweepResolved (walkComplete && !scrapeErr) may skip it.
   const enrichMap = new Map(enriched.map((e) => [e.poNumber, e]));
   const now = scrapedAt.toISOString();
   const activePOs: string[] = [];
@@ -161,13 +164,20 @@ export async function upsertHolmanRentalPoQueue(
     console.warn(`[VRM/HolmanPO] partial scrape — skipping resolved_holman sweep (${activePOs.length} scraped rows upserted only)`);
     return;
   }
-  if (activePOs.length > 0) {
-    const inList = activePOs.map((p) => `'${p.replace(/'/g, "''")}'`).join(",");
-    await db.execute(sql.raw(`
-      UPDATE holman_rental_po_queue
-      SET status = 'resolved_holman', last_synced_at = '${now}'
-      WHERE status IN ('pending', 'blocked', 'approve_failed', 'deny_failed') AND po_number NOT IN (${inList})
-    `));
+  // Anything still awaiting a decision here but absent from a clean scrape has been
+  // cleared on the Holman side. When the scrape is empty the NOT IN clause is simply
+  // omitted, so every remaining row clears — the emptied-page case that used to hang.
+  const notActive = activePOs.length > 0
+    ? `AND po_number NOT IN (${activePOs.map((p) => `'${p.replace(/'/g, "''")}'`).join(",")})`
+    : "";
+  const swept = await db.execute(sql.raw(`
+    UPDATE holman_rental_po_queue
+    SET status = 'resolved_holman', last_synced_at = '${now}'
+    WHERE status IN ('pending', 'blocked', 'approve_failed', 'deny_failed') ${notActive}
+  `));
+  const sweptCount = (swept as any)?.rowCount ?? (swept as any)?.rows?.length ?? 0;
+  if (sweptCount) {
+    console.log(`[VRM/HolmanPO] swept ${sweptCount} PO(s) to resolved_holman (gone from Holman; ${activePOs.length} still on the page)`);
   }
 }
 
