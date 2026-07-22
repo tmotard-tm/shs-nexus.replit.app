@@ -15,6 +15,13 @@ import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, get
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
 
+// The delta sweep is fire-and-forget and now runs 100+ trucks (~20s of Chromium
+// each, so ~45 min) where the old backfill ran 17. Without this a double-click,
+// an impatient retry, or a scheduled run overlapping a manual one spawns a second
+// full set of concurrent browser sessions on the same box. Module-level rather
+// than a DB lock because the sweep is in-process and this is a single instance.
+let scrapeSweepInFlight = false;
+
 /**
  * Who is making this change.
  *
@@ -305,7 +312,9 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.post("/rental-operations/master/:caseKey/scrape", async (req, res) => {
     try {
       const { scrapeAndStore } = await import("./scrape-service");
-      const report = await scrapeAndStore([req.params.caseKey], { force: true });
+      // No selection filter: an operator asking for THIS truck always gets a live
+      // look, even if the delta targeting would not have picked it.
+      const report = await scrapeAndStore([req.params.caseKey]);
       res.json({ ok: true, report });
     } catch (e: any) {
       console.error("[VRM/RentalOps] scrape failed:", e?.message || e);
@@ -313,17 +322,69 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
-  // POST scrape all present rentals with no portal row yet (fills gaps).
-  // Fire-and-forget: 20+ trucks x ~20s each is too long for one HTTP request.
-  router.post("/rental-operations/scrape-missing", async (_req, res) => {
+  // GET what the delta sweep WOULD do right now, without doing it. Read-only:
+  // one targeting query, no browser.
+  //
+  // This exists because the sweep otherwise switches itself off. The only UI
+  // entry points to POST scrape-missing are conditionally rendered on counts that
+  // mean the OLD thing — RentalOperations.tsx:676 gates on
+  // `missingCount = rows.filter(r => !r.has_portal).length > 0`, and :821 gates on
+  // `workableStats.needPhone > 0`. Both of those go to zero after the first sweep
+  // fills in the never-scraped trucks, at which point the button unmounts and the
+  // ~114 mismatch / po_newer targets — the entire reason the delta layer exists —
+  // become unreachable from the product. There is no server-side scheduled caller
+  // either (server/run-vrm-rental-ops-sync.ts does not touch the scraper).
+  //
+  // HANDOFF, still open: the client must gate on `found` from THIS endpoint
+  // instead of missingCount, and the sweep should be wired into the scheduled
+  // ingest after landPoHistory(). Both live in files this module does not own
+  // (RentalOperations.tsx, run-vrm-rental-ops-sync.ts / ingest.ts).
+  router.get("/rental-operations/scrape-targets", async (req, res) => {
     try {
-      const { findScrapeGaps, scrapeAndStore } = await import("./scrape-service");
-      const gaps = await findScrapeGaps();
-      scrapeAndStore(gaps, { force: false })
-        .then((r) => console.log("[VRM/RentalOps] scrape-missing done:", JSON.stringify(r)))
-        .catch((e) => console.error("[VRM/RentalOps] scrape-missing failed:", e?.message || e));
-      res.json({ ok: true, started: gaps.length, trucks: gaps });
+      const { findScrapeTargets } = await import("./scrape-service");
+      const limit = req.query.limit ? Math.max(1, Math.min(500, Number(req.query.limit))) : undefined;
+      const { targets, totalFound, truncated, byReason, served } = await findScrapeTargets({ limit });
+      // `targets` carries the reason + priority per truck so the UI can explain
+      // WHY a truck is queued rather than just show a number.
+      res.json({ ok: true, found: totalFound, served, truncated, byReason, inFlight: scrapeSweepInFlight, targets });
     } catch (e: any) {
+      console.error("[VRM/RentalOps] scrape-targets failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "scrape-targets failed" });
+    }
+  });
+
+  // POST the delta sweep. Route name kept ("scrape-missing") because the client
+  // mutation and its toast are wired to it, but the meaning widened on 7/21: it
+  // no longer means "trucks with no portal row", it means "trucks whose portal
+  // snapshot is missing OR provably suspect" (see findScrapeTargets). Snowflake
+  // is the base layer; this only goes where the base layer cannot be trusted.
+  // Fire-and-forget: 100+ trucks x ~20s each is far too long for one HTTP request.
+  //
+  // `started` stays truthful — it is the number of trucks actually handed to the
+  // scraper, which is what the client toast reports. `found` and `byReason` are
+  // both pre-truncation, so they sum to each other and found > started tells the
+  // operator there is a remainder to pick up on the next run.
+  router.post("/rental-operations/scrape-missing", async (_req, res) => {
+    if (scrapeSweepInFlight) return res.status(409).json({ error: "a Holman sweep is already running" });
+    try {
+      const { findScrapeTargets, scrapeAndStore } = await import("./scrape-service");
+      const { targets, totalFound, truncated, byReason } = await findScrapeTargets();
+      const trucks = targets.map((t) => t.truck);
+      if (!trucks.length) return res.json({ ok: true, started: 0, found: totalFound, truncated, byReason, trucks });
+      // The flag is set here and cleared in the settle handler, NOT in a finally
+      // around the response: the work outlives this request by ~45 minutes, so a
+      // finally here would unlock immediately and guard nothing.
+      scrapeSweepInFlight = true;
+      // Selection already happened above — do NOT re-filter inside scrapeAndStore,
+      // or every truck that already has a row (i.e. most of the delta targets)
+      // would be silently dropped.
+      scrapeAndStore(trucks)
+        .then((r) => console.log("[VRM/RentalOps] scrape-missing done:", JSON.stringify(r)))
+        .catch((e) => console.error("[VRM/RentalOps] scrape-missing failed:", e?.message || e))
+        .finally(() => { scrapeSweepInFlight = false; });
+      res.json({ ok: true, started: trucks.length, found: totalFound, truncated, byReason, trucks });
+    } catch (e: any) {
+      scrapeSweepInFlight = false;
       res.status(500).json({ error: e?.message || "scrape-missing failed" });
     }
   });

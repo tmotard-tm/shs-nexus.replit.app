@@ -115,7 +115,10 @@ interface MasterModel {
   workloadBuckets?: Record<string, number>;
   mismatchCount: number; costOverCount: number; pendedCount: number;
   sourceHealth: { clocks: SourceClock[]; lastSyncAt: string | null; lastImportAt: string | null; lastFileDate: string | null };
-  generatedAt: string;
+  // When the READ MODEL was computed — not when data landed. Optional on purpose:
+  // an older server build (or one mid-deploy) may not send it, and the as-of stamp
+  // must render nothing rather than "Invalid Date" when that happens.
+  generatedAt?: string | null;
 }
 interface PoLineItem { seq: number | null; description: string | null; repairType: string | null; ataGroup: string | null; qty: number | null; cost: number | null; }
 interface PoRecord {
@@ -188,6 +191,44 @@ function fmtDuration(days: number | null): string {
   const y = Math.floor(d / 365); const mo = Math.round((d % 365) / 30.44);
   return mo ? `${y}yr ${mo}mo` : `${y}yr`;
 }
+/** Local-time clock for the as-of stamp. Deliberately NOT fmtDateTime: that one
+ * takes its DATE half from fmtDate, which regex-scrapes YYYY-MM-DD straight out of
+ * the raw ISO string (so: UTC), and its TIME half from getHours()/getMinutes() (so:
+ * browser-local). generatedAt is emitted server-side as toISOString(), so for any
+ * value between 00:00 and 03:59 UTC — i.e. 8pm to midnight ET, exactly the
+ * after-hours board watch this stamp exists to serve — that mix prints TOMORROW's
+ * date beside tonight's clock: "07/22/26 23:59 · just now" on the evening of the
+ * 21st, a timestamp dated in the future sitting next to "just now". Harmless on
+ * fmtDateTime's other callers (PO dates, marks, call log), fatal on a freshness
+ * stamp, so this reads every field off one local Date. Do not fold it back in.
+ * Returns "" on missing/unparseable input; callers treat that as "render nothing". */
+function fmtLocalDateTime(s: string | null | undefined): string {
+  if (!s) return "";
+  const t = Date.parse(String(s));
+  if (Number.isNaN(t)) return "";
+  const d = new Date(t);
+  const p2 = (n: number) => String(n).padStart(2, "0");
+  return `${p2(d.getMonth() + 1)}/${p2(d.getDate())}/${String(d.getFullYear()).slice(2)} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+/** Age of a timestamp in whole minutes, or null when it is missing or unparseable.
+ * Clamped at 0: the server clock can sit a few seconds ahead of the browser, and
+ * "-1m ago" on a freshness stamp destroys trust in the stamp. */
+function minutesSince(s: string | null | undefined, now: number): number | null {
+  if (!s) return null;
+  const t = Date.parse(String(s));
+  if (Number.isNaN(t)) return null;
+  return Math.max(0, Math.floor((now - t) / 60_000));
+}
+/** Coarse "how long ago" for the as-of stamp. Never prints seconds — the reader
+ * needs an honest order of magnitude, not a stopwatch. */
+function fmtAgo(mins: number): string {
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const h = Math.floor(mins / 60);
+  if (h < 24) { const m = mins % 60; return m ? `${h}h ${m}m ago` : `${h}h ago`; }
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 function daysSince(s: string | null | undefined): number | null {
   if (!s) return null;
   const t = Date.parse(s);
@@ -250,6 +291,64 @@ function workloadBucketOf(r: { ams_bucket: string; workload_bucket?: string | nu
   if (isDeclinedAuction(r.ams_bucket)) return "cannot_work";
   if (r.workload_bucket === "mismatch_no_po") return "mismatch_no_po";
   return "workable";
+}
+
+// ── as-of stamp ──────────────────────────────────────────────────────────────
+// Tyler 7/21: he quoted "Open Repair Ticket 175" off this chip row; by the time we
+// went looking it was 178. Nothing was broken — the tab had been open a while and
+// the pool had moved under it. Nothing on the row said WHEN the numbers were taken,
+// so a snapshot got repeated as if it were a live meter. Dating the snapshot is the
+// entire job of this stamp.
+// What it deliberately does NOT do, so nobody credits it with more: it cannot
+// explain two chips disagreeing at the same instant (LUCA Call Queue sits below Open
+// Repair Ticket BY DEFINITION — the queue also demands a verified shop phone and
+// drops PENDED), and it says nothing about how old the Holman data underneath is.
+// generatedAt is when the read model was computed, not when Holman uploaded the POs
+// it was computed from, and 94% of those PO rows are 30+ days old. A green stamp
+// over month-old POs is still a stamp over month-old POs — the tooltip says so out
+// loud, and the last sync / last import line is where data age actually lives.
+// AMBER at 10 minutes, RED at an hour. The query refetches every 5 minutes while the
+// tab is visible and again on window focus (see useQuery below), so amber is a real
+// signal — hidden tab or failing fetch — and not the steady state.
+const AS_OF_AMBER_MINUTES = 10;
+const AS_OF_RED_MINUTES = 60;
+
+interface AsOfInfo { clock: string; ago: string; level: "red" | "amber" | null; title: string }
+
+/** Returns null when generatedAt is missing or unparseable, which makes every
+ * consumer render nothing. A blank slot is honest; "Invalid Date" or "NaN ago" on
+ * a freshness stamp is worse than no stamp at all, and the server field is not
+ * guaranteed on an older or mid-deploy build. */
+function asOfInfo(generatedAt: string | null | undefined, now: number): AsOfInfo | null {
+  const mins = minutesSince(generatedAt, now);
+  if (mins == null) return null;
+  const clock = fmtLocalDateTime(generatedAt);
+  if (!clock) return null;
+  const ago = fmtAgo(mins);
+  const level = mins >= AS_OF_RED_MINUTES ? "red" : mins >= AS_OF_AMBER_MINUTES ? "amber" : null;
+  const title = (level
+    ? `This snapshot is ${ago}. Do not quote these numbers as current — hit Sync now, or reload, first.`
+    : `This snapshot was fetched ${ago}.`)
+    + `\n\nEvery count on this page — the chips, the KPI cards, the sentence above them — is derived in your browser from ONE read-model snapshot taken at ${clock}. It is not a live meter: the rentals underneath move on every Holman scrape and every ETL land, so the same number read an hour apart can legitimately differ and neither reading is wrong. Filter toggles (include PENDED, the cohort tabs) re-derive the counts instantly off this same snapshot — that changes what is displayed without making any of it newer.`
+    + `\n\nThis is when the numbers were COMPUTED, not how fresh the Holman data behind them is. Most PO rows reach us weeks after the repair; read last sync / last import for data age.`;
+  return { clock, ago, level, title };
+}
+
+/** Purely presentational — all judgement lives in asOfInfo() so every stamp on the
+ * page is the same object. `inline` is the header placement (sits in a text line);
+ * the default right-aligns it at the end of the chip flex row. */
+function AsOfStamp({ info, inline }: { info: AsOfInfo | null; inline?: boolean }) {
+  if (!info) return null;
+  const { level } = info;
+  const fg = level === "red" ? colors.red : level === "amber" ? colors.amber : colors.inkMuted;
+  const bg = level === "red" ? colors.redLight : level === "amber" ? colors.amberLight : "transparent";
+  return (
+    <span title={info.title}
+      style={{ marginLeft: inline ? 10 : "auto", alignSelf: "center", display: "inline-flex", alignItems: "center", gap: 5, fontFamily: fonts.jetbrains, fontSize: 11, fontWeight: level ? 600 : 400, color: fg, background: bg, border: `1px solid ${level ? fg : colors.rule}`, borderRadius: 999, padding: "4px 10px", whiteSpace: "nowrap", cursor: "help" }}>
+      {level ? <AlertTriangle size={11} /> : null}
+      snapshot {info.clock} · {info.ago}
+    </span>
+  );
 }
 
 // ── multi-select filter (checkbox dropdown; empty selection = show all) ──────
@@ -333,6 +432,17 @@ export default function RentalOperations() {
   const { data, isLoading, error, isFetching } = useQuery<MasterModel>({
     queryKey: ["/api/vrm/rental-operations/master"],
     staleTime: 60_000,
+    // The app-wide defaults (client/src/lib/queryClient.ts) are refetchInterval:false
+    // and refetchOnWindowFocus:false. Right for most pages, wrong for a control
+    // center left open on a wall: without these two the as-of stamp crosses into red
+    // at an hour and then stays red forever with no way back, which just teaches
+    // everyone to ignore it. 5 minutes keeps a visible board inside the 10-minute
+    // amber line. refetchIntervalInBackground stays at its false default, so a hidden
+    // tab costs nothing and the focus refetch catches it up when someone returns.
+    // This only re-reads the read model. It cannot trigger a Holman scrape: nothing
+    // behind GET /master launches a browser.
+    refetchInterval: 5 * 60_000,
+    refetchOnWindowFocus: true,
   });
 
   const [cohort, setCohort] = useState<string>("all");
@@ -347,6 +457,16 @@ export default function RentalOperations() {
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
   const [panelKey, setPanelKey] = useState<string | null>(null);
+
+  // The as-of stamp has to age in place. React only re-renders this page on state
+  // or query changes, so without a tick a board left open on the wall all afternoon
+  // keeps saying "just now" — the exact false-live read the stamp exists to kill.
+  // 30s is finer than the 1-minute resolution it displays, so it never lags a step.
+  const [nowTick, setNowTick] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const rows = data?.rows ?? [];
 
@@ -576,6 +696,10 @@ export default function RentalOperations() {
   );
 
   const sh = data!.sourceHealth;
+  // Derived once and shared by the header pill, the chip-row pill, the subtitle
+  // tooltip and the KPI tooltips: four places quoting one snapshot must never be
+  // able to print four different times.
+  const asOf = asOfInfo(data?.generatedAt, nowTick);
   const kpis = [
     { label: includePended ? "Rentals (incl. pended)" : "Open rentals", value: basePool.length, icon: CircleDollarSign, fg: colors.ink },
     { label: "Open repair ticket", value: stats.cohorts.open_repair ?? 0, icon: Wrench, fg: colors.blue },
@@ -589,12 +713,16 @@ export default function RentalOperations() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 12, marginBottom: 16 }}>
         <div>
           <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0, color: colors.ink }}>Rental Operations Control Center</h1>
-          <div style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
+          <div title={asOf?.title} style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
             {basePool.length} {includePended ? "rentals (incl. pended)" : "open rentals"} · {stats.cohorts.open_repair ?? 0} with an open repair ticket · {(stats.identityStates.REVIEW ?? 0) + (stats.identityStates.EXCEPTION ?? 0)} identities need review{!includePended && pendedTotal ? ` · ${pendedTotal} pended hidden (matches Rentals Ops Dashboard)` : ""}
           </div>
           <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains }}>
             last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
             {"   ·   "}last import: {sh.lastImportAt ? `${fmtDate(sh.lastImportAt)} (file ${sh.clocks.find((c) => c.source_key === "manual_enterprise_import")?.last_file_date || "—"})` : "none"}
+            {/* Same object the chip-row stamp renders, so the two can never disagree.
+                Placed here because the subtitle sentence and the KPI cards above/below
+                quote the same counts and previously carried no qualifier at all. */}
+            <AsOfStamp info={asOf} inline />
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -620,7 +748,7 @@ export default function RentalOperations() {
       {/* KPI cards */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12, marginBottom: 16 }}>
         {kpis.map((k) => (
-          <div key={k.label} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
+          <div key={k.label} title={asOf?.title} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "14px 16px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, color: colors.inkMuted, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em" }}>
               <k.icon size={14} style={{ color: k.fg }} /> {k.label}
             </div>
@@ -659,6 +787,9 @@ export default function RentalOperations() {
             </button>
           );
         })}
+        {/* Rides at the end of the chip row on purpose: whatever number a reader
+            just took off a chip, the stamp for it is the next thing their eye hits. */}
+        <AsOfStamp info={asOf} />
       </div>
 
       {/* Workload banner — the governing sentence for whichever workload tab is on */}
