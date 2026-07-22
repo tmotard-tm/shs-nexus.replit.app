@@ -6,7 +6,7 @@
  * bucketing, class/vehicle type-mismatch, and class-median daily-cost outlier.
  */
 import { db } from "../../db";
-import { sql } from "drizzle-orm";
+import { sql, type SQL } from "drizzle-orm";
 import { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
 
 // ── board classifier (ported 1:1 from make_rental_fleet_gallery.py) ──────────
@@ -101,7 +101,23 @@ function median(nums: number[]): number | null {
 // would take the whole board down, not a panel. The CASE degrades that truck to
 // zero portal observations (→ pure ETL) instead. All 428 rows are arrays today;
 // this is here so a scrape-service change can never take the board with it.
-const PORTAL_PO_OBS = sql`
+//
+// ══ THESE FRAGMENTS ARE **THE** DEFINITION OF THE RECONCILIATION ════════════
+// Everything from PORTAL_PO_OBS down to SHOP_STRICT_CTE is exported for ONE
+// reason: so nothing hand-copies it again. scrape-service.ts did copy it, and
+// the copy drifted TWICE inside one week (integration gate, 7/21):
+//   · it dropped PORTAL_STATUS_ALLOWED, so ANY portal token — including the 51
+//     DIRECT lines this file deliberately refuses — could override an ETL
+//     status on the targeting path only;
+//   · it dropped the jsonb_typeof(h.hist)='array' guard, so one malformed hist
+//     row would 500 both the delta sweep and the scrape-targets endpoint while
+//     the board itself stayed up.
+// A second copy cannot be kept in sync by discipline; that was already tried,
+// and the file carrying the copy even documented the trap it then fell into.
+// IMPORT THESE. If a consumer needs a variant (a narrower scope, a different
+// alias), add a PARAMETER here so every consumer inherits the next fix — do
+// not fork the SQL.
+export const PORTAL_PO_OBS = sql`
   SELECT DISTINCT ON (h.truck_no, e->>'poNumber')
          h.truck_no,
          e->>'poNumber'                          AS po_number,
@@ -137,7 +153,20 @@ const PORTAL_PO_OBS = sql`
 // relabel is no longer counted as the portal correcting anything. If Holman's
 // DIRECT ever needs to mean "open", add it here WITH the mapping — do not let it
 // leak through as itself.
-const PORTAL_STATUS_ALLOWED = sql`pp.portal_status IN ('APPROVED', 'PAID', 'VOID', 'HOLD', 'BILL HOLD')`;
+export const PORTAL_STATUS_ALLOWED_TOKENS = ["APPROVED", "PAID", "VOID", "HOLD", "BILL HOLD"] as const;
+
+/**
+ * The allow-list as a predicate. Alias-parameterised so a consumer whose portal
+ * CTE is aliased something other than `pp` still gets THE list instead of
+ * retyping it — retyping it is exactly how scrape-service ended up without one.
+ * Emits literals, not bind params, so the fragment is safe to embed anywhere
+ * and the tokens above stay the single source of the vocabulary.
+ */
+export function portalStatusAllowed(portalAlias = "pp"): SQL {
+  const tokens = PORTAL_STATUS_ALLOWED_TOKENS.map((t) => `'${t}'`).join(", ");
+  return sql`${sql.raw(portalAlias)}.portal_status IN (${sql.raw(tokens)})`;
+}
+export const PORTAL_STATUS_ALLOWED = portalStatusAllowed();
 
 // po_eff = every ETL PO row carrying its EFFECTIVE status plus the timestamp of
 // the freshest evidence we hold for it.
@@ -158,13 +187,37 @@ const PORTAL_STATUS_ALLOWED = sql`pp.portal_status IN ('APPROVED', 'PAID', 'VOID
 // portal_status stays RAW (pre-allow-list) because getClassifiedPoHistory ships
 // it as the receipt — a reader debugging a truck needs to see that the portal
 // said DIRECT and that we declined to apply it.
-const PO_EFFECTIVE_CTE = sql`
+/**
+ * Tyler's PO rule as a fragment, alias-parameterised. It reads the ETL columns
+ * ONLY, on purpose — the portal corrects STATUS and nothing else, so no portal
+ * reading may promote a tow/parts/rental_placeholder line into a repair.
+ */
+export function qualifyingRepairPo(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.vendor_type = 'repair' OR (${a}.vendor_type = 'tow' AND ${a}.has_parts_labor IS TRUE))`;
+}
+
+/**
+ * Builds the `portal_po` + `po_eff` CTE pair. PO_EFFECTIVE_CTE below is the
+ * unscoped instance the read model uses; the builder exists so a consumer that
+ * only cares about a few hundred trucks can narrow the scan WITHOUT forking the
+ * reconciliation — the one thing this extraction is here to prevent.
+ *
+ * @param opts.scopeJoin an extra JOIN, emitted immediately after
+ *   `vrm_rental_operations_po_history p`, restricting po_eff to a subset of
+ *   trucks (e.g. `JOIN universe u ON u.truck = p.vehicle_number_padded`). It may
+ *   narrow the TRUCK set and nothing else: filtering on status, vendor_type or
+ *   date here would silently change what eff_status means for every downstream
+ *   aggregate and put us straight back into two divergent definitions.
+ */
+export function poEffectiveCte(opts: { scopeJoin?: SQL } = {}): SQL {
+  return sql`
   portal_po AS (${PORTAL_PO_OBS}),
   po_eff AS (
     SELECT p.vehicle_number_padded, p.po_number, p.po_date, p.po_status,
            p.vendor_type, p.has_parts_labor, p.vendor_name, p.vendor_address,
            p.vendor_city, p.vendor_state, p.vendor_zip, p.upload_timestamp,
-           (p.vendor_type = 'repair' OR (p.vendor_type = 'tow' AND p.has_parts_labor IS TRUE)) AS is_qualifying_repair,
+           ${qualifyingRepairPo("p")} AS is_qualifying_repair,
            COALESCE(
              CASE WHEN ${PORTAL_STATUS_ALLOWED} AND pp.observed_at > p.upload_timestamp
                   THEN pp.portal_status END,
@@ -174,10 +227,13 @@ const PO_EFFECTIVE_CTE = sql`
            CASE WHEN ${PORTAL_STATUS_ALLOWED} THEN pp.observed_at END AS portal_observed_at,
            GREATEST(p.upload_timestamp, CASE WHEN ${PORTAL_STATUS_ALLOWED} THEN pp.observed_at END) AS evidence_at
     FROM vrm_rental_operations_po_history p
+    ${opts.scopeJoin ?? sql.empty()}
     LEFT JOIN portal_po pp
       ON pp.truck_no = p.vehicle_number_padded AND pp.po_number = p.po_number
   )
 `;
+}
+export const PO_EFFECTIVE_CTE = poEffectiveCte();
 
 // Per-truck rollup of po_eff. Pre-aggregated as a CTE rather than left as two
 // correlated LATERALs (rental truck + assigned truck) because po_eff is a
@@ -185,7 +241,14 @@ const PO_EFFECTIVE_CTE = sql`
 // a self-inflicted 20M-comparison query. One GROUP BY + hash join instead.
 // etl_open_po_count is kept alongside open_po_count so the UI/API can show
 // "the ETL still says 1, the portal says 0" without a second round trip.
-const PO_AGG_CTE = sql`
+//
+// Exported for completeness, but NOTE for the scrape targeting path: its
+// evidence columns fold in the portal's observed_at, which IS scraped_at. A
+// targeting query that asks "did the base layer learn something since we last
+// looked" must NOT read those — every portal-matched open PO would report
+// evidence exactly as fresh as our last look and re-arm forever. Take po_eff
+// and aggregate the ETL clocks yourself for that question.
+export const PO_AGG_CTE = sql`
   po_agg AS (
     SELECT q.vehicle_number_padded AS truck,
       count(*) FILTER (WHERE q.is_qualifying_repair AND q.eff_status = 'APPROVED')                         AS open_po_count,
@@ -224,7 +287,7 @@ const PO_AGG_CTE = sql`
 // no_open_repair (portal says the PO is PAID) while shop_po_status still reads
 // APPROVED and LUCA dials that shop. DISTINCT ON per truck replaces the old
 // per-case LATERAL for the same reason as po_agg.
-const SHOP_PICK_CTE = sql`
+export const SHOP_PICK_CTE = sql`
   shop_pick AS (
     SELECT DISTINCT ON (q.vehicle_number_padded)
            q.vehicle_number_padded AS truck, q.vendor_name, q.vendor_address, q.vendor_city,
@@ -262,7 +325,7 @@ const SHOP_PICK_CTE = sql`
 // ignores status, so the same PO wins); what changes is that the STATUS shipped
 // with it is now the effective one. The raw ETL value rides along as
 // etl_po_status so the feed can still show its receipt.
-const SHOP_STRICT_CTE = sql`
+export const SHOP_STRICT_CTE = sql`
   shop_strict AS (
     SELECT DISTINCT ON (q.vehicle_number_padded)
            q.vehicle_number_padded AS truck, q.vendor_name, q.vendor_address, q.vendor_city,
@@ -724,20 +787,84 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
   };
 }
 
+/** The three verdicts ingest.classifySourceHealth can write. Re-declared here
+ *  rather than imported so the read path never takes a dependency on the write
+ *  path (ingest.ts pulls in Snowflake, the worker spawner and the whole land
+ *  pipeline; the board must not). */
+export type SourceHealthVerdict = "green" | "yellow" | "red";
+/** "unknown" is NOT something ingest can write — it is what the READ side
+ *  reports when there is no verdict to read (never synced since the DDL landed,
+ *  or the columns do not exist on this database at all). It is deliberately a
+ *  separate value from "green": the entire point of this work is that silence
+ *  must never render as an all-clear. */
+export type EffectiveHealth = SourceHealthVerdict | "unknown";
+const HEALTH_RANK: Record<EffectiveHealth, number> = { green: 0, unknown: 1, yellow: 2, red: 3 };
+function worseOf(a: EffectiveHealth, b: EffectiveHealth): EffectiveHealth {
+  return HEALTH_RANK[a] >= HEALTH_RANK[b] ? a : b;
+}
+
 export interface SourceHealthClock {
   source_key: string;
   last_status: string | null;
   last_success_at: string | null;
   last_file_date: string | null;
   last_row_count: number | null;
+  // RUN clock. Unchanged meaning: how long since WE last finished writing. It
+  // says nothing about whether the data is true — that is the whole defect.
   stale: boolean;
   age_hours: number | null;
+  // ── DATA clock, as written by ingest.upsertSourceHealth ───────────────────
+  // Column names verified against DEV information_schema 7/21: the percentile
+  // columns are data_age_p50_hours / data_age_p90_hours (NOT ..._p50 / ..._p90),
+  // which is why they are spelled out rather than guessed.
+  //
+  // Every one of these is NULLABLE in practice, and not as an edge case: on DEV
+  // right now manual_enterprise_import carries NULL across the board because it
+  // has not run since the columns landed, and on PROD the columns DO NOT EXIST
+  // YET (Nexus deploys run no migrations; ingest creates them on its first
+  // health write). Read effective_health, not health_status, unless you are
+  // deliberately showing the raw stored verdict.
+  health_status: SourceHealthVerdict | null;   // frozen at ingest time — can rot
+  health_reason: string | null;
+  data_age_metric: string | null;              // WHICH population was aged
+  data_age_p50_hours: number | null;
+  data_age_p90_hours: number | null;
+  /** Size of the aged population. 0 is ingest's empty-population alarm — BUT it
+   *  is also what the feed sources currently store for a scalar FILE_DATE
+   *  metric, where ingest's own contract says NULL. Do not re-derive a verdict
+   *  from this column; render health_reason, which distinguishes them. */
+  data_age_rows: number | null;
+  data_age_measured_at: string | null;
+  /** How stale the VERDICT itself is. The verdict is frozen at write time, so a
+   *  sync that stopped running leaves a green fossil behind — see the contract
+   *  note on ingest.classifySourceHealth. This is what catches that. */
+  data_age_measured_age_hours: number | null;
+  data_age_warn_hours: number | null;
+  data_age_fail_hours: number | null;
+  // ── what a badge should actually render ──────────────────────────────────
+  // The stored verdict crossed with both clocks: never green when the data age
+  // is unknown, and never green when the verdict itself is older than the
+  // source's freshness threshold. This is the single field the UI should colour.
+  effective_health: EffectiveHealth;
+  effective_health_reason: string | null;
 }
 export interface SourceHealthModel {
   clocks: SourceHealthClock[];
   lastSyncAt: string | null;
   lastImportAt: string | null;
   lastFileDate: string | null;
+  /** Worst effective_health across all sources — the one-badge rollup, so the
+   *  page header cannot show green while a source underneath is red. "unknown"
+   *  when there are no sources at all. */
+  worstHealth: EffectiveHealth;
+  /** source_keys whose effective_health is not green, worst-first. Empty array
+   *  is the ONLY all-clear; do not infer one from worstHealth alone. */
+  unhealthySources: string[];
+  /**
+   * Read-time re-measurement of the same idea. Both this and the persisted
+   * data_age_* columns above exist ON PURPOSE, and they answer different
+   * questions — see the note on getPoDataFreshness for the split.
+   */
   dataFreshness: PoDataFreshness;
 }
 
@@ -751,11 +878,31 @@ export interface SourceHealthModel {
  * number below is derived from timestamps INSIDE the data (Holman's
  * upload_timestamp, the portal's scraped_at), never from when a job last ran.
  *
- * CONTRACT NOTE for the ingest.ts health rewrite: consume `getPoDataFreshness()`
- * (or `SourceHealthModel.dataFreshness`) rather than re-deriving these. This
- * helper reads the landed tables directly and is deliberately independent of
- * whatever columns vrm_rental_source_health grows, so the two can ship in
- * either order without breaking each other.
+ * ── WHY THIS STILL EXISTS NOW THAT ingest PERSISTS data_age_* ───────────────
+ * Ruling (7/21, closing the integration gate's "two notions of freshness"):
+ * both stay, with ONE authority per question and neither allowed to answer the
+ * other's. Two clocks measuring the same thing is the defect; two clocks
+ * measuring different things and cross-checking each other is the fix.
+ *
+ *   getPoDataFreshness()  — HOW OLD IS THE DATA, RIGHT NOW. Re-measured on
+ *     every read off the landed tables, so it cannot rot, and it spans BOTH
+ *     layers (ETL base + portal correction) plus the reconciled evidence behind
+ *     open_repair. No per-source row can produce openFlagEvidence*, because
+ *     that number does not belong to a source — it is a property of the join.
+ *     This is the authority for "is the data old".
+ *
+ *   vrm_rental_source_health.data_age_* / health_status — WHAT THE RUN SAW WHEN
+ *     IT LANDED. Per source, and it holds two facts a read-time measurement can
+ *     never reconstruct: whether the run itself failed, and whether the run
+ *     landed into an EMPTY population (ingest's own alarm, and the most
+ *     dangerous state there is — an empty open_repair set reads as good news).
+ *     It is a verdict frozen in time and it can go stale exactly like the data
+ *     it describes. This is the authority for "did the last land go wrong".
+ *
+ * getSourceHealth() below is where the two meet: the frozen verdict is never
+ * allowed to render green once either clock says nobody has looked recently.
+ * If you find yourself computing a THIRD age anywhere, delete it and call one
+ * of these two instead.
  */
 export interface PoDataFreshness {
   // Snowflake ETL base layer (vrm_rental_operations_po_history)
@@ -847,35 +994,142 @@ export async function getPoDataFreshness(): Promise<PoDataFreshness> {
   }
 }
 
-export async function getSourceHealth(): Promise<SourceHealthModel> {
-  const res = await db.execute(sql`
-    SELECT source_key, last_status,
+// The run clock, present on every deployment since the table was created.
+const SOURCE_HEALTH_RUN_COLS = sql`source_key, last_status,
       to_char(last_success_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS last_success_at,
       EXTRACT(EPOCH FROM (NOW() - last_success_at))/3600.0 AS age_hours,
-      last_file_date, last_row_count, freshness_threshold_hours
-    FROM vrm_rental_source_health ORDER BY source_key
-  `);
-  const clocks: SourceHealthClock[] = (res.rows as any[]).map((r) => {
-    const age = r.age_hours == null ? null : Number(r.age_hours);
+      last_file_date, last_row_count, freshness_threshold_hours`;
+
+// The data clock. Split out because these nine columns are NOT guaranteed to
+// exist: ingest.ensureSourceHealthDataAgeColumns() is the only thing that
+// creates them, it is not wired into schema.ts boot DDL, and Nexus deploys run
+// no migrations — so on PROD right now (verified 7/21) selecting health_status
+// throws "column does not exist". getRentalOpsMaster awaits getSourceHealth,
+// so an unguarded select here would take the ENTIRE BOARD down on the very
+// deploy that ships this, for a health panel. Same degrade shape as
+// ingest.upsertSourceHealthLegacy, and for the same reason.
+const SOURCE_HEALTH_DATA_AGE_COLS = sql`,
+      health_status, health_reason, data_age_metric,
+      data_age_p50_hours, data_age_p90_hours, data_age_rows,
+      to_char(data_age_measured_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS data_age_measured_at,
+      EXTRACT(EPOCH FROM (NOW() - data_age_measured_at))/3600.0 AS data_age_measured_age_hours,
+      data_age_warn_hours, data_age_fail_hours`;
+
+export async function getSourceHealth(): Promise<SourceHealthModel> {
+  let rows: any[];
+  let dataAgeColumnsPresent = true;
+  try {
+    const res = await db.execute(sql`
+      SELECT ${SOURCE_HEALTH_RUN_COLS}${SOURCE_HEALTH_DATA_AGE_COLS}
+      FROM vrm_rental_source_health ORDER BY source_key
+    `);
+    rows = res.rows as any[];
+  } catch (e: any) {
+    // Not memoized: the columns appear the moment ingest's first health write
+    // runs on this box, and a cached "absent" would keep the panel dark for a
+    // whole process lifetime after that. One wasted round trip per board read
+    // until the deploy lands is the cheaper mistake.
+    console.warn(
+      "[VRM/RentalOps] source-health data-age columns unavailable, falling back to the run clock only " +
+      "(ingest has not created them on this database yet):", e?.message || e,
+    );
+    dataAgeColumnsPresent = false;
+    const res = await db.execute(sql`
+      SELECT ${SOURCE_HEALTH_RUN_COLS} FROM vrm_rental_source_health ORDER BY source_key
+    `);
+    rows = res.rows as any[];
+  }
+
+  // NUMERIC comes back from node-postgres as a STRING, so every one of these
+  // goes through Number() — `null` must survive as null (Number(null) is 0, and
+  // a 0-hour data age is exactly the false all-clear this work exists to kill).
+  const num = (v: any): number | null => {
+    if (v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+  const round1 = (v: number | null): number | null => (v == null ? null : Math.round(v * 10) / 10);
+  const isVerdict = (v: any): v is SourceHealthVerdict => v === "green" || v === "yellow" || v === "red";
+
+  const clocks: SourceHealthClock[] = rows.map((r) => {
+    const age = num(r.age_hours);
     const threshold = Number(r.freshness_threshold_hours || 30);
+    const stale = age == null ? true : age > threshold;
+    const stored = isVerdict(r.health_status) ? r.health_status : null;
+    const measuredAt = r.data_age_measured_at ?? null;
+    const measuredAge = round1(num(r.data_age_measured_age_hours));
+
+    // Silence is not health. Three ways to have no usable verdict, all of which
+    // must land on "unknown" rather than inherit green from an empty column:
+    // the DDL is missing, the source never wrote one, or it wrote a token we do
+    // not recognise (a future ingest value must degrade, not get trusted).
+    let effective: EffectiveHealth;
+    let reason: string | null;
+    if (!dataAgeColumnsPresent) {
+      effective = "unknown";
+      reason = "data-age columns do not exist on this database yet — only the run clock is available, and the run clock cannot see stale data";
+    } else if (stored == null || measuredAt == null) {
+      effective = "unknown";
+      reason = r.health_status
+        ? `unrecognised stored verdict "${r.health_status}" — not trusted`
+        : "no data-age verdict recorded — this source has not written health since the honest-health columns landed";
+    } else {
+      effective = stored;
+      reason = r.health_reason ?? null;
+    }
+
+    // health_status is FROZEN at ingest time (see the contract note on
+    // ingest.classifySourceHealth): if the sync stops running, the last green it
+    // wrote stays green forever and we have rebuilt the false all-clear one
+    // layer up. Cross it with both clocks so that cannot happen.
+    const rot: string[] = [];
+    if (stale) rot.push(`run clock stale (${age == null ? "never succeeded" : `${round1(age)}h`} vs ${threshold}h threshold)`);
+    if (measuredAge != null && measuredAge > threshold) rot.push(`verdict measured ${measuredAge}h ago`);
+    if (rot.length) {
+      effective = worseOf(effective, "yellow");
+      reason = [reason, `stored verdict may be stale: ${rot.join("; ")}`].filter(Boolean).join(" · ");
+    }
+
     return {
       source_key: r.source_key, last_status: r.last_status,
       last_success_at: r.last_success_at, last_file_date: r.last_file_date,
       last_row_count: r.last_row_count == null ? null : Number(r.last_row_count),
-      age_hours: age == null ? null : Math.round(age * 10) / 10,
-      stale: age == null ? true : age > threshold,
+      age_hours: round1(age),
+      stale,
+      health_status: stored,
+      health_reason: r.health_reason ?? null,
+      data_age_metric: r.data_age_metric ?? null,
+      data_age_p50_hours: round1(num(r.data_age_p50_hours)),
+      data_age_p90_hours: round1(num(r.data_age_p90_hours)),
+      data_age_rows: num(r.data_age_rows),
+      data_age_measured_at: measuredAt,
+      data_age_measured_age_hours: measuredAge,
+      data_age_warn_hours: num(r.data_age_warn_hours),
+      data_age_fail_hours: num(r.data_age_fail_hours),
+      effective_health: effective,
+      effective_health_reason: reason,
     };
   });
   const find = (k: string) => clocks.find((c) => c.source_key === k) || null;
   const sync = find("scheduled_sync");
   const imp = find("manual_enterprise_import");
+  const unhealthy = clocks
+    .filter((c) => c.effective_health !== "green")
+    .sort((a, b) => HEALTH_RANK[b.effective_health] - HEALTH_RANK[a.effective_health])
+    .map((c) => c.source_key);
   return {
     clocks,
     lastSyncAt: sync?.last_success_at ?? null,
     lastImportAt: imp?.last_success_at ?? null,
     lastFileDate: sync?.last_file_date ?? imp?.last_file_date ?? null,
-    // The `clocks` above are LAND-time clocks and will read GREEN even when the
-    // data inside is months old — read dataFreshness before believing them.
+    // An empty table is not an all-clear either — no sources means nobody is
+    // reporting, which is the same silence as a NULL verdict.
+    worstHealth: clocks.reduce<EffectiveHealth>((w, c) => worseOf(w, c.effective_health), clocks.length ? "green" : "unknown"),
+    unhealthySources: unhealthy,
+    // `stale` / `age_hours` above are LAND-time clocks and will read GREEN even
+    // when the data inside is months old. effective_health folds in the data
+    // clock; dataFreshness re-measures it live. Do not colour a badge off
+    // `stale` alone — that is the original false all-clear.
     dataFreshness: await getPoDataFreshness(),
   };
 }

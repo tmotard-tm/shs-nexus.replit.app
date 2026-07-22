@@ -325,28 +325,44 @@ export function registerRentalOperationsRoutes(router: Router): void {
   // GET what the delta sweep WOULD do right now, without doing it. Read-only:
   // one targeting query, no browser.
   //
-  // This exists because the sweep otherwise switches itself off. The only UI
-  // entry points to POST scrape-missing are conditionally rendered on counts that
-  // mean the OLD thing — RentalOperations.tsx:676 gates on
-  // `missingCount = rows.filter(r => !r.has_portal).length > 0`, and :821 gates on
-  // `workableStats.needPhone > 0`. Both of those go to zero after the first sweep
-  // fills in the never-scraped trucks, at which point the button unmounts and the
-  // ~114 mismatch / po_newer targets — the entire reason the delta layer exists —
-  // become unreachable from the product. There is no server-side scheduled caller
-  // either (server/run-vrm-rental-ops-sync.ts does not touch the scraper).
+  // This exists because the sweep otherwise switched itself off. The UI used to
+  // render its only entry points to POST scrape-missing on counts that mean the
+  // OLD thing — `missingCount = rows.filter(r => !r.has_portal).length` and
+  // `workableStats.needPhone`. Both go to zero once the never-scraped trucks are
+  // filled in, at which point the button unmounted and the ~114 mismatch /
+  // po_newer targets — the entire reason the delta layer exists — became
+  // unreachable from the product. RentalOperations.tsx now gates every Scrape
+  // control on `found` from THIS endpoint (sweepInfo()); do not reintroduce a
+  // second gate off row counts, or the two will disagree about the backlog.
   //
-  // HANDOFF, still open: the client must gate on `found` from THIS endpoint
-  // instead of missingCount, and the sweep should be wired into the scheduled
-  // ingest after landPoHistory(). Both live in files this module does not own
-  // (RentalOperations.tsx, run-vrm-rental-ops-sync.ts / ingest.ts).
+  // CONTRACT (client is being wired against this now, 7/21 — do not rename):
+  //   found      pre-truncation backlog. THE number the Scrape button gates on.
+  //   served     what one POST would actually work (== targets.length).
+  //   truncated  found > served, i.e. there is a remainder for the next run.
+  //   byReason   pre-truncation tally, sums to found, keys are ScrapeReason.
+  //   inFlight   a sweep is already running; POST would 409.
+  //   targets[]  { truck, reason, priority, openPoCount, scrapedAt } so the UI
+  //              can explain WHY a truck is queued rather than just show a count.
+  //   generatedAt when this was measured — the numbers are live, not cached, and
+  //              a panel showing a count with no timestamp is how the old false
+  //              all-clear got believed in the first place.
+  // Response is `ok:true` with found:0 when there is nothing to do; that is the
+  // all-clear, and it is NOT the same as a failed request. Gate the button on
+  // `found > 0`, never on the absence of an error.
+  //
+  // Two triggers now run the delta layer, and this endpoint only serves the
+  // operator one: server/run-vrm-rental-ops-sync.ts calls findScrapeTargets +
+  // scrapeAndStore itself right after the Snowflake land (capped, budgeted), so
+  // the button is the manual override, not the only path.
   router.get("/rental-operations/scrape-targets", async (req, res) => {
     try {
       const { findScrapeTargets } = await import("./scrape-service");
       const limit = req.query.limit ? Math.max(1, Math.min(500, Number(req.query.limit))) : undefined;
       const { targets, totalFound, truncated, byReason, served } = await findScrapeTargets({ limit });
-      // `targets` carries the reason + priority per truck so the UI can explain
-      // WHY a truck is queued rather than just show a number.
-      res.json({ ok: true, found: totalFound, served, truncated, byReason, inFlight: scrapeSweepInFlight, targets });
+      res.json({
+        ok: true, found: totalFound, served, truncated, byReason,
+        inFlight: scrapeSweepInFlight, generatedAt: new Date().toISOString(), targets,
+      });
     } catch (e: any) {
       console.error("[VRM/RentalOps] scrape-targets failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "scrape-targets failed" });

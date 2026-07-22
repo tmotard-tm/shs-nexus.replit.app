@@ -107,6 +107,31 @@ interface MasterRow {
 interface SourceClock {
   source_key: string; last_status: string | null; last_success_at: string | null;
   last_file_date: string | null; last_row_count: number | null; stale: boolean; age_hours: number | null;
+  // ── data clock (server read-repository getSourceHealth) ───────────────────
+  // `stale` / `age_hours` above are the RUN clock: how long since we last
+  // finished writing. That clock resets every night no matter how old Holman's
+  // own upload was, which is exactly how this row reported all five sources
+  // GREEN while 94% of the PO statuses underneath were 30+ days old. Everything
+  // below is the DATA clock and is what a badge may be coloured off.
+  //
+  // All optional: these columns do not exist on PROD until ingest's first health
+  // write creates them, and an older/mid-deploy server build sends the row
+  // without them. Missing must degrade to "unknown", never inherit green — see
+  // healthOf(). Field names verified against server SourceHealthClock 7/21
+  // (the percentiles are data_age_p50_hours / data_age_p90_hours, not _p50).
+  health_status?: string | null;      // the verdict FROZEN at ingest time — can rot
+  health_reason?: string | null;
+  data_age_metric?: string | null;    // which population was aged
+  data_age_p50_hours?: number | null;
+  data_age_p90_hours?: number | null;
+  data_age_rows?: number | null;
+  data_age_measured_at?: string | null;
+  data_age_measured_age_hours?: number | null;   // how stale the VERDICT itself is
+  data_age_warn_hours?: number | null;
+  data_age_fail_hours?: number | null;
+  // The stored verdict crossed with BOTH clocks. This is the one field to colour.
+  effective_health?: string | null;
+  effective_health_reason?: string | null;
 }
 interface MasterModel {
   rows: MasterRow[]; total: number;
@@ -114,11 +139,35 @@ interface MasterModel {
   categories: Record<string, number>; amsBuckets: Record<string, number>;
   workloadBuckets?: Record<string, number>;
   mismatchCount: number; costOverCount: number; pendedCount: number;
-  sourceHealth: { clocks: SourceClock[]; lastSyncAt: string | null; lastImportAt: string | null; lastFileDate: string | null };
+  sourceHealth: {
+    clocks: SourceClock[]; lastSyncAt: string | null; lastImportAt: string | null; lastFileDate: string | null;
+    // Server rollups. Optional for the same reason as the fields above; when they
+    // are absent the pill re-derives the worst from `clocks` rather than assuming
+    // health. unhealthySources is worst-first and an empty ARRAY is the only
+    // all-clear — undefined is not one.
+    worstHealth?: string | null;
+    unhealthySources?: string[];
+  };
   // When the READ MODEL was computed — not when data landed. Optional on purpose:
   // an older server build (or one mid-deploy) may not send it, and the as-of stamp
   // must render nothing rather than "Invalid Date" when that happens.
   generatedAt?: string | null;
+}
+/** GET /rental-operations/scrape-targets — the delta sweep's own backlog.
+ *
+ * Mirrors server scrape-service ScrapeTargetSet plus the route's `inFlight`.
+ * `found` and `byReason` are BOTH pre-truncation, so they sum to each other and
+ * never to `served`; `served` is what one POST will actually work. Everything is
+ * optional-tolerant at the render site because this endpoint is newer than the
+ * page — see the sweep gate for what happens when it is absent. */
+interface ScrapeTargetsModel {
+  ok?: boolean;
+  found?: number;
+  served?: number;
+  truncated?: boolean;
+  byReason?: Record<string, number>;
+  inFlight?: boolean;
+  targets?: Array<{ truck: string; reason: string; priority: number; openPoCount: number; scrapedAt: string | null }>;
 }
 interface PoLineItem { seq: number | null; description: string | null; repairType: string | null; ataGroup: string | null; qty: number | null; cost: number | null; }
 interface PoRecord {
@@ -351,6 +400,161 @@ function AsOfStamp({ info, inline }: { info: AsOfInfo | null; inline?: boolean }
   );
 }
 
+// ── Holman delta sweep ───────────────────────────────────────────────────────
+// Tyler 7/21: "have the snowflake data and then scrape and only bring in from the
+// scraper what's different." Snowflake is the BASE PO layer; the portal scrape is
+// a delta correction on top of it.
+//
+// The trap this replaces: the sweep used to be gated on rows.filter(r => !r.has_portal)
+// — trucks with no portal snapshot AT ALL. That number is 0 on prod, so the button
+// silently unmounted while findScrapeTargets() had 99 trucks queued and the headline
+// capability of the whole build shipped dark. Never re-derive this backlog from the
+// grid: the grid can see WHETHER a snapshot exists, never whether it is still true.
+// The server endpoint is the only thing that knows, so the control lives or dies
+// with it.
+//
+// Keys and order mirror server scrape-service ScrapeReason (priority 1 first) —
+// a truncated run drops the tail, so the order is operationally load-bearing.
+const SCRAPE_REASONS: Array<{ key: string; short: string; why: string }> = [
+  { key: "shop_mismatch_open", short: "wrong shop, repair open", why: "the portal still names a shop a newer PO superseded, on a live repair — LUCA would dial the wrong shop today" },
+  { key: "never_scraped_open", short: "never scraped, repair open", why: "no portal snapshot at all on a truck sitting in a shop right now" },
+  { key: "po_newer_than_scrape", short: "PO moved since we looked", why: "the base layer learned something after the last scrape, so the snapshot is behind" },
+  { key: "shop_mismatch", short: "wrong shop", why: "superseded shop on the snapshot, but no open repair at the moment" },
+  { key: "never_scraped", short: "never scraped", why: "no portal snapshot at all" },
+  { key: "stale_open", short: "snapshot aged out", why: "the snapshot aged past the refresh horizon on a truck we still work" },
+];
+const MISMATCH_REASONS = ["shop_mismatch_open", "shop_mismatch"];
+
+interface SweepInfo { found: number; served: number; truncated: boolean; mismatch: number; inFlight: boolean; label: string; title: string }
+
+/** Returns null whenever the sweep must not render a control at all: the endpoint
+ * errored or is absent (data undefined), sent a `found` we cannot parse, or found
+ * nothing to do. Rendering nothing is the deliberate fallback — a Scrape button
+ * whose size we cannot state is the same blind control that shipped last time, and
+ * POST scrape-missing runs the SAME query, so a GET that fails means the POST would
+ * have failed too. Never renders a disabled-forever button. */
+function sweepInfo(m: ScrapeTargetsModel | undefined, needPhone: number): SweepInfo | null {
+  if (!m) return null;
+  const found = Number(m.found);
+  if (!Number.isFinite(found) || found <= 0) return null;
+  const by = m.byReason && typeof m.byReason === "object" ? m.byReason : {};
+  const n = (k: string) => { const v = Number((by as any)[k]); return Number.isFinite(v) ? v : 0; };
+  const servedRaw = Number(m.served);
+  // `served` is what ONE pass works; `found` is the whole backlog. If the server
+  // omitted it, assume one pass covers everything rather than inventing a cap.
+  const served = Number.isFinite(servedRaw) && servedRaw > 0 ? Math.min(servedRaw, found) : found;
+  const truncated = m.truncated === true || served < found;
+  const mismatch = MISMATCH_REASONS.reduce((s, k) => s + n(k), 0);
+  const inFlight = m.inFlight === true;
+  // Any reason key the server adds later still shows up, under its raw key, rather
+  // than vanishing from a total the operator is being asked to act on.
+  const known = new Set(SCRAPE_REASONS.map((r) => r.key));
+  const lines = [
+    ...SCRAPE_REASONS.filter((r) => n(r.key) > 0).map((r) => `  ${n(r.key)} ${r.short} — ${r.why}`),
+    ...Object.keys(by).filter((k) => !known.has(k) && n(k) > 0).map((k) => `  ${n(k)} ${k}`),
+  ];
+  const label = inFlight ? "Holman sweep running…"
+    : mismatch > 0 ? `Scrape ${found} · ${mismatch} wrong shop`
+    : `Scrape ${found} from Holman`;
+  const title = [
+    `${found} truck${found === 1 ? " is" : "s are"} worth a Holman session right now.`,
+    mismatch > 0
+      ? `${mismatch} of them show a shop the current PO already superseded. That is the expensive one: LUCA reads the shop off this snapshot, so it would call a shop that no longer has the truck.`
+      : null,
+    lines.length ? `Why each truck is queued:\n${lines.join("\n")}` : null,
+    truncated
+      ? `One pass works ${served} of them, most urgent first; the other ${found - served} come back on the next run.`
+      : `One pass works all ${served}.`,
+    `This is a delta sweep, not a rebuild — Snowflake stays the base PO layer and Holman is only re-read where that layer is missing or provably suspect.`,
+    needPhone > 0
+      ? `Separately, ${needPhone} workable truck${needPhone === 1 ? " has" : "s have"} an open repair and no shop phone. A sweep only helps the ones listed above: a truck we scraped recently whose shop simply has no phone on file will not gain one from another pass.`
+      : null,
+    inFlight
+      ? `A sweep is already running on the server — starting another is refused. Reload in a few minutes.`
+      : `Runs in the background at roughly 20s per truck. Reload in a few minutes.`,
+  ].filter(Boolean).join("\n\n");
+  return { found, served, truncated, mismatch, inFlight, label, title };
+}
+
+// ── source health badge ──────────────────────────────────────────────────────
+// The row above this badge (last sync / last import) is the RUN clock: when a job
+// last finished. It resets every night no matter how old Holman's own upload was,
+// and it is exactly why this page reported all five sources fine while 94% of the
+// PO statuses underneath were 30+ days stale. The badge colours the DATA clock the
+// server now computes instead. Silence is never green.
+type HealthLevel = "green" | "yellow" | "red" | "unknown";
+const HEALTH_RANK: Record<HealthLevel, number> = { green: 0, unknown: 1, yellow: 2, red: 3 };
+/** Anything that is not one of the three verdicts the server can write — missing
+ * field (older server build, or the data-age columns not created on this database
+ * yet), null, or a token we do not recognise — becomes "unknown", which ranks
+ * ABOVE green. A future server verdict must degrade, not be trusted. */
+function healthOf(c: SourceClock): HealthLevel {
+  const v = String(c?.effective_health ?? "");
+  return v === "green" || v === "yellow" || v === "red" ? v : "unknown";
+}
+function healthPaint(l: HealthLevel): { fg: string; bg: string } {
+  if (l === "red") return { fg: colors.red, bg: colors.redLight };
+  if (l === "yellow") return { fg: colors.amber, bg: colors.amberLight };
+  if (l === "green") return { fg: colors.green, bg: colors.greenLight };
+  return { fg: colors.inkMuted, bg: colors.surface };
+}
+/** "?" for null, days past two days. Never prints 0h for a missing age — a
+ * zero-hour data age is the false all-clear this whole badge exists to kill. */
+function fmtHours(h: number | null | undefined): string {
+  if (h == null || !Number.isFinite(Number(h))) return "?";
+  const n = Number(h);
+  return n >= 48 ? `${Math.round(n / 24)}d` : `${Math.round(n * 10) / 10}h`;
+}
+function healthClockLine(c: SourceClock): string {
+  const bits: string[] = [`${c.source_key} — ${healthOf(c).toUpperCase()}`];
+  const p50 = c.data_age_p50_hours, p90 = c.data_age_p90_hours;
+  bits.push(p50 == null && p90 == null
+    ? `data age unknown${c.data_age_metric ? ` (${c.data_age_metric})` : ""}`
+    : `${c.data_age_metric || "data age"} p50 ${fmtHours(p50)} / p90 ${fmtHours(p90)}${c.data_age_rows == null ? "" : ` over ${c.data_age_rows} rows`}`);
+  if (c.data_age_measured_age_hours != null) bits.push(`verdict measured ${fmtHours(c.data_age_measured_age_hours)} ago`);
+  const reason = c.effective_health_reason || c.health_reason;
+  if (reason) bits.push(String(reason));
+  return `  ${bits.join(" · ")}`;
+}
+
+/** Renders nothing when the server sent no health at all (no clocks and no
+ * rollup) — an older build has nothing to say and a blank slot is honest. It
+ * does NOT render nothing for an empty verdict: that case is UNKNOWN and is the
+ * point of the badge. */
+function SourceHealthBadge({ sh }: { sh: MasterModel["sourceHealth"] }) {
+  const clocks = Array.isArray(sh?.clocks) ? sh.clocks : [];
+  const serverWorst = ((): HealthLevel | null => {
+    const v = String(sh?.worstHealth ?? "");
+    return v === "green" || v === "yellow" || v === "red" || v === "unknown" ? v : null;
+  })();
+  if (!clocks.length && !serverWorst) return null;
+  // Fall back to the worst per-source verdict when the rollup is absent. Starting
+  // from "unknown" on an empty clock list is deliberate: nobody reporting is the
+  // same silence as a null verdict, not an all-clear.
+  const derived = clocks.reduce<HealthLevel>(
+    (w, c) => (HEALTH_RANK[healthOf(c)] >= HEALTH_RANK[w] ? healthOf(c) : w),
+    clocks.length ? "green" : "unknown",
+  );
+  const worst = serverWorst ?? derived;
+  const unhealthy = Array.isArray(sh?.unhealthySources) ? sh!.unhealthySources! : clocks.filter((c) => healthOf(c) !== "green").map((c) => c.source_key);
+  const { fg, bg } = healthPaint(worst);
+  const text = worst === "green"
+    ? `data health: GREEN · ${clocks.length} source${clocks.length === 1 ? "" : "s"}`
+    : `data health: ${worst.toUpperCase()}${unhealthy.length ? ` · ${unhealthy.length} of ${clocks.length || unhealthy.length} source${(clocks.length || unhealthy.length) === 1 ? "" : "s"}` : ""}`;
+  const title = [
+    `This colours how old the DATA is. The dates to the left are the run clock — when a job last finished — and that clock resets every night no matter how old Holman's own upload was. It read fine here while 94% of the PO statuses underneath were 30+ days stale, which is why it is no longer what gets coloured.`,
+    `UNKNOWN is not an all-clear. It means no verdict was written for that source — it has not synced since the honest-health columns landed, or they do not exist on this database yet — so nobody is measuring it.`,
+    clocks.length ? `per source:\n${clocks.map(healthClockLine).join("\n")}` : `No source is reporting health at all.`,
+  ].join("\n\n");
+  return (
+    <span title={title}
+      style={{ marginLeft: 10, display: "inline-flex", alignItems: "center", gap: 5, fontFamily: fonts.jetbrains, fontSize: 11, fontWeight: worst === "green" ? 400 : 600, color: fg, background: bg, border: `1px solid ${fg}`, borderRadius: 999, padding: "4px 10px", whiteSpace: "nowrap", cursor: "help" }}>
+      {worst === "green" ? null : <AlertTriangle size={11} />}
+      {text}
+    </span>
+  );
+}
+
 // ── multi-select filter (checkbox dropdown; empty selection = show all) ──────
 function MultiSelect({ label, options, values, onChange, style }: {
   label: string;
@@ -443,6 +647,23 @@ export default function RentalOperations() {
     // behind GET /master launches a browser.
     refetchInterval: 5 * 60_000,
     refetchOnWindowFocus: true,
+  });
+
+  // The delta sweep's backlog. Same conventions as the master read above (default
+  // queryFn off the key, 60s staleTime, 5-minute visible-tab refetch, focus
+  // refetch) so the Scrape button ages with the board instead of freezing at
+  // whatever it said when the tab was opened. Like GET /master this is a pure
+  // read: findScrapeTargets is one SQL query and launches no browser.
+  //
+  // retry:false on purpose. When this endpoint is missing or throwing, the answer
+  // is "render no sweep control" (see sweepInfo) and we want that answer on the
+  // first failure, not after a retry storm on every board refresh.
+  const { data: scrapeTargets } = useQuery<ScrapeTargetsModel>({
+    queryKey: ["/api/vrm/rental-operations/scrape-targets"],
+    staleTime: 60_000,
+    refetchInterval: 5 * 60_000,
+    refetchOnWindowFocus: true,
+    retry: false,
   });
 
   const [cohort, setCohort] = useState<string>("all");
@@ -589,10 +810,20 @@ export default function RentalOperations() {
   });
   const scrapeMissingMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/scrape-missing"),
-    onSuccess: async (res: any) => { const j = await res.json().catch(() => ({})); toast({ title: "Scraping missing trucks from Holman", description: `${j?.started ?? 0} queued · runs in the background, refresh in a few minutes` }); },
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      const started = Number(j?.started ?? 0);
+      const found = Number(j?.found);
+      // `started` is what the server actually handed to the scraper and `found` is
+      // the whole backlog; when they differ the operator has a remainder to come
+      // back for, and the toast has to say so or the sweep looks complete.
+      const remainder = Number.isFinite(found) && found > started ? ` of ${found} queued (${found - started} left for the next run)` : "";
+      toast({ title: "Holman delta sweep started", description: `${started}${remainder} · runs in the background, reload in a few minutes` });
+      // Re-read the backlog so the button stops advertising work now in flight.
+      await qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/scrape-targets"] });
+    },
     onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
   });
-  const missingCount = useMemo(() => rows.filter((r) => !r.has_portal).length, [rows]);
 
   // ── LUCA caller: hand a callable shop (or the whole queue) to the LUCA agent ─
   const callMut = useMutation({
@@ -626,6 +857,14 @@ export default function RentalOperations() {
     const noOpenRepair = pool.filter((r) => r.repair_cohort !== "open_repair").length;
     return { total: pool.length, callableNow, needPhone, noOpenRepair };
   }, [basePool]);
+  // THE scrape gate. One object drives every Scrape control on the page so there
+  // can never be two competing buttons disagreeing about the backlog. needPhone is
+  // folded in as context inside the tooltip rather than as its own trigger: a
+  // truck can need a phone and still be a pointless scrape (we looked yesterday and
+  // the shop has no phone on file), and it can be a target with a phone already.
+  // Null = render no control at all; see sweepInfo for every reason that happens.
+  const sweep = useMemo(() => sweepInfo(scrapeTargets, workableStats.needPhone), [scrapeTargets, workableStats.needPhone]);
+  const sweepBusy = scrapeMissingMut.isPending || !!sweep?.inFlight;
   const doCall = (r: MasterRow) => {
     const tgt = r.redirect_to_assigned ? `assigned truck ${r.call_target_truck}` : `truck ${r.call_target_truck}`;
     const autonomous = !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket);
@@ -716,9 +955,15 @@ export default function RentalOperations() {
           <div title={asOf?.title} style={{ fontSize: 13, color: colors.inkSoft, marginTop: 4 }}>
             {basePool.length} {includePended ? "rentals (incl. pended)" : "open rentals"} · {stats.cohorts.open_repair ?? 0} with an open repair ticket · {(stats.identityStates.REVIEW ?? 0) + (stats.identityStates.EXCEPTION ?? 0)} identities need review{!includePended && pendedTotal ? ` · ${pendedTotal} pended hidden (matches Rentals Ops Dashboard)` : ""}
           </div>
-          <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains }}>
-            last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
-            {"   ·   "}last import: {sh.lastImportAt ? `${fmtDate(sh.lastImportAt)} (file ${sh.clocks.find((c) => c.source_key === "manual_enterprise_import")?.last_file_date || "—"})` : "none"}
+          <div style={{ fontSize: 11.5, color: colors.inkMuted, marginTop: 6, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", flexWrap: "wrap", rowGap: 6 }}>
+            <span>
+              last sync: {sh.lastSyncAt ? fmtDate(sh.lastSyncAt) : "—"} (file {sh.clocks?.find((c) => c.source_key === "scheduled_sync")?.last_file_date || "—"})
+              {"   ·   "}last import: {sh.lastImportAt ? `${fmtDate(sh.lastImportAt)} (file ${sh.clocks?.find((c) => c.source_key === "manual_enterprise_import")?.last_file_date || "—"})` : "none"}
+            </span>
+            {/* Those two dates are the RUN clock and stay here because they still
+                answer "did the job go off last night". They are just no longer
+                allowed to be the thing that looks healthy — the badge is. */}
+            <SourceHealthBadge sh={sh} />
             {/* Same object the chip-row stamp renders, so the two can never disagree.
                 Placed here because the subtitle sentence and the KPI cards above/below
                 quote the same counts and previously carried no qualifier at all. */}
@@ -733,10 +978,13 @@ export default function RentalOperations() {
             <Upload size={13} /> {importMut.isPending ? "Importing…" : "Import report"}
           </button>
           <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) importMut.mutate(f); e.target.value = ""; }} />
-          {missingCount > 0 && (
-            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={scrapeMissingMut.isPending} title="Pull POs + comments + shop phone from Holman for every truck we haven't scraped yet"
-              style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6, color: colors.amber, borderColor: colors.amber }}>
-              <RefreshCw size={13} style={{ animation: scrapeMissingMut.isPending ? "spin 1s linear infinite" : undefined }} /> Scrape {missingCount} missing
+          {sweep && (
+            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={sweepBusy} title={sweep.title}
+              style={{ ...selStyle, cursor: sweepBusy ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6, opacity: sweepBusy ? 0.7 : 1,
+                // Red when LUCA would be dialling a superseded shop — that is a wrong
+                // call placed, not just a stale field. Amber for everything else.
+                color: sweep.mismatch > 0 ? colors.red : colors.amber, borderColor: sweep.mismatch > 0 ? colors.red : colors.amber }}>
+              <RefreshCw size={13} style={{ animation: sweepBusy ? "spin 1s linear infinite" : undefined }} /> {sweep.label}
             </button>
           )}
           <button type="button" onClick={exportCsv} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
@@ -875,14 +1123,25 @@ export default function RentalOperations() {
               Workable — {workableStats.total} of {basePool.length} rental{basePool.length === 1 ? "" : "s"} we still own
             </div>
             <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 760 }}>
-              Everything NOT flagged Declined Repair / Sent To Auction in AMS. Of these: <b style={{ color: colors.green }}>{workableStats.callableNow} callable now</b> (open repair + verified phone, in the LUCA Call Queue), <b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b> (open repair, no shop phone yet — Scrape from Holman), and <b style={{ color: colors.inkMuted }}>{workableStats.noOpenRepair} with no open repair ticket</b>. Ready rows show a Call button.
+              Everything NOT flagged Declined Repair / Sent To Auction in AMS. Of these: <b style={{ color: colors.green }}>{workableStats.callableNow} callable now</b> (open repair + verified phone, in the LUCA Call Queue), <b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b> (open repair, no shop phone on file yet), and <b style={{ color: colors.inkMuted }}>{workableStats.noOpenRepair} with no open repair ticket</b>. Ready rows show a Call button.
             </div>
+            {/* The sweep's own sentence. It is NOT the same population as "need a
+                phone": a truck can need a phone and still be a pointless scrape
+                (we looked yesterday, the shop has none on file), and a truck with
+                a phone can still be queued because that phone belongs to a shop
+                the current PO superseded. One button, one number, stated here. */}
+            {sweep && (
+              <div title={sweep.title} style={{ fontSize: 12, color: colors.inkSoft, marginTop: 6, maxWidth: 760, cursor: "help" }}>
+                Holman delta sweep: <b style={{ color: sweep.mismatch > 0 ? colors.red : colors.amber }}>{sweep.found} truck{sweep.found === 1 ? "" : "s"} queued</b>
+                {sweep.mismatch > 0 ? <> · <b style={{ color: colors.red }}>{sweep.mismatch} still name a shop a newer PO superseded</b>, so LUCA would call the wrong shop about the repair</> : null}
+                {sweep.truncated ? ` · one pass works ${sweep.served}, most urgent first` : null}. Snowflake stays the base PO layer; this only re-reads Holman where that layer is missing or provably suspect.
+              </div>
+            )}
           </div>
-          {workableStats.needPhone > 0 && (
-            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={scrapeMissingMut.isPending}
-              title="Pull POs + shop phone from Holman for the workable trucks missing a phone"
-              style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600, color: colors.amber, background: colors.surface, border: `1px solid ${colors.amber}`, borderRadius: 10, padding: "8px 14px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <RefreshCw size={13} style={{ animation: scrapeMissingMut.isPending ? "spin 1s linear infinite" : undefined }} /> Scrape phones
+          {sweep && (
+            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={sweepBusy} title={sweep.title}
+              style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600, color: sweep.mismatch > 0 ? colors.red : colors.amber, background: colors.surface, border: `1px solid ${sweep.mismatch > 0 ? colors.red : colors.amber}`, borderRadius: 10, padding: "8px 14px", cursor: sweepBusy ? "wait" : "pointer", opacity: sweepBusy ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+              <RefreshCw size={13} style={{ animation: sweepBusy ? "spin 1s linear infinite" : undefined }} /> {sweep.label}
             </button>
           )}
         </div>

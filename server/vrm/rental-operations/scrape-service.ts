@@ -35,6 +35,9 @@ import { sql } from "drizzle-orm";
 import { toCanonical, toDisplayNumber } from "../../vehicle-number-utils";
 import type { SvcHistoryResult } from "./holman-svc-scrape";
 import { classifyPoVendor, type PoClassLine } from "./vendor-class";
+// THE reconciliation, imported — never re-typed here. See the note above
+// findScrapeTargets for what the previous hand-copy cost.
+import { poEffectiveCte, SHOP_PICK_CTE } from "./read-repository";
 
 const BATCH = 8;                 // vehicles per worker invocation (Chromium is sequential)
 const WORKER_TIMEOUT_MS = 300_000;
@@ -65,25 +68,36 @@ const MISMATCH_RECHECK_DAYS = 3;
 // head. The route reports found vs started so the operator sees the remainder.
 const MAX_TARGETS_PER_RUN = 150;
 
-// Tyler's PO rule. Tow/roadside vendors do not count as a repair unless parts
-// and/or labor are on the PO.
-//
-// Alias-parameterised on purpose. The first cut of this file spelled it once as
-// a constant bound to alias `h.` and then RE-INLINED the same predicate verbatim
-// against alias `s.` in the shop lateral, which is the copy that drifts first
-// (you edit the constant, the inline copy silently keeps the old rule). One
-// definition, pass the alias.
-//
-// It is still hand-synced with read-repository.ts (po_eff.is_qualifying_repair)
-// because that module does not export its CTEs. If you change the rule, change
-// it in BOTH files — see the eff_status note on findScrapeTargets.
-const QUALIFYING_REPAIR_PO = (alias: string) =>
-  sql`(${sql.raw(alias)}.vendor_type = 'repair' OR (${sql.raw(alias)}.vendor_type = 'tow' AND ${sql.raw(alias)}.has_parts_labor IS TRUE))`;
-
 // Vendor names are compared case- and punctuation-insensitively: the portal
 // renders "BIG-O TIRES #7042" where the ETL lands "BIG O TIRES 7042", and a
 // scrape triggered by that would be pure waste.
 const NORM_VENDOR = (col: any) => sql`upper(regexp_replace(${col}, '[^A-Za-z0-9]', '', 'g'))`;
+
+// Which trucks the scraper is even allowed to consider: every present rental
+// truck, PLUS the assigned trucks (renter_own_truck) of Declined/Auction cases,
+// because LUCA dials THOSE shops so their phone matters too. ~400 trucks.
+//
+// One definition shared by findScrapeTargets and findScrapeGaps. They ask
+// different questions of it (is this truck suspect / has this truck ever been
+// looked at) and the two must not drift apart on WHICH trucks are in scope, or
+// the never-scraped backfill would quietly stop covering trucks the delta sweep
+// still targets.
+const UNIVERSE_CTE = sql`
+  universe AS (
+    SELECT c.case_key AS truck
+    FROM vrm_rental_operations_cases c
+    WHERE c.present_in_latest = true
+    UNION
+    SELECT own.own_pad AS truck
+    FROM vrm_rental_operations_cases c
+    JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+    JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    JOIN LATERAL (SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad) own ON true
+    WHERE c.present_in_latest = true
+      AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
+      AND own.own_pad IS NOT NULL
+  )
+`;
 
 const KEEP_PO = ["type","poNumber","eventId","status","vendorName","vendorType","vendorTypeDescription","poAmount","repairDate","poMsgDate","meter","billPaidDate","createdBy","invoiceNo","vendorAddress","vendorPhone","estimatedReadyDate","workCompletedDate","vehicleDowntimeStartDate","vehicleDowntimeEndDate","notes","poNotes","lineItems","isDeclinedPo","rentalRequestExists","openRentalRequestWindow"];
 const KEEP_MSG = ["type","poMsgDate","notes","poNumber"];
@@ -356,69 +370,46 @@ export interface ScrapeTargetSet {
  * 131 -> 113, and none of the 18 dropped trucks lost a signal we did not already
  * hold the answer to.
  *
- * HAND-SYNC WARNING: portal_po / po_eff / shop_pick below are copies of
- * PORTAL_PO_OBS, PO_EFFECTIVE_CTE and SHOP_PICK_CTE in read-repository.ts, which
- * does not export them. If you change the reconciliation rule there, change it
- * here. The durable fix is for read-repository to export those CTEs — that is a
- * change in a file this module does not own.
+ * THE RECONCILIATION IS IMPORTED, NOT COPIED (7/21, integration gate). This
+ * function used to re-type portal_po / po_eff / shop_pick because
+ * read-repository.ts did not export them. It now does, so we call
+ * poEffectiveCte({scopeJoin}) and SHOP_PICK_CTE instead. That is not tidiness —
+ * the copy drifted twice inside a week and each drift was a real defect on this
+ * path only: it had no PORTAL_STATUS_ALLOWED filter (so DIRECT and any other
+ * unknown portal token could override an ETL status here while the board
+ * refused it), and no jsonb_typeof(h.hist)='array' guard (so a single malformed
+ * hist row would 500 the sweep and the scrape-targets endpoint while the board
+ * stayed up). Both are now inherited and cannot be dropped by editing this file.
+ * If targeting needs a variant of the reconciliation, add a PARAMETER to
+ * poEffectiveCte — do not fork it back out.
  *
- * One deliberate divergence: newest_open_evidence uses GREATEST(po_date,
- * upload_timestamp) — the ETL clock ONLY — where read-repository's evidence_at
- * also folds in the portal observed_at. Folding it in here would be circular:
- * observed_at IS scraped_at, so every portal-matched open PO would report
- * evidence exactly as new as our last look and trigger 2 would arm on every run
- * forever. Trigger 2 asks "did the BASE layer learn something after we looked",
- * so it may only read base-layer clocks.
+ * The scopeJoin narrows po_eff to this ~400-truck universe out of 13k PO rows.
+ * It may narrow the TRUCK set and nothing else; a status or vendor filter there
+ * would redefine eff_status and put us straight back into two definitions.
+ *
+ * One deliberate divergence, which is why po_agg below is LOCAL and NOT
+ * read-repository's exported PO_AGG_CTE: newest_open_evidence uses
+ * GREATEST(po_date, upload_timestamp) — the ETL clock ONLY — where
+ * PO_AGG_CTE's evidence columns also fold in po_eff.portal_observed_at.
+ * Folding it in here would be circular: observed_at IS scraped_at, so every
+ * portal-matched open PO would report evidence exactly as new as our last look
+ * and trigger 2 would arm on every run forever. Trigger 2 asks "did the BASE
+ * layer learn something after we looked", so it may only read base-layer clocks.
+ * read-repository's PO_AGG_CTE docblock carries the same warning from its side.
  */
 export async function findScrapeTargets(opts: { limit?: number } = {}): Promise<ScrapeTargetSet> {
   const limit = opts.limit ?? MAX_TARGETS_PER_RUN;
   const res = await db.execute(sql`
-    WITH universe AS (
-      SELECT c.case_key AS truck
-      FROM vrm_rental_operations_cases c
-      WHERE c.present_in_latest = true
-      UNION
-      SELECT own.own_pad AS truck
-      FROM vrm_rental_operations_cases c
-      JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
-      JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
-      JOIN LATERAL (SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad) own ON true
-      WHERE c.present_in_latest = true
-        AND (c.ams_status ILIKE '%declin%' OR c.ams_status ILIKE '%auction%')
-        AND own.own_pad IS NOT NULL
-    ),
-    -- ── reconciled PO layer (mirror of read-repository.ts, see docblock) ──────
-    portal_po AS (
-      SELECT DISTINCT ON (h.truck_no, e->>'poNumber')
-             h.truck_no,
-             e->>'poNumber'                          AS po_number,
-             upper(nullif(btrim(e->>'status'), ''))  AS portal_status,
-             h.scraped_at::timestamptz               AS observed_at
-      FROM vrm_holman_portal_hist h
-      CROSS JOIN LATERAL jsonb_array_elements(h.hist) e
-      WHERE e->>'type' = 'PO'
-        AND nullif(btrim(e->>'poNumber'), '') IS NOT NULL
-        AND e->>'poNumber' <> '0'
-        AND nullif(btrim(e->>'status'), '') IS NOT NULL
-      ORDER BY h.truck_no, e->>'poNumber', h.scraped_at DESC
-    ),
-    -- Joined to universe rather than scanned whole: this is ~400 trucks out of
-    -- 13k PO rows, and the read model pays for the fleet-wide version already.
-    po_eff AS (
-      SELECT p.vehicle_number_padded AS truck, p.po_number, p.po_date,
-             p.upload_timestamp, p.vendor_name,
-             ${QUALIFYING_REPAIR_PO("p")} AS is_qualifying_repair,
-             COALESCE(
-               CASE WHEN pp.observed_at > p.upload_timestamp THEN pp.portal_status END,
-               p.po_status
-             ) AS eff_status
-      FROM vrm_rental_operations_po_history p
-      JOIN universe u ON u.truck = p.vehicle_number_padded
-      LEFT JOIN portal_po pp
-        ON pp.truck_no = p.vehicle_number_padded AND pp.po_number = p.po_number
-    ),
+    WITH ${UNIVERSE_CTE},
+    -- ── THE reconciliation, imported from read-repository.ts ─────────────────
+    -- Emits portal_po + po_eff, scoped to universe so this scans ~400 trucks
+    -- of the 13k PO rows instead of the fleet the read model already pays for.
+    -- The allow-list and the jsonb array guard ride along inside the fragment.
+    ${poEffectiveCte({ scopeJoin: sql`JOIN universe u ON u.truck = p.vehicle_number_padded` })},
+    -- LOCAL on purpose, do not swap in read-repository's PO_AGG_CTE: the
+    -- evidence clock here must exclude the portal observation. See docblock.
     po_agg AS (
-      SELECT q.truck,
+      SELECT q.vehicle_number_padded AS truck,
              count(*) FILTER (WHERE q.is_qualifying_repair AND q.eff_status = 'APPROVED') AS open_po_count,
              -- ETL clocks only — see the divergence note in the docblock.
              max(GREATEST(q.po_date::timestamptz, q.upload_timestamp))
@@ -426,12 +417,11 @@ export async function findScrapeTargets(opts: { limit?: number } = {}): Promise<
       FROM po_eff q
       GROUP BY 1
     ),
-    shop_pick AS (
-      SELECT DISTINCT ON (q.truck) q.truck, q.vendor_name
-      FROM po_eff q
-      WHERE q.is_qualifying_repair
-      ORDER BY q.truck, (q.eff_status = 'APPROVED') DESC, q.po_date DESC NULLS LAST, q.po_number DESC
-    ),
+    -- Imported too. Targeting only reads vendor_name off it, but the ORDERING is
+    -- the reconciliation's (APPROVED-first, then date) and that is what decides
+    -- which shop counts as "the current one" for the mismatch trigger — so it
+    -- has to be the same pick the board and LUCA make, not a look-alike.
+    ${SHOP_PICK_CTE},
     base AS (
       -- A portal row with a NULL scraped_at counts as never_scraped, not as a
       -- scraped truck: every other trigger below is anchored on scraped_at, so
@@ -542,9 +532,42 @@ export async function findScrapeTargets(opts: { limit?: number } = {}): Promise<
   return { targets, totalFound, truncated: totalFound > targets.length, byReason, served: targets.length };
 }
 
-/** Truck numbers only, for callers that just want the list. Thin wrapper over
- * findScrapeTargets — the name predates the delta rewrite and now means "trucks
- * whose portal snapshot is missing OR suspect", not "trucks with no row". */
+/**
+ * Trucks in the universe we have NEVER looked at — no portal row, or a row with
+ * no scraped_at. The original meaning of "gap", restored.
+ *
+ * NOT a wrapper over findScrapeTargets, and that is the whole point (integration
+ * gate, 7/21). The delta rewrite made this a thin `.targets.map(t => t.truck)`,
+ * which silently changed what the one caller gets. Repo-root vrm-scrape.ts does
+ * `findScrapeGaps()` then `scrapeAndStore(gaps, { force: false })`, and force:false
+ * means onlyMissing — scrapeAndStore drops every truck that already has a row. So
+ * the wrapper handed it 113 trucks (measured on prod), 96 of which it immediately
+ * discarded, and because findScrapeTargets is capped at MAX_TARGETS_PER_RUN=150
+ * and ordered by priority with never_scraped LAST at priority 5, a big enough
+ * mismatch backlog would truncate the never-scraped tier away ENTIRELY and the
+ * backfill script would scrape nothing at all while reporting a healthy count.
+ * Silent, and it fails in exactly the situation you built the script for.
+ *
+ * So this asks the question the caller actually has: which trucks have no
+ * snapshot. No priority ordering to truncate, no MAX_TARGETS_PER_RUN — the set is
+ * bounded by the universe (~400) and shrinks to zero as the backfill lands.
+ * `limit` is honoured if a caller passes one, but there is no default cap.
+ *
+ * NULL scraped_at counts as never-scraped here for the same reason it does in
+ * findScrapeTargets: every downstream freshness test is anchored on that column,
+ * so such a row is not a snapshot. scrapeAndStore's onlyMissing filter keys off
+ * ROW EXISTENCE, not scraped_at, so it will still skip that narrow case — the
+ * truck is caught by findScrapeTargets' never_scraped trigger instead.
+ */
 export async function findScrapeGaps(opts: { limit?: number } = {}): Promise<string[]> {
-  return (await findScrapeTargets(opts)).targets.map((t) => t.truck);
+  const res = await db.execute(sql`
+    WITH ${UNIVERSE_CTE}
+    SELECT u.truck
+    FROM universe u
+    LEFT JOIN vrm_holman_portal_hist p ON p.truck_no = u.truck
+    WHERE p.truck_no IS NULL OR p.scraped_at IS NULL
+    ORDER BY u.truck
+    ${opts.limit ? sql`LIMIT ${opts.limit}` : sql.empty()}
+  `);
+  return (res.rows as any[]).map((r) => String(r.truck));
 }

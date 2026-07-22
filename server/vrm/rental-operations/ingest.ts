@@ -27,6 +27,20 @@ import {
 } from "./identity-resolver";
 import { landPoHistory } from "./po-history";
 import { enrichCasesWithAms } from "./ams-enrich";
+// The reconciliation SQL, IMPORTED rather than re-typed. measureDataAge below
+// used to carry its own copy of Tyler's PO rule and that copy went stale the
+// moment the portal delta layer landed (D4, integration gate 7/21) — the same
+// failure scrape-service hit with the same fragments. The clean-room note in the
+// header above is about the FleetScope read-model, a different module; inside
+// rental-operations there is exactly ONE definition of the reconciliation and it
+// lives in read-repository.
+//
+// ingest → read-repository is the safe direction of this edge: read-repository
+// imports only db + drizzle + ./workload. The REVERSE edge is the forbidden one
+// (this file drags in Snowflake and the whole land pipeline, and the board must
+// not), which is why read-repository re-declares SourceHealthVerdict instead of
+// importing SourceHealthStatus from here. Do not "tidy" that into an import.
+import { PO_EFFECTIVE_CTE } from "./read-repository";
 
 const ENT_TABLE = "PARTS_SUPPLYCHAIN.FLEET.ENTERPRISE_OPEN_RENTAL_TICKET_REPORT";
 const HOL_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_OPEN_RENTAL_REPORT";
@@ -586,14 +600,33 @@ export async function runRentalOpsIngest(opts: IngestOptions = {}): Promise<Inge
  *   data_age_p50_hours / data_age_p90_hours — HOW OLD THE DATA IS.
  *
  * WHY A PERCENTILE AND NOT A MAX. Measured on PROD 7/21 (every figure in this
- * block is prod; DEV numbers differ and are never quoted here): the 234 PO rows
- * that actually set the open-repair flag have a MIN age of 13.7h, because one
+ * block is prod; DEV numbers differ and are never quoted here): the 163 PO rows
+ * that actually set the open-repair flag have a MIN age of 14.6h, because one
  * row landed this morning. MAX(upload_timestamp) — i.e. "newest row we have" —
- * therefore reads 13.7h and certifies the source GREEN. The MEDIAN of that same
- * population is 757.7h (31.6 days) and the p90 is 3488.5h (145 days). One fresh
+ * therefore reads 14.6h and certifies the source GREEN. The MEDIAN of that same
+ * population is 206.6h (8.6 days) and the p90 is 2280.2h (95 days). One fresh
  * row must never be allowed to vouch for 13,000 fossils, so the gate is p50
  * (what the typical flag-setting row actually looks like) with p90 riding along
  * as the tail indicator, able to trip the status on its own.
+ *
+ * WHICH FRESHNESS THIS IS, AND WHICH IT IS NOT. Ruling 7/21, closing the
+ * integration gate's "two notions of freshness": there are exactly two, they
+ * answer different questions, and neither is allowed to answer the other's.
+ *   read-repository.getPoDataFreshness() — HOW OLD IS THE DATA RIGHT NOW.
+ *     Re-measured on every board read so it cannot rot, spans BOTH layers, and
+ *     produces openFlagEvidence*, which no per-source row can: that number is a
+ *     property of the ETL×portal join, not of any one source.
+ *   what THIS file persists — WHAT THE RUN SAW WHEN IT LANDED. Per source, and
+ *     it carries the two facts a read-time measurement can never reconstruct:
+ *     whether the run itself failed, and whether it landed into an EMPTY
+ *     population (the most dangerous state here, since an empty open_repair set
+ *     reads as good news on the grid).
+ * They are not independent — getSourceHealth() is where they meet, and it will
+ * not let a frozen verdict render green once either clock says nobody has
+ * looked recently. If you are about to compute a THIRD age anywhere in this
+ * module, don't; call one of those two. The population this file ages is
+ * likewise not a third definition of open_repair: it is imported from
+ * read-repository (see measureDataAge).
  */
 
 /** green = trust it · yellow = corroborate before acting · red = do not trust */
@@ -642,9 +675,10 @@ const FEED_DATA_AGE_WARN_HOURS = 36;
 const FEED_DATA_AGE_FAIL_HOURS = 72;
 
 /**
- * The Holman PO ETL. This is the source that sets open_repair
- * (read-repository.ts:329 — APPROVED repair/tow-with-parts-labor PO) and
- * therefore decides which shops LUCA dials, so it gets the strictest reading.
+ * The Holman PO ETL. This is the source behind open_repair — after the portal
+ * correction, a qualifying repair PO whose po_eff.eff_status is still APPROVED
+ * (read-repository.PO_EFFECTIVE_CTE) — and therefore decides which shops LUCA
+ * dials, so it gets the strictest reading.
  *   WARN 72h  — Holman re-uploads daily; three days without a refresh on the
  *               typical flag-driving PO means APPROVED is a guess, not a fact.
  *   FAIL 336h — 14 days, which is inside the normal repair cycle. A PO that has
@@ -655,18 +689,30 @@ const FEED_DATA_AGE_FAIL_HOURS = 72;
  *
  * NOT 720h. The audit's "provably suspect" line was 30 days and 94% of all PO
  * rows are past it, so 720 is the obvious-looking number. It was rejected
- * because the flag-driving subset sits right on top of it: PROD 7/21 median is
- * 757.7h, only 37h clear of 720 and drifting a day per day as the backlog ages,
- * so a single Holman re-upload of a handful of POs walks the median back under
- * the line. A threshold a normal day's data straddles produces a signal that
- * flips red/yellow/red and gets ignored inside a week, which is how the original
- * all-clear became furniture. 336h puts the current state unambiguously RED
- * (757.7h is 2.3x the line) and leaves room to actually observe improvement.
+ * because it lands inside the flag-driving subset's own spread rather than
+ * outside it: that subset runs from 14.6h to 3489.4h with a p90 of 2280.2h, so
+ * 720 sits in the middle of the tail where a handful of Holman re-uploads walk
+ * the reading back and forth across the line. A threshold a normal day's data
+ * straddles produces a signal that flips red/yellow/red and gets ignored inside
+ * a week, which is how the original all-clear became furniture.
  *
- * Tyler 7/21: 336h is a judgement call, not a measured constant. Sanity-check it
- * against the 30-day audit line when the delta layer starts correcting the base
- * layer; the right answer once the scrape is filling gaps is probably lower, not
- * higher.
+ * WHAT THE RECONCILIATION DID TO THIS READING — re-measured on PROD 7/21 when
+ * measureDataAge was corrected off the raw ETL predicate (D4). Against the raw
+ * predicate: 234 rows, p50 758.6h, verdict RED on the median. Against the
+ * reconciled population: 163 rows across the 136 open_repair trucks, p50 206.6h.
+ * A 73% drop, because the 72 rows the portal closed had a median age of 3489.4h
+ * (145 days) — the delta layer is retiring precisely the fossils, which is what
+ * it exists to do. The verdict moves RED → YELLOW and the reason moves to the
+ * tail: p90 2280.2h is still past 336h, so a tenth of what LUCA acts on is
+ * running on 95-day-old evidence, and the median is still past WARN.
+ *
+ * 336 was NOT re-tuned to preserve the red. It now sits 1.6x above the median
+ * with ~130h of headroom, i.e. roughly five missed Holman uploads before the
+ * median alone trips it, while WARN 72h fires today. Tyler 7/21: 336h is a
+ * judgement call, not a measured constant, and the right answer once the scrape
+ * is filling gaps is probably lower, not higher. That is now measurable —
+ * revisit it against the reconciled p50 above, not against the 30-day audit line
+ * (which described all 13,252 rows, a population this metric no longer ages).
  */
 const PO_DATA_AGE_WARN_HOURS = 72;
 const PO_DATA_AGE_FAIL_HOURS = 336;
@@ -689,14 +735,34 @@ export function dataAgeThresholds(sourceKey: string): DataAgeThresholds {
  * Ages the population that actually MATTERS for each source, not whatever rows
  * happen to be in the table.
  *
- * For holman_etl_po that population is deliberately narrow: only the ETL-sourced
- * rows matching the exact open-repair predicate from read-repository.ts:329.
- * Aging all 13,252 PO rows would be honest but useless (it is dominated by a
- * years-old PAID backfill and would read RED forever regardless of whether the
- * live flags are trustworthy). Aging the 234 rows that set a flag answers the
+ * For holman_etl_po that population is the RECONCILED open-repair set: ETL rows
+ * whose po_eff.eff_status is still APPROVED on a qualifying repair PO, straight
+ * off read-repository's exported CTE. It used to be a hand-copy of the RAW ETL
+ * predicate (po_status='APPROVED' AND repair/tow-with-parts-labor) still
+ * labelled "the rows that set open_repair" — true before the delta layer landed,
+ * false the moment it did (D4, integration gate 7/21). On prod that label was
+ * covering 72 rows across 42 trucks the board had already dismissed as
+ * closed_by_portal, and their median age of 3489.4h was what drove the verdict.
+ * A metric whose name lies about what it counts is worse than no metric.
+ *
+ * Aging all 13,252 PO rows would be honest but useless (dominated by a years-old
+ * PAID backfill, RED forever regardless of whether the live flags are
+ * trustworthy). Aging the 163 rows behind the 136 open_repair trucks answers the
  * only question worth asking: is the thing LUCA acts on still true?
- * on_demand_scrape rows are excluded — they are the correction layer and have
- * their own freshness; mixing them in would let the scrape mask ETL rot.
+ *
+ * WHY upload_timestamp AND NOT po_eff.evidence_at. evidence_at is
+ * GREATEST(Holman's upload stamp, the allow-listed portal observation), so a
+ * scrape from this morning would report the underlying ETL row as fresh — and
+ * this metric belongs to the ETL source. The scrape is the correction layer with
+ * its own freshness; folding it in here would let the delta layer mask base
+ * rot, the same masking the on_demand_scrape exclusion prevents. The
+ * reconciliation decides WHICH rows count; the clock stays Holman's own.
+ *
+ * The join back to vrm_rental_operations_po_history recovers `source`, which
+ * po_eff does not project — on_demand_scrape rows must stay out for the reason
+ * above. It is 1:1: (vehicle_number_padded, po_number) is unique with no NULLs
+ * in either column across all 13,252 prod / 14,974 dev rows (verified 7/21). If
+ * po_eff ever projects p.source, delete the join rather than the filter.
  *
  * THROWS on query failure. That is deliberate: the caller distinguishes "the
  * measurement blew up" (previous reading preserved, YELLOW) from "the population
@@ -706,16 +772,19 @@ export function dataAgeThresholds(sourceKey: string): DataAgeThresholds {
 async function measureDataAge(sourceKey: string, fileDate: string | null): Promise<DataAgeMeasurement> {
   if (sourceKey === "holman_etl_po") {
     const res = await db.execute(sql`
-      SELECT COUNT(upload_timestamp)::int AS rows,
-        percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (NOW() - upload_timestamp))/3600.0) AS p50,
-        percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (NOW() - upload_timestamp))/3600.0) AS p90
-      FROM vrm_rental_operations_po_history
-      WHERE source = 'holman_etl' AND po_status = 'APPROVED'
-        AND (vendor_type = 'repair' OR (vendor_type = 'tow' AND has_parts_labor = true))
+      WITH ${PO_EFFECTIVE_CTE}
+      SELECT COUNT(q.upload_timestamp)::int AS rows,
+        percentile_cont(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (NOW() - q.upload_timestamp))/3600.0) AS p50,
+        percentile_cont(0.9) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (NOW() - q.upload_timestamp))/3600.0) AS p90
+      FROM po_eff q
+      JOIN vrm_rental_operations_po_history s
+        ON s.vehicle_number_padded = q.vehicle_number_padded AND s.po_number = q.po_number
+      WHERE s.source = 'holman_etl'
+        AND q.is_qualifying_repair AND q.eff_status = 'APPROVED'
     `);
     const r = res.rows[0] as any;
     return {
-      metric: "upload_timestamp age of APPROVED repair POs (the rows that set open_repair)",
+      metric: "upload_timestamp age of the ETL rows still setting open_repair after portal reconciliation (eff_status APPROVED on a qualifying repair PO)",
       p50Hours: r?.p50 == null ? null : Number(r.p50),
       p90Hours: r?.p90 == null ? null : Number(r.p90),
       rows: Number(r?.rows ?? 0),
@@ -762,13 +831,18 @@ async function measureDataAge(sourceKey: string, fileDate: string | null): Promi
  * Three non-green states that are easy to conflate and must not be:
  *   RED  "last run failed"      — the job itself broke.
  *   RED  "population is empty"  — the job succeeded and left NOTHING behind the
- *        flag. For holman_etl_po that means not one APPROVED repair PO exists
- *        fleet-wide, i.e. the read model now says every truck is out of the
- *        shop. On a 178-truck fleet that is a wiped or truncated land, never a
- *        real Tuesday, and it is the single most dangerous state here because
- *        an empty open_repair set looks like GOOD news on the grid. It gets its
- *        own alarm rather than hiding inside "could not measure", which is why
- *        DataAgeMeasurement.rows distinguishes 0 from NULL.
+ *        flag. For holman_etl_po that means not one qualifying repair PO
+ *        survives the portal reconciliation as APPROVED fleet-wide, i.e. the
+ *        read model now says every truck is out of the shop. Against a 136-truck
+ *        open-repair cohort that is a wiped land or a portal layer gone haywire,
+ *        never a real Tuesday, and it is the single most dangerous state here
+ *        because an empty open_repair set looks like GOOD news on the grid. It
+ *        gets its own alarm rather than hiding inside "could not measure", which
+ *        is why DataAgeMeasurement.rows distinguishes 0 from NULL. Note the
+ *        reconciliation gave this alarm a SECOND trigger: pre-delta only a
+ *        broken ETL land could empty it; now a bad scrape that marks everything
+ *        PAID would too. Both are worth waking up for; the reason string cannot
+ *        tell them apart, so check vrm_holman_portal_hist before blaming the ETL.
  *   YELLOW "could not be measured" — the measurement query threw, or there is no
  *        usable file date. "We could not tell" must never read as an all-clear;
  *        that silence is precisely what produced the original false GREEN.
@@ -794,16 +868,26 @@ export function classifySourceHealth(
   if (m.p50Hours == null) return { status: "yellow", reason: "data age could not be measured" };
   const p50 = Math.round(m.p50Hours);
   const p90 = m.p90Hours == null ? null : Math.round(m.p90Hours);
+
+  // EVERY triggered condition goes into the reason, not just the first one to
+  // match. The verdicts are unchanged (red iff the median is past fail, yellow
+  // iff either the tail is past fail or the median is past warn) — what changes
+  // is that a source tripping two rules now says so. Post-D4 the reconciled PO
+  // population trips both (prod 7/21: p90 2280h vs fail 336h, p50 207h vs warn
+  // 72h) and the old early-return named only the tail, which reads as "the
+  // median is fine". It is not, and a reason that implies it is is the same
+  // species of false all-clear this rewrite exists to remove.
+  const reasons: string[] = [];
   if (m.p50Hours >= t.failHours) {
-    return { status: "red", reason: `median data age ${p50}h exceeds ${t.failHours}h — data is not evidence` };
+    reasons.push(`median data age ${p50}h exceeds ${t.failHours}h — data is not evidence`);
+  } else if (m.p50Hours >= t.warnHours) {
+    reasons.push(`median data age ${p50}h exceeds ${t.warnHours}h`);
   }
   if (p90 !== null && m.p90Hours! >= t.failHours) {
-    return { status: "yellow", reason: `tail data age p90 ${p90}h exceeds ${t.failHours}h — a stale minority is driving flags` };
+    reasons.push(`tail data age p90 ${p90}h exceeds ${t.failHours}h — a stale minority is driving flags`);
   }
-  if (m.p50Hours >= t.warnHours) {
-    return { status: "yellow", reason: `median data age ${p50}h exceeds ${t.warnHours}h` };
-  }
-  return { status: "green", reason: null };
+  if (!reasons.length) return { status: "green", reason: null };
+  return { status: m.p50Hours >= t.failHours ? "red" : "yellow", reason: reasons.join("; ") };
 }
 
 /**
