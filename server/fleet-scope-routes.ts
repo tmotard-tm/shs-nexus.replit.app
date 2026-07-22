@@ -2198,10 +2198,198 @@ function buildTranscriptText(transcript: any): string {
   return JSON.stringify(transcript);
 }
 
+// ---------------------------------------------------------------------------
+// READY GUARD — "ready for pickup" is not the same thing as "repaired".
+//
+// Measured on prod fs_call_logs 2026-07-21: 168 calls were stamped
+// VEHICLE_READY with a transcript on file, and the summarizer had banked
+// several of them off a shop simply wanting the van out of its bay. Truck
+// 61577 (2026-07-16) is the reference defect — the shop said verbatim "we have
+// this car here, and this need to be picked up ... This car need a transmission
+// and the engine", the agent asked "does the van start and run right now?",
+// got "Yes", and the call was recorded VEHICLE_READY.
+//
+// So DRIVABILITY IS NOT THE TEST. A van can start and run and still need an
+// engine. The test is whether the REPAIR IS FINISHED, or whether the vehicle is
+// merely being RELEASED and still needs work somewhere else.
+//
+// Asymmetry that drives every decision below: a false READY sends a technician
+// to collect a van he cannot use and closes a rental that should stay open. A
+// missed READY costs one more phone call. When the signal is ambiguous we do
+// not resolve READY — we downgrade and surface the truck to a human.
+//
+// This is a deterministic post-check on top of the model, not a replacement for
+// it: the model is what got 61577 wrong, so the code does not trust a model
+// answer of "Ready" that contradicts plain onward-referral language.
+// ---------------------------------------------------------------------------
+
+/** Agent-side turns are excluded: the agent itself says "another shop"/"body shop" when probing. */
+const READY_GUARD_AGENT_TURN = /^\s*(agent|assistant|luca|bot|system)\s*:/i;
+/** IVR menu text lands in the user channel ("For the off-site body shop, press 6") and must never trigger a rule. */
+const READY_GUARD_IVR_MENU = /\b(?:press|dial)\s+(?:\d|one|two|three|four|five|six|seven|eight|nine|zero)\b|dial-?by-?name|party'?s extension/i;
+
+/**
+ * Reduce a transcript to what the SHOP actually said. Everything the agent said
+ * is dropped — otherwise the agent's own probe ("was it transferred to another
+ * shop?") reads as evidence of a referral. This single filter is what keeps
+ * trucks 61193 and 23061 (vehicle already collected; "another shop" appears
+ * only in the agent's question) out of the downgrade set.
+ */
+export function readyGuardShopTurns(transcriptText: string): string {
+  const lines = String(transcriptText || "").split(/\r?\n/);
+  const kept: string[] = [];
+  let sawRolePrefix = false;
+  for (const line of lines) {
+    if (/^\s*[A-Za-z_ ]{1,20}\s*:/.test(line)) sawRolePrefix = true;
+    if (READY_GUARD_AGENT_TURN.test(line)) continue;
+    if (READY_GUARD_IVR_MENU.test(line)) continue;
+    kept.push(line.replace(/^\s*[A-Za-z_ ]{1,20}\s*:\s*/, ""));
+  }
+  // Unstructured transcript (plain string, no role prefixes): fall back to the
+  // whole text minus IVR noise rather than silently scanning nothing.
+  if (!sawRolePrefix) {
+    return String(transcriptText || "").split(/\r?\n/).filter((l) => !READY_GUARD_IVR_MENU.test(l)).join("\n");
+  }
+  return kept.join("\n");
+}
+
+const READY_GUARD_COMPONENT =
+  "(?:engine|motor|transmission|trans|transaxle|rear\\s?end|head\\s?gasket|torque\\s?converter)";
+
+/**
+ * Rules are intentionally narrow and present-tense. Each one was calibrated
+ * against all 168 transcripted VEHICLE_READY prod rows; together they move 5
+ * (3.0%) and leave every legitimate ready alone. Widen these only with a fresh
+ * replay — a loose rule here turns the follow-up board back into noise.
+ */
+const READY_GUARD_RULES: Array<{ code: string; re: RegExp }> = [
+  // "This car need a transmission and the engine" (61577); "Needs transmission" (36185).
+  {
+    code: "MAJOR_COMPONENT_STILL_NEEDED",
+    re: new RegExp(
+      "\\b(?:need|needs|needed|needing|require|requires|required|gotta\\s+have|waiting\\s+on)\\b[^.?!\\n]{0,45}?\\b(?:a|an|the|new|another)?\\s*" +
+        READY_GUARD_COMPONENT + "\\b",
+      "i",
+    ),
+  },
+  // "Not done." (36185, before the shop reversed itself under supervisor pressure).
+  {
+    code: "SHOP_SAYS_NOT_DONE",
+    re: /\b(?:not|isn'?t|is\s+not|ain'?t|wasn'?t|nope,?\s*not)\s+(?:yet\s+)?(?:done|ready|complete|completed|finished|fixed|repaired)\b/i,
+  },
+  // "needs to go to body shop" (61320) — released by this shop, still owed work elsewhere.
+  {
+    code: "ONWARD_REFERRAL_TO_ANOTHER_FACILITY",
+    re: /\b(?:needs?|has|have|got)\s+to\s+(?:go|be\s+(?:taken|towed|sent|moved|transferred))\b[^.?!\n]{0,40}?\b(?:body\s?shop|dealer|dealership|another\s+shop|different\s+shop|other\s+shop|transmission\s+shop|collision)\b/i,
+  },
+  {
+    code: "ONWARD_REFERRAL_TO_ANOTHER_FACILITY",
+    re: /\b(?:go|goes|going|take|takes|taken|taking|tow|towed|send|sends|sent|transfer|transferred|haul)\b[^.?!\n]{0,30}?\bto\s+(?:the\s+|a\s+|an\s+)?(?:body\s?shop|dealer|dealership|another\s+shop|different\s+shop|other\s+shop|transmission\s+shop|collision\s+(?:center|centre|shop))\b/i,
+  },
+  {
+    code: "FURTHER_WORK_REQUIRED",
+    re: /\b(?:needs?|requires?|still\s+needs?)\s+(?:some\s+|a\s+lot\s+of\s+)?(?:more|further|additional|other|body)\s+(?:work|repairs?|parts)\b/i,
+  },
+  { code: "FURTHER_WORK_REQUIRED", re: /\bstill\s+(?:needs?|has\s+to\s+have|requires?)\b/i },
+  // "It's ready for pickup. However, it needs towed." (61306) / "Needs to be towed." (22274).
+  // Present-need only: "it was towed out" (22365, past tense, repair genuinely finished)
+  // must NOT trip this.
+  {
+    code: "NOT_DRIVABLE_NEEDS_TOW",
+    re: /\b(?:needs?|need|requires?|gonna\s+need|will\s+need|has\s+to\s+be)\s+(?:to\s+be\s+|a\s+)?tow(?:ed|ing|)\b/i,
+  },
+  {
+    code: "NOT_DRIVABLE_NEEDS_TOW",
+    re: /\b(?:won'?t|will\s+not|does\s+not|doesn'?t|can'?t|cannot)\s+(?:start|run|drive|move)\b/i,
+  },
+];
+
+function readyGuardTruthy(v: any): boolean {
+  if (v === true) return true;
+  if (typeof v === "string") return /^(true|yes|y|1)$/i.test(v.trim());
+  return false;
+}
+function readyGuardFalsy(v: any): boolean {
+  if (v === false) return true;
+  if (typeof v === "string") return /^(false|no|n|0)$/i.test(v.trim());
+  return false;
+}
+
+// ElevenLabs data-collection field aliases. The agent-side work (repair-complete /
+// further-work-required collectors) ships separately, so accept the plausible
+// spellings and simply do nothing when the fields are absent.
+const READY_GUARD_FURTHER_KEYS = [
+  "further_work_required", "furtherworkrequired", "needs_further_work",
+  "needsfurtherwork", "onward_referral", "further_repairs_needed",
+];
+const READY_GUARD_COMPLETE_KEYS = [
+  "repair_complete", "repaircomplete", "repair_completed", "repair_finished", "repairs_complete",
+];
+
+/** Pull the two booleans we care about out of ElevenLabs `data_collection_results`. */
+export function readReadyGuardDataCollection(dataCollection: any): { furtherWork?: any; repairComplete?: any } {
+  const out: { furtherWork?: any; repairComplete?: any } = {};
+  if (!dataCollection || typeof dataCollection !== "object") return out;
+  for (const [k, v] of Object.entries(dataCollection as Record<string, any>)) {
+    const key = String(k).toLowerCase().replace(/[^a-z_]/g, "");
+    const val = v && typeof v === "object" && "value" in (v as any) ? (v as any).value : v;
+    if (READY_GUARD_FURTHER_KEYS.includes(key)) out.furtherWork = val;
+    if (READY_GUARD_COMPLETE_KEYS.includes(key)) out.repairComplete = val;
+  }
+  return out;
+}
+
+/** Dig the data-collection block out of whichever ElevenLabs shape we were handed. */
+export function extractElevenLabsDataCollection(conv: any): any {
+  if (!conv || typeof conv !== "object") return null;
+  return (
+    conv?.analysis?.data_collection_results ??
+    conv?.data?.analysis?.data_collection_results ??
+    conv?.conversation?.analysis?.data_collection_results ??
+    conv?.data_collection_results ??
+    null
+  );
+}
+
+/**
+ * Decide whether a proposed READY may stand.
+ *
+ * Structured ElevenLabs fields are preferred when present, but only ever in the
+ * direction of caution: they can force a downgrade, they can never license a
+ * READY over onward-referral language in the transcript. That asymmetry is
+ * deliberate — the expensive error is the false READY.
+ */
+export function evaluateReadyGuard(
+  transcriptText: string,
+  dataCollection?: any,
+  modelFurtherWork?: any,
+): { downgrade: boolean; reason: string | null } {
+  const dc = readReadyGuardDataCollection(dataCollection);
+  if (readyGuardTruthy(dc.furtherWork)) {
+    return { downgrade: true, reason: "structured field further_work_required=true" };
+  }
+  if (readyGuardFalsy(dc.repairComplete)) {
+    return { downgrade: true, reason: "structured field repair_complete=false" };
+  }
+  if (readyGuardTruthy(modelFurtherWork)) {
+    return { downgrade: true, reason: "summarizer reported further_work_required=true" };
+  }
+  const shopText = readyGuardShopTurns(transcriptText);
+  for (const rule of READY_GUARD_RULES) {
+    const m = rule.re.exec(shopText);
+    if (m) {
+      const phrase = m[0].replace(/\s+/g, " ").trim().slice(0, 120);
+      return { downgrade: true, reason: `${rule.code}: shop said "${phrase}"` };
+    }
+  }
+  return { downgrade: false, reason: null };
+}
+
 async function summarizeCallTranscript(
   transcriptText: string,
   callType: "repair" | "tech",
-  truckNumber: string
+  truckNumber: string,
+  dataCollection?: any
 ): Promise<{ status: string; summary: string; estimatedReadyDate: string | null; blockers: string | null }> {
   if (!process.env.AWS_BEARER_TOKEN_BEDROCK) {
     console.warn("[ElevenLabs] No AWS_BEARER_TOKEN_BEDROCK, skipping summarization");
@@ -2213,12 +2401,26 @@ async function summarizeCallTranscript(
 "summary": 2-3 sentence factual summary of the call
 "estimated_ready_date": if a pickup date was mentioned, return it as YYYY-MM-DD, otherwise null
 "blockers": any issues preventing pickup, or null
+"further_work_required": true if the vehicle still needs repair work (at this shop, a dealer, a body shop, or anywhere else) or cannot be driven away, false if the repair is finished, null if the transcript does not say
 Respond ONLY with valid JSON, no other text.`
-    : `You are a fleet coordinator assistant. Analyze repair shop call transcripts. Respond in JSON with these fields:
+    : `You are a fleet coordinator assistant. Analyze repair shop call transcripts.
+
+CRITICAL — "ready for pickup" does NOT mean "repaired".
+Shops routinely say a vehicle is "ready", "done", or "you can come get it" when they only mean "get this out of my bay". You must distinguish two different things:
+  (a) REPAIR COMPLETE — the work this vehicle came in for is finished and nothing further is owed.
+  (b) RELEASED BUT NOT REPAIRED — the shop wants the vehicle collected, but it still needs an engine, a transmission, a dealer, a body shop, another shop, a tow, or any other further work.
+Only (a) is "Ready". Case (b) is NOT "Ready" — use "In Repair" (or "Other Issues" if that fits better) and describe the outstanding work in "blockers".
+
+Do NOT use drivability as your test. A van can start and run and still need an engine. The question that separates the cases is whether the repair is FINISHED, not whether the vehicle moves. If the shop says the vehicle is ready AND in the same call says it needs a major component, needs to go somewhere else, is not done, or needs to be towed, the answer is NOT "Ready".
+
+If you cannot tell which case it is, do not answer "Ready" — a wrong "Ready" sends a technician on a wasted trip and closes a rental that should stay open, while a missed "Ready" only costs one more phone call.
+
+Respond in JSON with these fields:
 "status": one of these exact values: "Ready", "In Repair", "In Authorization", "Parts Ordered", "No Answer", "Voicemail", "On Hold", "Vehicle Not Found", "Other Issues" (there is a transcript so the call connected — pick "No Answer"/"Voicemail"/"On Hold"/"Vehicle Not Found" when no repair status was given; never treat a connected call as failed)
-"summary": 2-3 sentence factual summary of the call
+"summary": 2-3 sentence factual summary of the call. If the shop released the vehicle without finishing the repair, say so explicitly.
 "estimated_ready_date": if a completion/ready date was mentioned, return it as YYYY-MM-DD, otherwise null
-"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization), or null
+"blockers": any issues blocking repair completion (e.g. parts on order, awaiting authorization, needs engine/transmission, must go to a dealer or body shop, needs a tow), or null
+"further_work_required": true if the vehicle still needs work anywhere (case b above) or cannot be driven away, false if the repair is genuinely complete, null if the transcript does not say
 Respond ONLY with valid JSON, no other text.`;
   const userPrompt = callType === "tech"
     ? `Analyze this technician pickup call transcript:\n\n${transcriptText}`
@@ -2233,7 +2435,10 @@ Respond ONLY with valid JSON, no other text.`;
   const reqBody = JSON.stringify({
     system: [{ text: systemPrompt }],
     messages: [{ role: "user", content: [{ text: userPrompt }] }],
-    inferenceConfig: { maxTokens: 300, temperature: 0.3 },
+    // 400 (was 300): the repair prompt now also asks for further_work_required and
+    // a fuller blockers string; a truncated response fails JSON.parse, and a parse
+    // failure costs the whole summary.
+    inferenceConfig: { maxTokens: 400, temperature: 0.3 },
   });
 
   const maxAttempts = 3;
@@ -2264,11 +2469,36 @@ Respond ONLY with valid JSON, no other text.`;
       // Strip them before parsing so JSON.parse doesn't choke on the backticks.
       const stripped = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
       const parsed = JSON.parse(stripped);
+      let status: string = parsed.status || "Unknown";
+      let summary: string = parsed.summary || "";
+      let blockers: string | null = parsed.blockers || null;
+
+      // Belt and braces: the model is what stamped truck 61577 "Ready" off a shop
+      // that said the van needs a transmission and an engine, so a model answer of
+      // READY is re-checked deterministically before it can be banked. Anything
+      // that fails the check is PROPOSED, never banked — it is downgraded to a
+      // not-ready state so the truck stays on the follow-up board for a human.
+      const proposesReady = status === "Ready" || status === "Will Pick Up";
+      if (proposesReady) {
+        const guard = evaluateReadyGuard(transcriptText, dataCollection, parsed.further_work_required);
+        if (guard.downgrade) {
+          const downgradedTo = "Other Issues";
+          console.warn(
+            `[ReadyGuard] Truck ${truckNumber} (${callType}): downgraded "${status}" -> "${downgradedTo}" — ${guard.reason}`,
+          );
+          blockers = blockers ? `NEEDS REVIEW (${guard.reason}). ${blockers}` : `NEEDS REVIEW (${guard.reason})`;
+          summary = `[NEEDS REVIEW] Shop indicated pickup but the repair does not read as finished — ${guard.reason}. ${summary}`.trim();
+          status = downgradedTo;
+        } else {
+          console.log(`[ReadyGuard] Truck ${truckNumber} (${callType}): "${status}" upheld — no onward-referral language detected`);
+        }
+      }
+
       return {
-        status: parsed.status || "Unknown",
-        summary: parsed.summary || "",
+        status,
+        summary,
         estimatedReadyDate: parsed.estimated_ready_date || null,
-        blockers: parsed.blockers || null,
+        blockers,
       };
     } catch (err: any) {
       if (attempt < maxAttempts) {
@@ -2614,7 +2844,7 @@ async function pollForCallCompletion(
       const transcript = conv.transcript || conv.data?.transcript;
       if (!transcript) { console.log(`[CallPoller] No transcript yet for ${conv.conversation_id}`); continue; }
       const transcriptText = buildTranscriptText(transcript);
-      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
+      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber, extractElevenLabsDataCollection(conv));
       const convCallDate = conv.start_time_unix_secs ? new Date(conv.start_time_unix_secs * 1000) : undefined;
       await applyCallResultToTruck(truck, callType, conv.conversation_id, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
       console.log(`[CallPoller] Truck ${truck.truckNumber}: complete — status="${status}" after ${attempt} poll(s)`);
@@ -2719,7 +2949,7 @@ export async function elevenLabsWebhookHandler(req: any, res: any): Promise<void
     }
 
     const transcriptText = buildTranscriptText(transcript);
-    const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
+    const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber, extractElevenLabsDataCollection(body));
     console.log(`[ElevenLabs Webhook] Status: "${status}", Summary: "${summary}"`);
     await applyCallResultToTruck(truck, callType, conversationId, status, summary, estimatedReadyDate, blockers, transcriptText);
 
@@ -6001,7 +6231,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       if (!transcript) return res.status(422).json({ message: "Conversation found but transcript not yet available" });
 
       const transcriptText = buildTranscriptText(transcript);
-      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, resolvedCallType, truck.truckNumber);
+      const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, resolvedCallType, truck.truckNumber, extractElevenLabsDataCollection(convData));
       const convCallDate = convData.start_time_unix_secs ? new Date(convData.start_time_unix_secs * 1000)
         : convData.data?.start_time_unix_secs ? new Date(convData.data.start_time_unix_secs * 1000)
         : undefined;
@@ -6491,7 +6721,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 job.failed++;
               } else {
                 const transcriptText = buildTranscriptText(transcript);
-                const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber);
+                const { status, summary, estimatedReadyDate, blockers } = await summarizeCallTranscript(transcriptText, callType, truck.truckNumber, extractElevenLabsDataCollection(convData));
                 const convCallDate = convData.start_time_unix_secs ? new Date(convData.start_time_unix_secs * 1000) : undefined;
                 await applyCallResultToTruck(truck, callType, conversationId, status, summary, estimatedReadyDate, blockers, transcriptText, convCallDate);
                 job.results.push({ truckNumber: truckNum, callType, status: "updated", conversationId });
