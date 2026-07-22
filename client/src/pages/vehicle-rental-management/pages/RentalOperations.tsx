@@ -225,13 +225,13 @@ function makeSortComparator(accessor: (r: MasterRow) => unknown, dir: SortDir) {
 // qualifying repair PO). Server derives `workload_bucket`; these tabs read it.
 const WORKLOAD_TABS = new Set(["cannot_work", "mismatch_no_po"]);
 const COHORTS: Array<{ key: string; label: string }> = [
+  // All Rentals is the total and doubles as the workable count: everything here
+  // that is not under Cannot work is a rental we still own and can act on. That is
+  // why there is no separate Workable chip.
   { key: "all", label: "All Rentals" },
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
-  { key: "workable", label: "Workable · we own these" },
-  { key: "declined", label: "Declined · no call" },
-  { key: "auction", label: "Auction · no call" },
   { key: "pended", label: "Pended · turned in" },
   { key: "open_repair", label: "Open Repair Ticket" },
   { key: "no_open_repair", label: "No Open Repair" },
@@ -414,9 +414,6 @@ export default function RentalOperations() {
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
       else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
       else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
-      else if (cohort === "workable") { if (isDeclinedAuction(r.ams_bucket)) return false; }
-      else if (cohort === "declined") { if (r.ams_bucket !== "declined") return false; }
-      else if (cohort === "auction") { if (r.ams_bucket !== "auction") return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
@@ -635,35 +632,28 @@ export default function RentalOperations() {
       {/* Cohort tabs */}
       <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
         {COHORTS.map((c) => {
-          const declAuc = (stats.amsBuckets.declined ?? 0) + (stats.amsBuckets.auction ?? 0);
           const n: number | string = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
             : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
             : c.key === "mismatch_no_po" ? (stats.sawServerWorkload ? (stats.workload.mismatch_no_po ?? 0) : "—")
-            : c.key === "workable" ? (basePool.length - declAuc)
-            : c.key === "declined" ? (stats.amsBuckets.declined ?? 0)
-            : c.key === "auction" ? (stats.amsBuckets.auction ?? 0)
             : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
-          const danger = c.key === "declined" || c.key === "auction" || c.key === "cannot_work";
+          const danger = c.key === "cannot_work";
           const go = c.key === "luca_queue";
-          const own = c.key === "workable";
           const pended = c.key === "pended" || c.key === "mismatch_no_po";
-          const accentC = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.accent;
-          const restColor = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.inkSoft;
-          const restBorder = danger ? colors.red : go ? colors.green : own ? colors.blue : pended ? colors.amber : colors.rule;
+          const accentC = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.accent;
+          const restColor = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.inkSoft;
+          const restBorder = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.rule;
           return (
             <button key={c.key} type="button" onClick={() => setCohort(c.key)}
-              title={c.key === "declined" ? "AMS says Declined Repair — we no longer own the van, so its shop is never called. A few may still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck, not this van."
-                : c.key === "auction" ? "AMS says Sent To Auction — we no longer own the van, so its shop is never called. A few may still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck, not this van."
-                : c.key === "cannot_work" ? "Declined Repair / Sent To Auction — we no longer own these vans. Hands off: no shop calls."
+              title={c.key === "cannot_work" ? "Declined Repair / Sent To Auction — we no longer own these vans. Hands off: no shop calls. A few still appear in the LUCA Call Queue via the assigned-truck redirect, which calls the shop holding the tech's OWN truck rather than this van. Everything NOT counted here is a rental we still own and can work."
                 : c.key === "mismatch_no_po" ? (stats.sawServerWorkload
                     ? "ESCALATION COHORT: the renter is assigned a DIFFERENT truck than the one the rental is written against, and that assigned truck has NO qualifying repair PO. Nobody is repairing anything — route to the proper channel."
                     : "Unavailable: the running server has not sent workload_bucket, so this cohort cannot be counted. Restart the Nexus server to populate it. It is shown as — rather than 0 so an empty answer is never mistaken for 'none found'.")
                 : c.key === "pended" ? "PENDED = renter turned the vehicle in / ticket closing. These sit OUTSIDE the All Rentals total unless 'include PENDED' is checked, so the totals here and on the other chips will not add up to All Rentals. Some pended trucks are also Declined/Auction, so the toggle moves the Cannot-work count too."
-                : c.key === "luca_queue" ? "Open repair + a verified shop phone — this is the feed LUCA calls. Mostly workable trucks, plus any declined/auction rental whose renter has an ASSIGNED truck in a shop: we no longer own the rental van, so the call is redirected to the assigned truck's shop. Those still show under Declined/Auction, because the van itself is never called."
-                : own ? "Every rental we still own (NOT Declined Repair / Sent To Auction) — these are the ones that can be worked. Ready ones show a Call button; the rest are missing a phone or an open repair." : undefined}
+                : c.key === "luca_queue" ? "Open repair + a verified shop phone — this is the feed LUCA calls. Mostly workable trucks, plus any declined/auction rental whose renter has an ASSIGNED truck in a shop: we no longer own the rental van, so the call is redirected to the assigned truck's shop. Those still show under Cannot work, because the van itself is never called."
+                : undefined}
               style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: active ? 600 : 500, color: active ? "#fff" : restColor, background: active ? accentC : colors.surface, border: `1px solid ${active ? accentC : restBorder}`, borderRadius: 999, padding: "6px 14px", cursor: "pointer" }}>
               {c.label} <span style={{ opacity: 0.7 }}>{n}</span>
             </button>
@@ -744,12 +734,14 @@ export default function RentalOperations() {
         </div>
       )}
 
-      {/* Workable banner — the ones we still own (NOT declined/auction), the peer of the red tab */}
-      {cohort === "workable" && (
+      {/* Workable breakdown — hangs off All Rentals now that Workable has no chip of
+          its own. All Rentals is the total; this says how much of it is actually
+          actionable, and carries the Scrape phones button. */}
+      {cohort === "all" && (
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.blue}`, background: "rgba(59,130,246,.06)", borderRadius: 12 }}>
           <div>
             <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink }}>
-              Workable — {workableStats.total} rental{workableStats.total === 1 ? "" : "s"} we still own
+              Workable — {workableStats.total} of {basePool.length} rental{basePool.length === 1 ? "" : "s"} we still own
             </div>
             <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 760 }}>
               Everything NOT flagged Declined Repair / Sent To Auction in AMS. Of these: <b style={{ color: colors.green }}>{workableStats.callableNow} callable now</b> (open repair + verified phone, in the LUCA Call Queue), <b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b> (open repair, no shop phone yet — Scrape from Holman), and <b style={{ color: colors.inkMuted }}>{workableStats.noOpenRepair} with no open repair ticket</b>. Ready rows show a Call button.
