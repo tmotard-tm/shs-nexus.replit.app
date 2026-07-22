@@ -60,6 +60,35 @@ function envInt(name: string, fallback: number): number {
 }
 
 /**
+ * Replit Scheduled Deployments have a RUN command and no build step, so the compiled
+ * Chromium workers that `npm run build:workers` produces at publish time are not
+ * guaranteed to exist in this job's image. Build them if they are missing.
+ *
+ * Idempotent and ~15ms. Shells out to the npm script rather than duplicating the
+ * esbuild invocations, so there stays exactly one definition of how the workers are
+ * built. Never throws: scrape-service falls back to tsx when there is no bundle, and
+ * the Snowflake land already succeeded by the time this runs.
+ */
+async function ensureWorkersBuilt(): Promise<void> {
+  const { existsSync } = await import("node:fs");
+  const { spawn } = await import("child_process");
+  const bundle = "dist/vrm/rental-operations/holman-svc-scrape-worker.js";
+  if (existsSync(bundle)) return;
+  console.log("[VRM RentalOps] Chromium worker bundle missing — building (no build step in a Scheduled Deployment)…");
+  await new Promise<void>((resolve) => {
+    const child = spawn("npm", ["run", "build:workers"], { stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    child.stderr?.on("data", (d) => { err += String(d); });
+    child.on("error", (e) => { console.warn(`[VRM RentalOps] worker build could not start: ${e.message} — falling back to tsx`); resolve(); });
+    child.on("close", (code) => {
+      if (code === 0 && existsSync(bundle)) console.log("[VRM RentalOps] Chromium workers built.");
+      else console.warn(`[VRM RentalOps] worker build exited ${code} — falling back to tsx. ${err.trim().slice(0, 300)}`);
+      resolve();
+    });
+  });
+}
+
+/**
  * The Holman delta sweep. Runs AFTER the Snowflake land and never throws — the
  * land is the valuable half of this job and a Chromium failure must not cost it
  * or the process exit code. Everything here degrades to a logged warning.
@@ -70,6 +99,7 @@ async function runDeltaSweep(): Promise<void> {
     console.log("[VRM RentalOps] Delta sweep SKIPPED (VRM_SKIP_HOLMAN_SCRAPE set).");
     return;
   }
+  await ensureWorkersBuilt();
   const swept = Date.now();
   const cap = envInt("VRM_SCRAPE_MAX_TRUCKS", SCRAPE_MAX_TRUCKS);
   const budgetMs = envInt("VRM_SCRAPE_BUDGET_MIN", SCRAPE_BUDGET_MIN) * 60_000;
