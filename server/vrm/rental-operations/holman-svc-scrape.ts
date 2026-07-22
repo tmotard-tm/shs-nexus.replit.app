@@ -5,10 +5,8 @@
 // (single shared HOLMAN_PORTAL_USER/PASS). Meant to run in an ISOLATED CHILD
 // process (holman-svc-scrape-worker.ts), never in the Express request handler.
 import { chromium, type Browser } from "playwright-core";
-
-function resolveChromiumPath(): string | undefined {
-  return process.env.HOLMAN_CHROMIUM_PATH?.trim() || undefined;
-}
+// Chromium resolution lives in exactly one place; see server/chromium-path.ts.
+import { requireChromiumPath } from "../../chromium-path";
 
 export interface SvcHistoryResult {
   vehicle: string;
@@ -23,7 +21,7 @@ export async function scrapeVehicleHistories(vehicles: string[]): Promise<SvcHis
   const lessee = process.env.HOLMAN_LESSEE_CODE?.trim() || "2B56";
   if (!user || !pass) throw new Error("HOLMAN_PORTAL_USER / HOLMAN_PORTAL_PASS not set");
 
-  const executablePath = resolveChromiumPath();
+  const executablePath = requireChromiumPath("HolmanSvcScrape");
   console.error(`[HolmanSvcScrape] scraping ${vehicles.length} vehicle(s) (creds present)`);
   let browser: Browser | null = null;
   const results: SvcHistoryResult[] = [];

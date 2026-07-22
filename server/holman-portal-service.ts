@@ -463,6 +463,13 @@ function spawnHeadlessLogin(): Promise<HolmanHarvest> {
     // Dev runs via tsx (.ts source); a production build emits dist/holman-login-worker.js.
     const distWorker = "dist/holman-login-worker.js";
     const useDist = existsSync(distWorker);
+    // useDist is the only path that works in a deployment: tsx is a devDependency
+    // and production installs prune it, so the fallback below spawns a binary that
+    // is not there. `npm run build:workers` produces the dist worker; if it is
+    // missing, say so loudly rather than failing as an opaque spawn error.
+    if (!useDist && !existsSync("node_modules/.bin/tsx")) {
+      throw new Error(`${distWorker} missing and tsx unavailable — run \`npm run build:workers\`. The Holman browser subsystem cannot start.`);
+    }
     const cmd = useDist ? process.execPath : "node_modules/.bin/tsx";
     const argv = useDist ? [distWorker] : ["server/holman-login-worker.ts"];
 
@@ -765,6 +772,13 @@ export async function resolveRentersForVehicles(vehicles: string[]): Promise<Res
   return new Promise<ResolvedRenter[]>((resolve) => {
     const distWorker = "dist/holman-renter-worker.js";
     const useDist = existsSync(distWorker);
+    // useDist is the only path that works in a deployment: tsx is a devDependency
+    // and production installs prune it, so the fallback below spawns a binary that
+    // is not there. `npm run build:workers` produces the dist worker; if it is
+    // missing, say so loudly rather than failing as an opaque spawn error.
+    if (!useDist && !existsSync("node_modules/.bin/tsx")) {
+      throw new Error(`${distWorker} missing and tsx unavailable — run \`npm run build:workers\`. The Holman browser subsystem cannot start.`);
+    }
     const cmd = useDist ? process.execPath : "node_modules/.bin/tsx";
     const argv = (useDist ? [distWorker] : ["server/holman-renter-worker.ts"]).concat([uniq.join(",")]);
     let child;

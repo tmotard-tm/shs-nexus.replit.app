@@ -122,7 +122,19 @@ function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
     const workerJs = "dist/vrm/rental-operations/holman-svc-scrape-worker.js";
     let cmd: string, args: string[];
     if (existsSync(path.join(cwd, workerJs))) { cmd = process.execPath; args = [workerJs, vehicles.join(",")]; }
-    else { cmd = existsSync(tsxBin) ? tsxBin : "npx"; args = existsSync(tsxBin) ? [workerTs, vehicles.join(",")] : ["tsx", workerTs, vehicles.join(",")]; }
+    else if (existsSync(tsxBin)) { cmd = tsxBin; args = [workerTs, vehicles.join(",")]; }
+    else {
+      // DEPLOYMENT MISCONFIGURATION, not an empty portal. `npm run build:workers`
+      // did not run, so there is no compiled worker, and tsx is a devDependency a
+      // production install prunes — there is nothing left to spawn. Before 7/22
+      // this fell through to bare "npx", which fails in prod and returned the same
+      // shape as "we looked and found nothing". Every truck came back
+      // error:"worker failed", the report said 0 stored, and the UI called it a
+      // clean run. Prod never scraped once and nothing ever said so. Name it.
+      const msg = `scrape worker unavailable: neither ${workerJs} (run \`npm run build:workers\`) nor ${tsxBin} exists`;
+      console.error(`[SvcScrape] CONFIG ERROR — ${msg}`);
+      return resolve(vehicles.map((v) => ({ vehicle: v, hist: null, error: msg })));
+    }
     const fallback = () => vehicles.map((v) => ({ vehicle: v, hist: null, error: "worker failed" }));
     let child: ReturnType<typeof spawn>;
     try { child = spawn(cmd, args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: process.env }); }

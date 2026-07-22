@@ -15,11 +15,8 @@
 //      -> renter lives in a #jsonDataMain hidden JSON blob (DriverName/Phone/...).
 // The API-chain steps run INSIDE the authenticated page (cookies + Bearer).
 import { chromium, type Browser } from "playwright-core";
-
-function resolveChromiumPath(): string | undefined {
-  const envPath = process.env.HOLMAN_CHROMIUM_PATH?.trim();
-  return envPath || undefined;
-}
+// Chromium resolution lives in exactly one place; see server/chromium-path.ts.
+import { requireChromiumPath } from "./chromium-path";
 
 export interface RenterResult {
   vehicle: string;
@@ -74,7 +71,7 @@ export async function resolveRentersHeadless(vehicles: string[]): Promise<Renter
   const lessee = process.env.HOLMAN_LESSEE_CODE?.trim() || "2B56";
   if (!user || !pass) throw new Error("HOLMAN_PORTAL_USER / HOLMAN_PORTAL_PASS not set");
 
-  const executablePath = resolveChromiumPath();
+  const executablePath = requireChromiumPath("HolmanRenterResolver");
   console.error(`[HolmanRenter] resolving ${vehicles.length} vehicle(s) (credentials present)`);
   let browser: Browser | null = null;
   const results: RenterResult[] = [];
