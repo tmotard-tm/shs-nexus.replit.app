@@ -98,6 +98,7 @@ export default function WeeklyOffboarding() {
   const { toast } = useToast();
   const { lookupCostCenter } = useCostCenters();
   const [exportLoading, setExportLoading] = useState(false);
+  const [loaExportLoading, setLoaExportLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [weekFilter, setWeekFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -674,6 +675,73 @@ export default function WeeklyOffboarding() {
     const dateB = b.lastDateWorked ? new Date(b.lastDateWorked).getTime() : 0;
     return dateA - dateB;
   });
+
+  const exportLoaXlsx = async () => {
+    setLoaExportLoading(true);
+    try {
+      const ExcelJS = (await import('exceljs')).default;
+      const { downloadExcelWorkbook } = await import('@/lib/xlsx-utils');
+      const rows = filteredLoa.map((e) => {
+        const eid = e.enterpriseId ? e.enterpriseId.toUpperCase() : '';
+        const truck = e.lastKnownTruck?.trim() || null;
+        const nexus = truck ? nexusDataMap.get(truck) : null;
+        const st = eid ? loaOutreachMap[eid] : undefined;
+        const noteSummary = eid ? loaNotesSummaryMap.get(eid) : undefined;
+        const lastWorkedDate = e.lastDateWorked ? new Date(e.lastDateWorked) : null;
+        const daysSince = lastWorkedDate ? differenceInDays(new Date(), lastWorkedDate) : null;
+        const smsStatus = st?.formCompletedAt ? 'Form done'
+          : st?.repliedAt ? 'Replied'
+          : st?.resendSentAt ? 'Sent x2'
+          : st?.lastSentAt ? 'Sent'
+          : '';
+        return {
+          'Employment Status': e.employmentStatusLabel || e.employmentStatus || '',
+          'Name': e.fullName || '',
+          'Enterprise ID': e.enterpriseId || '',
+          'HR Notes': noteSummary ? `${noteSummary.noteCount} note${noteSummary.noteCount !== 1 ? 's' : ''}${noteSummary.unreadCount > 0 ? ` (${noteSummary.unreadCount} unread)` : ''}` : '',
+          'Rental': eid && openRentalEidSet.has(eid) ? 'Rental' : '',
+          'Rental Status (tech answer)': nexus?.returnedRental ? (returnedRentalLabels[nexus.returnedRental] || nexus.returnedRental) : '',
+          'Date Last Worked': lastWorkedDate ? format(lastWorkedDate, 'MM/dd/yyyy') : '',
+          'Days Since Last Worked': daysSince !== null ? daysSince : '',
+          'Truck': e.lastKnownTruck || '',
+          'SMS Outreach': smsStatus,
+          'First Text Sent': st?.lastSentAt ? format(new Date(st.lastSentAt), 'MM/dd/yyyy HH:mm') : '',
+          'Follow-up Text Sent': st?.resendSentAt ? format(new Date(st.resendSentAt), 'MM/dd/yyyy HH:mm') : '',
+          'Replied At': st?.repliedAt ? format(new Date(st.repliedAt), 'MM/dd/yyyy HH:mm') : '',
+          'Form Done At': st?.formCompletedAt ? format(new Date(st.formCompletedAt), 'MM/dd/yyyy HH:mm') : '',
+          'Unread Replies': st?.threadUnread ? Math.max(1, st?.threadUnreadCount ?? 1) : 0,
+          'District': e.district || '',
+          'Cost Center': e.district ? (lookupCostCenter(e.district) || '') : '',
+          'Phone (TPMS)': e.tpmsPhone || '',
+          'Personal Number': e.personalNumber || '',
+          'Address (TPMS)': e.tpmsAddress || '',
+          'TPMS Source': e.tpmsSource === 'TPMS_EXTRACT' ? 'Active' : e.tpmsSource === 'TPMS_EXTRACT_LAST_ASSIGNED' ? 'Last Assigned' : (e.tpmsSource || ''),
+          'Manual Status': nexus?.postOffboardedStatus ? (manualStatusLabels[nexus.postOffboardedStatus] || nexus.postOffboardedStatus) : '',
+          'Manual Status By': nexus?.updatedBy || '',
+          'Daily Profit': e.dailyProfit !== null && e.dailyProfit !== undefined ? Number(e.dailyProfit.toFixed(2)) : '',
+        };
+      });
+      const workbook = new ExcelJS.Workbook();
+      const ws = workbook.addWorksheet('LOA Paid Leave Suspended');
+      if (rows.length > 0) {
+        const headers = Object.keys(rows[0]);
+        const headerRow = ws.addRow(headers);
+        headerRow.font = { bold: true };
+        rows.forEach(r => ws.addRow(headers.map(h => (r as Record<string, any>)[h] ?? '')));
+        headers.forEach((h, i) => {
+          const maxLen = Math.max(h.length, ...rows.map(r => String((r as Record<string, any>)[h] ?? '').length));
+          ws.getColumn(i + 1).width = Math.min(Math.max(maxLen + 2, 10), 50);
+        });
+      }
+      const timestamp = format(new Date(), 'yyyy-MM-dd_HHmm');
+      await downloadExcelWorkbook(workbook, `loa_paid_leave_${timestamp}.xlsx`);
+      toast({ title: 'Export complete', description: `${rows.length} record${rows.length !== 1 ? 's' : ''} exported.` });
+    } catch (err: any) {
+      toast({ title: 'Export failed', description: err.message || 'Could not generate the XLSX file. Please try again.', variant: 'destructive' });
+    } finally {
+      setLoaExportLoading(false);
+    }
+  };
 
   // Count trucks over 31 days since Date Last Worked, split by whether a manual status is set
   const loaOver31 = filteredLoa.filter(e => {
@@ -1490,15 +1558,27 @@ export default function WeeklyOffboarding() {
                       </span>
                     </div>
                   )}
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => refetchLoa()}
-                    disabled={loaLoading}
-                  >
-                    <RefreshCw className={`h-4 w-4 mr-1 ${loaLoading ? 'animate-spin' : ''}`} />
-                    Refresh
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={exportLoaXlsx}
+                      disabled={loaLoading || loaExportLoading || filteredLoa.length === 0}
+                      data-testid="button-export-loa"
+                    >
+                      {loaExportLoading ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Download className="h-4 w-4 mr-1" />}
+                      {loaExportLoading ? 'Exporting...' : 'Export XLSX'}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => refetchLoa()}
+                      disabled={loaLoading}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-1 ${loaLoading ? 'animate-spin' : ''}`} />
+                      Refresh
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
