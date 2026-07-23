@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw, Lock, Plus } from "lucide-react";
+import { Upload, Search, Trash2, Loader2, FileSpreadsheet, RefreshCw, Download, Send, Paperclip, Package, Wrench, ArrowUpDown, ArrowUp, ArrowDown, MessageSquare, RotateCcw, Lock, Plus, Archive } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLocation } from "wouter";
 import { DecommConversations } from "@/components/fleet-scope/DecommConversations";
@@ -84,6 +84,8 @@ interface DecommissioningVehicle {
   termRequestFileName: string | null;
   termRequestStorageKey: string | null;
   category: string; // 'standard' or 'old_decline'
+  lane: string; // 'declined' | 'decommissioned' | 'archived' (source of truth for the 3 tabs)
+  holmanStatus: string | null; // cached Holman status: Active | Out of Service | Sold
   createdAt: string;
   updatedAt: string;
 }
@@ -111,7 +113,7 @@ export default function Decommissioning() {
     retry: false,
   });
   const commsEnabled = commsConfig?.enabled === true;
-  const [tableTab, setTableTab] = useState<"active" | "decommissioned" | "oldDeclines">("active");
+  const [tableTab, setTableTab] = useState<"declined" | "decommissioned" | "archived">("declined");
   const [oldDeclinesDialogOpen, setOldDeclinesDialogOpen] = useState(false);
   const [oldDeclinesPaste, setOldDeclinesPaste] = useState("");
   const [addTruckDialogOpen, setAddTruckDialogOpen] = useState(false);
@@ -257,7 +259,7 @@ export default function Decommissioning() {
       });
       setOldDeclinesDialogOpen(false);
       setOldDeclinesPaste("");
-      setTableTab("oldDeclines");
+      setTableTab("declined");
     },
     onError: (error: any) => {
       toast({
@@ -321,7 +323,7 @@ export default function Decommissioning() {
       });
       setAddTruckDialogOpen(false);
       setAddTruckPaste("");
-      setTableTab("active");
+      setTableTab("declined");
     },
     onError: (error: any) => {
       toast({
@@ -627,9 +629,9 @@ export default function Decommissioning() {
     });
 
     const wb = new ExcelJS.Workbook();
-    addJsonWorksheet(wb, activeVehicles.map(toExportRow), "Active");
+    addJsonWorksheet(wb, declinedVehicles.map(toExportRow), "Declined");
     addJsonWorksheet(wb, decommissionedVehicles.map(toExportRow), "Decommissioned");
-    addJsonWorksheet(wb, oldDeclinesVehicles.map(toExportRow), "Old Declines");
+    addJsonWorksheet(wb, archivedVehicles.map(toExportRow), "Archived (OOS-Sold)");
 
     const date = new Date().toISOString().split("T")[0];
     const isFiltered = searchTerm.trim() !== "" || dateFilter !== "" || techDistanceFilter || managerDistanceFilter || assignedFilter !== "all";
@@ -637,7 +639,7 @@ export default function Decommissioning() {
 
     toast({
       title: "Export Complete",
-      description: `Active: ${activeVehicles.length}, Decommissioned: ${decommissionedVehicles.length}, Old Declines: ${oldDeclinesVehicles.length}`,
+      description: `Declined: ${declinedVehicles.length}, Decommissioned: ${decommissionedVehicles.length}, Archived: ${archivedVehicles.length}`,
     });
   };
 
@@ -697,36 +699,36 @@ export default function Decommissioning() {
     return 0;
   });
 
-  // Three-way bucketing:
-  //  - Decommissioned: anything sent to procurement, regardless of category. So
-  //    when an Old Declines row's "Sent to Procurement" gets checked, it lands here.
-  //  - Active: standard rows that are NOT yet sent to procurement.
-  //  - Old Declines: old_decline rows that are NOT yet sent to procurement.
-  const activeVehicles = filteredVehicles.filter(v => !v.sentToProcurement && v.category !== "old_decline");
-  const oldDeclinesVehicles = filteredVehicles.filter(v => !v.sentToProcurement && v.category === "old_decline");
-  const decommissionedVehicles = filteredVehicles.filter(v => v.sentToProcurement);
+  // 3-category lifecycle bucketing, driven by the `lane` column (source of truth):
+  //  - Declined: awaiting decommission, still active in Holman.
+  //  - Decommissioned: sent to auction, awaiting Holman pickup.
+  //  - Archived: Holman shows Out of Service/Sold. Sticky -- rows never leave once
+  //    archived here, and archiving never deletes a row (server-side guarantee).
+  const declinedVehicles = filteredVehicles.filter(v => v.lane === "declined");
+  const decommissionedVehicles = filteredVehicles.filter(v => v.lane === "decommissioned");
+  const archivedVehicles = filteredVehicles.filter(v => v.lane === "archived");
   const displayedVehicles =
-    tableTab === "active"
-      ? activeVehicles
-      : tableTab === "oldDeclines"
-        ? oldDeclinesVehicles
+    tableTab === "declined"
+      ? declinedVehicles
+      : tableTab === "archived"
+        ? archivedVehicles
         : decommissionedVehicles;
 
   // When the user types a search and the current tab has zero matches but
   // another tab does, jump them to the tab with results so the search "feels"
   // global across all three tables. Priority: keep current tab if it has hits,
-  // otherwise prefer Active → Old Declines → Decommissioned.
+  // otherwise prefer Declined → Decommissioned → Archived.
   useEffect(() => {
     if (!searchTerm.trim()) return;
     if (displayedVehicles.length > 0) return;
-    if (activeVehicles.length > 0) {
-      setTableTab("active");
-    } else if (oldDeclinesVehicles.length > 0) {
-      setTableTab("oldDeclines");
+    if (declinedVehicles.length > 0) {
+      setTableTab("declined");
     } else if (decommissionedVehicles.length > 0) {
       setTableTab("decommissioned");
+    } else if (archivedVehicles.length > 0) {
+      setTableTab("archived");
     }
-  }, [searchTerm, displayedVehicles.length, activeVehicles.length, oldDeclinesVehicles.length, decommissionedVehicles.length]);
+  }, [searchTerm, displayedVehicles.length, declinedVehicles.length, decommissionedVehicles.length, archivedVehicles.length]);
 
   const SortIcon = ({ dir }: { dir: SortDir }) =>
     dir === "asc" ? <ArrowUp className="h-3 w-3 inline ml-1" /> :
@@ -1066,13 +1068,13 @@ export default function Decommissioning() {
       <>
       <div className="flex items-center gap-1 mb-3">
         <Button
-          variant={tableTab === "active" ? "default" : "outline"}
+          variant={tableTab === "declined" ? "default" : "outline"}
           size="sm"
-          onClick={() => setTableTab("active")}
-          data-testid="tab-active-vehicles"
+          onClick={() => setTableTab("declined")}
+          data-testid="tab-declined-vehicles"
         >
-          Active
-          <span className="ml-1.5 text-xs opacity-80">({activeVehicles.length})</span>
+          Declined
+          <span className="ml-1.5 text-xs opacity-80">({declinedVehicles.length})</span>
         </Button>
         <Button
           variant={tableTab === "decommissioned" ? "default" : "outline"}
@@ -1086,14 +1088,15 @@ export default function Decommissioning() {
           <span className="ml-1.5 text-xs opacity-80">({decommissionedVehicles.length})</span>
         </Button>
         <Button
-          variant={tableTab === "oldDeclines" ? "default" : "outline"}
+          variant={tableTab === "archived" ? "default" : "outline"}
           size="sm"
-          onClick={() => setTableTab("oldDeclines")}
-          className={tableTab === "oldDeclines" ? "bg-amber-600 hover:bg-amber-700" : ""}
-          data-testid="tab-old-declines-vehicles"
+          onClick={() => setTableTab("archived")}
+          className={tableTab === "archived" ? "bg-slate-600 hover:bg-slate-700" : ""}
+          data-testid="tab-archived-vehicles"
         >
-          Old Declines
-          <span className="ml-1.5 text-xs opacity-80">({oldDeclinesVehicles.length})</span>
+          <Archive className="h-3.5 w-3.5 mr-1.5" />
+          Archived
+          <span className="ml-1.5 text-xs opacity-80">({archivedVehicles.length})</span>
         </Button>
       </div>
       <Card>
@@ -1106,8 +1109,8 @@ export default function Decommissioning() {
             <div className="text-center py-12 text-muted-foreground">
               {tableTab === "decommissioned"
                 ? "No decommissioned trucks. Trucks appear here when \"Sent to Procurement\" is checked."
-                : tableTab === "oldDeclines"
-                  ? "No old declines yet. Click \"Import Old Declines\" to paste truck #/address rows."
+                : tableTab === "archived"
+                  ? "No archived trucks yet. Trucks appear here automatically once Holman marks them Out of Service or Sold."
                   : searchTerm ? "No vehicles match your search" : "No decommissioning vehicles yet. Click Import to add data."}
             </div>
           ) : (

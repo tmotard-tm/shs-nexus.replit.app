@@ -95,6 +95,34 @@ test("null-safe on every input shape", () => {
   assert.equal(classifyPoVendor({ vendorName: "SHOP", lines: [{}] as any }).vendorType, "repair");
 });
 
+// ── payment instruments & billing rows (2026-07-23) ──────────────────────────
+// The luca-rental-list feed offered these as SHOP_NAME on 11 trucks; LIVHR's
+// parseVrmShopOfRecord guard rejected every one (sync counter rejectedVendor=11).
+// A payment line pays the shop; it is not the shop.
+test("single-use CC provider is 'other' even WITH parts/labor lines", () => {
+  assert.equal(classifyPoVendor({ vendorName: "SINGLE USE CC PROVIDER USA", lines: [L("PARTS"), L("LABOR")] }).vendorType, "other");
+  assert.equal(classifyPoVendor({ vendorName: "SINGLE USE CC PROVIDER USA", hasPartsOrLabor: true }).vendorType, "other");
+});
+test("single-use CC provider with roadside-only lines is 'other', not 'tow'", () => {
+  assert.equal(classifyPoVendor({ vendorName: "SINGLE USE CC PROVIDER USA", lines: [L("ROADSIDE")] }).vendorType, "other");
+});
+test("ENTERPRISE - HANDBILL is 'rental_placeholder', never the shop", () => {
+  assert.equal(classifyPoVendor({ vendorName: "ENTERPRISE - HANDBILL", lines: [L("OTHER")] }).vendorType, "rental_placeholder");
+  assert.equal(classifyPoVendor({ vendorName: "ENTERPRISE - HANDBILL", lines: [L("PARTS")] }).vendorType, "rental_placeholder");
+});
+test("bare ENTERPRISE is the rental company; plural ENTERPRISES shops stay 'repair'", () => {
+  assert.equal(classifyPoVendor({ vendorName: "ENTERPRISE FLEET MANAGEMENT" }).vendorType, "rental_placeholder");
+  assert.equal(classifyPoVendor({ vendorName: "DAME ENTERPRISES LLC", lines: [L("PARTS")] }).vendorType, "repair");
+  assert.equal(classifyPoVendor({ vendorName: "BUDDE ENTERPRISES INC" }).vendorType, "repair");
+});
+test("ENTERPRISE TOLLS stays 'toll' (TOLL_RE ranks above the rental blocklist)", () => {
+  assert.equal(classifyPoVendor({ vendorName: "ENTERPRISE TOLLS/TOLL CHARGES" }).vendorType, "toll");
+});
+test("isQualifyingRepairPo excludes payment and handbill rows", () => {
+  assert.equal(isQualifyingRepairPo({ vendorName: "SINGLE USE CC PROVIDER USA", lines: [L("PARTS")] }), false);
+  assert.equal(isQualifyingRepairPo({ vendorName: "ENTERPRISE - HANDBILL", lines: [L("PARTS")] }), false);
+});
+
 // ── helpers ──────────────────────────────────────────────────────────────────
 test("poLineType prefers typeDesc, falls back to repairType, uppercases", () => {
   assert.equal(poLineType({ typeDesc: "parts", repairType: "LABOR" }), "PARTS");

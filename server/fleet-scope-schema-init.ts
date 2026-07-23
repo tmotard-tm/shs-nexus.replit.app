@@ -682,7 +682,28 @@ DO $$ BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='category') THEN
     ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "category" varchar(20) NOT NULL DEFAULT 'standard';
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='lane') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "lane" varchar(20) NOT NULL DEFAULT 'declined';
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='archived_at') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "archived_at" timestamp;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='archive_reason') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "archive_reason" varchar(50);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='holman_status') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "holman_status" varchar(30);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='fs_decommissioning_vehicles' AND column_name='holman_status_synced_at') THEN
+    ALTER TABLE "fs_decommissioning_vehicles" ADD COLUMN "holman_status_synced_at" timestamp;
+  END IF;
 END $$;
+
+-- One-time seed of the new lane from the legacy sent_to_procurement flag. Idempotent:
+-- only touches rows still at the default 'declined'. Archived rows are set by the
+-- Holman lane sync (POST /api/fs/decommissioning/sync-lanes), never by this seed.
+UPDATE "fs_decommissioning_vehicles" SET "lane" = 'decommissioned'
+  WHERE "sent_to_procurement" = true AND "lane" = 'declined';
 
 -- Backfill fs_pmf_status_events with existing fleet trucks that have no fleet_scope events yet.
 -- This ensures daysInStatus is accurate for trucks added before this feature shipped,

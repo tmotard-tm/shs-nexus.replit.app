@@ -1355,6 +1355,13 @@ export const decommissioningVehicles = pgTable("fs_decommissioning_vehicles", {
   isAssigned: boolean("is_assigned").default(false), // Whether truck # is currently found in TPMS_EXTRACT
   isManager: boolean("is_manager").default(false), // True if this tech's enterpriseId appears as a MANAGER_ENT_ID for some other tech in TPMS_EXTRACT
   category: varchar("category", { length: 20 }).notNull().default("standard"), // 'standard' (Active/Decommissioned) or 'old_decline' (Old Declines tab)
+  // 3-category lifecycle lane (source of truth for the Decommissioning tabs). Non-destructive:
+  // archived rows stay in this table and show in the Archived tab; nothing is ever deleted.
+  lane: varchar("lane", { length: 20 }).notNull().default("declined"), // 'declined' | 'decommissioned' | 'archived'
+  archivedAt: timestamp("archived_at"),
+  archiveReason: varchar("archive_reason", { length: 50 }), // 'holman_oos' | 'holman_sold' | 'manual'
+  holmanStatus: varchar("holman_status", { length: 30 }), // cached Holman status: Active | Out of Service | Sold
+  holmanStatusSyncedAt: timestamp("holman_status_synced_at"),
   nearestTechName: varchar("nearest_tech_name", { length: 100 }),
   nearestTechPhone: varchar("nearest_tech_phone", { length: 50 }),
   nearestTechZip: varchar("nearest_tech_zip", { length: 20 }),

@@ -16814,6 +16814,44 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // Sync decom-tab lanes from Holman status (Declined/Decommissioned/Archived).
+  // Non-destructive: never deletes; archiving only ever sets lane='archived' on
+  // the existing row (sticky, one-way). Safe to re-run any time.
+  app.post("/decommissioning/sync-lanes", async (req, res) => {
+    try {
+      const before = await fleetScopeStorage.getAllDecommissioningVehicles();
+      const beforeLaneByTruck = new Map(before.map(v => [v.truckNumber, v.lane]));
+
+      await fleetScopeStorage.syncDecommissioningLanesFromHolman();
+
+      const after = await fleetScopeStorage.getAllDecommissioningVehicles();
+      const newlyArchivedTrucks: string[] = [];
+      for (const v of after) {
+        if (beforeLaneByTruck.get(v.truckNumber) !== "archived" && v.lane === "archived") {
+          newlyArchivedTrucks.push(v.truckNumber);
+        }
+      }
+      const totals = {
+        declined: after.filter(v => v.lane === "declined").length,
+        decommissioned: after.filter(v => v.lane === "decommissioned").length,
+        archived: after.filter(v => v.lane === "archived").length,
+        all: after.length,
+      };
+
+      console.log(`[Decommissioning Lane Sync] Newly archived: ${newlyArchivedTrucks.length}, totals:`, totals);
+
+      res.json({
+        success: true,
+        newlyArchived: newlyArchivedTrucks.length,
+        newlyArchivedTrucks,
+        totals,
+      });
+    } catch (error: any) {
+      console.error("[Decommissioning Lane Sync] Error:", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // ── Daily AMS Declined Repair check ──────────────────────────────────────
   // Snapshot today's AMS statuses, diff vs the previous snapshot, and auto-add
   // NEW Declined Repair trucks to Decommissioning (with dedup vs decomm list,

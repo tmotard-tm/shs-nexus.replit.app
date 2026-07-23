@@ -6,7 +6,7 @@
  * companies or roadside assistance PO's unless parts and/or labor are included
  * on the PO."
  *
- * Two bugs this module fixes:
+ * Three bugs this module fixes:
  *  1. The old `classifyVendor(vendorName, description)` concatenated the vendor
  *     NAME with the PO's ATA-group description before running the tow regex. Any
  *     real repair shop whose PO happened to carry a ROADSIDE ata-group line
@@ -16,10 +16,19 @@
  *     thing that may feed the name regexes.
  *  2. Tyler's parts/labor EXCEPTION was implemented nowhere: a tow/roadside-named
  *     vendor that actually performed the repair could never surface as the shop.
+ *  3. (2026-07-23) Payment and billing artifacts classified as 'repair': the
+ *     luca-rental-list feed offered SINGLE USE CC PROVIDER USA (a card
+ *     processor) and ENTERPRISE - HANDBILL (the rental company's own billing
+ *     line) as SHOP_NAME on 11 trucks. LIVHR's parseVrmShopOfRecord guard
+ *     rejected all 11 (rejectedVendor=11), so no wrong call happened, but the
+ *     feed must never offer them: a payment line pays the shop, it is not the
+ *     shop. Hence PAYMENT_RE and the HANDBILL/ENTERPRISE terms in RENTAL_RE.
  *
  * RULE ORDER (deterministic; do not reorder without a Tyler ruling):
  *   toll name                              -> 'toll'
- *   rental blocklist name (wins)           -> 'rental_placeholder'
+ *   payment-instrument name (wins over     -> 'other'
+ *     everything, incl. parts/labor)
+ *   rental/billing blocklist name (wins)   -> 'rental_placeholder'
  *   tow/roadside name + PARTS/LABOR line   -> 'repair'      (Tyler's exception)
  *   tow/roadside name, no PARTS/LABOR      -> 'tow'
  *   parts-distributor name                 -> 'parts'
@@ -37,7 +46,20 @@ export type PoVendorType = "repair" | "tow" | "parts" | "rental_placeholder" | "
 export const TOLL_RE = /\bTOLL/i;
 export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|JUMP\s?START|LOCKOUT|WINCH/i;
 export const PARTS_RE = /\bJASPER\b|HOLMAN PARTS|PARTS DISTRIBUTION|\bNAPA\b|AUTOZONE|O'?REILLY|ADVANCE AUTO|GENUINE PARTS|WORLDPAC/i;
-export const RENTAL_RE = /ENTERPRISE RENT|\bNATIONAL\b|RENT-?A-?CAR|\bHERTZ\b|\bAVIS\b|\bRENTAL\b/i;
+// \bENTERPRISE\b is deliberately the SINGULAR with word boundaries: every
+// singular-ENTERPRISE vendor in 3y of ETL data is the rental company
+// (ENTERPRISE RENT-A-CAR INC., ENTERPRISE - HANDBILL; ENTERPRISE TOLLS is
+// caught by TOLL_RE first per the rule order), while real repair shops carry
+// the plural (DAME ENTERPRISES LLC, BUDDE ENTERPRISES INC), which the trailing
+// \b does not match. HAND.?BILL catches any "<vendor> - HANDBILL" billing row;
+// a billing artifact is never the shop holding the van.
+export const RENTAL_RE = /\bENTERPRISE\b|\bHAND.?BILL\b|\bNATIONAL\b|RENT-?A-?CAR|\bHERTZ\b|\bAVIS\b|\bRENTAL\b/i;
+// Payment instruments: one-time credit cards Holman issues to pay a vendor
+// ("SINGLE USE CC PROVIDER USA"). Their PO lines can legitimately read
+// PARTS/LABOR (the card paid for parts and labor somewhere), so the tow-style
+// parts/labor exception must never rescue these: there is no one to call at a
+// card processor.
+export const PAYMENT_RE = /SINGLE[\s-]*USE|\bCC\s+PROVIDER\b|CREDIT\s*CARD/i;
 
 // Holman REPAIR_TYPE_DESCRIPTION / portal lineItems.typeDesc domain (verified on
 // PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS, last 3y): PARTS, LABOR,
@@ -102,6 +124,9 @@ export function classifyPoVendor(input: PoClassInput): PoClassResult {
   const anyRoadside = input?.anyRoadside ?? s.anyRoadside;
 
   if (TOLL_RE.test(name)) return { vendorType: "toll", hasPartsOrLabor };
+  // A single-use card PAYS a shop; it is not the shop. Deliberately above the
+  // tow branch so PARTS/LABOR lines cannot rescue it into 'repair'.
+  if (PAYMENT_RE.test(name)) return { vendorType: "other", hasPartsOrLabor };
   if (RENTAL_RE.test(name)) return { vendorType: "rental_placeholder", hasPartsOrLabor };
   if (TOW_RE.test(name)) {
     // Tyler's exception: a tow/roadside vendor that actually did parts/labor work

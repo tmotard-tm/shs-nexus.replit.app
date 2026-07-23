@@ -1677,6 +1677,44 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // Refreshes the cached Holman status on every non-archived decom row, then
+  // promotes any row whose Holman status is Out of Service/Sold into the
+  // 'archived' lane. Archiving is STICKY (one-way): an already-archived row
+  // is never revisited here even if Holman's status later flips back, so
+  // "keep every record until told otherwise" holds by construction. This
+  // NEVER deletes a row -- it only ever writes lane/archived_at/archive_reason/
+  // holman_status columns. Set-based (two statements), not a per-row loop.
+  async syncDecommissioningLanesFromHolman(): Promise<void> {
+    await getDb().execute(sql`
+      UPDATE fs_decommissioning_vehicles d
+      SET holman_status = h.status_text,
+          holman_status_synced_at = now()
+      FROM (
+        SELECT
+          holman_vehicle_number,
+          COALESCE(
+            NULLIF(btrim(raw_data->>'status'), ''),
+            CASE status_code WHEN 1 THEN 'Active' WHEN 2 THEN 'Out of Service' WHEN 3 THEN 'Sold' END
+          ) AS status_text
+        FROM holman_vehicles_cache
+      ) h
+      WHERE regexp_replace(btrim(d.truck_number), '^0+', '') =
+            regexp_replace(btrim(h.holman_vehicle_number), '^0+', '')
+        AND d.lane <> 'archived'
+        AND h.status_text IS NOT NULL
+        AND d.holman_status IS DISTINCT FROM h.status_text
+    `);
+
+    await getDb().execute(sql`
+      UPDATE fs_decommissioning_vehicles
+      SET lane = 'archived',
+          archived_at = now(),
+          archive_reason = CASE WHEN holman_status = 'Sold' THEN 'holman_sold' ELSE 'holman_oos' END
+      WHERE lane <> 'archived'
+        AND holman_status IN ('Out of Service', 'Sold')
+    `);
+  }
+
   async getExcludedDecommTruckNumbers(): Promise<string[]> {
     const rows = await getDb().select().from(decommExcludedTrucks);
     return rows.map(r => r.truckNumber);
