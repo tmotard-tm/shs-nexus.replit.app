@@ -1309,6 +1309,8 @@ export async function getLucaRentalList(): Promise<any> {
       i.confidence AS eid_confidence,
       COALESCE(i.override_status, i.resolved_status) AS employee_status,
       to_char(i.resolved_status_date,'YYYY-MM-DD') AS employee_status_date,
+      i.resolved_district AS tech_district,
+      hv.tpms_assigned_tech_name AS tpms_tech,
       po.open_po_count, po.any_po_count, po.last_rental_date, po.has_rental_auth,
       ownp.own_pad AS assigned_truck,
       apo.open_po_count AS assigned_open_po,
@@ -1322,6 +1324,9 @@ export async function getLucaRentalList(): Promise<any> {
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
+    -- TPMS tech for the rental truck, same source the board reads (2026-07-23:
+    -- LUCA's own TPMS mirror covers 338/382 trucks; this closes the gap).
+    LEFT JOIN holman_vehicles_cache hv ON hv.vehicle_number_display = c.case_key
     -- Marquee-field joins (2026-07-23): the same atr/ownp/po_agg pattern the
     -- board query (getRentalOpsMaster) uses, so the feed forwards employment,
     -- the renter's OWN assigned truck (+ its open-PO count under the SAME
@@ -1414,6 +1419,8 @@ export async function getLucaRentalList(): Promise<any> {
     SHOP_SOURCE: shopName ? "vrm_repair_po" : null,
     // ── marquee fields (2026-07-23): the board-only facts LUCA's workload
     //    (NEXUS_FEED_COLUMNS) was built to consume — see the doc block above.
+    TPMS_TECH: r.tpms_tech ?? null,
+    TECH_DISTRICT: r.tech_district ?? null,
     AMS_STATUS: r.ams_status ?? null,
     AMS_STATUS_AT: r.ams_status_at ?? null,
     EMPLOYEE_STATUS: r.employee_status ?? null,
