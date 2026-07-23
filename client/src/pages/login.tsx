@@ -34,7 +34,17 @@ export default function Login() {
 
   const handleSsoLogin = () => {
     const nextUrl = urlParams.get('next') || '/';
-    window.location.href = `/auth/login?next=${encodeURIComponent(nextUrl)}`;
+    const ssoUrl = `/auth/login?next=${encodeURIComponent(nextUrl)}`;
+    // When running inside an embedded preview iframe (e.g. the Replit
+    // workspace preview), the IdP's session cookie is treated as a
+    // third-party cookie and blocked, producing a "missing cookie" error.
+    // Break out to a top-level tab so the SSO flow can set its cookies.
+    const isEmbedded = window.self !== window.top;
+    if (isEmbedded) {
+      window.open(`${window.location.origin}${ssoUrl}`, "_blank", "noopener");
+      return;
+    }
+    window.location.href = ssoUrl;
   };
 
   if (isLoading || user) {
