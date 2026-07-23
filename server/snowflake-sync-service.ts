@@ -891,6 +891,35 @@ export class SnowflakeSyncService {
         }
       }
 
+      // Stale-roster sweep (2026-07-23): the upsert-only sync leaves ghost rows for
+      // employees the Snowflake roster views stop returning (e.g. CNELSO1 lingered a
+      // week after dropping from the source). After a fully CLEAN run (zero batch
+      // errors — a failed batch makes ~500 legit techs look unseen), flag every row
+      // this run didn't touch so it falls off roster-facing reads. Guard: skip the
+      // sweep if it would flag more than max(150, 5% of the fetched roster) rows —
+      // a thin/bad Snowflake day must not mass-drop the roster. Reappearing techs
+      // are un-flagged by the upsert itself.
+      if (result.errors.length === 0 && rows.length > 0) {
+        try {
+          const runStartedAt = new Date(startTime);
+          const staleCandidates = await storage.countAllTechsMissingFromSync(runStartedAt);
+          const sweepGuard = Math.max(150, Math.ceil(rows.length * 0.05));
+          if (staleCandidates === 0) {
+            console.log('[Sync] Stale-roster sweep: no dropped employees to flag');
+          } else if (staleCandidates > sweepGuard) {
+            const msg = `Stale-roster sweep SKIPPED: ${staleCandidates} unseen rows exceeds guard ${sweepGuard} (max(150, 5% of ${rows.length})) — possible partial Snowflake feed`;
+            console.warn(`[Sync] ${msg}`);
+            result.errors.push(msg);
+          } else {
+            const flagged = await storage.markAllTechsDroppedFromSource(runStartedAt);
+            console.log(`[Sync] Stale-roster sweep: flagged ${flagged} employee(s) no longer in the Snowflake roster (dropped_from_source_at set)`);
+          }
+        } catch (sweepError: any) {
+          console.error('[Sync] Stale-roster sweep failed:', sweepError.message);
+          result.errors.push(`Stale-roster sweep failed: ${sweepError.message}`);
+        }
+      }
+
       // Honest completion semantics (2026-07-11): batch errors no longer report
       // success — a partial run is visible, an all-failed run is 'failed'.
       result.success = result.errors.length === 0;

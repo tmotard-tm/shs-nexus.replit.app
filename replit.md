@@ -121,6 +121,8 @@ Preferred communication style: Simple, everyday language.
 
 ## Gotchas
 
+-   **all_techs stale-roster sweep (2026-07-23)**: The `all_techs` sync is upsert-only, so employees the Snowflake roster views stop returning used to linger as ghost rows forever (e.g. CNELSO1). After every fully clean `syncAllTechs` run (zero batch errors), a sweep sets `dropped_from_source_at` on rows the run didn't touch; roster-facing reads (`getAllTechs`/`getAllTechsCount`/`getAllTechStatuses` → `/api/all-techs*`) exclude flagged rows, while offboarding queries and direct lookups still see them. A reappearing employee is un-flagged by the upsert itself. Guard: the sweep is skipped (with a warning in the sync log's `errorMessage`) if it would flag more than `max(150, 5% of the fetched roster)` rows — a thin/partial Snowflake feed must never mass-drop the roster. Prod backfill is automatic: the first clean sync after publish flags the accumulated ghosts (~266 measured 7/23, mostly orphans of the 7/11 roster-source swap; comfortably under the ~660 guard). No manual prod action needed beyond publishing.
+
 -   **Drizzle Kit vs. Raw SQL Migrations**: `drizzle-kit push` may conflict with Fleet-Scope `fs_*` tables (managed outside Drizzle). Use raw SQL migrations for these tables.
 -   **VRM Theming**: Always use the defined `colors` palette for VRM modules; avoid hardcoding hex values to ensure dark mode compatibility.
 -   **Snowflake CTE join for TPMS Phone**: `supervisor_tpms_phone_raw` can be NULL even if `MOBILEPHONENUMBER` is present. The system uses an in-memory `tpms-extract-snapshot` as a backstop.

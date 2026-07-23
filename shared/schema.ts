@@ -497,6 +497,12 @@ export const allTechs = pgTable("all_techs", {
   processedAt: timestamp("processed_at"), // When offboarding was fully processed
   // Sync tracking
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  // Set when a clean all_techs sync run no longer returns this employee from the
+  // Snowflake roster views (upsert-only sync would otherwise leave ghost rows forever,
+  // e.g. CNELSO1 2026-07). Cleared automatically if the employee reappears in the feed.
+  // Roster-facing reads (getAllTechs/getAllTechsCount/getAllTechStatuses) exclude
+  // flagged rows; offboarding/lookup paths still see them.
+  droppedFromSourceAt: timestamp("dropped_from_source_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {
@@ -506,6 +512,7 @@ export const allTechs = pgTable("all_techs", {
     employmentStatusIdx: index("all_techs_employment_status_idx").on(table.employmentStatus),
     effectiveDateIdx: index("all_techs_effective_date_idx").on(table.effectiveDate),
     offboardingTaskCreatedIdx: index("all_techs_offboarding_task_created_idx").on(table.offboardingTaskCreated),
+    droppedFromSourceAtIdx: index("all_techs_dropped_from_source_at_idx").on(table.droppedFromSourceAt),
   };
 });
 

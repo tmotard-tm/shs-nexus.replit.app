@@ -127,7 +127,7 @@ import {
   fleetOperationLog,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, and, or, inArray, desc, sql } from "drizzle-orm";
+import { eq, and, or, inArray, desc, sql, isNull } from "drizzle-orm";
 import { randomUUID, createHash, randomBytes } from "crypto";
 import bcrypt from "bcrypt";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, vehicleNumberVariants } from "./vehicle-number-utils";
@@ -335,6 +335,10 @@ export interface IStorage {
   upsertAllTech(tech: InsertAllTech): Promise<AllTech>;
   bulkUpsertAllTechs(techs: InsertAllTech[]): Promise<number>;
   updateAllTech(id: string, updates: Partial<AllTech>): Promise<AllTech | undefined>;
+  // Stale-roster sweep: rows not touched by the sync run that started at `since`
+  // are no longer returned by the Snowflake roster views.
+  countAllTechsMissingFromSync(since: Date): Promise<number>;
+  markAllTechsDroppedFromSource(since: Date): Promise<number>;
 
   // Sync Logs Module
   getSyncLog(id: string): Promise<SyncLog | undefined>;
@@ -1478,6 +1482,14 @@ export class MemStorage implements IStorage {
 
   async updateAllTech(_id: string, _updates: Partial<AllTech>): Promise<AllTech | undefined> {
     return undefined; // Not implemented in memory storage
+  }
+
+  async countAllTechsMissingFromSync(_since: Date): Promise<number> {
+    return 0; // Not implemented in memory storage
+  }
+
+  async markAllTechsDroppedFromSource(_since: Date): Promise<number> {
+    return 0; // Not implemented in memory storage
   }
 
   // Sync Logs Module - Stub implementation for MemStorage
@@ -3907,18 +3919,23 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllTechs(): Promise<AllTech[]> {
-    return await db.select().from(allTechs).orderBy(allTechs.techName);
+    // Roster-facing read: exclude rows the Snowflake source no longer returns.
+    return await db.select().from(allTechs)
+      .where(isNull(allTechs.droppedFromSourceAt))
+      .orderBy(allTechs.techName);
   }
 
   async getAllTechsCount(): Promise<number> {
-    const result = await db.select({ count: sql<number>`count(*)` }).from(allTechs);
+    const result = await db.select({ count: sql<number>`count(*)` }).from(allTechs)
+      .where(isNull(allTechs.droppedFromSourceAt));
     return Number(result[0]?.count ?? 0);
   }
 
   async getAllTechStatuses(): Promise<{ techRacfid: string; employmentStatus: string | null }[]> {
     return await db
       .select({ techRacfid: allTechs.techRacfid, employmentStatus: allTechs.employmentStatus })
-      .from(allTechs);
+      .from(allTechs)
+      .where(isNull(allTechs.droppedFromSourceAt));
   }
 
   async getTermedEmployeesFromRoster(daysBack: number = 30): Promise<AllTech[]> {
@@ -3982,8 +3999,14 @@ export class DatabaseStorage implements IStorage {
   async bulkUpsertAllTechs(techs: InsertAllTech[]): Promise<number> {
     if (techs.length === 0) return 0;
     
+    // Stamp syncedAt explicitly on inserts (not just conflict-updates) so the
+    // stale-roster sweep's `synced_at < runStart` predicate compares Node-clock
+    // timestamps on both paths instead of relying on the DB defaultNow().
+    const now = new Date();
+    const values = techs.map(t => ({ ...t, syncedAt: now }));
+    
     const result = await db.insert(allTechs)
-      .values(techs)
+      .values(values)
       .onConflictDoUpdate({
         target: allTechs.employeeId,
         set: {
@@ -4011,6 +4034,8 @@ export class DatabaseStorage implements IStorage {
           // TPMS truck assignment from TPMS_EXTRACT_LAST_ASSIGNED — informational-only, may be stale
           lastKnownTruckLu: sql`excluded.last_known_truck_lu`,
           lastKnownTruckFileDate: sql`excluded.last_known_truck_file_date`,
+          // Reappearing in the source feed clears any prior dropped flag.
+          droppedFromSourceAt: null,
           syncedAt: new Date(),
           updatedAt: new Date(),
         },
@@ -4026,6 +4051,27 @@ export class DatabaseStorage implements IStorage {
       .where(eq(allTechs.id, id))
       .returning();
     return result[0];
+  }
+
+  async countAllTechsMissingFromSync(since: Date): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(allTechs)
+      .where(and(
+        sql`${allTechs.syncedAt} < ${since}`,
+        isNull(allTechs.droppedFromSourceAt),
+      ));
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async markAllTechsDroppedFromSource(since: Date): Promise<number> {
+    const now = new Date();
+    const result = await db.update(allTechs)
+      .set({ droppedFromSourceAt: now, updatedAt: now })
+      .where(and(
+        sql`${allTechs.syncedAt} < ${since}`,
+        isNull(allTechs.droppedFromSourceAt),
+      ))
+      .returning({ id: allTechs.id });
+    return result.length;
   }
 
   // Sync Logs Module
