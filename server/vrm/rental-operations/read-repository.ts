@@ -1556,12 +1556,43 @@ export async function getClassifiedPoHistory(truck: string, limit = 100): Promis
 async function fetchPoHistoryWithFallback(truck: string): Promise<{ poHistory: any[]; poSource: string }> {
   try {
     const { getTruckPoHistory } = await import("./po-history");
-    return { poHistory: await getTruckPoHistory(truck), poSource: "snowflake_live" };
+    const live = (await getTruckPoHistory(truck)).map((p) => ({ ...p, source: "holman_etl" }));
+    // The Snowflake ETL loader has a rolling 5-day window and permanently
+    // misses some POs; those are materialized into the local po_history table
+    // under source='holman_portal'. The live path reads Snowflake directly, so
+    // portal-only POs would silently vanish here — merge them in (badge-worthy:
+    // they may lack an amount/description until the ETL catches up).
+    try {
+      const seen = new Set(live.map((p) => p.poNumber));
+      const portalRows = await db.execute(sql`
+        SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
+               vendor_type, vendor_city, vendor_state, description, approved_amount, has_parts_labor,
+               to_char(upload_timestamp,'YYYY-MM-DD"T"HH24:MI:SSZ') AS upload_timestamp
+        FROM vrm_rental_operations_po_history
+        WHERE vehicle_number_padded = ${truck} AND source = 'holman_portal'
+        ORDER BY po_date DESC NULLS LAST, po_number DESC`);
+      for (const p of portalRows.rows as any[]) {
+        if (seen.has(p.po_number)) continue;
+        live.push({
+          poNumber: p.po_number, poDate: p.po_date, poStatus: p.po_status, vendorType: p.vendor_type,
+          vendorName: p.vendor_name, vendorAddress: null, vendorCity: p.vendor_city, vendorState: p.vendor_state,
+          poType: null, repairDate: null, paidDate: null, approver: null, odometer: null,
+          hasPartsOrLabor: p.has_parts_labor === true,
+          totalAmount: p.approved_amount == null ? null : Number(p.approved_amount),
+          uploadTimestamp: p.upload_timestamp ?? null, lineItems: [],
+          source: "holman_portal",
+        } as any);
+      }
+      live.sort((a, b) => String(b.poDate ?? "").localeCompare(String(a.poDate ?? "")) || String(b.poNumber).localeCompare(String(a.poNumber)));
+    } catch (pe: any) {
+      console.warn(`[VRM/RentalOps] portal-PO merge failed for ${truck} (non-fatal):`, pe?.message || pe);
+    }
+    return { poHistory: live, poSource: "snowflake_live" };
   } catch (e: any) {
     console.warn(`[VRM/RentalOps] live PO history failed for ${truck}, using cached table:`, e?.message || e);
     const poHist = await db.execute(sql`
       SELECT po_number, to_char(po_date,'YYYY-MM-DD') AS po_date, po_status, vendor_name,
-             vendor_type, vendor_city, vendor_state, description, approved_amount, has_parts_labor
+             vendor_type, vendor_city, vendor_state, description, approved_amount, has_parts_labor, source
       FROM vrm_rental_operations_po_history WHERE vehicle_number_padded = ${truck}
       ORDER BY po_date DESC NULLS LAST, po_number DESC`);
     const poHistory = (poHist.rows as any[]).map((p) => ({
@@ -1569,6 +1600,7 @@ async function fetchPoHistoryWithFallback(truck: string): Promise<{ poHistory: a
       vendorName: p.vendor_name, vendorCity: p.vendor_city, vendorState: p.vendor_state,
       hasPartsOrLabor: p.has_parts_labor === true,
       totalAmount: p.approved_amount == null ? null : Number(p.approved_amount), lineItems: [],
+      source: p.source ?? "holman_etl",
     }));
     return { poHistory, poSource: "cached_fallback" };
   }

@@ -175,6 +175,7 @@ interface PoRecord {
   vendorName: string | null; vendorAddress?: string | null; vendorCity?: string | null; vendorState?: string | null;
   poType?: string | null; repairDate?: string | null; paidDate?: string | null; approver?: string | null;
   odometer?: number | null; totalAmount: number | null; uploadTimestamp?: string | null; lineItems: PoLineItem[];
+  source?: string | null;   // 'holman_etl' (Snowflake) | 'holman_portal' (recovered from portal scrape)
 }
 interface PoDetailPortal { notes: string | null; poNotes: Array<{ transDate?: string; notes?: string }> | null; lineItems: any[] | null; vendorPhone: string | null; vendorAddress: string | null; meter: any; createdBy: string | null; estimatedReadyDate: string | null; workCompletedDate: string | null; rentalRequestExists: boolean; openRentalRequestWindow: string | null }
 interface PortalData {
@@ -1612,6 +1613,12 @@ function PoHistorySection({ heading, poList, poSource, portal }: { heading: stri
                 <span style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.ink }}>{p.poNumber}</span>
                 <span style={{ fontSize: 11, color: colors.inkMuted }}>{fmtDate(p.poDate)}</span>
                 <span style={{ fontSize: 10, fontWeight: 700, color: sc, textTransform: "uppercase" }}>{p.poStatus}</span>
+                {p.source === "holman_portal" && (
+                  <span title="Recovered from the Holman portal scrape — amount/description may be missing until the Snowflake ETL catches up"
+                    style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: colors.inkMuted, border: `1px solid ${colors.rule}`, borderRadius: 4, padding: "1px 5px", flexShrink: 0 }}>
+                    portal
+                  </span>
+                )}
                 <span style={{ fontSize: 12, color: colors.ink, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.vendorName}</span>
                 <span style={{ fontSize: 9.5, color: colors.inkMuted, textTransform: "uppercase" }}>{p.vendorType}</span>
                 <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>{money2(p.totalAmount)}</span>
@@ -1624,7 +1631,7 @@ function PoHistorySection({ heading, poList, poSource, portal }: { heading: stri
                     {p.repairDate ? ` · repair ${fmtDate(p.repairDate)}` : ""}{p.paidDate ? ` · paid ${fmtDate(p.paidDate)}` : ""}{p.poType ? ` · ${p.poType}` : ""}
                     {p.uploadTimestamp ? ` · synced ${fmtDateTime(p.uploadTimestamp)}` : ""}
                   </div>
-                  {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>Line items not available (cached view).</div> : (
+                  {p.lineItems.length === 0 ? <div style={{ fontSize: 12, color: colors.inkMuted }}>{p.source === "holman_portal" ? "Line items not available yet — this PO was recovered from the Holman portal and the ETL hasn't caught up." : "Line items not available (cached view)."}</div> : (
                     <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11.5, fontFamily: fonts.dmSans }}>
                       <tbody>
                         {p.lineItems.map((li, j) => (
