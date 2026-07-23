@@ -273,3 +273,8 @@ phone passed from the client for a known tech.
 - `fs_comms_contacts.empl_status` holds the LAST roster value (A/L/P/S) and is NOT cleared on tombstone — the sync only flips `active=false`. A terminated tech usually still reads 'A'.
 - **Rule:** never surface `empl_status` raw for possibly-inactive contacts. Derive the display letter via `effectiveEmplStatus()` (server/fleet-comms/storage.ts): `active=false` → 'T', else the stored letter. Threads list/detail use it; the picker route is safe only because it hard-filters `active=true`.
 - **Why:** raw reads rendered ex-employees with a green "Active" badge in the inbox.
+
+## LOA outreach manual trigger (2026-07-22)
+- Prod base URL is https://SHS-Nexus.replit.app (fleet-scope.replit.app 302-redirects there).
+- Cron route `/api/fs/comms/cron/loa-outreach` accepts `{"forceDaily":true}` (+optional `"dryRun":true`) with x-internal-cron = SESSION_SECRET — bypasses ET-hour gate + daily watermark; flag + advisory lock still apply. Call takes ~30-75s; curl in the tool env may time out client-side while the request still completes — check logs/DB, don't re-fire blindly.
+- COMMS_PUBLIC_BASE_URL was NEVER set anywhere (SAML_BASE_URL also absent as env var) → form links rendered relative. Now set as shared env var; prod picks up env changes only on republish. Always dry-run-preview the link before a real send.
