@@ -55,7 +55,7 @@ export default function LoaRentalForm() {
     if (!location.trim()) errors.location = "Please enter the address where your truck is located.";
     if (!locationContact.trim()) errors.locationContact = "Please enter a contact number for this location.";
     if (!keys) errors.keys = "Please select an option for Keys.";
-    if (!repaired) errors.repaired = "Please select your rental status.";
+    if (!repaired) errors.repaired = "Please select your rental vehicle status.";
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -215,7 +215,7 @@ export default function LoaRentalForm() {
       }}
     >
       <div>
-        <Label htmlFor="loa-location">What is the address of where your truck is located?{requiredMark}</Label>
+        <Label htmlFor="loa-location">What is the address of where your Sears truck is located?{requiredMark}</Label>
         <Input
           id="loa-location"
           value={location}
@@ -272,7 +272,7 @@ export default function LoaRentalForm() {
         )}
       </div>
       <div>
-        <Label>Rental status{requiredMark}</Label>
+        <Label>Rental Vehicle Status{requiredMark}</Label>
         <Select value={repaired} onValueChange={(v) => { setRepaired(v); clearFieldError("repaired"); }}>
           <SelectTrigger
             className={`mt-1 ${fieldErrors.repaired ? "border-red-500" : ""}`}
