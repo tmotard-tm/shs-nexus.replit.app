@@ -88,6 +88,17 @@ export function etHour(now: Date = new Date()): number {
   return Number(ET_HOUR_FMT.format(now)) % 24;
 }
 
+// Hard TCPA quiet-hours floor (ET). No send path (scheduled, forced, or manual)
+// may text a technician outside this window. `force` bypasses the daily 10 AM
+// slot and the once-per-day watermark, but it does NOT bypass this floor.
+// 8 AM to 9 PM ET mirrors the SMS TCPA window.
+export const LOA_SEND_WINDOW_START_ET = 8;
+export const LOA_SEND_WINDOW_END_ET = 21;
+export function withinLoaSendWindow(now: Date = new Date()): boolean {
+  const h = etHour(now);
+  return h >= LOA_SEND_WINDOW_START_ET && h < LOA_SEND_WINDOW_END_ET;
+}
+
 // ---------------------------------------------------------------------------
 // Form link
 // ---------------------------------------------------------------------------
@@ -437,6 +448,14 @@ export async function runLoaOutreach(
   const { force = false, dryRun = false } = opts;
   const now = new Date();
 
+  // TCPA floor: never send outside the ET window, even on a forced/manual run.
+  // Returns BEFORE any state write, so a blocked off-hours force does not consume
+  // the day's watermark; the legitimate 10 AM scheduled send still fires.
+  if (!dryRun && !withinLoaSendWindow(now)) {
+    console.warn(`[LOA Outreach] blocked: outside ET send window (etHour=${etHour(now)}, trigger=${triggeredBy})`);
+    return { skipped: true, reason: "tcpa_quiet_hours", recipients: 0, sentTechs: 0, sentMessages: 0, excluded: 0, alreadySentToday: 0, errors: 0 };
+  }
+
   if (!dryRun && !force) {
     const enabled = await getBooleanSetting(LOA_OUTREACH_FLAG, false);
     if (!enabled) {
@@ -580,6 +599,11 @@ export async function runLoaOutreach(
 export async function processLoaResends(): Promise<{ resent: number; errors: number }> {
   const enabled = await getBooleanSetting(LOA_OUTREACH_FLAG, false);
   if (!enabled) return { resent: 0, errors: 0 };
+
+  // TCPA floor: defer resends that come due outside the ET window. Leaving
+  // pendingResendAt set means the next in-window cron tick drains them; nothing
+  // is dropped and nothing sends in quiet hours.
+  if (!withinLoaSendWindow()) return { resent: 0, errors: 0 };
 
   const due = await fsDb
     .select()
