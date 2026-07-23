@@ -779,11 +779,17 @@ export function registerCommsRoutes(app: Router): void {
   // ── Send (single) ───────────────────────────────────────────────────────
   app.post("/comms/send", gate, async (req: any, res) => {
     try {
-      const { ldap, phone, category, body, mediaUrl, managerCc, force, confirmed } = req.body || {};
+      const { ldap, phone, phoneLocked, category, body, mediaUrl, managerCc, force, confirmed } = req.body || {};
       const hasMedia = Array.isArray(mediaUrl) && mediaUrl.length > 0;
       if (!isValidCategory(category)) return res.status(400).json({ message: "Valid category required" });
       if ((!body || !String(body).trim()) && !hasMedia) return res.status(400).json({ message: "Message body or attachment required" });
       if (!ldap && !phone) return res.status(400).json({ message: "ldap or phone required" });
+      // phoneLocked = "send to this exact number" (per-number reply targeting in
+      // the thread view). Requires an explicit phone; without it resolveTarget
+      // would lock onto null and skip the send with a confusing reason.
+      if (phoneLocked && (!phone || String(phone).replace(/\D/g, "").length < 10)) {
+        return res.status(400).json({ message: "phoneLocked requires a valid phone" });
+      }
 
       // Lifecycle warn on individual sends: unlike bulk (which hard-excludes),
       // a single send to a termed or on-leave tech is allowed but requires an
@@ -810,6 +816,7 @@ export function registerCommsRoutes(app: Router): void {
       const result = await sendMessage({
         ldap: ldap ?? null,
         phone: phone ?? null,
+        phoneLocked: !!phoneLocked,
         category,
         body: body ? String(body) : "",
         mediaUrl: Array.isArray(mediaUrl) ? mediaUrl : null,

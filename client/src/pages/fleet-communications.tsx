@@ -93,6 +93,7 @@ interface Message {
   mediaType: string | null;
   senderName: string | null;
   createdAt: string | null;
+  readAt?: string | null;
 }
 interface Contact {
   ldap: string;
@@ -416,9 +417,14 @@ export default function FleetCommunications() {
   const [olderMessages, setOlderMessages] = useState<Message[]>([]);
   const [moreOlder, setMoreOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Per-number subtab inside the open thread: "all" (merged view, default) or a
+  // 10-digit key filtering to messages sent to/from that specific number. Reset
+  // whenever the open thread (or category scope) changes.
+  const [numberTab, setNumberTab] = useState<string>("all");
   useEffect(() => {
     setOlderMessages([]);
     setMoreOlder(false);
+    setNumberTab("all");
   }, [selectedId, category]);
 
   // Always open a thread scrolled to the newest message so the team never has to
@@ -431,7 +437,7 @@ export default function FleetCommunications() {
   useEffect(() => {
     if (!selectedId) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
-  }, [selectedId, latestMsgId]);
+  }, [selectedId, latestMsgId, numberTab]);
   useEffect(() => {
     setMoreOlder(!!detail?.hasMore);
   }, [detail?.hasMore, selectedId]);
@@ -612,6 +618,33 @@ export default function FleetCommunications() {
   // different (e.g. older) number, so merged old-number texts stay labeled.
   const threadDigits = (thread?.phoneDigits || (detail?.contact?.phone || "").replace(/\D/g, "")).slice(-10);
 
+  // Distinct phone numbers seen in the loaded conversation (e.g. LOA Rental
+  // outreach texts both the TPMS mobile and the personal number). On-file
+  // number first, then others in first-appearance order. When 2+, the thread
+  // view shows per-number subtabs so each number's conversation can be read —
+  // and replied to — individually.
+  const msgDigits = (m: Message) => (m.phone || "").replace(/\D/g, "").slice(-10);
+  const threadNumbers: string[] = [];
+  if (threadDigits.length === 10) threadNumbers.push(threadDigits);
+  for (const m of messages) {
+    const d = msgDigits(m);
+    if (d.length === 10 && !threadNumbers.includes(d)) threadNumbers.push(d);
+  }
+  // Unread indicator per number (inbound + not yet read in the loaded window).
+  const unreadByNumber = new Map<string, number>();
+  for (const m of messages) {
+    if (m.direction !== "inbound" || m.readAt) continue;
+    const d = msgDigits(m);
+    if (d.length === 10) unreadByNumber.set(d, (unreadByNumber.get(d) ?? 0) + 1);
+  }
+  // A stale tab (thread switched, or filtered category no longer has that
+  // number) falls back to the merged view rather than an empty pane.
+  const activeNumber = numberTab !== "all" && threadNumbers.includes(numberTab) ? numberTab : null;
+  const visibleMessages = activeNumber ? messages.filter((m) => msgDigits(m) === activeNumber) : messages;
+  const visiblePending = activeNumber
+    ? (detail?.pending ?? []).filter((p: any) => String(p.phoneDigits || "").slice(-10) === activeNumber)
+    : detail?.pending ?? [];
+
   const loadOlder = async () => {
     const earliest = messages[0];
     if (!earliest || !selectedId || loadingOlder) return;
@@ -630,9 +663,16 @@ export default function FleetCommunications() {
 
   const handleSend = () => {
     if (!thread || (!body.trim() && !attachment)) return;
+    // With a specific number subtab active, lock the reply to THAT number so
+    // the server can't re-resolve it back to the number on file (e.g. replying
+    // on the personal number an LOA tech has actually been answering from).
+    // On "All" (or single-number threads) behavior is unchanged.
     sendMut.mutate({
       ldap: thread.ldap,
-      phone: thread.ldap ? undefined : (detail?.contact?.phone ?? (thread.phoneDigits ? `+1${thread.phoneDigits}` : undefined)),
+      phone: activeNumber
+        ? `+1${activeNumber}`
+        : thread.ldap ? undefined : (detail?.contact?.phone ?? (thread.phoneDigits ? `+1${thread.phoneDigits}` : undefined)),
+      phoneLocked: activeNumber ? true : undefined,
       category: sendCategory,
       body: body.trim(),
       mediaUrl: attachment ? [attachment.url] : undefined,
@@ -1073,6 +1113,34 @@ export default function FleetCommunications() {
                 </div>
               )}
 
+              {threadNumbers.length >= 2 && (
+                <div className="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-1.5 flex-wrap" data-testid="number-subtabs">
+                  <button
+                    onClick={() => setNumberTab("all")}
+                    className={`px-2.5 h-6 rounded-full text-[11px] font-medium border transition-colors ${!activeNumber ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"}`}
+                    data-testid="number-subtab-all"
+                  >
+                    All
+                  </button>
+                  {threadNumbers.map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setNumberTab(d)}
+                      className={`px-2.5 h-6 rounded-full text-[11px] font-medium border transition-colors flex items-center gap-1 ${activeNumber === d ? "bg-indigo-600 text-white border-indigo-600" : "bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700"}`}
+                      title={d === threadDigits ? "Number currently on file" : "Additional number used in this conversation"}
+                      data-testid={`number-subtab-${d}`}
+                    >
+                      <Phone className="w-2.5 h-2.5" />
+                      {formatPhone(d)}
+                      {d === threadDigits && <span className="opacity-70">· on file</span>}
+                      {(unreadByNumber.get(d) ?? 0) > 0 && (
+                        <span className={`w-1.5 h-1.5 rounded-full ${activeNumber === d ? "bg-white" : "bg-red-500"}`} title="Unread messages on this number" data-testid={`number-subtab-unread-${d}`} />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 dark:bg-slate-950/50">
                 {moreOlder && (
                   <div className="text-center">
@@ -1086,10 +1154,12 @@ export default function FleetCommunications() {
                     </button>
                   </div>
                 )}
-                {messages.length === 0 ? (
-                  <div className="text-center text-sm text-slate-400 dark:text-slate-500 py-8">No messages yet.</div>
+                {visibleMessages.length === 0 ? (
+                  <div className="text-center text-sm text-slate-400 dark:text-slate-500 py-8">
+                    {activeNumber ? "No messages on this number yet." : "No messages yet."}
+                  </div>
                 ) : (
-                  messages.map((m) => (
+                  visibleMessages.map((m) => (
                     <div key={m.id} className={`flex ${m.direction === "outbound" ? "justify-end" : "justify-start"}`} data-testid={`message-${m.id}`}>
                       <div className={`max-w-[75%] px-3.5 py-2.5 text-sm shadow-sm ${m.direction === "outbound" ? "bg-gradient-to-br from-indigo-500 to-violet-600 text-white rounded-2xl rounded-br-md" : "bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-100 border border-slate-200 dark:border-slate-700 rounded-2xl rounded-bl-md"}`}>
                         <div className="flex items-center gap-1.5 mb-1">
@@ -1139,8 +1209,8 @@ export default function FleetCommunications() {
                     </div>
                   ))
                 )}
-                {(detail?.pending?.length ?? 0) > 0 && (
-                  <div className="text-center text-xs text-slate-400 dark:text-slate-500">{detail!.pending.length} message(s) queued for later</div>
+                {visiblePending.length > 0 && (
+                  <div className="text-center text-xs text-slate-400 dark:text-slate-500">{visiblePending.length} message(s) queued for later</div>
                 )}
                 <div ref={bottomRef} />
               </div>
@@ -1171,6 +1241,12 @@ export default function FleetCommunications() {
                     <Checkbox checked={managerCc} onCheckedChange={(v) => setManagerCc(!!v)} data-testid="checkbox-manager-cc" />
                     CC Lead{detail?.contact?.managerName ? ` (${detail.contact.managerName})` : detail?.contact ? " (none on file)" : ""}
                   </label>
+                  {activeNumber && (
+                    <span className="flex items-center gap-1 text-[11px] text-indigo-600 dark:text-indigo-400" data-testid="text-reply-target">
+                      <Phone className="w-3 h-3" />
+                      Reply goes to {formatPhone(activeNumber)}{activeNumber === threadDigits ? " (on file)" : ""}
+                    </span>
+                  )}
                 </div>
                 {attachment && (
                   <div className="relative inline-block" data-testid="attachment-preview">
