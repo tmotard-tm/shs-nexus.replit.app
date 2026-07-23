@@ -171,9 +171,12 @@ export default function WeeklyOffboarding() {
     queryKey: ['/api/weekly-offboarding'],
   });
 
-  // Fetch the set of Enterprise IDs currently in open rentals for the "Rental" badge
+  // Fetch the set of Enterprise IDs currently in open rentals for the "Rental" badge.
+  // scope=managed = the same strict open-rental population the Rental Operations tab
+  // shows (Enterprise-first de-dupe, Holman non-Enterprise only, out-of-service
+  // excluded) — NOT the broader membership superset the default scope returns.
   const { data: openRentalEids } = useQuery<{ enterpriseIds: string[] }>({
-    queryKey: ['/api/rental-ops/open-enterprise-ids'],
+    queryKey: ['/api/rental-ops/open-enterprise-ids?scope=managed'],
     staleTime: 5 * 60 * 1000,
   });
   const openRentalEidSet = new Set<string>((openRentalEids?.enterpriseIds || []).map(id => id.toUpperCase()));

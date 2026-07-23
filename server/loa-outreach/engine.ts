@@ -165,10 +165,16 @@ function toTenDigits(v: string | number | null | undefined): string | null {
 }
 
 /**
- * The open-rental Enterprise-ID membership set — same population as the Rental
- * badge on the Weekly Offboarding LOA table (default/badge scope of
- * GET /api/rental-ops/open-enterprise-ids): Enterprise open tickets enriched to
+ * The open-rental Enterprise-ID membership set — the broad/default scope of
+ * GET /api/rental-ops/open-enterprise-ids: Enterprise open tickets enriched to
  * EIDs via the TPMS snapshot, plus Holman open-rental rows (Toll rows excluded).
+ *
+ * NOTE: the Weekly Offboarding Rental badge/export now uses the STRICTER
+ * `scope=managed` set (Enterprise-first de-dupe, Holman non-Enterprise only,
+ * out-of-service excluded — Rental Operations tab parity). Outreach here
+ * intentionally keeps the broad membership set so no LOA tech with any
+ * open-rental signal is skipped; a tech can therefore get outreach without
+ * showing a Rental badge on the LOA table.
  */
 async function fetchOpenRentalEidSet(sf: any): Promise<Set<string>> {
   const normV = (v: string) => (v || "").trim().replace(/^0+/, "");

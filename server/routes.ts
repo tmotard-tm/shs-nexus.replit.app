@@ -17538,12 +17538,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       // Open-rental Enterprise-ID set for the "Rental" column — the exact same
-      // population that drives the on-screen Rental badge. Degrades gracefully:
-      // if Snowflake is unavailable the column is left blank rather than failing
-      // the whole export.
+      // population that drives the on-screen Rental badge (managed/strict scope,
+      // matching the Rental Operations tab). Degrades gracefully: if Snowflake is
+      // unavailable the column is left blank rather than failing the whole export.
       let openRentalEids = new Set<string>();
       try {
-        openRentalEids = new Set(await computeOpenRentalEidSet(false));
+        openRentalEids = new Set(await computeOpenRentalEidSet(true));
       } catch (e: any) {
         console.warn("[Weekly Offboarding export] Rental column unavailable:", e.message);
       }
@@ -19170,6 +19170,20 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!existing || rDate > eDate) entByVehicle.set(vn, r);
     }
 
+    // Managed scope: Rental Ops tab parity also means excluding out-of-service
+    // vehicles — the same getOosVehicleSet() filter the /api/rental-ops/open route
+    // applies by default (includeOos=false). Applied to BOTH segments before EIDs
+    // are collected. Default (broad) scope is unchanged.
+    let oosVehicles = new Set<string>();
+    if (managedScope) {
+      oosVehicles = await getOosVehicleSet();
+      if (oosVehicles.size > 0) {
+        for (const vn of Array.from(entByVehicle.keys())) {
+          if (oosVehicles.has(toDisplayNumber(vn))) entByVehicle.delete(vn);
+        }
+      }
+    }
+
     // Build rows for TPMS name enrichment
     const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
       renterName: (r.RENTER_NAME || '').trim(),
@@ -19195,9 +19209,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
         // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
         // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
-        // inflate the default membership set.
+        // inflate the default membership set. Out-of-service vehicles are also
+        // excluded (Rental Ops tab default view parity).
         if (isEntVendor(vendor)) continue;
         if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
+        if (oosVehicles.has(toDisplayNumber(normV(r.VEHICLE_NUMBER || '')))) continue;
       } else {
         if (/toll/i.test(vendor)) continue;
       }
@@ -19215,12 +19231,14 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const { isSnowflakeConfigured } = await import("./snowflake-service");
       if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured", enterpriseIds: [] });
 
-      // `scope=managed` (used by the Fleet Communications module) applies the SAME
-      // Enterprise-first / Holman-non-Enterprise de-dupe that the Rental Ops -> Fleet
-      // Scope sync (server/rental-ops-sync.ts) uses to build fs_trucks. That yields the
-      // same open-rental population as the Fleet Scope "rentals open" list, rather than
-      // the broader membership superset the default (badge) scope returns. Default scope
-      // is unchanged so the Weekly Offboarding rental badges keep their existing behavior.
+      // `scope=managed` (used by the Fleet Communications module AND the Weekly
+      // Offboarding Rental badges/export) applies the SAME Enterprise-first /
+      // Holman-non-Enterprise de-dupe that the Rental Ops -> Fleet Scope sync
+      // (server/rental-ops-sync.ts) uses to build fs_trucks, plus the out-of-service
+      // exclusion the Rental Ops tab applies by default. That yields the same
+      // open-rental population as the Rental Operations tab, rather than the broader
+      // membership superset the default scope returns. The default (broad) scope is
+      // still used by the LOA outreach engine (server/loa-outreach/engine.ts).
       const managedScope = /^(managed|fleet|fleetscope|fleet-scope)$/i.test(
         String(req.query?.scope || '')
       );
