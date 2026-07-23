@@ -187,12 +187,39 @@ export function registerCommsRoutes(app: Router): void {
       // {"forceDaily":true} = operator escape hatch: run the daily send now,
       // regardless of the ET hour and the once-per-day watermark. Still
       // internal-cron-authed; the engine's flag + advisory lock still apply.
+      //
+      // CONFIRM GATE (2026-07-23). The 04:37 ET misfire that texted 107 techs
+      // in TCPA quiet hours was this exact branch, invoked once from a live
+      // Replit Agent session (prod sync_logs shows one manual_cron_force run
+      // ever, at 08:37:42Z, bracketed by Agent commits at 08:33:44Z and
+      // 08:38:58Z — there is no scheduled deployment and never was). Anyone
+      // holding the repl's env can pass the header auth, including the Agent,
+      // so a bare force now runs as a DRY-RUN preview. A real forced send
+      // requires an explicit {"confirmSend":true} alongside it. The engine's
+      // ET quiet-hours floor still applies even to confirmed sends.
       const forceDaily = req.body?.forceDaily === true;
       if (forceDaily) {
+        const confirmed = req.body?.confirmSend === true;
         // {"dryRun":true} alongside forceDaily = resolve + render recipients,
         // send nothing (prod-safe preview before a real forced send).
-        const dryRun = req.body?.dryRun === true;
+        const dryRun = req.body?.dryRun === true || !confirmed;
+        // Attribution, so the next forced call is a log lookup rather than a
+        // forensic reconstruction. Secrets are never logged — header presence
+        // is implied by passing isInternalCron above.
+        console.log(
+          `[LOA] forceDaily invoked: confirmSend=${confirmed} dryRun=${dryRun} ` +
+            `ip=${req.ip ?? "?"} xff=${req.headers?.["x-forwarded-for"] ?? "-"} ` +
+            `ua=${req.headers?.["user-agent"] ?? "-"}`,
+        );
         daily = await runLoaOutreach("manual_cron_force", { force: true, dryRun });
+        if (!confirmed && req.body?.dryRun !== true) {
+          daily = {
+            ...daily,
+            note:
+              "forceDaily without confirmSend ran as a DRY-RUN preview; nothing was sent. " +
+              'POST {"forceDaily":true,"confirmSend":true} to actually send.',
+          };
+        }
       } else if (etHour() === LOA_SEND_ET_HOUR) {
         daily = await runLoaOutreach("scheduled_dispatcher");
       }

@@ -1267,19 +1267,38 @@ function composeAddress(r: any): string | null {
  * contradiction did not exist before reconciliation — both sides read raw ETL —
  * so it was created by the fix and had to close with it. SHOP_PO_STATUS_ETL
  * carries the old value for anyone reconciling the two.
+ *
+ * MARQUEE FIELDS (added 2026-07-23). LUCA's workload view (NEXUS_FEED_COLUMNS
+ * in fleetagents server/agents/luca/chat/workload.ts) was built ahead of the
+ * data and read "unavailable" for employment, AMS authority, the assigned-truck
+ * redirect rule and per-truck PO-history counts. Each row now forwards
+ * AMS_STATUS(_AT), EMPLOYEE_STATUS(_DATE), ASSIGNED_TRUCK,
+ * ASSIGNED_TRUCK_OPEN_PO_COUNT, OPEN_PO_COUNT and PO_COUNT — computed by the
+ * SAME joins/CTEs the board query uses (po_agg over the reconciled po_eff
+ * layer; atr/ownp for the renter's own truck), so the two surfaces cannot
+ * disagree. Extra board descriptors (VEH_DESC, RENTAL_CLASS, RATE_AUTHORIZED,
+ * RENTING_CITY/STATE, LAST_RENTAL_DATE, HAS_RENTAL_AUTH) ride along for LUCA's
+ * next increment — LUCA ignores unknown keys.
  */
 export async function getLucaRentalList(): Promise<any> {
   await db.execute(sql`SELECT 1`);
   const res = await db.execute(sql`
-    WITH ${PO_EFFECTIVE_CTE}, ${SHOP_STRICT_CTE}
+    WITH ${PO_EFFECTIVE_CTE}, ${PO_AGG_CTE}, ${SHOP_STRICT_CTE}
     SELECT
       c.case_key, c.vehicle_number, c.source, c.renter_name_raw, c.rental_vendor,
       c.ticket_number, c.claim_number, c.po_number, c.ticket_status,
       to_char(c.rental_start_date,'YYYY-MM-DD') AS rental_start_date,
       c.days_open, c.days_authorized, c.days_behind, c.number_of_extensions,
       c.number_of_rewrites, c.repairs_complete, c.claims_office, c.ams_status,
+      to_char(c.ams_status_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS ams_status_at,
+      c.renting_city, c.renting_state, c.veh_desc, c.rental_class, c.rate_authorized,
       COALESCE(i.override_employee_id, i.resolved_employee_id) AS employee_id,
       i.confidence AS eid_confidence,
+      COALESCE(i.override_status, i.resolved_status) AS employee_status,
+      to_char(i.resolved_status_date,'YYYY-MM-DD') AS employee_status_date,
+      po.open_po_count, po.any_po_count, po.last_rental_date, po.has_rental_auth,
+      ownp.own_pad AS assigned_truck,
+      apo.open_po_count AS assigned_open_po,
       shop.vendor_name AS shop_name, shop.po_number AS shop_po_number,
       shop.po_status AS shop_po_status, shop.etl_po_status AS shop_po_status_etl,
       shop.po_date AS shop_po_date,
@@ -1290,6 +1309,16 @@ export async function getLucaRentalList(): Promise<any> {
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
+    -- Marquee-field joins (2026-07-23): the same atr/ownp/po_agg pattern the
+    -- board query (getRentalOpsMaster) uses, so the feed forwards employment,
+    -- the renter's OWN assigned truck (+ its open-PO count under the SAME
+    -- reconciled po_eff rule), and the per-truck PO-history counts.
+    LEFT JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    LEFT JOIN LATERAL (
+      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+    ) ownp ON true
+    LEFT JOIN po_agg po  ON po.truck  = c.case_key
+    LEFT JOIN po_agg apo ON apo.truck = ownp.own_pad
     -- Shop of record: the MOST RECENT qualifying repair PO (strict date order),
     -- carrying the RECONCILED status — same po_eff layer the board reads, so the
     -- two LUCA-facing surfaces can no longer disagree about the same truck.
@@ -1370,6 +1399,24 @@ export async function getLucaRentalList(): Promise<any> {
     SHOP_PO_STATUS: shopName ? (r.shop_po_status ?? null) : null,
     SHOP_PO_STATUS_ETL: shopName ? (r.shop_po_status_etl ?? null) : null,
     SHOP_SOURCE: shopName ? "vrm_repair_po" : null,
+    // ── marquee fields (2026-07-23): the board-only facts LUCA's workload
+    //    (NEXUS_FEED_COLUMNS) was built to consume — see the doc block above.
+    AMS_STATUS: r.ams_status ?? null,
+    AMS_STATUS_AT: r.ams_status_at ?? null,
+    EMPLOYEE_STATUS: r.employee_status ?? null,
+    EMPLOYEE_STATUS_DATE: r.employee_status_date ?? null,
+    ASSIGNED_TRUCK: r.assigned_truck ?? null,
+    ASSIGNED_TRUCK_OPEN_PO_COUNT: r.assigned_open_po == null ? null : Number(r.assigned_open_po),
+    OPEN_PO_COUNT: r.open_po_count == null ? null : Number(r.open_po_count),
+    PO_COUNT: r.any_po_count == null ? null : Number(r.any_po_count),
+    // Extra board descriptors for LUCA's next increment (ignored today).
+    LAST_RENTAL_DATE: r.last_rental_date ?? null,
+    HAS_RENTAL_AUTH: r.has_rental_auth == null ? null : r.has_rental_auth === true,
+    RENTING_CITY: r.renting_city ?? null,
+    RENTING_STATE: r.renting_state ?? null,
+    VEH_DESC: r.veh_desc ?? null,
+    RENTAL_CLASS: r.rental_class ?? null,
+    RATE_AUTHORIZED: r.rate_authorized == null ? null : Number(r.rate_authorized),
     };
   });
   const sh = await getSourceHealth();
