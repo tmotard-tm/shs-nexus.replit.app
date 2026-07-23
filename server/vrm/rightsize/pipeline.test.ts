@@ -178,9 +178,14 @@ async function main() {
       proposal: "DONE", mode: "review", reason: "bedrock: reports a completed swap", source: "bedrock",
       confidence: 0.92, modelId: "test-model",
     });
-    // "Friday" reads as future tense, so the regex scores this COMMITTED even
-    // though the technician is reporting a swap that already happened.
-    const v = await resolveVerdict("All swapped out on Friday", "NON_RESPONDER", { llm: s.fn, isLlmEnabled: bedrockOn });
+    // A genuine tense ambiguity: the explicit future marker ("I'll ... tomorrow")
+    // makes the regex score COMMITTED, while the perfect-tense verb "swapped"
+    // means the tech may be reporting work already finished. That is what earns
+    // a second opinion.
+    // (Until 7/23 this fixture was "All swapped out on Friday". The classifier
+    // now reads that correctly as DONE by itself, so it no longer escalates;
+    // that is asserted directly at the end of this section.)
+    const v = await resolveVerdict("I'll get it swapped tomorrow", "NON_RESPONDER", { llm: s.fn, isLlmEnabled: bedrockOn });
     assert.equal(s.calls.length, 1, "the ambiguous reply gets a second opinion");
     assert.equal(v.source, "regex", "the regex verdict is NOT replaced");
     assert.equal(v.proposal, "COMMITTED", "the regex verdict still stands");
@@ -192,9 +197,16 @@ async function main() {
     // A second opinion that is not DONE/RETURNED is discarded: the model may
     // never talk the regex out of a verdict, only add an exec-visible flag.
     const s2 = spy({ proposal: "QUESTION", mode: "auto", reason: "x", source: "bedrock", confidence: 0.99 });
-    const v2 = await resolveVerdict("All swapped out on Friday", "NON_RESPONDER", { llm: s2.fn, isLlmEnabled: bedrockOn });
+    const v2 = await resolveVerdict("I'll get it swapped tomorrow", "NON_RESPONDER", { llm: s2.fn, isLlmEnabled: bedrockOn });
     assert.equal(v2.proposal, "COMMITTED");
     assert.equal(v2.secondOpinion ?? null, null, "a non-secured second opinion is dropped");
+
+    // 7/23 classifier fix: the old fixture needs no model at all now.
+    const s4 = spy({ proposal: "DONE", mode: "review", reason: "x", source: "bedrock", confidence: 0.99 });
+    const v4 = await resolveVerdict("All swapped out on Friday", "NON_RESPONDER", { llm: s4.fn, isLlmEnabled: bedrockOn });
+    assert.equal(v4.proposal, "DONE", "a weekday no longer hides a completed swap");
+    assert.equal(stageMutationFor(v4, "NON_RESPONDER").kind, "propose", "and it is still only ever a proposal");
+    assert.equal(s4.calls.length, 0, "the regex settles it, costing no model call");
 
     // An unambiguous COMMITTED is never escalated at all.
     const s3 = spy({ proposal: "DONE", mode: "review", reason: "x", source: "bedrock", confidence: 0.99 });
@@ -206,11 +218,16 @@ async function main() {
 
   section("a keyword-only QUESTION is the one regex verdict the model may overturn");
   {
-    // The bare word "when" trips the question rule even though nobody is asking
-    // us anything; this is really branch-stock pushback.
-    const body = "There are no sedans in my area. They've arranged to have someone reach out to me when one is available.";
+    // A LEADING interrogative with no question mark: the regex can only read it
+    // as a question, but the tech may really be reporting a blocker. That weak
+    // reading is the one verdict the model is allowed to overturn.
+    // (Until 7/23 this fixture was EPEAKE's "There are no sedans in my area ...
+    // when one is available." A bare MID-SENTENCE "when" no longer forces
+    // QUESTION, so the regex now reads that one correctly by itself; asserted
+    // at the end of this section.)
+    const body = "When will they have a sedan for me";
     const rxOnly = await resolveVerdict(body, "NON_RESPONDER", { isLlmEnabled: () => false });
-    assert.equal(rxOnly.proposal, "QUESTION", "regex alone mis-files this as a question");
+    assert.equal(rxOnly.proposal, "QUESTION", "a leading interrogative with no '?' is only a weak question");
 
     const s = spy({ proposal: "PUSHBACK_STOCK", mode: "review", reason: "bedrock: branch has none", source: "bedrock", confidence: 0.95, modelId: "test-model" });
     const v = await resolveVerdict(body, "NON_RESPONDER", { llm: s.fn, isLlmEnabled: bedrockOn });
@@ -223,6 +240,15 @@ async function main() {
     const s2 = spy({ proposal: "PUSHBACK_STOCK", mode: "review", reason: "x", source: "bedrock", confidence: 0.99 });
     const v2 = await resolveVerdict("when can I do this?", "NON_RESPONDER", { llm: s2.fn, isLlmEnabled: bedrockOn });
     assert.equal(s2.calls.length, 0, "an explicit question mark is a strong verdict");
+
+    // 7/23 classifier fix: the old EPEAKE fixture is now read correctly by the
+    // regex alone, so it is no longer a keyword-only question at all.
+    const sEpeake = spy({ proposal: "QUESTION", mode: "auto", reason: "x", source: "bedrock", confidence: 0.99 });
+    const epeake = await resolveVerdict(
+      "There are no sedans in my area. They've arranged to have someone reach out to me when one is available.",
+      "NON_RESPONDER", { llm: sEpeake.fn, isLlmEnabled: bedrockOn });
+    assert.equal(epeake.proposal, "PUSHBACK_STOCK", "a mid-sentence 'when' no longer hides a stock blocker");
+    assert.equal(sEpeake.calls.length, 0, "and it costs no model call");
     assert.equal(v2.proposal, "QUESTION");
 
     // Even here, a DONE reading may only ever be a proposal alongside the regex.

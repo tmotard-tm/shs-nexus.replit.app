@@ -142,3 +142,22 @@ test("estimateBulkSend flips needsConfirmation at the 200-recipient threshold", 
   assert.equal(estimateBulkSend(bodies(BULK_CONFIRM_THRESHOLD)).needsConfirmation, true);
   assert.equal(estimateBulkSend(bodies(BULK_CONFIRM_THRESHOLD + 50)).needsConfirmation, true);
 });
+
+test("localHourToUtc maps a local wall-clock hour to the correct UTC instant (quiet-hours deferral)", async () => {
+  // Regression for the inverted-sign bug: "8 AM ET" computed as 04:00 UTC
+  // (midnight ET, in the past), so quiet-hours deferrals were sent immediately.
+  const { localHourToUtc } = await import("../server/fleet-scope-reg-messaging");
+  const cases: Array<[string, [number, number, number, number], string]> = [
+    ["America/New_York",    [2026, 7, 24, 8],  "2026-07-24T12:00:00.000Z"], // EDT
+    ["America/New_York",    [2026, 1, 15, 8],  "2026-01-15T13:00:00.000Z"], // EST
+    ["America/Chicago",     [2026, 7, 24, 8],  "2026-07-24T13:00:00.000Z"],
+    ["America/Los_Angeles", [2026, 7, 24, 8],  "2026-07-24T15:00:00.000Z"],
+    ["America/Anchorage",   [2026, 7, 24, 8],  "2026-07-24T16:00:00.000Z"],
+    ["Pacific/Honolulu",    [2026, 7, 24, 8],  "2026-07-24T18:00:00.000Z"], // day-wrap normalization
+    ["America/New_York",    [2026, 7, 26, 12], "2026-07-26T16:00:00.000Z"], // TX Sunday noon rule
+    ["America/New_York",    [2026, 7, 24, 21], "2026-07-25T01:00:00.000Z"], // evening hour
+  ];
+  for (const [tz, [y, m, d, h], expected] of cases) {
+    assert.equal(localHourToUtc(tz, y, m, d, h).toISOString(), expected, `${tz} ${y}-${m}-${d} hour=${h}`);
+  }
+});

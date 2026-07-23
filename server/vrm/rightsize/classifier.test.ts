@@ -121,8 +121,8 @@ const CAMPAIGN: Array<[string, string | null, ClassifyResult["mode"]]> = [
   ["I just got off work so I'll do it tomorrow morning", "COMMITTED", "auto"],
   ["Ok tomorrow", "COMMITTED", "auto"],
   ["I'm in a good rental vehicle any smaller my tools will not fit", "PUSHBACK_EQUIP", "auto"],
-  ["They have no sedans available at the moment just suv and a jeep", "PUSHBACK_STOCK", "review"],
-  ["Nothing available until Sunday I'll check with them", "PUSHBACK_STOCK", "review"],
+  ["They have no sedans available at the moment just suv and a jeep", "PUSHBACK_STOCK", "auto"],
+  ["Nothing available until Sunday I'll check with them", "PUSHBACK_STOCK", "auto"],
   ["Hello I have the mini suv now", null, "none"],
 ];
 assert.equal(CAMPAIGN.length, 13);
@@ -147,5 +147,51 @@ assert.equal(from("I returned the parts, they don’t fit").proposal, null, "ret
 assert.equal(from("I will swap it tomorrow").proposal, "COMMITTED", "future tense is a commitment, not a DONE");
 assert.equal(from("I’ll swap it tomorrow").proposal, "COMMITTED", "...and the curly form agrees");
 assert.equal(from("").proposal, null);
+
+
+// ------------------------------------- 7/23 ground-truth audit regression lock
+// Verbatim prod messages that the pre-7/23 classifier got wrong. The 348-thread
+// audit traced 119 bad stages to these five gaps; each line is the exact text
+// that defeated the old rule. NOTE: the two PUSHBACK_STOCK modes above changed
+// review -> auto on 7/23 on purpose. Shuffling a tech between UNSECURED buckets
+// moves no secured dollar, and parking those as proposals nobody clicked is why
+// COMMITTED held 83 techs when only 43 were truly committed. DONE and RETURNED
+// are unaffected and remain propose-only (asserted below).
+const AUDIT: Array<[string, string | null, ClassifyResult["mode"], string]> = [
+  ["All swapped out on Friday", "DONE", "review", "NBLADES: a weekday must not veto a completed swap"],
+  ["Swap was completed last week", "DONE", "review", "JLOP105: 'was completed' as well as 'is complete'"],
+  ["Got a 2025 Chevy Malibu from enterprise on Monday", "DONE", "review", "SPITTM4: got a <named compliant car>"],
+  ["Vehicle switch was completed on July 13.", "DONE", "review", "KELLIN: past-tense switch with a calendar date"],
+  ["I got the full-Size Sedan rate and the current vehicle I have are the same", "DONE", "review", "JHABIBI: documented sedan rate is compliance"],
+  ["They have no full size sedans or smaller available", "PUSHBACK_STOCK", "auto", "JOBRIEN: negator not adjacent to the noun"],
+  ["The rental car company doesn't have any full size sedans or smaller.", "PUSHBACK_STOCK", "auto", "CTUCKE2: doesn't have any <qualified> sedans"],
+  ["this tool that I use to pull ovens out of the wall or unstacked dryers is too big for the trunk", "PUSHBACK_EQUIP", "auto", "JWILL12: gear 'too big', not car 'too small'"],
+  ["Hello I work on laundry and refrigeration and do need a vehicle with more room to house all the tools", "PUSHBACK_EQUIP", "auto", "MNISH: 'more room'"],
+  ["I can't get through to enterprise to set an appointment", "PUSHBACK_PROCESS", "auto", "NPOWELL: process blocker had no rule at all"],
+];
+for (const [body, proposal, mode, why] of AUDIT) {
+  const r = from(body);
+  assert.equal(r.proposal, proposal, `audit: ${why} -> got ${verdict(r)}`);
+  assert.equal(r.mode, mode, `audit mode: ${why} -> got ${verdict(r)}`);
+}
+
+// EPEAKE: a bare mid-sentence "when" used to force QUESTION and hide a stock blocker.
+assert.equal(
+  from("There are no sedans in my area. They've arranged to have someone reach out to me when one is available.").proposal,
+  "PUSHBACK_STOCK",
+  "EPEAKE: mid-sentence interrogative must not outrank a stock blocker",
+);
+// LDEPINA: wanting to return is not having returned; it is a process blocker.
+assert.equal(
+  from("I would love to return the vehicle but for some reason I'm having issues logging into my tech hub").proposal,
+  "PUSHBACK_PROCESS",
+  "LDEPINA: return INTENT must never bank a return",
+);
+// The widened equipment rule must not reopen the returned-parts trap.
+assert.equal(from("I returned the parts, they don't fit").proposal, null, "widened equip rule keeps the parts trap shut");
+// The truth boundary is untouched by every widening above.
+for (const body of ["All swapped out on Friday", "Swap was completed last week", "I got the full-Size Sedan rate and the current vehicle I have are the same"]) {
+  assert.equal(from(body).mode, "review", `DONE must still only ever be PROPOSED: "${body}"`);
+}
 
 console.log("classifier.test.ts: all assertions passed");

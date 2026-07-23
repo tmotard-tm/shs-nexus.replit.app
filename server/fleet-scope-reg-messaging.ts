@@ -70,7 +70,7 @@ function getLocalTimeParts(tz: string, now: Date) {
 }
 
 // Build a UTC Date corresponding to localHour:00:00 on the local date in the given tz
-function localHourToUtc(tz: string, year: number, month: number, day: number, hour: number): Date {
+export function localHourToUtc(tz: string, year: number, month: number, day: number, hour: number): Date {
   // Use a binary search approach: construct a local ISO-like string, parse, and adjust
   // Simpler: use the offset at a rough candidate and refine once
   const candidate = new Date(Date.UTC(year, month - 1, day, hour, 0, 0));
@@ -79,9 +79,18 @@ function localHourToUtc(tz: string, year: number, month: number, day: number, ho
     new Intl.DateTimeFormat("en-US", { timeZone: tz, hour: "2-digit", hour12: false }).format(candidate),
     10
   );
-  // Adjust by the difference
-  const diffHours = hour - localHourAtCandidate;
-  return new Date(candidate.getTime() - diffHours * 60 * 60 * 1000);
+  // Adjust by the difference. The candidate UTC instant renders as an EARLIER
+  // local hour in US timezones (e.g. 08:00 UTC = 4 AM ET), so we must ADD the
+  // shortfall to move the instant forward to the desired local hour.
+  // (The previous `-` sign inverted this, producing times in the past — e.g.
+  // "8 AM ET" became 04:00 UTC = midnight ET — so quiet-hours deferrals got a
+  // past-due scheduledFor and the drain sent them immediately.)
+  // Normalize to (-12, +12] so day-wrap timezones (HI/AK render a previous-day
+  // local hour for a morning-UTC candidate) don't land a full day off.
+  let diffHours = hour - localHourAtCandidate;
+  if (diffHours > 12) diffHours -= 24;
+  if (diffHours <= -12) diffHours += 24;
+  return new Date(candidate.getTime() + diffHours * 60 * 60 * 1000);
 }
 
 // TCPA Quiet Hours — returns next allowed send time (or null if currently allowed)
