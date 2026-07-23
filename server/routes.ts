@@ -17194,11 +17194,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
   // ── LOA Rental self-service form (Task #543) — PUBLIC, tokenized, no login ──
   // The SMS link opens /loa-form/:token. Step 1 verifies LDAP + Truck # against
-  // the outreach record; step 2 writes the six answers into vehicle_nexus_data
+  // the outreach record; step 2 writes the answers into vehicle_nexus_data
   // (same store the LOA sidebar reads) and permanently stops automated texting.
   const LOA_FORM_KEYS_VALUES = new Set(["present", "not_present", "unknown"]);
   const LOA_FORM_REPAIRED_VALUES = new Set(["returned_it", "never_had_rental", "hr_will_return", "wont_return"]);
-  const LOA_FORM_RETURNED_VALUES = new Set(["confirmed", "needs_tlt", "unconfirmed", "denied"]);
   const normTruck = (v: string) => String(v || "").replace(/\D/g, "").replace(/^0+/, "");
 
   async function loadLoaFormRow(token: string) {
@@ -17261,7 +17260,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const nexusNewLocationContact = String(req.body?.nexusNewLocationContact || "").trim().slice(0, 30);
       const keysVal = String(req.body?.keys || "").trim();
       const repairedVal = String(req.body?.repaired || "").trim();
-      const returnedVal = String(req.body?.returnedRental || "").trim();
       const commentsVal = String(req.body?.comments || "").trim().slice(0, 400);
       // All fields except Comments are required (Task #547).
       const missing: string[] = [];
@@ -17269,28 +17267,28 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!nexusNewLocationContact) missing.push("location contact number");
       if (!keysVal) missing.push("Keys");
       if (!repairedVal) missing.push("Rental status");
-      if (!returnedVal) missing.push("rental return confirmation");
       if (missing.length > 0) {
         return res.status(400).json({ success: false, message: `Please fill in all required fields: ${missing.join(", ")}.` });
       }
       if (!LOA_FORM_KEYS_VALUES.has(keysVal)) return res.status(400).json({ success: false, message: "Invalid keys selection." });
-      if (!LOA_FORM_REPAIRED_VALUES.has(repairedVal)) return res.status(400).json({ success: false, message: "Invalid repaired selection." });
-      if (!LOA_FORM_RETURNED_VALUES.has(returnedVal)) return res.status(400).json({ success: false, message: "Invalid returned rental selection." });
+      if (!LOA_FORM_REPAIRED_VALUES.has(repairedVal)) return res.status(400).json({ success: false, message: "Invalid rental status selection." });
 
+      // The tech's "Rental status" answer is stored in returnedRental so it
+      // surfaces under the Rental badge / Returned Rental field on the LOA
+      // sidebar. `repaired` is left untouched (staff-managed field).
       await storage.upsertVehicleNexusData({
         vehicleNumber: targetTruck,
         nexusNewLocation: nexusNewLocation || null,
         nexusNewLocationContact: nexusNewLocationContact || null,
         keys: keysVal || null,
-        repaired: repairedVal || null,
-        returnedRental: returnedVal || null,
+        returnedRental: repairedVal || null,
         comments: commentsVal || null,
         updatedBy: `loa-form:${ldap}`,
       });
 
       const formData = {
         nexusNewLocation, nexusNewLocationContact,
-        keys: keysVal, repaired: repairedVal, returnedRental: returnedVal, comments: commentsVal,
+        keys: keysVal, rentalStatus: repairedVal, comments: commentsVal,
       };
       const { markLoaFormCompleted } = await import("./loa-outreach/engine");
       await markLoaFormCompleted(ldap, targetTruck, formData);
@@ -17306,7 +17304,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           category: "loa_rental",
           direction: "inbound",
           contactRole: "tech",
-          body: `[LOA Rental form submitted] Truck ${targetTruck}. Location: ${nexusNewLocation || "—"}. Contact: ${nexusNewLocationContact || "—"}. Keys: ${keysVal || "—"}. Repaired: ${repairedVal || "—"}. Returned rental: ${returnedVal || "—"}. Comments: ${commentsVal || "—"}`,
+          body: `[LOA Rental form submitted] Truck ${targetTruck}. Location: ${nexusNewLocation || "—"}. Contact: ${nexusNewLocationContact || "—"}. Keys: ${keysVal || "—"}. Rental status: ${repairedVal || "—"}. Comments: ${commentsVal || "—"}`,
           phone: null,
           status: "received",
         });

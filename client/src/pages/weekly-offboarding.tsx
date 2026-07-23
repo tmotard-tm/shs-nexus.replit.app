@@ -325,6 +325,11 @@ export default function WeeklyOffboarding() {
     'needs_tlt': 'Needs a TLT',
     'unconfirmed': 'Unconfirmed',
     'denied': 'Denied',
+    // Tech-submitted values from the LOA Rental self-service form ("Rental status" question)
+    'returned_it': 'I returned it',
+    'never_had_rental': 'I never had a rental before going on leave',
+    'hr_will_return': 'I received communication from HR and will be returning it',
+    'wont_return': "I won't /can't return the rental",
   };
 
   // Manual status labels for display
@@ -2425,6 +2430,11 @@ export default function WeeklyOffboarding() {
                             <SelectItem value="needs_tlt">Needs a TLT</SelectItem>
                             <SelectItem value="unconfirmed">Unconfirmed</SelectItem>
                             <SelectItem value="denied">Denied</SelectItem>
+                            {/* Tech-submitted values from the LOA Rental self-service form ("Rental status" question) */}
+                            <SelectItem value="returned_it">I returned it</SelectItem>
+                            <SelectItem value="never_had_rental">I never had a rental before going on leave</SelectItem>
+                            <SelectItem value="hr_will_return">I received communication from HR and will be returning it</SelectItem>
+                            <SelectItem value="wont_return">I won't /can't return the rental</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>

@@ -46,7 +46,6 @@ export default function LoaRentalForm() {
   const [locationContact, setLocationContact] = useState("");
   const [keys, setKeys] = useState("");
   const [repaired, setRepaired] = useState("");
-  const [returnedRental, setReturnedRental] = useState("");
   const [comments, setComments] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -57,7 +56,6 @@ export default function LoaRentalForm() {
     if (!locationContact.trim()) errors.locationContact = "Please enter a contact number for this location.";
     if (!keys) errors.keys = "Please select an option for Keys.";
     if (!repaired) errors.repaired = "Please select your rental status.";
-    if (!returnedRental) errors.returnedRental = "Please select an option.";
     setFieldErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -99,7 +97,6 @@ export default function LoaRentalForm() {
         nexusNewLocationContact: locationContact,
         keys,
         repaired,
-        returnedRental,
         comments,
       }),
     onSuccess: () => {
@@ -293,27 +290,6 @@ export default function LoaRentalForm() {
         </Select>
         {fieldErrors.repaired && (
           <p className="text-sm text-red-500 mt-1" data-testid="error-loa-repaired">{fieldErrors.repaired}</p>
-        )}
-      </div>
-      <div>
-        <Label>Your rental must be returned{requiredMark}</Label>
-        <Select value={returnedRental} onValueChange={(v) => { setReturnedRental(v); clearFieldError("returnedRental"); }}>
-          <SelectTrigger
-            className={`mt-1 ${fieldErrors.returnedRental ? "border-red-500" : ""}`}
-            aria-invalid={!!fieldErrors.returnedRental}
-            data-testid="select-loa-returned"
-          >
-            <SelectValue placeholder="Select..." />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="confirmed">Confirmed</SelectItem>
-            <SelectItem value="needs_tlt">Needs a TLT</SelectItem>
-            <SelectItem value="unconfirmed">Unconfirmed</SelectItem>
-            <SelectItem value="denied">Denied</SelectItem>
-          </SelectContent>
-        </Select>
-        {fieldErrors.returnedRental && (
-          <p className="text-sm text-red-500 mt-1" data-testid="error-loa-returned">{fieldErrors.returnedRental}</p>
         )}
       </div>
       <div>
