@@ -217,6 +217,7 @@ export function poEffectiveCte(opts: { scopeJoin?: SQL } = {}): SQL {
     SELECT p.vehicle_number_padded, p.po_number, p.po_date, p.po_status,
            p.vendor_type, p.has_parts_labor, p.vendor_name, p.vendor_address,
            p.vendor_city, p.vendor_state, p.vendor_zip, p.upload_timestamp,
+           p.source AS po_source,
            ${qualifyingRepairPo("p")} AS is_qualifying_repair,
            COALESCE(
              CASE WHEN ${PORTAL_STATUS_ALLOWED} AND pp.observed_at > p.upload_timestamp
@@ -230,6 +231,18 @@ export function poEffectiveCte(opts: { scopeJoin?: SQL } = {}): SQL {
     ${opts.scopeJoin ?? sql.empty()}
     LEFT JOIN portal_po pp
       ON pp.truck_no = p.vehicle_number_padded AND pp.po_number = p.po_number
+    -- ETL SUPERSEDES PORTAL (portal-po-materialize.ts writes source='holman_portal'
+    -- rows for POs the ETL missed). The materializer physically deletes a portal
+    -- row once the ETL lands the same truck+PO, but that delete and the ETL land
+    -- are separate statements — this predicate makes the invariant hold even
+    -- mid-race: po_eff NEVER emits two rows for one truck+PO.
+    WHERE p.source <> 'holman_portal'
+       OR NOT EXISTS (
+            SELECT 1 FROM vrm_rental_operations_po_history e
+            WHERE e.vehicle_number_padded = p.vehicle_number_padded
+              AND e.po_number = p.po_number
+              AND e.source = 'holman_etl'
+          )
   )
 `;
 }
@@ -1491,11 +1504,15 @@ export async function getClassifiedPoHistory(truck: string, limit = 100): Promis
            q.eff_status AS effective_po_status, q.portal_status AS portal_po_status,
            (q.portal_observed_at IS NOT NULL) AS portal_status_applied,
            to_char(q.evidence_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS evidence_at,
-           q.vendor_name, q.vendor_type, q.has_parts_labor,
+           q.vendor_name, q.vendor_type, q.has_parts_labor, q.po_source,
            p.description, p.approved_amount
     FROM po_eff q
+    -- source must be part of the join key: with portal-materialized rows a
+    -- truck+PO can transiently exist under BOTH sources, and a source-blind
+    -- join would fan the receipt out to duplicate lines.
     JOIN vrm_rental_operations_po_history p
       ON p.vehicle_number_padded = q.vehicle_number_padded AND p.po_number = q.po_number
+     AND p.source = q.po_source
     WHERE q.vehicle_number_padded = ${caseKey}
     ORDER BY q.po_date DESC NULLS LAST, q.po_number DESC
     LIMIT ${cap}
@@ -1512,6 +1529,9 @@ export async function getClassifiedPoHistory(truck: string, limit = 100): Promis
     vendor_name: p.vendor_name ?? null,
     vendor_type: p.vendor_type ?? null,
     has_parts_labor: p.has_parts_labor === true,
+    // provenance: 'holman_etl' (Snowflake) or 'holman_portal' (materialized
+    // from the scraper because the ETL's 5-day window missed the PO).
+    source: p.po_source ?? "holman_etl",
     amount: p.approved_amount == null ? null : Number(p.approved_amount),
     description: p.description ?? null,
     is_current_shop: currentPo != null && p.po_number === currentPo,

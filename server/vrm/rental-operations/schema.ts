@@ -190,7 +190,7 @@ export async function initRentalOperationsSchema(): Promise<void> {
       driver_last_name       VARCHAR(120),
       enterprise_id          VARCHAR(40),
       upload_timestamp       TIMESTAMPTZ,                  -- freshness key (NOT file_date, which is frozen)
-      source                 VARCHAR(30) NOT NULL DEFAULT 'holman_etl', -- holman_etl | on_demand_scrape
+      source                 VARCHAR(30) NOT NULL DEFAULT 'holman_etl', -- holman_etl | holman_portal (portal-po-materialize) | on_demand_scrape
       raw_json               JSONB,
       ingested_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (vehicle_number_padded, po_number, source)

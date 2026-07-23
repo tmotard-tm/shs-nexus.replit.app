@@ -739,6 +739,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       )) {
         return requireAuthOrLucaFeedKey(req, res, next);
       }
+      // Fleet-Dispatcher internal-cron trigger for the Rental Ops ingest +
+      // Holman delta sweep. Same bearer convention as the fleet-scope router:
+      // x-internal-cron == SESSION_SECRET (or NEXUS_CRON_SECRET). Scoped to
+      // this ONE path; the route itself gates by ET hour + watermark + locks.
+      if (req.method === "POST" && req.path === "/rental-operations/cron/run") {
+        const internalToken = req.headers["x-internal-cron"];
+        const expectedInternal = process.env.SESSION_SECRET;
+        const expectedCron = process.env.NEXUS_CRON_SECRET;
+        if (internalToken && ((expectedInternal && internalToken === expectedInternal) || (expectedCron && internalToken === expectedCron))) {
+          return next();
+        }
+      }
       return requireAuth(req, res, next);
     }, vrmRouter);
     console.log("[VRM] Routes mounted at /api/vrm/* (session-gated; /repair-tracker/full also accepts Bearer API key)");

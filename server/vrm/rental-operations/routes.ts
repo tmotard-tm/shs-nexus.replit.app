@@ -284,6 +284,90 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST the Fleet-Dispatcher internal-cron trigger: the SAME ingest + Chromium
+  // delta sweep + portal-PO materialization the standalone script runs (one
+  // shared implementation in sweep-runner.ts — do not fork the bounds).
+  //
+  // Auth: the /api/vrm mount gate in server/routes.ts lets this ONE path
+  // through on `x-internal-cron` == SESSION_SECRET (session users can also hit
+  // it). The dispatcher pokes every 5 minutes, so the run decision is entirely
+  // server-side:
+  //   · ET-hour gate: runs only during the 14:00 and 20:00 ET hours — after the
+  //     ~13:00 ET Snowflake ETL upload, twice a day.
+  //   · watermark: skip if a completed scheduled_sync import run started within
+  //     the last 3 hours (so the 12 pokes inside one eligible hour yield 1 run,
+  //     and a 14:xx run never suppresses the 20:xx one).
+  //   · in-flight flags: honors syncInFlight AND scrapeSweepInFlight, exactly
+  //     like the manual sync / scrape-missing routes.
+  // `force` (query ?force=1 or body {force:true}) bypasses the hour gate and
+  // watermark for manual/backfill use; it never bypasses the in-flight flags.
+  // Responds immediately; the ingest + sweep run in the background (~30–40 min).
+  router.post("/rental-operations/cron/run", async (req, res) => {
+    try {
+      const force = req.query.force === "1" || req.query.force === "true" || req.body?.force === true;
+      const etHour = Number(new Intl.DateTimeFormat("en-US", {
+        timeZone: "America/New_York", hour: "numeric", hour12: false,
+      }).format(new Date()));
+      const RUN_HOURS = [14, 20]; // ET; ETL uploads ~13:00 ET
+      if (!force && !RUN_HOURS.includes(etHour)) {
+        return res.json({ ok: true, skipped: true, reason: `outside run hours (ET hour ${etHour}; runs during ${RUN_HOURS.join(" & ")})` });
+      }
+      if (syncInFlight || scrapeSweepInFlight) {
+        return res.json({ ok: true, skipped: true, reason: "a sync or sweep is already in flight" });
+      }
+      if (!force) {
+        const recent = await db.execute(sql`
+          SELECT 1 FROM vrm_rental_operations_import_runs
+          WHERE run_type = 'scheduled_sync' AND status = 'completed'
+            AND started_at > NOW() - INTERVAL '3 hours'
+          LIMIT 1
+        `);
+        if (recent.rows.length) {
+          return res.json({ ok: true, skipped: true, reason: "already ran within the last 3 hours" });
+        }
+      }
+      // Claim BOTH flags before responding — the sweep is part of this run, and
+      // a manual scrape-missing click mid-run must 409, not double-Chromium.
+      syncInFlight = true;
+      scrapeSweepInFlight = true;
+      res.json({ ok: true, started: true, etHour, forced: force });
+      (async () => {
+        const startedAt = Date.now();
+        console.log(`[VRM/RentalOps] cron run starting (ET hour ${etHour}${force ? ", forced" : ""})`);
+        const { runRentalOpsIngest } = await import("./ingest");
+        const r = await runRentalOpsIngest({ runType: "scheduled_sync", amsMode: "full", landPo: true });
+        if (r.skipped) {
+          console.log(`[VRM/RentalOps] cron run: ingest SKIPPED (${r.skipReason}) — no sweep.`);
+          return;
+        }
+        // Sweep AFTER the land, same order as the script: targeting compares the
+        // portal against the PO rows the land just wrote.
+        const { runDeltaSweep } = await import("./sweep-runner");
+        await runDeltaSweep();
+        console.log(`[VRM/RentalOps] cron run done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
+      })()
+        .catch((e) => console.error("[VRM/RentalOps] cron run FAILED:", e?.stack || e?.message || e))
+        .finally(() => { syncInFlight = false; scrapeSweepInFlight = false; });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] cron/run failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "cron run failed" });
+    }
+  });
+
+  // POST materialize portal-only POs into po_history right now (session-gated).
+  // The same materializer runs automatically after every sweep; this is the
+  // manual/backfill trigger (the one-time ~82-PO backfill in prod is exactly
+  // one call to this after publish). Synchronous — it is DB-only and fast.
+  router.post("/rental-operations/materialize-portal-pos", async (_req, res) => {
+    try {
+      const { materializePortalOnlyPos } = await import("./portal-po-materialize");
+      res.json({ ok: true, result: await materializePortalOnlyPos() });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] materialize-portal-pos failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "materialize failed" });
+    }
+  });
+
   // POST refresh PO history for current cases (bounded; ~seconds)
   router.post("/rental-operations/refresh-po", async (_req, res) => {
     try {
