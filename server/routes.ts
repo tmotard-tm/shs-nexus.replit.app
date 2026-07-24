@@ -17659,14 +17659,32 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // `activeVins` is the set of AMS VINs considered active (no SaleDate, no
   // OutofSvcDate, no FinalDisposition) — used to scope the Declined Repair /
   // Sent to Auction counts to active vehicles only.
-  let amsTruckStatusCache: {
+  type AmsTruckStatusCacheEntry = {
     data: Record<string, string | null>;
     activeVins: Set<string>;
     vehicleNumberByVin: Record<string, string>;
     activeSweepComplete: boolean;
     builtAt: number;
-  } | null = null;
+    // When set, overrides the builtAt+TTL freshness check. Used to pace a
+    // RETRY sooner than the normal TTL after an incomplete sweep, without
+    // lying about builtAt (which is surfaced to the UI as snapshotAgeMs).
+    nextRebuildAt?: number;
+  };
+  let amsTruckStatusCache: AmsTruckStatusCacheEntry | null = null;
   const AMS_TRUCK_STATUS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+  // After an INCOMPLETE sweep (AMS timing out), retry much sooner than the
+  // normal TTL so the scorecard self-heals as soon as AMS recovers — but not
+  // so aggressively that a struggling AMS gets hammered with back-to-back
+  // full sweeps.
+  const AMS_PARTIAL_SWEEP_RETRY_MS = 5 * 60 * 1000; // 5 minutes
+  // Freshness check shared by the hot-cache fast paths. Honors nextRebuildAt
+  // when present, else falls back to builtAt + TTL.
+  function amsTruckStatusCacheIsFresh(now: number): boolean {
+    if (!amsTruckStatusCache) return false;
+    const expiresAt = amsTruckStatusCache.nextRebuildAt
+      ?? (amsTruckStatusCache.builtAt + AMS_TRUCK_STATUS_CACHE_TTL_MS);
+    return now < expiresAt;
+  }
   // Never serve a persisted snapshot older than this on cold-start hydrate.
   const AMS_SNAPSHOT_MAX_AGE_MS = 12 * 60 * 60 * 1000; // 12 hours
   // Guard so the keep-warm interval is registered exactly once.
@@ -17676,7 +17694,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // instance can hydrate the scorecard immediately. Wrapped in try/catch — a DB
   // hiccup must NEVER throw into the sweep path. Partial sweeps are not persisted.
   async function persistAmsSweepSnapshot(
-    built: NonNullable<typeof amsTruckStatusCache>,
+    built: AmsTruckStatusCacheEntry,
   ): Promise<void> {
     if (!built.activeSweepComplete) return;
     try {
@@ -17707,7 +17725,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // Returns null if there is no snapshot, it is older than AMS_SNAPSHOT_MAX_AGE_MS,
   // or it fails to parse. builtAt is the snapshot's real (older) timestamp so the
   // TTL still forces a background rebuild on the next request.
-  async function loadAmsSweepSnapshotFromDb(): Promise<NonNullable<typeof amsTruckStatusCache> | null> {
+  async function loadAmsSweepSnapshotFromDb(): Promise<AmsTruckStatusCacheEntry | null> {
     try {
       const { rows } = await fsPool.query(
         `SELECT payload, built_at FROM ams_sweep_snapshot WHERE id = 'current' LIMIT 1`,
@@ -17744,41 +17762,73 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // /api/ams/active-scorecard-counts each kick off an independent ~2-minute full
   // AMS pagination, blowing past Replit's ~60s edge-proxy timeout and surfacing
   // as 502s on the All Vehicles page.
-  let amsTruckStatusBuildPromise: Promise<typeof amsTruckStatusCache> | null = null;
+  let amsTruckStatusBuildPromise: Promise<AmsTruckStatusCacheEntry> | null = null;
   // Kick off (or join) the deduped full-sweep build. Preserves the original
   // in-flight dedupe: only ONE buildAmsTruckStatusMap() runs at a time.
-  function kickOffAmsSweepBuild(): Promise<NonNullable<typeof amsTruckStatusCache>> {
+  function kickOffAmsSweepBuild(): Promise<AmsTruckStatusCacheEntry> {
     if (amsTruckStatusBuildPromise) {
-      return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
+      return amsTruckStatusBuildPromise;
     }
     amsTruckStatusBuildPromise = buildAmsTruckStatusMap()
-      .then((built) => {
+      .then(async (built) => {
+        if (built.activeSweepComplete) {
+          amsTruckStatusCache = {
+            data: built.map,
+            activeVins: built.activeVins,
+            vehicleNumberByVin: built.vehicleNumberByVin,
+            activeSweepComplete: true,
+            builtAt: Date.now(),
+          };
+          // Best-effort persist of a COMPLETED sweep so a future cold instance
+          // can hydrate instantly. Never throws into the sweep path.
+          void persistAmsSweepSnapshot(amsTruckStatusCache);
+          return amsTruckStatusCache;
+        }
+        // INCOMPLETE sweep (AMS timing out mid-pagination). A partial result
+        // must never clobber last-good COMPLETE data: the scorecard UI gates
+        // all numbers on activeSweepComplete, so serving a partial here used
+        // to pin the page in its "pending" (dashes) state for a full TTL even
+        // when a complete persisted snapshot existed. Prefer, in order:
+        //   1. the existing complete in-memory cache (hydrated or previous sweep),
+        //   2. the last persisted complete snapshot (≤12h old),
+        //   3. the partial itself (nothing better exists).
+        // In every case, pace the next rebuild attempt at the short retry
+        // interval so the card self-heals as soon as AMS recovers.
+        const retryAt = Date.now() + AMS_PARTIAL_SWEEP_RETRY_MS;
+        if (amsTruckStatusCache?.activeSweepComplete) {
+          console.warn('[AMS TruckStatusMap] Sweep incomplete — keeping existing complete cache, retrying in 5m');
+          amsTruckStatusCache = { ...amsTruckStatusCache, nextRebuildAt: retryAt };
+          return amsTruckStatusCache;
+        }
+        const snapshot = await loadAmsSweepSnapshotFromDb().catch(() => null);
+        if (snapshot) {
+          console.warn(`[AMS TruckStatusMap] Sweep incomplete — serving last persisted complete snapshot (age ${Math.round((Date.now() - snapshot.builtAt) / 60000)}m), retrying in 5m`);
+          amsTruckStatusCache = { ...snapshot, nextRebuildAt: retryAt };
+          return amsTruckStatusCache;
+        }
+        console.warn('[AMS TruckStatusMap] Sweep incomplete and no complete snapshot available — serving partial, retrying in 5m');
         amsTruckStatusCache = {
           data: built.map,
           activeVins: built.activeVins,
           vehicleNumberByVin: built.vehicleNumberByVin,
-          activeSweepComplete: built.activeSweepComplete,
+          activeSweepComplete: false,
           builtAt: Date.now(),
+          nextRebuildAt: retryAt,
         };
-        // Best-effort persist of a COMPLETED sweep so a future cold instance can
-        // hydrate instantly. Never throws into the sweep path.
-        if (amsTruckStatusCache.activeSweepComplete) {
-          void persistAmsSweepSnapshot(amsTruckStatusCache);
-        }
         return amsTruckStatusCache;
       })
       .finally(() => {
         amsTruckStatusBuildPromise = null;
       });
-    return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
+    return amsTruckStatusBuildPromise;
   }
-  async function getOrBuildAmsTruckStatusCache(): Promise<NonNullable<typeof amsTruckStatusCache>> {
+  async function getOrBuildAmsTruckStatusCache(): Promise<AmsTruckStatusCacheEntry> {
     const now = Date.now();
-    if (amsTruckStatusCache && (now - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+    if (amsTruckStatusCache && amsTruckStatusCacheIsFresh(now)) {
       return amsTruckStatusCache;
     }
     if (amsTruckStatusBuildPromise) {
-      return amsTruckStatusBuildPromise as Promise<NonNullable<typeof amsTruckStatusCache>>;
+      return amsTruckStatusBuildPromise;
     }
     // Cold start (fresh deploy / recycled instance): hydrate from the last
     // persisted sweep so callers serve real, last-good numbers immediately, then
@@ -17815,9 +17865,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   async function getAmsTruckStatusOrServe503(
     res: Response,
     logTag: string,
-  ): Promise<NonNullable<typeof amsTruckStatusCache> | null> {
+  ): Promise<AmsTruckStatusCacheEntry | null> {
     const now = Date.now();
-    if (amsTruckStatusCache && (now - amsTruckStatusCache.builtAt) <= AMS_TRUCK_STATUS_CACHE_TTL_MS) {
+    if (amsTruckStatusCache && amsTruckStatusCacheIsFresh(now)) {
       return amsTruckStatusCache;
     }
     const buildPromise = getOrBuildAmsTruckStatusCache();

@@ -4378,12 +4378,34 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
 
   app.get("/public/all-vehicles", requirePublicApiKey, async (_req, res) => {
     try {
-      const port = process.env.PORT || 5000;
-      const internalUrl = `http://localhost:${port}/api/fs/all-vehicles`;
-      const response = await fetch(internalUrl);
-      if (!response.ok) throw new Error(`Internal all-vehicles endpoint returned ${response.status}`);
-      const data = await response.json();
-      res.json({ success: true, count: Array.isArray(data) ? data.length : (data.vehicles?.length || 0), data });
+      // Serve the same payload the internal /api/fs/all-vehicles route builds,
+      // WITHOUT an unauthenticated localhost hop — the internal route requires
+      // a session, so the old fetch() proxy always failed with 401 → 500.
+      // Prefer the warm in-memory cache; fall back to the persisted response
+      // snapshot (refreshed on every live assembly of the internal route).
+      let payload: any = allVehiclesCache?.data ?? null;
+      let builtAtMs: number | null = allVehiclesCache?.timestamp ?? null;
+      if (!payload) {
+        const { readAllVehiclesResponseSnapshot } = await import("./fleet-scope-all-vehicles-mirror");
+        const persisted = await readAllVehiclesResponseSnapshot();
+        if (persisted) {
+          payload = persisted.payload;
+          builtAtMs = persisted.builtAt.getTime();
+        }
+      }
+      if (!payload) {
+        return res.status(503).json({
+          success: false,
+          message: "All-vehicles data is not available yet — no cached response or persisted snapshot. Retry after the app has served /api/fs/all-vehicles once.",
+        });
+      }
+      const count = Array.isArray(payload) ? payload.length : (payload.vehicles?.length || 0);
+      res.json({
+        success: true,
+        count,
+        builtAt: builtAtMs ? new Date(builtAtMs).toISOString() : null,
+        data: payload,
+      });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
