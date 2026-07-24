@@ -445,6 +445,8 @@ export default function AllVehicles() {
     excluded88: number;
     activeFleetCount: number | null;
     activeSweepComplete: boolean;
+    builtAt?: number;
+    snapshotAgeMs?: number;
   }>({
     queryKey: ['/api/ams/active-scorecard-counts'],
     // The AMS sweep can take a while to warm on a fresh server instance and the
@@ -461,7 +463,10 @@ export default function AllVehicles() {
     retryDelay: (attempt) => Math.min(4000 * attempt, 15000),
     refetchInterval: (query) => {
       const d = query.state.data as { activeSweepComplete?: boolean } | undefined;
-      return d?.activeSweepComplete ? false : 15000;
+      // Once complete, keep a slow background poll so builtAt stays current and
+      // the "Data as of" staleness note can appear/clear without a manual
+      // refresh (the server may be serving last-good data while AMS is down).
+      return d?.activeSweepComplete ? 5 * 60 * 1000 : 15000;
     },
   });
 
@@ -501,6 +506,18 @@ export default function AllVehicles() {
   // a pending state instead of a misleading 0 (failed/loading) or inflated total
   // (partial sweep).
   const amsReady = !!amsScorecardData && amsSweepComplete;
+  // Staleness note: the AMS cache normally rebuilds every 30 min. If builtAt is
+  // older than 45 min, refreshes are failing and the server is (correctly)
+  // serving the last-good complete data — disclose its age so slightly-old
+  // numbers are never mistaken for live ones.
+  const AMS_STALE_AFTER_MS = 45 * 60 * 1000;
+  const amsBuiltAt = amsScorecardData?.builtAt;
+  const amsDataIsStale =
+    amsReady && typeof amsBuiltAt === 'number' && Date.now() - amsBuiltAt > AMS_STALE_AFTER_MS;
+  const amsDataAsOfLabel =
+    typeof amsBuiltAt === 'number'
+      ? new Date(amsBuiltAt).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+      : null;
 
   const AMS_CARD_COLORS: Array<{ border: string; bg: string; text: string; subtext: string }> = [
     { border: 'border-green-200 dark:border-green-800', bg: 'bg-green-50 dark:bg-green-900/20', text: 'text-green-700 dark:text-green-400', subtext: 'text-green-600 dark:text-green-500' },
@@ -822,6 +839,11 @@ export default function AllVehicles() {
                           <p className="text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                             AMS Active · excludes 88/088
                           </p>
+                          {amsDataIsStale && amsDataAsOfLabel && (
+                            <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5" data-testid="text-ams-data-as-of">
+                              Data as of {amsDataAsOfLabel} — a fresh AMS refresh is pending
+                            </p>
+                          )}
                         </>
                       )}
                       {amsReady && declineRepairCount > 0 && (
