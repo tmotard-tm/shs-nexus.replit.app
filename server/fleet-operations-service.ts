@@ -953,6 +953,57 @@ function padDistrictForApi(input: string | undefined | null): string {
 }
 
 /**
+ * Fetch the tech's CURRENT district from live TPMS (system of record) and heal
+ * the tpms_tech_profiles mirror row when it disagrees. Returns the raw live
+ * districtNo (zero-padded as TPMS returns it, e.g. "0008366") or "" when the
+ * live lookup fails/times out — callers must fall back to the mirror in that case.
+ *
+ * WHY: the mirror's truck-driven refresh only re-queries a tech when his TRUCK
+ * assignment looks mismatched. A district-only transfer (tech moved districts,
+ * kept his truck) never triggers a refresh, so the mirror's district_no can stay
+ * stale for weeks (HABASI 2026-07-24: mirror said 0008184 since 7/6, live TPMS
+ * said 0008366). Any district comparison made from the stale mirror then blocks
+ * a perfectly valid assignment. Live-first + heal fixes both the decision and
+ * the mirror row.
+ */
+export async function fetchLiveTechDistrictAndHealMirror(
+  ldapId: string,
+  timeoutMs = 8000,
+): Promise<string> {
+  const eid = String(ldapId ?? "").trim().toUpperCase();
+  if (!eid) return "";
+  let liveDistrict = "";
+  try {
+    const { getTPMSService } = await import("./tpms-service");
+    const tpms = getTPMSService();
+    const live: any = await Promise.race([
+      tpms.getTechInfo(eid),
+      new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("live TPMS district lookup timed out")), timeoutMs),
+      ),
+    ]);
+    liveDistrict = String(live?.districtNo ?? "").trim();
+  } catch (e: any) {
+    console.warn(`[FleetOps] live TPMS district lookup failed for ${eid}: ${e?.message || e}`);
+    return "";
+  }
+  if (!liveDistrict) return "";
+  // Heal the mirror so every other reader (dialog auto-fill, guards, boards)
+  // agrees with TPMS from now on. Non-fatal: the live answer is returned either way.
+  try {
+    await db.execute(sql`
+      UPDATE tpms_tech_profiles
+      SET district_no = ${liveDistrict}, updated_at = now()
+      WHERE UPPER(enterprise_id) = ${eid}
+        AND COALESCE(district_no, '') <> ${liveDistrict}
+    `);
+  } catch (e: any) {
+    console.warn(`[FleetOps] tpms_tech_profiles district heal failed for ${eid}: ${e?.message || e}`);
+  }
+  return liveDistrict;
+}
+
+/**
  * District guard for the onboarding assign route ONLY
  * (/api/onboarding-hires/:id/assign). DUPLICATED from the inline guard in the
  * /api/fleet-ops/assign handler in routes.ts. The Fleet Management handler keeps
@@ -961,13 +1012,16 @@ function padDistrictForApi(input: string | undefined | null): string {
  * onboarding route enforce the same district block without modifying FM.
  * Behavior: resolve tech district from tpms_tech_profiles by enterprise id, fall
  * back to the caller districtNo (new hires have no profile yet), compare with the
- * vehicle's cached district, re-check LIVE Holman before blocking.
+ * vehicle's cached district, re-check LIVE TPMS (tech side) and LIVE Holman
+ * (vehicle side) before blocking.
  *
  * HARD REQUIREMENT (Tyler 2026-07-18, verbatim): "That district guard has to
  * stay in place ... currently we have to change the district before assigning
  * and that is INTENTIONAL." Block-on-district-mismatch is a deliberate rule:
- * never weaken, bypass, or add a force/skip flag. Keep this copy in sync with
- * the FM inline guard if that one ever changes.
+ * never weaken, bypass, or add a force/skip flag. The live TPMS recheck below
+ * does NOT weaken it — it swaps a stale mirror value for the system-of-record
+ * value on the about-to-block path only. Keep this copy in sync with the FM
+ * inline guard if that one ever changes.
  */
 export async function districtGuardForAssign(
   truckNumber: string,
@@ -996,18 +1050,31 @@ export async function districtGuardForAssign(
       .limit(1);
     const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
     if (vehicleDistrict && vehicleDistrict !== techDistrict) {
-      let liveDistrictOk = false;
-      try {
-        const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
-        const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
-        if (livePrefix && livePrefix === techDistrict) liveDistrictOk = true;
-      } catch (e: any) {
-        console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+      // The tpms_tech_profiles mirror can be stale for district-only transfers
+      // (tech moved districts, kept his truck — the truck-driven refresh never
+      // re-queries him). Before blocking, ask LIVE TPMS for the tech's current
+      // district; if it matches the vehicle, the mirror was stale and the assign
+      // is valid. The helper also heals the mirror row. Any failure falls back
+      // to the mirror value so the guard intent is preserved.
+      let effectiveTechDistrict = techDistrict;
+      const liveTechDistrict = padDistrictForApi(await fetchLiveTechDistrictAndHealMirror(_ldapNorm));
+      if (liveTechDistrict) effectiveTechDistrict = liveTechDistrict;
+      if (effectiveTechDistrict === vehicleDistrict) {
+        console.log(`[FleetOps] assign district recheck: mirror tech district ${techDistrict} was stale, live TPMS says ${effectiveTechDistrict} matching vehicle, allowing assign for ${truckNumber}`);
+      } else {
+        let liveDistrictOk = false;
+        try {
+          const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
+          const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
+          if (livePrefix && livePrefix === effectiveTechDistrict) liveDistrictOk = true;
+        } catch (e: any) {
+          console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+        }
+        if (!liveDistrictOk) {
+          return { blocked: true, message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning." };
+        }
+        console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${effectiveTechDistrict}, allowing assign for ${truckNumber}`);
       }
-      if (!liveDistrictOk) {
-        return { blocked: true, message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning." };
-      }
-      console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${techDistrict}, allowing assign for ${truckNumber}`);
     }
   }
   return { blocked: false };

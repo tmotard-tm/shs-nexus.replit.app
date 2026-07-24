@@ -15100,6 +15100,37 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // GET /api/tpms/techs/live-district/:enterpriseId — resolve the tech's CURRENT
+  // district, live-first. Used by the assign dialog's district auto-fill: the
+  // tpms_tech_profiles mirror goes stale for district-only transfers (the
+  // truck-driven refresh only re-queries mismatched trucks), so a live TPMS
+  // check is authoritative. The helper also heals the stale mirror row. Falls
+  // back to the mirror when live TPMS is unavailable.
+  app.get("/api/tpms/techs/live-district/:enterpriseId", requireAuth, async (req: any, res) => {
+    try {
+      const eid = String(req.params.enterpriseId || "").trim().toUpperCase();
+      if (!eid) return res.status(400).json({ message: "enterpriseId is required" });
+      const { fetchLiveTechDistrictAndHealMirror } = await import("./fleet-operations-service");
+      const liveDistrict = await fetchLiveTechDistrictAndHealMirror(eid);
+      if (liveDistrict) {
+        return res.json({ enterpriseId: eid, districtNo: liveDistrict, source: "live" });
+      }
+      const [profile] = await db
+        .select({ districtNo: tpmsTechProfiles.districtNo })
+        .from(tpmsTechProfiles)
+        .where(sql`UPPER(${tpmsTechProfiles.enterpriseId}) = ${eid}`)
+        .limit(1);
+      res.json({
+        enterpriseId: eid,
+        districtNo: profile?.districtNo || null,
+        source: profile?.districtNo ? "mirror" : "none",
+      });
+    } catch (error: any) {
+      console.error("Error resolving live tech district:", error);
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/tpms/techs/:techId/profile", requireAuth, async (req: any, res) => {
     try {
       const { techId } = req.params;
@@ -20467,27 +20498,38 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           .limit(1);
         const vehicleDistrict = padDistrictForApi(String(districtRows[0]?.district ?? ""));
         if (vehicleDistrict && vehicleDistrict !== techDistrict) {
-          // The cached district can lag a just-applied Holman change: the sync FREEZES
-          // holman_vehicles_cache.district until a submission verifies, so a change that
-          // already landed in Holman (and shows on the card, which reads the live prefix)
-          // can leave this column stale. Before blocking, double-check the LIVE Holman
-          // prefix. If Holman actually has the tech district, the cache is just stale and
-          // the assign is valid. Only the about-to-block path pays this lookup; any failure
-          // falls back to blocking so the guard intent is preserved.
-          let liveDistrictOk = false;
-          try {
-            const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
-            const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
-            if (livePrefix && livePrefix === techDistrict) liveDistrictOk = true;
-          } catch (e: any) {
-            console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+          // TWO caches can be stale here, so the about-to-block path rechecks both live:
+          // 1) The TECH side: tpms_tech_profiles district_no goes stale for district-only
+          //    transfers (tech moved districts, kept his truck — the truck-driven refresh
+          //    never re-queries him; HABASI 2026-07-24). Ask LIVE TPMS for the tech's
+          //    current district; the helper also heals the mirror row. If it matches the
+          //    vehicle, the assign is valid.
+          // 2) The VEHICLE side: holman_vehicles_cache.district is FROZEN until a
+          //    submission verifies, so a change already landed in Holman can leave it
+          //    stale. Double-check the LIVE Holman prefix.
+          // Any live-lookup failure falls back to blocking so the guard intent is preserved.
+          const { fetchLiveTechDistrictAndHealMirror } = await import("./fleet-operations-service");
+          let effectiveTechDistrict = techDistrict;
+          const liveTechDistrict = padDistrictForApi(await fetchLiveTechDistrictAndHealMirror(_ldapNorm));
+          if (liveTechDistrict) effectiveTechDistrict = liveTechDistrict;
+          if (effectiveTechDistrict === vehicleDistrict) {
+            console.log(`[FleetOps] assign district recheck: mirror tech district ${techDistrict} was stale, live TPMS says ${effectiveTechDistrict} matching vehicle, allowing assign for ${truckNumber}`);
+          } else {
+            let liveDistrictOk = false;
+            try {
+              const liveVeh = await holmanApiService.getVehicleAssignedStatus(truckNumber);
+              const livePrefix = padDistrictForApi(String((liveVeh as any)?.rawVehicle?.prefix ?? ""));
+              if (livePrefix && livePrefix === effectiveTechDistrict) liveDistrictOk = true;
+            } catch (e: any) {
+              console.warn(`[FleetOps] assign live-district recheck failed for ${truckNumber}: ${e?.message || e}`);
+            }
+            if (!liveDistrictOk) {
+              return res.status(409).json({
+                message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
+              });
+            }
+            console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${effectiveTechDistrict}, allowing assign for ${truckNumber}`);
           }
-          if (!liveDistrictOk) {
-            return res.status(409).json({
-              message: "This vehicle is in a different district than the tech. Unassign the vehicle and use Update District to change its district before assigning.",
-            });
-          }
-          console.log(`[FleetOps] assign district recheck: cache ${vehicleDistrict} is stale, live Holman matches tech district ${techDistrict}, allowing assign for ${truckNumber}`);
         }
       }
 

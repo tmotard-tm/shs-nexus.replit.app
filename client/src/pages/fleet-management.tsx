@@ -685,16 +685,17 @@ export default function FleetManagement() {
             assignAutoFilledRef.current = true;
             setAssignTechName(json.techName || `${json.firstName ?? ""} ${json.lastName ?? ""}`.trim());
 
-            // Prefer TPMS profile district over HR all_techs district — TPMS is the
-            // system of record for district assignment. Fall back to all_techs only
-            // when no TPMS profile exists for this enterprise ID.
+            // Prefer the TPMS district over HR all_techs district — TPMS is the
+            // system of record for district assignment. The live-district endpoint
+            // checks LIVE TPMS first (the local mirror goes stale for district-only
+            // transfers) and falls back to the mirror server-side. Fall back to
+            // all_techs only when TPMS has nothing for this enterprise ID.
             let districtToSet = json.districtNo ? String(json.districtNo) : "";
             try {
-              const tpmsRes = await fetch(`/api/tpms/techs?enterpriseId=${encodeURIComponent(q.toUpperCase())}&limit=1`, { credentials: "include" });
+              const tpmsRes = await fetch(`/api/tpms/techs/live-district/${encodeURIComponent(q.toUpperCase())}`, { credentials: "include" });
               if (tpmsRes.ok) {
-                const tpmsData = await tpmsRes.json();
-                const tpmsProfile = Array.isArray(tpmsData) ? tpmsData[0] : null;
-                if (tpmsProfile?.districtNo) districtToSet = String(tpmsProfile.districtNo);
+                const live = await tpmsRes.json();
+                if (live?.districtNo) districtToSet = String(live.districtNo);
               }
             } catch {
               // Non-fatal — keep the all_techs district as fallback
@@ -728,15 +729,14 @@ export default function FleetManagement() {
     setShowNameDropdown(false);
     setTechNameSuggestions([]);
 
-    // Prefer TPMS profile district over HR district for the same reason as the ID lookup path
+    // Prefer the live-first TPMS district over HR district for the same reason as the ID lookup path
     let districtToSet = tech.districtNo ? String(tech.districtNo) : "";
     if (id) {
       try {
-        const tpmsRes = await fetch(`/api/tpms/techs?enterpriseId=${encodeURIComponent(id)}&limit=1`, { credentials: "include" });
+        const tpmsRes = await fetch(`/api/tpms/techs/live-district/${encodeURIComponent(id)}`, { credentials: "include" });
         if (tpmsRes.ok) {
-          const tpmsData = await tpmsRes.json();
-          const tpmsProfile = Array.isArray(tpmsData) ? tpmsData[0] : null;
-          if (tpmsProfile?.districtNo) districtToSet = String(tpmsProfile.districtNo);
+          const live = await tpmsRes.json();
+          if (live?.districtNo) districtToSet = String(live.districtNo);
         }
       } catch {
         // Non-fatal — keep the all_techs district as fallback
