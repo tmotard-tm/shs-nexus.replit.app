@@ -21003,6 +21003,31 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
       }
 
+      // Self-heal (2026-07-24): the TPMS leg has the same disease — nothing in
+      // the refresh pipeline can UN-assign a tech in tpms_tech_profiles (the
+      // Snowflake extract keeps listing the last truck, the delta feed is
+      // blind to assignment changes, and the per-ID step is skipped/only fills
+      // empties). Terminated techs and truck-movers stay flagged forever even
+      // though live TPMS already cleared them (7 of 7 spot-checked on 7/24).
+      // Re-verify the TPMS-flagged techs against live TPMS in the background
+      // and drop the mismatch cache when anything heals. Fire-and-forget.
+      {
+        const tpmsFlagged = records
+          .filter((r: any) => r.tpmsTechId && String(r.tpmsTechId).trim())
+          .map((r: any) => ({ truckNumber: r.truckNumber, tpmsTechId: r.tpmsTechId }));
+        if (tpmsFlagged.length > 0) {
+          import("./tpms-mismatch-reverify")
+            .then(({ reverifyTpmsAssignments }) => reverifyTpmsAssignments(tpmsFlagged, { apply: true }))
+            .then((sum) => {
+              if (sum.refreshed > 0) {
+                console.log(`[Alignment] TPMS re-verify healed ${sum.refreshed}/${sum.checked} mirror rows — dropping mismatch cache`);
+                mismatchCache = null;
+              }
+            })
+            .catch((e: any) => console.warn("[Alignment] TPMS re-verify failed (non-fatal):", e?.message));
+        }
+      }
+
       if (countOnly) {
         return res.json({ count: records.length });
       }
@@ -21038,6 +21063,29 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json({ apply, candidates: amsFlagged.length, ...summary });
     } catch (err: any) {
       console.error("[Alignment] reverify-ams error:", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // POST /api/fleet-ops/mismatches/reverify-tpms — re-check the TPMS-flagged
+  // mismatch rows against live TPMS (per-tech /techinfo, the authoritative
+  // read). Dry-run by default (reports what WOULD refresh); ?apply=true
+  // corrects tpms_tech_profiles (clears ghosts, moves truck-movers).
+  app.post("/api/fleet-ops/mismatches/reverify-tpms", requireAuth, async (req: any, res) => {
+    try {
+      const apply = req.query.apply === "true";
+      const records = (mismatchCache && (Date.now() - mismatchCache.computedAt) < MISMATCH_CACHE_TTL)
+        ? mismatchCache.data
+        : await buildMismatchRecords();
+      const tpmsFlagged = records
+        .filter((r: any) => r.tpmsTechId && String(r.tpmsTechId).trim())
+        .map((r: any) => ({ truckNumber: r.truckNumber, tpmsTechId: r.tpmsTechId }));
+      const { reverifyTpmsAssignments } = await import("./tpms-mismatch-reverify");
+      const summary = await reverifyTpmsAssignments(tpmsFlagged, { apply });
+      if (apply && summary.refreshed > 0) mismatchCache = null;
+      res.json({ apply, candidates: tpmsFlagged.length, ...summary });
+    } catch (err: any) {
+      console.error("[Alignment] reverify-tpms error:", err);
       res.status(500).json({ message: err.message });
     }
   });

@@ -59,3 +59,21 @@ weekend/holiday batch auto-widens the exemption window).
 window can still be wrong; **confirm each candidate drift with a live `GET /techinfo` read
 before writing**. Safest design: AIMS = cheap bulk drift *detector*, live `techinfo` =
 authoritative *confirmer*.
+
+## Mismatch board now self-heals BOTH stale legs (July 2026)
+
+The Fleet Management mismatch board's TPMS leg reads `tpms_tech_profiles`, and NO refresh
+step can un-assign a tech there: the Snowflake extract keeps listing the last truck forever,
+the delta feed is blind (above), and the per-ID refresh step is skipped by default and only
+fills EMPTY cache slots. Verified July 2026: after a full refresh, all remaining "stuck"
+mismatches were mirror ghosts — live techinfo showed the termed techs unassigned and the
+movers on new trucks.
+
+Fix shipped: the mismatch compute fire-and-forgets live-techinfo re-verify sweeps for BOTH
+legs (AMS + TPMS patterns are parallel modules). Rules baked in: a truck is only CLEARED on
+an explicit live answer (success-with-no-truck or "No Data Found"); transient errors never
+clear; writes are CAS'd on the flagged truck so any concurrent writer wins; a winning
+move-write also clears other rows claiming the live truck (one owner per truck).
+**How to apply:** if stuck mismatches reappear, check the re-verify sweep logs before
+suspecting live TPMS — and note `truck_no` values can carry trailing spaces + leading zeros,
+so always TRIM before LTRIM-zeros canonical compare.
