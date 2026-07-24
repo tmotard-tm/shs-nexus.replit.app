@@ -888,6 +888,10 @@ export const onboardingHires = pgTable("onboarding_hires", {
   byovIntentCheckedAt: timestamp("byov_intent_checked_at"),
   // Sync tracking
   syncedAt: timestamp("synced_at").defaultNow().notNull(),
+  // Stale-hire sweep (2026-07-24): set when a clean Snowflake sync no longer returns
+  // this row; hire-facing reads exclude flagged rows. Cleared by the upsert if the
+  // employee reappears in the source feed.
+  droppedFromSourceAt: timestamp("dropped_from_source_at"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (table) => {

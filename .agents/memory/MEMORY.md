@@ -53,3 +53,4 @@
 - [BYOV prefix check pad order](byov-prefix-pad-order.md) — zero-padding a truck number to 6 digits BEFORE checking the '88' BYOV prefix breaks 5-digit BYOV trucks (88144→088144); check prefix on raw/trimmed number first.
 - [SMS quiet-hours deferral pitfalls](quiet-hours-deferral.md) — sign-inverted local→UTC made every quiet-hours deferral past-due (sent immediately, silent no-op); force/run-now routes must default dry-run + explicit confirm.
 - [db:push blocked by interactive drift](dbpush-interactive-drift.md) — drizzle push hangs on a TTY-only external_apps_name_unique prompt; apply columns via raw SQL on dev (schema.ts kept in sync), never --force (truncate risk).
+- [Upsert-only mirror sweeps](upsert-only-mirror-sweeps.md) — a ghost sweep on one Snowflake mirror doesn't fix sibling pages; every upsert-only sync table needs its own dropped_from_source_at sweep.

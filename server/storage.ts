@@ -393,6 +393,8 @@ export interface IStorage {
   bulkUpsertOnboardingHires(hires: InsertOnboardingHire[]): Promise<number>;
   updateOnboardingHire(id: string, updates: Partial<OnboardingHire>): Promise<OnboardingHire | undefined>;
   deleteOnboardingHire(id: string): Promise<boolean>;
+  countOnboardingHiresMissingFromSync(since: Date): Promise<number>;
+  markOnboardingHiresDroppedFromSource(since: Date): Promise<number>;
 
   // Field Mapping Module
   getIntegrationDataSources(): Promise<IntegrationDataSource[]>;
@@ -1656,6 +1658,14 @@ export class MemStorage implements IStorage {
 
   async deleteOnboardingHire(_id: string): Promise<boolean> {
     return false;
+  }
+
+  async countOnboardingHiresMissingFromSync(_since: Date): Promise<number> {
+    return 0;
+  }
+
+  async markOnboardingHiresDroppedFromSource(_since: Date): Promise<number> {
+    return 0;
   }
 
   // Activity Logs
@@ -4410,7 +4420,10 @@ export class DatabaseStorage implements IStorage {
 
   // Onboarding Hires
   async getOnboardingHires(): Promise<OnboardingHire[]> {
-    return await db.select().from(onboardingHires).orderBy(desc(onboardingHires.serviceDate));
+    // Exclude rows a clean Snowflake sync stopped returning (stale-hire sweep).
+    return await db.select().from(onboardingHires)
+      .where(isNull(onboardingHires.droppedFromSourceAt))
+      .orderBy(desc(onboardingHires.serviceDate));
   }
 
   async getOnboardingHire(id: string): Promise<OnboardingHire | undefined> {
@@ -4446,6 +4459,8 @@ export class DatabaseStorage implements IStorage {
           planningAreaName: hire.planningAreaName,
           specialties: hire.specialties,
           employmentStatus: hire.employmentStatus,
+          // Reappearing in the source feed clears any prior dropped flag.
+          droppedFromSourceAt: null,
           updatedAt: new Date(), 
           syncedAt: new Date() 
         })
@@ -4477,6 +4492,27 @@ export class DatabaseStorage implements IStorage {
   async deleteOnboardingHire(id: string): Promise<boolean> {
     const result = await db.delete(onboardingHires).where(eq(onboardingHires.id, id)).returning();
     return result.length > 0;
+  }
+
+  async countOnboardingHiresMissingFromSync(since: Date): Promise<number> {
+    const result = await db.select({ count: sql<number>`count(*)` }).from(onboardingHires)
+      .where(and(
+        sql`${onboardingHires.syncedAt} < ${since}`,
+        isNull(onboardingHires.droppedFromSourceAt),
+      ));
+    return Number(result[0]?.count ?? 0);
+  }
+
+  async markOnboardingHiresDroppedFromSource(since: Date): Promise<number> {
+    const now = new Date();
+    const result = await db.update(onboardingHires)
+      .set({ droppedFromSourceAt: now, updatedAt: now })
+      .where(and(
+        sql`${onboardingHires.syncedAt} < ${since}`,
+        isNull(onboardingHires.droppedFromSourceAt),
+      ))
+      .returning({ id: onboardingHires.id });
+    return result.length;
   }
 
   // Requests

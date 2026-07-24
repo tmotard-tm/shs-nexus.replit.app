@@ -2416,7 +2416,36 @@ export class SnowflakeSyncService {
       result.recordsProcessed = rows.length;
       result.recordsCreated = upsertedCount;
 
-      result.success = true;
+      // Stale-hire sweep (2026-07-24): the upsert-only sync leaves ghost rows for
+      // hires the Snowflake roster view stops returning (they linger with a stale
+      // employment_status, often 'A', so they keep showing on Weekly Onboarding).
+      // After a fully CLEAN run, flag every row this run didn't touch so it falls
+      // off hire-facing reads. Guard: skip the sweep if it would flag more than
+      // max(100, 10% of the fetched roster) rows — a thin/partial Snowflake feed
+      // must not mass-drop the table. Reappearing hires are un-flagged by the
+      // upsert itself.
+      if (result.errors.length === 0 && rows.length > 0) {
+        try {
+          const runStartedAt = new Date(startTime);
+          const staleCandidates = await storage.countOnboardingHiresMissingFromSync(runStartedAt);
+          const sweepGuard = Math.max(100, Math.ceil(rows.length * 0.10));
+          if (staleCandidates === 0) {
+            console.log('[OnboardingHires] Stale-hire sweep: no dropped hires to flag');
+          } else if (staleCandidates > sweepGuard) {
+            const msg = `Stale-hire sweep SKIPPED: ${staleCandidates} unseen rows exceeds guard ${sweepGuard} (max(100, 10% of ${rows.length})) — possible partial Snowflake feed`;
+            console.warn(`[OnboardingHires] ${msg}`);
+            result.errors.push(msg);
+          } else {
+            const flagged = await storage.markOnboardingHiresDroppedFromSource(runStartedAt);
+            console.log(`[OnboardingHires] Stale-hire sweep: flagged ${flagged} hire(s) no longer in the Snowflake roster (dropped_from_source_at set)`);
+          }
+        } catch (sweepError: any) {
+          console.error('[OnboardingHires] Stale-hire sweep failed:', sweepError.message);
+          result.errors.push(`Stale-hire sweep failed: ${sweepError.message}`);
+        }
+      }
+
+      result.success = result.errors.length === 0;
       result.duration = Date.now() - startTime;
 
       await storage.updateSyncLog(syncLog.id, {
