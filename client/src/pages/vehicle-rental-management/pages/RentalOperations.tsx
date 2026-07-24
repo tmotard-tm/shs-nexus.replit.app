@@ -322,6 +322,7 @@ const COHORTS: Array<{ key: string; label: string }> = [
   { key: "all", label: "All Rentals" },
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
+  { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
   { key: "mismatch_no_po", label: "Mismatch · no repair PO" },
   { key: "pended", label: "Pended · turned in" },
   { key: "open_repair", label: "Open Repair Ticket" },
@@ -756,6 +757,7 @@ export default function RentalOperations() {
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
       else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
       else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
+      else if (cohort === "auction_redirect") { if (!(isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable)) return false; }
       else if (cohort === "pended") { /* pool is already PENDED-only */ }
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
@@ -851,6 +853,11 @@ export default function RentalOperations() {
   });
   const lucaQueue = useMemo(() => basePool.filter((r) => r.callable), [basePool]);
   const callAllRedirects = useMemo(() => lucaQueue.filter((r) => r.redirect_to_assigned).length, [lucaQueue]);
+  // Ask #2 (Tyler 2026-07-24): the Sent-To-Auction subset LUCA WILL call via the
+  // assigned-truck redirect — declined/auction van we no longer own, but the tech
+  // drives an assigned truck in an open repair, so LUCA dials THAT shop. Same
+  // predicate as the row filter so the chip count and grid can never disagree.
+  const auctionRedirectCount = useMemo(() => basePool.filter((r) => isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable).length, [basePool]);
   const workableStats = useMemo(() => {
     const pool = basePool.filter((r) => !isDeclinedAuction(r.ams_bucket));
     const callableNow = pool.filter((r) => r.callable).length;
@@ -1012,12 +1019,13 @@ export default function RentalOperations() {
           const n: number | string = c.key === "all" ? basePool.length
             : c.key === "luca_queue" ? stats.callable
             : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
+            : c.key === "auction_redirect" ? auctionRedirectCount
             : c.key === "mismatch_no_po" ? (stats.sawServerWorkload ? (stats.workload.mismatch_no_po ?? 0) : "—")
             : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
           const danger = c.key === "cannot_work";
-          const go = c.key === "luca_queue";
+          const go = c.key === "luca_queue" || c.key === "auction_redirect";
           const pended = c.key === "pended" || c.key === "mismatch_no_po";
           const accentC = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.accent;
           const restColor = danger ? colors.red : go ? colors.green : pended ? colors.amber : colors.inkSoft;

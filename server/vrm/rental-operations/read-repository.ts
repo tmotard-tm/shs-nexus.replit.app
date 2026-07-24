@@ -1361,6 +1361,15 @@ export async function getLucaRentalList(): Promise<any> {
     WHERE c.present_in_latest = true AND COALESCE(c.ticket_status, '') <> 'PENDED'
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
   `);
+  // Assigned-truck redirect (Tyler 2026-07-24): enrich each rental with the
+  // board's OWN redirect resolution so LUCA's autonomous cadence can call the
+  // shop repairing the tech's ASSIGNED truck when the rental van is declined/
+  // auction. getRentalOpsMaster already computes redirect_to_assigned +
+  // call_shop_* (shop_pick / APPROVED-first, verified phone), so we read them by
+  // case_key rather than duplicate the join, and the feed can never disagree
+  // with the board about a redirect target.
+  const __master = await getRentalOpsMaster();
+  const __masterByKey = new Map(__master.rows.map((m: any) => [String(m.case_key), m]));
   let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneRejected = 0, statusCorrected = 0;
   const rentals = (res.rows as any[]).map((r) => {
     const shopName: string | null = r.shop_name ? String(r.shop_name).trim() : null;
@@ -1437,6 +1446,23 @@ export async function getLucaRentalList(): Promise<any> {
     VEH_DESC: r.veh_desc ?? null,
     RENTAL_CLASS: r.rental_class ?? null,
     RATE_AUTHORIZED: r.rate_authorized == null ? null : Number(r.rate_authorized),
+    // assigned-truck redirect (Tyler 2026-07-24). Only a genuinely CALLABLE
+    // redirect (assigned truck has an open repair + verified, non-rental phone)
+    // is flagged; LUCA swaps its shop + vehicle identity to the assigned truck.
+    // call_shop_* is the ASSIGNED truck's shop, distinct from SHOP_* (rental van).
+    ...(() => {
+      const m: any = __masterByKey.get(String(r.case_key));
+      const redir = !!(m && m.redirect_to_assigned && m.callable);
+      return {
+        REDIRECT_TO_ASSIGNED: redir,
+        CALL_TARGET_TRUCK: redir ? (m.call_target_truck ?? null) : null,
+        CALL_SHOP_NAME: redir ? (m.call_shop_name ?? null) : null,
+        CALL_SHOP_PHONE: redir ? (m.call_shop_phone ?? null) : null,
+        CALL_SHOP_ADDRESS: redir ? (m.call_shop_address ?? null) : null,
+        CALL_SHOP_PO_NUMBER: redir ? (m.call_shop_po_number ?? null) : null,
+        CALL_SHOP_PO_STATUS: redir ? (m.call_shop_po_status ?? null) : null,
+      };
+    })(),
     };
   });
   const sh = await getSourceHealth();
