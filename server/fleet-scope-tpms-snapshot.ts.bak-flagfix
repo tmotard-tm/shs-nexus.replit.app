@@ -24,7 +24,6 @@
 import { executeQuery } from './fleet-scope-snowflake';
 import { isSnowflakeConfigured } from './snowflake-service';
 import { runUnderSnowflakeSyncLock } from './fleetscope-snowflake-sync-lock';
-import { toDisplayNumber } from './vehicle-number-utils';
 
 export interface TpmsSnapshotEntry {
   enterpriseId: string;
@@ -40,15 +39,6 @@ export interface TpmsSnapshotEntry {
 
 interface SnapshotState {
   byLdap: Map<string, TpmsSnapshotEntry>;
-  /**
-   * Reverse index: normalized truck number (5-digit display form) -> LDAP.
-   * Built from the RAW (pre-dedup) TPMS_EXTRACT rows, so a tech with multiple
-   * truck rows maps each of their trucks to their LDAP. First writer wins for a
-   * given truck so the mapping is deterministic. Used by the rental
-   * Enterprise-ID enrichment to recover a renter's LDAP from the ticket's
-   * Vehicle Number when name matching is ambiguous or fails.
-   */
-  byTruck: Map<string, string>;
   lastRefreshedAt: Date;
   rowCount: number;
 }
@@ -72,19 +62,6 @@ export function lookupTpmsByLdap(ldap: string | null | undefined): TpmsSnapshotE
   const key = String(ldap).trim().toUpperCase();
   if (!key) return undefined;
   return state?.byLdap.get(key);
-}
-
-/**
- * Reverse lookup: given a truck number (any format), return the assigned tech's
- * LDAP from TPMS_EXTRACT, or undefined. The input is normalized to the 5-digit
- * display form so 61456 / 061456 / "61456" all match. Returns undefined when the
- * snapshot is not loaded or the truck has no assignment.
- */
-export function lookupLdapByTruck(truck: string | number | null | undefined): string | undefined {
-  if (truck == null) return undefined;
-  const key = toDisplayNumber(truck);
-  if (!key) return undefined;
-  return state?.byTruck.get(key);
 }
 
 /** Batch lookup. Returns a Map keyed by the same normalized LDAPs. */
@@ -159,7 +136,6 @@ export async function refreshSnapshot(
           MANAGER_NAME: string | null;
           PRIMARYZIP: string | null;
           DISTRICT: string | null;
-          TRUCK_LU: string | number | null;
         }>(`
           SELECT ENTERPRISE_ID,
                  FULL_NAME,
@@ -167,8 +143,7 @@ export async function refreshSnapshot(
                  MANAGER_ENT_ID,
                  MANAGER_NAME,
                  PRIMARYZIP,
-                 DISTRICT,
-                 TRUCK_LU
+                 DISTRICT
           FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT
           WHERE ENTERPRISE_ID IS NOT NULL
         `),
@@ -186,18 +161,6 @@ export async function refreshSnapshot(
           const m = String(row.MANAGER_ENT_ID).trim().toUpperCase();
           if (m) managerLdapSet.add(m);
         }
-      }
-
-      // Build the reverse truck -> LDAP index from the RAW rows (a tech can have
-      // multiple truck rows). First writer wins per truck so the mapping is
-      // deterministic across refreshes.
-      const byTruck = new Map<string, string>();
-      for (const row of rows) {
-        const ent = (row.ENTERPRISE_ID || '').trim().toUpperCase();
-        if (!ent) continue;
-        const truckKey = toDisplayNumber(row.TRUCK_LU);
-        if (!truckKey) continue;
-        if (!byTruck.has(truckKey)) byTruck.set(truckKey, ent);
       }
 
       // Build the per-LDAP map. TPMS_EXTRACT has one row per truck assignment,
@@ -222,14 +185,13 @@ export async function refreshSnapshot(
 
       state = {
         byLdap,
-        byTruck,
         lastRefreshedAt: new Date(),
         rowCount: byLdap.size,
       };
       const durationMs = Date.now() - startedAt;
       console.log(
         `[TPMS-Snapshot] Refresh complete: ${byLdap.size} unique LDAPs ` +
-          `(${managerLdapSet.size} managers, ${byTruck.size} trucks) in ${durationMs}ms`,
+          `(${managerLdapSet.size} managers) in ${durationMs}ms`,
       );
       return { ok: true, count: byLdap.size, durationMs };
     } catch (err: any) {

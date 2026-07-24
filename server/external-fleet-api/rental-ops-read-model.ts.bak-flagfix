@@ -167,27 +167,6 @@ export function rentalNameParse(fullName: string): { first: string; last: string
   return { first: tokens[0], last: tokens[endIndex] };
 }
 
-// Company-name noise that gets appended to a renter's name on the Enterprise
-// ticket (e.g. "ERIC PALMER SEARS", "ALBERT MORESCHI SEARS SERVICE"). These
-// trailing tokens make the last-name parse latch onto "SEARS"/"SERVICE" and
-// the name never matches a real tech. We strip them ONLY from the trailing end
-// and ONLY while ≥3 tokens remain, so a genuine two-token name (including the
-// rare real surname "Sears") is never damaged.
-const RENTER_NAME_NOISE = new Set([
-  "SEARS", "SERVICE", "SERVICES", "SVC", "SHS", "TRANSFORM", "LLC", "INC", "CORP", "HOME", "HOMES",
-]);
-export function stripRenterNameNoise(name: string): string {
-  const raw = (name || "").trim();
-  if (!raw) return raw;
-  const tokens = raw.toUpperCase().split(/\s+/).filter(Boolean);
-  let changed = false;
-  while (tokens.length > 2 && RENTER_NAME_NOISE.has(tokens[tokens.length - 1])) {
-    tokens.pop();
-    changed = true;
-  }
-  return changed ? tokens.join(" ") : raw;
-}
-
 export async function rentalEnrichEnterpriseIds(
   _client: SnowflakeClient,
   rows: RentalRow[],
@@ -195,7 +174,7 @@ export async function rentalEnrichEnterpriseIds(
   const toEnrich = rows.filter((row) => row.source === "enterprise" && !row.enterpriseId);
   if (!toEnrich.length) return;
   try {
-    const { ensureSnapshotLoaded, getSnapshot, lookupLdapByTruck } = await import("../fleet-scope-tpms-snapshot");
+    const { ensureSnapshotLoaded, getSnapshot } = await import("../fleet-scope-tpms-snapshot");
     await ensureSnapshotLoaded();
     const snapshot = getSnapshot();
 
@@ -252,7 +231,7 @@ export async function rentalEnrichEnterpriseIds(
     }
 
     for (const row of toEnrich) {
-      const { first, last } = rentalNameParse(stripRenterNameNoise(row.renterName || ""));
+      const { first, last } = rentalNameParse(row.renterName || "");
       if (!last) {
         row.enterpriseIdSource = "not_found";
         continue;
@@ -273,23 +252,6 @@ export async function rentalEnrichEnterpriseIds(
         }
       } else {
         row.enterpriseIdSource = "name_ambiguous";
-      }
-    }
-
-    // Truck-number fallback. For an Enterprise rental the ticket's Vehicle
-    // Number is the renter's OWN fleet truck (the one in the shop that caused
-    // the rental), so its TPMS assignment resolves to the same person. Name
-    // matching is tried first (above); any row it leaves unresolved
-    // (not_found / name_ambiguous) gets a deterministic second pass here. This
-    // recovers ambiguous last-name collisions and mis-keyed/compound renter
-    // names without changing any row the name pass already resolved.
-    for (const row of toEnrich) {
-      if (row.enterpriseId) continue;
-      const vehicle = row.vehicleNumber ?? row.VEHICLE_NUMBER ?? row.vehicleNumberPadded;
-      const ldap = lookupLdapByTruck(vehicle);
-      if (ldap) {
-        row.enterpriseId = ldap;
-        row.enterpriseIdSource = "truck_number";
       }
     }
   } catch (error: any) {

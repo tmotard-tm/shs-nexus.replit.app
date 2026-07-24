@@ -19230,23 +19230,23 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       if (!existing || rDate > eDate) entByVehicle.set(vn, r);
     }
 
-    // NOTE (2026-07-24): the out-of-service exclusion that used to run here for
-    // managed scope has been REMOVED. This helper answers "is this technician
-    // currently in an open rental?" for the Fleet Communications "In rental"
-    // badge and the Weekly Offboarding Rental column. An Enterprise ticket's
-    // Vehicle Number is the tech's OWN fleet truck, and that truck being marked
-    // out-of-service in Holman is frequently the very reason they are in a
-    // rental — so dropping OOS vehicles here silently un-flagged ~38 active
-    // technicians who really are renting. The OOS filter still applies on the
-    // Rental Operations tab (/api/rental-ops/open, includeOos=false), which is
-    // the "count of live rental vehicles" surface where it belongs.
+    // Managed scope: Rental Ops tab parity also means excluding out-of-service
+    // vehicles — the same getOosVehicleSet() filter the /api/rental-ops/open route
+    // applies by default (includeOos=false). Applied to BOTH segments before EIDs
+    // are collected. Default (broad) scope is unchanged.
+    let oosVehicles = new Set<string>();
+    if (managedScope) {
+      oosVehicles = await getOosVehicleSet();
+      if (oosVehicles.size > 0) {
+        for (const vn of Array.from(entByVehicle.keys())) {
+          if (oosVehicles.has(toDisplayNumber(vn))) entByVehicle.delete(vn);
+        }
+      }
+    }
 
-    // Build rows for TPMS name enrichment. vehicleNumber is threaded through so
-    // rentalEnrichEnterpriseIds can fall back to the truck -> assigned-tech
-    // index when a renter name is ambiguous or unmatched.
+    // Build rows for TPMS name enrichment
     const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
       renterName: (r.RENTER_NAME || '').trim(),
-      vehicleNumber: r.VEHICLE_NUMBER,
       enterpriseId: null as string | null,
       source: 'enterprise',
     }));
@@ -19269,11 +19269,11 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
         // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
         // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
-        // inflate the default membership set. (Out-of-service vehicles are NOT
-        // excluded — see the note above; an OOS truck out on rental is still a
-        // rental for the person-in-rental surfaces this set feeds.)
+        // inflate the default membership set. Out-of-service vehicles are also
+        // excluded (Rental Ops tab default view parity).
         if (isEntVendor(vendor)) continue;
         if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
+        if (oosVehicles.has(toDisplayNumber(normV(r.VEHICLE_NUMBER || '')))) continue;
       } else {
         if (/toll/i.test(vendor)) continue;
       }
