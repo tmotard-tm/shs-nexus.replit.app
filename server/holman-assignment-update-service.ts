@@ -298,7 +298,21 @@ class HolmanAssignmentUpdateService {
         // First check at 60s, up to 5 retry attempts with back-off
         holmanSubmissionService.scheduleVerification(submission.id, 60_000, 5);
       } catch (dbError: any) {
+        // Holman accepted the 202 but we couldn't persist the durable tracking row.
+        // Without it (a) the verify loop / 90s healer can never confirm or expire the
+        // op, and (b) the live pre-assign check can't see this queued change, so a
+        // later assign could skip its submit while this one lands afterward. Mirror
+        // the district route: surface a FAILURE so the operator knows the change is
+        // unconfirmed and retries — never return success with an untracked 202.
         console.error(`[HolmanAssignmentUpdate] Failed to save submission to DB:`, dbError);
+        return {
+          success: false,
+          holmanVehicleNumber: payload.holmanVehicleNumber,
+          submissionId,
+          error:
+            `Holman accepted the change but it could not be tracked for confirmation ` +
+            `(${dbError?.message || 'verification record failed'}). Please retry so the assignment can be verified.`,
+        };
       }
 
       return {

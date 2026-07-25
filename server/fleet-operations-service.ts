@@ -463,7 +463,7 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
           },
         };
       }
-      return { status: "failed", message: result.message || "Holman assign failed" };
+      return { status: "failed", message: result.message || (result as any).error || "Holman assign failed" };
     }
     if (action === "unassign") {
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
@@ -484,7 +484,7 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
           },
         };
       }
-      return { status: "failed", message: result.message || "Holman unassign failed" };
+      return { status: "failed", message: result.message || (result as any).error || "Holman unassign failed" };
     }
     return { status: "skipped", message: "Not applicable for this operation" };
   } catch (err: any) {

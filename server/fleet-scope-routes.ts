@@ -18165,6 +18165,40 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     }
   });
 
+  // Fleet-Dispatcher drain: the Holman verify pipeline (per-submission setTimeout
+  // chains + the 90s pollPendingSubmissions setInterval in index.ts) is in-process,
+  // so on the autoscale deployment it only ticks while an instance happens to be
+  // warm. This endpoint makes verification + op-event retries durable: the external
+  // dispatcher hits it every 5 minutes (x-internal-cron / NEXUS_CRON_SECRET — the
+  // router-wide gate above lets the header through; sessions also work for manual
+  // runs). Both drains are idempotent and internally guarded (pollPendingSubmissions
+  // skips rows younger than 45s; retryFailedOperationEvents honors nextRetryAt and
+  // attempt caps), so overlapping ticks are safe.
+  app.post("/fleet-ops/verify-drain", async (_req: any, res) => {
+    const steps: Array<{ step: string; ok: boolean; summary?: any; error?: string }> = [];
+    try {
+      try {
+        const { holmanSubmissionService } = await import("./holman-submission-service");
+        const poll = await holmanSubmissionService.pollPendingSubmissions();
+        steps.push({ step: "holman_pending_verify", ok: true, summary: poll });
+      } catch (e: any) {
+        steps.push({ step: "holman_pending_verify", ok: false, error: e?.message || String(e) });
+      }
+      try {
+        const { retryFailedOperationEvents } = await import("./fleet-operations-service");
+        const retry = await retryFailedOperationEvents();
+        steps.push({ step: "op_events_retry", ok: true, summary: retry });
+      } catch (e: any) {
+        steps.push({ step: "op_events_retry", ok: false, error: e?.message || String(e) });
+      }
+      const success = steps.every((s) => s.ok);
+      res.status(success ? 200 : 500).json({ success, steps });
+    } catch (error: any) {
+      console.error("[FleetOpsDrain] verify-drain failed:", error);
+      res.status(500).json({ success: false, steps, message: error?.message || "verify-drain failed" });
+    }
+  });
+
   app.post("/rental-sync", async (req: any, res) => {
     try {
       const user = req.user;
