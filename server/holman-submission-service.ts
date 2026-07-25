@@ -1,7 +1,9 @@
 import { db } from "./db";
-import { holmanSubmissions, fleetOperationLog, holmanVehiclesCache, type HolmanSubmission, type InsertHolmanSubmission } from "@shared/schema";
-import { eq, and, inArray, desc, gte, lte, like, sql } from "drizzle-orm";
+import { holmanSubmissions, fleetOperationLog, holmanVehiclesCache, reconciliationWriteFences, type HolmanSubmission, type InsertHolmanSubmission } from "@shared/schema";
+import { eq, and, inArray, desc, gte, lte, like, sql, isNull, or } from "drizzle-orm";
 import { holmanApiService } from "./holman-api-service";
+import { verifyFence, expireFence } from "./fleet-reconciliation/fences";
+import { toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
 
 const HOLMAN_SUBMISSION_EXPIRY_MS = parseInt(process.env.HOLMAN_SUBMISSION_EXPIRY_MS || '1200000', 10); // default 20 minutes
 const PRE_EXPIRY_BUFFER_MS = 2 * 60 * 1000; // 2 minutes before expiry
@@ -114,6 +116,89 @@ export class HolmanSubmissionService {
     return digits.slice(-4).padStart(4, '0');
   }
 
+  // ─── Superseded write-fence release (2026-07-24, truck 23893) ────────────────
+  // A reconciliation write-fence freezes holman_vehicles_cache's tech fields to
+  // the backstop-written value until bulk-verify confirms it or the 7-day TTL
+  // expires. If a NEWER assign/unassign is confirmed against live Holman while
+  // such a fence is active, the fence's expectation is obsolete: without this
+  // release it would pin the stale cached value (blocking every bulk pull) for
+  // up to a week. Called at each confirmed-assign/unassign point.
+  //  - fence expectation matches the confirmed value → verifyFence (live now
+  //    matches what the backstop wanted; lift early, normal semantics)
+  //  - fence expectation differs → expireFence (superseded by this newer
+  //    confirmed operation) + mirror the confirmed truth into the cache so the
+  //    mismatch view heals without waiting for the next bulk pull.
+  // ONLY call this from LIVE-Holman-confirmed points, never from cache-based
+  // confirms: the fence pins the cache to its own expected value, so a cache
+  // "confirmation" can be the fence's own pinned value reflected back
+  // (circular evidence) — lifting on it would clobber the very correction the
+  // fence protects during Holman's apply-latency window.
+  // Never throws — fence bookkeeping must not fail a successful verification.
+  private async releaseSupersededFence(
+    vehicleNumber: string,
+    confirmedTech: string | null,
+    confirmedName: string | null,
+    submissionCreatedAt: Date | null,
+  ): Promise<void> {
+    try {
+      const canonical = (toCanonical(vehicleNumber) || "").trim();
+      if (!canonical) return;
+      const [fence] = await db
+        .select()
+        .from(reconciliationWriteFences)
+        .where(
+          and(
+            eq(reconciliationWriteFences.system, "holman"),
+            eq(reconciliationWriteFences.truckCanonical, canonical),
+            eq(reconciliationWriteFences.field, "assignment"),
+            isNull(reconciliationWriteFences.verifiedAt),
+            or(
+              isNull(reconciliationWriteFences.expiresAt),
+              sql`${reconciliationWriteFences.expiresAt} > now()`,
+            ),
+          ),
+        )
+        .limit(1);
+      if (!fence) return;
+
+      // Supersession-order guard: only a submission created strictly AFTER
+      // the fence may release it. An older in-flight submission confirming
+      // late must not expire a newer fence (mirrors the sweep's check).
+      if (!submissionCreatedAt || !(submissionCreatedAt > fence.createdAt)) {
+        return;
+      }
+
+      const norm = (v: string | null | undefined) => {
+        const t = String(v ?? "").trim().toLowerCase();
+        return t || null;
+      };
+      const expected = norm(fence.expectedValue);
+      const confirmed = norm(confirmedTech);
+
+      if (expected === confirmed) {
+        await verifyFence(db, "holman", canonical, "assignment");
+        console.log(`[HolmanVerify] Fence on ${canonical} verified early — live matches backstop expectation ("${expected ?? ""}")`);
+        return;
+      }
+
+      await expireFence(db, "holman", canonical, "assignment");
+      await db
+        .update(holmanVehiclesCache)
+        .set({
+          // Same normalization the bulk sync writes (lowercased enterprise id)
+          holmanTechAssigned: confirmedTech ? normalizeEnterpriseId(confirmedTech) || null : null,
+          holmanTechName: confirmedTech ? (confirmedName || null) : null,
+          lastLocalUpdateAt: new Date(),
+        })
+        .where(sql`UPPER(LTRIM(TRIM(${holmanVehiclesCache.holmanVehicleNumber}), '0')) = ${canonical.toUpperCase()}`);
+      console.log(
+        `[HolmanVerify] Fence on ${canonical} SUPERSEDED (expected "${expected ?? ""}", confirmed "${confirmed ?? ""}") — expired + cache mirrored`,
+      );
+    } catch (e: any) {
+      console.warn(`[HolmanVerify] Fence release failed for ${vehicleNumber} (non-fatal):`, e?.message);
+    }
+  }
+
   // ─── Vehicle-lookup verification (primary strategy) ──────────────────────────
   // Holman's batch submission API returns 202 Accepted (async queue).
   // There is no per-vehicle status endpoint.  Holman's basic-query GET does not
@@ -145,11 +230,17 @@ export class HolmanSubmissionService {
             if (submission.action === 'assign') {
               const cd = (live.assignedStatusCode || '').toUpperCase();
               if (expectedTech && cd !== 'U' && techInHolman.toLowerCase() === expectedTech.toLowerCase()) {
+                const raw: any = live.rawVehicle;
+                const liveName = raw?.firstName && raw?.lastName
+                  ? `${raw.firstName} ${raw.lastName}`.trim()
+                  : (raw?.driverName || null);
+                await this.releaseSupersededFence(vehicleNumber, techInHolman, liveName, submission.createdAt);
                 return { verified: true, newStatus: 'completed', message: `Confirmed assigned via live Holman (tech="${techInHolman}")`, rawVehicle: live.rawVehicle };
               }
             } else {
               const cd = (live.assignedStatusCode || '').toUpperCase();
               if (cd === 'U' || !techInHolman) {
+                await this.releaseSupersededFence(vehicleNumber, null, null, submission.createdAt);
                 return { verified: true, newStatus: 'completed', message: `Confirmed unassigned via live Holman (status=${live.assignedStatus})`, rawVehicle: live.rawVehicle };
               }
             }
@@ -183,6 +274,9 @@ export class HolmanSubmissionService {
         const success = assignedStatusCd === 'U' || techInCache === '';
         if (success) {
           console.log(`[HolmanVerify] Submission ${submission.id} — confirmed unassigned from cache (status=${assignedStatusCd}, tech="${techInCache}")`);
+          // NOTE: no fence release here — a cache confirm can be the fence's
+          // own pinned value reflected back (circular); only live-confirmed
+          // points may release fences. The supersede sweep covers the rest.
           return { verified: true, newStatus: 'completed', message: `Confirmed unassigned via cache (status=${assignedStatusCd})`, rawVehicle: cached };
         }
         console.log(`[HolmanVerify] Submission ${submission.id} — cache still shows assigned (status=${assignedStatusCd}, tech="${techInCache}"), pending`);
@@ -193,6 +287,8 @@ export class HolmanSubmissionService {
         const techMatch = !!(expectedTech && techInCache.toLowerCase().includes(expectedTech.toLowerCase()));
         if (techMatch) {
           console.log(`[HolmanVerify] Submission ${submission.id} — confirmed assigned from cache (tech="${techInCache}" matches "${expectedTech}")`);
+          // NOTE: no fence release here — cache confirm is circular evidence
+          // (the fence pins the cache); only live-confirmed points release.
           return { verified: true, newStatus: 'completed', message: `Confirmed assigned via cache (tech="${techInCache}")`, rawVehicle: cached };
         }
         if (techInCache && expectedTech) {

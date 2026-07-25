@@ -21028,6 +21028,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         }
       }
 
+      // Self-heal (2026-07-24, truck 23893): a Holman reconciliation
+      // write-fence can outlive the correction it protected — a human
+      // re-assign confirmed AFTER a backstop unassign leaves the fence
+      // pinning the stale blank tech in holman_vehicles_cache for up to
+      // 7 days (every forced refresh included). Lift fences superseded by
+      // a newer completed submission, confirmed against LIVE Holman, and
+      // mirror the live truth into the cache. Fire-and-forget; throttled
+      // internally (10-min min interval, singleton).
+      import("./holman-fence-supersede")
+        .then(({ liftSupersededHolmanFences }) => liftSupersededHolmanFences({ apply: true }))
+        .then((sum) => {
+          if (sum.lifted > 0) {
+            console.log(`[Alignment] Holman fence supersede lifted ${sum.lifted}/${sum.checked} stale fences — dropping mismatch cache`);
+            mismatchCache = null;
+          }
+        })
+        .catch((e: any) => console.warn("[Alignment] Holman fence supersede failed (non-fatal):", e?.message));
+
       if (countOnly) {
         return res.json({ count: records.length });
       }
@@ -21086,6 +21104,24 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       res.json({ apply, candidates: tpmsFlagged.length, ...summary });
     } catch (err: any) {
       console.error("[Alignment] reverify-tpms error:", err);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // POST /api/fleet-ops/mismatches/reverify-holman-fences — find active
+  // Holman assignment write-fences superseded by a newer completed
+  // assign/unassign submission, confirm against live Holman, and lift them
+  // (expire fence + mirror live truth into holman_vehicles_cache). Dry-run
+  // by default (reports what WOULD lift); ?apply=true applies.
+  app.post("/api/fleet-ops/mismatches/reverify-holman-fences", requireAuth, async (req: any, res) => {
+    try {
+      const apply = req.query.apply === "true";
+      const { liftSupersededHolmanFences } = await import("./holman-fence-supersede");
+      const summary = await liftSupersededHolmanFences({ apply });
+      if (apply && summary.lifted > 0) mismatchCache = null;
+      res.json({ apply, ...summary });
+    } catch (err: any) {
+      console.error("[Alignment] reverify-holman-fences error:", err);
       res.status(500).json({ message: err.message });
     }
   });
