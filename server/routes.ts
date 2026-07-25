@@ -12086,7 +12086,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(422).json({ message: "This hire has no Enterprise ID yet (enrichment pending). It is required for assignment." });
       }
 
-      const { fleetOpsService, districtGuardForAssign } = await import("./fleet-operations-service");
+      const { fleetOpsService, districtGuardForAssign, validateAssignTarget } = await import("./fleet-operations-service");
+
+      // FM-parity target validation: numeric format, existence (cache + live
+      // Holman fallback), L/B/W/T status, operation lock — all BEFORE any
+      // external system is called.
+      const target = await validateAssignTarget(truckNumber);
+      if (target.blocked) {
+        const code = target.reason === "invalid_format" || target.reason === "not_found" ? 422 : 409;
+        return res.status(code).json({ message: target.message, reason: target.reason });
+      }
 
       const guard = await districtGuardForAssign(truckNumber, ldapId, hire.district ?? undefined);
       if (guard.blocked) return res.status(409).json({ message: guard.message });
@@ -20468,6 +20477,16 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "truckNumber and ldapId are required" });
       }
 
+      // Defense-in-depth target validation (FM's UI already prevents these
+      // structurally, but the API itself must reject malformed/unknown trucks,
+      // L/B/W/T status codes, and locked vehicles before any external call).
+      const { validateAssignTarget } = await import("./fleet-operations-service");
+      const target = await validateAssignTarget(String(truckNumber));
+      if (target.blocked) {
+        const code = target.reason === "invalid_format" || target.reason === "not_found" ? 422 : 409;
+        return res.status(code).json({ message: target.message, reason: target.reason });
+      }
+
       // Block an assignment that would silently change the vehicle's district.
       // Resolve the tech's district from a TRUSTED server-side source — the synced
       // TPMS tech profile, keyed by enterprise/LDAP id — and only fall back to the
@@ -20607,6 +20626,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
           operationLockedBy: holmanVehiclesCache.operationLockedBy,
           byovVinMissing: holmanVehiclesCache.byovVinMissing,
           vin: holmanVehiclesCache.vin,
+          district: holmanVehiclesCache.district,
         }).from(holmanVehiclesCache)
           .where(eq(holmanVehiclesCache.holmanVehicleNumber, candidate))
           .limit(1);
@@ -20614,7 +20634,33 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       }
 
       if (!row) {
-        return res.status(404).json({ message: "Vehicle not found in cache" });
+        // Cache miss — check LIVE Holman before declaring the truck unknown, so
+        // a genuinely new vehicle that hasn't synced yet isn't false-blocked by
+        // the Onboarding pre-check (a 404 here now means "verified not a fleet
+        // vehicle", matching the server-side assign validation).
+        if (/^\d{1,6}$/.test(String(truckNumber).trim())) {
+          try {
+            const live = await holmanApiService.getVehicleAssignedStatus(truckNumber);
+            if (live?.found) {
+              return res.json({
+                holmanVehicleNumber: String((live as any)?.rawVehicle?.holmanVehicleNumber ?? truckNumber),
+                holmanAssignedStatusCd: live.assignedStatusCode ?? null,
+                holmanTechAssigned: live.techAssigned ?? null,
+                holmanTechName: null,
+                isLocked: false,
+                lockedBy: null,
+                byovVinMissing: null,
+                vin: (live as any)?.rawVehicle?.vin ?? null,
+                district: (live as any)?.rawVehicle?.prefix ?? null,
+                source: "live",
+              });
+            }
+          } catch (e: any) {
+            console.warn(`[FleetOps] vehicle-status live Holman fallback failed for ${truckNumber}: ${e?.message || e}`);
+            return res.status(503).json({ message: "Vehicle not in cache and live Holman lookup failed — try again" });
+          }
+        }
+        return res.status(404).json({ message: "Vehicle not found in Holman (cache + live)" });
       }
 
       // Check if lock is active (not expired)
@@ -20630,6 +20676,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         lockedBy: isLocked ? row.operationLockedBy : null,
         byovVinMissing: row.byovVinMissing,
         vin: row.vin,
+        district: row.district,
       });
     } catch (err: any) {
       res.status(500).json({ message: err.message });

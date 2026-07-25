@@ -8,7 +8,7 @@
 // button and enforces the same district block. Fleet Management's code is
 // untouched (Tyler 2026-07-18).
 import { useState, useEffect, useMemo, useRef } from "react";
-import { useCostCenters } from "@/hooks/use-cost-centers";
+import { useCostCenters, padDistrict } from "@/hooks/use-cost-centers";
 import { TopBar } from "@/components/layout/top-bar";
 import { MainContent } from "@/components/layout/main-content";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -629,12 +629,17 @@ export default function WeeklyOnboardingV2() {
     const t = setTimeout(() => setPrecheckTruck(truckNumber.trim()), 400);
     return () => clearTimeout(t);
   }, [truckNumber]);
-  const { data: precheck, isError: precheckMiss } = useQuery<any>({
+  const { data: precheck, isError: precheckErr, error: precheckError } = useQuery<any>({
     queryKey: ['/api/fleet-ops/vehicle-status', precheckTruck],
     enabled: assignDialogOpen && !!precheckTruck,
     staleTime: 30_000,
     retry: false,
   });
+  // The endpoint now verifies cache + LIVE Holman, so a 404 means "verified
+  // not a fleet vehicle" (hard block). Any other error (e.g. 503 live-lookup
+  // failure) is transient — don't block; the server re-validates on submit.
+  const precheckMiss = precheckErr && String((precheckError as any)?.message ?? "").startsWith("404");
+  const precheckTransientErr = precheckErr && !precheckMiss;
 
   // ── Derived data ──
   const weekGroups = useMemo(() => groupHiresByWeek(hires, new Date()), [hires]);
@@ -1247,7 +1252,25 @@ export default function WeeklyOnboardingV2() {
 
   // ── Assign submit ──
   const activePending = activeHire ? pendingMap[activeHire.id] ?? null : null;
-  const precheckBlocked = !!precheck?.isLocked;
+  // FM-parity blocks (mirrors Fleet Management's Assign dialog + the server's
+  // validateAssignTarget): non-numeric truck, unknown truck (server verified
+  // cache + live Holman → 404 means truly not a fleet vehicle), Holman status
+  // L/B/W/T, operation lock, and vehicle-district ≠ hire-district.
+  const truckTrimmed = truckNumber.trim();
+  const truckInvalidFormat = !!truckTrimmed && !/^\d{1,6}$/.test(truckTrimmed);
+  const precheckStatusCd = String(precheck?.holmanAssignedStatusCd ?? "").trim().toUpperCase();
+  const precheckStatusBlocked = ["L", "B", "W", "T"].includes(precheckStatusCd);
+  const precheckDistrictMismatch = (() => {
+    const vd = padDistrict(precheck?.district);
+    const hd = padDistrict(activeHire?.district);
+    return !!vd && !!hd && vd !== hd;
+  })();
+  const precheckBlocked =
+    truckInvalidFormat ||
+    (precheckMiss && !!truckTrimmed) ||
+    !!precheck?.isLocked ||
+    precheckStatusBlocked ||
+    precheckDistrictMismatch;
   const canSubmitAssign =
     !!activeHire &&
     !!truckNumber.trim() &&
@@ -1881,15 +1904,23 @@ export default function WeeklyOnboardingV2() {
                   />
                   {/* Pre-check chip (30s staleTime; read-only cache lookup) */}
                   {precheckTruck && (
-                    precheckMiss ? (
-                      <p className="text-xs text-muted-foreground">Truck {precheckTruck}: not in Holman cache (may still be valid — server will verify)</p>
+                    truckInvalidFormat ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">Truck number "{precheckTruck}" is invalid — it must be numeric (up to 6 digits). Assignment is blocked.</p>
+                    ) : precheckMiss ? (
+                      <p className="text-xs text-red-600 dark:text-red-400">Truck {precheckTruck} was not found in Holman (cache and live) — not a fleet vehicle, so assignment is blocked.</p>
+                    ) : precheckTransientErr ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">Couldn't verify truck {precheckTruck} right now (Holman lookup failed) — the server will verify on assign.</p>
                     ) : precheck ? (
-                      <p className={`text-xs ${precheck.isLocked ? "text-red-600 dark:text-red-400" : precheck.holmanTechAssigned ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
+                      <p className={`text-xs ${precheck.isLocked || precheckStatusBlocked || precheckDistrictMismatch ? "text-red-600 dark:text-red-400" : precheck.holmanTechAssigned ? "text-amber-600 dark:text-amber-400" : "text-green-600 dark:text-green-400"}`}>
                         {precheck.isLocked
                           ? `Locked: another operation on ${precheckTruck} is in progress (${precheck.lockedBy || "unknown"})`
-                          : precheck.holmanTechAssigned
-                            ? `Heads up: ${precheckTruck} shows assigned to ${precheck.holmanTechName || precheck.holmanTechAssigned} in Holman — assigning will reassign it`
-                            : `${precheckTruck}: unassigned in Holman cache (status ${precheck.holmanAssignedStatusCd || "-"})`}
+                          : precheckStatusBlocked
+                            ? `Truck ${precheckTruck} has Holman status code ${precheckStatusCd}, which does not allow assignment.`
+                            : precheckDistrictMismatch
+                              ? `Truck ${precheckTruck} is in district ${precheck.district}, but this hire is in district ${activeHire?.district || "?"}. Assignment is blocked — unassign the vehicle and use Update District in Fleet Management first.`
+                              : precheck.holmanTechAssigned
+                                ? `Heads up: ${precheckTruck} shows assigned to ${precheck.holmanTechName || precheck.holmanTechAssigned} in Holman — assigning will reassign it`
+                                : `${precheckTruck}: unassigned in Holman (status ${precheck.holmanAssignedStatusCd || "-"})`}
                       </p>
                     ) : null
                   )}

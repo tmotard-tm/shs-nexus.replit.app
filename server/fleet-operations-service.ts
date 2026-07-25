@@ -1161,6 +1161,99 @@ export async function districtGuardForAssign(
   return { blocked: false };
 }
 
+/**
+ * Shared pre-assign target validation (Onboarding + Fleet Management assign
+ * routes). Runs BEFORE any external system is called and blocks:
+ *  - non-numeric / over-long truck numbers (TPMS rule: numeric, max 6 digits) —
+ *    this is what let "byov" ("00byov") reach TPMS/Holman and diverge them;
+ *  - trucks that don't exist in the fleet (Holman cache first, LIVE Holman
+ *    fallback so a cache miss on a genuinely new vehicle doesn't false-block;
+ *    a live-lookup ERROR fails open with a warning — an outage must not block
+ *    legit assigns, and the format check above still blocks garbage);
+ *  - vehicles whose Holman assigned-status code is L/B/W/T (FM's UI rule);
+ *  - vehicles currently operation-locked (active lock < 2 min old).
+ * Purely read-only; distinct human-readable reasons per block.
+ */
+export async function validateAssignTarget(
+  truckNumber: string,
+): Promise<{ blocked: boolean; reason?: "invalid_format" | "not_found" | "blocked_status" | "locked"; message?: string }> {
+  const raw = String(truckNumber ?? "").trim();
+  if (!/^\d{1,6}$/.test(raw)) {
+    return {
+      blocked: true,
+      reason: "invalid_format",
+      message: `Truck number "${raw}" is invalid — it must be numeric (up to 6 digits). No systems were contacted.`,
+    };
+  }
+
+  const candidates = Array.from(new Set(
+    [toHolmanRef(raw), toDisplayNumber(raw), raw, toCanonical(raw)]
+      .map((c) => String(c || "").trim())
+      .filter(Boolean),
+  ));
+
+  let statusCd = "";
+  let cacheRow: { holmanAssignedStatusCd: string | null; operationLockAt: Date | null; operationLockedBy: string | null } | null = null;
+  try {
+    const rows = await db
+      .select({
+        holmanAssignedStatusCd: holmanVehiclesCache.holmanAssignedStatusCd,
+        operationLockAt: holmanVehiclesCache.operationLockAt,
+        operationLockedBy: holmanVehiclesCache.operationLockedBy,
+      })
+      .from(holmanVehiclesCache)
+      .where(inArray(holmanVehiclesCache.holmanVehicleNumber, candidates))
+      .limit(1);
+    cacheRow = rows[0] ?? null;
+  } catch (e: any) {
+    console.warn(`[FleetOps] validateAssignTarget cache lookup failed for ${raw}: ${e?.message || e}`);
+  }
+
+  if (cacheRow) {
+    statusCd = String(cacheRow.holmanAssignedStatusCd ?? "").trim().toUpperCase();
+  } else {
+    // Cache miss — verify LIVE against Holman before rejecting.
+    try {
+      const live = await holmanApiService.getVehicleAssignedStatus(raw);
+      if (!live?.found) {
+        return {
+          blocked: true,
+          reason: "not_found",
+          message: `Truck ${raw} was not found in Holman — it is not a fleet vehicle, so it cannot be assigned. No systems were changed.`,
+        };
+      }
+      statusCd = String(live.assignedStatusCode ?? "").trim().toUpperCase();
+    } catch (e: any) {
+      // Live lookup ERROR (outage/timeout): fail open — the numeric-format
+      // check above already blocked garbage input, and blocking legitimate
+      // assigns on a Holman outage would be a regression.
+      console.warn(`[FleetOps] validateAssignTarget live Holman lookup failed for ${raw} (failing open): ${e?.message || e}`);
+      return { blocked: false };
+    }
+  }
+
+  if (["L", "B", "W", "T"].includes(statusCd)) {
+    return {
+      blocked: true,
+      reason: "blocked_status",
+      message: `Truck ${raw} has Holman assigned-status code ${statusCd}, which does not allow assignment.`,
+    };
+  }
+
+  if (cacheRow?.operationLockAt) {
+    const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000);
+    if (new Date(cacheRow.operationLockAt) > twoMinutesAgo) {
+      return {
+        blocked: true,
+        reason: "locked",
+        message: `Truck ${raw} is being updated by another operation (${cacheRow.operationLockedBy || "unknown"}) — try again in a moment.`,
+      };
+    }
+  }
+
+  return { blocked: false };
+}
+
 // Acquire an operation lock on a vehicle row atomically.
 // Returns true if the lock was acquired, false if already held by another operation.
 async function acquireVehicleLock(holmanVehicleNumber: string, lockedBy: string): Promise<boolean> {

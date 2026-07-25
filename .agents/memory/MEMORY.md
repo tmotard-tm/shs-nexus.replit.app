@@ -55,4 +55,5 @@
 - [db:push blocked by interactive drift](dbpush-interactive-drift.md) — drizzle push hangs on a TTY-only external_apps_name_unique prompt; apply columns via raw SQL on dev (schema.ts kept in sync), never --force (truncate risk).
 - [Upsert-only mirror sweeps](upsert-only-mirror-sweeps.md) — a ghost sweep on one Snowflake mirror doesn't fix sibling pages; every upsert-only sync table needs its own dropped_from_source_at sweep.
 - [TPMS district mirror staleness](tpms-district-mirror-staleness.md) — truck-driven refresh never re-queries district-only transfers, so tpms_tech_profiles district goes stale; district decisions must live-check TPMS + heal the mirror.
+- [Assign target validation](assign-target-validation.md) — every assign entry point must run server-side truck validation (format/exists/status/lock); UI-only guards let "byov" diverge TPMS/Holman.
 - [Holman write-fence supersede](holman-write-fence-supersede.md) — fences outlive their correction when a newer op lands; release only on live-confirmed newer submissions, NEVER on cache confirms (fence pins the cache = circular evidence).
