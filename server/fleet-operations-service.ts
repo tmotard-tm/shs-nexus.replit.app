@@ -12,6 +12,7 @@ import {
   techVehicleAssignmentHistory,
   allTechs,
   fleetOperationLog,
+  holmanSubmissions,
 } from "@shared/schema";
 import type { FleetOperationLog, InsertFleetOperationLog, InsertOperationEvent } from "@shared/schema";
 
@@ -105,6 +106,21 @@ interface SystemResult {
   effectiveLdap?: string;
   /** TPMS truck number that was actually written, normalized as TPMS sees it. */
   effectiveTruck?: string;
+  /**
+   * Unassign-only: live TPMS shows the tech on a DIFFERENT truck than the one
+   * being unassigned. Their real TPMS assignment was intentionally left
+   * untouched; only the target truck's local (truck-keyed) records should be
+   * cleared. writeThroughCaches/planTpmsCacheWrites use this to avoid nulling
+   * the tech's canonical/mirror rows (which reflect their REAL truck).
+   */
+  crossTruck?: boolean;
+  /**
+   * Skip was VERIFIED against the live downstream system (the state we would
+   * have written already exists). writeThroughCaches uses this structured
+   * flag — not the human-readable message text — to decide that a skipped
+   * result should still write its cachePayload through.
+   */
+  skipVerified?: boolean;
   /** Back-compat aliases used by routes.ts bulk-fix handler on conflict status. */
   conflictTech?: string;
   conflictTruck?: string;
@@ -244,9 +260,21 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
         const liveTruckNo = liveTech?.truckNo?.trim() ?? "";
         const canonicalLive = toCanonical(liveTruckNo);
         const canonicalParam = toCanonical(params.truckNumber);
-        if (!liveTruckNo || (canonicalLive !== canonicalParam && liveTruckNo !== tpmsPaddedTruck)) {
-          console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}"; live lookup for "${fallbackLdap}" shows truckNo="${liveTruckNo}" — skipping unassign`);
+        if (!liveTruckNo) {
+          console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}"; live lookup for "${fallbackLdap}" shows no truck — skipping unassign`);
           return { status: "skipped", message: "Not assigned in TPMS" };
+        }
+        if (canonicalLive !== canonicalParam && liveTruckNo !== tpmsPaddedTruck) {
+          // Cross-truck: the tech is live-assigned to a DIFFERENT truck. Leave
+          // their real TPMS assignment untouched — only this truck's local
+          // records get cleared (crossTruck flag drives that downstream).
+          console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}"; live lookup shows "${fallbackLdap}" is on truck "${liveTruckNo}" — leaving their TPMS assignment untouched, clearing this truck's local records only`);
+          return {
+            status: "skipped",
+            message: `${fallbackLdap} is actually assigned to truck ${liveTruckNo} in TPMS — their real assignment was left untouched; only this truck's local records were cleared`,
+            crossTruck: true,
+            effectiveTruck: liveTruckNo,
+          };
         }
         console.log(`[FleetOps-TPMS] Cache miss for truck "${params.truckNumber}" resolved via live TPMS lookup for "${fallbackLdap}" (truckNo="${liveTruckNo}")`);
         tpmsLdap = fallbackLdap;
@@ -275,21 +303,20 @@ async function callTpms(action: string, params: Record<string, any>): Promise<Sy
           .catch((e: unknown) => console.warn(`[FleetOps-TPMS] Cache evict failed for ${tpmsLdap}:`, e));
         return { status: "skipped", message: "Already unassigned in TPMS" };
       }
-      // Guard: if the cached tech is live-assigned to a DIFFERENT truck, surface as a conflict
-      // so the caller can seek confirmation before clearing their valid assignment elsewhere.
-      // If skipConflictCheck is set (user has confirmed), bypass this guard and proceed.
+      // Guard: if the cached tech is live-assigned to a DIFFERENT truck, do NOT clear
+      // their valid assignment elsewhere. Recognize the cross-truck situation and let
+      // the caller clear only THIS truck's local records (crossTruck flag). The tech's
+      // real TPMS assignment stays untouched. skipConflictCheck (explicit operator
+      // confirmation, bulk-fix path) still forces a full clear as before.
       const canonicalCurrent = toCanonical(current.truckNo.trim());
       const canonicalTarget  = toCanonical(params.truckNumber);
       if (canonicalCurrent !== canonicalTarget && !params.skipConflictCheck) {
-        console.log(`[FleetOps-TPMS] "${tpmsLdap}" is on truck "${current.truckNo}", not "${params.truckNumber}" — returning conflict for user confirmation`);
+        console.log(`[FleetOps-TPMS] "${tpmsLdap}" is live-assigned to truck "${current.truckNo}", not "${params.truckNumber}" — leaving their TPMS assignment untouched, clearing this truck's local records only`);
         return {
-          status: "conflict",
-          message: `${tpmsLdap} is currently assigned to truck ${current.truckNo} in TPMS. Confirm to unassign them.`,
-          effectiveLdap: tpmsLdap,
+          status: "skipped",
+          message: `${tpmsLdap} is actually assigned to truck ${current.truckNo} in TPMS — their real assignment was left untouched; only this truck's local records were cleared`,
+          crossTruck: true,
           effectiveTruck: current.truckNo,
-          // Back-compat aliases for routes.ts bulk-fix handler.
-          conflictTech: tpmsLdap,
-          conflictTruck: current.truckNo,
         };
       }
       try {
@@ -361,6 +388,60 @@ async function callHolman(action: string, params: Record<string, any>): Promise<
         params.assignmentType === 'dummy'    ? 'D' :
         params.assignmentType === 'in-repair'? 'I' :
         'A';
+
+      // ── Live pre-check: skip the submit if Holman ALREADY shows this exact
+      // assignment. Avoids a redundant submission (and its pending fence /
+      // verify loop) when Holman is already correct. Fail-open: any error or
+      // timeout in the live read falls through to the normal submit path.
+      try {
+        const live: any = await Promise.race([
+          holmanApiService.getVehicleAssignedStatus(holmanVehicleNum),
+          new Promise((resolve) => setTimeout(() => resolve(null), 8000)),
+        ]);
+        if (live?.found) {
+          const liveTech = normalizeEnterpriseId(String(live.techAssigned || "").trim());
+          const wantTech = normalizeEnterpriseId(params.ldapId);
+          const liveCode = String(live.assignedStatusCode || "").trim().toUpperCase();
+          const codeMatches =
+            liveCode === holmanStatusCode ||
+            (holmanStatusCode === "A" && !liveCode && String(live.assignedStatus || "").trim().toLowerCase() === "assigned");
+          if (liveTech && liveTech === wantTech && codeMatches) {
+            // Holman applies submissions ASYNCHRONOUSLY (202 = queued, not
+            // done). A queued unassign/assign for this vehicle can still be
+            // in flight while the live read shows the old state — skipping
+            // here would let that queued change land unopposed and leave
+            // Holman diverged from what we report as "verified". Only skip
+            // when NO in-flight submission exists for this vehicle.
+            const inFlight = await db.select({ id: holmanSubmissions.id })
+              .from(holmanSubmissions)
+              .where(and(
+                eq(holmanSubmissions.holmanVehicleNumber, holmanVehicleNum),
+                inArray(holmanSubmissions.status, ["pending", "processing"]),
+              ))
+              .limit(1);
+            if (inFlight.length > 0) {
+              console.log(`[FleetOps-Holman] ${holmanVehicleNum}: live Holman shows ${liveTech} assigned, but an in-flight submission exists (${inFlight[0].id}) — submitting anyway`);
+            } else {
+              console.log(`[FleetOps-Holman] ${holmanVehicleNum}: live Holman already shows ${liveTech} assigned (code=${liveCode || holmanStatusCode}), no in-flight submission — skipping submit`);
+              return {
+                status: "skipped",
+                skipVerified: true,
+                message: "Already assigned in Holman (verified live) — no update sent",
+                cachePayload: {
+                  system: "holman",
+                  holmanVehicleNumber: holmanVehicleNum,
+                  ldap: params.ldapId,
+                  techName: params.techName || params.ldapId,
+                  statusCode: liveCode || holmanStatusCode,
+                },
+              };
+            }
+          }
+        }
+      } catch (preErr: any) {
+        console.warn(`[FleetOps-Holman] live pre-assign check failed for ${holmanVehicleNum} (${preErr?.message ?? preErr}) — proceeding with submit`);
+      }
+
       const result = await holmanAssignmentUpdateService.updateVehicleAssignment(
         holmanVehicleNum,
         normalizeEnterpriseId(params.ldapId),
@@ -1239,11 +1320,20 @@ export function planTpmsCacheWrites(args: WriteThroughCacheArgs): TpmsCacheWrite
   // [ASSIGN-UPSERT] Proceed also when TPMS was SKIPPED because the tech is ALREADY on the
   // truck — the assignment is true in TPMS, so the mirror must reflect it. Without this, a
   // re-confirm (or a first assign of a tech already on the truck) wrote nothing to the mirror.
+  // Primary signal is the structured skipVerified flag; the message-regex is
+  // kept only as back-compat for older callers that pass pre-flag results.
   const tpmsSkipConfirmed =
     args.tpms.status === "skipped" &&
     args.action === "assign" &&
-    /already assigned/i.test(args.tpms.message || "");
-  if (args.tpms.status !== "success" && !tpmsSkipConfirmed) return empty;
+    (args.tpms.skipVerified === true || /already assigned/i.test(args.tpms.message || ""));
+  // [CROSS-TRUCK 2026-07-25] Unassign where live TPMS shows the tech on a DIFFERENT
+  // truck: the tech's real assignment was left untouched, but the target truck's
+  // truck-keyed local rows must still be cleared (the card must stop showing them).
+  const tpmsCrossTruckSkip =
+    args.tpms.status === "skipped" &&
+    args.action === "unassign" &&
+    args.tpms.crossTruck === true;
+  if (args.tpms.status !== "success" && !tpmsSkipConfirmed && !tpmsCrossTruckSkip) return empty;
 
   // For unassign, prefer the LDAP that TPMS actually acted on (resolved via
   // truck-number cache) over the request author's ldapId — they can differ
@@ -1302,7 +1392,10 @@ export function planTpmsCacheWrites(args: WriteThroughCacheArgs): TpmsCacheWrite
       plan.cachedAssignmentDeletes.push({ lookupKey: v, lookupType: "truck_number" });
       plan.lastKnownDeletes.push(v);
     }
-    if (ldap) {
+    // [CROSS-TRUCK 2026-07-25] When the tech is live-assigned to a DIFFERENT truck,
+    // do NOT null their tech-keyed rows — those reflect their REAL assignment.
+    // Only the truck-keyed rows above are cleared.
+    if (ldap && !tpmsCrossTruckSkip) {
       plan.cachedAssignmentNullTruck.push({ lookupKey: ldap, lookupType: "enterprise_id" });
       plan.techProfileTruckSets.push({ enterpriseId: ldap, truckNo: null });
     }
@@ -1455,8 +1548,17 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
       }
 
       // ── Holman cache (centralized via cachePayload) ─────────────────────
+      // [HOLMAN-SKIP-CONFIRMED 2026-07-25] Mirrors the tpmsSkipConfirmed pattern:
+      // when the assign was skipped because live Holman ALREADY shows this exact
+      // assignment, the payload carries verified-live state — write it through so
+      // the card reflects the confirmed truth immediately. Keyed on the structured
+      // skipVerified flag (NOT the message text — rewording the message must not
+      // silently break this). Other skip reasons still leave the cache untouched.
+      const holmanSkipConfirmed =
+        args.holman.status === "skipped" &&
+        args.holman.skipVerified === true;
       const holmanPayload = args.holman.cachePayload;
-      if ((args.holman.status === "success" || args.holman.status === "pending") && holmanPayload?.system === "holman" && holmanPayload.holmanVehicleNumber) {
+      if ((args.holman.status === "success" || args.holman.status === "pending" || holmanSkipConfirmed) && holmanPayload?.system === "holman" && holmanPayload.holmanVehicleNumber) {
         await tx.insert(holmanVehiclesCache).values({
           holmanVehicleNumber: holmanPayload.holmanVehicleNumber,
           holmanTechAssigned: holmanPayload.ldap ?? null,
@@ -1506,6 +1608,11 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
       // mutated when TPMS did not block (conflict/failed) — avoids flipping
       // a tech to inactive while user resolution is pending.
       const tpmsBlocking = args.tpms.status === "conflict" || args.tpms.status === "failed";
+      // [CROSS-TRUCK 2026-07-25] Unassign where live TPMS shows the tech on a
+      // DIFFERENT truck: only clear their canonical row if it (stale) points at
+      // the truck being unassigned. If it points at their REAL truck (or they
+      // have no row), leave it completely alone.
+      const tpmsCrossTruck = action === "unassign" && args.tpms.crossTruck === true;
       if (ldap) {
         const existingRows = await tx.select()
           .from(techVehicleAssignments)
@@ -1515,8 +1622,10 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
         const previousTruckNo = existing?.truckNo ?? null;
         const newTruckNo = action === "assign" ? truckPadded : null;
         const newStatus = action === "assign" ? "active" : "inactive";
+        const preserveCanonicalRow = tpmsCrossTruck &&
+          (!existing || !existing.truckNo || toCanonical(existing.truckNo) !== truckCanonical);
 
-        if (!tpmsBlocking) {
+        if (!tpmsBlocking && !preserveCanonicalRow) {
           if (existing) {
             await tx.update(techVehicleAssignments)
               .set({
@@ -1543,7 +1652,9 @@ export async function writeThroughCaches(args: WriteThroughCacheArgs): Promise<v
           : (action === "assign"
               ? (previousTruckNo && previousTruckNo !== newTruckNo ? "changed" : "assigned")
               : "unassigned");
-        const histTruck = tpmsBlocking ? previousTruckNo : newTruckNo;
+        // [CROSS-TRUCK 2026-07-25] preserved canonical row → history reflects the
+        // unchanged truck (notes carry the cross-truck explanation from TPMS msg).
+        const histTruck = (tpmsBlocking || preserveCanonicalRow) ? previousTruckNo : newTruckNo;
 
         await tx.insert(techVehicleAssignmentHistory).values({
           techRacfid: ldap,
@@ -1765,15 +1876,19 @@ export const fleetOpsService = {
 
       const [tpms, holman, ams] = await Promise.all([
         tpmsAlreadyCurrent
-          ? Promise.resolve<SystemResult>({ status: "skipped", message: "Already assigned in TPMS" })
+          ? Promise.resolve<SystemResult>({ status: "skipped", skipVerified: true, message: "Already assigned in TPMS (verified live) — caches reconciled" })
           : callTpms("assign", params),
         callHolman("assign", params),
         callAms("assign", params),
       ]);
 
-      // Synchronous TPMS post-assignment verification
+      // Synchronous TPMS post-assignment verification. Also runs on the
+      // tpmsAlreadyCurrent skip path: the mirrors are reconciled from this skip
+      // (see tpmsSkipConfirmed in planTpmsCacheWrites), so fetch the REAL
+      // TechInfo here too — the cache upsert then stores an authoritative row
+      // instead of an optimistic stub.
       let confirmedTpmsTechInfo: any = null;
-      if (!tpmsAlreadyCurrent && tpms.status === "success") {
+      if (tpmsAlreadyCurrent || tpms.status === "success") {
         try {
           const { getTPMSService } = await import("./tpms-service");
           const tpmsService = getTPMSService();

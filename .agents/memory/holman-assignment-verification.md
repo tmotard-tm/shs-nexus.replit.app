@@ -75,6 +75,17 @@ NOTE: `/vehicles/custom-query` POST currently 400s with `"The statusCode field i
 `{lesseeCodes, additionalFilters, paging}` body is rejected; `findVehicleByNumber` only works because it falls
 back to basic-query pagination. Use basic-query for live lookups.
 
+## Live pre-checks must also gate on in-flight submissions
+A "skip the submit — live Holman already shows this state" optimization is only safe if there is NO
+pending/processing `holman_submissions` row for that vehicle. Because 202 = async queue, a queued
+unassign/assign can still be in flight while the live read shows the old (matching) state; skipping then lets
+the queued change land unopposed and Holman diverges from what Nexus reports as "verified." **How to apply:**
+any live-read short-circuit before a Holman write must first check `holman_submissions` for
+`status IN ('pending','processing')` on that vehicle and fall through to a real submit if one exists.
+Related: when a skipped result should still drive cache writes, signal it with a structured flag on the
+result (e.g. `skipVerified: true`), never by regex-matching the human-readable skip message — message
+rewording silently breaks the consumer and the tests that mirror the regex keep passing.
+
 ## Case study (truck 36177 → district 7670, tech mschae2)
 Live Holman showed 36177 stuck at `prefix=7084` (Chambersburg PA), Unassigned, driver UNKNOWN — the district
 move to 7670 never applied despite Nexus reporting success. Ruled OUT data-validity causes by scanning live

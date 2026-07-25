@@ -38,14 +38,19 @@ function emptyCaches(): CacheState {
 /**
  * Applies the Holman cachePayload path from writeThroughCaches to the
  * in-memory holmanVehiclesCache map. Mirrors the real DB upsert-on-conflict
- * logic (lines ~1059–1079 in writeThroughCaches): only executes when
- * holman.status is "success" or "pending" and the payload carries a
+ * logic in writeThroughCaches: executes when holman.status is "success" or
+ * "pending" — or when the assign was SKIPPED because live Holman already
+ * showed this exact assignment (holmanSkipConfirmed: structured
+ * skipVerified === true flag, NOT message text) — and the payload carries a
  * system="holman" tag plus a non-empty holmanVehicleNumber.
  */
 function applyHolmanCachePayload(state: CacheState, holman: WriteThroughCacheArgs["holman"]): void {
   const payload = holman.cachePayload;
+  const skipConfirmed =
+    holman.status === "skipped" &&
+    holman.skipVerified === true;
   if (
-    (holman.status === "success" || holman.status === "pending") &&
+    (holman.status === "success" || holman.status === "pending" || skipConfirmed) &&
     payload?.system === "holman" &&
     payload.holmanVehicleNumber
   ) {
@@ -551,6 +556,105 @@ test("Holman cache pending: holmanTechAssigned, holmanTechName, and holmanAssign
   assert.equal(row.holmanTechAssigned, "jcasti0");
   assert.equal(row.holmanTechName, "J Casti");
   assert.equal(row.holmanAssignedStatusCd, "P");
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Cross-truck unassign (2026-07-25 hardening): live TPMS shows the tech on a
+ * DIFFERENT truck than the one being unassigned. The TPMS sub-step returns
+ * {status:"skipped", crossTruck:true} — their real assignment is untouched;
+ * only the target truck's truck-keyed local rows are cleared.
+ * ────────────────────────────────────────────────────────────────────────── */
+test("cross-truck unassign: planner clears truck-keyed rows only, never the tech's rows", () => {
+  const caches = emptyCaches();
+  // xtech is REALLY on truck 077777; truck 61385's local rows stale-point at xtech.
+  caches.tpmsCachedAssignments.set("xtech", {
+    lookupKey: "xtech", lookupType: "enterprise_id", truckNo: "077777", enterpriseId: "xtech",
+  });
+  caches.tpmsCachedAssignments.set("061385", {
+    lookupKey: "061385", lookupType: "truck_number", truckNo: "061385", enterpriseId: "xtech",
+  });
+  caches.tpmsCachedAssignments.set("61385", {
+    lookupKey: "61385", lookupType: "truck_number", truckNo: "061385", enterpriseId: "xtech",
+  });
+  caches.tpmsLastKnownTruckTech.set("061385", { truckNo: "061385", enterpriseId: "xtech" });
+  caches.tpmsTechProfiles.set("xtech", { enterpriseId: "xtech", truckNo: "077777" });
+
+  const plan = planTpmsCacheWrites({
+    action: "unassign",
+    params: { ldapId: "xtech", truckNumber: "61385" },
+    tpms: {
+      status: "skipped",
+      message: "xtech is actually assigned to truck 077777 in TPMS — their real assignment was left untouched; only this truck's local records were cleared",
+      crossTruck: true,
+      effectiveTruck: "077777",
+    },
+    holman: ok,
+    ams: ok,
+  });
+
+  // Tech-keyed writes must be completely absent — their REAL assignment survives.
+  assert.equal(plan.cachedAssignmentNullTruck.length, 0, "cross-truck unassign must not null the tech's enterprise row");
+  assert.equal(plan.techProfileTruckSets.length, 0, "cross-truck unassign must not clear the tech's profile truck");
+
+  applyPlanToCaches(caches, plan);
+
+  // Target truck's truck-keyed rows are gone under both variants.
+  assert.equal(caches.tpmsCachedAssignments.get("061385"), undefined);
+  assert.equal(caches.tpmsCachedAssignments.get("61385"), undefined);
+  assert.equal(caches.tpmsLastKnownTruckTech.get("061385"), undefined);
+  // The tech's rows still reflect their REAL truck.
+  assert.equal(caches.tpmsCachedAssignments.get("xtech")?.truckNo, "077777");
+  assert.equal(caches.tpmsTechProfiles.get("xtech")?.truckNo, "077777");
+});
+
+test("unassign with a plain skipped TPMS result (no crossTruck flag) yields an empty plan", () => {
+  const plan = planTpmsCacheWrites({
+    action: "unassign",
+    params: { ldapId: "jcasti0", truckNumber: "61385" },
+    tpms: { status: "skipped", message: "Not assigned in TPMS" },
+    holman: ok,
+    ams: ok,
+  });
+
+  assert.deepEqual(plan, {
+    cachedAssignmentUpserts: [],
+    cachedAssignmentNullTruck: [],
+    cachedAssignmentDeletes: [],
+    lastKnownUpserts: [],
+    lastKnownDeletes: [],
+    techProfileTruckSets: [],
+  });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * Holman verified-live skip (2026-07-25 hardening): the assign submit was
+ * skipped because live Holman ALREADY showed this exact assignment. The
+ * payload carries verified state — it must be written through so the card
+ * reflects the confirmed truth. Other skip reasons must still not mutate.
+ * ────────────────────────────────────────────────────────────────────────── */
+test("Holman cache: verified-live 'already assigned' skip writes the confirmed state through", () => {
+  const caches = emptyCaches();
+
+  const holmanResult: WriteThroughCacheArgs["holman"] = {
+    status: "skipped",
+    skipVerified: true,
+    message: "Already assigned in Holman (verified live) — no update sent",
+    cachePayload: {
+      system: "holman",
+      holmanVehicleNumber: "061385",
+      ldap: "jcasti0",
+      techName: "J Casti",
+      statusCode: "A",
+    },
+  };
+
+  applyHolmanCachePayload(caches, holmanResult);
+
+  const row = caches.holmanVehiclesCache.get("061385");
+  assert.ok(row, "verified-live skip must write the Holman cache row");
+  assert.equal(row.holmanTechAssigned, "jcasti0");
+  assert.equal(row.holmanTechName, "J Casti");
+  assert.equal(row.holmanAssignedStatusCd, "A");
 });
 
 /* Force-exit after test suite completes.

@@ -502,6 +502,140 @@ test("atomicity: when write-through transaction fails, fleet log status does NOT
   assert.equal(hist.length, 0, "tech_vehicle_assignment_history must roll back on tx failure");
 });
 
+test("cross-truck unassign: canonical row pointing at the tech's REAL truck is preserved", async () => {
+  // Scenario (2026-07-25 hardening): truck 61385's card stale-shows XT, but
+  // live TPMS says XT is really on _t184_777. Unassigning 61385 returns
+  // {status:"skipped", crossTruck:true} from the TPMS sub-step — the tech's
+  // canonical row (pointing at their REAL truck) must survive untouched,
+  // while the target truck's truck-keyed rows are cleared.
+  const XT = "_t184_xtruck";
+  const REAL_TRUCK = "_t184_777";
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, XT));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, XT));
+  await db.delete(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, XT));
+  await db.delete(tpmsLastKnownTruckTech).where(eq(tpmsLastKnownTruckTech.truckNo, TRUCK_PADDED));
+
+  await db.insert(techVehicleAssignments).values({
+    techRacfid: XT, truckNo: REAL_TRUCK, assignmentStatus: "active",
+  });
+  await db.insert(tpmsTechProfiles).values({ techId: XT, enterpriseId: XT, truckNo: REAL_TRUCK });
+  // Stale truck-keyed row: 61385 claims XT.
+  await db.insert(tpmsLastKnownTruckTech).values({ truckNo: TRUCK_PADDED, enterpriseId: XT });
+
+  await writeThroughCaches({
+    action: "unassign",
+    params: { ldapId: XT, truckNumber: TRUCK, requestedBy: "test:cross-truck" },
+    tpms: {
+      status: "skipped",
+      message: `${XT} is actually assigned to truck ${REAL_TRUCK} in TPMS — their real assignment was left untouched; only this truck's local records were cleared`,
+      crossTruck: true,
+      effectiveTruck: REAL_TRUCK,
+    },
+    holman: { status: "skipped", message: "" },
+    ams: { status: "skipped", message: "" },
+    changeSource: "manual",
+  });
+
+  // Canonical row: STILL active on their real truck.
+  const tva = await db.select().from(techVehicleAssignments)
+    .where(eq(techVehicleAssignments.techRacfid, XT));
+  assert.equal(tva[0]?.truckNo, REAL_TRUCK, "canonical row must keep the tech's REAL truck");
+  assert.equal(tva[0]?.assignmentStatus, "active", "canonical row must stay active");
+
+  // Tech profile untouched (writeThroughCaches must not clear it on cross-truck).
+  const prof = await db.select().from(tpmsTechProfiles)
+    .where(eq(tpmsTechProfiles.enterpriseId, XT));
+  assert.equal(prof[0]?.truckNo, REAL_TRUCK, "tech profile must keep the REAL truck");
+
+  // Target truck's truck-keyed row is gone.
+  const lk = await db.select().from(tpmsLastKnownTruckTech)
+    .where(eq(tpmsLastKnownTruckTech.truckNo, TRUCK_PADDED));
+  assert.equal(lk.length, 0, "stale truck-keyed last-known row must be deleted");
+
+  // Audit: history row written, truckNo reflects the UNCHANGED real truck.
+  const hist = await db.select().from(techVehicleAssignmentHistory)
+    .where(eq(techVehicleAssignmentHistory.techRacfid, XT));
+  assert.equal(hist.length, 1, "cross-truck unassign must still write an audit history row");
+  assert.equal(hist[0].truckNo, REAL_TRUCK, "history truckNo must reflect the preserved (unchanged) truck");
+  assert.equal(hist[0].previousTruckNo, REAL_TRUCK);
+
+  // Cleanup.
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, XT));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, XT));
+  await db.delete(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, XT));
+});
+
+test("cross-truck unassign: canonical row stale-pointing at the TARGET truck IS cleared", async () => {
+  // Same crossTruck skip, but here the tech's canonical row itself is the
+  // stale artifact — it points at the truck being unassigned. That row must
+  // be cleared (the tech's REAL assignment lives only in TPMS elsewhere).
+  const XT2 = "_t184_xtruck2";
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, XT2));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, XT2));
+
+  await db.insert(techVehicleAssignments).values({
+    techRacfid: XT2, truckNo: TRUCK_PADDED, assignmentStatus: "active",
+  });
+
+  await writeThroughCaches({
+    action: "unassign",
+    params: { ldapId: XT2, truckNumber: TRUCK, requestedBy: "test:cross-truck" },
+    tpms: {
+      status: "skipped",
+      message: `${XT2} is actually assigned to truck _t184_888 in TPMS — their real assignment was left untouched; only this truck's local records were cleared`,
+      crossTruck: true,
+      effectiveTruck: "_t184_888",
+    },
+    holman: { status: "skipped", message: "" },
+    ams: { status: "skipped", message: "" },
+    changeSource: "manual",
+  });
+
+  const tva = await db.select().from(techVehicleAssignments)
+    .where(eq(techVehicleAssignments.techRacfid, XT2));
+  assert.equal(tva[0]?.truckNo, null, "stale canonical row pointing at the target truck must be cleared");
+  assert.equal(tva[0]?.assignmentStatus, "inactive");
+
+  // Cleanup.
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, XT2));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, XT2));
+});
+
+test("Holman verified-live 'already assigned' skip writes the confirmed state to holman_vehicles_cache", async () => {
+  const TRUCK_NUM = "_t184_holman_skipv";
+  await db.delete(holmanVehiclesCache).where(eq(holmanVehiclesCache.holmanVehicleNumber, TRUCK_NUM));
+
+  await writeThroughCaches({
+    action: "assign",
+    params: { ldapId: NEW_TECH, truckNumber: TRUCK, techName: "J Casti", requestedBy: "test" },
+    tpms: { status: "skipped", message: "" },
+    holman: {
+      status: "skipped",
+      skipVerified: true,
+      message: "Already assigned in Holman (verified live) — no update sent",
+      cachePayload: {
+        system: "holman",
+        holmanVehicleNumber: TRUCK_NUM,
+        ldap: NEW_TECH,
+        techName: "J Casti",
+        statusCode: "A",
+      },
+    },
+    ams: { status: "skipped", message: "" },
+  });
+
+  const row = await db.select().from(holmanVehiclesCache)
+    .where(eq(holmanVehiclesCache.holmanVehicleNumber, TRUCK_NUM));
+  assert.equal(row.length, 1, "verified-live skip must write the Holman cache row");
+  assert.equal(row[0].holmanTechAssigned, NEW_TECH);
+  assert.equal(row[0].holmanAssignedStatusCd, "A");
+
+  // Cleanup.
+  await db.delete(holmanVehiclesCache).where(eq(holmanVehiclesCache.holmanVehicleNumber, TRUCK_NUM));
+  await db.delete(techVehicleAssignmentHistory).where(eq(techVehicleAssignmentHistory.techRacfid, NEW_TECH));
+  await db.delete(techVehicleAssignments).where(eq(techVehicleAssignments.techRacfid, NEW_TECH));
+});
+
 /* Force-exit after all tests + cleanup hooks complete.
  * The Neon/postgres connection pool keeps the event loop alive after tests
  * finish. We schedule an immediate exit that preserves process.exitCode so a
