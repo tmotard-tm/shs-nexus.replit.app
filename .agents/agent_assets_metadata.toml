@@ -120,3 +120,9 @@ id = "cqGsvtFfQSbW0hAqhGrxM"
 uri = "file://drafts/insert_missing_holman_pos_2026-07-20.sql.txt"
 type = "text"
 title = "DRAFT — Backfill missing Holman open POs (review before running)"
+
+[[outputs]]
+id = "Mgv5FlCcW3lblCmEF0cw4"
+uri = "file://exports/agent-skills.zip"
+type = "unspecified"
+title = "Agent skills bundle (8 skills, ready to upload)"
