@@ -48,7 +48,7 @@ Secondary breakdowns (same row, smaller): by district/division (top 10), by rent
 
 ### Row 4 — Insight cards (rule-based recommendations)
 
-The action layer on top of the buckets. Each card: title, count, estimated daily-dollar impact, severity, and a drill-down link to the filtered Rental Operations case list.
+The action layer on top of the buckets. Each card: title, count, estimated daily-dollar impact, severity, and a drill-down that opens an **in-page case-list drawer** (truck #, tech, vendor, rate, days open, badges) — the existing Rental Operations page has no URL-driven filters and is out of scope for changes, so drill-downs stay self-contained on this page, with a per-case link into Rental Operations.
 
 1. **Long-runners** — `days_open` > 45, ranked by `rate_authorized` (any bucket; bucket shown per row).
 2. **Right-size candidates not in the campaign** — resolved renter paying van/minivan-class rate, not present in `vrm_rightsize_techs`.
@@ -61,7 +61,7 @@ The action layer on top of the buckets. Each card: title, count, estimated daily
 
 ### AI executive brief
 
-- 2–3 paragraph narrative below the cards, generated from the exact metrics JSON served by the summary endpoint (no independent data reads), via the already-configured OpenAI integration.
+- 2–3 paragraph narrative below the cards, generated from the exact metrics JSON served by the summary endpoint (no independent data reads), via the existing Bedrock helper (`invokeBedrock` in `server/vrm/rightsize/llm.ts` — the same AI path the right-size classifier already uses; no new keys or vendors).
 - Generated at most once per day, cached (in `vrm_exec_daily_metrics.ai_brief` on today's row); admin-only "Regenerate" button.
 - Fail-soft: if the AI call fails (quota, key, outage), the page renders everything else and hides the brief. Never blocks or errors the page. (Known gotcha: OpenAI keys degrade silently — out-of-quota passes key checks but 429s on completions.)
 
@@ -130,7 +130,7 @@ Reconstructs history, flag-guarded via `app_settings` key `vrm_exec_metrics_back
 
 - Unit tests (tsx --test) for: the bucket classifier's precedence order against seeded cases (must include: new hire in a Sent-to-Auction truck → New Hire bucket; termed tech in a truck with an open PO → TERMINATED bucket; unresolved renter → truck-state bucket + unknown-renter flag; padded/unpadded truck-number joins; each registration sub-state), each insight rule, vendor normalization, weekly new/returned windows, backfill reconstruction against known import-run counts.
 - `npm run check` — zero NEW type errors vs the ~224 baseline.
-- Manual: every KPI and card drill-down lands on the correctly filtered Rental Operations view; AI brief renders, regenerates (admin), and hides cleanly when the key is disabled.
+- Manual: every KPI and card drill-down opens the in-page drawer with the correctly filtered case list (badges included); AI brief renders, regenerates (admin), and hides cleanly when the key is disabled.
 - Backfill sanity: spot-check `vrm_exec_daily_metrics` rows against `vrm_rental_operations_import_runs` totals for the same dates.
 
 ## Out of scope
