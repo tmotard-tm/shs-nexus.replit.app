@@ -3,7 +3,9 @@ name: Prod sync schedule reality (autoscale)
 description: How to audit whether scheduled syncs actually run in production, and what the July 2026 audit found
 ---
 
-The entire `server/sync-scheduler.ts` schedule (nightly 5AM sync, 15-min TPMS/AMS watermark polls, 30-min separation poll, 4-hr stale sweep, etc.) is in-process `setInterval` — on the autoscale deployment it only fires while an instance happens to be awake. The designed schedule is fiction in prod; only platform Scheduled Deployments and cold-start catch-ups actually run.
+The entire `server/sync-scheduler.ts` schedule (nightly 5AM sync, 15-min TPMS/AMS watermark polls, 30-min separation poll, 4-hr stale sweep, etc.) is in-process `setInterval` — on the autoscale deployment it only fires while an instance happens to be awake. The designed schedule is fiction in prod; only external pings and cold-start catch-ups actually run.
+
+**The real prod scheduler (user-confirmed 2026-07-26):** the fleet agents app (LIVHR, fleetagents.replit.app), which runs on an always-on Reserved VM, POSTs Nexus's internal-cron endpoints (`x-internal-cron` = SESSION_SECRET) every 5 minutes. There is NO separate "Fleet-Dispatcher" Repl and this Repl cannot host a Scheduled Deployment (its one deployment slot is the Autoscale web app). Any new durable job = a one-line addition to the fleet-agents pinger hitting a new internal-cron route here.
 
 **Why:** July 2026 audit evidence: `external_watermark_state` was completely EMPTY in prod (the 15-min AMS/TPMS watermark polls had never persisted a single run); `fs_all_vehicles_mirror` was 6 days old (daily job); `all_techs` nightly last completed at 15:39 UTC (a cold-start catch-up, not 5AM); `separation_poll` (30-min) had 15-hour gaps; `comms_contacts` ran 2× in 14 days.
 
