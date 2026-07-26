@@ -3,6 +3,7 @@ import { RouteReadySidebar } from "./components/route-ready-sidebar";
 import { RouteReadyTopbar } from "./components/route-ready-topbar";
 import { WipPlaceholder } from "./components/wip-placeholder";
 import { colors, navItems } from "./lib/constants";
+import ExecutiveSummary from "./pages/ExecutiveSummary";
 import NewRentals from "./pages/NewRentals";
 import NewRentalFullLog from "./pages/NewRentalFullLog";
 import RentalRepairTracker from "./pages/RentalRepairTracker";
@@ -34,6 +35,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/active-rentals">
               <Redirect to="/vehicle-rental-management/new-rentals" replace />
             </Route>
+            <Route path="/vehicle-rental-management/executive-summary" component={ExecutiveSummary} />
             <Route path="/vehicle-rental-management/new-rentals" component={NewRentals} />
             <Route path="/vehicle-rental-management/new-rental-full-log" component={NewRentalFullLog} />
             <Route path="/vehicle-rental-management/rental-repair-tracker" component={RentalRepairTracker} />

@@ -713,9 +713,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   try {
     // Background (non-awaited) idempotent init — see Fleet-Scope note above. Mount
     // VRM routes immediately; the vrm_ tables already exist in prod.
-    initVrmSchema().catch((e: any) => {
-      console.error("[VRM] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
-    });
+    initVrmSchema()
+      .then(() =>
+        // Executive Summary one-time trend backfill — flag-guarded, idempotent,
+        // must run AFTER the schema init that creates vrm_exec_daily_metrics.
+        import("./vrm/executive-summary/backfill").then((m) => m.runExecBackfillOnce()),
+      )
+      .catch((e: any) => {
+        console.error("[VRM] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
+      });
     // Twilio status-callback webhook MUST be registered BEFORE the
     // session-gated /api/vrm router below, because Twilio cannot present
     // a session cookie. The webhook authenticates via X-Twilio-Signature.

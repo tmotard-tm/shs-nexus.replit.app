@@ -804,3 +804,28 @@ export const vrmNotificationTemplates = pgTable("vrm_notification_templates", {
 export type VrmNotificationTemplate = typeof vrmNotificationTemplates.$inferSelect;
 export const insertVrmNotificationTemplateSchema = createInsertSchema(vrmNotificationTemplates).omit({ updatedAt: true });
 export type InsertVrmNotificationTemplate = z.infer<typeof insertVrmNotificationTemplateSchema>;
+
+// ─── Executive Summary daily rollup (type truth ONLY — DDL owned by initVrmSchema;
+//     never drizzle-kit push against vrm_* tables) ───────────────────────────────
+
+export const vrmExecDailyMetrics = pgTable("vrm_exec_daily_metrics", {
+  metricDate: date("metric_date").primaryKey(),
+  openTotal: integer("open_total").notNull().default(0),
+  openByVendor: jsonb("open_by_vendor").notNull().default(sql`'{}'::jsonb`),
+  newCount: integer("new_count").notNull().default(0),
+  returnedCount: integer("returned_count").notNull().default(0),
+  dailySpend: decimal("daily_spend", { precision: 12, scale: 2 }).notNull().default("0"),
+  potentialSavings: decimal("potential_savings", { precision: 12, scale: 2 }),
+  avgDaysOpen: decimal("avg_days_open", { precision: 8, scale: 2 }),
+  over30Count: integer("over_30_count"),
+  rightsizeStages: jsonb("rightsize_stages"),
+  bucketCounts: jsonb("bucket_counts"),
+  insightCounts: jsonb("insight_counts"),
+  aiBrief: text("ai_brief"),
+  aiBriefGeneratedAt: timestamp("ai_brief_generated_at", { withTimezone: true }),
+  source: varchar("source", { length: 16 }).notNull().default("live"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+export type VrmExecDailyMetrics = typeof vrmExecDailyMetrics.$inferSelect;

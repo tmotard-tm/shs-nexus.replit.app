@@ -470,6 +470,15 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
   `);
   await upsertSourceHealth(runId, o.healthKey, "completed", o.fileDate, totalCases, null, o.healthFileDate);
 
+  // Executive Summary daily rollup — dynamic import avoids a module cycle;
+  // failure must NEVER fail the ingest itself.
+  try {
+    const { upsertTodayExecMetrics } = await import("../executive-summary/rollup");
+    await upsertTodayExecMetrics();
+  } catch (e) {
+    console.error("[vrm-exec] daily rollup after ingest failed (non-fatal):", (e as Error)?.message);
+  }
+
   return { runId, resolved, review, exception, dropped, totalCases, enterpriseCount, holmanCount, pendedCount };
 }
 

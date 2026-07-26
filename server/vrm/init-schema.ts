@@ -825,6 +825,33 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_label TEXT;`);
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_overrode_deny BOOLEAN NOT NULL DEFAULT FALSE;`);
 
+  // ── Executive Summary daily rollup — one row per ET day ──
+  // Nullable analytics columns are deliberate: backfilled rows (source='backfill')
+  // can't reconstruct person-status buckets or per-case rates; null → chart gap,
+  // never a fake zero. rightsize_stages stores the FULL stage→count map (condensed
+  // at read time so historical charts survive stage-taxonomy changes).
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_exec_daily_metrics (
+      metric_date DATE PRIMARY KEY,
+      open_total INTEGER NOT NULL DEFAULT 0,
+      open_by_vendor JSONB NOT NULL DEFAULT '{}'::jsonb,
+      new_count INTEGER NOT NULL DEFAULT 0,
+      returned_count INTEGER NOT NULL DEFAULT 0,
+      daily_spend NUMERIC(12,2) NOT NULL DEFAULT 0,
+      potential_savings NUMERIC(12,2),
+      avg_days_open NUMERIC(8,2),
+      over_30_count INTEGER,
+      rightsize_stages JSONB,
+      bucket_counts JSONB,
+      insight_counts JSONB,
+      ai_brief TEXT,
+      ai_brief_generated_at TIMESTAMPTZ,
+      source VARCHAR(16) NOT NULL DEFAULT 'live',
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    )
+  `);
+
   // VRM Rental Operations V2 (clean-room) — additive tables, own module.
   await initRentalOperationsSchema();
   await initRightsizeSchema();

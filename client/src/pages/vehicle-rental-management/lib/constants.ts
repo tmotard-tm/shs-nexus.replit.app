@@ -5,6 +5,7 @@ import {
   Wrench,
   Gauge,
   Settings2,
+  BarChart3,
   type LucideIcon,
 } from "lucide-react";
 
@@ -105,6 +106,7 @@ export interface NavItem {
 }
 
 export const navItems: NavItem[] = [
+  { label: "Executive Summary", path: "/vehicle-rental-management/executive-summary", icon: BarChart3 },
   { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
   { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
   { label: "Rental Denial Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
