@@ -24,31 +24,38 @@ A top-level VRM page that tracks the rental program from every angle — how man
 - Open rentals over time (line; stackable by vendor).
 - New vs returned per week (bars) — the shrink/grow signal.
 - Daily spend over time.
+- Bucket mix over time (from `bucket_counts` — live rows only; backfill can't reconstruct historical person-status).
 - Right-size stage mix over time (funnel shifting toward DONE).
 
 Time ranges: 30 / 90 / 180 days / all.
 
-### Row 3 — Breakdowns (current-state)
+### Row 3 — Rental buckets (the primary "why is it open" segmentation)
 
-- By district / division (top 10, from case fields).
-- By rental class — van/minivan vs sedan mix (right-size angle).
-- By "why is it open": in shop (open repair PO / repair-tracker active), repair complete, declined repair/decommission, registration blocker, no repair activity.
-- Vendor is a persistent filter across all breakdowns and drill-downs.
+Every open rental is assigned to **exactly one** bucket, evaluated in this precedence order (person-status first, then truck state). Each bucket is a monitored count with trend + drill-down.
+
+1. **TERMINATED renter** — renter's employment status is T (from `COALESCE(override_status, resolved_status)` on the case's identity resolution). A termed tech in a rental is a recovery case, whatever the truck says.
+2. **LOA renter** — employment status L / P / S. Monitored alongside the existing LOA Recovery flow.
+3. **New hire (≤ 60 days)** — renter's enterprise ID matches an `onboarding_hires` row (excluding stale-swept rows) with `service_date` within 60 days. Expected rentals while a van is located — **takes precedence over the Declined/Decommissioned bucket**, because new hires are sometimes parked under a truck number that shows Declined Repair / Sent to Auction. The card monitors *duration* (a new hire in a rental for 55 days is the signal, not the rental's existence).
+4. **Declined Repair / Decommissioned truck** — truck's `fs_trucks` main status is terminal (Declined Repair, incl. Sent to Auction sub-status) or the truck is in decommissioning. The truck is never coming back; force the rental decision.
+5. **In repair** — truck has an actively open repair-type PO (classified PO history; open = APPROVED status — the Holman feed has no literal "Open").
+6. **Repair done — registration dead** — repair complete (`repairs_complete` affirmative OR repair-tracker/AMS completed) but the truck's registration is expired (`registration_sticker_valid`/`registration_expiry_date`/`holman_reg_expiry`) or renewal in process (`registration_in_progress` OR `registration_renewal_in_process`). Action: chase the renewal; shows how long the renewal has been pending (`registration_last_update`).
+7. **Repair done — no blocker** — repair complete, registration fine, rental still open. Purest waste; first calls to make.
+8. **No repair activity, no known reason** — nothing being repaired, no other explanation. The true "why does this rental exist?" cases.
+
+**Unknown renter** (identity resolution state ≠ RESOLVED) is not a bucket of its own: person-status buckets (1–3) require a resolved renter, so unresolved cases classify by truck state only (buckets 4–8) and carry an **UNKNOWN RENTER badge** — plus a dedicated insight card below, since resolving identity unlocks the person-status buckets.
+
+Secondary breakdowns (same row, smaller): by district/division (top 10), by rental class (van/minivan vs sedan — right-size angle). Vendor is a persistent filter across all buckets, breakdowns, and drill-downs.
 
 ### Row 4 — Insight cards (rule-based recommendations)
 
-Each card: title, count, estimated daily-dollar impact, severity, and a drill-down link to the filtered Rental Operations case list.
+The action layer on top of the buckets. Each card: title, count, estimated daily-dollar impact, severity, and a drill-down link to the filtered Rental Operations case list.
 
-1. **Repair done, rental still open** — case open AND (`repairs_complete` affirmative OR repair-tracker/AMS shows completed). Purest waste; first calls to make.
-2. **Rental, no repair activity** — case open AND no open repair-type PO for the truck (via classified PO history). **Splits into two sub-groups with different plays:**
-   - **Registration is the blocker** — truck's `fs_trucks` row shows registration expired (`registration_sticker_valid`/`registration_expiry_date`/`holman_reg_expiry`) or renewal in process (`registration_in_progress` OR `registration_renewal_in_process`). Action: chase the renewal; card shows how long the renewal has been pending (`registration_last_update`).
-   - **No known reason** — registration fine, nothing being repaired. The true "why does this rental exist?" cases.
-3. **Long-runners** — `days_open` > 45, ranked by `rate_authorized`.
-4. **Right-size candidates not in the campaign** — resolved renter paying van/minivan-class rate, not present in `vrm_rightsize_techs`.
-5. **Right-size stalled** — COMMITTED > 14 days without RETURNED/DONE; plus NON_RESPONDER count.
-6. **Extension pile-ups** — `number_of_extensions` ≥ 3 OR `days_behind` > 0.
-7. **Declined-repair / decommission trucks still holding rentals** — truck's main status is terminal (Declined Repair) or truck in decommissioning, rental still open. The truck is never coming back; force the rental decision.
-8. **Unknown renter** — identity resolution state ≠ RESOLVED. Blocks every other play; card links to the identity drawer.
+1. **Long-runners** — `days_open` > 45, ranked by `rate_authorized` (any bucket; bucket shown per row).
+2. **Right-size candidates not in the campaign** — resolved renter paying van/minivan-class rate, not present in `vrm_rightsize_techs`.
+3. **Right-size stalled** — COMMITTED > 14 days without RETURNED/DONE; plus NON_RESPONDER count.
+4. **Extension pile-ups** — `number_of_extensions` ≥ 3 OR `days_behind` > 0.
+5. **Unknown renter** — identity resolution state ≠ RESOLVED. Blocks bucket accuracy and every people-play; card links to the identity drawer.
+6. **New-hire rentals aging out** — bucket-3 cases past 45 days: the van search is taking too long; escalate van sourcing rather than the rental itself.
 
 **Registration badge everywhere:** every case row rendered by this dashboard (any card, any drill-down list) shows a REG flag when its truck's registration is dead or in renewal, so a long-runner or extension pile-up with a registration problem is never mistaken for tech foot-dragging.
 
@@ -68,7 +75,9 @@ Each card: title, count, estimated daily-dollar impact, severity, and a drill-do
 
 ### Metrics module
 
-`server/vrm/executive-summary/` — new module: `metrics.ts` (pure SQL/aggregation functions, one exported function per metric group), `insights.ts` (the 8 rules; each returns {count, caseKeys, dailyImpact}), `routes.ts` (thin), `brief.ts` (AI narrative). Insight rules are pure functions over query results so they are unit-testable with seeded data.
+`server/vrm/executive-summary/` — new module: `metrics.ts` (pure SQL/aggregation functions, one exported function per metric group), `buckets.ts` (the bucket classifier — one pure function that takes a case's joined facts and returns exactly one bucket, applying the precedence order above), `insights.ts` (the 6 insight rules; each returns {count, caseKeys, dailyImpact}), `routes.ts` (thin), `brief.ts` (AI narrative). The classifier and insight rules are pure functions over query results so they are unit-testable with seeded data.
+
+**Bucket data joins (all read-only):** person status from `vrm_rental_identity_resolutions` (`COALESCE(override_status, resolved_status)`); new-hire lookup from `onboarding_hires` by enterprise ID (`service_date` ≥ today − 60d, excluding `dropped_from_source_at` rows); truck terminal status + registration fields from `fs_trucks`; open repair POs from classified PO history.
 
 **Truck-number join rule:** VRM `case_key` is a padded vehicle number; `fs_trucks.truck_number` may be unpadded. All joins between cases and `fs_trucks` (registration, terminal status) normalize by stripping leading zeros on BOTH sides. BYOV `88`-prefix checks (if ever needed) run on the raw/trimmed number before padding.
 
@@ -82,7 +91,8 @@ Each card: title, count, estimated daily-dollar impact, severity, and a drill-do
 - `daily_spend` NUMERIC, `potential_savings` NUMERIC
 - `avg_days_open` NUMERIC, `over_30_count` INT
 - `rightsize_stages` JSONB (stage → count)
-- `insight_counts` JSONB (rule id → count; lets trends later show e.g. "repair-done backlog shrinking")
+- `bucket_counts` JSONB (bucket id → count; drives the bucket-mix-over-time trend — e.g. "repair-done backlog shrinking", "terminated-renter rentals climbing")
+- `insight_counts` JSONB (rule id → count)
 - `ai_brief` TEXT NULL, `ai_brief_generated_at` TIMESTAMPTZ NULL
 - `source` VARCHAR — `backfill` | `live`
 - `created_at`, `updated_at`
@@ -118,7 +128,7 @@ Reconstructs history, flag-guarded via `app_settings` key `vrm_exec_metrics_back
 
 ## Verification
 
-- Unit tests (tsx --test) for: each insight rule against seeded cases (including padded/unpadded join cases and each registration sub-state), vendor normalization, weekly new/returned windows, backfill reconstruction against known import-run counts.
+- Unit tests (tsx --test) for: the bucket classifier's precedence order against seeded cases (must include: new hire in a Sent-to-Auction truck → New Hire bucket; termed tech in a truck with an open PO → TERMINATED bucket; unresolved renter → truck-state bucket + unknown-renter flag; padded/unpadded truck-number joins; each registration sub-state), each insight rule, vendor normalization, weekly new/returned windows, backfill reconstruction against known import-run counts.
 - `npm run check` — zero NEW type errors vs the ~224 baseline.
 - Manual: every KPI and card drill-down lands on the correctly filtered Rental Operations view; AI brief renders, regenerates (admin), and hides cleanly when the key is disabled.
 - Backfill sanity: spot-check `vrm_exec_daily_metrics` rows against `vrm_rental_operations_import_runs` totals for the same dates.
