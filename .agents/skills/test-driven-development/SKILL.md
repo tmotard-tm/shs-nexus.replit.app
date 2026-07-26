@@ -1,6 +1,10 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code. Write the test first, watch it fail, then write the code. Includes the required fallback for repos that have no test runner.
+description: >-
+  Use when implementing any feature or bugfix, before writing implementation
+  code. Write the test first, watch it fail, then write the code. Includes the
+  required fallback for repos that have no test runner.
+enabled: true
 ---
 
 # Test-Driven Development
