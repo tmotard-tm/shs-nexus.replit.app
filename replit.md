@@ -119,6 +119,8 @@ Polls the LIVHR / fleet-agents app for LUCA's rental-recovery shop-call results 
 
 Preferred communication style: Simple, everyday language.
 
+Do not create agent skills, AGENTS.md, or similar agent-config scaffolding unprompted — the user will add their own skills to `.agents/skills/` if and when they want them.
+
 ## Gotchas
 
 -   **onboarding_hires stale-hire sweep (2026-07-24)**: Same ghost-row problem as `all_techs` (below), different table — Weekly Onboarding reads `onboarding_hires`, whose sync was also upsert-only, so hires dropped from `NS_TECH_HIRE_ROSTER_VW` lingered with stale `employment_status` (60 in prod, 55 shown as Active). Now `syncOnboardingHires` flags untouched rows with `dropped_from_source_at` after a clean run (guard: skip if > `max(100, 10% of fetch)`); `getOnboardingHires()` excludes flagged rows; the upsert un-flags reappearing hires. Column applied to dev via raw SQL (schema.ts in sync; publish diffs it to prod). Prod backfill is automatic on the first clean sync after publish (~63 rows, under the guard).
