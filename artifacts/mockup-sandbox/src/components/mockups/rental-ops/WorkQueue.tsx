@@ -53,6 +53,14 @@ function fmtAgo(s: string | null) {
     return `${Math.floor(h / 24)}d ago`;
 }
 
+// BYOV = tech's own vehicle (truck number starts with 88 or 088). BYOV repairs are
+// not tracked, so these rows never have shop info. Check the RAW number — never
+// zero-pad first (padding "88144" to "088144" would break the prefix test).
+function isByov(truckNo: string | null | undefined): boolean {
+  const raw = String(truckNo ?? "").trim();
+  return raw.startsWith("88") || raw.startsWith("088");
+}
+
 function mk(overrides: Partial<MasterRow>): MasterRow {
   return {
     case_key: "", vehicle_number: "", source: "holman_etl", rental_vendor: "Enterprise",
@@ -110,6 +118,13 @@ const MOCK_ROWS: MasterRow[] = [
     rental_start_date: "2026-07-10", days_open: 17, daily_cost: 72.00, cost_over: false,
     tech_name: "Alice White", employee_status: "Active", ams_bucket: "in_repair", shop_name: "Quick Fix",
     callable: true, workload_bucket: "workable", has_open_repair: true, repair_cohort: "pended"
+  }),
+  // BYOV truck (88-prefix): tech drives their own vehicle, repairs not tracked → no shop info, never callable
+  mk({
+    case_key: "5", vehicle_number: "88217", renter_name_raw: "Herrera, Luis",
+    rental_start_date: "2026-07-15", days_open: 11, daily_cost: 46.00, cost_over: false,
+    rental_class: "Cargo Van", tech_name: "Luis Herrera", employee_status: "Active",
+    ams_bucket: "in_use", callable: false, workload_bucket: "workable"
   })
 ];
 
@@ -167,6 +182,7 @@ export function WorkQueue() {
       if (chips.has("no_repair") && r.has_open_repair) return false;
       if (chips.has("new_hire") && r.employee_status !== "New Hire") return false;
       if (chips.has("term_leave") && r.employee_status !== "Term/Leave") return false;
+      if (chips.has("byov") && !isByov(r.vehicle_number)) return false;
 
       return true;
     });
@@ -251,6 +267,7 @@ export function WorkQueue() {
               { id: "no_repair", label: "No open repair" },
               { id: "new_hire", label: "New hire" },
               { id: "term_leave", label: "Term/Leave" },
+              { id: "byov", label: "BYOV" },
             ].map(c => (
               <button
                 key={c.id}
@@ -298,7 +315,12 @@ export function WorkQueue() {
                       cursor: "pointer"
                     }}
                   >
-                    <td style={{ padding: "12px 16px", fontFamily: fonts.jetbrains }}>{r.vehicle_number}</td>
+                    <td style={{ padding: "12px 16px", fontFamily: fonts.jetbrains }}>
+                      {r.vehicle_number}
+                      {isByov(r.vehicle_number) && (
+                        <span style={{ marginLeft: 6, fontSize: 10, padding: "2px 5px", borderRadius: 4, backgroundColor: colors.blueLight, color: colors.blue, fontWeight: 600, fontFamily: fonts.dmSans }}>BYOV</span>
+                      )}
+                    </td>
                     <td style={{ padding: "12px 16px" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         {r.tech_name || "Unknown"}
@@ -318,8 +340,12 @@ export function WorkQueue() {
                       ) : null}
                     </td>
                     <td style={{ padding: "12px 16px" }}>
-                      <div style={{ color: colors.ink }}>{r.shop_name || "—"}</div>
-                      <div style={{ color: colors.inkMuted, fontSize: 11 }}>{r.shop_po_status || "—"}</div>
+                      {isByov(r.vehicle_number) ? (
+                        <div style={{ color: colors.inkMuted, fontStyle: "italic", fontSize: 12 }} title="BYOV trucks are the tech's own vehicle — repairs aren't tracked, so there is no shop to show or call.">BYOV — repairs not tracked</div>
+                      ) : (<>
+                        <div style={{ color: colors.ink }}>{r.shop_name || "—"}</div>
+                        <div style={{ color: colors.inkMuted, fontSize: 11 }}>{r.shop_po_status || "—"}</div>
+                      </>)}
                     </td>
                     <td style={{ padding: "12px 16px", fontFamily: fonts.jetbrains }}>
                       {r.days_open != null ? `${r.days_open}d` : "—"}

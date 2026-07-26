@@ -10,3 +10,5 @@ When building equivalent logic elsewhere (e.g. a Snowflake view unioning truck n
 **Why:** confirmed empirically — comparing a candidate Snowflake classification view against the app's live classification for a random sample of technicians caught exactly this: 9/10 matched, the 1 mismatch was a BYOV truck misclassified as company due to pad-then-check ordering.
 
 **How to apply:** when writing truck-number classification/normalization SQL (or any code) that both (a) needs a zero-padded canonical form for joins/dedup and (b) has a prefix-based rule, carry the original un-padded/trimmed value through for the prefix check, and only use the padded form for joins.
+
+**Related domain rule (user-confirmed 2026-07-26):** BYOV trucks (88/088 prefix) have NO shop/repair information anywhere — BYOV repairs are not tracked. Rental-ops UIs must show an explicit "BYOV — repairs not tracked" state instead of "no shop"/"not scraped" warnings, and BYOV rows must never enter the LUCA shop-call queue (nothing to call). Applies to any future rental-ops rebuild/graduation.

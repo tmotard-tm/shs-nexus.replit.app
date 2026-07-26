@@ -265,11 +265,11 @@ const MOCK_ROWS: MasterRow[] = [
     open_po_count: 1, po_count: 1, days_open: 6, last_rental_date: "2026-04-15", odometer: 31220,
   }),
   mk({
-    case_key: "088174", vehicle_number: "088174", renter_name_raw: "Victor Salinas",
+    case_key: "048174", vehicle_number: "048174", renter_name_raw: "Victor Salinas",
     tech_name: "Victor Salinas", tpms_tech: "Victor Salinas", employee_id: "T-50781",
     employee_status: "Active", employee_status_date: "2024-11-05",
     identity_state: "REVIEW", identity_confidence: "medium",
-    wrong_truck: true, renter_own_truck: "088012",
+    wrong_truck: true, renter_own_truck: "048012",
     veh_desc: "2021 Ford Transit 350", rental_class: "CARGO VAN", daily_cost: 47.0,
     actual_vehicle_type: "Sedan", actual_bucket: "SEDAN", type_mismatch: true,
     ams_status: "In Use", ams_bucket: "in_use", repair_cohort: "no_open_repair",
@@ -296,10 +296,27 @@ const MOCK_ROWS: MasterRow[] = [
     assigned_truck: "046012", assigned_truck_mismatch: true, assigned_truck_has_repair_po: false,
     po_count: 1, days_open: 23, last_rental_date: "2026-03-18", odometer: 91500,
   }),
+  // BYOV truck (88-prefix): tech drives their own vehicle, repairs not tracked → no shop info, never callable
+  mk({
+    case_key: "88217", vehicle_number: "88217", renter_name_raw: "Luis Herrera",
+    tech_name: "Luis Herrera", tpms_tech: "Luis Herrera", employee_id: "T-52440",
+    employee_status: "Active", employee_status_date: "2025-08-18",
+    veh_desc: "2022 Ford Transit 250", rental_class: "CARGO VAN", daily_cost: 46.0,
+    ams_status: null, ams_bucket: "other", repair_cohort: "no_open_repair",
+    po_count: 0, days_open: 11, last_rental_date: "2026-04-08", odometer: 58230,
+  }),
 ];
 
 function isDeclinedAuction(b: string) {
   return b === "declined" || b === "auction";
+}
+
+// BYOV = tech's own vehicle (truck number starts with 88 or 088). BYOV repairs are
+// not tracked, so these rows never have shop info. Check the RAW number — never
+// zero-pad first (padding "88144" to "088144" would break the prefix test).
+function isByov(truckNo: string | null | undefined): boolean {
+  const raw = String(truckNo ?? "").trim();
+  return raw.startsWith("88") || raw.startsWith("088");
 }
 
 function fmtPhone(p: string | null | undefined): string {
@@ -487,7 +504,10 @@ export function CardsAsTabs() {
             {sorted.map((r, i) => (
               <tr key={r.case_key} style={{ cursor: "pointer" }}>
                 <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{i + 1}</td>
-                <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>{r.case_key}</td>
+                <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
+                  {r.case_key}
+                  {isByov(r.vehicle_number) && <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 600, color: colors.blue, background: colors.blueLight, borderRadius: 999, padding: "1px 7px", fontFamily: fonts.dmSans }}>BYOV</span>}
+                </td>
                 <td style={tdStyle}>{r.renter_name_raw}</td>
                 <td style={{ ...tdStyle, fontSize: 12 }}>{r.tpms_tech || "-"}</td>
                 <td style={tdStyle}>{r.veh_desc || "-"}</td>
@@ -496,8 +516,12 @@ export function CardsAsTabs() {
                   {r.ams_status ? <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: r.ams_bucket === 'in_repair' ? colors.blue : r.ams_bucket === 'auction' || r.ams_bucket === 'declined' ? colors.red : colors.inkMuted, background: colors.surface, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase" }}>{r.ams_status}</span> : <span style={{ color: colors.inkMuted }}>—</span>}
                 </td>
                 <td style={{ ...tdStyle, fontSize: 12 }}>
-                  {r.shop_name || "-"}
-                  {r.portal_shop_phone && <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains }}>{fmtPhone(r.portal_shop_phone)}</div>}
+                  {isByov(r.vehicle_number) ? (
+                    <span style={{ color: colors.inkMuted, fontStyle: "italic" }} title="BYOV trucks are the tech's own vehicle — repairs aren't tracked, so there is no shop to show or call.">BYOV — repairs not tracked</span>
+                  ) : (<>
+                    {r.shop_name || "-"}
+                    {r.portal_shop_phone && <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains }}>{fmtPhone(r.portal_shop_phone)}</div>}
+                  </>)}
                 </td>
                 <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.days_open ?? ""}</td>
                 <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
