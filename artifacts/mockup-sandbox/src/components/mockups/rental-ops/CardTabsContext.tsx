@@ -329,8 +329,43 @@ const MOCK_CALL_LOG: Record<string, CallLogEntry[]> = {
   "041877": [ {date:"2026-07-17", outcome:"Reached shop", summary:"Brakes done; awaiting invoice upload."} ]
 };
 
-const MOCK_NOTES_INITIAL: Record<string, NoteEntry[]> = {
-  "017640": [ {date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."} ]
+const MOCK_SHOP_DETAILS: Record<string, {shopName?:string; address:string; city:string; state:string; phone:string|null; poSynced:string; holmanScraped:string|null}> = {
+  "023132": {address:"4820 Lemmon Ave", city:"Dallas", state:"TX", phone:"(214) 555-1987", poSynced:"2026-07-26 06:12", holmanScraped:"2026-07-25"},
+  "041877": {address:"3400 E Sky Harbor Blvd", city:"Phoenix", state:"AZ", phone:"(602) 555-4412", poSynced:"2026-07-26 06:12", holmanScraped:null},
+  "092310": {shopName:"Desert Diesel Repair", address:"88 S Arizona Ave", city:"Chandler", state:"AZ", phone:"(480) 555-0192", poSynced:"2026-07-26 06:12", holmanScraped:"2026-07-24"},
+  "071228": {shopName:"Sunline Collision", address:"9012 NW Grand Ave", city:"Peoria", state:"AZ", phone:null, poSynced:"2026-07-26 06:12", holmanScraped:null}
+};
+
+const MOCK_HOLMAN_MESSAGES: Record<string, {scrapedAt:string; messages:{date:string; note:string}[]}> = {
+  "023132": {scrapedAt: "2026-07-25", messages: [{date:"2026-07-16", note:"Parts on order, ETA 7/21 per shop."}, {date:"2026-07-10", note:"Vehicle checked in, diagnostic scheduled."}, {date:"2026-07-08", note:"PO opened by Holman rep — transmission concern."}]},
+  "041877": {scrapedAt: "2026-07-25", messages: [{date:"2026-07-17", note:"Repair complete, awaiting invoice."}]},
+  "092310": {scrapedAt: "2026-07-24", messages: [{date:"2026-07-21", note:"Head gasket on backorder — est. 8-10 business days."}]}
+};
+
+const MOCK_COMMENTS: Record<string, {actor:string; date:string; text:string}[]> = {
+  "023132": [{actor:"jmorga1", date:"2026-07-19", text:"Shop says parts arrived early — watch for completion this week."}],
+  "017640": [{actor:"handers", date:"2026-07-13", text:"Possible identity mismatch — two Wallace records in TPMS."}]
+};
+
+const CALL_TRANSCRIPTS: Record<string, Record<string, string[]>> = {
+  "023132": {
+    "2026-07-18": ["LUCA: Calling Precision Fleet Service regarding truck 023132.", "Shop: Parts arrived yesterday, tech is on it.", "LUCA: What's the expected completion date?", "Shop: Around July 22nd."],
+    "2026-07-11": ["LUCA: Left voicemail requesting status on PO H-482913."]
+  },
+  "041877": {
+    "2026-07-17": ["LUCA: Checking status on brake repair.", "Shop: Done — invoice uploads today."]
+  }
+};
+
+const INVESTIGATION_NOTES: Record<string, NoteEntry[]> = {
+  "092310": [{date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."}],
+  "071228": []
+};
+
+// AMS status for the tech's ASSIGNED truck (the rental row's ams_status belongs to the rental van)
+const ASSIGNED_TRUCK_AMS: Record<string, string> = {
+  "092310": "In Repair",
+  "071228": "In Body Shop"
 };
 
 function isDeclinedAuction(b: string) {
@@ -389,10 +424,17 @@ export function CardTabsContext() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState<MasterRow | null>(null);
   const [drawerTargetTruck, setDrawerTargetTruck] = useState<string | null>(null);
-  const [drawerTab, setDrawerTab] = useState<"pos" | "calls" | "notes">("pos");
-  const [notesState, setNotesState] = useState(MOCK_NOTES_INITIAL);
-  const [newNote, setNewNote] = useState("");
+  const [drawerTab, setDrawerTab] = useState<"overview" | "pos" | "calls" | "notes">("overview");
   const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
+  const [expandedCalls, setExpandedCalls] = useState<Set<string>>(new Set());
+  const [localComments, setLocalComments] = useState(MOCK_COMMENTS);
+  const [newComment, setNewComment] = useState("");
+  const [localInvestNotes, setLocalInvestNotes] = useState(INVESTIGATION_NOTES);
+  const [newInvestNote, setNewInvestNote] = useState("");
+  const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [justSynced, setJustSynced] = useState<Record<string, boolean>>({});
+  const [pulledPhones, setPulledPhones] = useState<Record<string, string>>({});
 
   const callMut = useNoopMutation();
   const callAllMut = useNoopMutation();
@@ -409,10 +451,13 @@ export function CardTabsContext() {
   const openDrawer = (r: MasterRow) => {
     setSelectedRow(r);
     setDrawerTargetTruck(r.case_key);
-    setDrawerTab("pos");
+    setDrawerTab("overview");
     setDrawerOpen(true);
     setExpandedPOs(new Set());
-    setNewNote("");
+    setExpandedCalls(new Set());
+    setNewComment("");
+    setNewInvestNote("");
+    setPinnedIdentity(null);
   };
 
   const closeDrawer = () => {
@@ -440,16 +485,45 @@ export function CardTabsContext() {
     });
   };
 
-  const handleAddNote = () => {
-    if (!newNote.trim() || !drawerTargetTruck) return;
-    setNotesState(prev => ({
+  const handleAddComment = () => {
+    if (!newComment.trim() || !selectedRow) return;
+    const key = selectedRow.case_key;
+    setLocalComments(prev => ({
       ...prev,
-      [drawerTargetTruck]: [
-        ...(prev[drawerTargetTruck] || []),
-        { date: new Date().toISOString().split('T')[0], author: "current_user", text: newNote.trim() }
-      ]
+      [key]: [...(prev[key] || []), { actor: "you", date: new Date().toISOString().split('T')[0], text: newComment.trim() }]
     }));
-    setNewNote("");
+    setNewComment("");
+  };
+
+  const handleAddInvestNote = () => {
+    if (!newInvestNote.trim() || !drawerTargetTruck) return;
+    setLocalInvestNotes(prev => ({
+      ...prev,
+      [drawerTargetTruck]: [...(prev[drawerTargetTruck] || []), { date: new Date().toISOString().split('T')[0], author: "you", text: newInvestNote.trim() }]
+    }));
+    setNewInvestNote("");
+  };
+
+  const toggleCall = (key: string) => {
+    setExpandedCalls(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
+
+  const handleRefresh = (truck: string) => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setTimeout(() => {
+      setIsRefreshing(false);
+      setJustSynced(prev => ({ ...prev, [truck]: true }));
+    }, 900);
+  };
+
+  const handlePullPhone = (truck: string) => {
+    setPulledPhones(prev => ({ ...prev, [truck]: "(623) 555-0710" }));
   };
 
   const pool = rows;
@@ -498,6 +572,15 @@ export function CardTabsContext() {
 
   const thStyle: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 500, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", padding: "12px", textAlign: "left", borderBottom: `1px solid ${colors.rule}`, backgroundColor: colors.surface, whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 1 };
   const tdStyle: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, padding: "12px", borderBottom: `1px solid ${colors.rule}`, whiteSpace: "nowrap", transition: "background-color 0.15s" };
+  const sectionLabel: React.CSSProperties = { fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 };
+
+  const Fact = ({ label, value, warn, mono }: { label: string; value: string; warn?: string; mono?: boolean }) => (
+    <div>
+      <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 500, fontFamily: mono ? fonts.jetbrains : undefined, color: colors.ink }}>{value}</div>
+      {warn && <div style={{ fontSize: 11, color: colors.amber, fontWeight: 600, marginTop: 2 }}>{warn}</div>}
+    </div>
+  );
 
   const Th = ({ col, label, style }: { col: string; label: string; style?: React.CSSProperties }) => {
     const active = sort.col === col && sort.dir != null;
@@ -540,6 +623,19 @@ export function CardTabsContext() {
 
   // Unique AMS statuses for filter
   const uniqueStatuses = Array.from(new Set(pool.map(r => r.ams_status).filter(Boolean))) as string[];
+
+  // Drawer-derived values
+  const liveSelectedRow = selectedRow ? (rows.find(x => x.case_key === selectedRow.case_key) || selectedRow) : null;
+  const viewingAssigned = !!(selectedRow && drawerTargetTruck && drawerTargetTruck !== selectedRow.case_key);
+  const targetShopDetails = drawerTargetTruck ? MOCK_SHOP_DETAILS[drawerTargetTruck] : undefined;
+  const targetAms = selectedRow && drawerTargetTruck ? (viewingAssigned ? (ASSIGNED_TRUCK_AMS[drawerTargetTruck] || null) : selectedRow.ams_status) : null;
+  const amsPillStyle = (status: string | null) => {
+    const s = (status || "").toLowerCase();
+    if (s.includes("repair") || s.includes("body")) return { color: colors.blueDeep, bg: colors.blueLight };
+    if (s.includes("auction") || s.includes("declined")) return { color: colors.redDeep, bg: colors.redLight };
+    if (s.includes("use")) return { color: colors.greenDeep, bg: colors.greenLight };
+    return { color: colors.inkMuted, bg: colors.surface };
+  };
 
   return (
     <TooltipProvider>
@@ -851,8 +947,8 @@ export function CardTabsContext() {
 
         {/* Drawer Panel */}
         <div style={{ 
-          position: "fixed", left: "50%", top: "50%", width: 760, maxWidth: "calc(100vw - 48px)", 
-          height: "min(720px, calc(100vh - 48px))", borderRadius: 16, overflow: "hidden", background: "#fff", 
+          position: "fixed", left: "50%", top: "50%", width: 880, maxWidth: "calc(100vw - 48px)", 
+          height: "calc(100vh - 48px)", borderRadius: 16, overflow: "hidden", background: "#fff", 
           boxShadow: "0 24px 80px rgba(0,0,0,0.28)", zIndex: 20,
           transform: drawerOpen ? "translate(-50%, -50%) scale(1)" : "translate(-50%, -50%) scale(0.96)",
           opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none",
@@ -866,18 +962,21 @@ export function CardTabsContext() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
-                      <h2 style={{ fontFamily: fonts.jetbrains, fontSize: 24, fontWeight: 700, margin: 0, color: colors.ink }}>{selectedRow.case_key}</h2>
-                      {selectedRow.ams_status && (
-                        <span style={{ fontSize: 12, fontWeight: 700, color: colors.blueDeep, background: colors.blueLight, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase", letterSpacing: "0.02em" }}>
-                          {selectedRow.ams_status}
+                      <h2 style={{ fontFamily: fonts.jetbrains, fontSize: 24, fontWeight: 700, margin: 0, color: colors.ink }}>{drawerTargetTruck}</h2>
+                      {targetAms && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: amsPillStyle(targetAms).color, background: amsPillStyle(targetAms).bg, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                          {targetAms}
                         </span>
+                      )}
+                      {viewingAssigned && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: colors.inkMuted, background: colors.surface, borderRadius: 6, padding: "4px 8px" }}>tech's assigned truck</span>
                       )}
                     </div>
                     <div style={{ fontSize: 14, color: colors.inkSoft, fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
                       <span>{selectedRow.renter_name_raw}</span>
                       <span style={{ color: colors.inkMuted }}>•</span>
-                      <span>{selectedRow.shop_name || "No shop info"}</span>
-                      {selectedRow.days_open && (
+                      <span>{viewingAssigned ? (targetShopDetails?.shopName || selectedRow.call_shop_name || "No shop info") : (selectedRow.shop_name || "No shop info")}</span>
+                      {!viewingAssigned && selectedRow.days_open != null && (
                         <>
                           <span style={{ color: colors.inkMuted }}>•</span>
                           <span style={{ color: colors.redDeep, fontWeight: 600 }}>{selectedRow.days_open} days open</span>
@@ -885,9 +984,22 @@ export function CardTabsContext() {
                       )}
                     </div>
                   </div>
-                  <button onClick={closeDrawer} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, borderRadius: 4 }}>
-                    <X size={20} />
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                    <button
+                      onClick={() => handleRefresh(drawerTargetTruck)}
+                      disabled={isRefreshing}
+                      style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: justSynced[drawerTargetTruck] && !isRefreshing ? colors.greenDeep : colors.blue, fontSize: 13, fontWeight: 600, cursor: isRefreshing ? "default" : "pointer", opacity: isRefreshing ? 0.7 : 1, padding: 0 }}
+                    >
+                      {justSynced[drawerTargetTruck] && !isRefreshing ? (
+                        <><CheckCircle2 size={14} /> Synced just now</>
+                      ) : (
+                        <><RefreshCw size={14} style={{ animation: isRefreshing ? "spin 1s linear infinite" : undefined }} /> Refresh {drawerTargetTruck} from Holman</>
+                      )}
+                    </button>
+                    <button onClick={closeDrawer} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, borderRadius: 4 }}>
+                      <X size={20} />
+                    </button>
+                  </div>
                 </div>
 
                 {/* Truck Switcher (if assigned mismatch) */}
@@ -897,24 +1009,59 @@ export function CardTabsContext() {
                       onClick={() => setDrawerTargetTruck(selectedRow.case_key)}
                       style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", background: drawerTargetTruck === selectedRow.case_key ? "#fff" : "transparent", color: drawerTargetTruck === selectedRow.case_key ? colors.ink : colors.inkMuted, fontWeight: drawerTargetTruck === selectedRow.case_key ? 600 : 500, fontSize: 13, cursor: "pointer", boxShadow: drawerTargetTruck === selectedRow.case_key ? "0 1px 3px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
                     >
-                      Rental {selectedRow.case_key}
+                      Rental {selectedRow.case_key} — the rental van
                     </button>
                     <button 
                       onClick={() => setDrawerTargetTruck(selectedRow.assigned_truck!)}
                       style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", background: drawerTargetTruck === selectedRow.assigned_truck ? "#fff" : "transparent", color: drawerTargetTruck === selectedRow.assigned_truck ? colors.ink : colors.inkMuted, fontWeight: drawerTargetTruck === selectedRow.assigned_truck ? 600 : 500, fontSize: 13, cursor: "pointer", boxShadow: drawerTargetTruck === selectedRow.assigned_truck ? "0 1px 3px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
                     >
-                      Assigned {selectedRow.assigned_truck}
+                      Assigned {selectedRow.assigned_truck} — tech's own truck · {(localInvestNotes[selectedRow.assigned_truck] || []).length} note(s)
                     </button>
                   </div>
                 )}
+
+                {/* Renter / identity */}
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, fontSize: 13, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" }}>Renter / identity</span>
+                    <span style={{ fontWeight: 600, color: colors.ink }}>{selectedRow.renter_name_raw}</span>
+                    <span style={{ fontFamily: fonts.jetbrains, color: colors.inkMuted }}>{selectedRow.employee_id || "—"}</span>
+                    <span style={{ color: selectedRow.employee_status === "Active" ? colors.greenDeep : colors.amber, fontWeight: 600 }}>
+                      {selectedRow.employee_status} <span style={{ color: colors.inkMuted, fontWeight: 400 }}>{selectedRow.employee_status_date}</span>
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: selectedRow.case_key === "017640" ? colors.amberLight : (selectedRow.identity_confidence === "high" ? colors.greenLight : selectedRow.identity_confidence === "medium" ? colors.amberLight : colors.redLight), color: selectedRow.case_key === "017640" ? colors.amber : (selectedRow.identity_confidence === "high" ? colors.greenDeep : selectedRow.identity_confidence === "medium" ? colors.amber : colors.redDeep), textTransform: "uppercase" }}>
+                      {selectedRow.case_key === "017640" ? "Review" : selectedRow.identity_confidence}
+                    </span>
+                  </div>
+
+                  {selectedRow.case_key === "017640" && (
+                    <div style={{ marginTop: 12, padding: 14, background: "#fff", borderRadius: 8, border: `1px solid ${colors.rule}` }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: colors.ink, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span>Multiple matches found. Select correct identity:</span>
+                        {pinnedIdentity && (
+                          <button onClick={() => setPinnedIdentity(null)} style={{ background: "transparent", border: "none", color: colors.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>clear manual override</button>
+                        )}
+                      </div>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button onClick={() => setPinnedIdentity("T-30112")} style={{ flex: 1, padding: "9px 14px", borderRadius: 6, fontSize: 12, border: `1px solid ${pinnedIdentity === "T-30112" ? colors.accent : colors.rule}`, background: pinnedIdentity === "T-30112" ? colors.accentLight : "transparent", textAlign: "left", cursor: "pointer", transition: "all 0.15s" }}>
+                          use T-30112 [Active 2026-01-05] Andre Wallace
+                        </button>
+                        <button onClick={() => setPinnedIdentity("T-29881")} style={{ flex: 1, padding: "9px 14px", borderRadius: 6, fontSize: 12, border: `1px solid ${pinnedIdentity === "T-29881" ? colors.accent : colors.rule}`, background: pinnedIdentity === "T-29881" ? colors.accentLight : "transparent", textAlign: "left", cursor: "pointer", transition: "all 0.15s" }}>
+                          use T-29881 [Term 2025-11-20] Andre R. Wallace
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* Drawer Tabs */}
               <div style={{ display: "flex", borderBottom: `1px solid ${colors.rule}`, padding: "0 32px" }}>
                 {[
+                  { id: "overview", label: "Overview", icon: List },
                   { id: "pos", label: "PO History", icon: FileText },
                   { id: "calls", label: "LUCA Call Log", icon: PhoneCall },
-                  { id: "notes", label: "Operator Notes", icon: MessageSquare }
+                  { id: "notes", label: "Comments & Notes", icon: MessageSquare }
                 ].map(t => (
                   <button
                     key={t.id}
@@ -928,6 +1075,101 @@ export function CardTabsContext() {
 
               {/* Drawer Content */}
               <div style={{ flex: 1, overflow: "auto", padding: "32px", background: "#fff" }}>
+                {drawerTab === "overview" && (() => {
+                  const shopName = viewingAssigned ? (targetShopDetails?.shopName || selectedRow.call_shop_name) : selectedRow.shop_name;
+                  const rawPhone = viewingAssigned ? selectedRow.call_shop_phone : selectedRow.portal_shop_phone;
+                  const shopPhone = pulledPhones[drawerTargetTruck] || targetShopDetails?.phone || (rawPhone ? fmtPhone(rawPhone) : null);
+                  const targetByov = isByov(drawerTargetTruck);
+                  const liveMark = (liveSelectedRow || selectedRow).operator_mark;
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                      {targetByov && (
+                        <div style={{ padding: "16px 20px", background: colors.blueLight, borderRadius: 8, fontSize: 13, color: colors.blueDeep, fontWeight: 500 }}>
+                          BYOV — this is the tech's own vehicle. Repairs aren't tracked, so there is no shop, PO, or Holman data for this truck.
+                        </div>
+                      )}
+
+                      <div>
+                        <div style={sectionLabel}>{viewingAssigned ? "Assigned truck" : "Rental ticket & economics"}</div>
+                        {viewingAssigned ? (
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16 }}>
+                            <Fact label="AMS status" value={targetAms || "—"} />
+                            <Fact label="Open POs" value={String(selectedRow.assigned_truck_open_po_count ?? 0)} />
+                            <Fact label="Repair PO on file" value={selectedRow.assigned_truck_has_repair_po ? "Yes" : "No"} />
+                          </div>
+                        ) : (
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
+                            <Fact label="Vendor" value={val(selectedRow.rental_vendor)} />
+                            <Fact label="Ticket status" value={val(selectedRow.ticket_status)} />
+                            <Fact label="Days open" value={selectedRow.days_open != null ? String(selectedRow.days_open) : "—"} />
+                            <Fact label="Extensions" value={selectedRow.number_of_extensions != null ? String(selectedRow.number_of_extensions) : "—"} />
+                            <Fact label="Daily cost" value={selectedRow.daily_cost != null ? `$${selectedRow.daily_cost.toFixed(2)}/day` : "—"} warn={selectedRow.cost_over && selectedRow.cost_delta != null ? `+$${selectedRow.cost_delta.toFixed(2)}/day over $${selectedRow.class_median} class median` : undefined} />
+                            <Fact label="Rental class" value={val(selectedRow.rental_class)} warn={selectedRow.type_mismatch && selectedRow.actual_vehicle_type ? `Actual: ${selectedRow.actual_vehicle_type}` : undefined} />
+                            <Fact label="Last rental date" value={val(selectedRow.last_rental_date)} />
+                            <Fact label="Odometer" value={selectedRow.odometer != null ? selectedRow.odometer.toLocaleString() : "—"} mono />
+                          </div>
+                        )}
+                      </div>
+
+                      {!targetByov && (
+                        <div>
+                          <div style={sectionLabel}>Current shop</div>
+                          {shopName ? (
+                            <div style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "16px 20px" }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                                <div>
+                                  <div style={{ fontSize: 14, fontWeight: 600, color: colors.ink, marginBottom: 4 }}>{shopName}</div>
+                                  {targetShopDetails ? (
+                                    <div style={{ fontSize: 13, color: colors.inkSoft }}>{targetShopDetails.address}, {targetShopDetails.city}, {targetShopDetails.state}</div>
+                                  ) : (!viewingAssigned && (selectedRow.shop_city || selectedRow.shop_state) && (
+                                    <div style={{ fontSize: 13, color: colors.inkSoft }}>{[selectedRow.shop_city, selectedRow.shop_state].filter(Boolean).join(", ")}</div>
+                                  ))}
+                                </div>
+                                <div style={{ textAlign: "right" }}>
+                                  {shopPhone ? (
+                                    <div style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.greenDeep, fontWeight: 600 }}>{shopPhone}</div>
+                                  ) : (
+                                    <button onClick={() => handlePullPhone(drawerTargetTruck)} style={{ fontSize: 12, fontWeight: 600, color: colors.blue, background: colors.blueLight, border: "none", borderRadius: 6, padding: "6px 12px", cursor: "pointer" }}>
+                                      Pull phone from Holman portal
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                              {targetShopDetails && (
+                                <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${colors.rule}`, fontSize: 12, color: colors.inkMuted, display: "flex", gap: 16 }}>
+                                  <span>POs synced {targetShopDetails.poSynced}</span>
+                                  <span>Holman messages {targetShopDetails.holmanScraped ? `scraped ${targetShopDetails.holmanScraped}` : "never scraped"}</span>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div style={{ border: `1px dashed ${colors.rule}`, borderRadius: 8, padding: "16px 20px", fontSize: 13, color: colors.inkMuted }}>No shop on file for this truck.</div>
+                          )}
+                        </div>
+                      )}
+
+                      <div>
+                        <div style={sectionLabel}>Operator mark</div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <div style={{ display: "inline-flex", gap: 4, background: colors.surface, padding: 3, borderRadius: 8 }}>
+                            {[
+                              { id: "open", label: "Open", color: colors.green },
+                              { id: "closed", label: "Closed", color: colors.inkMuted },
+                              { id: "pickup", label: "Pickup", color: colors.amber }
+                            ].map(m => (
+                              <button key={m.id} type="button" onClick={() => doMark(selectedRow.case_key, m.id, liveMark)}
+                                style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: liveMark === m.id ? m.color : "transparent", color: liveMark === m.id ? "#fff" : colors.inkMuted, cursor: "pointer", fontSize: 12, fontWeight: 700, transition: "all 0.15s" }}>
+                                {m.label}
+                              </button>
+                            ))}
+                          </div>
+                          <span style={{ fontSize: 12, color: colors.inkMuted }}>Synced with the table — marking here updates the row.</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {drawerTab === "pos" && (
                   <div>
                     {isByov(drawerTargetTruck) ? (
@@ -1050,6 +1292,31 @@ export function CardTabsContext() {
                         })()}
                       </>
                     )}
+
+                    {!isByov(drawerTargetTruck) && (() => {
+                      const trail = MOCK_HOLMAN_MESSAGES[drawerTargetTruck];
+                      return (
+                        <div style={{ marginTop: 32 }}>
+                          <div style={sectionLabel}>
+                            Holman message trail{trail ? ` — scraped ${trail.scrapedAt}` : ""}
+                          </div>
+                          {trail ? (
+                            <div style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden" }}>
+                              {trail.messages.map((m, i) => (
+                                <div key={i} style={{ padding: "12px 16px", borderTop: i > 0 ? `1px solid ${colors.rule}` : "none", display: "flex", gap: 16, fontSize: 13 }}>
+                                  <span style={{ fontFamily: fonts.jetbrains, color: colors.inkMuted, whiteSpace: "nowrap" }}>{m.date}</span>
+                                  <span style={{ color: colors.ink }}>{m.note}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <div style={{ border: `1px dashed ${colors.rule}`, borderRadius: 8, padding: "14px 16px", fontSize: 13, color: colors.inkMuted }}>
+                              No Holman portal messages scraped for this truck.
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
 
@@ -1081,6 +1348,27 @@ export function CardTabsContext() {
                                 <div style={{ fontSize: 14, color: colors.inkSoft, background: colors.surface, padding: "12px 16px", borderRadius: 8 }}>
                                   {call.summary}
                                 </div>
+                                {(() => {
+                                  const transcript = CALL_TRANSCRIPTS[drawerTargetTruck]?.[call.date];
+                                  if (!transcript) return null;
+                                  const tKey = `${drawerTargetTruck}:${call.date}`;
+                                  const open = expandedCalls.has(tKey);
+                                  return (
+                                    <div style={{ marginTop: 8 }}>
+                                      <button onClick={() => toggleCall(tKey)} style={{ display: "inline-flex", alignItems: "center", gap: 4, background: "transparent", border: "none", color: colors.blue, fontSize: 12, fontWeight: 600, cursor: "pointer", padding: 0 }}>
+                                        <ChevronDown size={12} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                                        {open ? "Hide transcript" : "View transcript"}
+                                      </button>
+                                      {open && (
+                                        <div style={{ marginTop: 8, background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "12px 16px", display: "flex", flexDirection: "column", gap: 6 }}>
+                                          {transcript.map((line, li) => (
+                                            <div key={li} style={{ fontSize: 12, fontFamily: fonts.jetbrains, color: line.startsWith("LUCA:") ? colors.blueDeep : colors.ink }}>{line}</div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </div>
                             </div>
                           ))}
@@ -1091,49 +1379,95 @@ export function CardTabsContext() {
                 )}
 
                 {drawerTab === "notes" && (
-                  <div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
-                      {(notesState[drawerTargetTruck] || []).map((note, idx) => (
-                        <div key={idx} style={{ background: colors.surface, padding: "16px", borderRadius: 8 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{note.author}</span>
-                            <span style={{ fontSize: 12, color: colors.inkMuted }}>{note.date}</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+                    {/* Case comments */}
+                    <div>
+                      <div style={sectionLabel}>Comments — case {selectedRow.case_key}</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                        {(localComments[selectedRow.case_key] || []).map((c, idx) => (
+                          <div key={idx} style={{ background: colors.surface, padding: "14px 16px", borderRadius: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{c.actor}</span>
+                              <span style={{ fontSize: 12, color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{c.date}</span>
+                            </div>
+                            <div style={{ fontSize: 14, color: colors.inkSoft, lineHeight: 1.5 }}>{c.text}</div>
                           </div>
-                          <div style={{ fontSize: 14, color: colors.inkSoft, lineHeight: 1.5 }}>
-                            {note.text}
-                          </div>
-                        </div>
-                      ))}
-                      {(notesState[drawerTargetTruck] || []).length === 0 && (
-                        <div style={{ textAlign: "center", padding: "40px 0", color: colors.inkMuted }}>
-                          <MessageSquare size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
-                          <div style={{ fontSize: 14, fontWeight: 500, color: colors.ink }}>No notes yet.</div>
-                        </div>
-                      )}
-                    </div>
-                    
-                    <div style={{ borderTop: `1px solid ${colors.rule}`, paddingTop: 24 }}>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Add Note</div>
+                        ))}
+                        {(localComments[selectedRow.case_key] || []).length === 0 && (
+                          <div style={{ textAlign: "center", padding: "24px 0", color: colors.inkMuted, fontSize: 13 }}>No comments on this case yet.</div>
+                        )}
+                      </div>
                       <textarea 
-                        value={newNote}
-                        onChange={e => setNewNote(e.target.value)}
-                        placeholder="Type a note..."
-                        style={{ width: "100%", height: 100, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, background: "#fff", fontSize: 14, resize: "none", marginBottom: 12, fontFamily: "inherit" }}
+                        value={newComment}
+                        onChange={e => setNewComment(e.target.value)}
+                        placeholder="Add a comment on this case..."
+                        style={{ width: "100%", height: 80, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, background: "#fff", fontSize: 14, resize: "none", fontFamily: "inherit" }}
                       />
-                      <button 
-                        onClick={handleAddNote}
-                        disabled={!newNote.trim()}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newNote.trim() ? colors.accent : colors.surface, color: newNote.trim() ? "#fff" : colors.inkMuted, fontSize: 13, fontWeight: 600, border: "none", cursor: newNote.trim() ? "pointer" : "default", transition: "background 0.2s" }}
-                      >
-                        <Plus size={14} /> Add Note
-                      </button>
+                      <div style={{ marginTop: 8 }}>
+                        <button 
+                          onClick={handleAddComment}
+                          disabled={!newComment.trim()}
+                          style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newComment.trim() ? colors.accent : colors.surface, color: newComment.trim() ? "#fff" : colors.inkMuted, fontSize: 13, fontWeight: 600, border: "none", cursor: newComment.trim() ? "pointer" : "default", transition: "background 0.2s" }}
+                        >
+                          <Plus size={14} /> Add Comment
+                        </button>
+                      </div>
                     </div>
+
+                    {/* Investigation notes (assigned truck only) */}
+                    {viewingAssigned ? (
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                          <span style={{ ...sectionLabel, marginBottom: 0 }}>Investigation notes — truck {drawerTargetTruck}</span>
+                          {(localInvestNotes[drawerTargetTruck] || []).length > 0 ? (
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.greenLight, color: colors.greenDeep, textTransform: "uppercase" }}>Investigated</span>
+                          ) : (
+                            <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: colors.amberLight, color: colors.amber, textTransform: "uppercase" }}>Not investigated</span>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 16 }}>
+                          {(localInvestNotes[drawerTargetTruck] || []).map((note, idx) => (
+                            <div key={idx} style={{ background: colors.surface, padding: "14px 16px", borderRadius: 8 }}>
+                              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{note.author}</span>
+                                <span style={{ fontSize: 12, color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{note.date}</span>
+                              </div>
+                              <div style={{ fontSize: 14, color: colors.inkSoft, lineHeight: 1.5 }}>{note.text}</div>
+                            </div>
+                          ))}
+                          {(localInvestNotes[drawerTargetTruck] || []).length === 0 && (
+                            <div style={{ textAlign: "center", padding: "24px 0", color: colors.inkMuted, fontSize: 13 }}>No investigation notes for this truck yet.</div>
+                          )}
+                        </div>
+                        <textarea 
+                          value={newInvestNote}
+                          onChange={e => setNewInvestNote(e.target.value)}
+                          placeholder="Add an investigation note..."
+                          style={{ width: "100%", height: 80, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, background: "#fff", fontSize: 14, resize: "none", fontFamily: "inherit" }}
+                        />
+                        <div style={{ marginTop: 8 }}>
+                          <button 
+                            onClick={handleAddInvestNote}
+                            disabled={!newInvestNote.trim()}
+                            style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newInvestNote.trim() ? colors.accent : colors.surface, color: newInvestNote.trim() ? "#fff" : colors.inkMuted, fontSize: 13, fontWeight: 600, border: "none", cursor: newInvestNote.trim() ? "pointer" : "default", transition: "background 0.2s" }}
+                          >
+                            <Plus size={14} /> Add Note
+                          </button>
+                        </div>
+                      </div>
+                    ) : selectedRow.assigned_truck ? (
+                      <div style={{ border: `1px dashed ${colors.rule}`, borderRadius: 8, padding: "14px 16px", fontSize: 13, color: colors.inkMuted }}>
+                        Investigation notes live on the tech's assigned truck — switch to Assigned {selectedRow.assigned_truck} above to view or add them.
+                      </div>
+                    ) : null}
                   </div>
                 )}
               </div>
             </>
           )}
         </div>
+
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     </TooltipProvider>
   );

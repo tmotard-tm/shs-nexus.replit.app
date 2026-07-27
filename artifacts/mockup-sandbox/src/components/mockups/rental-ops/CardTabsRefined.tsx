@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from "react";
 import {
   Search, RefreshCw, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, Wrench, PhoneCall, Filter,
-  Clock, MapPin, Truck, List, X, ChevronDown, ChevronRight, FileText, MessageSquare, Plus
+  Clock, MapPin, Truck, List, X, ChevronDown, ChevronRight, FileText, MessageSquare, Plus, CheckCircle
 } from "lucide-react";
 
 const fonts = {
@@ -343,21 +343,44 @@ const MOCK_POS: Record<string, PO[]> = {
   ]
 };
 
-const MOCK_CALL_LOG: Record<string, {date:string; outcome:string; summary:string}[]> = {
-  "023132": [
-    {date:"2026-07-18", outcome:"Reached shop", summary:"Shop confirmed parts arrived; repair completing ~7/22."},
-    {date:"2026-07-11", outcome:"Voicemail", summary:"Left message requesting repair status."}
-  ],
-  "041877": [
-    {date:"2026-07-17", outcome:"Reached shop", summary:"Brakes done; awaiting invoice upload."}
-  ]
+const MOCK_SHOP_DETAILS: Record<string, {shopName?:string; address:string; city:string; state:string; phone:string|null; poSynced:string; holmanScraped:string|null}> = {
+  "023132": {address:"4820 Lemmon Ave", city:"Dallas", state:"TX", phone:"(214) 555-1987", poSynced:"2026-07-26 06:12", holmanScraped:"2026-07-25"},
+  "041877": {address:"3400 E Sky Harbor Blvd", city:"Phoenix", state:"AZ", phone:"(602) 555-4412", poSynced:"2026-07-26 06:12", holmanScraped:null},
+  "092310": {shopName:"Desert Diesel Repair", address:"88 S Arizona Ave", city:"Chandler", state:"AZ", phone:"(480) 555-0192", poSynced:"2026-07-26 06:12", holmanScraped:"2026-07-24"},
+  "071228": {shopName:"Sunline Collision", address:"9012 NW Grand Ave", city:"Peoria", state:"AZ", phone:null, poSynced:"2026-07-26 06:12", holmanScraped:null}
 };
 
-const MOCK_NOTES: Record<string, {date:string; author:string; text:string}[]> = {
-  "017640": [
-    {date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."}
-  ]
+const MOCK_HOLMAN_MESSAGES: Record<string, {scrapedAt:string; messages:{date:string; note:string}[]}> = {
+  "023132": {scrapedAt: "2026-07-25", messages: [{date:"2026-07-16", note:"Parts on order, ETA 7/21 per shop."}, {date:"2026-07-10", note:"Vehicle checked in, diagnostic scheduled."}, {date:"2026-07-08", note:"PO opened by Holman rep — transmission concern."}]},
+  "041877": {scrapedAt: "2026-07-25", messages: [{date:"2026-07-17", note:"Repair complete, awaiting invoice."}]},
+  "092310": {scrapedAt: "2026-07-24", messages: [{date:"2026-07-21", note:"Head gasket on backorder — est. 8-10 business days."}]}
 };
+
+const MOCK_COMMENTS: Record<string, {actor:string; date:string; text:string}[]> = {
+  "023132": [{actor:"jmorga1", date:"2026-07-19", text:"Shop says parts arrived early — watch for completion this week."}],
+  "017640": [{actor:"handers", date:"2026-07-13", text:"Possible identity mismatch — two Wallace records in TPMS."}]
+};
+
+const MOCK_CALL_LOG: Record<string, {date:string; outcome:string; summary:string}[]> = {
+  "023132": [ {date:"2026-07-18", outcome:"Reached shop", summary:"Shop confirmed parts arrived; repair completing ~7/22."}, {date:"2026-07-11", outcome:"Voicemail", summary:"Left message requesting repair status."} ],
+  "041877": [ {date:"2026-07-17", outcome:"Reached shop", summary:"Brakes done; awaiting invoice upload."} ]
+};
+
+const CALL_TRANSCRIPTS: Record<string, Record<string, string[]>> = {
+  "023132": {
+    "2026-07-18": ["LUCA: Calling Precision Fleet Service regarding truck 023132.", "Shop: Parts arrived yesterday, tech is on it.", "LUCA: What's the expected completion date?", "Shop: Around July 22nd."],
+    "2026-07-11": ["LUCA: Left voicemail requesting status on PO H-482913."]
+  },
+  "041877": {
+    "2026-07-17": ["LUCA: Checking status on brake repair.", "Shop: Done — invoice uploads today."]
+  }
+};
+
+const INVESTIGATION_NOTES: Record<string, {date:string; author:string; text:string}[]> = {
+  "092310": [{date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."}],
+  "071228": []
+};
+
 
 function isDeclinedAuction(b: string) {
   return b === "declined" || b === "auction";
@@ -405,11 +428,24 @@ export function CardTabsRefined() {
   const [markOverrides, setMarkOverrides] = useState<Record<string, string | null>>({});
 
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
-  const [drawerTab, setDrawerTab] = useState<"pos" | "calls" | "notes">("pos");
+  const [drawerSubTab, setDrawerSubTab] = useState<"pos" | "calls">("pos");
   const [drawerTruckToggle, setDrawerTruckToggle] = useState<"rental" | "assigned">("rental");
   const [expandedPOs, setExpandedPOs] = useState<Record<string, boolean>>({});
-  const [localNotes, setLocalNotes] = useState<Record<string, {date:string; author:string; text:string}[]>>(MOCK_NOTES);
-  const [newNote, setNewNote] = useState("");
+  const [expandedCalls, setExpandedCalls] = useState<Record<string, boolean>>({});
+  
+  // Local state for appends
+  const [localComments, setLocalComments] = useState<Record<string, {actor:string; date:string; text:string}[]>>(MOCK_COMMENTS);
+  const [newComment, setNewComment] = useState("");
+  
+  const [localInvestNotes, setLocalInvestNotes] = useState<Record<string, {author:string; date:string; text:string}[]>>(INVESTIGATION_NOTES);
+  const [newInvestNote, setNewInvestNote] = useState("");
+
+  const [pinnedIdentity, setPinnedIdentity] = useState<string | null>(null);
+
+  // Sync simulation state
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [justSyncedTrucks, setJustSyncedTrucks] = useState<Record<string, boolean>>({});
+  const [justPulledPhone, setJustPulledPhone] = useState<Record<string, boolean>>({});
 
   const callMut = useNoopMutation();
   const callAllMut = useNoopMutation();
@@ -474,10 +510,12 @@ export function CardTabsRefined() {
 
   const openDrawer = (r: MasterRow) => {
     setSelectedRowKey(r.case_key);
-    setDrawerTab("pos");
+    setDrawerSubTab("pos");
     setDrawerTruckToggle("rental");
     setExpandedPOs({});
-    setNewNote("");
+    setExpandedCalls({});
+    setNewComment("");
+    setNewInvestNote("");
   };
 
   const thStyle: React.CSSProperties = { 
@@ -524,13 +562,28 @@ export function CardTabsRefined() {
     }
   };
 
-  const renderPOs = () => {
-    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
-    if (isByov(activeTruck)) {
-      return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>BYOV — repairs not tracked, no Holman PO history</div>;
-    }
+  const handleSimulatedRefresh = (truck: string) => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setTimeout(() => {
+      setIsRefreshing(false);
+      setJustSyncedTrucks(prev => ({ ...prev, [truck]: true }));
+    }, 1200);
+  };
+
+  const handlePullPhone = (truck: string) => {
+    if (isRefreshing) return;
+    setIsRefreshing(true);
+    setTimeout(() => {
+      setIsRefreshing(false);
+      setJustPulledPhone(prev => ({ ...prev, [truck]: true }));
+    }, 1200);
+  };
+
+  // Drawer Modals renderers
+  const renderPOs = (activeTruck: string) => {
     const pos = MOCK_POS[activeTruck] || [];
-    if (pos.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>No POs on file for this truck.</div>;
+    if (pos.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0", background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>No POs on file for this truck.</div>;
 
     return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {pos.map(po => {
@@ -594,61 +647,397 @@ export function CardTabsRefined() {
     </div>;
   };
 
-  const renderCalls = () => {
-    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
+  const renderCalls = (activeTruck: string) => {
     const calls = MOCK_CALL_LOG[activeTruck] || [];
-    if (calls.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>No LUCA calls yet.</div>;
+    const transcripts = CALL_TRANSCRIPTS[activeTruck] || {};
+
+    if (calls.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0", background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 8 }}>No LUCA calls yet.</div>;
     return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {calls.map((c, i) => (
-        <div key={i} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, background: "#fff", padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
-            <span style={{ fontWeight: 600, color: colors.ink }}>{c.date}</span>
-            <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: c.outcome.includes("Reached") ? colors.greenLight : colors.amberLight, color: c.outcome.includes("Reached") ? colors.green : colors.amber }}>{c.outcome}</span>
+      {calls.map((c, i) => {
+        const tr = transcripts[c.date];
+        const exp = expandedCalls[c.date];
+        return (
+          <div key={i} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div style={{ padding: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+                <span style={{ fontWeight: 600, color: colors.ink }}>{c.date}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: c.outcome.includes("Reached") ? colors.greenLight : colors.amberLight, color: c.outcome.includes("Reached") ? colors.green : colors.amber }}>{c.outcome}</span>
+              </div>
+              <div style={{ fontSize: 13, color: colors.inkMuted }}>{c.summary}</div>
+            </div>
+            {tr && (
+              <div>
+                <button 
+                  onClick={() => setExpandedCalls(p => ({ ...p, [c.date]: !exp }))}
+                  style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "8px 0", background: "#F9FAFC", border: "none", borderTop: `1px solid ${colors.rule}`, color: colors.inkMuted, fontSize: 12, fontWeight: 600, cursor: "pointer", transition: "background 0.15s" }}
+                >
+                  {exp ? "Hide transcript" : "Show transcript"} {exp ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </button>
+                {exp && (
+                  <div style={{ padding: "16px 20px", background: "#fff", borderTop: `1px solid ${colors.rule}` }}>
+                    {tr.map((line, idx) => (
+                      <div key={idx} style={{ fontSize: 13, color: line.startsWith("LUCA:") ? colors.accent : colors.ink, marginBottom: 8, fontFamily: fonts.dmSans }}>
+                        <strong>{line.split(":")[0]}:</strong> {line.split(":").slice(1).join(":")}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-          <div style={{ fontSize: 13, color: colors.inkMuted }}>{c.summary}</div>
-        </div>
-      ))}
+        );
+      })}
     </div>;
   };
 
-  const renderNotes = () => {
-    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
-    const notes = localNotes[activeTruck] || [];
-    
-    const handleAddNote = () => {
-      if (!newNote.trim()) return;
-      const n = { date: new Date().toISOString().split('T')[0], author: "You", text: newNote };
-      setLocalNotes(prev => ({ ...prev, [activeTruck]: [n, ...(prev[activeTruck] || [])] }));
-      setNewNote("");
-    };
-
-    return <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <textarea 
-          value={newNote} onChange={e => setNewNote(e.target.value)}
-          placeholder="Add an operator note..." 
-          style={{ width: "100%", height: 80, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, resize: "none", fontSize: 13, outline: "none", fontFamily: fonts.dmSans, color: colors.ink, background: "#fff" }}
-        />
-        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-          <button onClick={handleAddNote} disabled={!newNote.trim()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newNote.trim() ? colors.accent : colors.rule, color: newNote.trim() ? "#fff" : colors.inkMuted, border: "none", cursor: newNote.trim() ? "pointer" : "default", fontSize: 13, fontWeight: 600, transition: "background 0.15s" }}>
-            <Plus size={14} /> Add note
-          </button>
+  const renderHolmanTrail = (activeTruck: string) => {
+    const hData = MOCK_HOLMAN_MESSAGES[activeTruck];
+    if (!hData || hData.messages.length === 0) return null;
+    return (
+      <div style={{ marginTop: 32 }}>
+        <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+          Holman message trail
+          <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 6px", borderRadius: 4, background: colors.surface, color: colors.inkMuted, fontFamily: fonts.dmSans }}>Scraped {hData.scrapedAt}</span>
+        </h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {hData.messages.map((m, i) => (
+            <div key={i} style={{ display: "flex", gap: 16, fontSize: 13, paddingBottom: 12, borderBottom: i === hData.messages.length - 1 ? "none" : `1px solid ${colors.rule}` }}>
+              <div style={{ fontFamily: fonts.jetbrains, color: colors.inkMuted, width: 80, flexShrink: 0 }}>{m.date}</div>
+              <div style={{ color: colors.ink }}>{m.note}</div>
+            </div>
+          ))}
         </div>
       </div>
-      
-      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-        {notes.map((n, i) => (
-          <div key={i} style={{ borderBottom: `1px solid ${colors.rule}`, paddingBottom: 16 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
-              <span style={{ fontWeight: 700, color: colors.ink }}>{n.author}</span>
-              <span style={{ color: colors.inkMuted }}>{n.date}</span>
+    );
+  };
+
+  const renderShopCard = (activeTruck: string, row: MasterRow, isRental: boolean) => {
+    const shop = MOCK_SHOP_DETAILS[activeTruck];
+    if (!shop && !row.shop_name && !isRental) {
+      return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "20px 0", border: `1px dashed ${colors.rule}`, borderRadius: 8, marginBottom: 24 }}>No shop details for assigned truck.</div>;
+    }
+    if (!shop && !row.shop_name) return null;
+
+    const sName = shop?.shopName || row.shop_name;
+    const sAddr = shop?.address ? `${shop.address}, ${shop.city}, ${shop.state}` : (row.shop_city ? `${row.shop_address || ""} ${row.shop_city}, ${row.shop_state}` : "—");
+    
+    let sPhone = shop?.phone || (isRental ? row.portal_shop_phone : null);
+    if (sPhone && !sPhone.includes("(")) sPhone = fmtPhone(sPhone);
+    const hasPulled = justPulledPhone[activeTruck];
+
+    const isRepair = isRental ? row.repair_cohort === "open_repair" : row.assigned_truck_has_repair_po;
+    const badgeTxt = isRepair ? "Open ticket" : "Last shop PO";
+    const badgeColor = isRepair ? colors.blue : colors.inkMuted;
+    const badgeBg = isRepair ? colors.blueLight : colors.surface;
+
+    return (
+      <div style={{ background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 12, padding: "20px 24px", marginBottom: 24, boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>Current Shop</div>
+            <div style={{ fontSize: 18, fontWeight: 700, fontFamily: fonts.syne, color: colors.ink, marginBottom: 8 }}>{sName}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: badgeBg, color: badgeColor }}>{badgeTxt}</span>
+              <span style={{ fontSize: 13, color: colors.inkMuted, display: "flex", alignItems: "center", gap: 4 }}><MapPin size={12}/> {sAddr}</span>
             </div>
-            <div style={{ fontSize: 13, color: colors.ink }}>{n.text}</div>
           </div>
-        ))}
-        {notes.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "20px 0" }}>No notes on file.</div>}
+          <div style={{ textAlign: "right" }}>
+            {sPhone || hasPulled ? (
+              <div style={{ fontSize: 22, fontWeight: 700, fontFamily: fonts.jetbrains, color: colors.green, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 8 }}>
+                <PhoneCall size={18} /> {hasPulled ? "(480) 555-0999" : sPhone}
+              </div>
+            ) : (
+              <button 
+                onClick={() => handlePullPhone(activeTruck)}
+                disabled={isRefreshing}
+                style={{ background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "8px 12px", fontSize: 13, fontWeight: 600, color: colors.ink, cursor: isRefreshing ? "default" : "pointer", display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}
+              >
+                <RefreshCw size={14} className={isRefreshing ? "spin" : ""} style={{ color: colors.blue }} /> 
+                No phone yet — pull {activeTruck} from Holman
+              </button>
+            )}
+            {shop && (
+              <div style={{ fontSize: 11, color: colors.inkMuted, display: "flex", flexDirection: "column", gap: 4, alignItems: "flex-end" }}>
+                <span>PO data synced <strong style={{ color: colors.ink }}>{justSyncedTrucks[activeTruck] ? "just now" : shop.poSynced}</strong></span>
+                {shop.holmanScraped && <span>Holman scraped <strong style={{ color: colors.ink }}>{shop.holmanScraped}</strong></span>}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
-    </div>;
+    );
+  };
+
+  const renderRentalTab = () => {
+    if (!selectedRow) return null;
+    const activeTruck = selectedRow.case_key;
+    const isByovRow = isByov(activeTruck);
+
+    if (isByovRow) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", color: colors.inkMuted }}>
+          <Truck size={48} style={{ opacity: 0.2, margin: "0 auto 16px" }} />
+          <div style={{ fontSize: 16, fontWeight: 600, color: colors.ink, marginBottom: 8 }}>BYOV — repairs not tracked</div>
+          <div style={{ fontSize: 14 }}>This is a tech's own vehicle. No shop info, POs, or message trails available.</div>
+        </div>
+      );
+    }
+
+    const tpmsIsMismatch = selectedRow.tpms_tech && selectedRow.tpms_tech !== selectedRow.renter_name_raw;
+    const tpmsVal = !selectedRow.tpms_tech ? "—" : selectedRow.tpms_tech;
+
+    const comments = localComments[activeTruck] || [];
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        {/* Grid 1: Ticket + economics */}
+        <div>
+          <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16 }}>Ticket + vehicle economics</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 12, padding: 20 }}>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Ticket</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.ticket_number || "—"} <span style={{ fontWeight: 400, color: colors.inkMuted }}>{selectedRow.ticket_status ? `(${selectedRow.ticket_status})` : ""}</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Rental Start</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.last_rental_date || "—"} <span style={{ fontWeight: 400, color: colors.inkMuted }}>({selectedRow.days_open ?? "—"} days)</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Vehicle</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.veh_desc || "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Rental Class</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.rental_class || "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Daily Cost</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.daily_cost ? `$${selectedRow.daily_cost.toFixed(2)}` : "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Renting Location</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{selectedRow.renting_city ? `${selectedRow.renting_city}, ${selectedRow.renting_state}` : "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>TPMS Assigned</div>
+              <div style={{ fontSize: 13, color: tpmsIsMismatch ? colors.red : colors.ink, fontWeight: 600, display: "flex", alignItems: "center", gap: 6 }}>
+                {tpmsIsMismatch && <AlertTriangle size={12} />} {tpmsVal}
+              </div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Odometer</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600, fontFamily: fonts.jetbrains }}>{selectedRow.odometer ?? "—"}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Last Rental PO</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600, fontFamily: fonts.jetbrains }}>{selectedRow.po_number || "—"}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Current Shop Card */}
+        {renderShopCard(activeTruck, selectedRow, true)}
+
+        {/* Operator Mark */}
+        <div>
+          <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16 }}>Operator Mark</h3>
+          <div style={{ display: "flex", gap: 12 }}>
+            {[
+              { id: "open", label: "Rental OPEN (keep)", color: colors.green, bg: colors.greenLight },
+              { id: "closed", label: "CLOSE ticket", color: colors.ink, bg: colors.surface },
+              { id: "pickup", label: "Needs PICK UP", color: colors.amber, bg: colors.amberLight }
+            ].map(m => {
+              const cur = markOverrides[activeTruck] !== undefined ? markOverrides[activeTruck] : selectedRow.operator_mark;
+              const on = cur === m.id;
+              return (
+                <button
+                  key={m.id}
+                  onClick={() => doMark(activeTruck, m.id, cur)}
+                  style={{ 
+                    flex: 1, padding: "12px 16px", borderRadius: 8, border: `2px solid ${on ? m.color : colors.rule}`, 
+                    background: on ? m.bg : "#fff", color: on ? m.color : colors.inkMuted, 
+                    fontWeight: 700, fontSize: 13, cursor: "pointer", transition: "all 0.15s",
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 8
+                  }}
+                >
+                  {on && <CheckCircle size={14} />} {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Comments */}
+        <div>
+          <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16 }}>Comments ({comments.length})</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ position: "relative" }}>
+              <textarea 
+                value={newComment} onChange={e => setNewComment(e.target.value)}
+                placeholder="Add a comment…" 
+                style={{ width: "100%", height: 80, padding: 16, paddingBottom: 44, borderRadius: 8, border: `1px solid ${colors.rule}`, resize: "none", fontSize: 13, outline: "none", fontFamily: fonts.dmSans, color: colors.ink, background: "#fff" }}
+                onFocus={e => e.target.style.borderColor = colors.accent}
+                onBlur={e => e.target.style.borderColor = colors.rule}
+              />
+              <button 
+                disabled={!newComment.trim()}
+                onClick={() => {
+                  if(!newComment.trim()) return;
+                  setLocalComments(p => ({...p, [activeTruck]: [{actor:"you", date:new Date().toISOString().split('T')[0], text:newComment}, ...(p[activeTruck]||[])]}));
+                  setNewComment("");
+                }}
+                style={{ position: "absolute", bottom: 12, right: 12, padding: "6px 14px", borderRadius: 6, background: newComment.trim() ? colors.accent : colors.surface, color: newComment.trim() ? "#fff" : colors.inkMuted, border: "none", fontSize: 12, fontWeight: 700, cursor: newComment.trim() ? "pointer" : "default", transition: "background 0.15s" }}
+              >
+                Add
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {comments.map((c, i) => (
+                <div key={i} style={{ background: "#F9FAFC", padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}` }}>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 12, alignItems: "center" }}>
+                    <span style={{ fontWeight: 700, color: colors.ink }}>{c.actor}</span>
+                    <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{c.date}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.ink, lineHeight: 1.5 }}>{c.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* PO / Call log sub tabs */}
+        <div>
+          <div style={{ display: "flex", gap: 24, borderBottom: `1px solid ${colors.rule}`, marginBottom: 20 }}>
+            <button 
+              onClick={() => setDrawerSubTab("pos")}
+              style={{ padding: "0 0 12px 0", background: "transparent", border: "none", borderBottom: `2px solid ${drawerSubTab === "pos" ? colors.accent : "transparent"}`, color: drawerSubTab === "pos" ? colors.ink : colors.inkMuted, fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.15s" }}
+            >
+              PO history
+            </button>
+            <button 
+              onClick={() => setDrawerSubTab("calls")}
+              style={{ padding: "0 0 12px 0", background: "transparent", border: "none", borderBottom: `2px solid ${drawerSubTab === "calls" ? colors.accent : "transparent"}`, color: drawerSubTab === "calls" ? colors.ink : colors.inkMuted, fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              Call Logs ({MOCK_CALL_LOG[activeTruck]?.length || 0})
+            </button>
+          </div>
+          <div>
+            {drawerSubTab === "pos" ? renderPOs(activeTruck) : renderCalls(activeTruck)}
+          </div>
+        </div>
+
+        {/* Holman Trail */}
+        {renderHolmanTrail(activeTruck)}
+
+      </div>
+    );
+  };
+
+  const renderAssignedTab = () => {
+    if (!selectedRow || !selectedRow.assigned_truck) return null;
+    const activeTruck = selectedRow.assigned_truck;
+    const amsStatus = activeTruck === "092310" ? "In Repair" : (activeTruck === "071228" ? "In Body Shop" : "—");
+    const notes = localInvestNotes[activeTruck] || [];
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
+        {/* Summary grid */}
+        <div>
+          <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16 }}>Assigned truck details</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, background: "#fff", border: `1px solid ${colors.rule}`, borderRadius: 12, padding: 20 }}>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Truck</div>
+              <div style={{ fontSize: 15, color: colors.ink, fontWeight: 700, fontFamily: fonts.jetbrains }}>{activeTruck}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>AMS Status</div>
+              <div style={{ fontSize: 13, color: colors.ink, fontWeight: 600 }}>{amsStatus}</div>
+            </div>
+            <div>
+              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", fontWeight: 700, marginBottom: 4 }}>Open Repair POs</div>
+              <div style={{ fontSize: 13, color: selectedRow.assigned_truck_open_po_count > 0 ? colors.red : colors.ink, fontWeight: 700 }}>
+                {selectedRow.assigned_truck_open_po_count}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Shop Card */}
+        {renderShopCard(activeTruck, selectedRow, false)}
+
+        {/* Sub tabs */}
+        <div>
+          <div style={{ display: "flex", gap: 24, borderBottom: `1px solid ${colors.rule}`, marginBottom: 20 }}>
+            <button 
+              onClick={() => setDrawerSubTab("pos")}
+              style={{ padding: "0 0 12px 0", background: "transparent", border: "none", borderBottom: `2px solid ${drawerSubTab === "pos" ? colors.accent : "transparent"}`, color: drawerSubTab === "pos" ? colors.ink : colors.inkMuted, fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.15s" }}
+            >
+              PO history
+            </button>
+            <button 
+              onClick={() => setDrawerSubTab("calls")}
+              style={{ padding: "0 0 12px 0", background: "transparent", border: "none", borderBottom: `2px solid ${drawerSubTab === "calls" ? colors.accent : "transparent"}`, color: drawerSubTab === "calls" ? colors.ink : colors.inkMuted, fontWeight: 700, fontSize: 14, cursor: "pointer", transition: "all 0.15s", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              Call Logs ({MOCK_CALL_LOG[activeTruck]?.length || 0})
+            </button>
+          </div>
+          <div>
+            {drawerSubTab === "pos" ? renderPOs(activeTruck) : renderCalls(activeTruck)}
+          </div>
+        </div>
+
+        {/* Investigation Notes */}
+        <div>
+          <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}>
+            Investigation notes · truck {activeTruck} ({notes.length})
+            <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: notes.length > 0 ? colors.greenLight : colors.redLight, color: notes.length > 0 ? colors.green : colors.red, fontFamily: fonts.dmSans }}>
+              {notes.length > 0 ? "investigated" : "not investigated"}
+            </span>
+          </h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ position: "relative" }}>
+              <textarea 
+                value={newInvestNote} onChange={e => setNewInvestNote(e.target.value)}
+                placeholder={`Why is truck ${activeTruck} not being repaired?`}
+                style={{ width: "100%", height: 80, padding: 16, paddingBottom: 44, borderRadius: 8, border: `1px solid ${colors.rule}`, resize: "none", fontSize: 13, outline: "none", fontFamily: fonts.dmSans, color: colors.ink, background: "#fff" }}
+                onFocus={e => e.target.style.borderColor = colors.accent}
+                onBlur={e => e.target.style.borderColor = colors.rule}
+              />
+              <button 
+                disabled={!newInvestNote.trim()}
+                onClick={() => {
+                  if(!newInvestNote.trim()) return;
+                  setLocalInvestNotes(p => ({...p, [activeTruck]: [{author:"you", date:new Date().toISOString().split('T')[0], text:newInvestNote}, ...(p[activeTruck]||[])]}));
+                  setNewInvestNote("");
+                }}
+                style={{ position: "absolute", bottom: 12, right: 12, padding: "6px 14px", borderRadius: 6, background: newInvestNote.trim() ? colors.accent : colors.surface, color: newInvestNote.trim() ? "#fff" : colors.inkMuted, border: "none", fontSize: 12, fontWeight: 700, cursor: newInvestNote.trim() ? "pointer" : "default", transition: "background 0.15s" }}
+              >
+                Add
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              {notes.map((n, i) => (
+                <div key={i} style={{ background: "#F9FAFC", padding: 16, borderRadius: 8, border: `1px solid ${colors.rule}` }}>
+                  <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 12, alignItems: "center" }}>
+                    <span style={{ fontWeight: 700, color: colors.ink }}>{n.author}</span>
+                    <span style={{ color: colors.inkMuted, fontFamily: fonts.jetbrains }}>{n.date}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.ink, lineHeight: 1.5 }}>{n.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Holman Trail */}
+        {renderHolmanTrail(activeTruck)}
+      </div>
+    );
+  };
+
+  const getActiveViewTruck = () => {
+    if (!selectedRow) return "";
+    return drawerTruckToggle === "rental" ? selectedRow.case_key : (selectedRow.assigned_truck || selectedRow.case_key);
   };
 
   return (
@@ -757,7 +1146,7 @@ export function CardTabsRefined() {
         )}
       </div>
 
-      {/* Grid with colored top border indicating the active tab */}
+      {/* Grid */}
       <div style={{ 
         overflow: "auto", 
         border: `1px solid ${colors.rule}`, 
@@ -789,7 +1178,6 @@ export function CardTabsRefined() {
               const amsStyles = getAmsStyles(r.ams_bucket);
               const isByovRow = isByov(r.vehicle_number);
               
-              // Tech & TPMS merge logic
               const hasTpmsMismatch = r.tpms_tech && r.tpms_tech !== r.renter_name_raw;
               const missingTpms = !r.tpms_tech;
 
@@ -914,90 +1302,123 @@ export function CardTabsRefined() {
         </table>
       </div>
 
-      {/* Detail Drawer */}
+      {/* CENTERED MODAL */}
       {selectedRow && (
         <>
           <div 
-            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, opacity: 1, transition: "opacity 0.2s" }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 100, opacity: 1, transition: "opacity 0.2s", backdropFilter: "blur(2px)" }}
             onClick={() => setSelectedRowKey(null)}
           />
           <div style={{
-            position: "fixed", left: "50%", top: "50%", width: 760, maxWidth: "calc(100vw - 48px)",
-            height: "min(720px, calc(100vh - 48px))", borderRadius: 16, overflow: "hidden",
+            position: "fixed", left: "50%", top: "50%", width: 880, maxWidth: "calc(100vw - 48px)",
+            height: "calc(100vh - 48px)", borderRadius: 16, overflow: "hidden",
             background: colors.background, zIndex: 101, boxShadow: "0 24px 80px rgba(0,0,0,0.28)",
             display: "flex", flexDirection: "column",
             transform: "translate(-50%, -50%)",
           }}>
             {/* Header */}
-            <div style={{ padding: "24px 32px", borderBottom: `1px solid ${colors.rule}`, background: "#fff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+            <div style={{ padding: "20px 32px", borderBottom: `1px solid ${colors.rule}`, background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
                 <div>
-                  <div style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.inkMuted, marginBottom: 4 }}>Truck {selectedRow.case_key}</div>
-                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: fonts.syne, color: colors.ink }}>{selectedRow.renter_name_raw}</div>
+                  <div style={{ fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted, marginBottom: 2 }}>Truck {selectedRow.case_key}</div>
+                  <div style={{ fontSize: 18, fontWeight: 700, fontFamily: fonts.syne, color: colors.ink, lineHeight: 1.2 }}>{selectedRow.renter_name_raw}</div>
                 </div>
-                <button onClick={() => setSelectedRowKey(null)} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4 }}>
-                  <X size={20} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+                <button 
+                  onClick={() => handleSimulatedRefresh(getActiveViewTruck())}
+                  disabled={isRefreshing}
+                  style={{ display: "flex", alignItems: "center", gap: 8, background: "transparent", border: "none", color: colors.blue, fontSize: 13, fontWeight: 600, cursor: isRefreshing ? "default" : "pointer", opacity: isRefreshing ? 0.7 : 1 }}
+                >
+                  <RefreshCw size={14} className={isRefreshing ? "spin" : ""} />
+                  Refresh {getActiveViewTruck()} from Holman
+                </button>
+                <button onClick={() => setSelectedRowKey(null)} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, cursor: "pointer", color: colors.inkMuted, padding: 6, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#fff"}
+                  onMouseLeave={e => e.currentTarget.style.background = colors.surface}
+                >
+                  <X size={18} />
                 </button>
               </div>
-              
-              <div style={{ display: "flex", gap: 16, fontSize: 13, color: colors.inkMuted, marginBottom: selectedRow.assigned_truck ? 20 : 0 }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Wrench size={14} /> {selectedRow.shop_name || "No shop"}</span>
-                <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Clock size={14} /> {selectedRow.days_open ?? "—"} days</span>
-                {selectedRow.ams_status && (
-                  <span style={{ fontWeight: 600, color: getAmsStyles(selectedRow.ams_bucket).color }}>{selectedRow.ams_status}</span>
+            </div>
+
+            {/* Truck Switch & Identity */}
+            <div style={{ padding: "24px 32px", background: "#fff", borderBottom: `1px solid ${colors.rule}`, flexShrink: 0 }}>
+              {/* Truck Switch Top Level */}
+              <div style={{ display: "flex", gap: 12, marginBottom: 24 }}>
+                <button 
+                  onClick={() => setDrawerTruckToggle("rental")}
+                  style={{ flex: 1, padding: "16px", border: `1px solid ${drawerTruckToggle === "rental" ? colors.accent : colors.rule}`, background: drawerTruckToggle === "rental" ? "#fff" : colors.surface, borderRadius: 12, textAlign: "left", cursor: "pointer", boxShadow: drawerTruckToggle === "rental" ? "0 4px 16px rgba(0,0,0,0.04)" : "none", transition: "all 0.15s" }}
+                >
+                  <div style={{ fontSize: 16, fontWeight: 700, fontFamily: fonts.syne, color: drawerTruckToggle === "rental" ? colors.accent : colors.ink, marginBottom: 4 }}>Truck {selectedRow.case_key}</div>
+                  <div style={{ fontSize: 13, color: colors.inkMuted }}>the rental van</div>
+                </button>
+                
+                {selectedRow.assigned_truck ? (
+                  <button 
+                    onClick={() => setDrawerTruckToggle("assigned")}
+                    style={{ flex: 1, padding: "16px", border: `1px solid ${drawerTruckToggle === "assigned" ? colors.accent : colors.rule}`, background: drawerTruckToggle === "assigned" ? "#fff" : colors.surface, borderRadius: 12, textAlign: "left", cursor: "pointer", boxShadow: drawerTruckToggle === "assigned" ? "0 4px 16px rgba(0,0,0,0.04)" : "none", transition: "all 0.15s" }}
+                  >
+                    <div style={{ fontSize: 16, fontWeight: 700, fontFamily: fonts.syne, color: drawerTruckToggle === "assigned" ? colors.accent : colors.ink, marginBottom: 4 }}>Truck {selectedRow.assigned_truck}</div>
+                    <div style={{ fontSize: 13, color: colors.inkMuted }}>tech's assigned truck · {(localInvestNotes[selectedRow.assigned_truck]?.length || 0)} note(s)</div>
+                  </button>
+                ) : (
+                  <div style={{ flex: 1, padding: "16px", border: `1px dashed ${colors.rule}`, background: "transparent", borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <div style={{ fontSize: 14, fontWeight: 600, color: colors.inkMuted }}>No assigned truck</div>
+                  </div>
                 )}
               </div>
 
-              {selectedRow.assigned_truck && (
-                <div style={{ display: "flex", background: colors.surface, padding: 4, borderRadius: 8, marginTop: 16 }}>
-                  <button 
-                    onClick={() => setDrawerTruckToggle("rental")}
-                    style={{ flex: 1, padding: "8px 0", border: "none", background: drawerTruckToggle === "rental" ? "#fff" : "transparent", borderRadius: 6, fontSize: 13, fontWeight: 600, color: drawerTruckToggle === "rental" ? colors.ink : colors.inkMuted, cursor: "pointer", boxShadow: drawerTruckToggle === "rental" ? "0 2px 8px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
-                  >
-                    Rental {selectedRow.case_key}
-                  </button>
-                  <button 
-                    onClick={() => setDrawerTruckToggle("assigned")}
-                    style={{ flex: 1, padding: "8px 0", border: "none", background: drawerTruckToggle === "assigned" ? "#fff" : "transparent", borderRadius: 6, fontSize: 13, fontWeight: 600, color: drawerTruckToggle === "assigned" ? colors.ink : colors.inkMuted, cursor: "pointer", boxShadow: drawerTruckToggle === "assigned" ? "0 2px 8px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
-                  >
-                    Assigned {selectedRow.assigned_truck}
-                  </button>
+              {/* Renter / Identity section */}
+              <div>
+                <h3 style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 12 }}>Renter / identity</h3>
+                <div style={{ display: "flex", alignItems: "center", gap: 20, fontSize: 14 }}>
+                  <div style={{ fontWeight: 600, color: colors.ink }}>{selectedRow.renter_name_raw}</div>
+                  <div style={{ fontFamily: fonts.jetbrains, color: colors.inkMuted }}>{selectedRow.employee_id || "—"}</div>
+                  <div style={{ color: selectedRow.employee_status === "Active" ? colors.green : colors.amber, fontWeight: 600 }}>
+                    {selectedRow.employee_status} <span style={{ color: colors.inkMuted, fontWeight: 400, marginLeft: 4 }}>{selectedRow.employee_status_date}</span>
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, padding: "2px 8px", borderRadius: 4, background: selectedRow.identity_confidence === "high" ? colors.greenLight : (selectedRow.identity_confidence === "medium" || selectedRow.case_key === "017640" ? colors.amberLight : colors.redLight), color: selectedRow.identity_confidence === "high" ? colors.green : (selectedRow.identity_confidence === "medium" || selectedRow.case_key === "017640" ? colors.amber : colors.red), textTransform: "uppercase" }}>
+                    {selectedRow.case_key === "017640" ? "Review" : selectedRow.identity_confidence}
+                  </div>
                 </div>
-              )}
+
+                {/* Special override case for 017640 */}
+                {selectedRow.case_key === "017640" && (
+                  <div style={{ marginTop: 16, padding: 16, background: colors.surface, borderRadius: 8, border: `1px solid ${colors.rule}` }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: colors.ink, marginBottom: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span>Multiple matches found. Select correct identity:</span>
+                      {pinnedIdentity && (
+                        <button onClick={() => setPinnedIdentity(null)} style={{ background: "transparent", border: "none", color: colors.accent, fontSize: 12, fontWeight: 600, cursor: "pointer" }}>clear manual override</button>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <button 
+                        onClick={() => setPinnedIdentity("T-30112")}
+                        style={{ flex: 1, padding: "10px 16px", borderRadius: 6, border: `1px solid ${pinnedIdentity === "T-30112" ? colors.accent : colors.rule}`, background: pinnedIdentity === "T-30112" ? "#fff" : "transparent", textAlign: "left", cursor: "pointer", transition: "all 0.15s", boxShadow: pinnedIdentity === "T-30112" ? `0 0 0 1px ${colors.accent}` : "none" }}
+                      >
+                        use T-30112 [Active 2026-01-05] Andre Wallace
+                      </button>
+                      <button 
+                        onClick={() => setPinnedIdentity("T-29881")}
+                        style={{ flex: 1, padding: "10px 16px", borderRadius: 6, border: `1px solid ${pinnedIdentity === "T-29881" ? colors.accent : colors.rule}`, background: pinnedIdentity === "T-29881" ? "#fff" : "transparent", textAlign: "left", cursor: "pointer", transition: "all 0.15s", boxShadow: pinnedIdentity === "T-29881" ? `0 0 0 1px ${colors.accent}` : "none" }}
+                      >
+                        use T-29881 [Term 2025-11-20] Andre R. Wallace
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
-            {/* Tabs */}
-            <div style={{ display: "flex", padding: "0 32px", borderBottom: `1px solid ${colors.rule}`, background: "#fff", gap: 24 }}>
-              {[
-                { id: "pos", label: "POs", icon: FileText },
-                { id: "calls", label: "Call log", icon: PhoneCall },
-                { id: "notes", label: "Notes", icon: MessageSquare }
-              ].map(t => (
-                <button 
-                  key={t.id} 
-                  onClick={() => setDrawerTab(t.id as any)}
-                  style={{ 
-                    display: "flex", alignItems: "center", gap: 8, padding: "16px 0", background: "transparent", border: "none", 
-                    borderBottom: `2px solid ${drawerTab === t.id ? colors.accent : "transparent"}`,
-                    color: drawerTab === t.id ? colors.ink : colors.inkMuted,
-                    fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all 0.15s"
-                  }}
-                >
-                  <t.icon size={15} style={{ color: drawerTab === t.id ? colors.accent : colors.inkMuted }} />
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            {/* Content */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
-              {drawerTab === "pos" && renderPOs()}
-              {drawerTab === "calls" && renderCalls()}
-              {drawerTab === "notes" && renderNotes()}
+            {/* Scrolling Body */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "32px", background: colors.background }}>
+              {drawerTruckToggle === "rental" ? renderRentalTab() : renderAssignedTab()}
             </div>
           </div>
         </>
       )}
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } } .spin { animation: spin 1s linear infinite; }`}</style>
     </div>
   );
 }
