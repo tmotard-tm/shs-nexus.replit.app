@@ -21012,8 +21012,17 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const page = Math.max(1, parseInt(req.query.page as string) || 1);
       const pageSize = Math.min(200, Math.max(10, parseInt(req.query.pageSize as string) || 100));
 
-      // Serve from cache when not forced and still fresh (cache always has full data)
-      if (!forceRefresh && mismatchCache && (Date.now() - mismatchCache.computedAt) < MISMATCH_CACHE_TTL) {
+      // Serve from cache when not forced and still fresh (cache always has full data).
+      // A cache computed BEFORE the last Holman cache rewrite is stale even inside
+      // the TTL — on autoscale cold starts the first compute races the boot-time
+      // fleet sync and would otherwise pin ghost mismatches for 15 minutes.
+      const { fleetAssignmentDataUpdatedAt } = await import("./fleet-mismatch-signal");
+      if (
+        !forceRefresh &&
+        mismatchCache &&
+        (Date.now() - mismatchCache.computedAt) < MISMATCH_CACHE_TTL &&
+        mismatchCache.computedAt > fleetAssignmentDataUpdatedAt()
+      ) {
         if (countOnly) {
           return res.json({ count: mismatchCache.count });
         }
@@ -21025,9 +21034,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.json({ data: paginated, total, page, pageSize });
       }
 
-      // Build full analysis (always, so countOnly also populates full cache)
+      // Build full analysis (always, so countOnly also populates full cache).
+      // computedAt = compute START time, so a sync that rewrites the Holman
+      // cache while this compute is reading still invalidates the result.
+      const computeStartedAt = Date.now();
       const records = await buildMismatchRecords();
-      mismatchCache = { data: records, count: records.length, computedAt: Date.now() };
+      mismatchCache = { data: records, count: records.length, computedAt: computeStartedAt };
 
       // Self-heal (Tyler 7/11): the AMS leg of a mismatch reads
       // ams_vehicles_cache, which nothing refreshes on unassignment — the

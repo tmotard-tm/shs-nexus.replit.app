@@ -11,6 +11,7 @@ import { getTPMSService } from "./tpms-service";
 import { toHolmanRef, toTpmsRef, toDisplayNumber, toCanonical, normalizeEnterpriseId } from "./vehicle-number-utils";
 import { loadActiveFenceSet } from "./fleet-reconciliation/fences";
 import { decodeModelYearFromVin } from "@shared/vin-year";
+import { markFleetAssignmentDataUpdated } from "./fleet-mismatch-signal";
 
 // Resolve a model year, preferring the Holman-supplied value and falling back
 // to the VIN-derived year. Returns null when neither yields a usable year so we
@@ -210,6 +211,10 @@ class HolmanVehicleSyncService {
       
       // Update cache with change tracking info
       await this.updateCacheWithChangeTracking(filteredVehicles);
+      // Signal the mismatch endpoint that assignment data changed, so a
+      // cached mismatch list computed against the pre-sync mirror is dropped.
+      // (Skip when the incremental delta was empty — nothing was written.)
+      if (filteredVehicles.length > 0) markFleetAssignmentDataUpdated();
 
       // Passively verify any pending Holman submissions against fresh fleet data
       try {
@@ -457,6 +462,12 @@ class HolmanVehicleSyncService {
           await this.updateCache(filteredVehicleData);
           await this.processPendingChanges();
           await this.reapplyRecentUnassigns();
+          // Signal the mismatch endpoint that assignment data changed, so a
+          // cached mismatch list computed against the pre-sync mirror (e.g.
+          // during a cold-start boot) is dropped instead of pinned for 15 min.
+          // Fired after processPendingChanges/reapplyRecentUnassigns since
+          // those also write holman_vehicles_cache.
+          markFleetAssignmentDataUpdated();
           // Passively verify any pending Holman submissions against fresh fleet data
           const { holmanSubmissionService } = await import('./holman-submission-service');
           await holmanSubmissionService.verifyFromFleetData(filteredVehicleData);

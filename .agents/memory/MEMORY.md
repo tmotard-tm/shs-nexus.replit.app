@@ -57,3 +57,4 @@
 - [TPMS district mirror staleness](tpms-district-mirror-staleness.md) — truck-driven refresh never re-queries district-only transfers, so tpms_tech_profiles district goes stale; district decisions must live-check TPMS + heal the mirror.
 - [Assign target validation](assign-target-validation.md) — every assign entry point must run server-side truck validation (format/exists/status/lock); UI-only guards let "byov" diverge TPMS/Holman.
 - [Holman write-fence supersede](holman-write-fence-supersede.md) — fences outlive their correction when a newer op lands; release only on live-confirmed newer submissions, NEVER on cache confirms (fence pins the cache = circular evidence).
+- [Mismatch cache cold-start pinning](mismatch-cache-cold-start.md) — TTL caches over synced mirrors pin stale results on autoscale cold boots; invalidate via a shared epoch bumped after every mirror rewrite.
