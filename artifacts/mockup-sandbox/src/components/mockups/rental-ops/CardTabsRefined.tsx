@@ -1,9 +1,9 @@
 import './_group.css';
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import {
   Search, RefreshCw, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, Wrench, PhoneCall, Filter,
-  Clock, MapPin, Truck, List
+  Clock, MapPin, Truck, List, X, ChevronDown, ChevronRight, FileText, MessageSquare, Plus
 } from "lucide-react";
 
 const fonts = {
@@ -292,6 +292,7 @@ const MOCK_ROWS: MasterRow[] = [
     assigned_truck: "046012", assigned_truck_mismatch: true, assigned_truck_has_repair_po: false,
     po_count: 1, days_open: 23, last_rental_date: "2026-03-18", odometer: 91500,
   }),
+  // BYOV truck (88-prefix): tech drives their own vehicle, repairs not tracked → no shop info, never callable
   mk({
     case_key: "88217", vehicle_number: "88217", renter_name_raw: "Luis Herrera",
     tech_name: "Luis Herrera", tpms_tech: "Luis Herrera", employee_id: "T-52440",
@@ -301,6 +302,62 @@ const MOCK_ROWS: MasterRow[] = [
     po_count: 0, days_open: 11, last_rental_date: "2026-04-08", odometer: 58230,
   }),
 ];
+
+interface PO {
+  poNumber: string;
+  poDate: string;
+  poStatus: string;
+  vendorType: string;
+  vendorName: string;
+  vendorCity: string;
+  vendorState: string;
+  approver: string;
+  odometer: number;
+  repairDate: string;
+  paidDate: string | null;
+  poType: string;
+  totalAmount: number;
+  portalNote?: string;
+  lineItems: {
+    qty: number;
+    description: string;
+    repairType: string;
+    ataGroup: string;
+    cost: number;
+  }[];
+}
+
+const MOCK_POS: Record<string, PO[]> = {
+  "023132": [
+    { poNumber:"H-482913", poDate:"2026-07-14", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Precision Fleet Service", vendorCity:"Mesa", vendorState:"AZ", approver:"D. Kowalski", odometer:84120, repairDate:"2026-07-15", paidDate:null, poType:"REPAIR", totalAmount:2843.50, portalNote:"7/16 — Parts on order, ETA 7/21 per shop", lineItems:[ {qty:1, description:"Transmission service + solenoid replacement", repairType:"REPAIR", ataGroup:"27-TRANSMISSION", cost:2100.00}, {qty:2, description:"Fluid + filter kit", repairType:"PARTS", ataGroup:"27-TRANSMISSION", cost:486.00}, {qty:1, description:"Diagnostic labor", repairType:"LABOR", ataGroup:"00-GENERAL", cost:257.50} ] },
+    { poNumber:"H-471002", poDate:"2026-06-02", poStatus:"PAID", vendorType:"MAINTENANCE", vendorName:"QuickLane 88", vendorCity:"Tempe", vendorState:"AZ", approver:"D. Kowalski", odometer:82655, repairDate:"2026-06-02", paidDate:"2026-06-12", poType:"PM", totalAmount:214.75, lineItems:[ {qty:1, description:"Lube-oil-filter + tire rotation", repairType:"PM", ataGroup:"01-PM", cost:214.75} ] }
+  ],
+  "041877": [
+    { poNumber:"H-479560", poDate:"2026-07-08", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Metro Brake & Wheel", vendorCity:"Glendale", vendorState:"AZ", approver:"S. Whitmore", odometer:67230, repairDate:"2026-07-09", paidDate:null, poType:"REPAIR", totalAmount:1120.40, lineItems:[ {qty:1, description:"Front brake pads + rotors", repairType:"REPAIR", ataGroup:"13-BRAKES", cost:892.40}, {qty:1, description:"Brake fluid flush", repairType:"LABOR", ataGroup:"13-BRAKES", cost:228.00} ] }
+  ],
+  "092310": [
+    { poNumber:"H-490118", poDate:"2026-07-19", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Desert Diesel Repair", vendorCity:"Chandler", vendorState:"AZ", approver:"S. Whitmore", odometer:112480, repairDate:"2026-07-20", paidDate:null, poType:"REPAIR", totalAmount:4310.00, portalNote:"Waiting on head gasket — shop est. 8-10 business days", lineItems:[ {qty:1, description:"Head gasket replacement", repairType:"REPAIR", ataGroup:"45-ENGINE", cost:3650.00}, {qty:1, description:"Coolant system flush", repairType:"LABOR", ataGroup:"42-COOLING", cost:660.00} ] }
+  ],
+  "071228": [
+    { poNumber:"H-488301", poDate:"2026-07-16", poStatus:"APPROVED", vendorType:"BODY SHOP", vendorName:"Sunline Collision", vendorCity:"Peoria", vendorState:"AZ", approver:"D. Kowalski", odometer:54900, repairDate:"2026-07-17", paidDate:null, poType:"BODY", totalAmount:2050.00, lineItems:[ {qty:1, description:"Right rear quarter panel repair + paint", repairType:"BODY", ataGroup:"98-BODY", cost:2050.00} ] }
+  ]
+};
+
+const MOCK_CALL_LOG: Record<string, {date:string; outcome:string; summary:string}[]> = {
+  "023132": [
+    {date:"2026-07-18", outcome:"Reached shop", summary:"Shop confirmed parts arrived; repair completing ~7/22."},
+    {date:"2026-07-11", outcome:"Voicemail", summary:"Left message requesting repair status."}
+  ],
+  "041877": [
+    {date:"2026-07-17", outcome:"Reached shop", summary:"Brakes done; awaiting invoice upload."}
+  ]
+};
+
+const MOCK_NOTES: Record<string, {date:string; author:string; text:string}[]> = {
+  "017640": [
+    {date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."}
+  ]
+};
 
 function isDeclinedAuction(b: string) {
   return b === "declined" || b === "auction";
@@ -346,6 +403,13 @@ export function CardTabsRefined() {
   const [hoveredCard, setHoveredCard] = useState<string | null>(null);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
   const [markOverrides, setMarkOverrides] = useState<Record<string, string | null>>({});
+
+  const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<"pos" | "calls" | "notes">("pos");
+  const [drawerTruckToggle, setDrawerTruckToggle] = useState<"rental" | "assigned">("rental");
+  const [expandedPOs, setExpandedPOs] = useState<Record<string, boolean>>({});
+  const [localNotes, setLocalNotes] = useState<Record<string, {date:string; author:string; text:string}[]>>(MOCK_NOTES);
+  const [newNote, setNewNote] = useState("");
 
   const callMut = useNoopMutation();
   const callAllMut = useNoopMutation();
@@ -398,6 +462,24 @@ export function CardTabsRefined() {
     return cmp ? [...filtered].sort(cmp) : filtered;
   }, [filtered, sort]);
 
+  const selectedRow = useMemo(() => pool.find(r => r.case_key === selectedRowKey) || null, [selectedRowKey, pool]);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSelectedRowKey(null);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
+
+  const openDrawer = (r: MasterRow) => {
+    setSelectedRowKey(r.case_key);
+    setDrawerTab("pos");
+    setDrawerTruckToggle("rental");
+    setExpandedPOs({});
+    setNewNote("");
+  };
+
   const thStyle: React.CSSProperties = { 
     fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: colors.inkMuted, 
     textTransform: "uppercase", letterSpacing: "0.04em", padding: "12px 16px", 
@@ -440,6 +522,133 @@ export function CardTabsRefined() {
       case 'in_use': return { color: colors.green, bg: colors.greenLight };
       default: return { color: colors.inkMuted, bg: colors.surface };
     }
+  };
+
+  const renderPOs = () => {
+    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
+    if (isByov(activeTruck)) {
+      return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>BYOV — repairs not tracked, no Holman PO history</div>;
+    }
+    const pos = MOCK_POS[activeTruck] || [];
+    if (pos.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>No POs on file for this truck.</div>;
+
+    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {pos.map(po => {
+        const exp = expandedPOs[po.poNumber];
+        return (
+          <div key={po.poNumber} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, background: "#fff", overflow: "hidden" }}>
+            <div onClick={() => setExpandedPOs(p => ({ ...p, [po.poNumber]: !exp }))} style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", background: exp ? "#F9FAFC" : "#fff", transition: "background 0.15s" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                {exp ? <ChevronDown size={16} color={colors.inkMuted} /> : <ChevronRight size={16} color={colors.inkMuted} />}
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+                    <span style={{ fontFamily: fonts.jetbrains, fontWeight: 700, fontSize: 14, color: colors.ink }}>{po.poNumber}</span>
+                    <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: po.poStatus === "APPROVED" ? colors.greenLight : colors.blueLight, color: po.poStatus === "APPROVED" ? colors.green : colors.blue }}>{po.poStatus}</span>
+                  </div>
+                  <div style={{ fontSize: 13, color: colors.inkMuted }}>{po.poDate} • {po.vendorName}</div>
+                </div>
+              </div>
+              <div style={{ fontFamily: fonts.jetbrains, fontWeight: 700, fontSize: 15, color: colors.ink }}>
+                ${po.totalAmount.toFixed(2)}
+              </div>
+            </div>
+            {exp && (
+              <div style={{ padding: "20px", borderTop: `1px solid ${colors.rule}` }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 20, fontSize: 13 }}>
+                  <div><span style={{ color: colors.inkMuted }}>Vendor:</span> <span style={{ fontWeight: 600, color: colors.ink }}>{po.vendorName}</span> ({po.vendorCity}, {po.vendorState})</div>
+                  <div><span style={{ color: colors.inkMuted }}>Approver:</span> <span style={{ fontWeight: 600, color: colors.ink }}>{po.approver}</span></div>
+                  <div><span style={{ color: colors.inkMuted }}>Odometer:</span> <span style={{ fontFamily: fonts.jetbrains, color: colors.ink }}>{po.odometer}</span></div>
+                  <div><span style={{ color: colors.inkMuted }}>Repair Date:</span> <span style={{ color: colors.ink }}>{po.repairDate}</span></div>
+                </div>
+                {po.portalNote && (
+                  <div style={{ background: colors.surface, padding: 12, borderRadius: 6, fontSize: 13, color: colors.ink, marginBottom: 20, borderLeft: `3px solid ${colors.accent}` }}>
+                    <div style={{ fontWeight: 700, marginBottom: 4, fontSize: 11, textTransform: "uppercase", color: colors.inkMuted }}>Holman Note</div>
+                    {po.portalNote}
+                  </div>
+                )}
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ textAlign: "left", color: colors.inkMuted, fontWeight: 600, paddingBottom: 8, borderBottom: `1px solid ${colors.rule}` }}>Qty</th>
+                      <th style={{ textAlign: "left", color: colors.inkMuted, fontWeight: 600, paddingBottom: 8, borderBottom: `1px solid ${colors.rule}` }}>Description</th>
+                      <th style={{ textAlign: "left", color: colors.inkMuted, fontWeight: 600, paddingBottom: 8, borderBottom: `1px solid ${colors.rule}` }}>Type</th>
+                      <th style={{ textAlign: "right", color: colors.inkMuted, fontWeight: 600, paddingBottom: 8, borderBottom: `1px solid ${colors.rule}` }}>Cost</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {po.lineItems.map((li, i) => (
+                      <tr key={i}>
+                        <td style={{ padding: "8px 0", borderBottom: `1px solid ${colors.surface}`, fontFamily: fonts.jetbrains, color: colors.ink }}>{li.qty}</td>
+                        <td style={{ padding: "8px 0", borderBottom: `1px solid ${colors.surface}`, color: colors.ink }}>{li.description}</td>
+                        <td style={{ padding: "8px 0", borderBottom: `1px solid ${colors.surface}`, color: colors.ink }}>{li.repairType}</td>
+                        <td style={{ padding: "8px 0", borderBottom: `1px solid ${colors.surface}`, textAlign: "right", fontFamily: fonts.jetbrains, color: colors.ink }}>${li.cost.toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>;
+  };
+
+  const renderCalls = () => {
+    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
+    const calls = MOCK_CALL_LOG[activeTruck] || [];
+    if (calls.length === 0) return <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "40px 0" }}>No LUCA calls yet.</div>;
+    return <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {calls.map((c, i) => (
+        <div key={i} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, background: "#fff", padding: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 13 }}>
+            <span style={{ fontWeight: 600, color: colors.ink }}>{c.date}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: c.outcome.includes("Reached") ? colors.greenLight : colors.amberLight, color: c.outcome.includes("Reached") ? colors.green : colors.amber }}>{c.outcome}</span>
+          </div>
+          <div style={{ fontSize: 13, color: colors.inkMuted }}>{c.summary}</div>
+        </div>
+      ))}
+    </div>;
+  };
+
+  const renderNotes = () => {
+    const activeTruck = drawerTruckToggle === "rental" ? selectedRow!.case_key : selectedRow!.assigned_truck!;
+    const notes = localNotes[activeTruck] || [];
+    
+    const handleAddNote = () => {
+      if (!newNote.trim()) return;
+      const n = { date: new Date().toISOString().split('T')[0], author: "You", text: newNote };
+      setLocalNotes(prev => ({ ...prev, [activeTruck]: [n, ...(prev[activeTruck] || [])] }));
+      setNewNote("");
+    };
+
+    return <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        <textarea 
+          value={newNote} onChange={e => setNewNote(e.target.value)}
+          placeholder="Add an operator note..." 
+          style={{ width: "100%", height: 80, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, resize: "none", fontSize: 13, outline: "none", fontFamily: fonts.dmSans, color: colors.ink, background: "#fff" }}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={handleAddNote} disabled={!newNote.trim()} style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newNote.trim() ? colors.accent : colors.rule, color: newNote.trim() ? "#fff" : colors.inkMuted, border: "none", cursor: newNote.trim() ? "pointer" : "default", fontSize: 13, fontWeight: 600, transition: "background 0.15s" }}>
+            <Plus size={14} /> Add note
+          </button>
+        </div>
+      </div>
+      
+      <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        {notes.map((n, i) => (
+          <div key={i} style={{ borderBottom: `1px solid ${colors.rule}`, paddingBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 12 }}>
+              <span style={{ fontWeight: 700, color: colors.ink }}>{n.author}</span>
+              <span style={{ color: colors.inkMuted }}>{n.date}</span>
+            </div>
+            <div style={{ fontSize: 13, color: colors.ink }}>{n.text}</div>
+          </div>
+        ))}
+        {notes.length === 0 && <div style={{ color: colors.inkMuted, fontSize: 14, textAlign: "center", padding: "20px 0" }}>No notes on file.</div>}
+      </div>
+    </div>;
   };
 
   return (
@@ -571,6 +780,7 @@ export function CardTabsRefined() {
               <Th col="days" label="Days Open" style={{ textAlign: "right" }} />
               <th style={{ ...thStyle, width: 90, textAlign: "center" }}>LUCA</th>
               <th style={{ ...thStyle, width: 110, textAlign: "center" }}>Mark</th>
+              <th style={{ ...thStyle, width: 40, padding: 0 }} />
             </tr>
           </thead>
           <tbody>
@@ -586,11 +796,13 @@ export function CardTabsRefined() {
               return (
                 <tr 
                   key={r.case_key} 
+                  onClick={() => openDrawer(r)}
                   onMouseEnter={() => setHoveredRow(r.case_key)}
                   onMouseLeave={() => setHoveredRow(null)}
                   style={{ 
                     cursor: "pointer", 
-                    background: isHovered ? "#F8FAFC" : "transparent"
+                    background: isHovered ? "#F8FAFC" : "transparent",
+                    transition: "background 0.15s"
                   }}
                 >
                   <td style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 12 }}>{i + 1}</td>
@@ -683,12 +895,15 @@ export function CardTabsRefined() {
                       })}
                     </div>
                   </td>
+                  <td style={{ ...tdStyle, padding: "12px 16px 12px 0", color: isHovered ? colors.inkMuted : "transparent" }}>
+                    <ChevronRight size={16} />
+                  </td>
                 </tr>
               );
             })}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={10} style={{ padding: "60px 20px", textAlign: "center", color: colors.inkMuted }}>
+                <td colSpan={11} style={{ padding: "60px 20px", textAlign: "center", color: colors.inkMuted }}>
                   <Filter size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
                   <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>No rentals found</div>
                   <div style={{ fontSize: 13, marginTop: 4 }}>Try adjusting your filters or search query.</div>
@@ -698,6 +913,90 @@ export function CardTabsRefined() {
           </tbody>
         </table>
       </div>
+
+      {/* Detail Drawer */}
+      {selectedRow && (
+        <>
+          <div 
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 100, opacity: 1, transition: "opacity 0.2s" }}
+            onClick={() => setSelectedRowKey(null)}
+          />
+          <div style={{
+            position: "fixed", right: 0, top: 0, bottom: 0, width: 600,
+            background: colors.background, zIndex: 101, boxShadow: "-8px 0 30px rgba(0,0,0,0.1)",
+            display: "flex", flexDirection: "column",
+            transform: "translateX(0)", transition: "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+          }}>
+            {/* Header */}
+            <div style={{ padding: "24px 32px", borderBottom: `1px solid ${colors.rule}`, background: "#fff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontFamily: fonts.jetbrains, fontSize: 13, color: colors.inkMuted, marginBottom: 4 }}>Truck {selectedRow.case_key}</div>
+                  <div style={{ fontSize: 20, fontWeight: 700, fontFamily: fonts.syne, color: colors.ink }}>{selectedRow.renter_name_raw}</div>
+                </div>
+                <button onClick={() => setSelectedRowKey(null)} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4 }}>
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <div style={{ display: "flex", gap: 16, fontSize: 13, color: colors.inkMuted, marginBottom: selectedRow.assigned_truck ? 20 : 0 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Wrench size={14} /> {selectedRow.shop_name || "No shop"}</span>
+                <span style={{ display: "flex", alignItems: "center", gap: 6 }}><Clock size={14} /> {selectedRow.days_open ?? "—"} days</span>
+                {selectedRow.ams_status && (
+                  <span style={{ fontWeight: 600, color: getAmsStyles(selectedRow.ams_bucket).color }}>{selectedRow.ams_status}</span>
+                )}
+              </div>
+
+              {selectedRow.assigned_truck && (
+                <div style={{ display: "flex", background: colors.surface, padding: 4, borderRadius: 8, marginTop: 16 }}>
+                  <button 
+                    onClick={() => setDrawerTruckToggle("rental")}
+                    style={{ flex: 1, padding: "8px 0", border: "none", background: drawerTruckToggle === "rental" ? "#fff" : "transparent", borderRadius: 6, fontSize: 13, fontWeight: 600, color: drawerTruckToggle === "rental" ? colors.ink : colors.inkMuted, cursor: "pointer", boxShadow: drawerTruckToggle === "rental" ? "0 2px 8px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
+                  >
+                    Rental {selectedRow.case_key}
+                  </button>
+                  <button 
+                    onClick={() => setDrawerTruckToggle("assigned")}
+                    style={{ flex: 1, padding: "8px 0", border: "none", background: drawerTruckToggle === "assigned" ? "#fff" : "transparent", borderRadius: 6, fontSize: 13, fontWeight: 600, color: drawerTruckToggle === "assigned" ? colors.ink : colors.inkMuted, cursor: "pointer", boxShadow: drawerTruckToggle === "assigned" ? "0 2px 8px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
+                  >
+                    Assigned {selectedRow.assigned_truck}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: "flex", padding: "0 32px", borderBottom: `1px solid ${colors.rule}`, background: "#fff", gap: 24 }}>
+              {[
+                { id: "pos", label: "POs", icon: FileText },
+                { id: "calls", label: "Call log", icon: PhoneCall },
+                { id: "notes", label: "Notes", icon: MessageSquare }
+              ].map(t => (
+                <button 
+                  key={t.id} 
+                  onClick={() => setDrawerTab(t.id as any)}
+                  style={{ 
+                    display: "flex", alignItems: "center", gap: 8, padding: "16px 0", background: "transparent", border: "none", 
+                    borderBottom: `2px solid ${drawerTab === t.id ? colors.accent : "transparent"}`,
+                    color: drawerTab === t.id ? colors.ink : colors.inkMuted,
+                    fontWeight: 600, fontSize: 13, cursor: "pointer", transition: "all 0.15s"
+                  }}
+                >
+                  <t.icon size={15} style={{ color: drawerTab === t.id ? colors.accent : colors.inkMuted }} />
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Content */}
+            <div style={{ flex: 1, overflowY: "auto", padding: "24px 32px" }}>
+              {drawerTab === "pos" && renderPOs()}
+              {drawerTab === "calls" && renderCalls()}
+              {drawerTab === "notes" && renderNotes()}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }

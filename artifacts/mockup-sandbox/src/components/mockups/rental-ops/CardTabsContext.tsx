@@ -3,7 +3,7 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import {
   Search, Download, RefreshCw, Upload, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight, Filter,
-  List, CheckCircle2, UserX
+  List, CheckCircle2, UserX, X, FileText, MessageSquare, Plus, ChevronDown
 } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
@@ -309,6 +309,30 @@ const MOCK_ROWS: MasterRow[] = [
   }),
 ];
 
+interface LineItem { qty: number; description: string; repairType: string; ataGroup: string; cost: number; }
+interface PO { poNumber: string; poDate: string; poStatus: string; vendorType: string; vendorName: string; vendorCity: string; vendorState: string; approver: string; odometer: number; repairDate: string; paidDate: string | null; poType: string; totalAmount: number; portalNote?: string; lineItems: LineItem[]; }
+interface CallLogEntry { date: string; outcome: string; summary: string; }
+interface NoteEntry { date: string; author: string; text: string; }
+
+const MOCK_POS: Record<string, PO[]> = {
+  "023132": [
+    { poNumber:"H-482913", poDate:"2026-07-14", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Precision Fleet Service", vendorCity:"Mesa", vendorState:"AZ", approver:"D. Kowalski", odometer:84120, repairDate:"2026-07-15", paidDate:null, poType:"REPAIR", totalAmount:2843.50, portalNote:"7/16 — Parts on order, ETA 7/21 per shop", lineItems:[ {qty:1, description:"Transmission service + solenoid replacement", repairType:"REPAIR", ataGroup:"27-TRANSMISSION", cost:2100.00}, {qty:2, description:"Fluid + filter kit", repairType:"PARTS", ataGroup:"27-TRANSMISSION", cost:486.00}, {qty:1, description:"Diagnostic labor", repairType:"LABOR", ataGroup:"00-GENERAL", cost:257.50} ] },
+    { poNumber:"H-471002", poDate:"2026-06-02", poStatus:"PAID", vendorType:"MAINTENANCE", vendorName:"QuickLane 88", vendorCity:"Tempe", vendorState:"AZ", approver:"D. Kowalski", odometer:82655, repairDate:"2026-06-02", paidDate:"2026-06-12", poType:"PM", totalAmount:214.75, lineItems:[ {qty:1, description:"Lube-oil-filter + tire rotation", repairType:"PM", ataGroup:"01-PM", cost:214.75} ] }
+  ],
+  "041877": [ { poNumber:"H-479560", poDate:"2026-07-08", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Metro Brake & Wheel", vendorCity:"Glendale", vendorState:"AZ", approver:"S. Whitmore", odometer:67230, repairDate:"2026-07-09", paidDate:null, poType:"REPAIR", totalAmount:1120.40, lineItems:[ {qty:1, description:"Front brake pads + rotors", repairType:"REPAIR", ataGroup:"13-BRAKES", cost:892.40}, {qty:1, description:"Brake fluid flush", repairType:"LABOR", ataGroup:"13-BRAKES", cost:228.00} ] } ],
+  "092310": [ { poNumber:"H-490118", poDate:"2026-07-19", poStatus:"APPROVED", vendorType:"REPAIR", vendorName:"Desert Diesel Repair", vendorCity:"Chandler", vendorState:"AZ", approver:"S. Whitmore", odometer:112480, repairDate:"2026-07-20", paidDate:null, poType:"REPAIR", totalAmount:4310.00, portalNote:"Waiting on head gasket — shop est. 8-10 business days", lineItems:[ {qty:1, description:"Head gasket replacement", repairType:"REPAIR", ataGroup:"45-ENGINE", cost:3650.00}, {qty:1, description:"Coolant system flush", repairType:"LABOR", ataGroup:"42-COOLING", cost:660.00} ] } ],
+  "071228": [ { poNumber:"H-488301", poDate:"2026-07-16", poStatus:"APPROVED", vendorType:"BODY SHOP", vendorName:"Sunline Collision", vendorCity:"Peoria", vendorState:"AZ", approver:"D. Kowalski", odometer:54900, repairDate:"2026-07-17", paidDate:null, poType:"BODY", totalAmount:2050.00, lineItems:[ {qty:1, description:"Right rear quarter panel repair + paint", repairType:"BODY", ataGroup:"98-BODY", cost:2050.00} ] } ]
+};
+
+const MOCK_CALL_LOG: Record<string, CallLogEntry[]> = {
+  "023132": [ {date:"2026-07-18", outcome:"Reached shop", summary:"Shop confirmed parts arrived; repair completing ~7/22."}, {date:"2026-07-11", outcome:"Voicemail", summary:"Left message requesting repair status."} ],
+  "041877": [ {date:"2026-07-17", outcome:"Reached shop", summary:"Brakes done; awaiting invoice upload."} ]
+};
+
+const MOCK_NOTES_INITIAL: Record<string, NoteEntry[]> = {
+  "017640": [ {date:"2026-07-12", author:"jmorga1", text:"Tech says van was swapped at district lot 7/10 — investigating why rental still open."} ]
+};
+
 function isDeclinedAuction(b: string) {
   return b === "declined" || b === "auction";
 }
@@ -361,6 +385,15 @@ export function CardTabsContext() {
   const [rows, setRows] = useState<MasterRow[]>(MOCK_ROWS);
   const [hoveredRow, setHoveredRow] = useState<string | null>(null);
 
+  // Drawer state
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [selectedRow, setSelectedRow] = useState<MasterRow | null>(null);
+  const [drawerTargetTruck, setDrawerTargetTruck] = useState<string | null>(null);
+  const [drawerTab, setDrawerTab] = useState<"pos" | "calls" | "notes">("pos");
+  const [notesState, setNotesState] = useState(MOCK_NOTES_INITIAL);
+  const [newNote, setNewNote] = useState("");
+  const [expandedPOs, setExpandedPOs] = useState<Set<string>>(new Set());
+
   const callMut = useNoopMutation();
   const callAllMut = useNoopMutation();
   const markMut = useNoopMutation();
@@ -371,6 +404,52 @@ export function CardTabsContext() {
     const next = current === mark ? null : mark;
     markMut.mutate({ caseKey, mark: next ?? "none" });
     setRows(rs => rs.map(r => r.case_key === caseKey ? { ...r, operator_mark: next } : r));
+  };
+
+  const openDrawer = (r: MasterRow) => {
+    setSelectedRow(r);
+    setDrawerTargetTruck(r.case_key);
+    setDrawerTab("pos");
+    setDrawerOpen(true);
+    setExpandedPOs(new Set());
+    setNewNote("");
+  };
+
+  const closeDrawer = () => {
+    setDrawerOpen(false);
+    setTimeout(() => {
+      setSelectedRow(null);
+      setDrawerTargetTruck(null);
+    }, 300);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && drawerOpen) closeDrawer();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [drawerOpen]);
+
+  const togglePO = (poNum: string) => {
+    setExpandedPOs(prev => {
+      const next = new Set(prev);
+      if (next.has(poNum)) next.delete(poNum);
+      else next.add(poNum);
+      return next;
+    });
+  };
+
+  const handleAddNote = () => {
+    if (!newNote.trim() || !drawerTargetTruck) return;
+    setNotesState(prev => ({
+      ...prev,
+      [drawerTargetTruck]: [
+        ...(prev[drawerTargetTruck] || []),
+        { date: new Date().toISOString().split('T')[0], author: "current_user", text: newNote.trim() }
+      ]
+    }));
+    setNewNote("");
   };
 
   const pool = rows;
@@ -464,7 +543,7 @@ export function CardTabsContext() {
 
   return (
     <TooltipProvider>
-      <div className="min-h-screen" style={{ fontFamily: fonts.dmSans, color: colors.ink, background: colors.background, padding: 24 }}>
+      <div className="min-h-screen" style={{ fontFamily: fonts.dmSans, color: colors.ink, background: colors.background, padding: 24, position: "relative", overflow: drawerOpen ? "hidden" : "auto" }}>
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
           <h1 style={{ fontFamily: fonts.syne, fontSize: 26, fontWeight: 700, margin: 0, color: colors.ink }}>Rental Operations</h1>
@@ -612,6 +691,7 @@ export function CardTabsContext() {
                 <Th col="days" label="Days Open" style={{ textAlign: "right" }} />
                 <th style={{ ...thStyle, textAlign: "center" }}>LUCA</th>
                 <th style={{ ...thStyle, textAlign: "center", width: 120 }}>Operator Mark</th>
+                <th style={{ ...thStyle, width: 40 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -641,6 +721,7 @@ export function CardTabsContext() {
                     key={r.case_key} 
                     onMouseEnter={() => setHoveredRow(r.case_key)}
                     onMouseLeave={() => setHoveredRow(null)}
+                    onClick={() => openDrawer(r)}
                     style={{ 
                       cursor: "pointer", 
                       background: isHovered ? activeKpi.activeBg : "transparent",
@@ -739,12 +820,15 @@ export function CardTabsContext() {
                         </Tooltip>
                       </div>
                     </td>
+                    <td style={{ ...tdStyle, background: "transparent", color: isHovered ? colors.accent : colors.inkMuted, transition: "color 0.15s" }}>
+                      <ChevronRight size={16} />
+                    </td>
                   </tr>
                 );
               })}
               {sorted.length === 0 && (
                 <tr>
-                  <td colSpan={10} style={{ ...tdStyle, background: "transparent", textAlign: "center", color: colors.inkMuted, padding: "40px 20px" }}>
+                  <td colSpan={11} style={{ ...tdStyle, background: "transparent", textAlign: "center", color: colors.inkMuted, padding: "40px 20px" }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
                       <Search size={32} style={{ opacity: 0.2 }} />
                       <div style={{ fontSize: 15, fontWeight: 500, color: colors.ink }}>No rentals found</div>
@@ -755,6 +839,298 @@ export function CardTabsContext() {
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Drawer Overlay */}
+        {drawerOpen && (
+          <div 
+            onClick={closeDrawer}
+            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.3)", zIndex: 10, opacity: drawerOpen ? 1 : 0, transition: "opacity 0.3s" }}
+          />
+        )}
+
+        {/* Drawer Panel */}
+        <div style={{ 
+          position: "absolute", top: 0, right: 0, bottom: 0, width: 600, background: "#fff", 
+          boxShadow: "-4px 0 24px rgba(0,0,0,0.1)", zIndex: 20,
+          transform: drawerOpen ? "translateX(0)" : "translateX(100%)",
+          transition: "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+          display: "flex", flexDirection: "column"
+        }}>
+          {selectedRow && drawerTargetTruck && (
+            <>
+              {/* Drawer Header */}
+              <div style={{ padding: "24px 32px", borderBottom: `1px solid ${colors.rule}`, background: colors.background }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                      <h2 style={{ fontFamily: fonts.jetbrains, fontSize: 24, fontWeight: 700, margin: 0, color: colors.ink }}>{selectedRow.case_key}</h2>
+                      {selectedRow.ams_status && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: colors.blueDeep, background: colors.blueLight, borderRadius: 6, padding: "4px 10px", textTransform: "uppercase", letterSpacing: "0.02em" }}>
+                          {selectedRow.ams_status}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 14, color: colors.inkSoft, fontWeight: 500, display: "flex", alignItems: "center", gap: 8 }}>
+                      <span>{selectedRow.renter_name_raw}</span>
+                      <span style={{ color: colors.inkMuted }}>•</span>
+                      <span>{selectedRow.shop_name || "No shop info"}</span>
+                      {selectedRow.days_open && (
+                        <>
+                          <span style={{ color: colors.inkMuted }}>•</span>
+                          <span style={{ color: colors.redDeep, fontWeight: 600 }}>{selectedRow.days_open} days open</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={closeDrawer} style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 4, borderRadius: 4 }}>
+                    <X size={20} />
+                  </button>
+                </div>
+
+                {/* Truck Switcher (if assigned mismatch) */}
+                {selectedRow.assigned_truck && (
+                  <div style={{ display: "flex", background: colors.surface, borderRadius: 8, padding: 4, marginTop: 16 }}>
+                    <button 
+                      onClick={() => setDrawerTargetTruck(selectedRow.case_key)}
+                      style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", background: drawerTargetTruck === selectedRow.case_key ? "#fff" : "transparent", color: drawerTargetTruck === selectedRow.case_key ? colors.ink : colors.inkMuted, fontWeight: drawerTargetTruck === selectedRow.case_key ? 600 : 500, fontSize: 13, cursor: "pointer", boxShadow: drawerTargetTruck === selectedRow.case_key ? "0 1px 3px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
+                    >
+                      Rental {selectedRow.case_key}
+                    </button>
+                    <button 
+                      onClick={() => setDrawerTargetTruck(selectedRow.assigned_truck!)}
+                      style={{ flex: 1, padding: "8px 0", borderRadius: 6, border: "none", background: drawerTargetTruck === selectedRow.assigned_truck ? "#fff" : "transparent", color: drawerTargetTruck === selectedRow.assigned_truck ? colors.ink : colors.inkMuted, fontWeight: drawerTargetTruck === selectedRow.assigned_truck ? 600 : 500, fontSize: 13, cursor: "pointer", boxShadow: drawerTargetTruck === selectedRow.assigned_truck ? "0 1px 3px rgba(0,0,0,0.05)" : "none", transition: "all 0.15s" }}
+                    >
+                      Assigned {selectedRow.assigned_truck}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Drawer Tabs */}
+              <div style={{ display: "flex", borderBottom: `1px solid ${colors.rule}`, padding: "0 32px" }}>
+                {[
+                  { id: "pos", label: "PO History", icon: FileText },
+                  { id: "calls", label: "LUCA Call Log", icon: PhoneCall },
+                  { id: "notes", label: "Operator Notes", icon: MessageSquare }
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => setDrawerTab(t.id as any)}
+                    style={{ display: "flex", alignItems: "center", gap: 8, padding: "16px 16px", background: "transparent", border: "none", borderBottom: `2px solid ${drawerTab === t.id ? colors.accent : "transparent"}`, color: drawerTab === t.id ? colors.ink : colors.inkMuted, fontWeight: drawerTab === t.id ? 600 : 500, fontSize: 14, cursor: "pointer", transition: "color 0.15s" }}
+                  >
+                    <t.icon size={16} /> {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Drawer Content */}
+              <div style={{ flex: 1, overflow: "auto", padding: "32px", background: "#fff" }}>
+                {drawerTab === "pos" && (
+                  <div>
+                    {isByov(drawerTargetTruck) ? (
+                      <div style={{ textAlign: "center", padding: "60px 0", color: colors.inkMuted }}>
+                        <FileText size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
+                        <div style={{ fontSize: 15, fontWeight: 500, color: colors.ink, marginBottom: 8 }}>BYOV — repairs not tracked</div>
+                        <div style={{ fontSize: 13 }}>No Holman PO history available for personal vehicles.</div>
+                      </div>
+                    ) : (
+                      <>
+                        {(() => {
+                          const pos = MOCK_POS[drawerTargetTruck] || [];
+                          if (pos.length === 0) {
+                            return (
+                              <div style={{ textAlign: "center", padding: "60px 0", color: colors.inkMuted }}>
+                                <FileText size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
+                                <div style={{ fontSize: 15, fontWeight: 500, color: colors.ink, marginBottom: 8 }}>No POs on file for this truck.</div>
+                                <div style={{ fontSize: 13 }}>Holman has no repair records for {drawerTargetTruck}.</div>
+                              </div>
+                            );
+                          }
+                          const totalSpend = pos.reduce((acc, p) => acc + p.totalAmount, 0);
+                          const latestDate = pos.map(p => p.poDate).sort().pop();
+                          return (
+                            <>
+                              <div style={{ fontSize: 13, color: colors.inkMuted, marginBottom: 24, display: "flex", alignItems: "center", gap: 8 }}>
+                                <span style={{ fontWeight: 600, color: colors.ink }}>{pos.length} PO{pos.length !== 1 && 's'}</span>
+                                <span>•</span>
+                                <span style={{ fontWeight: 600, color: colors.ink }}>${totalSpend.toLocaleString(undefined, { minimumFractionDigits: 2 })} total</span>
+                                <span>•</span>
+                                <span>Last activity {latestDate}</span>
+                              </div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                                {pos.map(po => {
+                                  const isExpanded = expandedPOs.has(po.poNumber);
+                                  return (
+                                    <div key={po.poNumber} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden" }}>
+                                      <div 
+                                        onClick={() => togglePO(po.poNumber)}
+                                        style={{ padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", background: isExpanded ? colors.background : "#fff", cursor: "pointer", transition: "background 0.15s" }}
+                                      >
+                                        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+                                          <ChevronDown size={16} style={{ color: colors.inkMuted, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.2s" }} />
+                                          <div>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 4 }}>
+                                              <span style={{ fontFamily: fonts.jetbrains, fontWeight: 700, fontSize: 14 }}>{po.poNumber}</span>
+                                              <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: po.poStatus === "APPROVED" ? colors.blueLight : colors.greenLight, color: po.poStatus === "APPROVED" ? colors.blueDeep : colors.greenDeep }}>{po.poStatus}</span>
+                                              <span style={{ fontSize: 13, color: colors.inkMuted }}>{po.poDate}</span>
+                                            </div>
+                                            <div style={{ fontSize: 13, color: colors.inkSoft, fontWeight: 500 }}>
+                                              {po.vendorName} <span style={{ color: colors.inkMuted, fontWeight: 400 }}>({po.vendorType})</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <div style={{ fontFamily: fonts.jetbrains, fontWeight: 700, fontSize: 15, color: colors.ink }}>
+                                          ${po.totalAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                                        </div>
+                                      </div>
+                                      
+                                      {isExpanded && (
+                                        <div style={{ padding: "0 20px 20px", borderTop: `1px solid ${colors.rule}`, background: colors.background }}>
+                                          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, padding: "16px 0" }}>
+                                            <div>
+                                              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", marginBottom: 4 }}>Location</div>
+                                              <div style={{ fontSize: 13, fontWeight: 500 }}>{po.vendorCity}, {po.vendorState}</div>
+                                            </div>
+                                            <div>
+                                              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", marginBottom: 4 }}>Odometer</div>
+                                              <div style={{ fontSize: 13, fontWeight: 500, fontFamily: fonts.jetbrains }}>{po.odometer.toLocaleString()}</div>
+                                            </div>
+                                            <div>
+                                              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", marginBottom: 4 }}>Repair Date</div>
+                                              <div style={{ fontSize: 13, fontWeight: 500 }}>{po.repairDate}</div>
+                                            </div>
+                                            <div>
+                                              <div style={{ fontSize: 11, color: colors.inkMuted, textTransform: "uppercase", marginBottom: 4 }}>Approver</div>
+                                              <div style={{ fontSize: 13, fontWeight: 500 }}>{po.approver}</div>
+                                            </div>
+                                          </div>
+                                          
+                                          {po.portalNote && (
+                                            <div style={{ background: "#fff", padding: "12px 16px", borderRadius: 6, borderLeft: `3px solid ${colors.amber}`, marginBottom: 16 }}>
+                                              <div style={{ fontSize: 11, color: colors.amber, fontWeight: 700, textTransform: "uppercase", marginBottom: 4 }}>Holman Note</div>
+                                              <div style={{ fontSize: 13, color: colors.ink }}>{po.portalNote}</div>
+                                            </div>
+                                          )}
+                                          
+                                          <div style={{ background: "#fff", borderRadius: 6, border: `1px solid ${colors.rule}`, overflow: "hidden" }}>
+                                            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                              <thead style={{ background: colors.surface }}>
+                                                <tr>
+                                                  <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, color: colors.inkMuted, fontWeight: 600 }}>Qty</th>
+                                                  <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, color: colors.inkMuted, fontWeight: 600 }}>Description</th>
+                                                  <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, color: colors.inkMuted, fontWeight: 600 }}>Type</th>
+                                                  <th style={{ padding: "8px 12px", textAlign: "left", fontSize: 11, color: colors.inkMuted, fontWeight: 600 }}>ATA Group</th>
+                                                  <th style={{ padding: "8px 12px", textAlign: "right", fontSize: 11, color: colors.inkMuted, fontWeight: 600 }}>Cost</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {po.lineItems.map((item, idx) => (
+                                                  <tr key={idx} style={{ borderTop: `1px solid ${colors.rule}` }}>
+                                                    <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, fontFamily: fonts.jetbrains, color: colors.inkMuted }}>{item.qty}</td>
+                                                    <td style={{ padding: "8px 12px", fontSize: 12, fontWeight: 500 }}>{item.description}</td>
+                                                    <td style={{ padding: "8px 12px", fontSize: 12, color: colors.inkMuted }}>{item.repairType}</td>
+                                                    <td style={{ padding: "8px 12px", fontSize: 12, color: colors.inkMuted }}>{item.ataGroup}</td>
+                                                    <td style={{ padding: "8px 12px", textAlign: "right", fontSize: 12, fontFamily: fonts.jetbrains }}>${item.cost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                                                  </tr>
+                                                ))}
+                                              </tbody>
+                                            </table>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {drawerTab === "calls" && (
+                  <div>
+                    {(() => {
+                      const calls = MOCK_CALL_LOG[drawerTargetTruck] || [];
+                      if (calls.length === 0) {
+                        return (
+                          <div style={{ textAlign: "center", padding: "60px 0", color: colors.inkMuted }}>
+                            <PhoneCall size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
+                            <div style={{ fontSize: 15, fontWeight: 500, color: colors.ink, marginBottom: 8 }}>No LUCA calls yet.</div>
+                            <div style={{ fontSize: 13 }}>LUCA hasn't called the shop for this truck.</div>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                          {calls.map((call, idx) => (
+                            <div key={idx} style={{ display: "flex", gap: 16 }}>
+                              <div style={{ width: 1, background: colors.rule, position: "relative", marginLeft: 8 }}>
+                                <div style={{ position: "absolute", top: 0, left: -4, width: 9, height: 9, borderRadius: "50%", background: colors.green }} />
+                              </div>
+                              <div style={{ flex: 1, paddingBottom: 16 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 8 }}>
+                                  <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{call.date}</span>
+                                  <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 6px", borderRadius: 4, background: colors.greenLight, color: colors.greenDeep, textTransform: "uppercase" }}>{call.outcome}</span>
+                                </div>
+                                <div style={{ fontSize: 14, color: colors.inkSoft, background: colors.surface, padding: "12px 16px", borderRadius: 8 }}>
+                                  {call.summary}
+                                </div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+
+                {drawerTab === "notes" && (
+                  <div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 16, marginBottom: 32 }}>
+                      {(notesState[drawerTargetTruck] || []).map((note, idx) => (
+                        <div key={idx} style={{ background: colors.surface, padding: "16px", borderRadius: 8 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                            <span style={{ fontSize: 13, fontWeight: 600, color: colors.ink }}>{note.author}</span>
+                            <span style={{ fontSize: 12, color: colors.inkMuted }}>{note.date}</span>
+                          </div>
+                          <div style={{ fontSize: 14, color: colors.inkSoft, lineHeight: 1.5 }}>
+                            {note.text}
+                          </div>
+                        </div>
+                      ))}
+                      {(notesState[drawerTargetTruck] || []).length === 0 && (
+                        <div style={{ textAlign: "center", padding: "40px 0", color: colors.inkMuted }}>
+                          <MessageSquare size={32} style={{ opacity: 0.2, margin: "0 auto 12px" }} />
+                          <div style={{ fontSize: 14, fontWeight: 500, color: colors.ink }}>No notes yet.</div>
+                        </div>
+                      )}
+                    </div>
+                    
+                    <div style={{ borderTop: `1px solid ${colors.rule}`, paddingTop: 24 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>Add Note</div>
+                      <textarea 
+                        value={newNote}
+                        onChange={e => setNewNote(e.target.value)}
+                        placeholder="Type a note..."
+                        style={{ width: "100%", height: 100, padding: 12, borderRadius: 8, border: `1px solid ${colors.rule}`, background: "#fff", fontSize: 14, resize: "none", marginBottom: 12, fontFamily: "inherit" }}
+                      />
+                      <button 
+                        onClick={handleAddNote}
+                        disabled={!newNote.trim()}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "8px 16px", borderRadius: 6, background: newNote.trim() ? colors.accent : colors.surface, color: newNote.trim() ? "#fff" : colors.inkMuted, fontSize: 13, fontWeight: 600, border: "none", cursor: newNote.trim() ? "pointer" : "default", transition: "background 0.2s" }}
+                      >
+                        <Plus size={14} /> Add Note
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </TooltipProvider>
