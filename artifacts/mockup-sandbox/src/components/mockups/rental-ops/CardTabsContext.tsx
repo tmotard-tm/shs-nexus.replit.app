@@ -845,16 +845,18 @@ export function CardTabsContext() {
         {drawerOpen && (
           <div 
             onClick={closeDrawer}
-            style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, background: "rgba(0,0,0,0.3)", zIndex: 10, opacity: drawerOpen ? 1 : 0, transition: "opacity 0.3s" }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 10, opacity: drawerOpen ? 1 : 0, transition: "opacity 0.3s" }}
           />
         )}
 
         {/* Drawer Panel */}
         <div style={{ 
-          position: "absolute", top: 0, right: 0, bottom: 0, width: 600, background: "#fff", 
-          boxShadow: "-4px 0 24px rgba(0,0,0,0.1)", zIndex: 20,
-          transform: drawerOpen ? "translateX(0)" : "translateX(100%)",
-          transition: "transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)",
+          position: "fixed", left: "50%", top: "50%", width: 760, maxWidth: "calc(100vw - 48px)", 
+          height: "min(720px, calc(100vh - 48px))", borderRadius: 16, overflow: "hidden", background: "#fff", 
+          boxShadow: "0 24px 80px rgba(0,0,0,0.28)", zIndex: 20,
+          transform: drawerOpen ? "translate(-50%, -50%) scale(1)" : "translate(-50%, -50%) scale(0.96)",
+          opacity: drawerOpen ? 1 : 0, pointerEvents: drawerOpen ? "auto" : "none",
+          transition: "transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.25s",
           display: "flex", flexDirection: "column"
         }}>
           {selectedRow && drawerTargetTruck && (
