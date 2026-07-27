@@ -371,7 +371,7 @@ export default function ExecutiveSummary() {
   const sectionErrs = data.sectionErrors ? Object.keys(data.sectionErrors) : [];
 
   return (
-    <div style={{ display: "grid", gap: 22, maxWidth: 1280 }}>
+    <div style={{ display: "grid", gap: 22 }}>
       {/* ---------------------------------------------------------- header */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <div style={{ marginRight: "auto" }}>
