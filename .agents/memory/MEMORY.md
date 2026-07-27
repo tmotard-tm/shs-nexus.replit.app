@@ -58,3 +58,4 @@
 - [Assign target validation](assign-target-validation.md) — every assign entry point must run server-side truck validation (format/exists/status/lock); UI-only guards let "byov" diverge TPMS/Holman.
 - [Holman write-fence supersede](holman-write-fence-supersede.md) — fences outlive their correction when a newer op lands; release only on live-confirmed newer submissions, NEVER on cache confirms (fence pins the cache = circular evidence).
 - [Mismatch cache cold-start pinning](mismatch-cache-cold-start.md) — TTL caches over synced mirrors pin stale results on autoscale cold boots; invalidate via a shared epoch bumped after every mirror rewrite.
+- [Holman phantom cache rows](holman-phantom-cache-rows.md) — upsert-only sync never removes failed-assign manual rows; self-heal keys on manual+never-synced, NOT number format (real Holman numbers can be alphanumeric).

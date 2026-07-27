@@ -20911,7 +20911,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         h.vin,
         h.holman_assigned_status_cd AS holman_status_cd,
         h.byov_vin_missing,
-        t.district_no
+        t.district_no,
+        h.data_source,
+        h.last_holman_sync_at
       FROM holman_vehicles_cache h
       LEFT JOIN tpms_latest t ON t.canonical_truck = LTRIM(h.holman_vehicle_number, '0')
       LEFT JOIN ams_vehicles_cache a ON a.vin = h.vin
@@ -20968,7 +20970,54 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       ORDER BY h.holman_vehicle_number
     `);
 
-    const rows = dbRows<Record<string, string | null>>(rawResult);
+    const allRows = dbRows<Record<string, string | null>>(rawResult);
+
+    // Self-heal: phantom locally-written Holman rows. A failed/mistyped assign
+    // (e.g. truck "00byov", 2026-07-24) can write-through a manual cache row
+    // for a vehicle number that TPMS rejects ("must be numeric, max 6 chars")
+    // and that Holman never returns. The sync is upsert-only (never deletes),
+    // so the phantom pins a permanent mismatch. Guards — ALL three required:
+    //   (a) data_source='manual'      — row was written locally, and
+    //   (b) last_holman_sync_at NULL  — NEVER confirmed by any Holman sync, and
+    //   (c) number fails ^[0-9]{1,6}$ after trim.
+    // IMPORTANT: (c) alone is NOT a safe discriminator — real, sync-confirmed
+    // Holman numbers CAN be alphanumeric (e.g. 24024B, A06431, T0003). Those
+    // rows always carry data_source='holman' + a non-null sync timestamp (the
+    // write-through upsert never resets dataSource on conflict), so guards
+    // (a)+(b) are the load-bearing protection. Do not relax them.
+    const isPhantomHolmanRow = (row: any) =>
+      row.data_source === "manual" &&
+      !row.last_holman_sync_at &&
+      !/^[0-9]{1,6}$/.test((row.truck_number || "").trim());
+    const phantomRows = allRows.filter(isPhantomHolmanRow);
+    let phantomsHealed = false;
+    if (phantomRows.length > 0) {
+      const phantomNumbers = phantomRows.map((r: any) => r.truck_number);
+      try {
+        await db
+          .update(holmanVehiclesCache)
+          .set({
+            isActive: false,
+            holmanTechAssigned: null,
+            holmanTechName: null,
+            lastLocalUpdateAt: new Date(),
+          })
+          .where(and(
+            inArray(holmanVehiclesCache.holmanVehicleNumber, phantomNumbers),
+            eq(holmanVehiclesCache.dataSource, "manual"),
+            isNull(holmanVehiclesCache.lastHolmanSyncAt),
+          ));
+        phantomsHealed = true;
+        console.log(`[Alignment] Self-healed ${phantomRows.length} phantom Holman cache row(s) with invalid vehicle number(s): ${phantomNumbers.join(", ")}`);
+      } catch (err) {
+        console.error(`[Alignment] Phantom-row self-heal failed (rows kept in mismatch list):`, err);
+      }
+    }
+    // Phantoms are excluded from results only when the heal actually succeeded
+    // (on heal failure they stay visible so the mismatch isn't silently hidden).
+    const rows = phantomsHealed
+      ? allRows.filter((r: any) => !isPhantomHolmanRow(r))
+      : allRows;
 
     const records = await Promise.all(
       rows.map(async (row: any) => {
