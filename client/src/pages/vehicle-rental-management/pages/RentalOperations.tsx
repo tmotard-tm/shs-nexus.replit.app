@@ -1122,29 +1122,23 @@ export default function RentalOperations() {
         </div>
       )}
 
-      {/* Workable breakdown — hangs off All Rentals now that Workable has no chip of
-          its own. All Rentals is the total; this says how much of it is actually
-          actionable, and carries the Scrape phones button. */}
+      {/* Workable line. Was a bordered blue panel with two paragraphs of prose;
+          Tyler 2026-07-28: redundant and visually heavy. Everything it spelled
+          out is already on screen — "callable now" IS the LUCA Call Queue chip,
+          "no open repair ticket" IS the No Open Repair chip, and the sweep counts
+          are already the Scrape button's own label. Only the workable total and
+          "need a phone" were unique, so those are all that survive, on one line,
+          with the explanations demoted to tooltips. */}
       {cohort === "all" && (
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12, padding: "12px 16px", border: `1px solid ${colors.blue}`, background: "rgba(59,130,246,.06)", borderRadius: 12 }}>
-          <div>
-            <div style={{ fontFamily: fonts.syne, fontSize: 14, fontWeight: 700, color: colors.ink }}>
-              Workable — {workableStats.total} of {basePool.length} rental{basePool.length === 1 ? "" : "s"} we still own
-            </div>
-            <div style={{ fontSize: 12, color: colors.inkSoft, marginTop: 4, maxWidth: 760 }}>
-              Everything NOT flagged Declined Repair / Sent To Auction in AMS. Of these: <b style={{ color: colors.green }}>{workableStats.callableNow} callable now</b> (open repair + verified phone, in the LUCA Call Queue), <b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b> (open repair, no shop phone on file yet), and <b style={{ color: colors.inkMuted }}>{workableStats.noOpenRepair} with no open repair ticket</b>. Ready rows show a Call button.
-            </div>
-            {/* The sweep's own sentence. It is NOT the same population as "need a
-                phone": a truck can need a phone and still be a pointless scrape
-                (we looked yesterday, the shop has none on file), and a truck with
-                a phone can still be queued because that phone belongs to a shop
-                the current PO superseded. One button, one number, stated here. */}
-            {sweep && (
-              <div title={sweep.title} style={{ fontSize: 12, color: colors.inkSoft, marginTop: 6, maxWidth: 760, cursor: "help" }}>
-                Holman delta sweep: <b style={{ color: sweep.mismatch > 0 ? colors.red : colors.amber }}>{sweep.found} truck{sweep.found === 1 ? "" : "s"} queued</b>
-                {sweep.mismatch > 0 ? <> · <b style={{ color: colors.red }}>{sweep.mismatch} still name a shop a newer PO superseded</b>, so LUCA would call the wrong shop about the repair</> : null}
-                {sweep.truncated ? ` · one pass works ${sweep.served}, most urgent first` : null}. Snowflake stays the base PO layer; this only re-reads Holman where that layer is missing or provably suspect.
-              </div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.inkSoft }}>
+            <span title="Everything NOT flagged Declined Repair / Sent To Auction in AMS — the rentals we still own and can act on.">
+              <b style={{ color: colors.ink }}>{workableStats.total}</b> workable of {basePool.length}
+            </span>
+            {workableStats.needPhone > 0 && (
+              <span title="Open repair, but no shop phone on file yet. These are what the scrape is for." style={{ cursor: "help" }}>
+                {" · "}<b style={{ color: colors.amber }}>{workableStats.needPhone} need a phone</b>
+              </span>
             )}
           </div>
           {sweep && (
