@@ -419,18 +419,18 @@ export default function InboundCalls() {
                     style={{ cursor: "pointer", background: selected === c.conversation_id ? colors.accentLight : undefined }}>
                     <td style={tdStyle}>{fmtDateTime(c.call_at)}</td>
                     <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{fmtDur(c.duration_secs)}</td>
-                    <td style={{ ...tdStyle, maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis" }} title={c.shop_name || ""}>{c.shop_name || <span style={{ color: colors.inkMuted }}>—</span>}</td>
-                    <td style={tdStyle}>{c.caller_name || <span style={{ color: colors.inkMuted }}>—</span>}</td>
+                    <td style={{ ...tdStyle, maxWidth: 190, overflow: "hidden", textOverflow: "ellipsis" }} title={c.shop_name || ""}>{c.shop_name || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}</td>
+                    <td style={tdStyle}>{c.caller_name || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}</td>
                     <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{fmtPhone(c.caller_phone)}</td>
-                    <td style={tdStyle}>{vehicleOf(c) || <span style={{ color: colors.inkMuted }}>—</span>}</td>
-                    <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{idOf(c) || <span style={{ color: colors.inkMuted }}>—</span>}</td>
+                    <td style={tdStyle}>{vehicleOf(c) || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}</td>
+                    <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{idOf(c) || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}</td>
                     <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontSize: 11.5 }}>
                       {c.matched_truck
                         ? <span title={`matched by ${c.match_method} (${c.match_confidence})`}>{c.matched_truck}{c.match_confidence === "low" && <span style={{ color: colors.amber }}> ?</span>}</span>
-                        : <span style={{ color: colors.inkMuted }}>—</span>}
+                        : <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}
                     </td>
                     <td style={{ ...tdStyle, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis" }} title={c.renter_name_raw || ""}>
-                      {c.renter_name_raw || <span style={{ color: colors.inkMuted }}>—</span>}
+                      {c.renter_name_raw || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}
                     </td>
                     <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{c.days_open ?? ""}</td>
                     <td style={tdStyle}><Pill text={tp.label} fg={tp.fg} bg={tp.bg} /></td>
@@ -487,17 +487,21 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
     },
   });
 
-  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em" };
-  const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
-  const btn: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "6px 10px", cursor: "pointer", color: colors.ink };
+  const label: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, fontWeight: 700, color: colors.inkSoft, textTransform: "uppercase", letterSpacing: "0.07em" };
+  const val: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13.5, color: colors.ink };
+  const btn: React.CSSProperties = { fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 500, background: colors.background, border: `1.5px solid ${colors.inkMuted}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer", color: colors.ink };
+  // Primary actions carry the accent so they are findable without hunting.
+  const btnPrimary: React.CSSProperties = { ...btn, borderColor: colors.accent, color: colors.accent, background: colors.accentLight, fontWeight: 600 };
+  // Each block sits on an inset panel so field groups are visually separable.
+  const section: React.CSSProperties = { background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 14, marginTop: 14 };
   const Row = ({ l, v }: { l: string; v: React.ReactNode }) => (
-    <div style={{ marginBottom: 10 }}><div style={label}>{l}</div><div style={val}>{v || <span style={{ color: colors.inkMuted }}>—</span>}</div></div>
+    <div style={{ marginBottom: 10 }}><div style={label}>{l}</div><div style={val}>{v || <span style={{ color: colors.inkSoft, opacity: 0.7 }}>—</span>}</div></div>
   );
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)", padding: 24 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(760px, 100%)", maxHeight: "88vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 14, boxShadow: "0 24px 64px rgba(0,0,0,0.35)", overflowY: "auto", padding: 24 }}>
+        style={{ width: "min(760px, 100%)", maxHeight: "88vh", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, boxShadow: "0 24px 64px rgba(0,0,0,0.55)", overflowY: "auto", padding: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <PhoneIncoming size={16} color={colors.accent} />
           <div style={{ fontFamily: fonts.syne, fontSize: 17, fontWeight: 700, color: colors.ink, flex: 1 }}>
@@ -519,7 +523,7 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 18px" }}>
+        <div style={{ ...section, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 18px" }}>
           <Row l="When" v={fmtDateTime(call.call_at)} />
           <Row l="Duration" v={fmtDur(call.duration_secs)} />
           <Row l="Caller" v={call.caller_name} />
@@ -534,8 +538,8 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
           <Row l="Amount" v={money(call.authorization_amount)} />
         </div>
 
-        <div style={{ borderTop: `1px solid ${colors.rule}`, marginTop: 8, paddingTop: 14 }}>
-          <div style={{ ...label, marginBottom: 8 }}>Fleet linkage</div>
+        <div style={section}>
+          <div style={{ ...label, marginBottom: 10 }}>Fleet linkage</div>
           {call.matched_truck ? (
             <div style={{ ...val, marginBottom: 8 }}>
               Truck <strong>{call.matched_truck}</strong> · matched by {call.match_method} ({call.match_confidence})
@@ -548,8 +552,8 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
           ) : <div style={{ ...val, color: colors.inkMuted, marginBottom: 8 }}>Not matched to a truck.</div>}
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <input value={truck} onChange={(e) => setTruck(e.target.value)} placeholder="truck #"
-              style={{ ...btn, width: 100, cursor: "text", fontFamily: fonts.jetbrains }} />
-            <button style={btn} disabled={busy} onClick={() => onLink(truck.trim() || null)}>Link</button>
+              style={{ ...btn, width: 110, cursor: "text", fontFamily: fonts.jetbrains, fontSize: 13, letterSpacing: "0.06em" }} />
+            <button style={btnPrimary} disabled={busy} onClick={() => onLink(truck.trim() || null)}>Link</button>
             <button style={btn} disabled={busy} onClick={() => { setTruck(""); onLink(null); }}>Clear match</button>
           </div>
           <div style={{ marginTop: 10 }}>
@@ -562,8 +566,8 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
           </div>
         </div>
 
-        <div style={{ borderTop: `1px solid ${colors.rule}`, marginTop: 14, paddingTop: 14 }}>
-          <div style={{ ...label, marginBottom: 8 }}>Disposition</div>
+        <div style={section}>
+          <div style={{ ...label, marginBottom: 10 }}>Disposition</div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
             {["NEW", "ACKNOWLEDGED", "ACTIONED", "DISMISSED"].map((s) => (
               <button key={s} style={{ ...btn, ...(call.status === s ? { borderColor: colors.accent, color: colors.accent } : {}) }}
@@ -576,7 +580,7 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
           </select>
           <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="note (optional)"
             style={{ ...btn, width: "100%", minHeight: 54, cursor: "text", fontFamily: fonts.dmSans }} />
-          <button style={{ ...btn, marginTop: 6, borderColor: colors.accent, color: colors.accent }}
+          <button style={{ ...btnPrimary, marginTop: 6 }}
             disabled={busy || !disp} onClick={() => onDisposition(disp, note || undefined)}>Record disposition</button>
           {call.actioned_by && (
             <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted, marginTop: 6 }}>
@@ -586,14 +590,14 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
         </div>
 
         {call.summary && (
-          <div style={{ borderTop: `1px solid ${colors.rule}`, marginTop: 14, paddingTop: 14 }}>
+          <div style={section}>
             <div style={{ ...label, marginBottom: 6 }}>Summary</div>
             <div style={{ ...val, lineHeight: 1.55 }}>{call.summary}</div>
           </div>
         )}
 
         {detail?.call?.transcript_text && (
-          <div style={{ borderTop: `1px solid ${colors.rule}`, marginTop: 14, paddingTop: 14 }}>
+          <div style={section}>
             <div style={{ ...label, marginBottom: 6 }}>Transcript</div>
             <pre style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.inkSoft, whiteSpace: "pre-wrap", lineHeight: 1.5, margin: 0 }}>
               {detail.call.transcript_text}
@@ -602,7 +606,7 @@ function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppres
         )}
 
         {!!detail?.events?.length && (
-          <div style={{ borderTop: `1px solid ${colors.rule}`, marginTop: 14, paddingTop: 14 }}>
+          <div style={section}>
             <div style={{ ...label, marginBottom: 6 }}>Activity</div>
             {detail.events.map((e: any, i: number) => (
               <div key={i} style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, marginBottom: 4 }}>
