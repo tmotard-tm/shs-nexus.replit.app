@@ -48,6 +48,7 @@ import passport from "passport";
 import { createSamlStrategy, generateSpMetadata, printSpDetails, getBaseUrl, getSamlConfig } from "./saml-config";
 import { isExternalFleetReadApiEnabled } from "./external-fleet-api/auth";
 import { registerExternalFleetReadApi } from "./external-fleet-api/router";
+import { registerNearbyTltProxy } from "./nearby-tlt-route";
 import {
   buildOpenRentalsReadModel,
   calcDaysOpen,
@@ -2551,6 +2552,37 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   });
 
   // Assets Queue Module routes
+  registerNearbyTltProxy(app, {
+    requireAuth,
+    hasAssetsAccess: async (user) => {
+      const currentUser = await storage.getUserByUsername(user.username);
+      return Boolean(currentUser && hasQueueAccess(currentUser, 'assets'));
+    },
+    resolveAssetsQueueEnterpriseId: async (itemId) => {
+      const item = await storage.getAssetsQueueItem(itemId);
+      if (!item) return { found: false };
+
+      let parsedData: any = {};
+      try {
+        parsedData = typeof item.data === 'string'
+          ? JSON.parse(item.data)
+          : (item.data || {});
+      } catch {}
+
+      return {
+        found: true,
+        enterpriseId:
+          parsedData?.enterpriseId ||
+          parsedData?.technician?.enterpriseId ||
+          parsedData?.technician?.techRacfid ||
+          parsedData?.employee?.enterpriseId ||
+          parsedData?.employee?.racfId ||
+          parsedData?.techRacfId ||
+          undefined,
+      };
+    },
+  });
+
   app.get("/api/assets-queue", requireAuth, async (req: any, res) => {
     const startTime = Date.now();
     try {

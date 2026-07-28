@@ -24,6 +24,15 @@ import {
   type Region,
   type RegionBasis,
 } from "./region";
+import {
+  loadWorkbookStates,
+  loadWorkbookHistory,
+  appendWorkbookEntry,
+  WORKBOOK_STATUSES,
+  WORKBOOK_STATUS_LABEL,
+  WORKBOOK_CLOSED_STATUSES,
+  type WorkbookState,
+} from "./workbook";
 
 // Coverage is a pure constant check that can only break if somebody edits the
 // state lists. Verified once at load: loud in the log, but it must never be able
@@ -44,6 +53,8 @@ export interface RegionalRow extends MasterRow {
   region_basis: RegionBasis;
   district_split: boolean;
   district_inferred: boolean;
+  /** The team's working state on this case. Never null — an unworked case reads 'new'. */
+  workbook: WorkbookState;
 }
 
 interface DistrictSummary {
@@ -95,6 +106,9 @@ async function loadTechHomeStates(): Promise<Map<string, string>> {
 }
 
 export function registerRegionRoutes(router: Router): void {
+  // Working state (status, notes, next action) lives in ./workbook.
+  registerWorkbookRoutes(router);
+
   /**
    * GET /api/vrm/rental-operations/by-region
    *
@@ -106,9 +120,10 @@ export function registerRegionRoutes(router: Router): void {
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      const [model, homeStates] = await Promise.all([
+      const [model, homeStates, workbooks] = await Promise.all([
         getRentalOpsMaster({ includeDropped }),
         loadTechHomeStates(),
+        loadWorkbookStates(),
       ]);
 
       // Attach the technician's home state BEFORE assigning regions — it is the
@@ -129,6 +144,10 @@ export function registerRegionRoutes(router: Router): void {
           region_basis: resolved.basis,
           district_split: resolved.districtSplit,
           district_inferred: resolved.districtInferred,
+          workbook: workbooks.get(String((r as any).case_key)) ?? {
+            status: "new", tech_said: null, issue: null, next_action: null,
+            follow_up_date: null, assigned_to: null, actor: null, updated_at: null,
+          },
         };
       });
 
@@ -190,11 +209,74 @@ export function registerRegionRoutes(router: Router): void {
         // Non-null only when someone has broken the state lists. The page shows
         // it rather than quietly reporting an inflated Unassigned count.
         coverageError: regionCoverageError,
+        // Vocabulary travels with the data so the page never hardcodes it.
+        workbookStatuses: WORKBOOK_STATUSES.map((k) => ({
+          key: k, label: WORKBOOK_STATUS_LABEL[k], closed: WORKBOOK_CLOSED_STATUSES.has(k),
+        })),
         rows,
       });
     } catch (e: any) {
       console.error("[VRM/RentalOps] by-region failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "by-region read failed" });
+    }
+  });
+}
+
+/* ------------------------------------------------------------------------ *
+ * Workbook endpoints — the team's working state on a case.
+ * Registered by registerRegionRoutes() below the read route.
+ * ------------------------------------------------------------------------ */
+
+/**
+ * Who is making this change. Mirrors actorOf() in ./routes.ts deliberately
+ * rather than importing it: that function is not exported, and this file is
+ * kept free of dependencies on the shared routes file.
+ *
+ * req.user WINS over the body so a live session cannot sign somebody else's
+ * name to a note.
+ */
+function workbookActor(req: any): string {
+  const u = req.user ?? {};
+  const b = req.body ?? {};
+  return (u.username || u.id || b.actor || "unknown").toString().trim() || "unknown";
+}
+
+export function registerWorkbookRoutes(router: Router): void {
+  // The status vocabulary, so the client never hardcodes it.
+  router.get("/rental-operations/workbook/statuses", (_req, res) => {
+    res.json({
+      statuses: WORKBOOK_STATUSES.map((s) => ({
+        key: s,
+        label: WORKBOOK_STATUS_LABEL[s],
+        closed: WORKBOOK_CLOSED_STATUSES.has(s),
+      })),
+    });
+  });
+
+  // Save working state on one case. Append-only: every save is a new row and
+  // the previous one stays as history.
+  router.post("/rental-operations/workbook/:caseKey", async (req, res) => {
+    try {
+      const caseKey = String(req.params.caseKey || "").trim();
+      if (!caseKey) return res.status(400).json({ error: "caseKey required" });
+      const result = await appendWorkbookEntry(caseKey, req.body ?? {}, workbookActor(req));
+      if (!result.ok) return res.status(400).json({ error: result.error });
+      res.json({ ok: true, caseKey, state: result.state });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] workbook save failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "workbook save failed" });
+    }
+  });
+
+  // Full audit trail for one case, newest first.
+  router.get("/rental-operations/workbook/:caseKey/history", async (req, res) => {
+    try {
+      const caseKey = String(req.params.caseKey || "").trim();
+      if (!caseKey) return res.status(400).json({ error: "caseKey required" });
+      res.json({ caseKey, history: await loadWorkbookHistory(caseKey) });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] workbook history failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "workbook history failed" });
     }
   });
 }

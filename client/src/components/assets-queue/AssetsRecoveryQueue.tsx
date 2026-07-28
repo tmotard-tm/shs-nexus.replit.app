@@ -16,6 +16,7 @@ import { useDebouncedSave } from "@/hooks/use-debounced-save";
 import { PickUpRequestDialog } from "@/components/pick-up-request-dialog";
 import { WorkModuleDialog } from "@/components/work-module-dialog";
 import { AssetsTaskDetailView } from "@/components/assets-queue/AssetsTaskDetailView";
+import { NearbyTltsCard } from "@/components/nearby-tlts-card";
 import { LoaDetailView } from "@/components/loa-recovery/LoaDetailView";
 import { inferVehicleType, parseLoaData } from "@/components/loa-recovery/loa-types";
 import { activeItemsForQueue } from "@/components/loa-recovery/loa-checklist-config";
@@ -774,6 +775,8 @@ function ExpandedRowDetails({
               )}
             </div>
           </div>
+
+          <NearbyTltsCard itemId={item.id} />
 
           <div className="space-y-3">
             <h4 className="text-sm font-semibold text-slate-900 uppercase tracking-wider flex items-center gap-2">
