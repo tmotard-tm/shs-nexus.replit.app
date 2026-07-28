@@ -1,7 +1,6 @@
 import {
   TrendingUp,
   MessagesSquare,
-  PhoneIncoming,
   ClipboardList,
   Wrench,
   Gauge,
@@ -115,6 +114,5 @@ export const navItems: NavItem[] = [
   { label: "Rental Operations", path: "/vehicle-rental-management/rental-operations", icon: Gauge },
   { label: "Cases by Region", path: "/vehicle-rental-management/cases-by-region", icon: MapPin },
   { label: "Rightsize Tracker", path: "/vehicle-rental-management/rightsize-tracker", icon: MessagesSquare },
-  { label: "Inbound Calls", path: "/vehicle-rental-management/inbound-calls", icon: PhoneIncoming },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];

@@ -49,12 +49,19 @@ export async function initInboundSchema(): Promise<void> {
       -- entities extracted from the transcript --------------------------------
       shop_name             TEXT,
       caller_name           TEXT,
+      shop_address          TEXT,
       callback_number       VARCHAR(24),
       callback_digits       VARCHAR(10),
       vehicle_make_model    TEXT,
+      vehicle_year          VARCHAR(4),       -- spoken, else derived from VIN pos 10
       vin                   VARCHAR(20),
       vin_last_8            VARCHAR(10),
       license_plate         VARCHAR(20),
+      plate_state           VARCHAR(2),
+      unit_number           VARCHAR(10),      -- caller-spoken Holman truck number
+      ro_number             VARCHAR(20),      -- the shop's repair-order number
+      escalation_flags      JSONB NOT NULL DEFAULT '[]'::jsonb,
+      next_steps            TEXT,
 
       summary               TEXT,
       transcript_text       TEXT,
@@ -83,6 +90,30 @@ export async function initInboundSchema(): Promise<void> {
       updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  // Additive and idempotent, following server/vrm/rightsize/schema.ts: columns
+  // added after the table first shipped must be ALTERed in as well, or an
+  // environment that already created the table never gets them. Safe to run on
+  // every boot.
+  for (const [col, type] of [
+    ["shop_address", "TEXT"],
+    ["vehicle_year", "VARCHAR(4)"],
+    ["plate_state", "VARCHAR(2)"],
+    ["unit_number", "VARCHAR(10)"],
+    ["ro_number", "VARCHAR(20)"],
+    ["escalation_flags", "JSONB"],
+    ["next_steps", "TEXT"],
+  ] as const) {
+    await db.execute(sql.raw(`ALTER TABLE vrm_inbound_calls ADD COLUMN IF NOT EXISTS ${col} ${type};`));
+  }
+
+  // WIDEN the caller identifier columns. VARCHAR(24) rejected 21 of 385 real
+  // conversations on the first backfill: ElevenLabs `user_id` is not always an
+  // E.164 phone number, it can be a SIP URI or a long opaque id. Widening a
+  // varchar is non-destructive (no truncation, no rewrite of valid rows) and is
+  // the one ALTER COLUMN this module performs, on its own table only.
+  await db.execute(sql`ALTER TABLE vrm_inbound_calls ALTER COLUMN caller_phone TYPE VARCHAR(128);`);
+  await db.execute(sql`ALTER TABLE vrm_inbound_calls ALTER COLUMN callback_number TYPE VARCHAR(128);`);
+
   // The page's default view is "open work, newest first".
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_inbound_status ON vrm_inbound_calls (status, call_at DESC);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_inbound_call_at ON vrm_inbound_calls (call_at DESC);`);

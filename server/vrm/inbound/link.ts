@@ -33,7 +33,14 @@ export function padTruck(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const digits = String(raw).replace(/[^0-9]/g, "").replace(/^0+/, "");
   if (!digits) return null;
-  return digits.padStart(5, "0").slice(-5);
+  // REJECT rather than truncate. The old `.slice(-5)` turned "616534" into
+  // "16534" and returned it with method="unit", confidence="high", which
+  // attaches the call to a REAL BUT WRONG TRUCK. Downstream that suppresses
+  // LUCA outbound calling on an unrelated truck and shows another technician's
+  // rental in the drawer. case_key is VARCHAR(10), so there was never a width
+  // reason to truncate.
+  if (digits.length > 5) return null;
+  return digits.padStart(5, "0");
 }
 
 /**
@@ -48,11 +55,22 @@ async function vehicleCacheColumns(): Promise<Set<string>> {
     const r = await db.execute(sql`
       SELECT column_name FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'holman_vehicles_cache'`);
-    cachedCols = new Set((r.rows as any[]).map((x) => String(x.column_name)));
-  } catch {
-    cachedCols = new Set();
+    // `?? []` guards the Neon quirk where a query can hand back null instead of
+    // an empty array, which would throw on .map and poison the cache below.
+    const cols = new Set(((r as any)?.rows ?? []).map((x: any) => String(x.column_name)));
+    if (cols.size) cachedCols = cols;   // only memoize a SUCCESSFUL probe
+    return cols;
+  } catch (e: any) {
+    // NEVER memoize the failure. The old code did `cachedCols = new Set()`, and
+    // an empty Set is truthy, so a single transient error — most likely at the
+    // boot sync 60s into startup, the most contended moment — permanently
+    // disabled ALL VIN/plate matching for the life of the process, silently.
+    // Every ingest would record matched_truck=NULL and relink could not repair
+    // it because relink calls this same function. At ~1 call/day, re-probing is
+    // free and the next call self-heals.
+    console.warn("[VRM/Inbound] holman_vehicles_cache column probe failed:", e?.message || e);
+    return new Set();
   }
-  return cachedCols;
 }
 
 function firstPresent(cols: Set<string>, candidates: string[]): string | null {

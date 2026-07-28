@@ -34,7 +34,12 @@ async function el(path: string): Promise<any | null> {
   const key = apiKey();
   if (!key) return null;
   try {
-    const res = await fetch(`${API}${path}`, { headers: { "xi-api-key": key } });
+    // Timeout: without it a hung ElevenLabs request wedges the poller, and the
+    // 10-minute interval then stacks a second run on top of the first.
+    const res = await fetch(`${API}${path}`, {
+      headers: { "xi-api-key": key },
+      signal: AbortSignal.timeout(30_000),
+    });
     if (!res.ok) {
       console.warn(`[VRM/Inbound] ElevenLabs ${path} -> ${res.status}`);
       return null;
@@ -86,9 +91,19 @@ export interface SyncResult {
  * paging once they hit a conversation we already have, because the list endpoint
  * returns newest-first.
  */
+let syncInFlight = false;
+
 export async function runInboundSync(opts: { trigger?: string; full?: boolean } = {}): Promise<SyncResult> {
   const trigger = opts.trigger || "manual";
   const out: SyncResult = { scanned: 0, ingested: 0, skipped: 0, linked: 0, errors: 0, trigger };
+  // A slow backfill must not have the 10-minute interval stack a second pass on
+  // top of it; two concurrent runs would both see the same unseen conversations.
+  if (syncInFlight) {
+    console.log(`[VRM/Inbound] sync(${trigger}) skipped, a run is already in flight`);
+    return out;
+  }
+  syncInFlight = true;
+  try {
   if (!apiKey()) {
     console.warn("[VRM/Inbound] FS_ELEVENLABS_API_KEY not configured; sync skipped");
     return out;
@@ -100,16 +115,23 @@ export async function runInboundSync(opts: { trigger?: string; full?: boolean } 
   let cursor: string | null = null;
   let stop = false;
   let pages = 0;
+  // Tracks whether paging ended because the API SAID it was done, as opposed to
+  // ending because a request failed. Only a clean finish may mark the backfill
+  // complete. Without this a 429 on page 3 silently truncated the 60-day
+  // backfill, flipped `backfilled=true`, and every later run went incremental
+  // and stopped on page 1 — pages 3+ never ingested, never retried, and
+  // inboundSyncState() still reported errors:0 so the hole was invisible.
+  let cleanFinish = false;
 
   while (!stop && pages < 40) {
     pages++;
     const qs = new URLSearchParams({ agent_id: INBOUND_AGENT_ID, page_size: "100" });
     if (cursor) qs.set("cursor", cursor);
     const page = await el(`/conversations?${qs.toString()}`);
-    if (!page) break;
+    if (!page) { out.errors++; break; }   // request failed: NOT a clean finish
 
     const convos: any[] = page.conversations || [];
-    if (!convos.length) break;
+    if (!convos.length) { cleanFinish = true; break; }
 
     for (const c of convos) {
       const cid = c.conversation_id;
@@ -133,15 +155,21 @@ export async function runInboundSync(opts: { trigger?: string; full?: boolean } 
       }
     }
 
-    if (!page.has_more || !page.next_cursor) break;
+    if (!page.has_more || !page.next_cursor) { cleanFinish = true; break; }
+    if (page.next_cursor === cursor) { cleanFinish = true; break; }  // cursor not advancing: stop rather than loop
     cursor = page.next_cursor;
   }
 
-  if (full && !out.errors) await setState("backfilled", "true");
+  // `stop` means we hit an already-known conversation on an incremental run,
+  // which is also a legitimate finish.
+  if (full && cleanFinish && !out.errors) await setState("backfilled", "true");
   await setState("last_sync_at", new Date().toISOString());
   await setState("last_sync_result", JSON.stringify(out));
   console.log(`[VRM/Inbound] sync(${trigger}) scanned=${out.scanned} ingested=${out.ingested} linked=${out.linked} skipped=${out.skipped} errors=${out.errors}`);
   return out;
+  } finally {
+    syncInFlight = false;
+  }
 }
 
 async function ingestOne(cid: string, summaryRow: any, out: SyncResult): Promise<void> {
@@ -173,8 +201,9 @@ async function ingestOne(cid: string, summaryRow: any, out: SyncResult): Promise
       caller_phone, caller_phone_digits,
       call_type, vehicle_status, action_recommendation, priority_level,
       authorization_amount, parts_status, classified_by, classified_at,
-      shop_name, caller_name, callback_number, callback_digits,
-      vehicle_make_model, vin, vin_last_8, license_plate,
+      shop_name, caller_name, shop_address, callback_number, callback_digits,
+      vehicle_make_model, vehicle_year, vin, vin_last_8, license_plate,
+      plate_state, unit_number, ro_number, escalation_flags, next_steps,
       summary, transcript_text, raw_json,
       matched_truck, matched_case_key, match_method, match_confidence, matched_at,
       status
@@ -183,8 +212,10 @@ async function ingestOne(cid: string, summaryRow: any, out: SyncResult): Promise
       ${callerPhone}, ${digits(callerPhone)},
       ${c.call_type}, ${c.vehicle_status}, ${c.action_recommendation}, ${c.priority_level},
       ${c.authorization_amount}, ${c.parts_status}, ${c.classified_by}, NOW(),
-      ${c.shop_name}, ${c.caller_name}, ${c.callback_number}, ${digits(c.callback_number)},
-      ${c.vehicle_make_model}, ${c.vin}, ${c.vin_last_8}, ${c.license_plate},
+      ${c.shop_name}, ${c.caller_name}, ${c.shop_address}, ${c.callback_number}, ${digits(c.callback_number)},
+      ${c.vehicle_make_model}, ${c.vehicle_year}, ${c.vin}, ${c.vin_last_8}, ${c.license_plate},
+      ${c.plate_state}, ${c.unit_number}, ${c.ro_number},
+      ${JSON.stringify(c.escalation_flags || [])}::jsonb, ${c.next_steps},
       ${summary}, ${transcriptText}, ${JSON.stringify({
         unit_number: c.unit_number,
         plate_state: c.plate_state,
@@ -209,7 +240,7 @@ async function ingestOne(cid: string, summaryRow: any, out: SyncResult): Promise
  */
 export async function relinkUnmatched(limit = 200): Promise<{ examined: number; linked: number }> {
   const r = await db.execute(sql`
-    SELECT conversation_id, vin, vin_last_8, license_plate, raw_json
+    SELECT conversation_id, vin, vin_last_8, license_plate, unit_number
     FROM vrm_inbound_calls
     WHERE matched_truck IS NULL AND match_method <> 'manual' AND call_type <> 'JUNK'
     ORDER BY call_at DESC LIMIT ${limit}`);
@@ -217,7 +248,7 @@ export async function relinkUnmatched(limit = 200): Promise<{ examined: number; 
   const rows = r.rows as any[];
   for (const row of rows) {
     const link = await linkInboundCall({
-      unit_number: row.raw_json?.unit_number ?? null,
+      unit_number: row.unit_number ?? null,
       vin: row.vin, vin_last_8: row.vin_last_8, license_plate: row.license_plate,
     });
     if (!link.matched_truck) continue;

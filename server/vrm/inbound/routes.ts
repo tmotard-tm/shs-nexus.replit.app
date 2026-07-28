@@ -64,16 +64,21 @@ export function registerInboundRoutes(router: Router): void {
     try {
       const kpi = await db.execute(sql`
         SELECT
-          COUNT(*)                                                            AS total,
-          COUNT(*) FILTER (WHERE call_type <> 'JUNK')                         AS real_calls,
-          COUNT(*) FILTER (WHERE status = 'NEW' AND call_type <> 'JUNK')      AS open_new,
-          COUNT(*) FILTER (WHERE call_type = 'READY' AND status IN ('NEW','ACKNOWLEDGED'))       AS ready_open,
-          COUNT(*) FILTER (WHERE call_type = 'AUTHORIZATION' AND status IN ('NEW','ACKNOWLEDGED')) AS auth_open,
-          COALESCE(SUM(authorization_amount) FILTER (WHERE call_type = 'AUTHORIZATION' AND status IN ('NEW','ACKNOWLEDGED')), 0) AS auth_open_dollars,
-          COUNT(*) FILTER (WHERE matched_truck IS NOT NULL)                   AS matched,
-          COUNT(*) FILTER (WHERE matched_truck IS NULL AND call_type <> 'JUNK') AS unmatched,
-          COUNT(*) FILTER (WHERE suppress_luca)                               AS suppressing,
-          MAX(call_at)                                                        AS newest_call
+          COUNT(*)::int                                                       AS total,
+          COUNT(*) FILTER (WHERE call_type <> 'JUNK')::int                    AS real_calls,
+          COUNT(*) FILTER (WHERE status = 'NEW' AND call_type <> 'JUNK')::int AS open_new,
+          COUNT(*) FILTER (WHERE call_type = 'READY' AND status IN ('NEW','ACKNOWLEDGED'))::int  AS ready_open,
+          COUNT(*) FILTER (WHERE call_type = 'AUTHORIZATION' AND status IN ('NEW','ACKNOWLEDGED'))::int AS auth_open,
+          COUNT(*) FILTER (WHERE call_type = 'PARTS_UPDATE' AND status IN ('NEW','ACKNOWLEDGED'))::int AS parts_open,
+          COUNT(*) FILTER (WHERE call_type = 'TOW_RECOVERY' AND status IN ('NEW','ACKNOWLEDGED'))::int AS tow_open,
+          COUNT(*) FILTER (WHERE call_type = 'CALLBACK_REQUEST' AND status IN ('NEW','ACKNOWLEDGED'))::int AS callback_open,
+          COUNT(*) FILTER (WHERE jsonb_array_length(COALESCE(escalation_flags,'[]'::jsonb)) > 0
+                             AND status IN ('NEW','ACKNOWLEDGED'))::int                    AS flagged_open,
+          COALESCE(SUM(authorization_amount) FILTER (WHERE call_type = 'AUTHORIZATION' AND status IN ('NEW','ACKNOWLEDGED')), 0)::float8 AS auth_open_dollars,
+          COUNT(*) FILTER (WHERE matched_truck IS NOT NULL AND call_type <> 'JUNK')::int AS matched,
+          COUNT(*) FILTER (WHERE matched_truck IS NULL AND call_type <> 'JUNK')::int AS unmatched,
+          COUNT(*) FILTER (WHERE suppress_luca AND (suppress_until IS NULL OR suppress_until > NOW()))::int AS suppressing,
+          to_char(MAX(call_at) AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"')          AS newest_call
         FROM vrm_inbound_calls`);
       const byType = await db.execute(sql`SELECT call_type, COUNT(*)::int AS n FROM vrm_inbound_calls GROUP BY 1 ORDER BY 2 DESC`);
       const byStatus = await db.execute(sql`SELECT status, COUNT(*)::int AS n FROM vrm_inbound_calls GROUP BY 1 ORDER BY 2 DESC`);
@@ -97,22 +102,25 @@ export function registerInboundRoutes(router: Router): void {
     try {
       const includeJunk = String(req.query.include_junk || "") === "true";
       const r = await db.execute(sql`
-        SELECT c.conversation_id, c.call_at, c.duration_secs, c.caller_phone, c.callback_number,
+        SELECT c.conversation_id, c.duration_secs, c.caller_phone, c.callback_number,
                c.call_type, c.vehicle_status, c.action_recommendation, c.priority_level,
-               c.authorization_amount, c.parts_status,
-               c.shop_name, c.caller_name, c.vehicle_make_model,
-               c.vin, c.vin_last_8, c.license_plate, c.summary,
+               c.authorization_amount::float8 AS authorization_amount, c.parts_status,
+               to_char(c.call_at    AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS call_at,
+               to_char(c.actioned_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS actioned_at,
+               to_char(c.suppress_until AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS suppress_until,
+               c.shop_name, c.caller_name, c.shop_address, c.vehicle_make_model,
+               c.vehicle_year, c.vin, c.vin_last_8, c.license_plate, c.plate_state,
+               c.unit_number, c.ro_number, c.escalation_flags, c.next_steps, c.summary,
                c.matched_truck, c.matched_case_key, c.match_method, c.match_confidence,
-               c.status, c.disposition, c.disposition_note, c.actioned_by, c.actioned_at,
-               c.suppress_luca, c.suppress_until,
-               c.raw_json->>'unit_number'    AS unit_number,
-               c.raw_json->>'plate_state'    AS plate_state,
+               c.status, c.disposition, c.disposition_note, c.actioned_by,
+               c.suppress_luca,
                c.raw_json->>'shop_city_state' AS shop_city_state,
+               c.raw_json->>'reason_text'    AS reason_text,
                c.raw_json->>'update_text'    AS update_text,
                rc.renter_name_raw, rc.rental_vendor, rc.days_open, rc.ticket_status,
                rc.veh_desc, rc.district, rc.present_in_latest
         FROM vrm_inbound_calls c
-        LEFT JOIN vrm_rental_operations_cases rc ON rc.case_key = c.matched_case_key
+        LEFT JOIN vrm_rental_operations_cases rc ON rc.case_key = c.matched_truck
         WHERE (${includeJunk} OR c.call_type <> 'JUNK')
         ORDER BY c.call_at DESC NULLS LAST
         LIMIT 2000`);
@@ -194,18 +202,27 @@ export function registerInboundRoutes(router: Router): void {
       const actor = actorOf(req);
       const rawTruck = req.body?.truck == null ? null : String(req.body.truck);
 
-      if (!rawTruck) {  // unlink -> fall back to automatic resolution
-        const auto = await linkInboundCall({ vin: row.vin, vin_last_8: row.vin_last_8, license_plate: row.license_plate, unit_number: row.raw_json?.unit_number ?? null });
+      if (!rawTruck) {
+        // Explicit operator clear = "this call belongs to no truck". Recorded as
+        // match_method='manual' with a NULL truck so relinkUnmatched (which only
+        // skips 'manual') cannot silently re-attach the same wrong truck, and so
+        // re-running automatic resolution does not just hand back the value the
+        // operator just rejected.
         await db.execute(sql`
-          UPDATE vrm_inbound_calls SET matched_truck = ${auto.matched_truck}, matched_case_key = ${auto.matched_case_key},
-            match_method = ${auto.match_method}, match_confidence = ${auto.match_confidence}, matched_at = NOW(), updated_at = NOW()
+          UPDATE vrm_inbound_calls
+          SET matched_truck = NULL, matched_case_key = NULL,
+              match_method = 'manual', match_confidence = NULL,
+              suppress_luca = FALSE, suppress_until = NULL,
+              matched_at = NOW(), updated_at = NOW()
           WHERE conversation_id = ${req.params.id}`);
-        await logEvent(req.params.id, "link", row.matched_truck, auto.matched_truck, "manual link cleared", actor);
-        return res.json({ ok: true, ...auto });
+        await logEvent(req.params.id, "link", row.matched_truck, null, "operator cleared the match (no truck)", actor);
+        return res.json({ ok: true, matched_truck: null, matched_case_key: null, match_method: "manual" });
       }
 
       const truck = padTruck(rawTruck);
-      if (!truck) return res.status(400).json({ error: "truck must contain digits" });
+      // padTruck REJECTS anything over 5 digits rather than truncating it, so a
+      // typo like 616534 is a 400 instead of silently becoming truck 16534.
+      if (!truck) return res.status(400).json({ error: "truck must be 1-5 digits" });
       const caseRow = await db.execute(sql`SELECT case_key FROM vrm_rental_operations_cases WHERE case_key = ${truck} LIMIT 1`);
       const caseKey = (caseRow.rows as any[])[0]?.case_key ?? null;
       await db.execute(sql`

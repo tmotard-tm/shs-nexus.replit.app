@@ -3,7 +3,6 @@ import { db } from "../db";
 import { sql, eq, gte, lte, and, desc } from "drizzle-orm";
 import { registerRentalOperationsRoutes } from "./rental-operations/routes";
 import { registerRightsizeRoutes } from "./rightsize/routes";
-import { registerInboundRoutes } from "./inbound/routes";
 import { registerExecutiveSummaryRoutes } from "./executive-summary/routes";
 import {
   listTechs,
@@ -2801,7 +2800,6 @@ export function registerVrmRoutes(): Router {
   // VRM Rental Operations V2 (clean-room) — additive routes under /rental-operations/*
   registerRentalOperationsRoutes(router);
   registerRightsizeRoutes(router);
-  registerInboundRoutes(router);
   registerExecutiveSummaryRoutes(router);
 
   return router;

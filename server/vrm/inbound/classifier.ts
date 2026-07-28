@@ -59,10 +59,56 @@ export interface InboundClassification {
   license_plate: string | null;
   plate_state: string | null;
   unit_number: string | null;   // Holman truck number, spoken by the caller = direct case_key
+  vehicle_year: string | null;  // spoken, else DERIVED from VIN position 10
+  ro_number: string | null;     // the shop's own repair-order / work-order number
+  shop_address: string | null;
+  escalation_flags: string[];   // authorization_needed | high_cost | long_eta | ...
+  next_steps: string | null;    // the concrete action the fleet team should take
   reason_text: string | null;   // the caller's own words for why they called
   update_text: string | null;   // the caller's own words for the vehicle update
   classified_by: "heuristic";
 }
+
+/**
+ * VIN position 10 is the model-year code (ISO 3779). Deriving it beats waiting
+ * for a caller to volunteer the year: the inbound agent's script never asks for
+ * the year, so on the 2026-07-27 corpus it was almost never spoken, but a VIN or
+ * a full-VIN lookup gives it deterministically.
+ *
+ * The code cycles every 30 years, so each letter maps to two candidate years.
+ * Sears' fleet is vans in service now, so the modern year wins; anything that
+ * would resolve to the future is pulled back a cycle.
+ */
+const VIN_YEAR_CODES = "ABCDEFGHJKLMNPRSTVWXY123456789";
+export function yearFromVin(vin: string | null | undefined): string | null {
+  // EXACTLY 17. A transcription-damaged VIN (the corpus contains a 16-char
+  // "1GC5GFX2C1142394") has lost a character, so its 10th position is no longer
+  // the year code and decoding it yields a confident wrong year — 2001 for a van
+  // that is actually a 2012. Same never-guess rule as the outbound agent: no
+  // year is strictly better than a wrong one.
+  if (!vin || vin.length !== 17) return null;
+  const c = vin.toUpperCase()[9];
+  const i = VIN_YEAR_CODES.indexOf(c);
+  if (i < 0) return null;
+  // 1980 + index, then advance by 30-year cycles into the plausible fleet window.
+  let y = 1980 + i;
+  const currentYear = 2026;
+  while (y + 30 <= currentYear + 1) y += 30;
+  return String(y);
+}
+
+// Mirrors the categories the old luca-ai-monitor analyzer emitted, so the
+// replacement page shows the same vocabulary operators already recognise.
+const ESCALATION_PATTERNS: Array<[string, RegExp]> = [
+  ["authorization_needed", /\b(approv\w*|authoriz\w*|need (a |an )?(ok|okay|go[- ]?ahead|sign[- ]?off)|waiting (on|for) (approval|authorization))\b/i],
+  ["high_cost", /\$\s?[0-9][0-9,]{3,}|\b[0-9][0-9,]{3,}\s*dollars\b|\b(expensive|costly|long block|new engine|new transmission)\b/i],
+  ["long_eta", /\b(\d+\s*(week|month)s?|back ?order\w*|no eta|not sure when|could be a while)\b/i],
+  ["frustrated_caller", /\b(frustrat\w*|ridiculous|unacceptable|been (sitting|waiting)|nobody (has |ever )?call|third time|again and again)\b/i],
+  ["billing_issue", /\b(invoice|billing|bill|payment|who('?s| is) paying|purchase order|p\.?o\.? number)\b/i],
+  ["major_complication", /\b(needs? (an? )?(engine|transmission|motor)|total\w*|not repairable|has to go to the dealer|another shop|body shop)\b/i],
+  ["vehicle_not_found", /\b(don'?t have (it|any)|not here|no vehicle|can'?t find|nothing under)\b/i],
+  ["tow_required", /\b(tow\w*|needs? to be (moved|towed|transported)|abandon\w*)\b/i],
+];
 
 export interface TranscriptTurn {
   role?: string | null;
@@ -255,6 +301,11 @@ export function classifyInboundCall(
       license_plate: null,
       plate_state: null,
       unit_number: null,
+      vehicle_year: null,
+      ro_number: null,
+      shop_address: null,
+      escalation_flags: [],
+      next_steps: null,
       reason_text,
       update_text: null,
       classified_by: "heuristic",
@@ -440,11 +491,59 @@ export function classifyInboundCall(
   if (cbM) callback_number = digitsOf(cbM[1]);
   if (!callback_number) callback_number = digitsOf(callerPhone);
 
+  // ── year: spoken if we can get it, otherwise derived from the VIN ──────────
+  // The interview script never asks for the year, so it is rarely volunteered.
+  // A VIN gives it deterministically, which is why derivation is the primary
+  // path here rather than the fallback.
+  let vehicle_year: string | null = null;
+  const spokenYear = /\b(19[89]\d|20[0-3]\d)\b/.exec(allUser);
+  if (spokenYear) vehicle_year = spokenYear[1];
+  if (!vehicle_year) vehicle_year = yearFromVin(vin);
+
+  // ── repair-order number ───────────────────────────────────────────────────
+  let ro_number: string | null = null;
+  const roM = /\b(?:r\.?o\.?|repair order|work order|ticket|order)\s*(?:number|#|no\.?|is)?\s*[:#]?\s*([A-Z0-9][A-Z0-9-]{2,12})\b/i.exec(allUser);
+  if (roM && /[0-9]/.test(roM[1])) ro_number = roM[1].toUpperCase();
+
+  // ── shop address: street line if given, else the city/state answer ─────────
+  let shop_address: string | null = null;
+  const addrM = /\b(\d{2,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s*(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Place|Pl|Court|Ct|Highway|Hwy|Route|Rte)\b\.?)/i.exec(allUser);
+  if (addrM) shop_address = clean(addrM[1]);
+  if (shop_address && shop_city_state) shop_address = `${shop_address}, ${shop_city_state}`;
+  if (!shop_address) shop_address = shop_city_state;
+
+  // ── escalation flags ──────────────────────────────────────────────────────
+  const flagSource = `${allUser} ${summary || ""}`;
+  const escalation_flags = ESCALATION_PATTERNS.filter(([, re]) => re.test(flagSource)).map(([k]) => k);
+  // An explicit dollar amount on an authorization is always high_cost even if
+  // the wording is mild.
+  if (authorization_amount && authorization_amount >= 1000 && !escalation_flags.includes("high_cost")) {
+    escalation_flags.push("high_cost");
+  }
+  if (escalation_flags.length && priority_level === "LOW") priority_level = "HIGH";
+
+  // ── next steps: one concrete instruction for whoever works the queue ───────
+  const who = shop_name || "the shop";
+  const veh = [vehicle_year, vehicle_make_model].filter(Boolean).join(" ") || "the vehicle";
+  const idPart = unit_number ? `unit ${unit_number}` : license_plate ? `plate ${license_plate}` : vin_last_8 ? `VIN ...${vin_last_8}` : "no identifier given";
+  const NEXT: Record<string, string> = {
+    SCHEDULE_PICKUP: `Arrange pickup of ${veh} (${idPart}) from ${who} and close the rental.`,
+    APPROVE_WORK: `Review and approve the repair at ${who} for ${veh} (${idPart})${authorization_amount ? ` — $${authorization_amount}` : ""}. The truck is blocked until this is answered.`,
+    ARRANGE_TOW: `Arrange transport for ${veh} (${idPart}) away from ${who}.`,
+    RETURN_CALL: `Call ${who} back${callback_number ? ` at ${callback_number}` : ""}; they asked for a person.`,
+    FOLLOW_UP: `Follow up with ${who} on parts for ${veh} (${idPart}).`,
+    ESCALATE: `Escalate: ${who} is dissatisfied regarding ${veh} (${idPart}).`,
+    REVIEW: `Read the transcript and decide — the reason for this call was not clear.`,
+    NO_ACTION: `No action needed.`,
+  };
+  const next_steps = NEXT[action_recommendation] ?? null;
+
   return {
     call_type, vehicle_status, action_recommendation, priority_level,
     authorization_amount, parts_status,
     shop_name, caller_name, shop_city_state, callback_number,
     vehicle_make_model, vin, vin_last_8, license_plate, plate_state, unit_number,
+    vehicle_year, ro_number, shop_address, escalation_flags, next_steps,
     reason_text, update_text,
     classified_by: "heuristic",
   };
