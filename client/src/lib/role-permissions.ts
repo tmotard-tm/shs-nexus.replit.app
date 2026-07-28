@@ -28,6 +28,7 @@ export const DEFAULT_SUPERADMIN_PERMISSIONS: RolePermissionSettings = {
       operationsDash: true,
       rentalReductionDash: true,
       reporting: true,
+      poHistoryDash: true,
     },
     queues: {
       enabled: true,
@@ -171,6 +172,7 @@ export const DEFAULT_ADMIN_PERMISSIONS: RolePermissionSettings = {
       operationsDash: true,
       rentalReductionDash: true,
       reporting: false,
+      poHistoryDash: true,
     },
     queues: {
       enabled: true,
@@ -313,6 +315,7 @@ export const DEFAULT_AGENT_PERMISSIONS: RolePermissionSettings = {
       operationsDash: false,
       rentalReductionDash: false,
       reporting: false,
+      poHistoryDash: false,
     },
     queues: {
       enabled: true,
@@ -516,6 +519,7 @@ export function checkRouteAccess(user: User | null, route: string, permissions?:
     '/analytics-board': () => perms.sidebar.dashboards.vehicleAssignmentDash,
     '/rental-dashboard': () => perms.sidebar.dashboards.rentalReductionDash,
     '/reporting': () => perms.sidebar.dashboards.reporting,
+    '/po-history-dashboard': () => !!perms.sidebar.dashboards.poHistoryDash,
     '/rental-operations': () => perms.sidebar.management.rentalOperations,
     '/vehicle-rental-management': () => !!perms.sidebar.vehicleRentalManagement,
     '/samsara-integration': () => perms.sidebar.management.integrations,

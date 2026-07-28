@@ -65,6 +65,7 @@ export interface RolePermissionSettings {
       operationsDash: boolean;
       rentalReductionDash: boolean;
       reporting: boolean;
+      poHistoryDash: boolean;
     };
     queues: {
       enabled: boolean;
@@ -1208,6 +1209,7 @@ export const rolePermissionSettingsSchema = z.object({
       vehicleAssignmentDash: z.boolean(),
       operationsDash: z.boolean(),
       rentalReductionDash: z.boolean(),
+      poHistoryDash: z.boolean().optional(),
     }),
     queues: z.object({
       enabled: z.boolean(),

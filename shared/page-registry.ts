@@ -416,6 +416,15 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "reporting",
   },
   {
+    key: "poHistoryDash",
+    label: "PO History Dashboard",
+    description: "Holman purchase order history — spend by vendor, ATA group, and vehicle",
+    path: "/po-history-dashboard",
+    icon: FileText,
+    category: "dashboards",
+    permissionKey: "poHistoryDash",
+  },
+  {
     key: "activityLogs",
     label: "Activity Logs",
     description: "View user activity and audit logs",

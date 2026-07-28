@@ -65,6 +65,7 @@ import WmsEngine from "@/pages/wms-engine";
 import FieldMapping from "@/pages/field-mapping";
 import ActivityLogs from "@/pages/activity-logs";
 import Reporting from "@/pages/reporting";
+import PoHistoryDashboard from "@/pages/po-history-dashboard";
 import CommunicationHub from "@/pages/communication-hub";
 import FleetCommunications from "@/pages/fleet-communications";
 import TestRepairResults from "@/pages/test-repair-results";
@@ -550,6 +551,14 @@ function Router() {
         <ProtectedRoute>
           <MainContent>
             <Reporting />
+          </MainContent>
+        </ProtectedRoute>
+      </Route>
+
+      <Route path="/po-history-dashboard">
+        <ProtectedRoute>
+          <MainContent>
+            <PoHistoryDashboard />
           </MainContent>
         </ProtectedRoute>
       </Route>
