@@ -186,7 +186,7 @@ const PENDING_EXPORTS_PATH = "/api/pending-exports";
  * documents 61, 37 and 38, and the May production doc sends "38" carrying a
  * Duration. If the owner says otherwise this constant is the only edit.
  */
-export const RENTAL_RETURN_ACTIVITY_TYPE = "38";
+export const RENTAL_RETURN_ACTIVITY_TYPE = "46";
 
 /** Two hours, matching what Eddie described on the 2026-07-27 call. */
 export const RENTAL_RETURN_DURATION_MIN = 120;

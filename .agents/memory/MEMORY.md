@@ -57,5 +57,6 @@
 - [TPMS district mirror staleness](tpms-district-mirror-staleness.md) — truck-driven refresh never re-queries district-only transfers, so tpms_tech_profiles district goes stale; district decisions must live-check TPMS + heal the mirror.
 - [Assign target validation](assign-target-validation.md) — every assign entry point must run server-side truck validation (format/exists/status/lock); UI-only guards let "byov" diverge TPMS/Holman.
 - [Holman write-fence supersede](holman-write-fence-supersede.md) — fences outlive their correction when a newer op lands; release only on live-confirmed newer submissions, NEVER on cache confirms (fence pins the cache = circular evidence).
+- [Spares pool & INTERIOR source](spares-pool-interior.md) — unassigned pool derived locally (holman cache minus tpms occupied, BYOV excluded, Snowflake fallback guards); rack INTERIOR only in fs_all_vehicles_mirror — holman cache interior is a 'Standard' default.
 - [Mismatch cache cold-start pinning](mismatch-cache-cold-start.md) — TTL caches over synced mirrors pin stale results on autoscale cold boots; invalidate via a shared epoch bumped after every mirror rewrite.
 - [Holman phantom cache rows](holman-phantom-cache-rows.md) — upsert-only sync never removes failed-assign manual rows; self-heal keys on manual+never-synced, NOT number format (real Holman numbers can be alphanumeric).

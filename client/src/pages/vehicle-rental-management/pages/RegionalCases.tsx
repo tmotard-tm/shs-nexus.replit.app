@@ -332,6 +332,35 @@ const COHORTS: Array<{ key: string; label: string }> = [
 ];
 const isDeclinedAuction = (b: string) => b === "declined" || b === "auction";
 
+/**
+ * Why a dead-end case is still in the queue.
+ *
+ * Declined and auction cases are normally noise: the van is not coming back, so
+ * there is nothing to recover. The Hide toggles drop them. What survives is the
+ * subset where the technician is assigned a DIFFERENT truck — the case did not
+ * end, it MOVED. Without this column those rows look identical to the ones that
+ * were filtered out, and a lead has no way to tell why the queue kept them.
+ *
+ * The distinction that matters is whether the truck they moved to has a repair
+ * PO on it. No PO is an escalation under Tyler's workload rule, not a wait.
+ * Returns null for every ordinary row so the column stays empty for the ~265
+ * cases this does not apply to.
+ */
+function deadEndReason(r: MasterRow): { text: string; escalate: boolean } | null {
+  if (!isDeclinedAuction(r.ams_bucket)) return null;
+  if (!r.assigned_truck_mismatch) return null;
+  const truck = r.assigned_truck ? `truck ${r.assigned_truck}` : "another truck";
+  const label = r.ams_bucket === "auction" ? "Auctioned" : "Declined";
+  // has_repair_po is null when there is no assigned truck; treat unknown as
+  // "not proven", because claiming a PO exists is the costlier error.
+  const hasPo = r.assigned_truck_has_repair_po === true && (r.assigned_truck_open_po_count ?? 0) > 0;
+  if (!hasPo) {
+    return { text: `${label}, but tech is on ${truck} with no repair PO — escalate`, escalate: true };
+  }
+  const n = r.assigned_truck_open_po_count ?? 0;
+  return { text: `${label}, but tech is on ${truck} · ${n} open PO${n === 1 ? "" : "s"}`, escalate: false };
+}
+
 /** THE workload derivation. Used by BOTH the chip counts and the row filter so a
  * chip can never advertise a number and then open a grid that disagrees.
  * cannot_work comes from ams_bucket (the same field the Declined/Auction chips
@@ -697,6 +726,20 @@ export default function RegionalCases() {
 
   const [cohort, setCohort] = useState<string>("all");
   const [search, setSearch] = useState("");
+  // Quick action: drop declined cases from the queue, EXCEPT the ones where the
+  // technician is assigned a DIFFERENT truck. A decline means we no longer own
+  // the rental van, so there is nothing to recover — unless that tech is on
+  // another truck, in which case the case is still live and moves to that
+  // truck (Tyler's workload rule: the assigned truck must carry a repair PO or
+  // it escalates). Keyed on assigned_truck_mismatch, NOT redirect_to_assigned:
+  // measured on prod 2026-07-28, 4 of the 32 declines are mismatches but only 1
+  // sets redirect_to_assigned, so the narrower flag would bury 3 live cases.
+  const [hideDeclines, setHideDeclines] = useState(false);
+  // Same rule for auction. A truck sent to auction is not coming back either,
+  // so the case is noise UNLESS that technician is on another truck. The gap is
+  // wider here: measured on prod 2026-07-28, 18 of the 112 auction cases are
+  // mismatches but only 2 set redirect_to_assigned.
+  const [hideAuctions, setHideAuctions] = useState(false);
   const [amsF, setAmsF] = useState<string[]>([]);
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
@@ -738,6 +781,17 @@ export default function RegionalCases() {
     (includePended || r.ticket_status !== "PENDED") &&
     (wbFilter.length === 0 || wbFilter.includes(r.workbook?.status ?? "new"))
   ), [regionPool, includePended, wbFilter]);
+  // What each toggle would remove, and what it is deliberately keeping. One
+  // helper for both buckets so the two can never drift apart.
+  const deadEndCounts = useMemo(() => {
+    const tally = (bucket: string) => {
+      const all = basePool.filter((r) => r.ams_bucket === bucket);
+      const keep = all.filter((r) => r.assigned_truck_mismatch);
+      return { total: all.length, keep: keep.length, hideable: all.length - keep.length };
+    };
+    return { declined: tally("declined"), auction: tally("auction") };
+  }, [basePool]);
+
   const pendedTotal = useMemo(() => rows.filter((r) => r.ticket_status === "PENDED").length, [rows]);
   // counts computed over the current pool so tab badges + KPIs always match the grid
   const stats = useMemo(() => {
@@ -813,12 +867,14 @@ export default function RegionalCases() {
         const m = r.operator_mark || "none";
         if (markF === "none" ? m !== "none" : m !== markF) return false;
       }
+      if (hideDeclines && r.ams_bucket === "declined" && !r.assigned_truck_mismatch) return false;
+      if (hideAuctions && r.ams_bucket === "auction" && !r.assigned_truck_mismatch) return false;
       if (mismatchOnly && !r.type_mismatch) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly]);
+  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly, hideDeclines, hideAuctions]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -951,7 +1007,7 @@ export default function RegionalCases() {
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
     const headers = ["truck", "tech", "employee_id", "employment", "status_date", "tpms_assigned", "wrong_truck", "renter_own_truck", "vehicle", "actual_type", "rental_class", "daily_cost", "class_median", "type_mismatch", "cost_over", "ams_status", "cohort", "shop", "shop_status", "shop_phone", "shop_city", "shop_state", "last_rental", "no_rental_auth", "po_count", "odometer", "days_open", "extensions", "pended", "mark", "identity_state", "identity_confidence",
-      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po"];
+      "workload_bucket", "assigned_truck", "assigned_truck_has_repair_po", "why_still_here"];
     const body = sorted.map((r) => [
       r.case_key, r.renter_name_raw, r.employee_id || "", r.employee_status || "", r.employee_status_date || "",
       r.tpms_tech || "", r.wrong_truck ? "YES" : "", r.renter_own_truck || "",
@@ -963,6 +1019,7 @@ export default function RegionalCases() {
       r.operator_mark || "", r.identity_state || "", r.identity_confidence || "",
       r.workload_bucket || "", r.assigned_truck || "",
       r.assigned_truck_has_repair_po == null ? "" : (r.assigned_truck_has_repair_po ? "YES" : "NO"),
+      deadEndReason(r)?.text || "",
     ].map((c) => esc(String(c))));
     const csv = [headers.join(","), ...body.map((r) => r.join(","))].join("\r\n");
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8;" }));
@@ -1045,6 +1102,28 @@ export default function RegionalCases() {
         <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, whiteSpace: "nowrap" }}>
           {search.trim() ? `${sorted.length} of ${basePool.length}` : `${sorted.length} cases`}
         </span>
+        <button type="button" onClick={() => setHideDeclines((v) => !v)}
+          title={hideDeclines
+            ? "Showing every case, declines included."
+            : "Hides declined cases, except where the tech is assigned another truck — those still need follow-up."}
+          style={{ fontFamily: fonts.dmSans, fontSize: 12,
+            color: hideDeclines ? colors.ink : colors.inkSoft,
+            background: hideDeclines ? colors.surface : "transparent",
+            border: `1px solid ${hideDeclines ? colors.ink : colors.rule}`,
+            borderRadius: 8, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          {hideDeclines ? `Declines hidden (${deadEndCounts.declined.hideable})` : `Hide declines (${deadEndCounts.declined.hideable})`}
+        </button>
+        <button type="button" onClick={() => setHideAuctions((v) => !v)}
+          title={hideAuctions
+            ? "Showing every case, auctions included."
+            : "Hides auction cases, except where the tech is assigned another truck — those still need follow-up."}
+          style={{ fontFamily: fonts.dmSans, fontSize: 12,
+            color: hideAuctions ? colors.ink : colors.inkSoft,
+            background: hideAuctions ? colors.surface : "transparent",
+            border: `1px solid ${hideAuctions ? colors.ink : colors.rule}`,
+            borderRadius: 8, padding: "6px 12px", cursor: "pointer", whiteSpace: "nowrap" }}>
+          {hideAuctions ? `Auctions hidden (${deadEndCounts.auction.hideable})` : `Hide auctions (${deadEndCounts.auction.hideable})`}
+        </button>
         <button type="button" onClick={() => exportCsv()}
           title="Exports exactly what is on screen: this region, this search, this sort."
           style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, background: "transparent",
@@ -1062,6 +1141,7 @@ export default function RegionalCases() {
               <Th col="tech" label="Tech" />
               <Th col="cost" label="Daily Cost" style={{ textAlign: "right" }} />
               <Th col="ams" label="AMS" />
+              <th style={{ ...thStyle, minWidth: 200 }}>Why still here</th>
               <Th col="shop" label="Shop" />
               <Th col="days" label="Days" style={{ textAlign: "right" }} />
               <Th col="npos" label="POs" style={{ textAlign: "right" }} />
@@ -1085,7 +1165,7 @@ export default function RegionalCases() {
                 <Fragment key={r.case_key}>
                 {showDistrictHeader && (
                   <tr>
-                    <td colSpan={9} style={{ padding: "7px 10px", background: colors.background,
+                    <td colSpan={10} style={{ padding: "7px 10px", background: colors.background,
                       borderTop: `1px solid ${colors.rule}`, borderBottom: `1px solid ${colors.rule}`,
                       fontFamily: fonts.dmSans, fontSize: 11.5, fontWeight: 600, color: colors.inkSoft,
                       position: "sticky", top: 32, zIndex: 1 }}>
@@ -1122,6 +1202,18 @@ export default function RegionalCases() {
                   </td>
                   <td style={tdStyle}>
                     {r.ams_status ? <span style={{ display: "inline-block", fontSize: 10.5, fontWeight: 600, color: ams.fg, background: ams.bg, border: `1px solid ${ams.fg}`, borderRadius: 999, padding: "1px 8px", textTransform: "uppercase" }}>{r.ams_status}</span> : <span style={{ color: colors.inkMuted }}>—</span>}
+                  </td>
+                  <td style={{ ...tdStyle, fontSize: 11.5 }}>
+                    {(() => {
+                      const why = deadEndReason(r);
+                      if (!why) return null;
+                      return (
+                        <span style={{ color: why.escalate ? colors.red : colors.inkSoft,
+                                       fontWeight: why.escalate ? 600 : 400 }}>
+                          {why.text}
+                        </span>
+                      );
+                    })()}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>
                     {r.shop_name ? (
@@ -1178,7 +1270,7 @@ export default function RegionalCases() {
                 </Fragment>
               );
             })}
-            {sorted.length === 0 && <tr><td colSpan={9} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
           </tbody>
         </table>
       </div>

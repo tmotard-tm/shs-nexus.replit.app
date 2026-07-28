@@ -24,6 +24,7 @@ import {
   refreshTpmsExtractSnapshot,
 } from "./tpms-extract-snapshot";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
+import { getNexusUnassignedVehicles, getOccupiedTruckSet, checkTruckAssignedNexus } from "./spares-pool";
 import { registerCommsRoutes } from "./fleet-comms/routes";
 import { fetchRentalRoster } from "./vrm/snowflake-queries";
 import { trackPackage, testUPSConnection, checkRateLimit } from "./fleet-scope-ups";
@@ -4179,26 +4180,27 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   //   Ref + General Home Appliance → ref-rack only   (UTILITY WITH REF RACKS)
   //   HVAC                         → ref-rack only   (UTILITY WITH REF RACKS)
   app.get("/public/spares/search", requirePublicApiKey, async (req, res) => {
+    // Interior matching runs in JS against the Nexus-derived unassigned pool
+    // (holman_vehicles_cache.interior); "no racks" also accepts NULL/empty.
+    const noRacksMatch = (i: string | null) => !i || !i.trim() || i.trim().toUpperCase() === 'UTILITY WITHOUT REF RACKS';
+    const refRacksMatch = (i: string | null) => (i || '').trim().toUpperCase() === 'UTILITY WITH REF RACKS';
     const TECH_TYPE_CONFIGS: Record<string, {
-      interiorSql: string;
+      interiorMatch: (interior: string | null) => boolean;
       compatibleVehicleTypes: string[];
       interiorToVehicleType: (interior: string | null) => string;
     }> = {
       'General Home Appliance': {
-        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-          AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')`,
+        interiorMatch: noRacksMatch,
         compatibleVehicleTypes: ['No racks'],
         interiorToVehicleType: (_) => 'No racks',
       },
       'Ref + General Home Appliance': {
-        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-          AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'`,
+        interiorMatch: refRacksMatch,
         compatibleVehicleTypes: ['Ref (with racks)'],
         interiorToVehicleType: (_) => 'Ref (with racks)',
       },
       'HVAC': {
-        interiorSql: `COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-          AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'`,
+        interiorMatch: refRacksMatch,
         compatibleVehicleTypes: ['Ref (with racks)'],
         interiorToVehicleType: (_) => 'Ref (with racks)',
       },
@@ -4229,13 +4231,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.status(400).json({ success: false, message: 'lon must be a valid number' });
       }
 
-      const candidates = await executeQuery<SpareVehicleCandidate>(`
-        SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-               AMS_ZIP_LAT, AMS_ZIP_LON,
-               AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
-        FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-        WHERE ${config.interiorSql}
-      `);
+      // Candidates come from the Nexus-derived unassigned pool (with Snowflake
+      // fallback behind sanity guards) — see server/spares-pool.ts
+      const sparePool = await getNexusUnassignedVehicles();
+      const candidates: SpareVehicleCandidate[] = sparePool.vehicles
+        .filter(v => config.interiorMatch(v.INTERIOR))
+        .map(v => ({
+          VEHICLE_NUMBER: v.VEHICLE_NUMBER,
+          TRUCK_STATUS: v.TRUCK_STATUS || null,
+          INTERIOR: v.INTERIOR,
+          AMS_ZIP_LAT: v.AMS_ZIP_LAT,
+          AMS_ZIP_LON: v.AMS_ZIP_LON,
+          AMS_CUR_ADDRESS: v.AMS_CUR_ADDRESS || null,
+          AMS_CUR_CITY: v.AMS_CUR_CITY || null,
+          AMS_CUR_STATE: v.AMS_CUR_STATE || null,
+          AMS_CUR_ZIP: v.AMS_CUR_ZIP || null,
+        }));
 
       // Delegate all enrichment/scoring to the shared helper
       const scored = await scoreSpareVehicleCandidates(candidates, techLat, techLon);
@@ -5095,34 +5106,35 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         return res.json({ matchFound: false, techName, jobTitle: null, suggestions: [] });
       }
 
-      // Step 3: determine INTERIOR filter based on job title and query REPLIT_ALL_VEHICLES
-      // Fetch the full matching pool (no row cap) so distance-sort finds the truly closest 3
+      // Step 3: determine INTERIOR filter based on job title and filter the
+      // Nexus-derived unassigned pool (holman_vehicles_cache + tpms_tech_profiles,
+      // with Snowflake fallback behind sanity guards — see server/spares-pool.ts).
+      // Full matching pool (no row cap) so distance-sort finds the truly closest 3.
       const upperTitle = jobTitle.toUpperCase();
-      let step3Sql: string;
+      let interiorMatch: (interior: string | null) => boolean;
 
       if (upperTitle.includes('TECHNICIAN 1')) {
-        step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON,
-                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
-          FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-          WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-            AND (UPPER(INTERIOR) = 'UTILITY WITHOUT REF RACKS' OR INTERIOR IS NULL OR TRIM(INTERIOR) = '')
-        `;
+        interiorMatch = (i) => !i || !i.trim() || i.trim().toUpperCase() === 'UTILITY WITHOUT REF RACKS';
       } else if (upperTitle.includes('TECHNICIAN 2') || upperTitle.includes('TECHNICIAN 3') || upperTitle.includes('HVAC')) {
-        step3Sql = `
-          SELECT VEHICLE_NUMBER, TRUCK_STATUS, INTERIOR,
-                 AMS_ZIP_LAT, AMS_ZIP_LON,
-                 AMS_CUR_ADDRESS, AMS_CUR_CITY, AMS_CUR_STATE, AMS_CUR_ZIP
-          FROM PARTS_SUPPLYCHAIN.FLEET.REPLIT_ALL_VEHICLES
-          WHERE COALESCE(LOWER(TRIM(TPMS_ASSIGNED)), '') != 'assigned'
-            AND UPPER(INTERIOR) = 'UTILITY WITH REF RACKS'
-        `;
+        interiorMatch = (i) => (i || '').trim().toUpperCase() === 'UTILITY WITH REF RACKS';
       } else {
         return res.json({ matchFound: true, techName, jobTitle, suggestions: [] });
       }
 
-      const candidates = await executeQuery<SpareVehicleCandidate>(step3Sql);
+      const sparePool = await getNexusUnassignedVehicles();
+      const candidates: SpareVehicleCandidate[] = sparePool.vehicles
+        .filter(v => interiorMatch(v.INTERIOR))
+        .map(v => ({
+          VEHICLE_NUMBER: v.VEHICLE_NUMBER,
+          TRUCK_STATUS: v.TRUCK_STATUS || null,
+          INTERIOR: v.INTERIOR,
+          AMS_ZIP_LAT: v.AMS_ZIP_LAT,
+          AMS_ZIP_LON: v.AMS_ZIP_LON,
+          AMS_CUR_ADDRESS: v.AMS_CUR_ADDRESS || null,
+          AMS_CUR_CITY: v.AMS_CUR_CITY || null,
+          AMS_CUR_STATE: v.AMS_CUR_STATE || null,
+          AMS_CUR_ZIP: v.AMS_CUR_ZIP || null,
+        }));
 
       // Resolve tech's ZIP from the truck's repair address in fs_trucks
       let techLat: number | null = null;
@@ -5342,9 +5354,9 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
         console.warn('[Queue] Could not fetch Holman repair PO dates:', repairPOErr.message);
       }
 
-      // Fetch available spare vans from Snowflake for Step 7 suggestions.
-      // Join with Holman_VEHICLES on VIN to include vehicle mileage (odometer).
-      // Include AMS lat/lon for distance-based sorting.
+      // Fetch available spare vans for Step 7 suggestions from the
+      // Nexus-derived unassigned pool (odometer + AMS lat/lon included;
+      // Snowflake fallback behind sanity guards — see server/spares-pool.ts).
       type SpareVanRow = {
         vehicleNumber: string;
         status: string;
@@ -5356,39 +5368,21 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
       };
       let spareVanPool: SpareVanRow[] = [];
       try {
-        const spareRows = await executeQuery<{
-          VEHICLE_NUMBER: string;
-          TRUCK_STATUS: string;
-          AMS_CUR_ADDRESS: string;
-          AMS_CUR_CITY: string;
-          AMS_CUR_STATE: string;
-          AMS_CUR_ZIP: string;
-          AMS_ZIP_LAT: number | null;
-          AMS_ZIP_LON: number | null;
-          ODOMETER: number | null;
-        }>(`
-          SELECT uv.VEHICLE_NUMBER, uv.TRUCK_STATUS,
-                 uv.AMS_CUR_ADDRESS, uv.AMS_CUR_CITY, uv.AMS_CUR_STATE, uv.AMS_CUR_ZIP,
-                 uv.AMS_ZIP_LAT, uv.AMS_ZIP_LON,
-                 hv.ODOMETER
-          FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES uv
-          LEFT JOIN PARTS_SUPPLYCHAIN.FLEET.Holman_VEHICLES hv ON uv.VIN = hv.VIN
-          ORDER BY uv.VEHICLE_NUMBER
-        `);
+        const sparePoolResult = await getNexusUnassignedVehicles();
         const repairSet = new Set(allTrucks.map(t => (t.truckNumber || '').replace(/^0+/, '') || '0'));
-        spareVanPool = spareRows
+        spareVanPool = sparePoolResult.vehicles
           .filter(v => !repairSet.has((v.VEHICLE_NUMBER || '').replace(/^0+/, '') || '0'))
           .map(v => ({
             vehicleNumber: v.VEHICLE_NUMBER || '',
             status: v.TRUCK_STATUS || '',
             address: [v.AMS_CUR_ADDRESS, v.AMS_CUR_CITY, v.AMS_CUR_STATE].filter(Boolean).join(', '),
             zip: v.AMS_CUR_ZIP || null,
-            lat: v.AMS_ZIP_LAT ? Number(v.AMS_ZIP_LAT) : null,
-            lon: v.AMS_ZIP_LON ? Number(v.AMS_ZIP_LON) : null,
-            mileage: v.ODOMETER ? Number(v.ODOMETER) : null,
+            lat: v.AMS_ZIP_LAT,
+            lon: v.AMS_ZIP_LON,
+            mileage: v.ODOMETER != null ? Number(v.ODOMETER) : null,
           }));
       } catch (spareErr: any) {
-        console.warn('[Queue] Could not fetch spare vans from Snowflake:', spareErr.message);
+        console.warn('[Queue] Could not fetch spare vans:', spareErr.message);
       }
 
       // Haversine distance in miles between two lat/lon pairs
@@ -8134,7 +8128,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
     try {
       console.log("[Spares Locations] Fetching unassigned vehicles with location data...");
       
-      // 0. Daily cleanup: Remove manually-added trucks that are now assigned in TPMS_EXTRACT
+      // 1. Get the unassigned pool from Nexus's own Fleet Management assignment
+      // status (holman_vehicles_cache + tpms_tech_profiles occupied set), with
+      // a legacy Snowflake fallback behind sanity guards. See server/spares-pool.ts.
+      // Fetched first because the daily cleanup below also needs it.
+      const poolResult = await getNexusUnassignedVehicles();
+      const unassignedVehicles = poolResult.vehicles;
+      console.log(`[Spares Locations] Found ${unassignedVehicles.length} unassigned vehicles (source: ${poolResult.source})`);
+      
+      // 0. Daily cleanup: Remove manually-added trucks that are now assigned
+      // per Nexus assignment status (tpms_tech_profiles) and are no longer in
+      // the unassigned pool.
       const now = new Date();
       const shouldRunCleanup = !lastManualTruckCleanup || 
         (now.getTime() - lastManualTruckCleanup.getTime()) > CLEANUP_INTERVAL_MS;
@@ -8147,45 +8151,22 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           const manualTrucks = await getDb().select().from(spareVehicleDetails);
           
           if (manualTrucks.length > 0) {
-            // Query TPMS_EXTRACT for assigned trucks (TRUCK_LU column)
-            // A truck in TPMS_EXTRACT means it has a technician assigned to it
-            const tpmsSql = `
-              SELECT DISTINCT TRUCK_LU 
-              FROM PARTS_SUPPLYCHAIN.FLEET.TPMS_EXTRACT 
-              WHERE TRUCK_LU IS NOT NULL
-            `;
-            const tpmsAssigned = await executeQuery<{ TRUCK_LU: string }>(tpmsSql);
-            
-            // Also get the current UNASSIGNED_VEHICLES for double-confirmation
-            const unassignedSql = `
-              SELECT DISTINCT VEHICLE_NUMBER 
-              FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES 
-              WHERE VEHICLE_NUMBER IS NOT NULL
-            `;
-            const unassignedVehicles = await executeQuery<{ VEHICLE_NUMBER: string }>(unassignedSql);
-            
-            // Create normalized sets for fast lookup
-            const assignedSet = new Set<string>();
-            for (const row of tpmsAssigned) {
-              if (row.TRUCK_LU) {
-                const normalized = row.TRUCK_LU.toString().replace(/^0+/, '') || '0';
-                assignedSet.add(normalized);
-              }
-            }
+            // A truck in the tpms_tech_profiles occupied set has a technician
+            // assigned to it (kept fresh by the 7:30 AM live TPMS sweep and by
+            // Nexus assign/unassign write-through).
+            const assignedSet = await getOccupiedTruckSet();
             
             const unassignedSet = new Set<string>();
-            for (const row of unassignedVehicles) {
-              if (row.VEHICLE_NUMBER) {
-                const normalized = row.VEHICLE_NUMBER.toString().replace(/^0+/, '') || '0';
-                unassignedSet.add(normalized);
-              }
+            for (const v of unassignedVehicles) {
+              const normalized = (v.VEHICLE_NUMBER?.toString().trim() || '').replace(/^0+/, '') || '0';
+              unassignedSet.add(normalized);
             }
             
-            console.log(`[Spares Cleanup] Found ${assignedSet.size} assigned trucks in TPMS_EXTRACT, ${unassignedSet.size} in UNASSIGNED_VEHICLES`);
+            console.log(`[Spares Cleanup] Found ${assignedSet.size} assigned trucks (tpms_tech_profiles), ${unassignedSet.size} in unassigned pool`);
             
             // Find and delete manually-added trucks that are:
-            // 1. Found in TPMS_EXTRACT (assigned to a tech), AND
-            // 2. NOT in UNASSIGNED_VEHICLES (no longer unassigned)
+            // 1. Assigned to a tech per tpms_tech_profiles, AND
+            // 2. NOT in the unassigned pool (no longer unassigned)
             let deletedCount = 0;
             for (const truck of manualTrucks) {
               const normalized = truck.vehicleNumber.replace(/^0+/, '') || '0';
@@ -8197,7 +8178,7 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
                 await getDb().delete(spareVehicleDetails)
                   .where(eq(spareVehicleDetails.vehicleNumber, truck.vehicleNumber));
                 deletedCount++;
-                console.log(`[Spares Cleanup] Removed truck ${truck.vehicleNumber} (confirmed assigned in TPMS, not in UNASSIGNED_VEHICLES)`);
+                console.log(`[Spares Cleanup] Removed truck ${truck.vehicleNumber} (assigned per tpms_tech_profiles, not in unassigned pool)`);
               }
             }
             
@@ -8214,36 +8195,6 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
           // Don't fail the whole request if cleanup fails
         }
       }
-      
-      // 1. Get all unassigned vehicles with VINs
-      const unassignedSql = `
-        SELECT 
-          VEHICLE_NUMBER,
-          VIN,
-          MAKE_NAME,
-          MODEL_NAME,
-          TRUCK_DISTRICT,
-          TRUCK_STATUS,
-          AMS_CUR_ADDRESS,
-          AMS_CUR_CITY,
-          AMS_CUR_STATE,
-          AMS_CUR_ZIP
-        FROM PARTS_SUPPLYCHAIN.FLEET.UNASSIGNED_VEHICLES
-        ORDER BY VEHICLE_NUMBER
-      `;
-      const unassignedVehicles = await executeQuery<{
-        VEHICLE_NUMBER: string;
-        VIN: string;
-        MAKE_NAME: string;
-        MODEL_NAME: string;
-        TRUCK_DISTRICT: string;
-        TRUCK_STATUS: string;
-        AMS_CUR_ADDRESS: string;
-        AMS_CUR_CITY: string;
-        AMS_CUR_STATE: string;
-        AMS_CUR_ZIP: string;
-      }>(unassignedSql);
-      console.log(`[Spares Locations] Found ${unassignedVehicles.length} unassigned vehicles`);
       
       // 2. Get confirmed addresses and status fields from SPARE_VEHICLE_ASSIGNMENT_STATUS
       // First, try to get all fields including new status columns
@@ -9116,24 +9067,17 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/spares/check-assigned/:truckNumber", async (req, res) => {
     try {
       const { truckNumber } = req.params;
-      // TPMS_EXTRACT stores truck numbers WITHOUT leading zeros (e.g., 21100 not 021100)
-      // So we need to strip leading zeros and query with the raw number
       const rawTruckNumber = truckNumber.replace(/^0+/, '') || truckNumber;
       
-      console.log(`[Spares] Checking if truck ${rawTruckNumber} (input: ${truckNumber}) is assigned in TPMS_EXTRACT`);
+      console.log(`[Spares] Checking if truck ${rawTruckNumber} (input: ${truckNumber}) is assigned per Nexus (tpms_tech_profiles)`);
       
-      const sql = `
-        SELECT TRUCK_LU, FULL_NAME, TECH_NO
-        FROM PARTS_SUPPLYCHAIN.SOFTEON.TPMS_EXTRACT 
-        WHERE TRUCK_LU = ?
-        LIMIT 1
-      `;
+      // Local Nexus assignment check (tpms_tech_profiles) — fresher than the
+      // Snowflake TPMS_EXTRACT mirror and reflects Nexus assign/unassign immediately
+      const result = await checkTruckAssignedNexus(truckNumber);
       
-      const results = await executeQuery<{ TRUCK_LU: string; FULL_NAME: string; TECH_NO: string }>(sql, [rawTruckNumber]);
-      
-      if (results.length > 0) {
-        const techName = results[0].FULL_NAME || 'Unknown';
-        const techNo = results[0].TECH_NO || '';
+      if (result.isAssigned) {
+        const techName = result.techName || 'Unknown';
+        const techNo = result.techNo || '';
         console.log(`[Spares] Truck ${rawTruckNumber} is assigned to ${techName} (${techNo})`);
         res.json({ 
           isAssigned: true, 
