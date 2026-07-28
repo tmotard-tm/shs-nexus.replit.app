@@ -76,10 +76,6 @@ export async function initVrmSchema(): Promise<void> {
       IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vrm_alt_task_status') THEN
         CREATE TYPE vrm_alt_task_status AS ENUM ('assigned','in_progress','completed');
       END IF;
-
-      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'vrm_escalation_status') THEN
-        CREATE TYPE vrm_escalation_status AS ENUM ('pending_carl','resolved','epv_required');
-      END IF;
     END $$;
   `);
 
@@ -197,23 +193,6 @@ export async function initVrmSchema(): Promise<void> {
       completion_status  vrm_alt_task_status NOT NULL DEFAULT 'assigned',
       assigned_by_name   VARCHAR(255),
       created_at         TIMESTAMP DEFAULT NOW() NOT NULL
-    );
-  `);
-
-  await db.execute(sql`
-    CREATE TABLE IF NOT EXISTS vrm_escalations (
-      id                    VARCHAR PRIMARY KEY DEFAULT gen_random_uuid(),
-      tech_id               VARCHAR NOT NULL REFERENCES vrm_techs(id),
-      triggered_by_name     VARCHAR(255),
-      reason                TEXT,
-      prior_outreach_summary TEXT,
-      status                vrm_escalation_status NOT NULL DEFAULT 'pending_carl',
-      carl_outcome_notes    TEXT,
-      epv_confirmed         BOOLEAN NOT NULL DEFAULT false,
-      epv_confirmed_at      TIMESTAMP,
-      rental_stop_date      DATE,
-      created_at            TIMESTAMP DEFAULT NOW() NOT NULL,
-      updated_at            TIMESTAMP DEFAULT NOW() NOT NULL
     );
   `);
 
@@ -337,7 +316,6 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_outreach_log_tech_idx ON vrm_outreach_log(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_sms_messages_tech_idx ON vrm_sms_messages(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_exception_cases_tech_idx ON vrm_exception_cases(tech_id);`);
-  await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_escalations_tech_idx ON vrm_escalations(tech_id);`);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS vrm_tech_notes_tech_idx ON vrm_tech_notes(tech_id);`);
 
   await db.execute(sql`

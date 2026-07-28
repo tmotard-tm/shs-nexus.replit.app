@@ -23,10 +23,6 @@ import {
   getShopContactLog,
   getDcaReviewQueue,
   setDcaOutcome,
-  getEscalationsWithTech,
-  createEscalation,
-  updateEscalation,
-  confirmEpv,
   addRentalDecision,
   syncDeniedDecisionToRepairTracker,
   listRentalDecisions,
@@ -92,7 +88,7 @@ import { sql as drizzleSql } from "drizzle-orm";
 import { isSnowflakeConfigured } from "../snowflake-service";
 import { generateAuditPdf } from "./pdf-generator";
 import {
-  vrmTechs, vrmOutreachLog, vrmEscalations, vrmExceptionCases, vrmReachabilityLog,
+  vrmTechs, vrmOutreachLog, vrmExceptionCases, vrmReachabilityLog,
   insertVrmNewRentalLogSchema,
   insertVrmRepairTrackerSchema,
 } from "../../shared/vrm-schema";
@@ -247,42 +243,6 @@ export function registerVrmRoutes(): Router {
     try {
       const { outcome, notes, changedByName } = req.body;
       await setDcaOutcome(req.params.techId, outcome, notes, changedByName);
-      res.json({ ok: true });
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  // ─── Escalations ────────────────────────────────────────────────────────────
-
-  router.get("/escalations", async (_req, res) => {
-    try {
-      res.json(await getEscalationsWithTech());
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.post("/escalations", async (req, res) => {
-    try {
-      res.json(await createEscalation(req.body));
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.patch("/escalations/:id", async (req, res) => {
-    try {
-      res.json(await updateEscalation(req.params.id, req.body));
-    } catch (e: any) {
-      res.status(500).json({ error: e.message });
-    }
-  });
-
-  router.post("/escalations/:id/confirm-epv", async (req, res) => {
-    try {
-      const { techId } = req.body;
-      await confirmEpv(req.params.id, techId);
       res.json({ ok: true });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

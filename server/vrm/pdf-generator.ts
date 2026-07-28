@@ -5,7 +5,7 @@
 import PDFDocument from "pdfkit";
 import { db } from "../db";
 import { eq, desc } from "drizzle-orm";
-import { vrmTechs, vrmOutreachLog, vrmEscalations } from "../../shared/vrm-schema";
+import { vrmTechs, vrmOutreachLog } from "../../shared/vrm-schema";
 
 interface AuditData {
   tech: {
@@ -17,10 +17,6 @@ interface AuditData {
     currentStatus: string;
   };
   outreach: Array<{ actionType: string; outcome: string | null; performedByName: string | null; createdAt: string }>;
-  escalation: {
-    reason: string | null; carlOutcomeNotes: string | null; status: string;
-    createdAt: string; rentalStopDate: string | null;
-  } | null;
 }
 
 async function loadAuditData(techId: string): Promise<AuditData> {
@@ -28,9 +24,6 @@ async function loadAuditData(techId: string): Promise<AuditData> {
   if (!tech) throw new Error(`Tech ${techId} not found`);
 
   const outreach = await db.select().from(vrmOutreachLog).where(eq(vrmOutreachLog.techId, techId)).orderBy(desc(vrmOutreachLog.createdAt));
-
-  const escalations = await db.select().from(vrmEscalations).where(eq(vrmEscalations.techId, techId)).orderBy(desc(vrmEscalations.createdAt)).limit(1);
-  const escalation = escalations[0] ?? null;
 
   return {
     tech: {
@@ -48,13 +41,6 @@ async function loadAuditData(techId: string): Promise<AuditData> {
       performedByName: o.performedByName,
       createdAt: o.createdAt.toISOString(),
     })),
-    escalation: escalation ? {
-      reason: escalation.reason,
-      carlOutcomeNotes: escalation.carlOutcomeNotes,
-      status: escalation.status,
-      createdAt: escalation.createdAt.toISOString(),
-      rentalStopDate: escalation.rentalStopDate as string | null,
-    } : null,
   };
 }
 
@@ -76,7 +62,7 @@ function fmtTs(d: string) {
 
 export async function generateAuditPdf(techId: string): Promise<Buffer> {
   const data = await loadAuditData(techId);
-  const { tech, outreach, escalation } = data;
+  const { tech, outreach } = data;
 
   return new Promise<Buffer>((resolve, reject) => {
     const doc = new PDFDocument({ margin: 48, size: "LETTER" });
@@ -148,19 +134,6 @@ export async function generateAuditPdf(techId: string): Promise<Buffer> {
       }
     }
     doc.moveDown(0.5);
-
-    // ── Escalation ────────────────────────────────────────────────────────────
-    if (escalation) {
-      doc.moveTo(48, doc.y).lineTo(doc.page.width - 48, doc.y).strokeColor(RULE).stroke();
-      doc.moveDown(0.5);
-      doc.fontSize(12).font("Helvetica-Bold").fillColor(INK).text("Escalation Details");
-      doc.fontSize(10).font("Helvetica").fillColor(MUTED).text(`Status: ${escalation.status.replace(/_/g, " ").toUpperCase()}  ·  Opened: ${fmtTs(escalation.createdAt)}`);
-      if (escalation.reason) doc.text(`Reason: ${escalation.reason}`);
-      if (escalation.carlOutcomeNotes) doc.text(`Carl's Notes: ${escalation.carlOutcomeNotes}`);
-      if (escalation.rentalStopDate) {
-        doc.fillColor(RED).text(`Rental Stop Date: ${escalation.rentalStopDate}`);
-      }
-    }
 
     // ── Footer ────────────────────────────────────────────────────────────────
     doc.fontSize(8).fillColor(MUTED).text(

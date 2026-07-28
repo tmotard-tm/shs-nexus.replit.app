@@ -4,7 +4,6 @@ import {
   vrmTechs,
   vrmTechStatusHistory,
   vrmOutreachLog,
-  vrmEscalations,
   vrmExceptionCases,
   vrmReachabilityLog,
   vrmSmsMessages,
@@ -880,7 +879,6 @@ export async function getDashboardStats() {
   const [
     totalResult,
     exceptionResult,
-    escalationResult,
     costResult,
   ] = await Promise.all([
     db.select({ count: count() }).from(vrmTechs)
@@ -891,9 +889,6 @@ export async function getDashboardStats() {
         eq(vrmTechs.currentStatus, "exception_paired"),
         eq(vrmTechs.currentStatus, "exception_home_learning"),
       )),
-
-    db.select({ count: count() }).from(vrmEscalations)
-      .where(eq(vrmEscalations.status, "pending_carl")),
 
     // Monthly cost avoided: days since status changed × $78 for all techs not in rental
     db.execute(sql`
@@ -921,7 +916,6 @@ export async function getDashboardStats() {
   return {
     totalTechsInScope: totalResult[0]?.count ?? 0,
     inExceptionWindow: exceptionResult[0]?.count ?? 0,
-    activeEscalations: escalationResult[0]?.count ?? 0,
     overdueCheckIns: Number((overdueResult.rows[0] as any)?.overdue ?? 0),
     monthlyCostAvoided: Number((costResult.rows[0] as any)?.cost_avoided ?? 0),
   };
@@ -956,13 +950,6 @@ export async function getAutoFlaggedTechIds(): Promise<Set<string>> {
       AND CURRENT_DATE - ec.open_date::DATE >= 55
   `);
   for (const row of approaching60.rows) flagged.add((row as any).id);
-
-  // 3. Pending escalations
-  const pendingEsc = await db.execute(sql`
-    SELECT DISTINCT tech_id AS id FROM vrm_escalations
-    WHERE status = 'pending_carl'
-  `);
-  for (const row of pendingEsc.rows) flagged.add((row as any).id);
 
   return flagged;
 }
@@ -1152,67 +1139,6 @@ export async function setDcaOutcome(
       performedByName: changedByName,
     });
   }
-}
-
-// ─── Escalations ─────────────────────────────────────────────────────────────
-
-export async function listEscalations() {
-  return db
-    .select()
-    .from(vrmEscalations)
-    .orderBy(desc(vrmEscalations.createdAt));
-}
-
-export async function getEscalationsWithTech() {
-  return db
-    .select({
-      escalation: vrmEscalations,
-      tech: vrmTechs,
-    })
-    .from(vrmEscalations)
-    .innerJoin(vrmTechs, eq(vrmEscalations.techId, vrmTechs.id))
-    .orderBy(desc(vrmEscalations.createdAt));
-}
-
-export async function createEscalation(data: {
-  techId: string;
-  triggeredByName?: string;
-  reason?: string;
-  priorOutreachSummary?: string;
-}) {
-  const [esc] = await db.insert(vrmEscalations).values(data).returning();
-  await updateTechStatus(data.techId, "escalated_carl", data.triggeredByName ?? "system", data.reason);
-  return esc;
-}
-
-export async function updateEscalation(
-  escalationId: string,
-  data: { carlOutcomeNotes?: string; status?: string },
-) {
-  const setValues: Record<string, any> = { updatedAt: new Date() };
-  if (data.carlOutcomeNotes !== undefined) setValues.carlOutcomeNotes = data.carlOutcomeNotes;
-  if (data.status !== undefined) setValues.status = data.status;
-
-  const [updated] = await db
-    .update(vrmEscalations)
-    .set(setValues)
-    .where(eq(vrmEscalations.id, escalationId))
-    .returning();
-  return updated;
-}
-
-export async function confirmEpv(escalationId: string, techId: string) {
-  const today = new Date().toISOString().split("T")[0];
-  await db.update(vrmEscalations)
-    .set({
-      epvConfirmed: true,
-      epvConfirmedAt: new Date(),
-      rentalStopDate: today,
-      status: "epv_required",
-      updatedAt: new Date(),
-    })
-    .where(eq(vrmEscalations.id, escalationId));
-  await updateTechStatus(techId, "epv_issued", "system", "EPV confirmed");
 }
 
 // ─── Rental decisions ────────────────────────────────────────────────────────

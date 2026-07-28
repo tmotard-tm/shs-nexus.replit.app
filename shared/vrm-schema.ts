@@ -109,12 +109,6 @@ export const vrmAltTaskStatusEnum = pgEnum("vrm_alt_task_status", [
   "completed",
 ]);
 
-export const vrmEscalationStatusEnum = pgEnum("vrm_escalation_status", [
-  "pending_carl",
-  "resolved",
-  "epv_required",
-]);
-
 // ─── Tables ───────────────────────────────────────────────────────────────────
 
 export const vrmTechs = pgTable("vrm_techs", {
@@ -251,23 +245,6 @@ export const vrmAlternativeTasks = pgTable("vrm_alternative_tasks", {
   assignedByName: varchar("assigned_by_name", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
-
-export const vrmEscalations = pgTable("vrm_escalations", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  techId: varchar("tech_id").notNull().references(() => vrmTechs.id),
-  triggeredByName: varchar("triggered_by_name", { length: 255 }),
-  reason: text("reason"),
-  priorOutreachSummary: text("prior_outreach_summary"),
-  status: vrmEscalationStatusEnum("status").notNull().default("pending_carl"),
-  carlOutcomeNotes: text("carl_outcome_notes"),
-  epvConfirmed: boolean("epv_confirmed").notNull().default(false),
-  epvConfirmedAt: timestamp("epv_confirmed_at"),
-  rentalStopDate: date("rental_stop_date"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-}, (table) => ({
-  techIdIdx: index("vrm_escalations_tech_idx").on(table.techId),
-}));
 
 export const vrmShopContactLog = pgTable("vrm_shop_contact_log", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -407,12 +384,6 @@ export const insertVrmOutreachLogSchema = createInsertSchema(vrmOutreachLog).omi
   createdAt: true,
 });
 
-export const insertVrmEscalationSchema = createInsertSchema(vrmEscalations).omit({
-  id: true,
-  createdAt: true,
-  updatedAt: true,
-});
-
 export const insertVrmExceptionCaseSchema = createInsertSchema(vrmExceptionCases).omit({
   id: true,
   createdAt: true,
@@ -454,7 +425,6 @@ export const insertVrmRentalCheckSchema = createInsertSchema(vrmRentalChecks).om
 export type VrmTech = typeof vrmTechs.$inferSelect;
 export type InsertVrmTech = z.infer<typeof insertVrmTechSchema>;
 export type VrmOutreachLog = typeof vrmOutreachLog.$inferSelect;
-export type VrmEscalation = typeof vrmEscalations.$inferSelect;
 export type VrmExceptionCase = typeof vrmExceptionCases.$inferSelect;
 export type VrmTechNote = typeof vrmTechNotes.$inferSelect;
 export type VrmSmsMessage = typeof vrmSmsMessages.$inferSelect;
