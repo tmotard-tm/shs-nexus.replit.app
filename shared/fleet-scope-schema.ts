@@ -135,6 +135,49 @@ export function getCombinedStatus(mainStatus: string, subStatus: string | null):
   return `${mainStatus}, ${subStatus}`;
 }
 
+/**
+ * Normalizes SHS owner names to ONE canonical spelling per person.
+ * The Action Tracker shows one card per distinct value, so every variation
+ * ("OLga", "Olga", "Olga F.") must collapse to the same string.
+ * Rob A / Rob C / Rob D / Rob G are DIFFERENT people and stay separate;
+ * "Rob Anderson"/"Rob And" = Rob A and "Robert Delgado" = Rob D (confirmed by ops).
+ * SINGLE SOURCE OF TRUTH — used by client grouping (Action Tracker, Dashboard),
+ * server truck writes (fleet-scope-storage), and the idempotent startup data
+ * heal (fleet-scope-schema-init). Do not fork per-page copies of this logic.
+ */
+export function normalizeOwnerName(owner: string | null | undefined): string {
+  if (!owner || owner.trim() === "") {
+    return "Oscar S"; // Default owner
+  }
+
+  // Trim, collapse internal whitespace, strip trailing periods
+  let normalized = owner.trim().replace(/\s+/g, " ");
+  while (normalized.endsWith(".")) {
+    normalized = normalized.slice(0, -1).trim();
+  }
+
+  const lower = normalized.toLowerCase();
+
+  // Rob family — A/C/D/G are different people, keep them separate
+  if (lower === "rob a" || lower.startsWith("rob a ") || lower.startsWith("rob and")) return "Rob A"; // incl. "Rob Anderson", "Rob And"
+  if (lower === "rob c") return "Rob C";
+  if (lower === "rob d" || lower.startsWith("robert d")) return "Rob D"; // incl. "Robert Delgado"
+  if (lower === "rob g") return "Rob G";
+
+  if (lower.includes("oscar")) return "Oscar S";
+  if (lower.startsWith("olga")) return "Olga F"; // "Olga", "OLga", "Olga F."
+  if (lower.startsWith("jenn")) return "Jenn D"; // "Jennifer", "Jenn D.", "Jenn D"
+  if (lower.startsWith("john c")) return "John C";
+  if (lower.startsWith("samantha w")) return "Samantha W";
+  if (lower.startsWith("mandy r")) return "Mandy R";
+  if (lower.startsWith("cheryl")) return "Cheryl";
+  if (lower.startsWith("bob b")) return "Bob B";
+  if (lower === "luca b") return "Luca B";
+  if (lower === "sean c") return "Sean C";
+
+  return normalized;
+}
+
 // Migration mapping: Old statuses to new structure
 export const OLD_TO_NEW_STATUS_MAP: Record<string, { mainStatus: MainStatus; subStatus: string }> = {
   // Confirming Status mappings

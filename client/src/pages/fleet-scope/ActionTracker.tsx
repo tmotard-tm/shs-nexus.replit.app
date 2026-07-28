@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { type Truck, getCombinedStatus, MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
+import { type Truck, getCombinedStatus, normalizeOwnerName, MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
 
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { StatusReminder, useStatusReminder } from "@/components/fleet-scope/StatusReminder";
@@ -46,48 +46,8 @@ import { useToast } from "@/hooks/use-toast";
 // Owner types for the Action Tracker (predefined owners, but shsOwner can have any value)
 type OwnerType = string;
 
-/**
- * Normalizes owner names for consistent grouping:
- * - Trims whitespace, removes trailing periods
- * - Keeps Rob A, Rob C, Rob D, Rob G as separate owners (different people)
- */
-function normalizeOwnerName(owner: string | null | undefined): string {
-  if (!owner || owner.trim() === '') {
-    return 'Oscar S';  // Default owner
-  }
-  
-  let normalized = owner.trim();
-  
-  // Handle Rob variations - keep them separate but normalize format
-  if (normalized.match(/^Rob A[.\s]/i) || normalized.toLowerCase() === 'rob a.' || normalized.toLowerCase() === 'rob a') {
-    return 'Rob A';
-  }
-  if (normalized.toLowerCase() === 'rob c.' || normalized.toLowerCase() === 'rob c') {
-    return 'Rob C';
-  }
-  if (normalized.toLowerCase() === 'rob d.' || normalized.toLowerCase() === 'rob d') {
-    return 'Rob D';
-  }
-  if (normalized.toLowerCase() === 'rob g.' || normalized.toLowerCase() === 'rob g') {
-    return 'Rob G';
-  }
-  
-  // Handle other known owners - normalize variations
-  if (normalized.toLowerCase().includes('oscar')) return 'Oscar S';
-  if (normalized.toLowerCase().startsWith('jenn d')) return 'Jenn D';
-  if (normalized.toLowerCase().startsWith('john c')) return 'John C';
-  if (normalized.toLowerCase().startsWith('samantha w')) return 'Samantha W';
-  if (normalized.toLowerCase().startsWith('mandy r')) return 'Mandy R';
-  if (normalized.toLowerCase().startsWith('cheryl')) return 'Cheryl';
-  if (normalized.toLowerCase().startsWith('bob b')) return 'Bob B';
-  
-  // Remove trailing period for any remaining names
-  if (normalized.endsWith('.')) {
-    normalized = normalized.slice(0, -1).trim();
-  }
-  
-  return normalized;
-}
+// Owner-name normalization is shared with the server and Dashboard — see
+// normalizeOwnerName in @shared/fleet-scope-schema (imported above).
 
 interface OwnerInfo {
   name: string;
@@ -292,7 +252,7 @@ function determineOwner(truck: Truck): OwnerType {
   // Approved for sale - owner assignment based on substatus
   if (mainStatus === "Approved for sale") {
     if (subStatus === "Clearing Softeon Inventory" || subStatus === "Vehicle Termination Form completed") {
-      return "Jenn D.";
+      return "Jenn D";
     }
     if (subStatus === "Fleet Administrator review" || subStatus === "Procurement to transfer form to leadership") {
       return "Bob B";

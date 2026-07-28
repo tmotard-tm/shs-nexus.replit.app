@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { type Truck } from "@shared/fleet-scope-schema";
+import { type Truck, normalizeOwnerName } from "@shared/fleet-scope-schema";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
 import { StatusReminder, useStatusReminder } from "@/components/fleet-scope/StatusReminder";
 import { IssueIndicator, useIssueStats } from "@/components/fleet-scope/IssueIndicator";
@@ -71,7 +71,7 @@ import Papa from "papaparse";
 import { Badge } from "@/components/ui/badge";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 
-type OwnerType = "Oscar S" | "John C" | "Mandy R" | "Rob A" | "Bob B" | "Jenn D." | "Samantha W" | "Cheryl" | "Final Actioned";
+type OwnerType = "Oscar S" | "John C" | "Mandy R" | "Rob A" | "Bob B" | "Jenn D" | "Samantha W" | "Cheryl" | "Final Actioned";
 
 const ownerColors: Record<OwnerType, string> = {
   "Oscar S": "bg-amber-100 text-amber-700 border-amber-200",
@@ -79,7 +79,7 @@ const ownerColors: Record<OwnerType, string> = {
   "Bob B": "bg-orange-100 text-orange-700 border-orange-200",
   "John C": "bg-blue-100 text-blue-700 border-blue-200",
   "Mandy R": "bg-green-100 text-green-700 border-green-200",
-  "Jenn D.": "bg-pink-100 text-pink-700 border-pink-200",
+  "Jenn D": "bg-pink-100 text-pink-700 border-pink-200",
   "Samantha W": "bg-cyan-100 text-cyan-700 border-cyan-200",
   "Cheryl": "bg-rose-100 text-rose-700 border-rose-200",
   "Final Actioned": "bg-gray-100 text-gray-600 border-gray-200",
@@ -116,45 +116,15 @@ const PRESET_OWNERS = [
   "Bob B",
   "John C",
   "Mandy R",
-  "Jenn D.",
+  "Jenn D",
   "Samantha W",
   "Cheryl",
   "Luca B",
   "Sean C",
 ];
 
-// Normalize owner names to prevent duplicates from spacing/capitalization differences
-function normalizeOwnerName(name: string | null | undefined): string {
-  if (!name || name.trim() === "") return "Oscar S"; // Default blank to Oscar S
-  let normalized = name.trim();
-  // Remove trailing periods for consistency (e.g., "Oscar S." -> "Oscar S")
-  if (normalized.endsWith(".") && !normalized.includes(" ")) {
-    normalized = normalized.slice(0, -1);
-  }
-  // Fix common variations - but keep Rob A, Rob C, Rob D, Rob G as separate people
-  const nameMap: Record<string, string> = {
-    "oscar s": "Oscar S",
-    "oscar": "Oscar S",
-    "john c": "John C",
-    "mandy r": "Mandy R",
-    "bob b": "Bob B",
-    "jenn d": "Jenn D.",
-    "jenn d.": "Jenn D.",
-    "samantha w": "Samantha W",
-    "cheryl": "Cheryl",
-    "rob a": "Rob A",
-    "rob c": "Rob C",
-    "rob d": "Rob D", 
-    "rob g": "Rob G",
-    "luca b": "Luca B",
-    "sean c": "Sean C",
-  };
-  const lowerName = normalized.toLowerCase();
-  if (nameMap[lowerName]) {
-    return nameMap[lowerName];
-  }
-  return normalized;
-}
+// Owner-name normalization is shared with the server and Action Tracker — see
+// normalizeOwnerName in @shared/fleet-scope-schema (imported above).
 
 function determineOwner(truck: Truck): OwnerType {
   const mainStatus = truck.mainStatus;
@@ -184,7 +154,7 @@ function determineOwner(truck: Truck): OwnerType {
   // Approved for sale - owner assignment based on substatus
   if (mainStatus === "Approved for sale") {
     if (subStatus === "Clearing Softeon Inventory" || subStatus === "Vehicle Termination Form completed") {
-      return "Jenn D.";
+      return "Jenn D";
     }
     if (subStatus === "Fleet Administrator review" || subStatus === "Procurement to transfer form to leadership") {
       return "Bob B";
@@ -360,7 +330,15 @@ function loadStoredFilters(): Partial<StoredFilters> {
   try {
     const stored = localStorage.getItem(DASHBOARD_FILTERS_KEY);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed: Partial<StoredFilters> = JSON.parse(stored);
+      // Migrate previously saved owner filters to the canonical spellings
+      // (e.g. an old saved "Jenn D." would otherwise silently match zero trucks)
+      if (Array.isArray(parsed.ownerFilter)) {
+        parsed.ownerFilter = Array.from(
+          new Set(parsed.ownerFilter.map((o) => normalizeOwnerName(o)))
+        );
+      }
+      return parsed;
     }
   } catch (e) {
     console.error("Failed to load dashboard filters from localStorage:", e);
@@ -1694,7 +1672,7 @@ export default function Dashboard() {
       apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         mainStatus: value,
         subStatus: "Clearing Softeon Inventory",
-        shsOwner: "Jenn D.",
+        shsOwner: "Jenn D",
         lastUpdatedBy: currentUser || "User"
       }).then(() => {
         queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
@@ -1749,10 +1727,10 @@ export default function Dashboard() {
   // Helper function to determine owner for "Approved for sale" substatus
   const getOwnerForApprovedForSale = (subStatus: string | null): string | null => {
     if (subStatus === "Clearing Softeon Inventory" || subStatus === "Vehicle Termination Form completed") {
-      return "Jenn D.";
+      return "Jenn D";
     }
     if (subStatus === "Fleet Administrator review" || subStatus === "Procurement to transfer form to leadership") {
-      return "Bob B.";
+      return "Bob B";
     }
     if (subStatus === "Leadership to approve Docusign") {
       return "Samantha W";

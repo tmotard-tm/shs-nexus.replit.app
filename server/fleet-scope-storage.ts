@@ -6,76 +6,10 @@ function getDb() {
   return fsDb;
 }
 
-/**
- * Normalizes owner names for consistency:
- * - Trims whitespace
- * - Removes trailing periods
- * - Fixes common variations (Oscar → Oscar S, lowercase → proper case)
- * - Keeps Rob A, Rob C, Rob D, Rob G as separate owners (different people)
- */
-export function normalizeOwnerName(owner: string | null | undefined): string {
-  if (!owner || owner.trim() === '') {
-    return 'Oscar S';  // Default owner
-  }
-  
-  let normalized = owner.trim();
-  
-  // Remove trailing period (except for Rob variations which we handle specially)
-  if (normalized.endsWith('.') && !normalized.match(/^Rob [A-Z]\.$/i)) {
-    normalized = normalized.slice(0, -1).trim();
-  }
-  
-  // Handle Rob variations - keep them separate but normalize format
-  if (normalized.match(/^Rob A[.\s]/i) || normalized.toLowerCase() === 'rob a.' || normalized.toLowerCase() === 'rob a') {
-    return 'Rob A';
-  }
-  if (normalized.toLowerCase() === 'rob c.' || normalized.toLowerCase() === 'rob c') {
-    return 'Rob C';
-  }
-  if (normalized.toLowerCase() === 'rob d.' || normalized.toLowerCase() === 'rob d') {
-    return 'Rob D';
-  }
-  if (normalized.toLowerCase() === 'rob g.' || normalized.toLowerCase() === 'rob g') {
-    return 'Rob G';
-  }
-  
-  // Handle Oscar variations
-  if (normalized.toLowerCase() === 'oscar' || normalized.toLowerCase() === 'oscar s' || normalized.toLowerCase().includes('oscar')) {
-    return 'Oscar S';
-  }
-  
-  // Handle Jenn D variations
-  if (normalized.toLowerCase().startsWith('jenn d')) {
-    return 'Jenn D';
-  }
-  
-  // Handle John C variations
-  if (normalized.toLowerCase().startsWith('john c')) {
-    return 'John C';
-  }
-  
-  // Handle Samantha W variations
-  if (normalized.toLowerCase().startsWith('samantha w')) {
-    return 'Samantha W';
-  }
-  
-  // Handle Mandy R variations
-  if (normalized.toLowerCase().startsWith('mandy r')) {
-    return 'Mandy R';
-  }
-  
-  // Handle Cheryl variations
-  if (normalized.toLowerCase().startsWith('cheryl')) {
-    return 'Cheryl';
-  }
-  
-  // Remove trailing period for any remaining names
-  if (normalized.endsWith('.')) {
-    normalized = normalized.slice(0, -1).trim();
-  }
-  
-  return normalized;
-}
+// Canonical owner-name normalizer lives in the shared schema so client pages,
+// server writes, and the startup data heal all agree on ONE spelling per person.
+import { normalizeOwnerName } from "@shared/fleet-scope-schema";
+export { normalizeOwnerName };
 
 export interface PmfDataset {
   import: PmfImport | null;

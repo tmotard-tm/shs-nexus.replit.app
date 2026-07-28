@@ -1,4 +1,5 @@
 import { fsPool } from "./fleet-scope-db";
+import { normalizeOwnerName } from "@shared/fleet-scope-schema";
 
 const INIT_SQL = `
 CREATE TABLE IF NOT EXISTS "fs_trucks" (
@@ -832,6 +833,32 @@ export async function initFleetScopeSchema(): Promise<void> {
     await client.query(INIT_SQL);
     initialized = true;
     console.log("[Fleet-Scope] Schema initialized — all fs_ tables verified/created");
+    // Idempotent owner-name heal: collapse stored shs_owner variations ("OLga",
+    // "Rob And", "Jennifer", …) to the canonical spelling so the Action Tracker
+    // shows one card per person. Value-guarded (only rewrites rows whose value
+    // differs from normalizeOwnerName's output) and a no-op once healed — safe
+    // on every boot, and it is how production data gets fixed after publish
+    // (the tool-side prod DB connection is read-only). NULL/blank owners are
+    // intentionally left untouched (no bulk default-to-Oscar rewrite).
+    try {
+      const { rows } = await client.query(
+        `SELECT DISTINCT shs_owner FROM fs_trucks WHERE shs_owner IS NOT NULL AND btrim(shs_owner) <> ''`
+      );
+      for (const row of rows) {
+        const raw = row.shs_owner as string;
+        const canonical = normalizeOwnerName(raw);
+        if (canonical !== raw) {
+          const res = await client.query(
+            `UPDATE fs_trucks SET shs_owner = $1 WHERE shs_owner = $2`,
+            [canonical, raw]
+          );
+          console.log(`[Fleet-Scope] Owner heal: "${raw}" → "${canonical}" (${res.rowCount} rows)`);
+        }
+      }
+    } catch (healErr: any) {
+      // Non-fatal: display-side normalization still groups correctly.
+      console.warn("[Fleet-Scope] Owner-name heal skipped:", healErr.message);
+    }
   } catch (err: any) {
     console.error("[Fleet-Scope] Schema init error:", err.message);
     throw err;
