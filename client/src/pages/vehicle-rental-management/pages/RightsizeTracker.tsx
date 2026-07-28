@@ -376,7 +376,7 @@ export default function RightsizeTracker() {
   const td: React.CSSProperties = { padding: "6px 10px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
   return (
-    <div style={{ fontFamily: fonts.dmSans, color: colors.ink, maxWidth: 1500 }}>
+    <div style={{ fontFamily: fonts.dmSans, color: colors.ink, width: "100%" }}>
       {/* header + freshness clocks */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <h1 style={{ fontFamily: fonts.syne, fontSize: 22, fontWeight: 700, margin: 0 }}>Rental Right-Size Tracker</h1>
@@ -594,8 +594,8 @@ export default function RightsizeTracker() {
           {sort.col && <> · sorted by <b>{sort.col}</b> {sort.dir}</>}
         </span>
       </div>
-      <div style={{ marginTop: 8, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "auto", maxHeight: 560 }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
+      <div style={{ marginTop: 8, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "auto", maxHeight: "max(560px, calc(100vh - 320px))" }}>
+        <table style={{ width: "100%", minWidth: 1150, borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
           <thead>
             <tr>
               <SortHeader col="ldap" text="LDAP" sort={sort} setSort={setSort} sticky thStyle={{ width: 92 }} />
