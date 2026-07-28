@@ -1,5 +1,16 @@
 uploads = []
-generated = []
+
+[[generated]]
+id = "JXdV9hyl6uKd_6mPA4ryb"
+uri = "file://client/public/app-launcher/byov-dashboard.png"
+type = "image"
+title = "BYOV dashboard app icon"
+
+[[generated]]
+id = "VpM6IHBSURyz1FqBCkRcq"
+uri = "file://client/public/app-launcher/byov-enrollment.png"
+type = "image"
+title = "BYOV enrollment app icon"
 
 [[outputs]]
 id = "EjiRdfMjaMBkIoz5B7zTK"

@@ -907,6 +907,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       { name: "eFleets",          url: "https://login.efleets.com/fleetweb/login",  logoUrl: "https://icons.duckduckgo.com/ip3/efleets.com.ico", color: "#ffffff", sortOrder: 3 },
       { name: "Holman",           url: "https://insights.holman.com/AriAccessWeb3/LoginForm.aspx?ReturnUrl=%2FAriAccessWeb3%2Fdefault.aspx", logoUrl: "https://www.google.com/s2/favicons?domain=holman.com&sz=256", color: "#ffffff", sortOrder: 4 },
       { name: "PAL Transport",    url: "https://paltransport.replit.app",           logoUrl: "/app-launcher/paltransport.png",  color: "#ffffff", sortOrder: 5 },
+      // BYOV (Bring Your Own Vehicle) program apps — separate from Nexus but fleet-related.
+      { name: "BYOV Dashboard",       url: "https://byovdashboard.replit.app",    logoUrl: "/app-launcher/byov-dashboard.png",  color: "#ffffff", sortOrder: 6 },
+      { name: "BYOV Enrollment Site", url: "https://byov-enrollment.replit.app",  logoUrl: "/app-launcher/byov-enrollment.png", color: "#ffffff", sortOrder: 7 },
     ];
     for (const a of STARTER_APPS) {
       await withTimeout(db.execute(sql`
