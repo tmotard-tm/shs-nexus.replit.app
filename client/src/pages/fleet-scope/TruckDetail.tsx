@@ -108,14 +108,12 @@ interface FleetOpLogEntry {
   createdAt: string;
 }
 
-type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
+type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "Final Actioned";
 
 const ownerColors: Record<OwnerName, string> = {
   "Oscar S": "bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700",
   "Rob A": "bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-900/30 dark:text-purple-300 dark:border-purple-700",
   "Bob B": "bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700",
-  "John C": "bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700",
-  "Mandy R": "bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700",
   "Final Actioned": "bg-gray-100 text-gray-600 border-gray-300 dark:bg-gray-800 dark:text-gray-400 dark:border-gray-600",
 };
 
@@ -140,12 +138,6 @@ function determineOwner(truck: Truck): OwnerName {
   }
   if (mainStatus === "Declined Repair" || mainStatus === "PMF") {
     return "Bob B";
-  }
-  if (mainStatus === "Tags") {
-    return "John C";
-  }
-  if (mainStatus === "Scheduling") {
-    return "Mandy R";
   }
   if (mainStatus === "In Transit") {
     return "Oscar S";
@@ -1182,7 +1174,7 @@ export default function TruckDetail() {
                       <div className="flex items-center gap-2 flex-1">
                         <Tags className="w-5 h-5 text-muted-foreground" />
                         <span className="font-semibold">Registration & Tags</span>
-                        <span className="ml-auto text-xs text-muted-foreground font-normal">John C. / Cheryl</span>
+                        <span className="ml-auto text-xs text-muted-foreground font-normal">Cheryl</span>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
@@ -1473,7 +1465,7 @@ export default function TruckDetail() {
                       <div className="flex items-center gap-2 flex-1">
                         <Calendar className="w-5 h-5 text-muted-foreground" />
                         <span className="font-semibold">Pickup Scheduling</span>
-                        <span className="ml-auto text-xs text-muted-foreground font-normal">Mandy R. / Oscar</span>
+                        <span className="ml-auto text-xs text-muted-foreground font-normal">Oscar</span>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
@@ -1615,7 +1607,7 @@ export default function TruckDetail() {
                       <div className="flex items-center gap-2 flex-1">
                         <TruckIcon className="w-5 h-5 text-muted-foreground" />
                         <span className="font-semibold">Transport & Delivery</span>
-                        <span className="ml-auto text-xs text-muted-foreground font-normal">Mandy R. / Oscar</span>
+                        <span className="ml-auto text-xs text-muted-foreground font-normal">Oscar</span>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">
@@ -1976,7 +1968,7 @@ export default function TruckDetail() {
                       <div className="flex items-center gap-2 flex-1">
                         <FileText className="w-5 h-5 text-muted-foreground" />
                         <span className="font-semibold">Additional Options</span>
-                        <span className="ml-auto text-xs text-muted-foreground font-normal">John C.</span>
+                        <span className="ml-auto text-xs text-muted-foreground font-normal">Oscar</span>
                       </div>
                     </AccordionTrigger>
                     <AccordionContent className="pb-4">

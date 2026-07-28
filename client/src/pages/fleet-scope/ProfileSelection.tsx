@@ -12,8 +12,6 @@ const PRESET_USERS = [
   "Oscar S",
   "Rob A",
   "Bob B",
-  "John C",
-  "Mandy R",
   "Luca B",
   "Samantha W",
   "Sean C",

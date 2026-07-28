@@ -33,8 +33,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Wrench,
-  Tag,
-  Package,
+
   DollarSign,
   AlertCircle,
   Filter,
@@ -66,22 +65,6 @@ const OWNERS: OwnerInfo[] = [
     colorClass: "text-amber-600",
     bgClass: "bg-amber-50 hover:bg-amber-100",
     borderClass: "border-amber-200",
-  },
-  {
-    name: "John C",
-    icon: Tag,
-    description: "Tag & Registration",
-    colorClass: "text-blue-600",
-    bgClass: "bg-blue-50 hover:bg-blue-100",
-    borderClass: "border-blue-200",
-  },
-  {
-    name: "Mandy R",
-    icon: Package,
-    description: "Pickup Coordination",
-    colorClass: "text-green-600",
-    bgClass: "bg-green-50 hover:bg-green-100",
-    borderClass: "border-green-200",
   },
   {
     name: "Rob A",
@@ -264,18 +247,10 @@ function determineOwner(truck: Truck): OwnerType {
     return "Oscar S";
   }
 
-  // Priority 4: John C - Tags category
-  if (mainStatus === "Tags") {
-    return "John C";
-  }
-
-  // Priority 5: Mandy R - Scheduling category
-  if (mainStatus === "Scheduling") {
-    return "Mandy R";
-  }
-
-  // Priority 6: Oscar S - Everything else
-  // Confirming Status, Decision Pending (except estimate review), Repairing, In Transit
+  // Priority 4: Oscar S - Everything else
+  // Confirming Status, Decision Pending (except estimate review), Repairing,
+  // In Transit, Tags, Scheduling (Tags/Scheduling moved to Oscar S after
+  // John C and Mandy R left the team, July 2026)
   return "Oscar S";
 }
 
@@ -389,7 +364,10 @@ export default function ActionTracker() {
   // Persist selected owner to localStorage so it's remembered when returning from viewing a truck
   const [selectedOwner, setSelectedOwner] = useState<string | null>(() => {
     const saved = localStorage.getItem("actionTrackerSelectedOwner");
-    return saved || null;
+    // Normalize a stale saved selection (e.g. "John C"/"Mandy R" after they
+    // were removed from the team) so it maps to the current canonical owner
+    // instead of opening an empty orphan panel.
+    return saved ? normalizeOwnerName(saved) : null;
   });
   const { toast } = useToast();
   
@@ -836,103 +814,6 @@ export default function ActionTracker() {
           })}
         </div>
 
-        {/* Roles & Responsibilities */}
-        <Card className="mb-8" data-testid="card-roles-responsibilities">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-lg flex items-center gap-2">
-              <Users className="w-5 h-5" />
-              Roles & Responsibilities
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
-              <div className="p-3 rounded-lg bg-amber-50 border border-amber-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wrench className="w-4 h-4 text-amber-600" />
-                  <span className="font-semibold text-amber-700">Oscar S</span>
-                </div>
-                <p className="text-xs text-amber-600 mb-2">Confirming Status, Decision Pending, Repairing, In Transit</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Research vehicle location/status</li>
-                  <li>Track Holman research requests</li>
-                  <li>Follow up with shops for estimates</li>
-                  <li>Coordinate repairs at shop</li>
-                  <li>Monitor repair progress</li>
-                  <li>Track vehicle transport</li>
-                </ul>
-              </div>
-
-              <div className="p-3 rounded-lg bg-purple-50 border border-purple-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <ClipboardList className="w-4 h-4 text-purple-600" />
-                  <span className="font-semibold text-purple-700">Rob A</span>
-                </div>
-                <p className="text-xs text-purple-600 mb-2">Decision Pending (Estimate received)</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Review repair estimates</li>
-                  <li>Run PO through GPT for decision</li>
-                  <li>Approve or decline repairs</li>
-                  <li>Make repair vs. sale decisions</li>
-                </ul>
-              </div>
-
-              <div className="p-3 rounded-lg bg-orange-50 border border-orange-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <DollarSign className="w-4 h-4 text-orange-600" />
-                  <span className="font-semibold text-orange-700">Bob B</span>
-                </div>
-                <p className="text-xs text-orange-600 mb-2">Declined Repair, PMF</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Process vehicle decommission</li>
-                  <li>Prep vehicles for sale</li>
-                  <li>Manage PMF transfers & work</li>
-                  <li>Coordinate redeployment</li>
-                </ul>
-              </div>
-
-              <div className="p-3 rounded-lg bg-blue-50 border border-blue-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <Tag className="w-4 h-4 text-blue-600" />
-                  <span className="font-semibold text-blue-700">John C</span>
-                </div>
-                <p className="text-xs text-blue-600 mb-2">Tags</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Process tag/registration</li>
-                  <li>Handle registration renewals</li>
-                  <li>Manage expired tags</li>
-                  <li>Track renewal progress</li>
-                </ul>
-              </div>
-
-              <div className="p-3 rounded-lg bg-green-50 border border-green-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <Package className="w-4 h-4 text-green-600" />
-                  <span className="font-semibold text-green-700">Mandy R</span>
-                </div>
-                <p className="text-xs text-green-600 mb-2">Scheduling</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Schedule tech pickup slots</li>
-                  <li>Coordinate with technicians</li>
-                  <li>Manage pickup logistics</li>
-                  <li>Track awaiting pickups</li>
-                </ul>
-              </div>
-
-              <div className="p-3 rounded-lg bg-gray-50 border border-gray-200">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 className="w-4 h-4 text-gray-600" />
-                  <span className="font-semibold text-gray-700">Final Actioned</span>
-                </div>
-                <p className="text-xs text-gray-600 mb-2">On Road, Vehicle was sold</p>
-                <ul className="space-y-1 text-muted-foreground">
-                  <li>Delivered to technician</li>
-                  <li>Vehicle was sold</li>
-                  <li>Case closed - no further action</li>
-                </ul>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
 
         {/* Selected Owner's Truck List */}
         {selectedOwner && (

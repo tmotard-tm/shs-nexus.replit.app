@@ -71,8 +71,18 @@ function normDistrict(d: string | null | undefined): string | null {
 /** The subset of a master row this module needs. Structural, so MasterRow satisfies it. */
 export interface RegionInput {
   tech_district?: string | null;
-  /** The technician's resolved home state. The primary signal — "location of the tech". */
-  identity_state?: string | null;
+  /**
+   * The technician's home state from `all_techs.home_state` (clean 2-letter
+   * codes; verified 13,503 rows, all length 2). The primary signal — Tyler's
+   * "location of the tech".
+   *
+   * DO NOT use the master row's `identity_state` here. Despite the name that
+   * column is the identity-resolution STATUS (RESOLVED / REVIEW / EXCEPTION),
+   * not a US state — it is `vrm_rental_identity_resolutions.state`, a state
+   * machine, not a place. Reading it silently pushed every single district
+   * down the shop-state fallback while still producing plausible totals.
+   */
+  tech_home_state?: string | null;
   /** Fallbacks, in this order, only when the tech state is unknown. */
   shop_state?: string | null;
   renting_state?: string | null;
@@ -120,7 +130,7 @@ export function assignDistrictRegions(rows: readonly RegionInput[]): Map<string,
     const district = normDistrict(row.tech_district);
     if (!district) continue;
 
-    const techRegion = regionForState(row.identity_state);
+    const techRegion = regionForState(row.tech_home_state);
     if (techRegion) {
       if (!techVotes.has(district)) techVotes.set(district, zero());
       techVotes.get(district)![techRegion] += 1;
@@ -192,7 +202,7 @@ export function resolveCaseRegion(
     return { region: null, basis: "unassigned", districtSplit: false, districtInferred: false };
   }
 
-  const byTech = regionForState(row.identity_state);
+  const byTech = regionForState(row.tech_home_state);
   if (byTech) return { region: byTech, basis: "tech_state", districtSplit: false, districtInferred: false };
 
   const byShop = regionForState(row.shop_state);

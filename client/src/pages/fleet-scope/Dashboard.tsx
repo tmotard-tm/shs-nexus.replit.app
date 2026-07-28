@@ -71,14 +71,12 @@ import Papa from "papaparse";
 import { Badge } from "@/components/ui/badge";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
 
-type OwnerType = "Oscar S" | "John C" | "Mandy R" | "Rob A" | "Bob B" | "Jenn D" | "Samantha W" | "Cheryl" | "Final Actioned";
+type OwnerType = "Oscar S" | "Rob A" | "Bob B" | "Jenn D" | "Samantha W" | "Cheryl" | "Final Actioned";
 
 const ownerColors: Record<OwnerType, string> = {
   "Oscar S": "bg-amber-100 text-amber-700 border-amber-200",
   "Rob A": "bg-purple-100 text-purple-700 border-purple-200",
   "Bob B": "bg-orange-100 text-orange-700 border-orange-200",
-  "John C": "bg-blue-100 text-blue-700 border-blue-200",
-  "Mandy R": "bg-green-100 text-green-700 border-green-200",
   "Jenn D": "bg-pink-100 text-pink-700 border-pink-200",
   "Samantha W": "bg-cyan-100 text-cyan-700 border-cyan-200",
   "Cheryl": "bg-rose-100 text-rose-700 border-rose-200",
@@ -114,8 +112,6 @@ const PRESET_OWNERS = [
   "Oscar S",
   "Rob A", 
   "Bob B",
-  "John C",
-  "Mandy R",
   "Jenn D",
   "Samantha W",
   "Cheryl",
@@ -166,14 +162,7 @@ function determineOwner(truck: Truck): OwnerType {
     return "Oscar S";
   }
 
-  if (mainStatus === "Tags") {
-    return "John C";
-  }
-
-  if (mainStatus === "Scheduling") {
-    return "Mandy R";
-  }
-
+  // Tags and Scheduling default to Oscar S (John C and Mandy R left the team, July 2026)
   return "Oscar S";
 }
 import { useToast } from "@/hooks/use-toast";

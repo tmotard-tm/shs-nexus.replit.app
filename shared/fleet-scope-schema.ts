@@ -167,9 +167,11 @@ export function normalizeOwnerName(owner: string | null | undefined): string {
   if (lower.includes("oscar")) return "Oscar S";
   if (lower.startsWith("olga")) return "Olga F"; // "Olga", "OLga", "Olga F."
   if (lower.startsWith("jenn")) return "Jenn D"; // "Jennifer", "Jenn D.", "Jenn D"
-  if (lower.startsWith("john c")) return "John C";
+  // John C and Mandy R were removed from the team (July 2026) — their vehicles
+  // and future Tags/Scheduling work go to Oscar S (confirmed by ops).
+  if (lower.startsWith("john c")) return "Oscar S";
   if (lower.startsWith("samantha w")) return "Samantha W";
-  if (lower.startsWith("mandy r")) return "Mandy R";
+  if (lower.startsWith("mandy r")) return "Oscar S";
   if (lower.startsWith("cheryl")) return "Cheryl";
   if (lower.startsWith("bob b")) return "Bob B";
   if (lower === "luca b") return "Luca B";

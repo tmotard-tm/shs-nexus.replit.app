@@ -11,6 +11,8 @@
  * population. All the regional logic lives in ./region.
  */
 import type { Router } from "express";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, type MasterRow } from "./read-repository";
 import {
   assignDistrictRegions,
@@ -35,6 +37,8 @@ try {
 }
 
 export interface RegionalRow extends MasterRow {
+  /** all_techs.home_state for this case's technician. The "location of the tech". */
+  tech_home_state: string | null;
   region: Region | null;
   region_label: string;
   region_basis: RegionBasis;
@@ -66,6 +70,30 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
+/**
+ * employee_id -> home_state, straight from the roster.
+ *
+ * Deliberately a separate small query rather than a new column on the big master
+ * SELECT: this keeps the whole regional feature inside its own two files.
+ * `all_techs.home_state` is clean 2-letter codes (verified: 13,503 non-empty
+ * rows, every one length 2), so no state-name normalisation is needed — but it
+ * is upper-cased anyway so a future dirty row cannot silently miss.
+ */
+async function loadTechHomeStates(): Promise<Map<string, string>> {
+  const res: any = await db.execute(sql`
+    SELECT employee_id, home_state
+    FROM all_techs
+    WHERE employee_id IS NOT NULL
+      AND home_state IS NOT NULL
+      AND btrim(home_state) <> ''`);
+  const rows = (res?.rows ?? res ?? []) as Array<{ employee_id: string; home_state: string }>;
+  const m = new Map<string, string>();
+  for (const r of rows) {
+    m.set(String(r.employee_id).trim(), String(r.home_state).trim().toUpperCase());
+  }
+  return m;
+}
+
 export function registerRegionRoutes(router: Router): void {
   /**
    * GET /api/vrm/rental-operations/by-region
@@ -78,11 +106,21 @@ export function registerRegionRoutes(router: Router): void {
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      const model = await getRentalOpsMaster({ includeDropped });
+      const [model, homeStates] = await Promise.all([
+        getRentalOpsMaster({ includeDropped }),
+        loadTechHomeStates(),
+      ]);
 
-      const districts = assignDistrictRegions(model.rows);
+      // Attach the technician's home state BEFORE assigning regions — it is the
+      // primary signal and the district vote is built from it.
+      const withState = model.rows.map((r) => ({
+        ...r,
+        tech_home_state: homeStates.get(String((r as any).employee_id ?? "").trim()) ?? null,
+      }));
 
-      const rows: RegionalRow[] = model.rows.map((r) => {
+      const districts = assignDistrictRegions(withState);
+
+      const rows: RegionalRow[] = withState.map((r) => {
         const resolved = resolveCaseRegion(r, districts);
         return {
           ...r,
@@ -126,7 +164,9 @@ export function registerRegionRoutes(router: Router): void {
 
       const summarise = (key: Region | "unassigned"): RegionSummary => {
         const bucket = buckets.get(key)!;
-        const list = Array.from(bucket.values()).sort((a, b) => b.caseCount - a.caseCount || a.district.localeCompare(b.district));
+        const list = Array.from(bucket.values()).sort(
+          (a, b) => b.caseCount - a.caseCount || a.district.localeCompare(b.district),
+        );
         return {
           region: key,
           label: key === "unassigned" ? "UNASSIGNED" : REGION_LABEL[key],

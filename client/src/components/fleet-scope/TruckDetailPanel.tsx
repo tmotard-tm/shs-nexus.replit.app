@@ -153,7 +153,7 @@ interface TruckDetailPanelProps {
   fromPage?: string;
 }
 
-type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "John C" | "Mandy R" | "Final Actioned";
+type OwnerName = "Oscar S" | "Rob A" | "Bob B" | "Final Actioned";
 
 function determineOwner(truck: Truck): OwnerName {
   const mainStatus = truck.mainStatus || "";
@@ -168,8 +168,6 @@ function determineOwner(truck: Truck): OwnerName {
   }
   if (mainStatus === "Repairing") return "Oscar S";
   if (mainStatus === "Declined Repair" || mainStatus === "PMF") return "Bob B";
-  if (mainStatus === "Tags") return "John C";
-  if (mainStatus === "Scheduling") return "Mandy R";
   if (mainStatus === "In Transit") return "Oscar S";
   return "Oscar S";
 }
@@ -178,8 +176,6 @@ const ownerColors: Record<OwnerName, string> = {
   "Oscar S": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
   "Rob A": "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
   "Bob B": "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
-  "John C": "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
-  "Mandy R": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
   "Final Actioned": "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
 };
 

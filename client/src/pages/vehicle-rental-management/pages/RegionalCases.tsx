@@ -32,7 +32,9 @@ interface RegionalRow {
   renter_name_raw: string;
   tech_name: string | null;
   tech_district: string | null;
-  identity_state: string | null;
+  /** all_techs.home_state. NOT the master row's `identity_state`, which is a
+   *  resolution STATUS (RESOLVED / REVIEW / EXCEPTION), not a place. */
+  tech_home_state: string | null;
   employee_status: string | null;
   days_open: number | null;
   daily_cost: number | null;
@@ -167,7 +169,7 @@ const COLUMNS: Array<{ key: string; label: string; get: (r: RegionalRow) => unkn
   { key: "district", label: "District", get: (r) => r.tech_district ?? "" },
   { key: "truck", label: "Truck", get: (r) => r.vehicle_number },
   { key: "tech", label: "Tech", get: (r) => r.tech_name || r.renter_name_raw || "" },
-  { key: "state", label: "Tech State", get: (r) => r.identity_state ?? "" },
+  { key: "state", label: "Tech State", get: (r) => r.tech_home_state ?? "" },
   { key: "employment", label: "Employment", get: (r) => r.employee_status ?? "" },
   { key: "days_open", label: "Days Open", get: (r) => r.days_open },
   { key: "daily_cost", label: "Daily $", get: (r) => r.daily_cost, render: (r) => money(r.daily_cost) },
