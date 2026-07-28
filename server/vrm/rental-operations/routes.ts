@@ -11,6 +11,7 @@ import * as XLSX from "xlsx";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory } from "./read-repository";
+import { registerRegionRoutes } from "./region-routes";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -42,6 +43,10 @@ function actorOf(req: any): string {
 }
 
 export function registerRentalOperationsRoutes(router: Router): void {
+  // EAST / CENTRAL / WEST split of the rental cases. Logic lives in
+  // ./region + ./region-routes so this shared file takes one line.
+  registerRegionRoutes(router);
+
   // GET master grid model (rich rows + cohorts + source health two-clock)
   router.get("/rental-operations/master", async (req, res) => {
     try {
