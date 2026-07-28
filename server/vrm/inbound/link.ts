@@ -57,7 +57,7 @@ async function vehicleCacheColumns(): Promise<Set<string>> {
       WHERE table_schema = 'public' AND table_name = 'holman_vehicles_cache'`);
     // `?? []` guards the Neon quirk where a query can hand back null instead of
     // an empty array, which would throw on .map and poison the cache below.
-    const cols = new Set(((r as any)?.rows ?? []).map((x: any) => String(x.column_name)));
+    const cols = new Set<string>(((r as any)?.rows ?? []).map((x: any) => String(x.column_name)));
     if (cols.size) cachedCols = cols;   // only memoize a SUCCESSFUL probe
     return cols;
   } catch (e: any) {
