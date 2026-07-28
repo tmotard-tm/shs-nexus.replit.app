@@ -126,7 +126,7 @@ export function registerRegionRoutes(router: Router): void {
 
       const summarise = (key: Region | "unassigned"): RegionSummary => {
         const bucket = buckets.get(key)!;
-        const list = [...bucket.values()].sort((a, b) => b.caseCount - a.caseCount || a.district.localeCompare(b.district));
+        const list = Array.from(bucket.values()).sort((a, b) => b.caseCount - a.caseCount || a.district.localeCompare(b.district));
         return {
           region: key,
           label: key === "unassigned" ? "UNASSIGNED" : REGION_LABEL[key],

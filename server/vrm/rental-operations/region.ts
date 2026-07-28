@@ -145,9 +145,11 @@ export function assignDistrictRegions(rows: readonly RegionInput[]): Map<string,
   };
 
   const out = new Map<string, DistrictAssignment>();
-  const districts = new Set<string>([...techVotes.keys(), ...fallbackVotes.keys()]);
+  const districts = new Set<string>(
+    Array.from(techVotes.keys()).concat(Array.from(fallbackVotes.keys())),
+  );
 
-  for (const district of districts) {
+  for (const district of Array.from(districts)) {
     const tv = techVotes.get(district);
     if (tv) {
       const { region, split } = pick(tv);

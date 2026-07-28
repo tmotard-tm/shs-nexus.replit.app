@@ -8,6 +8,7 @@ import NewRentals from "./pages/NewRentals";
 import NewRentalFullLog from "./pages/NewRentalFullLog";
 import RentalRepairTracker from "./pages/RentalRepairTracker";
 import RentalOperations from "./pages/RentalOperations";
+import RegionalCases from "./pages/RegionalCases";
 import RightsizeTracker from "./pages/RightsizeTracker";
 import Settings from "./pages/Settings";
 
@@ -40,6 +41,7 @@ export default function RouteReadyLayout() {
             <Route path="/vehicle-rental-management/new-rental-full-log" component={NewRentalFullLog} />
             <Route path="/vehicle-rental-management/rental-repair-tracker" component={RentalRepairTracker} />
             <Route path="/vehicle-rental-management/rental-operations" component={RentalOperations} />
+            <Route path="/vehicle-rental-management/cases-by-region" component={RegionalCases} />
             <Route path="/vehicle-rental-management/rightsize-tracker" component={RightsizeTracker} />
             <Route path="/vehicle-rental-management/settings" component={Settings} />
             <Route>
