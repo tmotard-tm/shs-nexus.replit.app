@@ -454,7 +454,7 @@ export default function InboundCalls() {
         </div>
       </div>
 
-      {sel && <Drawer call={sel} onClose={() => setSelected(null)}
+      {sel && <DetailModal call={sel} onClose={() => setSelected(null)}
         onStatus={(s) => mStatus.mutate({ id: sel.conversation_id, status: s })}
         onDisposition={(d, note) => mDisp.mutate({ id: sel.conversation_id, disposition: d, note })}
         onLink={(t) => mLink.mutate({ id: sel.conversation_id, truck: t })}
@@ -464,8 +464,8 @@ export default function InboundCalls() {
   );
 }
 
-// ── detail drawer: everything the old page showed, plus the write paths ─────
-function Drawer({ call, onClose, onStatus, onDisposition, onLink, onSuppress, busy }: {
+// ── detail modal (centred): everything the old page showed, plus the write paths ──
+function DetailModal({ call, onClose, onStatus, onDisposition, onLink, onSuppress, busy }: {
   call: Call; onClose: () => void;
   onStatus: (s: string) => void;
   onDisposition: (d: string, note?: string) => void;
@@ -495,9 +495,9 @@ function Drawer({ call, onClose, onStatus, onDisposition, onLink, onSuppress, bu
   );
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", justifyContent: "flex-end", background: "rgba(0,0,0,0.28)" }} onClick={onClose}>
+    <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.45)", padding: 24 }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()}
-        style={{ width: "min(560px, 100%)", height: "100%", background: colors.background, borderLeft: `1px solid ${colors.rule}`, overflowY: "auto", padding: 22 }}>
+        style={{ width: "min(760px, 100%)", maxHeight: "88vh", background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 14, boxShadow: "0 24px 64px rgba(0,0,0,0.35)", overflowY: "auto", padding: 24 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
           <PhoneIncoming size={16} color={colors.accent} />
           <div style={{ fontFamily: fonts.syne, fontSize: 17, fontWeight: 700, color: colors.ink, flex: 1 }}>
@@ -519,7 +519,7 @@ function Drawer({ call, onClose, onStatus, onDisposition, onLink, onSuppress, bu
           </div>
         )}
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 18px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 18px" }}>
           <Row l="When" v={fmtDateTime(call.call_at)} />
           <Row l="Duration" v={fmtDur(call.duration_secs)} />
           <Row l="Caller" v={call.caller_name} />

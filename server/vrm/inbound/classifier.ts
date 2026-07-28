@@ -144,8 +144,14 @@ function answersTo(turns: TranscriptTurn[], re: RegExp, take = 2): string[] {
     for (let j = i + 1, n = 0; j < turns.length && n < take; j++) {
       const m = (turns[j].message || "").trim();
       if (turns[j].role === "agent") {
-        if (m) break;      // a real follow-up question ends the answer
-        continue;          // empty agent turn = tool call, keep looking
+        // Only a SUBSTANTIVE agent turn ends the answer. Empty turns are tool
+        // calls, and short interjections are backchannel while the caller is
+        // still reading: on a real call the plate came as "DCB." -> agent "And..."
+        // -> "3233." (= DCB3233), and breaking on that interjection captured only
+        // "DCB", which has no digit and was rejected as an identifier.
+        const substantive = m.length > 12 || /\?$/.test(m);
+        if (substantive) break;
+        continue;
       }
       if (!m || m === "...") continue;
       out.push(m);
@@ -184,6 +190,49 @@ const VIN17_RE = /\b([A-HJ-NPR-Z0-9]{17})\b/;
 const TOKEN_RE = /\b([A-Z0-9]{5,9})\b/g;
 
 /**
+ * Collapse a spoken identifier into the string it spells.
+ *
+ * `despeak` alone is not enough: it looks for a RUN of single letters or spelled
+ * digit-words, and a real VIN read-out mixes in bare digits and multi-digit
+ * groups, which breaks the run. The 2026-07-28 Waterbury call read
+ *   "VIN number 1, Frank, Tom, yellow, Edward, 1, yellow, Michael, 6, George,
+ *    Kevin, boy, 08557"
+ * where "1" and "6" and "08557" are literal digits between phonetic letters.
+ *
+ * So: decode phonetics, drop filler and the label words the caller says around
+ * the value, then concatenate what remains. Everything left is a character of
+ * the identifier.
+ */
+const ID_STOPWORDS = new Set([
+  "uh", "um", "er", "ah", "yeah", "yes", "no", "ok", "okay", "so", "and", "its",
+  "it", "is", "the", "a", "of", "for", "that", "this", "one", // "one" only as filler after label words
+  "vin", "number", "numbers", "plate", "license", "licence", "tag", "unit",
+  "last", "eight", "digits", "digit", "full", "sure", "got", "here", "hold",
+  "let", "me", "see", "think", "believe", "gonna", "give", "you", "i", "ill",
+]);
+
+function collapseIdentifier(text: string): string {
+  const decoded = decodePhonetic(text);
+  const tokens = decoded.split(/[^A-Za-z0-9]+/).filter(Boolean);
+  const out: string[] = [];
+  for (const raw of tokens) {
+    const t = raw.toUpperCase();
+    const lower = raw.toLowerCase();
+    // A token belongs to the identifier if it is a single character, a short
+    // all-digit group ("08557" read as one chunk), or a short all-letter group
+    // ("DCB" read as one chunk). Stopwords are filtered on ALL shapes, which is
+    // what keeps "uh", "yeah", "VIN" and "number" out of the value.
+    const isChar = t.length === 1;
+    const isDigitGroup = /^[0-9]{2,6}$/.test(t);
+    const isLetterGroup = /^[A-Z]{2,4}$/.test(t);
+    if (!isChar && !isDigitGroup && !isLetterGroup) continue;
+    if (ID_STOPWORDS.has(lower)) continue;
+    out.push(t);
+  }
+  return out.join("");
+}
+
+/**
  * A vehicle identifier must contain BOTH a letter and a digit.
  *
  * This one predicate is load-bearing. Identifiers are matched against text that
@@ -207,12 +256,69 @@ function looksLikeIdentifier(t: string): boolean {
  * like rubber, G like George"). Without this the plate is unrecoverable and the
  * call cannot be matched to a truck.
  */
+/**
+ * NATO **plus** the improvised "police / Western Union" alphabet, which is what
+ * shop staff actually use. A real 2026-07-28 call read a VIN as:
+ *   "1, Frank, Tom, yellow, Edward, 1, yellow, Michael, 6, George, Kevin, boy, 08557"
+ * = 1FTYE1YM6GKB08557, a valid 17-char Ford Transit VIN. A NATO-only table
+ * decoded none of it and the call never matched a truck. Callers mix schemes
+ * freely and invent words ("yellow" for Y, "boy" for B), so this table is
+ * deliberately permissive: a wrong letter is no worse than the miss it replaces,
+ * because the VIN/plate still has to match a real fleet row to link anything.
+ */
 const NATO: Record<string, string> = {
-  alpha: "A", alfa: "A", bravo: "B", charlie: "C", delta: "D", echo: "E",
-  foxtrot: "F", golf: "G", hotel: "H", india: "I", juliet: "J", juliett: "J",
-  kilo: "K", lima: "L", mike: "M", november: "N", oscar: "O", papa: "P",
-  quebec: "Q", romeo: "R", sierra: "S", tango: "T", uniform: "U", victor: "V",
-  whiskey: "W", xray: "X", "x-ray": "X", yankee: "Y", zulu: "Z",
+  // A
+  alpha: "A", alfa: "A", adam: "A", apple: "A", able: "A",
+  // B
+  bravo: "B", boy: "B", baker: "B", bob: "B",
+  // C
+  charlie: "C", charles: "C", cat: "C",
+  // D
+  delta: "D", david: "D", dog: "D",
+  // E
+  echo: "E", edward: "E", easy: "E",
+  // F
+  foxtrot: "F", frank: "F", fox: "F",
+  // G
+  golf: "G", george: "G",
+  // H
+  hotel: "H", henry: "H", harry: "H",
+  // I
+  india: "I", ida: "I", item: "I",
+  // J
+  juliet: "J", juliett: "J", john: "J", jig: "J",
+  // K
+  kilo: "K", king: "K", kevin: "K",
+  // L
+  lima: "L", lincoln: "L", love: "L",
+  // M
+  mike: "M", mary: "M", michael: "M",
+  // N
+  november: "N", nora: "N", nancy: "N",
+  // O
+  oscar: "O", ocean: "O", oboe: "O",
+  // P
+  papa: "P", paul: "P", peter: "P",
+  // Q
+  quebec: "Q", queen: "Q",
+  // R
+  romeo: "R", robert: "R", roger: "R",
+  // S
+  sierra: "S", sam: "S", sugar: "S", sam_uel: "S",
+  // T
+  tango: "T", tom: "T", thomas: "T",
+  // U
+  uniform: "U", union: "U",
+  // V
+  victor: "V", victory: "V",
+  // W
+  whiskey: "W", william: "W", whisky: "W",
+  // X
+  xray: "X", "x-ray": "X",
+  // Y
+  yankee: "Y", young: "Y", yellow: "Y",
+  // Z
+  zulu: "Z", zebra: "Z",
 };
 
 function decodePhonetic(text: string): string {
@@ -397,7 +503,12 @@ export function classifyInboundCall(
 
   // VIN: allow 15-18 chars. Real transcripts drop or add a character
   // ("1GC5GFX2C1142394" came through at 16), and a strict 17 finds nothing.
+  // Collapse the spoken identifier answer FIRST — that is where a phonetically
+  // spelled VIN or a plate split across turns actually lives.
+  const collapsed = collapseIdentifier(idAns);
+
   let vin: string | null = VIN17_RE.exec(idFlat)?.[1] ?? VIN17_RE.exec(allFlat)?.[1] ?? null;
+  if (!vin && collapsed.length === 17 && /^[A-HJ-NPR-Z0-9]+$/.test(collapsed)) vin = collapsed;
   if (!vin) {
     const loose = /\b([A-HJ-NPR-Z0-9]{15,18})\b/.exec(idFlat) ?? /\b([A-HJ-NPR-Z0-9]{15,18})\b/.exec(allFlat);
     if (loose && looksLikeIdentifier(loose[1])) vin = loose[1];
@@ -407,6 +518,11 @@ export function classifyInboundCall(
 
   // Bare token from the identifier answer. The agent then asks which it is.
   let tokens = Array.from(idFlat.matchAll(TOKEN_RE)).map((m) => m[1]).filter(looksLikeIdentifier);
+  // The collapsed answer beats loose tokens when it is plate-shaped: it survives
+  // an interjection splitting the value ("DCB." / "And..." / "3233." = DCB3233).
+  if (collapsed.length >= 5 && collapsed.length <= 9 && looksLikeIdentifier(collapsed) && collapsed !== vin) {
+    tokens = [collapsed, ...tokens];
+  }
   if (!tokens.length) {
     // Callers often split one identifier across consecutive turns ("DCB." then
     // "3233." = DCB3233). Neither half qualifies alone; the join does.
@@ -509,7 +625,15 @@ export function classifyInboundCall(
   let shop_address: string | null = null;
   const addrM = /\b(\d{2,6}\s+[A-Za-z0-9.'-]+(?:\s+[A-Za-z0-9.'-]+){0,4}\s*(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Place|Pl|Court|Ct|Highway|Hwy|Route|Rte)\b\.?)/i.exec(allUser);
   if (addrM) shop_address = clean(addrM[1]);
-  if (shop_address && shop_city_state) shop_address = `${shop_address}, ${shop_city_state}`;
+  // Only append the city/state answer when it adds something. The address
+  // question is "city and state, or the street address if you have it", so the
+  // one answer often already contains the street and appending duplicated it
+  // ("11928 Research Boulevard, Austin, Texas, 11928 Research Boulevard").
+  if (shop_address && shop_city_state && !shop_city_state.toLowerCase().includes(shop_address.toLowerCase())) {
+    shop_address = clean(`${shop_address}, ${shop_city_state}`);
+  } else if (shop_address && shop_city_state) {
+    shop_address = clean(shop_city_state);
+  }
   if (!shop_address) shop_address = shop_city_state;
 
   // ── escalation flags ──────────────────────────────────────────────────────
