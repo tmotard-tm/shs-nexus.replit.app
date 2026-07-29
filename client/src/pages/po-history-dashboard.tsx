@@ -865,7 +865,7 @@ export default function PoHistoryDashboard() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">PO History Dashboard</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Holman purchase orders · {pos.length.toLocaleString()} most recent POs (last 3 years)
+            Holman purchase orders · all open POs + recent history ({pos.length.toLocaleString()} POs)
           </p>
         </div>
       </div>

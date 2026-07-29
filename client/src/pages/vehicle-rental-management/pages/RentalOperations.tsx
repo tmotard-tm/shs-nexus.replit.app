@@ -1264,6 +1264,7 @@ export default function RentalOperations() {
       </div>
 
       {panelKey && <DetailPanel caseKey={panelKey} row={rows.find((r) => r.case_key === panelKey)} onClose={() => setPanelKey(null)} onMark={doMark} />}
+      {pickupFor && <PickupTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -1946,7 +1947,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
         </div>
       </div>
 
-      {pickupFor && <PickupTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
     </div>
   );
 }

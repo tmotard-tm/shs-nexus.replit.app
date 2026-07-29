@@ -20353,7 +20353,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // PO History Dashboard — live Snowflake read joining HOLMAN_ETL_PO_DETAILS
   // (PO headers + line items, latest upload per PO) with
   // HOLMAN_VEHICLE_DETAIL_PO_HISTORY_RAW (PO Notes, keyed EVENT_PO_NUMBER).
-  // Returns the most recent `limit` POs (default 500) within `days` (default 3y).
+  // Returns ALL open POs (APPROVED/HOLD/BILL HOLD) plus the most recent `limit`
+  // POs (default 500) within `days` (default 3y).
   // In-memory cache: this Snowflake scan takes ~70s on the shared warehouse, so we
   // cache results per (days,limit,vehicle) key. Fresh for 15 min; a stale-but-present
   // entry (up to 2h) is served immediately while a background refresh runs.
@@ -20376,23 +20377,42 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     const sf = getSnowflakeService();
     await sf.connect();
 
+    // Includes EVERY open PO (APPROVED/HOLD/BILL HOLD — the fleet-wide follow-up
+    // list, ~2.7k POs) PLUS the most recent `limit` POs within `days`, so users
+    // can clear open POs without the recency cap hiding older ones.
     const lineRows = await sf.executeQuery(`
-      WITH top_pos AS (
-        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER, MAX(PO_DATE) AS PD
+      WITH latest AS (
+        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER, PO_STATUS, PO_DATE, PO_TYPE_DESCRIPTION,
+               VENDOR_NAME, PO_LINE_SEQ, DESCRIPTION, ATA_CODE, ATA_GROUP_DESC,
+               REPAIR_TYPE_DESCRIPTION, LINE_ITEM_COST, TOTAL_LINE_ITEM_AMOUNT
         FROM ${HOLMAN_PO_ETL_TABLE}
         WHERE PO_NUMBER IS NOT NULL
-          AND PO_DATE >= DATEADD(day, -${days}, CURRENT_DATE)
           ${vehicleClause}
+        QUALIFY UPLOAD_TIMESTAMP = MAX(UPLOAD_TIMESTAMP) OVER (PARTITION BY HOLMAN_VEHICLE_NUMBER, PO_NUMBER)
+      ),
+      recent_keys AS (
+        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER, MAX(PO_DATE) AS PD
+        FROM latest
+        WHERE PO_DATE >= DATEADD(day, -${days}, CURRENT_DATE)
         GROUP BY HOLMAN_VEHICLE_NUMBER, PO_NUMBER
         ORDER BY PD DESC
         LIMIT ${limit}
+      ),
+      open_keys AS (
+        SELECT DISTINCT HOLMAN_VEHICLE_NUMBER, PO_NUMBER
+        FROM latest
+        WHERE UPPER(PO_STATUS) IN ('APPROVED', 'HOLD', 'BILL HOLD', 'OPEN')
+      ),
+      keys AS (
+        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER FROM recent_keys
+        UNION
+        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER FROM open_keys
       )
       SELECT l.HOLMAN_VEHICLE_NUMBER, l.PO_NUMBER, l.PO_STATUS, l.PO_DATE, l.PO_TYPE_DESCRIPTION,
              l.VENDOR_NAME, l.PO_LINE_SEQ, l.DESCRIPTION, l.ATA_CODE, l.ATA_GROUP_DESC,
              l.REPAIR_TYPE_DESCRIPTION, l.LINE_ITEM_COST, l.TOTAL_LINE_ITEM_AMOUNT
-      FROM ${HOLMAN_PO_ETL_TABLE} l
-      JOIN top_pos t ON t.HOLMAN_VEHICLE_NUMBER = l.HOLMAN_VEHICLE_NUMBER AND t.PO_NUMBER = l.PO_NUMBER
-      QUALIFY l.UPLOAD_TIMESTAMP = MAX(l.UPLOAD_TIMESTAMP) OVER (PARTITION BY l.HOLMAN_VEHICLE_NUMBER, l.PO_NUMBER)
+      FROM latest l
+      JOIN keys t ON t.HOLMAN_VEHICLE_NUMBER = l.HOLMAN_VEHICLE_NUMBER AND t.PO_NUMBER = l.PO_NUMBER
       ORDER BY l.PO_DATE DESC, l.PO_NUMBER, l.PO_LINE_SEQ
     `) as any[];
 
