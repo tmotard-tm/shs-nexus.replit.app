@@ -12,6 +12,7 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory } from "./read-repository";
 import { registerRegionRoutes } from "./region-routes";
+import { loadWorkbookStates, WORKBOOK_STATUSES, WORKBOOK_STATUS_LABEL, WORKBOOK_CLOSED_STATUSES } from "./workbook";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -51,8 +52,33 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.get("/rental-operations/master", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      const model = await getRentalOpsMaster({ includeDropped });
-      res.json(model);
+      // Workbook state rides along so Rental Operations can show Ready for
+      // Pickup (Tyler 2026-07-29). It is ONE grouped query for the whole board
+      // (loadWorkbookStates), not a per-row lookup, and it is attached here
+      // rather than inside getRentalOpsMaster so the LUCA feed and the external
+      // API - which share that read model - keep their existing contract.
+      const [model, workbooks] = await Promise.all([
+        getRentalOpsMaster({ includeDropped }),
+        loadWorkbookStates(),
+      ]);
+      const rows = (model.rows ?? []).map((r: any) => {
+        const wb = workbooks.get(String(r.case_key));
+        return {
+          ...r,
+          workbook_status: wb?.status ?? "new",
+          workbook_actor: wb?.actor ?? null,
+          workbook_updated_at: wb?.updated_at ?? null,
+          workbook_next_action: wb?.next_action ?? null,
+        };
+      });
+      res.json({
+        ...model,
+        rows,
+        readyForPickupCount: rows.filter((r: any) => r.workbook_status === "ready_for_pickup").length,
+        workbookStatuses: WORKBOOK_STATUSES.map((k) => ({
+          key: k, label: WORKBOOK_STATUS_LABEL[k], closed: WORKBOOK_CLOSED_STATUSES.has(k),
+        })),
+      });
     } catch (e: any) {
       console.error("[VRM/RentalOps] master failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "master read failed" });

@@ -103,6 +103,12 @@ interface MasterRow {
   mark_at: string | null;
   present_in_latest: boolean;
   last_seen_at: string | null;
+  // Working state from the shared VRM workbook (same rows Cases by Region
+  // edits). `ready_for_pickup` is the one LUCA sets itself, off a shop call.
+  workbook_status: string;
+  workbook_actor: string | null;
+  workbook_updated_at: string | null;
+  workbook_next_action: string | null;
 }
 interface SourceClock {
   source_key: string; last_status: string | null; last_success_at: string | null;
@@ -320,6 +326,9 @@ const COHORTS: Array<{ key: string; label: string }> = [
   // that is not under Cannot work is a rental we still own and can act on. That is
   // why there is no separate Workable chip.
   { key: "all", label: "All Rentals" },
+  // Highest-value cohort on the page: the shop is finished, so every further
+  // day is pure rental spend on a truck that is just sitting there.
+  { key: "ready_for_pickup", label: "Ready for Pickup" },
   { key: "luca_queue", label: "LUCA Call Queue" },
   { key: "cannot_work", label: "Cannot work · declined + auction" },
   { key: "auction_redirect", label: "Sent to Auction · LUCA will call" },
@@ -753,7 +762,8 @@ export default function RentalOperations() {
     // the turned-in list regardless of the toggle.
     const pool = cohort === "pended" ? rows.filter((r) => r.ticket_status === "PENDED") : basePool;
     return pool.filter((r) => {
-      if (cohort === "luca_queue") { if (!r.callable) return false; }
+      if (cohort === "ready_for_pickup") { if (r.workbook_status !== "ready_for_pickup") return false; }
+      else if (cohort === "luca_queue") { if (!r.callable) return false; }
       // Tyler's workload split — same derivation as the chip counts (MECE over the pool)
       else if (cohort === "cannot_work") { if (workloadBucketOf(r) !== "cannot_work") return false; }
       else if (cohort === "mismatch_no_po") { if (workloadBucketOf(r) !== "mismatch_no_po") return false; }
@@ -1176,7 +1186,16 @@ export default function RentalOperations() {
               return (
                 <tr key={r.case_key} onClick={() => setPanelKey(r.case_key)} style={{ cursor: "pointer", background: tint, opacity: r.operator_mark === "closed" ? 0.72 : 1 }}>
                   <td style={{ ...tdStyle, textAlign: "right", color: colors.inkMuted, fontFamily: fonts.jetbrains, fontSize: 11 }}>{i + 1}</td>
-                  <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>{r.case_key}</td>
+                  <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
+                    {r.case_key}
+                    {/* Set by LUCA off a shop call, or by a lead in the Cases by
+                        Region workbook. Green because it is the good state, and
+                        loud because every day it sits unread is rental spend on
+                        a truck that is already fixed. */}
+                    {r.workbook_status === "ready_for_pickup" && (
+                      <Chip text="READY" fg={colors.green} bg={colors.greenLight} />
+                    )}
+                  </td>
                   <td style={tdStyle}>
                     {r.renter_name_raw}
                     {r.ticket_status === "PENDED" && <Chip text="PENDED" fg={colors.red} bg={colors.redLight} />}
