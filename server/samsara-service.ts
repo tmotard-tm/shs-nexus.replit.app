@@ -204,6 +204,21 @@ export class SamsaraService {
     return all;
   }
 
+  // Live device health list (all pages). NOTE: /devices rejects limit=512 with HTTP 400 — max accepted is lower, use 100.
+  // Deliberately NOT filtered by parentTagIds: /devices is an org-level hardware endpoint.
+  async liveGetDevicesWithHealth(): Promise<any[]> {
+    const all: any[] = [];
+    let cursor: string | undefined;
+    do {
+      const params = new URLSearchParams({ includeHealth: 'true', limit: '100' });
+      if (cursor) params.set('after', cursor);
+      const result = await this.callLiveApi(`/devices?${params.toString()}`);
+      if (result.data) all.push(...result.data);
+      cursor = result.pagination?.hasNextPage ? result.pagination.endCursor : undefined;
+    } while (cursor);
+    return all;
+  }
+
   // Expose live vehicle list (all pages, filtered by group if SAMSARA_GROUP_ID set)
   async liveGetVehicles(): Promise<any[]> {
     return this.fetchAllLivePages('/fleet/vehicles');

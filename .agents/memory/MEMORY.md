@@ -59,4 +59,5 @@
 - [Holman write-fence supersede](holman-write-fence-supersede.md) — fences outlive their correction when a newer op lands; release only on live-confirmed newer submissions, NEVER on cache confirms (fence pins the cache = circular evidence).
 - [Spares pool & INTERIOR source](spares-pool-interior.md) — unassigned pool derived locally (holman cache minus tpms occupied, BYOV excluded, Snowflake fallback guards); rack INTERIOR only in fs_all_vehicles_mirror — holman cache interior is a 'Standard' default.
 - [Mismatch cache cold-start pinning](mismatch-cache-cold-start.md) — TTL caches over synced mirrors pin stale results on autoscale cold boots; invalidate via a shared epoch bumped after every mirror rewrite.
+- [Samsara /devices health](samsara-devices-health.md) — includeHealth=true rejects limit=512 (use 100 + cursor); 2 devices/vehicle (VG gateway + CM camera); roll up worst-of per canonical truck number.
 - [Holman phantom cache rows](holman-phantom-cache-rows.md) — upsert-only sync never removes failed-assign manual rows; self-heal keys on manual+never-synced, NOT number format (real Holman numbers can be alphanumeric).
