@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 
 // ─── Shared MultiSelect ────────────────────────────────────────────────────
+// Sentinel meaning "explicitly nothing selected" (empty set means "all").
+const NONE_SENTINEL = "__NONE__";
+
 function MultiSelect({
   label, options, selected, onChange, width = "w-40",
 }: {
@@ -32,17 +35,34 @@ function MultiSelect({
     return () => document.removeEventListener("mousedown", handler);
   }, []);
 
-  const allSelected = selected.size === 0 || selected.size === options.length;
+  // Selection semantics: empty set = ALL selected (no filtering).
+  // The sentinel NONE_SENTINEL means explicitly nothing selected.
+  const noneSelected = selected.has(NONE_SENTINEL);
+  const allSelected = !noneSelected && (selected.size === 0 || selected.size === options.length);
 
   const toggle = (value: string) => {
-    const next = new Set(selected);
-    next.has(value) ? next.delete(value) : next.add(value);
-    onChange(next.size === options.length ? new Set() : next);
+    // Start from the EFFECTIVE selection: "all" expands to the full option list,
+    // so unchecking one item keeps the rest selected.
+    const base = noneSelected
+      ? new Set<string>()
+      : selected.size === 0
+        ? new Set(options.map(o => o.value))
+        : new Set(selected);
+    base.has(value) ? base.delete(value) : base.add(value);
+    if (base.size === options.length) onChange(new Set());
+    else if (base.size === 0) onChange(new Set([NONE_SENTINEL]));
+    else onChange(base);
   };
 
-  const isChecked = (value: string) => selected.size === 0 || selected.has(value);
+  const toggleAll = () => {
+    // All checked -> unselect everything; otherwise -> select everything.
+    onChange(allSelected ? new Set([NONE_SENTINEL]) : new Set());
+  };
+
+  const isChecked = (value: string) => !noneSelected && (selected.size === 0 || selected.has(value));
 
   const triggerLabel = (() => {
+    if (noneSelected) return `No ${label}`;
     if (selected.size === 0 || selected.size === options.length) return `All ${label}`;
     if (selected.size === 1) return options.find(o => selected.has(o.value))?.label ?? `1 ${label}`;
     return `${selected.size} ${label}`;
@@ -61,7 +81,7 @@ function MultiSelect({
       {open && (
         <div className="absolute z-50 mt-1 w-full min-w-[160px] bg-popover border border-border rounded-md shadow-xl overflow-hidden">
           <button
-            onClick={() => onChange(new Set())}
+            onClick={toggleAll}
             className="w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent transition-colors border-b border-border"
           >
             <span className={`flex items-center justify-center w-4 h-4 rounded border ${allSelected ? "bg-primary border-primary" : "border-border bg-transparent"}`}>
