@@ -400,6 +400,26 @@ async function processItem(
         if (vrm.outcome === "applied") {
           result.vrmReadyApplied = (result.vrmReadyApplied ?? 0) + 1;
           console.log(`[LUCA-Writeback] ${label}: VRM case ${vrm.caseKey} -> Ready for pickup`);
+          // Region-owner email + (if the toggle is on) the automatic pickup
+          // text. AWAITED on purpose: the scheduled-deployment trigger exits
+          // right after the poll, and a fire-and-forget here would silently
+          // lose the email whenever the process dies first. The flip is
+          // edge-triggered (task-id idempotency in ready-ingest), so this runs
+          // at most once per outbox task, not once per poll.
+          try {
+            const { notifyReadyFlip } = await import("../vrm/rental-operations/ready-notify");
+            const n = await notifyReadyFlip({
+              caseKey: vrm.caseKey!,
+              detail: (rawItem as any)?.detail ?? null,
+              externalId: mapped.externalId,
+            });
+            console.log(
+              `[LUCA-Writeback] ${label}: notify ${n.regionLabel}/${n.owner} — email ${n.email.sent ? "sent" : `not sent (${n.email.reason})`}` +
+              `, auto-text ${n.autoText.enabled ? (n.autoText.status ?? n.autoText.reason ?? "?") : "off"}`,
+            );
+          } catch (err: any) {
+            console.warn(`[LUCA-Writeback] ${label}: ready notify failed (non-fatal): ${err?.message}`);
+          }
         } else {
           console.log(`[LUCA-Writeback] ${label}: VRM ready no-op (${vrm.outcome}: ${vrm.detail})`);
         }

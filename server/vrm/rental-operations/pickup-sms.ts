@@ -169,10 +169,17 @@ export async function resolvePickupTarget(row: MasterRow): Promise<{
   warnings: PickupWarning[];
 }> {
   const warnings: PickupWarning[] = [];
+  // Declined / sent-to-auction redirect: the rental van is not coming back, and
+  // the truck the tech actually collects is their ASSIGNED truck at ITS shop -
+  // the same redirect the LUCA caller follows. Without this branch the text
+  // named the case truck and the case truck's shop, which on this cohort is a
+  // vehicle the tech will never pick up. (Review 2026-07-29.)
+  const redirectToAssigned = !!(row.redirect_to_assigned && row.call_target_truck);
   const target: PickupTarget = {
     case_key: row.case_key,
-    // The truck at the shop is the case vehicle itself. See PickupTarget.
-    repair_truck: row.case_key,
+    // The truck at the shop. Normally the case vehicle itself; on the redirect
+    // cohort, the tech's assigned truck. See PickupTarget.
+    repair_truck: redirectToAssigned ? String(row.call_target_truck) : row.case_key,
     rental_vendor: row.rental_vendor,
     ticket_number: row.ticket_number,
     // renter_own_truck is the renter's own assigned truck; assigned_truck is the
@@ -185,9 +192,12 @@ export async function resolvePickupTarget(row: MasterRow): Promise<{
     employee_status: row.employee_status,
     contact_status: null,
     contact_active: null,
-    shop_name: row.shop_name,
-    shop_city: row.shop_city,
-    shop_state: row.shop_state,
+    // The redirect shop comes from the assigned truck's PO. Its address is one
+    // opaque string, so city/state stay null there and buildPickupBody degrades
+    // to the name-only form rather than guessing at a parse.
+    shop_name: redirectToAssigned ? row.call_shop_name : row.shop_name,
+    shop_city: redirectToAssigned ? null : row.shop_city,
+    shop_state: redirectToAssigned ? null : row.shop_state,
     days_open: row.days_open ?? null,
     daily_cost: row.daily_cost ?? null,
   };
@@ -209,6 +219,10 @@ export async function resolvePickupTarget(row: MasterRow): Promise<{
      LIMIT 1
   `);
   const racf = (r.rows?.[0]?.tech_racfid || "").trim();
+  // The roster's own word on whether this person is active. The contact table's
+  // empl_status is a copy that can lag (its sync only flips `active` on
+  // tombstone), so the fresher all_techs value backs it up below.
+  const rosterStatus = (r.rows?.[0]?.employment_status || "").trim().toUpperCase();
   if (!racf) {
     warnings.push({
       code: "no_racfid",
@@ -255,6 +269,17 @@ export async function resolvePickupTarget(row: MasterRow): Promise<{
       code: "on_leave",
       blocking: false,
       message: `${contact.name || target.ldap} is on leave (status ${contact.emplStatus}).`,
+    });
+  } else if (rosterStatus && rosterStatus !== "A") {
+    // The contact record says active but the roster disagrees. The roster wins
+    // a warning: it is the direct feed, and this query already paid for the
+    // column. (Review 2026-07-29: employment_status was selected and thrown
+    // away, so a tech the roster had already marked termed or on leave could
+    // pass through with no confirmation step.)
+    warnings.push({
+      code: "on_leave",
+      blocking: false,
+      message: `${contact.name || target.ldap} is not active on the roster (status ${rosterStatus}) even though the comms contact still reads active. Confirm before sending.`,
     });
   }
   return { target, warnings };

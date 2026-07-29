@@ -26,8 +26,25 @@ import { normalizeTruckNumber } from "../../luca-writeback/mapper";
 import {
   appendWorkbookEntry,
   loadWorkbookState,
+  loadWorkbookHistory,
   WORKBOOK_CLOSED_STATUSES,
 } from "./workbook";
+
+/**
+ * Statuses LUCA must never overwrite with ready_for_pickup.
+ *
+ * `returned_closed` for the obvious reason. `return_scheduled` and `escalated`
+ * because both mean a human has moved the case PAST needing a ready flag - the
+ * return is booked, or a person is on it - and a re-assertion would silently
+ * pull the case back into the open queue. (Review 2026-07-29: the original
+ * guard protected only the closed status, and a verifier reproduced LUCA
+ * flipping a lead's return_scheduled back to ready on the next poll.)
+ */
+// Array.from, not a spread: this tsconfig targets below es2015 downlevel
+// iteration, so spreading a Set is TS2802.
+const READY_NO_REGRESS: ReadonlySet<string> = new Set(
+  Array.from(WORKBOOK_CLOSED_STATUSES).concat(["return_scheduled", "escalated"]),
+);
 
 /**
  * Outbox reasons that mean "a human can go collect this truck".
@@ -51,6 +68,8 @@ export const READY_REASONS: ReadonlySet<string> = new Set([
 export type ReadyIngestOutcome =
   | "applied"
   | "already_ready"
+  | "already_applied"
+  | "past_ready"
   | "case_closed"
   | "no_case"
   | "bad_truck_number"
@@ -106,11 +125,34 @@ export async function applyReadyForPickup(input: {
     return { outcome: "already_ready", caseKey, detail: "already ready_for_pickup" };
   }
 
-  // A human has finished this case. LUCA re-asserting an older ready signal
-  // would drag it back into the open queue and the rental would look live
-  // again. The human's terminal state wins.
-  if (WORKBOOK_CLOSED_STATUSES.has(current.status)) {
-    return { outcome: "case_closed", caseKey, detail: `case already ${current.status}; not regressing` };
+  // The human's later word wins. Closed, return-booked, or escalated cases are
+  // never dragged back to ready - not by a stuck task replaying, and not by a
+  // genuinely fresh signal either, because the ready flag has nothing left to
+  // tell anyone on those cases.
+  if (READY_NO_REGRESS.has(current.status)) {
+    const closed = WORKBOOK_CLOSED_STATUSES.has(current.status);
+    return {
+      outcome: closed ? "case_closed" : "past_ready",
+      caseKey,
+      detail: `case already ${current.status}; not regressing`,
+    };
+  }
+
+  // EDGE-TRIGGERED, not level-triggered. The status check above cannot make
+  // re-delivery safe on its own: the fs_trucks unknown-truck path leaves the
+  // LIVHR task PENDING, so the same task id is re-delivered every poll, and if
+  // a lead had meanwhile moved the case back to a workable status (say,
+  // disputing the shop's "ready" down to `working`), a level-triggered write
+  // would flip it to ready again every 15 minutes and fight the human forever.
+  // The task id is stamped into the issue line on apply, so its presence in
+  // history means THIS signal already landed once - after that, only a NEW
+  // outbox task (a fresh shop call) may assert ready again.
+  if (input.externalId != null) {
+    const marker = `(LUCA task ${input.externalId})`;
+    const history = await loadWorkbookHistory(caseKey, 50);
+    if (history.some((h) => h.actor === "LUCA" && h.status === "ready_for_pickup" && (h.issue ?? "").includes(marker))) {
+      return { outcome: "already_applied", caseKey, detail: `task ${input.externalId} already applied once; human status ${current.status} stands` };
+    }
   }
 
   const provenance = input.externalId != null ? ` (LUCA task ${input.externalId})` : "";

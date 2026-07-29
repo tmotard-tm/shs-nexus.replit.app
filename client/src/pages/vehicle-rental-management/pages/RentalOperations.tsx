@@ -855,6 +855,14 @@ export default function RentalOperations() {
   // drives an assigned truck in an open repair, so LUCA dials THAT shop. Same
   // predicate as the row filter so the chip count and grid can never disagree.
   const auctionRedirectCount = useMemo(() => basePool.filter((r) => isDeclinedAuction(r.ams_bucket) && r.redirect_to_assigned && r.callable).length, [basePool]);
+  // Counted client-side off basePool - the SAME pool the cohort filter reads -
+  // so the chip and the rows behind it cannot disagree. The server does ship a
+  // readyForPickupCount, but that one is computed over EVERY row including the
+  // pended rows this page hides by default, so consuming it here would show a
+  // chip count clicking the chip does not produce. (Review 2026-07-29: the chip
+  // previously fell through to stats.cohorts[key], which never has this key, so
+  // it rendered 0 no matter how many trucks LUCA had flagged.)
+  const readyForPickupChipCount = useMemo(() => basePool.filter((r) => r.workbook_status === "ready_for_pickup").length, [basePool]);
   const workableStats = useMemo(() => {
     const pool = basePool.filter((r) => !isDeclinedAuction(r.ams_bucket));
     const callableNow = pool.filter((r) => r.callable).length;
@@ -981,6 +989,7 @@ export default function RentalOperations() {
               <RefreshCw size={13} style={{ animation: sweepBusy ? "spin 1s linear infinite" : undefined }} /> {sweep.label}
             </button>
           )}
+          <AutoTextToggle />
           <button type="button" onClick={exportCsv} style={{ ...selStyle, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
             <Download size={13} /> CSV
           </button>
@@ -1007,6 +1016,7 @@ export default function RentalOperations() {
             : c.key === "cannot_work" ? (stats.workload.cannot_work ?? 0)
             : c.key === "auction_redirect" ? auctionRedirectCount
             : c.key === "mismatch_no_po" ? (stats.sawServerWorkload ? (stats.workload.mismatch_no_po ?? 0) : "—")
+            : c.key === "ready_for_pickup" ? readyForPickupChipCount
             : c.key === "pended" ? pendedTotal
             : (stats.cohorts[c.key] ?? 0);
           const active = cohort === c.key;
@@ -2115,5 +2125,65 @@ function AmsCommentBadge({ payload }: { payload?: any }) {
     >
       {p.text}
     </span>
+  );
+}
+
+
+// ─── auto-text on Ready ──────────────────────────────────────────────────────
+/**
+ * The switch Tyler asked for verbatim: "create the ability to turn the
+ * automatic sending on with the click of a button, once we validate the
+ * findings." While OFF (the shipped default), a Ready flip only flags the case
+ * and emails the region owner; the technician is texted by a human through the
+ * per-row Text button. While ON, the flip also fires the pickup text itself -
+ * through the same pipeline, same opt-out and quiet-hours gates, and with
+ * termed/on-leave techs BLOCKED outright since no human is present to confirm.
+ *
+ * Lives on Rental Operations, not Cases by Region, per the standing split:
+ * control-centre switches here, the regional work queue stays chrome-free.
+ */
+function AutoTextToggle() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data } = useQuery<any>({ queryKey: ["/api/vrm/rental-operations/settings"] });
+  const on = data?.auto_text_on_ready?.enabled === true;
+
+  const mut = useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiRequest("POST", "/api/vrm/rental-operations/settings", { auto_text_on_ready: enabled }),
+    onSuccess: async (_res: any, enabled: boolean) => {
+      await qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/settings"] });
+      toast({
+        title: enabled ? "Auto-text ON" : "Auto-text OFF",
+        description: enabled
+          ? "New Ready for Pickup flips will text the technician automatically."
+          : "Ready flips flag the case and email the region owner only.",
+      });
+    },
+    onError: (e: any) => toast({ title: "Setting not saved", description: String(e?.message || e), variant: "destructive" }),
+  });
+
+  const flip = () => {
+    if (mut.isPending || !data) return;
+    if (!on) {
+      if (!window.confirm(
+        "Turn ON automatic pickup texts?\n\nFrom now on, every time LUCA flips a case to Ready for Pickup, the technician is texted automatically (opt-out and quiet-hours still apply; termed or on-leave techs are never auto-texted; one text per case per 7 days).\n\nTurn it on?",
+      )) return;
+    }
+    mut.mutate(!on);
+  };
+
+  return (
+    <button type="button" onClick={flip} disabled={mut.isPending || !data}
+      title={data
+        ? (on
+          ? `Auto-text is ON (set by ${data.auto_text_on_ready.updated_by ?? "unknown"}). Click to turn off.`
+          : "Auto-text is OFF - Ready flips only flag the case and email the region owner. Click to enable automatic pickup texts.")
+        : "Loading setting…"}
+      style={{ fontFamily: fonts.dmSans, fontSize: 12.5, padding: "7px 11px", borderRadius: 8, background: colors.surface,
+        cursor: mut.isPending || !data ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 6,
+        color: on ? colors.green : colors.inkSoft, border: `1px solid ${on ? colors.green : colors.rule}`, fontWeight: on ? 700 : 400 }}>
+      <MessageSquare size={13} /> Auto-text {data ? (on ? "ON" : "off") : "…"}
+    </button>
   );
 }

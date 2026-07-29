@@ -173,6 +173,42 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // ── auto-text toggle (Tyler 2026-07-29) ─────────────────────────────────
+  // The switch that lets the ready-flip hook text technicians automatically.
+  // Ships OFF; flipping it is deliberate and recorded with the actor's name.
+
+  router.get("/rental-operations/settings", async (_req, res) => {
+    try {
+      const { getSetting, SETTING_AUTO_TEXT_ON_READY } = await import("./settings");
+      const s = await getSetting(SETTING_AUTO_TEXT_ON_READY);
+      res.json({
+        auto_text_on_ready: {
+          enabled: s?.value?.enabled === true,
+          updated_by: s?.updated_by ?? null,
+          updated_at: s?.updated_at ?? null,
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "settings read failed" });
+    }
+  });
+
+  router.post("/rental-operations/settings", async (req, res) => {
+    try {
+      const enabled = req.body?.auto_text_on_ready;
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ error: "auto_text_on_ready must be a boolean" });
+      }
+      const { setSetting, SETTING_AUTO_TEXT_ON_READY } = await import("./settings");
+      const actor = actorOf(req);
+      await setSetting(SETTING_AUTO_TEXT_ON_READY, { enabled }, actor);
+      console.log(`[VRM/RentalOps] auto_text_on_ready -> ${enabled} (by ${actor})`);
+      res.json({ ok: true, auto_text_on_ready: { enabled, updated_by: actor } });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "settings write failed" });
+    }
+  });
+
   // GET the FULL active-rental list in LUCA's VW_NEXUS_RENTAL_LIST contract.
   // This is what LUCA's syncActiveRentalsFromNexus() reads to populate its
   // fleet_rentals book (replacing the Snowflake view). Returns EVERY present
