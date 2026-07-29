@@ -16,6 +16,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
+  MessageSquare,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
@@ -838,29 +839,15 @@ export default function RentalOperations() {
     onError: (e: any) => toast({ title: "Scrape failed", description: String(e?.message || e), variant: "destructive" }),
   });
 
-  // ── LUCA caller: hand a callable shop (or the whole queue) to the LUCA agent ─
-  const callMut = useMutation({
-    mutationFn: (caseKey: string) => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/call`),
-    onSuccess: async (res: any) => {
-      const j = await res.json().catch(() => ({}));
-      if (j?.ok === false || j?.result?.ok === false) {
-        toast({ title: "Call NOT dispatched", description: j?.result?.message || "LUCA rejected the hand-off", variant: "destructive" });
-        return;
-      }
-      const dialed = j?.result?.dialed, dry = j?.result?.dryRun;
-      toast({ title: dialed ? "LUCA is calling the shop" : (dry ? "Queued (LUCA in dry-run)" : "Handed to LUCA"), description: j?.result?.message || (dry ? "LUCA_OUTREACH_LIVE is off — logged, no live dial" : `conv ${j?.result?.conversationId || "—"}`) });
-    },
-    onError: (e: any) => toast({ title: "Call failed", description: String(e?.message || e), variant: "destructive" }),
-  });
-  const callAllMut = useMutation({
-    mutationFn: (caseKeys: string[]) => apiRequest("POST", "/api/vrm/rental-operations/call-batch", { caseKeys }),
-    onSuccess: async (res: any) => {
-      const j = await res.json().catch(() => ({}));
-      const r = j?.result || {};
-      toast({ title: r.failed ? `LUCA queue: ${r.failed} of ${r.total} failed` : "LUCA working the queue", description: `${r.dispatched ?? 0} handed to LUCA${r.failed ? `, ${r.failed} failed (open a case call log for details)` : ""}${r.dryRun ? " (dry-run — no live dial)" : ""}`, variant: r.failed ? "destructive" : undefined });
-    },
-    onError: (e: any) => toast({ title: "Batch call failed", description: String(e?.message || e), variant: "destructive" }),
-  });
+  // The manual LUCA call buttons (per-row "Call" and the batch "Call all with
+  // LUCA") were REMOVED 2026-07-29 on Tyler's call. LUCA works this queue
+  // autonomously, so every manual dial on a truck the agent already covers was a
+  // duplicate call to the same shop. Measured on the live feed the day they went:
+  // 382 rentals, 141 declined/auction, and CALL_SHOP_PHONE (the redirect-only
+  // field the buttons uniquely served) populated on just 4 rows. Four edge cases
+  // did not justify a permanent double-dial hazard on a 380-row board; if those
+  // matter, the fix belongs in LUCA's own skip logic, not in a human button.
+  // The queue itself is still shown below as READ-ONLY context.
   const lucaQueue = useMemo(() => basePool.filter((r) => r.callable), [basePool]);
   const callAllRedirects = useMemo(() => lucaQueue.filter((r) => r.redirect_to_assigned).length, [lucaQueue]);
   // Ask #2 (Tyler 2026-07-24): the Sent-To-Auction subset LUCA WILL call via the
@@ -883,19 +870,8 @@ export default function RentalOperations() {
   // Null = render no control at all; see sweepInfo for every reason that happens.
   const sweep = useMemo(() => sweepInfo(scrapeTargets, workableStats.needPhone), [scrapeTargets, workableStats.needPhone]);
   const sweepBusy = scrapeMissingMut.isPending || !!sweep?.inFlight;
-  const doCall = (r: MasterRow) => {
-    const tgt = r.redirect_to_assigned ? `assigned truck ${r.call_target_truck}` : `truck ${r.call_target_truck}`;
-    const autonomous = !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket);
-    const warning = autonomous
-      ? "HEADS UP: the autonomous LUCA agent already works this truck on its own cadence. Calling from here places a SECOND, duplicate call and can double-dial the same shop.\n\nOnly do this if you need a call RIGHT NOW and cannot wait for the agent's next pass."
-      : "This truck is Declined Repair / Sent To Auction, which the autonomous agent SKIPS. The manual button is the correct tool here: it dials the shop holding the tech's ASSIGNED truck, not the rental van.";
-    if (window.confirm(`${warning}\n\nShop: ${r.call_shop_name || "this shop"} (${fmtPhone(r.call_shop_phone)})\nCalling about: ${tgt}\n\nLUCA dials only if it is clocked in and outreach is live; otherwise it logs a dry-run.\n\nPlace this call anyway?`)) callMut.mutate(r.case_key);
-  };
-  const doCallAll = () => {
-    if (!lucaQueue.length) return;
-    const autoCount = lucaQueue.filter((r) => !r.redirect_to_assigned && !isDeclinedAuction(r.ams_bucket)).length;
-    if (window.confirm(`HEADS UP: the autonomous LUCA agent already works ${autoCount} of these ${lucaQueue.length} shops on its own cadence. Firing the batch from here places DUPLICATE calls to those shops.\n\nThe ${lucaQueue.length - autoCount} declined/auction redirects are the ones the agent skips, so those are the ones this button is really for.\n\nLUCA dials each only if clocked in + outreach live (TCPA + 30-min double-dial guard apply); otherwise dry-run.\n\nSend all ${lucaQueue.length} anyway?`)) callAllMut.mutate(lucaQueue.map((r) => r.case_key));
-  };
+  // Which case the pickup-text preview is open for. Null = closed.
+  const [pickupFor, setPickupFor] = useState<string | null>(null);
 
   const doMark = (caseKey: string, mark: string, current: string | null) => {
     markMut.mutate({ caseKey, mark: current === mark ? "none" : mark });
@@ -1125,10 +1101,11 @@ export default function RentalOperations() {
               This is the exact feed the LUCA agent dials (agent_3201 luca-shop): open repair ticket + verified shop phone. Declined / Sent-to-Auction rentals are redirected to the shop repairing the tech's <b>assigned</b> truck{callAllRedirects ? `, ${callAllRedirects} here` : ""}; declined/auction with no assigned truck are excluded. Same source as <code>/api/vrm/rental-operations/luca-feed</code>.
             </div>
           </div>
-          <button type="button" onClick={doCallAll} disabled={callAllMut.isPending || !lucaQueue.length}
-            style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 700, color: "#fff", background: colors.green, border: `1px solid ${colors.green}`, borderRadius: 10, padding: "9px 18px", cursor: lucaQueue.length ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", gap: 7, opacity: callAllMut.isPending ? 0.7 : 1 }}>
-            <PhoneCall size={15} /> {callAllMut.isPending ? "Handing to LUCA…" : `Call all ${lucaQueue.length} with LUCA`}
-          </button>
+          {/* Read-only. The agent dials this queue on its own cadence; a button
+              here would only place duplicate calls to the same shops. */}
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkSoft, whiteSpace: "nowrap" }}>
+            worked automatically by the agent
+          </div>
         </div>
       )}
 
@@ -1174,7 +1151,7 @@ export default function RentalOperations() {
               <Th col="days" label="Days" style={{ textAlign: "right" }} />
               <Th col="ext" label="Ext" style={{ textAlign: "right" }} />
               <Th col="npos" label="POs" style={{ textAlign: "right" }} />
-              <th style={{ ...thStyle, textAlign: "center" }}>LUCA</th>
+              <th style={{ ...thStyle, textAlign: "center" }}>Text</th>
               <th style={{ ...thStyle, textAlign: "center" }}>Mark</th>
             </tr>
           </thead>
@@ -1254,12 +1231,20 @@ export default function RentalOperations() {
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12 }}>{r.number_of_extensions ?? ""}</td>
                   <td style={{ ...tdStyle, textAlign: "right", fontFamily: fonts.jetbrains, fontSize: 12, color: r.po_count ? colors.ink : colors.inkMuted }}>{r.po_count || "—"}</td>
                   <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                    {r.callable ? (
-                      <button type="button" title={`Hand ${r.call_shop_name || "shop"} (${fmtPhone(r.call_shop_phone)}) to LUCA${r.redirect_to_assigned ? ` — assigned truck ${r.call_target_truck}` : ""}`} onClick={() => doCall(r)} disabled={callMut.isPending}
-                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: "#fff", background: colors.green, border: `1px solid ${colors.green}`, borderRadius: 7, padding: "4px 9px", cursor: "pointer" }}>
-                        <PhoneCall size={12} /> Call
+                    {/* Tells the tech to collect their truck and hand the
+                        rental back. Nothing sends from this click: it opens a
+                        preview with the real recipient and an editable message.
+                        Disabled only when we KNOW there is nobody to text (no
+                        identity resolved); every other reason a send can fail
+                        (no phone, opted out, termed) is resolved server-side and
+                        reported in the preview rather than guessed at here. */}
+                    {r.employee_id ? (
+                      <button type="button" title={`Text ${r.tech_name || "the technician"} to pick up truck ${r.case_key}`}
+                        onClick={() => setPickupFor(r.case_key)}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: "#fff", background: colors.accent, border: `1px solid ${colors.accent}`, borderRadius: 7, padding: "4px 9px", cursor: "pointer" }}>
+                        <MessageSquare size={12} /> Text
                       </button>
-                    ) : <span style={{ color: colors.inkMuted, fontSize: 11 }}>—</span>}
+                    ) : <span style={{ color: colors.inkMuted, fontSize: 11 }} title="No technician resolved on this rental">—</span>}
                   </td>
                   <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: "inline-flex", gap: 3 }}>
@@ -1959,6 +1944,137 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
           </div>
         )}
         </div>
+      </div>
+
+      {pickupFor && <PickupTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
+    </div>
+  );
+}
+
+
+// ─── Pickup text ─────────────────────────────────────────────────────────────
+/**
+ * "Text the tech to pick up their van" — the tech half of a rental. LUCA works
+ * the shop; this works the person holding our rental, and that message is what
+ * actually stops the daily charge.
+ *
+ * Deliberately preview-first. The GET runs the REAL resolution chain and the
+ * REAL send gates (opt-out, recipient-local quiet hours) with zero side effects,
+ * so what this screen says WILL happen is what happens on Send. Nothing is sent
+ * by opening it, and the operator sees the exact recipient and body first.
+ */
+function PickupTextModal({ caseKey, onClose }: { caseKey: string; onClose: () => void }) {
+  const { toast } = useToast();
+  const [body, setBody] = useState<string | null>(null);
+  const [sent, setSent] = useState(false);
+
+  const { data, isLoading, error } = useQuery<any>({
+    queryKey: [`/api/vrm/rental-operations/master/${caseKey}/pickup-text`],
+    staleTime: 0,
+  });
+
+  const t = data?.target;
+  const effectiveBody = body ?? data?.body ?? "";
+  // 153 (not 160) once a message is multi-part: the UDH concatenation header
+  // eats 7 bits of every segment. Matches the server's countSegments.
+  const segments = effectiveBody.length <= 160 ? 1 : Math.ceil(effectiveBody.length / 153);
+  const lifecycle = (data?.warnings ?? []).find((w: any) => !w.blocking);
+
+  const sendMut = useMutation({
+    mutationFn: () =>
+      apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/pickup-text`, {
+        body: effectiveBody,
+        // The server demands this whenever the tech is termed or on leave; the
+        // operator has already been shown that warning above the button.
+        confirmed: true,
+      }),
+    onSuccess: async (res: any) => {
+      const j = await res.json().catch(() => ({}));
+      setSent(true);
+      toast({
+        title: j?.status === "queued" ? "Queued" : "Text sent",
+        description: j?.message || "",
+        variant: j?.ok === false ? "destructive" : undefined,
+      });
+      if (j?.ok !== false) onClose();
+    },
+    onError: async (e: any) => {
+      toast({ title: "Not sent", description: String(e?.message || e), variant: "destructive" });
+    },
+  });
+
+  const blocked = data && !data.canSend;
+  const label = sendMut.isPending
+    ? "Sending…"
+    : data?.wouldQueue
+      ? "Queue for the morning"
+      : "Send text";
+
+  return (
+    <div onClick={onClose}
+      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div onClick={(e) => e.stopPropagation()}
+        style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, width: "min(560px, 100%)", maxHeight: "90vh", overflow: "auto", padding: 20 }}>
+        <div style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>
+          Text the technician for pickup
+        </div>
+
+        {isLoading && <div style={{ color: colors.inkMuted, fontSize: 13, padding: "18px 0" }}>Checking who we would text…</div>}
+        {error && <div style={{ color: colors.red, fontSize: 13, padding: "18px 0" }}>Could not load the preview: {String((error as any)?.message || error)}</div>}
+
+        {data && (
+          <>
+            <div style={{ fontSize: 12.5, color: colors.inkSoft, marginBottom: 14, fontFamily: fonts.jetbrains }}>
+              {t?.tech_name || "unknown tech"}
+              {t?.phone ? <> · {t.phone}</> : <span style={{ color: colors.red }}> · no phone on file</span>}
+              <br />collect truck <b style={{ color: colors.ink }}>{t?.repair_truck}</b>
+              {t?.shop_name ? <> at {t.shop_name}</> : null}
+            </div>
+
+            {(data.warnings ?? []).map((w: any, i: number) => (
+              <div key={i} style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8,
+                color: w.blocking ? colors.red : colors.amber,
+                background: w.blocking ? colors.redLight : colors.amberLight }}>
+                {w.message}
+              </div>
+            ))}
+            {data.wouldSkipReason && (
+              <div style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8, color: colors.red, background: colors.redLight }}>
+                {data.wouldSkipReason}
+              </div>
+            )}
+
+            <textarea
+              value={effectiveBody}
+              onChange={(e) => setBody(e.target.value)}
+              disabled={blocked}
+              rows={4}
+              style={{ width: "100%", fontFamily: fonts.dmSans, fontSize: 13, lineHeight: 1.5, color: colors.ink, background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 10, resize: "vertical" }}
+            />
+            <div style={{ fontSize: 11, color: segments > 1 ? colors.amber : colors.inkMuted, fontFamily: fonts.jetbrains, marginTop: 5 }}>
+              {effectiveBody.length} chars · {segments} SMS segment{segments === 1 ? "" : "s"}
+              {data.wouldQueue ? " · outside the tech's local send window, this will queue and go out automatically" : ""}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
+              <button type="button" onClick={onClose}
+                style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 9, padding: "8px 14px", cursor: "pointer" }}>
+                Cancel
+              </button>
+              <button type="button" disabled={blocked || sendMut.isPending || sent || !effectiveBody.trim()}
+                onClick={() => sendMut.mutate()}
+                title={blocked ? "This technician cannot be texted from here" : lifecycle ? "Sending anyway — see the warning above" : undefined}
+                style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 700, color: "#fff",
+                  background: blocked ? colors.inkMuted : colors.accent,
+                  border: `1px solid ${blocked ? colors.inkMuted : colors.accent}`,
+                  borderRadius: 9, padding: "8px 16px",
+                  cursor: blocked || sendMut.isPending ? "not-allowed" : "pointer",
+                  opacity: sendMut.isPending ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <MessageSquare size={14} /> {label}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

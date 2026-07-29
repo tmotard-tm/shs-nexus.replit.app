@@ -164,8 +164,10 @@ const STATUS_TOGGLE_ON: Record<string, string> = {
 };
 const statusToggleOn = (s: string) => STATUS_TOGGLE_ON[s] ?? "bg-primary/15 text-primary border-primary/40";
 
-// In HOLMAN_ETL_PO_DETAILS there is no 'OPEN' status — open POs carry PO_STATUS='APPROVED'.
-const isOpenStatus = (s: string) => s === "APPROVED" || s === "OPEN";
+// In HOLMAN_ETL_PO_DETAILS there is no 'OPEN' status — open POs carry
+// APPROVED / HOLD / BILL HOLD (same definition as the Fleet Management PO flags).
+const OPEN_STATUSES = new Set(["APPROVED", "HOLD", "BILL HOLD", "OPEN"]);
+const isOpenStatus = (s: string) => OPEN_STATUSES.has(String(s ?? "").toUpperCase());
 
 const TYPE_BADGE: Record<string, string> = {
   MAINTENANCE: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:text-cyan-400",
