@@ -211,7 +211,7 @@ interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?:
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
-  actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string }>;
+  actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string; payload?: any }>;
   poHistory: PoRecord[];
   poSource?: string;
   portal?: PortalData | null;
@@ -1907,7 +1907,10 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 {notes.map((n) => (
                   <div key={n.id} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px" }}>
                     <div style={{ fontSize: 12.5, color: colors.ink, whiteSpace: "pre-wrap" }}>{n.note}</div>
-                    <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains }}>{n.actor || "unknown"} · {fmtDate(n.created_at)}</div>
+                    <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                      <span>{n.actor || "unknown"} · {fmtDate(n.created_at)}</span>
+                      <AmsCommentBadge payload={(n as any).payload} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2077,5 +2080,40 @@ function PickupTextModal({ caseKey, onClose }: { caseKey: string; onClose: () =>
         )}
       </div>
     </div>
+  );
+}
+
+
+// ─── AMS comment mirror status ───────────────────────────────────────────────
+/**
+ * Whether a comment typed here actually landed on the vehicle's AMS record.
+ *
+ * The mirror is best-effort by design - Nexus commits the comment first and AMS
+ * is attempted after - so the ONLY honest thing to do is show the real outcome
+ * per comment. Rendering nothing on failure would let a coordinator believe AMS
+ * had been updated when it had not, which is worse than not mirroring at all.
+ *
+ * Shape comes from server/vrm/rental-operations/ams-comment.ts, stamped onto the
+ * action row's payload. Absent payload = a comment written before the mirror
+ * existed, so it renders nothing rather than a scary "failed".
+ */
+function AmsCommentBadge({ payload }: { payload?: any }) {
+  const a = payload && payload.ams;
+  if (!a || !a.status) return null;
+  const paint: Record<string, { fg: string; bg: string; text: string }> = {
+    synced: { fg: colors.green, bg: colors.greenLight, text: "in AMS" },
+    failed: { fg: colors.red, bg: colors.redLight, text: "AMS failed" },
+    skipped: { fg: colors.inkMuted, bg: colors.surface, text: "not sent to AMS" },
+    disabled: { fg: colors.inkMuted, bg: colors.surface, text: "AMS mirror off" },
+  };
+  const p = paint[a.status as string];
+  if (!p) return null;
+  return (
+    <span
+      title={a.reason ? `${p.text}: ${a.reason}` : a.vin ? `Posted to AMS on VIN ${a.vin}` : p.text}
+      style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: p.fg, background: p.bg, border: `1px solid ${p.fg}`, borderRadius: 5, padding: "1px 5px", cursor: "help", whiteSpace: "nowrap" }}
+    >
+      {p.text}
+    </span>
   );
 }

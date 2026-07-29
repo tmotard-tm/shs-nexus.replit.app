@@ -513,11 +513,17 @@ export class AmsApiService {
     return this.request('POST', `/api/v1/vehicles/${vin}/tech-update`, data);
   }
 
+  /**
+   * `signal` lets a caller bound how long it will wait. request() already
+   * forwards it to fetch, which otherwise has NO timeout - an unresponsive AMS
+   * would hang the caller's request indefinitely. Optional, so every existing
+   * call site is unchanged.
+   */
   async addComment(vin: string, data: {
     comment: string;
     user: string;
-  }): Promise<any> {
-    return this.request('POST', `/api/v1/vehicles/${vin}/comments`, data);
+  }, signal?: AbortSignal): Promise<any> {
+    return this.request('POST', `/api/v1/vehicles/${vin}/comments`, data, signal);
   }
 
   async getComments(vin: string): Promise<any> {

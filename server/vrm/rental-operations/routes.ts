@@ -243,7 +243,33 @@ export function registerRentalOperationsRoutes(router: Router): void {
         VALUES (${caseKey}, ${caseId}, ${action_type}, ${mark_value ?? null}, ${note ?? null}, ${assigned_to ?? null}, ${actor})
         RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
       `);
-      res.json({ ok: true, action: ins.rows[0], actor });
+      const action: any = ins.rows[0];
+
+      // Mirror the comment onto the vehicle's AMS record (Tyler 2026-07-29), so
+      // the rest of the business sees what the rental team learned. Deliberately
+      // AFTER the local insert and fully non-fatal: the Nexus row is the source
+      // of truth and a bad day at AMS must never cost a human their comment. The
+      // outcome is stamped onto the action's payload, so the drawer can show
+      // synced / failed / skipped per comment instead of implying success.
+      let amsResult: any = null;
+      if (action_type === "note" && String(note ?? "").trim()) {
+        try {
+          const { postCaseCommentToAms } = await import("./ams-comment");
+          amsResult = await postCaseCommentToAms({
+            actionId: String(action.id),
+            caseKey,
+            note: String(note),
+            actor,
+          });
+        } catch (e: any) {
+          // postCaseCommentToAms does not throw; this only catches an import or
+          // programming error, which must still not fail the operator's save.
+          console.warn("[VRM/RentalOps] AMS comment mirror errored:", e?.message || e);
+          amsResult = { status: "failed", vin: null, reason: String(e?.message || e), at: new Date().toISOString() };
+        }
+      }
+
+      res.json({ ok: true, action, actor, ams: amsResult });
     } catch (e: any) {
       console.error("[VRM/RentalOps] action failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "action failed" });

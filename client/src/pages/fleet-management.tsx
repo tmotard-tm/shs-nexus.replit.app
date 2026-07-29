@@ -23,7 +23,7 @@ import {
   CheckCircle, XCircle, Database, Loader2, Link2, MapPin, Eye, EyeOff,
   UserX, History, AlertTriangle, User, Package, Car, X, Gauge,
   UserPlus, ArrowLeftRight, FileText, Home, Activity, MessageSquare, Send, Pencil, Wrench, Download,
-  Users, PhoneCall, ClipboardList, Radio
+  Users, PhoneCall, ClipboardList
 } from "lucide-react";
 import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
 import { VehicleRowSyncBadges } from "@/components/fleet-scope/VehicleRowSyncBadges";
@@ -309,7 +309,7 @@ export default function FleetManagement() {
   const [districtFilter, setDistrictFilter] = useState("all");
   
   // Stat card quick-filter (clicking a summary card filters the grid)
-  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental"|"maintenance"|"dtc"|"deviceHealth"|"byov">("all");
+  const [statCardFilter, setStatCardFilter] = useState<"all"|"assigned"|"unassigned"|"mismatch"|"rental"|"maintenance"|"dtc"|"byov">("all");
 
   // Tech Assignment filters
   const [holmanTechFilter, setHolmanTechFilter] = useState("all");
@@ -321,7 +321,6 @@ export default function FleetManagement() {
   const [poRentalFilter, setPoRentalFilter] = useState("all");
   const [poMaintFilter, setPoMaintFilter] = useState("all");
   const [dtcFilter, setDtcFilter] = useState("all");
-  const [deviceHealthFilter, setDeviceHealthFilter] = useState("all");
 
   // Status field filters
   const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>([]);
@@ -810,25 +809,6 @@ export default function FleetManagement() {
     refetchOnWindowFocus: false,
   });
   type PoFlag = { hasOpenRental: boolean; openRentalCount: number; hasOpenMaintenance: boolean; openMaintenanceCount: number };
-
-  // Samsara device health (gateway + camera per vehicle) — loaded once, cached server-side
-  type DeviceHealthDevice = { type: 'gateway' | 'camera' | 'other'; model: string | null; serial: string | null; status: string; reason: string | null; recommendedAction: string | null; lastConnectedTime: string | null };
-  type DeviceHealthEntry = { status: string; devices: DeviceHealthDevice[] };
-  const { data: deviceHealthData } = useQuery<{ byVehicle: Record<string, DeviceHealthEntry>; deviceCount: number; fetchedAt: string }>({
-    queryKey: ['/api/fleet-vehicles/device-health'],
-    staleTime: 10 * 60 * 1000,
-    refetchOnWindowFocus: false,
-    retry: 2,
-  });
-  const deviceHealthMap = useMemo(() => {
-    const m = new Map<string, DeviceHealthEntry>();
-    if (!deviceHealthData?.byVehicle) return m;
-    for (const [key, val] of Object.entries(deviceHealthData.byVehicle)) m.set(key, val);
-    return m;
-  }, [deviceHealthData]);
-  const deviceHealthLoaded = !!deviceHealthData;
-  const getDeviceHealth = (vehicleNumber: string): DeviceHealthEntry | undefined =>
-    deviceHealthMap.get(toCanonical(vehicleNumber)) ?? deviceHealthMap.get(vehicleNumber);
   const poFlagsMap = useMemo(() => {
     const m = new Map<string, PoFlag>();
     if (!poFlagsData) return m;
@@ -1518,7 +1498,7 @@ export default function FleetManagement() {
     assignmentStatusFilter,
     stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
     holmanTechFilter, tpmsTechFilter, mismatchFilter,
-    rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter, deviceHealthFilter,
+    rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
   ].filter(f => f !== "all").length +
   [holmanStatusFilter, amsTruckStatusFilter, amsRepairShopFilter, offboardingFilter].filter(f => f.length > 0).length +
   (targetZipcode ? 1 : 0);
@@ -1617,11 +1597,6 @@ export default function FleetManagement() {
         (dtcFilter === "yes" && hasDTCF) ||
         (dtcFilter === "no" && !hasDTCF);
 
-      const dhEntryF = deviceHealthMap.get(toCanonical(vehicle.vehicleNumber)) ?? deviceHealthMap.get(vehicle.vehicleNumber);
-      const matchesDeviceHealth = deviceHealthFilter === "all" ||
-        (deviceHealthFilter === "noDevice" && deviceHealthLoaded && !dhEntryF) ||
-        (!!dhEntryF && dhEntryF.status === deviceHealthFilter);
-
       // Status field filters
       const holmanStatusCodeMap: Record<string, number> = { "Active": 1, "New": 0, "Inactive / Out of Service": 2, "Sold": 3 };
       const matchesHolmanStatus = holmanStatusFilter.length === 0 ||
@@ -1664,7 +1639,6 @@ export default function FleetManagement() {
         (statCardFilter === "rental"       && isRentalSC) ||
         (statCardFilter === "maintenance"  && !!(poFlagsMap.get(vehicle.vehicleNumber)?.hasOpenMaintenance)) ||
         (statCardFilter === "dtc"          && hasDTCF) ||
-        (statCardFilter === "deviceHealth" && (deviceHealthLoaded && (!dhEntryF || dhEntryF.status === "needsAttention" || dhEntryF.status === "needsReplacement"))) ||
         (statCardFilter === "byov"         && isByovSC);
 
       return matchesSearch && matchesMake && matchesModel && matchesYear && matchesColor &&
@@ -1672,7 +1646,7 @@ export default function FleetManagement() {
              matchesAssignment &&
              matchesState && matchesCity && matchesLicenseState && matchesRegion && matchesDivision && matchesDistrict &&
              matchesHolmanTech && matchesTpmsTech && matchesMismatch &&
-             matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC && matchesDeviceHealth &&
+             matchesRentalOps && matchesPoRental && matchesPoMaint && matchesDTC &&
              matchesHolmanStatus && matchesAmsTruckStatus && matchesAmsRepairShop && matchesOffboarding &&
              matchesStatCard;
     });
@@ -1681,11 +1655,11 @@ export default function FleetManagement() {
       assignmentStatusFilter,
       stateFilter, cityFilter, licenseStateFilter, regionFilter, divisionFilter, districtFilter,
       holmanTechFilter, tpmsTechFilter, mismatchFilter,
-      rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter, deviceHealthFilter,
+      rentalOpsFilter, poRentalFilter, poMaintFilter, dtcFilter,
       holmanStatusFilter, amsTruckStatusFilter, amsTruckStatusData, amsRepairShopFilter, repairShopFlagsMap,
       offboardingFilter, offboardingFlagsMap,
       statCardFilter,
-      rentalOpsVehicleSet, poFlagsMap, dtcTruckSet, deviceHealthMap, deviceHealthLoaded]);
+      rentalOpsVehicleSet, poFlagsMap, dtcTruckSet]);
 
   // Async zip-distance sort: fetch real coordinates and sort by haversine distance
   useEffect(() => {
@@ -1805,7 +1779,6 @@ export default function FleetManagement() {
     setPoRentalFilter("all");
     setPoMaintFilter("all");
     setDtcFilter("all");
-    setDeviceHealthFilter("all");
     setHolmanStatusFilter([]);
     setAmsTruckStatusFilter([]);
     setAmsRepairShopFilter([]);
@@ -1863,10 +1836,6 @@ export default function FleetManagement() {
   const dtcCount = activeVehicles.filter(v =>
     dtcTruckSet.has(v.vehicleNumber) || dtcTruckSet.has(toCanonical(v.vehicleNumber))
   ).length;
-  const deviceIssueCount = deviceHealthLoaded ? activeVehicles.filter(v => {
-    const dh = deviceHealthMap.get(toCanonical(v.vehicleNumber)) ?? deviceHealthMap.get(v.vehicleNumber);
-    return !dh || dh.status === "needsAttention" || dh.status === "needsReplacement";
-  }).length : 0;
   const byovCount = activeVehicles.filter(v =>
     getVehicleOwnership(v.vehicleNumber).type === 'BYOV'
   ).length;
@@ -2012,24 +1981,6 @@ export default function FleetManagement() {
                 </CardContent>
               </Card>
 
-              {/* Device Health */}
-              <Card
-                onClick={() => setStatCardFilter(statCardFilter === "deviceHealth" ? "all" : "deviceHealth")}
-                className={`cursor-pointer transition-all hover:shadow-md select-none border-sky-200 bg-sky-50/50 dark:bg-sky-950/10 ${statCardFilter === "deviceHealth" ? "ring-2 ring-offset-1 ring-sky-500" : ""}`}
-              >
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-medium text-sky-600 flex items-center gap-1">
-                    <Radio className="h-3.5 w-3.5" />
-                    Device Health
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-2xl font-bold text-sky-600" data-testid="text-device-issue-count">
-                    {deviceHealthLoaded ? deviceIssueCount : '—'}
-                  </p>
-                </CardContent>
-              </Card>
-
               {/* BYOV */}
               <Card
                 onClick={() => setStatCardFilter(statCardFilter === "byov" ? "all" : "byov")}
@@ -2097,7 +2048,7 @@ export default function FleetManagement() {
                     <Button
                       onClick={() => {
                         const date = new Date().toISOString().slice(0, 10);
-                        const isFiltered = searchQuery !== "" || makeFilter !== "all" || modelFilter !== "all" || yearFilter !== "all" || colorFilter !== "all" || vehicleProgramFilter !== "all" || brandingFilter !== "all" || interiorFilter !== "all" || tuneStatusFilter !== "all" || assignmentStatusFilter !== "all" || stateFilter !== "all" || cityFilter !== "all" || licenseStateFilter !== "all" || regionFilter !== "all" || divisionFilter !== "all" || districtFilter !== "all" || statCardFilter !== "all" || holmanTechFilter !== "all" || tpmsTechFilter !== "all" || mismatchFilter !== "all" || rentalOpsFilter !== "all" || poRentalFilter !== "all" || poMaintFilter !== "all" || dtcFilter !== "all" || deviceHealthFilter !== "all" || holmanStatusFilter.length > 0 || amsTruckStatusFilter.length > 0 || amsRepairShopFilter.length > 0 || offboardingFilter.length > 0;
+                        const isFiltered = searchQuery !== "" || makeFilter !== "all" || modelFilter !== "all" || yearFilter !== "all" || colorFilter !== "all" || vehicleProgramFilter !== "all" || brandingFilter !== "all" || interiorFilter !== "all" || tuneStatusFilter !== "all" || assignmentStatusFilter !== "all" || stateFilter !== "all" || cityFilter !== "all" || licenseStateFilter !== "all" || regionFilter !== "all" || divisionFilter !== "all" || districtFilter !== "all" || statCardFilter !== "all" || holmanTechFilter !== "all" || tpmsTechFilter !== "all" || mismatchFilter !== "all" || rentalOpsFilter !== "all" || poRentalFilter !== "all" || poMaintFilter !== "all" || dtcFilter !== "all" || holmanStatusFilter.length > 0 || amsTruckStatusFilter.length > 0 || amsRepairShopFilter.length > 0 || offboardingFilter.length > 0;
                         const a = document.createElement("a");
                         a.href = "/api/fleet-vehicles/export.csv";
                         a.download = isFiltered ? `fleet-vehicles-filtered-${date}.csv` : `fleet-vehicles-${date}.csv`;
@@ -2252,19 +2203,6 @@ export default function FleetManagement() {
                             <SelectItem value="all">All (DTC)</SelectItem>
                             <SelectItem value="yes">Has DTC</SelectItem>
                             <SelectItem value="no">No DTC</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <Select value={deviceHealthFilter} onValueChange={setDeviceHealthFilter}>
-                          <SelectTrigger className="h-7 text-xs w-36" data-testid="select-device-health-filter">
-                            <SelectValue placeholder="Device Health" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="all">All (device health)</SelectItem>
-                            <SelectItem value="healthy">Device healthy</SelectItem>
-                            <SelectItem value="needsAttention">Needs attention</SelectItem>
-                            <SelectItem value="needsReplacement">Needs replacement</SelectItem>
-                            <SelectItem value="dataPending">Data pending</SelectItem>
-                            <SelectItem value="noDevice">No device</SelectItem>
                           </SelectContent>
                         </Select>
                       </div>
@@ -2540,23 +2478,6 @@ export default function FleetManagement() {
                     const hasDTC = dtcTruckSet.has(vehicle.vehicleNumber) || dtcTruckSet.has(toCanonical(vehicle.vehicleNumber));
                     const dtcScore = dtcScoreMap.get(vehicle.vehicleNumber) ?? dtcScoreMap.get(toCanonical(vehicle.vehicleNumber)) ?? 0;
                     const amsTruckStatusLabel = amsTruckStatusData?.[(vehicle.vin || '').toUpperCase()] ?? null;
-                    const dhEntry = getDeviceHealth(vehicle.vehicleNumber);
-                    const dhWorst = dhEntry?.status;
-                    const showDeviceBadge = deviceHealthLoaded && (!dhEntry || dhWorst === 'needsAttention' || dhWorst === 'needsReplacement' || dhWorst === 'dataPending');
-                    const deviceBadgeClass = !dhEntry
-                      ? 'bg-slate-600 text-white'
-                      : dhWorst === 'needsReplacement'
-                      ? 'bg-red-600 text-white'
-                      : dhWorst === 'needsAttention'
-                      ? 'bg-amber-500 text-white'
-                      : 'bg-slate-400 text-white';
-                    const deviceBadgeLabel = !dhEntry
-                      ? 'No Device'
-                      : dhWorst === 'needsReplacement'
-                      ? 'Device: Replace'
-                      : dhWorst === 'needsAttention'
-                      ? 'Device: Attention'
-                      : 'Device: Pending';
                     
                     const card = (
                       <Card 
@@ -2671,36 +2592,6 @@ export default function FleetManagement() {
                             )}
                             {isInRentalOps && (
                               <Badge className="bg-orange-500 text-white text-xs border-none">Rental</Badge>
-                            )}
-                            {showDeviceBadge && (
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Badge className={`text-xs border-none flex items-center gap-1 ${deviceBadgeClass}`} data-testid={`badge-device-health-${vehicle.vehicleNumber}`}>
-                                      <Radio className="h-3 w-3" />
-                                      {deviceBadgeLabel}
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="max-w-xs">
-                                    {!dhEntry ? (
-                                      <p className="text-xs">No Samsara telematics device found for this vehicle.</p>
-                                    ) : (
-                                      <div className="space-y-1.5">
-                                        {dhEntry.devices.map((d, i) => (
-                                          <div key={i} className="text-xs">
-                                            <p className="font-semibold">
-                                              {d.type === 'gateway' ? 'Gateway' : d.type === 'camera' ? 'Camera' : 'Device'}
-                                              {d.model ? ` (${d.model})` : ''} — {d.status}
-                                            </p>
-                                            {d.reason && d.status !== 'healthy' && <p>Reason: {d.reason}</p>}
-                                            {d.lastConnectedTime && <p>Last connected: {new Date(d.lastConnectedTime).toLocaleString()}</p>}
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
                             )}
                             {hasDTC && (
                               <Badge className={`text-xs border-none flex items-center gap-1 ${dtcBadgeClass(dtcScore)}`}>

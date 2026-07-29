@@ -1810,7 +1810,10 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     // case-level actions ONLY. target_truck IS NOT NULL rows are notes about a
     // specific vehicle (the assigned-truck section renders those) and must not
     // double-render in the case Comments list.
-    db.execute(sql`SELECT id, action_type, mark_value, note, assigned_to, actor,
+    // `payload` carries the AMS mirror outcome on note rows (see ./ams-comment),
+    // so the drawer can show whether a comment actually reached AMS rather than
+    // implying that it did.
+    db.execute(sql`SELECT id, action_type, mark_value, note, assigned_to, actor, payload,
                      to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
                    FROM vrm_rental_operation_actions
                    WHERE case_key = ${caseKey} AND target_truck IS NULL

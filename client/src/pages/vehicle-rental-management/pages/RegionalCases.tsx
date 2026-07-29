@@ -205,7 +205,7 @@ interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?:
 interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
-  actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string }>;
+  actions: Array<{ id: string; action_type: string; mark_value: string | null; note: string | null; actor: string | null; created_at: string; payload?: any }>;
   poHistory: PoRecord[];
   poSource?: string;
   portal?: PortalData | null;
@@ -734,12 +734,25 @@ export default function RegionalCases() {
   // it escalates). Keyed on assigned_truck_mismatch, NOT redirect_to_assigned:
   // measured on prod 2026-07-28, 4 of the 32 declines are mismatches but only 1
   // sets redirect_to_assigned, so the narrower flag would bury 3 live cases.
-  const [hideDeclines, setHideDeclines] = useState(false);
+  // WORK QUEUE DEFAULT (Tyler 2026-07-29: "I need there to be workable items in
+  // the Cases by region").
+  //
+  // These start ON. Measured on the live board the day this changed: 387 cases,
+  // of which 122 (32%) are declined or sent-to-auction dead ends nobody in a
+  // region can act on. Landing an owner on a list that is one-third unworkable
+  // buries the 265 that are real, and the toggles that fixed it defaulted OFF so
+  // nobody ever hit them.
+  //
+  // The hide predicates keep their `!assigned_truck_mismatch` exception, which
+  // is the important nuance: a declined or auctioned RENTAL whose tech is
+  // assigned a different truck is still live work, so those 22 stay visible.
+  // Both toggles remain one click away for anyone who wants the full book.
+  const [hideDeclines, setHideDeclines] = useState(true);
   // Same rule for auction. A truck sent to auction is not coming back either,
   // so the case is noise UNLESS that technician is on another truck. The gap is
   // wider here: measured on prod 2026-07-28, 18 of the 112 auction cases are
   // mismatches but only 2 set redirect_to_assigned.
-  const [hideAuctions, setHideAuctions] = useState(false);
+  const [hideAuctions, setHideAuctions] = useState(true);
   const [amsF, setAmsF] = useState<string[]>([]);
   const [catF, setCatF] = useState("");
   const [classF, setClassF] = useState("");
@@ -1099,8 +1112,16 @@ export default function RegionalCases() {
           placeholder="Search truck, tech, shop…"
           style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, background: colors.surface,
             border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 11px", minWidth: 230, outline: "none" }} />
-        <span style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, whiteSpace: "nowrap" }}>
-          {search.trim() ? `${sorted.length} of ${basePool.length}` : `${sorted.length} cases`}
+        {/* Say WHICH number this is. "265 cases" and "265 workable" look the
+            same but answer different questions, and with dead ends hidden by
+            default the honest label is the second one. */}
+        <span title={hideDeclines || hideAuctions
+            ? "Declined and sent-to-auction rentals are hidden. Cases where the tech is assigned another truck stay visible, because those are still workable."
+            : "Every case in this region, dead ends included."}
+          style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted, whiteSpace: "nowrap", cursor: "help" }}>
+          {search.trim()
+            ? `${sorted.length} of ${basePool.length}`
+            : `${sorted.length} ${hideDeclines && hideAuctions ? "workable" : "cases"}`}
         </span>
         <button type="button" onClick={() => setHideDeclines((v) => !v)}
           title={hideDeclines
@@ -1927,7 +1948,10 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 {notes.map((n) => (
                   <div key={n.id} style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 10px" }}>
                     <div style={{ fontSize: 12.5, color: colors.ink, whiteSpace: "pre-wrap" }}>{n.note}</div>
-                    <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains }}>{n.actor || "unknown"} · {fmtDate(n.created_at)}</div>
+                    <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 3, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", flexWrap: "wrap" }}>
+                      <span>{n.actor || "unknown"} · {fmtDate(n.created_at)}</span>
+                      <AmsCommentBadge payload={(n as any).payload} />
+                    </div>
                   </div>
                 ))}
               </div>
@@ -2131,5 +2155,40 @@ function WorkbookEditor({ caseKey, row, statuses, onClose, onSaved }: {
         })}
       </div>
     </div>
+  );
+}
+
+
+// ─── AMS comment mirror status ───────────────────────────────────────────────
+/**
+ * Whether a comment typed here actually landed on the vehicle's AMS record.
+ *
+ * The mirror is best-effort by design - Nexus commits the comment first and AMS
+ * is attempted after - so the ONLY honest thing to do is show the real outcome
+ * per comment. Rendering nothing on failure would let a coordinator believe AMS
+ * had been updated when it had not, which is worse than not mirroring at all.
+ *
+ * Shape comes from server/vrm/rental-operations/ams-comment.ts, stamped onto the
+ * action row's payload. Absent payload = a comment written before the mirror
+ * existed, so it renders nothing rather than a scary "failed".
+ */
+function AmsCommentBadge({ payload }: { payload?: any }) {
+  const a = payload && payload.ams;
+  if (!a || !a.status) return null;
+  const paint: Record<string, { fg: string; bg: string; text: string }> = {
+    synced: { fg: colors.green, bg: colors.greenLight, text: "in AMS" },
+    failed: { fg: colors.red, bg: colors.redLight, text: "AMS failed" },
+    skipped: { fg: colors.inkMuted, bg: colors.surface, text: "not sent to AMS" },
+    disabled: { fg: colors.inkMuted, bg: colors.surface, text: "AMS mirror off" },
+  };
+  const p = paint[a.status as string];
+  if (!p) return null;
+  return (
+    <span
+      title={a.reason ? `${p.text}: ${a.reason}` : a.vin ? `Posted to AMS on VIN ${a.vin}` : p.text}
+      style={{ marginLeft: 6, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.03em", textTransform: "uppercase", color: p.fg, background: p.bg, border: `1px solid ${p.fg}`, borderRadius: 5, padding: "1px 5px", cursor: "help", whiteSpace: "nowrap" }}
+    >
+      {p.text}
+    </span>
   );
 }
