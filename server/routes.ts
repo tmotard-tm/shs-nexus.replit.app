@@ -750,7 +750,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // Holman delta sweep. Same bearer convention as the fleet-scope router:
       // x-internal-cron == SESSION_SECRET (or NEXUS_CRON_SECRET). Scoped to
       // this ONE path; the route itself gates by ET hour + watermark + locks.
-      if (req.method === "POST" && req.path === "/rental-operations/cron/run") {
+      // holman-po-queue/cron-refresh rides the same internal-cron convention:
+      // the ARGUS 30-min heartbeat replaced the on-page-load Holman scrape
+      // (Tyler 2026-07-29). The route itself gates in-flight + freshness.
+      if (req.method === "POST" && (req.path === "/rental-operations/cron/run" || req.path === "/holman-po-queue/cron-refresh")) {
         const internalToken = req.headers["x-internal-cron"];
         const expectedInternal = process.env.SESSION_SECRET;
         const expectedCron = process.env.NEXUS_CRON_SECRET;

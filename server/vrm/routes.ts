@@ -2648,16 +2648,18 @@ export function registerVrmRoutes(): Router {
   // overlap answer is the current DB queue + inFlight:true, not an error: the
   // caller's poll picks up the running walk's result when it lands.
   let holmanPoRefreshInFlight = false;
-  router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
-    if (holmanPoRefreshInFlight) {
-      const rows = await listHolmanPoQueue();
-      return res.json({ ok: true, inFlight: true, rows });
-    }
-    holmanPoRefreshInFlight = true;
-    try {
+
+  /**
+   * The walk itself - scrape, renter fill, tech match, upsert - shared by the
+   * operator's Refresh button and the ARGUS 30-minute heartbeat so there is
+   * exactly ONE copy of the Chromium-launching code path. Interior lifted
+   * verbatim from the former route body (indentation kept to preserve the
+   * diff); callers own the in-flight flag.
+   */
+  async function runHolmanPoWalk(): Promise<{ ok: boolean; scrapedCount: number; scrapeError: string | null }> {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
-        return res.status(502).json({ ok: false, error: scrapeErr });
+        return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr };
       }
       // Fill the REAL renter for UNKNOWN-driver POs from Holman's View Rental
       // Request box (Tyler 2026-07-11). The renter chain runs in an isolated
@@ -2687,13 +2689,74 @@ export function registerVrmRoutes(): Router {
       await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
         sweepResolved: walkComplete !== false && !scrapeErr,
       });
+      return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null };
+  }
+
+  router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
+    if (holmanPoRefreshInFlight) {
       const rows = await listHolmanPoQueue();
-      res.json({ ok: true, scrapedCount: scraped.length, rows, scrapeError: scrapeErr ?? null });
+      return res.json({ ok: true, inFlight: true, rows });
+    }
+    holmanPoRefreshInFlight = true;
+    try {
+      const walk = await runHolmanPoWalk();
+      if (!walk.ok) {
+        return res.status(502).json({ ok: false, error: walk.scrapeError });
+      }
+      const rows = await listHolmanPoQueue();
+      res.json({ ok: true, scrapedCount: walk.scrapedCount, rows, scrapeError: walk.scrapeError });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
     } finally {
       holmanPoRefreshInFlight = false;
+    }
+  });
+
+  /**
+   * POST /api/vrm/holman-po-queue/cron-refresh - the ARGUS heartbeat trigger
+   * (x-internal-cron, allowlisted in server/routes.ts; no session). Replaces
+   * the removed on-page-load scrape with a 30-minute schedule fired from the
+   * always-on FleetAgents VM, because THIS app is Autoscale and cannot keep
+   * its own timers alive. Gates, in order:
+   *   1. in-flight - never a second concurrent walk;
+   *   2. freshness - skip when ANY queue row synced <25 min ago, so retries,
+   *      restarts, and overlapping schedulers converge to one walk per half
+   *      hour (an EMPTY queue never skips - new POs must be discovered);
+   * then responds started:true IMMEDIATELY and walks detached, because a walk
+   * outruns the edge proxy timeout and the dispatcher only needs the verdict
+   * "accepted / skipped", not the row payload.
+   */
+  router.post("/holman-po-queue/cron-refresh", async (_req, res) => {
+    try {
+      if (holmanPoRefreshInFlight) {
+        return res.json({ ok: true, skipped: true, reason: "a walk is already in flight" });
+      }
+      const rows = await listHolmanPoQueue();
+      const newest = rows.reduce((mx: number, r: any) => {
+        const t = r?.lastSyncedAt ? new Date(r.lastSyncedAt).getTime() : 0;
+        return Number.isFinite(t) && t > mx ? t : mx;
+      }, 0);
+      if (newest && Date.now() - newest < 25 * 60_000) {
+        return res.json({ ok: true, skipped: true, reason: `queue synced ${Math.round((Date.now() - newest) / 60_000)} min ago` });
+      }
+      holmanPoRefreshInFlight = true;
+      res.json({ ok: true, started: true });
+      void (async () => {
+        try {
+          const walk = await runHolmanPoWalk();
+          console.log(`[VRM/HolmanPO] cron walk done: ${walk.ok ? `${walk.scrapedCount} rows` : `FAILED ${walk.scrapeError}`}`);
+        } catch (e: any) {
+          console.error("[VRM/HolmanPO] cron walk error:", e?.message || e);
+        } finally {
+          holmanPoRefreshInFlight = false;
+        }
+      })();
+    } catch (e: any) {
+      // Only reachable before the flag flips (the list read); the detached walk
+      // owns the flag from then on.
+      console.error("[VRM] holman-po-queue cron-refresh error:", e?.message || e);
+      if (!res.headersSent) res.status(500).json({ ok: false, error: e?.message });
     }
   });
 
