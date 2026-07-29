@@ -153,6 +153,14 @@ export const FS_TERMINAL_MAIN_STATUSES: readonly string[] = [
 
 /**
  * Escalation reason → dashboard mapping.
+ *
+ * The left side MUST stay in lockstep with EscalationReason on LIVHR
+ * (server/agents/luca/escalation/build-task.ts). An unmapped reason does not
+ * error: it silently falls to the default branch below with callStatus null, so
+ * the signal lands as a generic note and no status is ever stamped. That is how
+ * `ready_for_pickup` - the single most goal-critical signal in the recovery loop
+ * - went unmapped. Audited 2026-07-29 against all 17 LIVHR reasons; 6 were
+ * missing and are added above.
  * `callStatus` null = the escalation is not call-shaped; only the summary is
  * written. `callDerived` controls whether lastCallDate is stamped.
  */
@@ -165,6 +173,25 @@ const REASON_MAP: Record<
   shop_call_failures: { label: "Repeated call failures", callStatus: "No Answer", callDerived: true },
   shop_no_truck: { label: "Shop does not have the truck", callStatus: "Shop Does Not Have Truck", callDerived: true },
   truck_ready: { label: "Vehicle ready for pickup", callStatus: "Ready", callDerived: true },
+  // LUCA emits TWO ready lanes and only one of them was mapped here, so the
+  // other fell through to the default branch (callStatus null) and never stamped
+  // a status. `truck_ready` is the ESCALATE_RENTAL_RECOVERY lane; this one is
+  // Stage-1 NOTIFY_ROUTING, which notify-routing.ts writes UNCONDITIONALLY on
+  // every ready van. It is the higher-volume of the two and was the one missing.
+  // Both mean the same thing to a human, so both resolve to "Ready".
+  ready_for_pickup: { label: "Vehicle ready for pickup", callStatus: "Ready", callDerived: true },
+  // Deliberately NOT "Ready". The shop said ready while the SAME call reported
+  // an unfinished repair or an onward referral, and LUCA's post-call guard
+  // refused to resolve it. A human verifies before anyone drives out. Mapping
+  // this to Ready would send a tech to collect a truck that is not fixed.
+  ready_not_repaired: { label: "Released but repair unfinished - verify", callStatus: null, callDerived: true },
+  // Terminal artifact of the recovery loop, so the closure reaches VRM with
+  // LUCA provenance rather than being inferred from a feed drop-off.
+  rental_closed: { label: "Rental closed by LUCA", callStatus: null, callDerived: false },
+  // A human corrected the shop name/phone/address in LUCA chat. Not call-shaped.
+  shop_contact_corrected: { label: "Shop contact corrected", callStatus: null, callDerived: false },
+  repair_declined: { label: "Repair declined", callStatus: "Repair Declined", callDerived: true },
+  vehicle_totaled: { label: "Vehicle totaled", callStatus: "Totaled", callDerived: true },
   vehicle_relocated: { label: "Vehicle relocated to another shop", callStatus: "Relocated", callDerived: true },
   van_already_ready: { label: "Van already ready", callStatus: "Ready", callDerived: true },
   terminal_pressure: { label: "Terminal cost pressure", callStatus: null, callDerived: false },

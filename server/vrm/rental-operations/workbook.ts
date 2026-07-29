@@ -28,6 +28,14 @@ export const WORKBOOK_ACTION_TYPE = "recovery_status";
  * The three `awaiting_*` states exist so a lead can tell at a glance who a case
  * is BLOCKED ON. A single "in progress" cannot answer that, and answering it is
  * the whole reason to look at the board.
+ *
+ * `ready_for_pickup` (Tyler 2026-07-29) is the 10th, and it is the only state
+ * an AGENT sets rather than a human: LUCA writes it when a shop call reports the
+ * truck finished. It sits immediately before `return_scheduled` because that is
+ * the real order of work — the shop releases the truck, THEN somebody books the
+ * tech to go collect it and hand the rental back. It is deliberately NOT closed:
+ * a ready truck nobody has collected is the most expensive row on the board,
+ * since the rental keeps billing every day it sits there.
  */
 export const WORKBOOK_STATUSES = [
   "new",
@@ -36,6 +44,7 @@ export const WORKBOOK_STATUSES = [
   "awaiting_tech",
   "awaiting_shop",
   "blocked",
+  "ready_for_pickup",
   "return_scheduled",
   "returned_closed",
   "escalated",
@@ -50,6 +59,7 @@ export const WORKBOOK_STATUS_LABEL: Record<WorkbookStatus, string> = {
   awaiting_tech: "Awaiting tech",
   awaiting_shop: "Awaiting shop",
   blocked: "Blocked",
+  ready_for_pickup: "Ready for pickup",
   return_scheduled: "Return scheduled",
   returned_closed: "Returned / closed",
   escalated: "Escalated",

@@ -110,6 +110,43 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // -- "text the tech to pick up their van" --------------------------------
+  // The tech side of a rental. LUCA works the shop; nothing worked the person
+  // holding our rental until now. Sends through the Master Fleet Comms pipeline
+  // (opt-out, recipient-local quiet hours, threading) - see ./pickup-sms.
+
+  // GET preview: who we would text, on what number, with what body, and whether
+  // it would go now or queue. Zero side effects - safe to call on every open.
+  router.get("/rental-operations/master/:caseKey/pickup-text", async (req, res) => {
+    try {
+      const { previewPickupText } = await import("./pickup-sms");
+      const body = typeof req.query.body === "string" ? req.query.body : null;
+      res.json(await previewPickupText(req.params.caseKey, body));
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] pickup-text preview failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "pickup-text preview failed" });
+    }
+  });
+
+  // POST send it. `confirmed` is required when the tech is termed or on leave;
+  // `force` bypasses quiet hours (default false = queue, never drop).
+  router.post("/rental-operations/master/:caseKey/pickup-text", async (req, res) => {
+    try {
+      const { sendPickupText } = await import("./pickup-sms");
+      const result = await sendPickupText({
+        caseKey: req.params.caseKey,
+        actor: actorOf(req),
+        body: typeof req.body?.body === "string" ? req.body.body : null,
+        confirmed: req.body?.confirmed === true,
+        force: req.body?.force === true,
+      });
+      res.status(result.ok ? 200 : 409).json(result);
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] pickup-text send failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "pickup-text send failed" });
+    }
+  });
+
   // GET the FULL active-rental list in LUCA's VW_NEXUS_RENTAL_LIST contract.
   // This is what LUCA's syncActiveRentalsFromNexus() reads to populate its
   // fleet_rentals book (replacing the Snowflake view). Returns EVERY present

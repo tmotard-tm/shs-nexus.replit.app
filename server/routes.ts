@@ -20350,6 +20350,175 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   // =====================================================================
   const HOLMAN_PO_ETL_TABLE = "PARTS_SUPPLYCHAIN.FLEET.HOLMAN_ETL_PO_DETAILS";
 
+  // PO History Dashboard — live Snowflake read joining HOLMAN_ETL_PO_DETAILS
+  // (PO headers + line items, latest upload per PO) with
+  // HOLMAN_VEHICLE_DETAIL_PO_HISTORY_RAW (PO Notes, keyed EVENT_PO_NUMBER).
+  // Returns the most recent `limit` POs (default 500) within `days` (default 3y).
+  // In-memory cache: this Snowflake scan takes ~70s on the shared warehouse, so we
+  // cache results per (days,limit,vehicle) key. Fresh for 15 min; a stale-but-present
+  // entry (up to 2h) is served immediately while a background refresh runs.
+  const PO_HIST_FRESH_MS = 15 * 60 * 1000;
+  const PO_HIST_STALE_MS = 2 * 60 * 60 * 1000;
+  const poHistCache = new Map<string, { at: number; payload: any }>();
+  const poHistInflight = new Map<string, Promise<any>>();
+
+  const buildPoHistoryPayload = async (days: number, limit: number, vehicleRaw: string) => {
+    const { getSnowflakeService } = await import("./snowflake-service");
+
+    let vehicleClause = "";
+    if (vehicleRaw) {
+      const { toCanonical, toDisplayNumber, toHolmanRef } = await import("./vehicle-number-utils");
+      const variants = new Set<string>([vehicleRaw, toCanonical(vehicleRaw), toDisplayNumber(vehicleRaw), toHolmanRef(vehicleRaw)]);
+      const inList = Array.from(variants).filter(Boolean).map(v => `'${v.replace(/'/g, "''")}'`).join(",");
+      vehicleClause = `AND HOLMAN_VEHICLE_NUMBER IN (${inList})`;
+    }
+
+    const sf = getSnowflakeService();
+    await sf.connect();
+
+    const lineRows = await sf.executeQuery(`
+      WITH top_pos AS (
+        SELECT HOLMAN_VEHICLE_NUMBER, PO_NUMBER, MAX(PO_DATE) AS PD
+        FROM ${HOLMAN_PO_ETL_TABLE}
+        WHERE PO_NUMBER IS NOT NULL
+          AND PO_DATE >= DATEADD(day, -${days}, CURRENT_DATE)
+          ${vehicleClause}
+        GROUP BY HOLMAN_VEHICLE_NUMBER, PO_NUMBER
+        ORDER BY PD DESC
+        LIMIT ${limit}
+      )
+      SELECT l.HOLMAN_VEHICLE_NUMBER, l.PO_NUMBER, l.PO_STATUS, l.PO_DATE, l.PO_TYPE_DESCRIPTION,
+             l.VENDOR_NAME, l.PO_LINE_SEQ, l.DESCRIPTION, l.ATA_CODE, l.ATA_GROUP_DESC,
+             l.REPAIR_TYPE_DESCRIPTION, l.LINE_ITEM_COST, l.TOTAL_LINE_ITEM_AMOUNT
+      FROM ${HOLMAN_PO_ETL_TABLE} l
+      JOIN top_pos t ON t.HOLMAN_VEHICLE_NUMBER = l.HOLMAN_VEHICLE_NUMBER AND t.PO_NUMBER = l.PO_NUMBER
+      QUALIFY l.UPLOAD_TIMESTAMP = MAX(l.UPLOAD_TIMESTAMP) OVER (PARTITION BY l.HOLMAN_VEHICLE_NUMBER, l.PO_NUMBER)
+      ORDER BY l.PO_DATE DESC, l.PO_NUMBER, l.PO_LINE_SEQ
+    `) as any[];
+
+      const cleanPo = (v: unknown) => String(v ?? "").replace(/^'/, "").trim();
+      type Line = { id: string; lineNumber: number | null; description: string | null; ataCode: string | null; ataGroup: string | null; repairType: string | null; amount: number | null };
+      type Po = { poNumber: string; vehicle: string; type: string; status: string; openDate: string | null; totalAmount: number; vendorName: string; lines: Line[]; notes: { id: string; text: string; date: string | null }[] };
+
+      const byKey = new Map<string, Po>();
+      const order: string[] = [];
+      for (const r of lineRows) {
+        const po = cleanPo(r.PO_NUMBER);
+        const veh = String(r.HOLMAN_VEHICLE_NUMBER ?? "").trim();
+        if (!po) continue;
+        const key = `${po}|${veh}`;
+        let rec = byKey.get(key);
+        if (!rec) {
+          const d = r.PO_DATE ? new Date(r.PO_DATE) : null;
+          rec = {
+            poNumber: po,
+            vehicle: veh,
+            type: String(r.PO_TYPE_DESCRIPTION ?? "").trim().toUpperCase() || "OTHER",
+            status: String(r.PO_STATUS ?? "").trim().toUpperCase() || "UNKNOWN",
+            openDate: d && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : null,
+            totalAmount: 0,
+            vendorName: String(r.VENDOR_NAME ?? "").trim() || "Unknown Vendor",
+            lines: [],
+            notes: [],
+          };
+          byKey.set(key, rec);
+          order.push(key);
+        }
+        const amt = r.LINE_ITEM_COST != null && r.LINE_ITEM_COST !== "" ? Number(r.LINE_ITEM_COST) : null;
+        rec.lines.push({
+          id: `${key}#${rec.lines.length + 1}`,
+          lineNumber: r.PO_LINE_SEQ != null ? Number(r.PO_LINE_SEQ) : rec.lines.length + 1,
+          description: r.DESCRIPTION ? String(r.DESCRIPTION).trim() : null,
+          ataCode: r.ATA_CODE ? String(r.ATA_CODE).trim() : null,
+          ataGroup: r.ATA_GROUP_DESC ? String(r.ATA_GROUP_DESC).trim() : null,
+          repairType: r.REPAIR_TYPE_DESCRIPTION ? String(r.REPAIR_TYPE_DESCRIPTION).trim() : null,
+          amount: amt != null && !Number.isNaN(amt) ? amt : null,
+        });
+        const lineTotal = r.TOTAL_LINE_ITEM_AMOUNT != null && r.TOTAL_LINE_ITEM_AMOUNT !== "" ? Number(r.TOTAL_LINE_ITEM_AMOUNT) : null;
+        if (lineTotal != null && !Number.isNaN(lineTotal)) rec.totalAmount += lineTotal;
+      }
+
+      // notes: PO Note rows keyed on EVENT_PO_NUMBER (plain, no leading quote).
+      // PO numbers currently never repeat across vehicles, but we still guard by
+      // vehicle (canonical, leading zeros stripped) to prevent cross-vehicle bleed.
+      const canonVeh = (v: unknown) => String(v ?? "").trim().replace(/^0+/, "");
+      const poNumbers = Array.from(new Set(order.map(k => k.split("|")[0])));
+      if (poNumbers.length > 0) {
+        const notesByPo = new Map<string, { id: string; text: string; date: string | null; veh: string }[]>();
+        const chunkArr = <T,>(a: T[], n: number): T[][] => { const o: T[][] = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
+        for (const part of chunkArr(poNumbers, 1000)) {
+          const inList = part.map(p => `'${p.replace(/'/g, "''")}'`).join(",");
+          const noteRows = await sf.executeQuery(`
+            SELECT DISTINCT EVENT_PO_NUMBER, VEHICLE, DATE_TIME_OCCURRED, DESCRIPTION, ROW_HASH
+            FROM PARTS_SUPPLYCHAIN.FLEET.HOLMAN_VEHICLE_DETAIL_PO_HISTORY_RAW
+            WHERE TYPE_OF_OCCURRENCE = 'PO Note'
+              AND EVENT_PO_NUMBER IN (${inList})
+          `) as any[];
+          for (const n of noteRows) {
+            const po = cleanPo(n.EVENT_PO_NUMBER);
+            if (!po) continue;
+            const text = String(n.DESCRIPTION ?? "").trim();
+            if (!text) continue;
+            const d = n.DATE_TIME_OCCURRED ? new Date(String(n.DATE_TIME_OCCURRED)) : null;
+            const list = notesByPo.get(po) ?? [];
+            list.push({ id: String(n.ROW_HASH ?? `${po}-${list.length}`), text, date: d && !Number.isNaN(d.getTime()) ? d.toISOString() : null, veh: canonVeh(n.VEHICLE) });
+            notesByPo.set(po, list);
+          }
+        }
+        for (const key of order) {
+          const rec = byKey.get(key)!;
+          const recVeh = canonVeh(rec.vehicle);
+          const notes = notesByPo.get(rec.poNumber)?.filter(n => !n.veh || n.veh === recVeh);
+          if (notes && notes.length > 0) {
+            rec.notes = notes
+              .sort((a, b) => String(a.date ?? "").localeCompare(String(b.date ?? "")))
+              .map(({ veh: _veh, ...rest }) => rest);
+          }
+        }
+      }
+
+      const data = order.map(k => byKey.get(k)!);
+      return { data, total: data.length, days, limit, generatedAt: new Date().toISOString() };
+  };
+
+  app.get("/api/po-history-dashboard", requireAuth, async (req, res) => {
+    try {
+      const { isSnowflakeConfigured } = await import("./snowflake-service");
+      if (!isSnowflakeConfigured()) return res.status(503).json({ message: "Snowflake not configured" });
+
+      const days = Math.min(Math.max(parseInt(String(req.query.days ?? "1095"), 10) || 1095, 1), 1095);
+      const limit = Math.min(Math.max(parseInt(String(req.query.limit ?? "500"), 10) || 500, 1), 2000);
+      const vehicleRaw = String(req.query.vehicle ?? "").trim();
+      const cacheKey = `${days}|${limit}|${vehicleRaw}`;
+
+      const now = Date.now();
+      const cached = poHistCache.get(cacheKey);
+      const startRefresh = () => {
+        let p = poHistInflight.get(cacheKey);
+        if (!p) {
+          p = buildPoHistoryPayload(days, limit, vehicleRaw)
+            .then(payload => { poHistCache.set(cacheKey, { at: Date.now(), payload }); return payload; })
+            .finally(() => poHistInflight.delete(cacheKey));
+          poHistInflight.set(cacheKey, p);
+        }
+        return p;
+      };
+
+      if (cached && now - cached.at < PO_HIST_FRESH_MS) {
+        return res.json({ ...cached.payload, cached: true });
+      }
+      if (cached && now - cached.at < PO_HIST_STALE_MS) {
+        startRefresh().catch(e => console.error("[PO History Dashboard] Background refresh failed:", e.message));
+        return res.json({ ...cached.payload, cached: true, stale: true });
+      }
+      const payload = await startRefresh();
+      res.json(payload);
+    } catch (err: any) {
+      console.error("[PO History Dashboard] Error:", err.message);
+      res.status(500).json({ message: err.message });
+    }
+  });
+
   app.post("/api/holman/pos/sync", requireAuth, async (req: any, res) => {
     try {
       const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");

@@ -43,6 +43,7 @@
  * best-effort warm path only (same split as fleet-comms / run-rental-sync).
  */
 import { fsPool } from "../fleet-scope-db";
+import { applyReadyForPickup, isReadyReason } from "../vrm/rental-operations/ready-ingest";
 import { fleetScopeStorage } from "../fleet-scope-storage";
 import { storage } from "../storage";
 import {
@@ -127,6 +128,8 @@ export interface LucaWritebackResult {
   duplicates: number;
   noOp: number;
   errors: number;
+  /** VRM cases flipped to ready_for_pickup this run (the Tyler 2026-07-29 lane). */
+  vrmReadyApplied?: number;
   previews: WritebackPreview[];
 }
 
@@ -324,6 +327,16 @@ function buildFinalWrite(
   return write;
 }
 
+/**
+ * The raw outbox `reason`. MappedWriteback intentionally collapses reason into a
+ * label + callStatus for the FleetScope write, so the VRM lane - which routes on
+ * the reason itself - has to read it off the untouched task.
+ */
+function rawReasonOf(rawItem: unknown): string | null {
+  const r = (rawItem as { reason?: unknown } | null)?.reason;
+  return typeof r === "string" && r.trim() !== "" ? r.trim() : null;
+}
+
 // ─── Core run ────────────────────────────────────────────────────────────────
 
 async function processItem(
@@ -366,6 +379,37 @@ async function processItem(
       await markTaskSynced(cfg.baseUrl, cfg.token, mapped.externalId, "fs-luca-writeback-dup");
     }
     return;
+  }
+
+  // ── VRM Ready for Pickup ────────────────────────────────────────────────
+  // Runs BEFORE the fs_trucks gate below on purpose. VRM keeps its own case
+  // universe, and a truck missing from fs_trucks returns early down there — so
+  // wiring this any lower would silently drop the ready signal for exactly the
+  // trucks FleetScope has not caught up on. Its idempotency is self-contained
+  // (it reads the current workbook status), so the re-delivery that the early
+  // return causes is harmless.
+  if (mapped.source === "outbox_task" && isReadyReason(rawReasonOf(rawItem))) {
+    if (cfg.apply) {
+      try {
+        const vrm = await applyReadyForPickup({
+          truckNumber: mapped.truckNumberDisplay,
+          reason: rawReasonOf(rawItem) ?? "",
+          detail: (rawItem as any)?.detail ?? null,
+          externalId: mapped.externalId,
+        });
+        if (vrm.outcome === "applied") {
+          result.vrmReadyApplied = (result.vrmReadyApplied ?? 0) + 1;
+          console.log(`[LUCA-Writeback] ${label}: VRM case ${vrm.caseKey} -> Ready for pickup`);
+        } else {
+          console.log(`[LUCA-Writeback] ${label}: VRM ready no-op (${vrm.outcome}: ${vrm.detail})`);
+        }
+      } catch (err: any) {
+        // Never fatal: the FleetScope half of this run must still complete.
+        console.warn(`[LUCA-Writeback] ${label}: VRM ready write failed: ${err?.message}`);
+      }
+    } else {
+      console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD flip VRM case for truck ${mapped.truckNumberDisplay} to Ready for pickup`);
+    }
   }
 
   const truck = await resolveTruck(mapped);

@@ -1141,12 +1141,6 @@ export default function RentalOperations() {
               </span>
             )}
           </div>
-          {sweep && (
-            <button type="button" onClick={() => scrapeMissingMut.mutate()} disabled={sweepBusy} title={sweep.title}
-              style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600, color: sweep.mismatch > 0 ? colors.red : colors.amber, background: colors.surface, border: `1px solid ${sweep.mismatch > 0 ? colors.red : colors.amber}`, borderRadius: 10, padding: "8px 14px", cursor: sweepBusy ? "wait" : "pointer", opacity: sweepBusy ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-              <RefreshCw size={13} style={{ animation: sweepBusy ? "spin 1s linear infinite" : undefined }} /> {sweep.label}
-            </button>
-          )}
         </div>
       )}
 

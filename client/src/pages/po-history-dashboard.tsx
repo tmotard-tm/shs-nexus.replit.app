@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,85 +90,62 @@ function MultiSelect({
   );
 }
 
-// ─── Mock data ─────────────────────────────────────────────────────────────
-type POStatus = "OPEN" | "APPROVED" | "CLOSED" | "DECLINED";
+// ─── Data types (from GET /api/po-history-dashboard, live Snowflake) ───────
+type POStatus = string;
 
 interface LineItem {
   id: string;
-  lineNumber: number;
-  description: string;
-  ataCode: string;
-  ataGroup: string;
-  repairType: string;
-  amount: number;
+  lineNumber: number | null;
+  description: string | null;
+  ataCode: string | null;
+  ataGroup: string | null;
+  repairType: string | null;
+  amount: number | null;
 }
 
-interface Note { id: string; text: string; date: string }
+interface Note { id: string; text: string; date: string | null }
 
 interface PO {
   poNumber: string;
   vehicle: string;
   type: string;
   status: POStatus;
-  openDate: string;
+  openDate: string | null;
   totalAmount: number;
   vendorName: string;
   lines: LineItem[];
   notes: Note[];
 }
 
-const MOCK_POS: PO[] = [
-  { poNumber: "PO-2023-0891", vehicle: "021100", type: "MAINTENANCE", status: "CLOSED", openDate: "2023-04-12", totalAmount: 450.00, vendorName: "Jiffy Lube", lines: [{ id: "L1", lineNumber: 1, description: "Synthetic Oil Change", ataCode: "01 Engine", ataGroup: "PM", repairType: "PM", amount: 150.00 }, { id: "L2", lineNumber: 2, description: "Air Filter Replacement", ataCode: "01 Engine", ataGroup: "PM", repairType: "PM", amount: 300.00 }], notes: [{ id: "N1", text: "Approved standard PM services.", date: "2023-04-12T09:00:00Z" }] },
-  { poNumber: "PO-2023-1102", vehicle: "034567", type: "REPAIR", status: "APPROVED", openDate: "2023-08-05", totalAmount: 1250.75, vendorName: "Goodyear", lines: [{ id: "L3", lineNumber: 1, description: "Replace 4 Tires", ataCode: "42 Tires", ataGroup: "Tires", repairType: "Wear", amount: 1100.00 }, { id: "L4", lineNumber: 2, description: "Wheel Alignment", ataCode: "42 Tires", ataGroup: "Tires", repairType: "Wear", amount: 150.75 }], notes: [{ id: "N2", text: "Tires under minimum tread depth.", date: "2023-08-05T10:15:00Z" }, { id: "N3", text: "Vendor requested quick approval.", date: "2023-08-05T11:00:00Z" }] },
-  { poNumber: "PO-2023-1544", vehicle: "047823", type: "REPAIR", status: "OPEN", openDate: "2023-11-20", totalAmount: 875.50, vendorName: "NAPA", lines: [{ id: "L5", lineNumber: 1, description: "Brake Pads and Rotors", ataCode: "33 Brakes", ataGroup: "Brakes", repairType: "Wear", amount: 875.50 }], notes: [{ id: "N4", text: "Driver reported squeaking brakes.", date: "2023-11-20T08:30:00Z" }] },
-  { poNumber: "PO-2023-1999", vehicle: "056231", type: "ACCIDENT", status: "DECLINED", openDate: "2023-12-01", totalAmount: 3200.00, vendorName: "Pep Boys", lines: [{ id: "L6", lineNumber: 1, description: "Front Bumper Replacement", ataCode: "71 Body", ataGroup: "Body", repairType: "Accident", amount: 2000.00 }, { id: "L7", lineNumber: 2, description: "Paint and Labor", ataCode: "71 Body", ataGroup: "Body", repairType: "Accident", amount: 1200.00 }], notes: [{ id: "N5", text: "Estimate seems high. Requesting secondary quote.", date: "2023-12-01T14:20:00Z" }, { id: "N6", text: "Declined PO.", date: "2023-12-02T09:00:00Z" }] },
-  { poNumber: "PO-2024-0012", vehicle: "021100", type: "MAINTENANCE", status: "OPEN", openDate: "2024-01-10", totalAmount: 210.00, vendorName: "Jiffy Lube", lines: [{ id: "L8", lineNumber: 1, description: "Transmission Fluid Flush", ataCode: "01 Engine", ataGroup: "PM", repairType: "PM", amount: 210.00 }], notes: [] },
-  { poNumber: "PO-2024-0234", vehicle: "034567", type: "REPAIR", status: "CLOSED", openDate: "2024-02-15", totalAmount: 450.25, vendorName: "Goodyear", lines: [{ id: "L9", lineNumber: 1, description: "Fuel Pump Replacement", ataCode: "14 Fuel", ataGroup: "Fuel", repairType: "Repair", amount: 450.25 }], notes: [{ id: "N7", text: "Vehicle stalling. Fuel pump diagnosed as faulty.", date: "2024-02-15T11:45:00Z" }] },
-  { poNumber: "PO-2024-0456", vehicle: "047823", type: "MAINTENANCE", status: "APPROVED", openDate: "2024-03-01", totalAmount: 85.00, vendorName: "NAPA", lines: [{ id: "L10", lineNumber: 1, description: "Wiper Blades", ataCode: "71 Body", ataGroup: "Body", repairType: "PM", amount: 85.00 }], notes: [] },
-  { poNumber: "PO-2024-0789", vehicle: "056231", type: "REPAIR", status: "CLOSED", openDate: "2024-04-10", totalAmount: 1150.00, vendorName: "Pep Boys", lines: [{ id: "L11", lineNumber: 1, description: "Alternator Replacement", ataCode: "01 Engine", ataGroup: "Electrical", repairType: "Repair", amount: 1150.00 }], notes: [{ id: "N8", text: "Battery not charging. Alternator failed.", date: "2024-04-10T09:30:00Z" }] },
-  { poNumber: "PO-2024-1011", vehicle: "021100", type: "REPAIR", status: "APPROVED", openDate: "2024-05-22", totalAmount: 2850.00, vendorName: "NAPA", lines: [{ id: "L12", lineNumber: 1, description: "Alternator Assembly", ataCode: "01 Engine", ataGroup: "Electrical", repairType: "Repair", amount: 1850.00 }, { id: "L13", lineNumber: 2, description: "Labor", ataCode: "01 Engine", ataGroup: "Electrical", repairType: "Labor", amount: 1000.00 }], notes: [{ id: "N9", text: "No-start condition.", date: "2024-05-22T08:00:00Z" }] },
-  { poNumber: "PO-2024-1234", vehicle: "034567", type: "REPAIR", status: "APPROVED", openDate: "2024-06-12", totalAmount: 4250.00, vendorName: "Goodyear", lines: [{ id: "L14", lineNumber: 1, description: "Front Brake Pads", ataCode: "33 Brakes", ataGroup: "Brakes", repairType: "Replace", amount: 850.00 }, { id: "L15", lineNumber: 2, description: "Rotors Machining", ataCode: "33 Brakes", ataGroup: "Brakes", repairType: "Machine", amount: 1200.00 }, { id: "L16", lineNumber: 3, description: "Labor", ataCode: "33 Brakes", ataGroup: "Brakes", repairType: "Labor", amount: 2200.00 }], notes: [{ id: "N10", text: "Heavy wear on rotors.", date: "2024-06-12T09:30:00Z" }] },
-];
+interface PoHistoryResponse {
+  data: PO[];
+  total: number;
+  generatedAt: string;
+}
 
-const VENDOR_OPTIONS = [
-  { value: "Jiffy Lube", label: "Jiffy Lube" },
-  { value: "Goodyear", label: "Goodyear" },
-  { value: "NAPA", label: "NAPA" },
-  { value: "Pep Boys", label: "Pep Boys" },
-];
-
-const ATA_OPTIONS = [
-  { value: "01 Engine", label: "01 Engine" },
-  { value: "14 Fuel", label: "14 Fuel" },
-  { value: "33 Brakes", label: "33 Brakes" },
-  { value: "42 Tires", label: "42 Tires" },
-  { value: "71 Body", label: "71 Body" },
-];
-
-const REPAIR_TYPE_OPTIONS = [
-  { value: "PM", label: "PM" },
-  { value: "Wear", label: "Wear" },
-  { value: "Repair", label: "Repair" },
-  { value: "Accident", label: "Accident" },
-  { value: "Replace", label: "Replace" },
-  { value: "Labor", label: "Labor" },
-];
-
-const STATUS_OPTIONS: POStatus[] = ["OPEN", "APPROVED", "CLOSED", "DECLINED"];
-
-const STATUS_BADGE: Record<POStatus, string> = {
+const DEFAULT_STATUS_BADGE = "bg-muted text-muted-foreground border-border";
+const STATUS_BADGE: Record<string, string> = {
   OPEN: "bg-blue-500/10 text-blue-600 border-blue-500/20 dark:text-blue-400",
   APPROVED: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20 dark:text-emerald-400",
   CLOSED: "bg-zinc-500/10 text-zinc-600 border-zinc-500/20 dark:text-zinc-400",
+  PAID: "bg-zinc-500/10 text-zinc-600 border-zinc-500/20 dark:text-zinc-400",
   DECLINED: "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400",
+  CANCELLED: "bg-red-500/10 text-red-600 border-red-500/20 dark:text-red-400",
 };
+const statusBadge = (s: string) => STATUS_BADGE[s] ?? DEFAULT_STATUS_BADGE;
 
-const STATUS_TOGGLE_ON: Record<POStatus, string> = {
+const STATUS_TOGGLE_ON: Record<string, string> = {
   OPEN: "bg-blue-500/15 text-blue-600 border-blue-400/40 dark:text-blue-300",
   APPROVED: "bg-emerald-500/15 text-emerald-600 border-emerald-400/40 dark:text-emerald-300",
   CLOSED: "bg-zinc-500/15 text-zinc-600 border-zinc-400/40 dark:text-zinc-300",
+  PAID: "bg-zinc-500/15 text-zinc-600 border-zinc-400/40 dark:text-zinc-300",
   DECLINED: "bg-red-500/15 text-red-600 border-red-400/40 dark:text-red-300",
+  CANCELLED: "bg-red-500/15 text-red-600 border-red-400/40 dark:text-red-300",
 };
+const statusToggleOn = (s: string) => STATUS_TOGGLE_ON[s] ?? "bg-primary/15 text-primary border-primary/40";
+
+// In HOLMAN_ETL_PO_DETAILS there is no 'OPEN' status — open POs carry PO_STATUS='APPROVED'.
+const isOpenStatus = (s: string) => s === "APPROVED" || s === "OPEN";
 
 const TYPE_BADGE: Record<string, string> = {
   MAINTENANCE: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20 dark:text-cyan-400",
@@ -177,17 +155,41 @@ const TYPE_BADGE: Record<string, string> = {
 
 const fmt = (n: number) => new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 
-// ─── ATA groups (for "By ATA Group" tab) ──────────────────────────────────
-const ATA_GROUPS = [
-  { code: "33", name: "Brakes", color: "bg-teal-500", textColor: "text-teal-500" },
-  { code: "42", name: "Tires", color: "bg-blue-500", textColor: "text-blue-500" },
-  { code: "01", name: "Engine", color: "bg-orange-500", textColor: "text-orange-500" },
-  { code: "14", name: "Fuel", color: "bg-yellow-500", textColor: "text-yellow-500" },
-  { code: "71", name: "Body", color: "bg-purple-500", textColor: "text-purple-500" },
-];
+// Options derived from the live data set (vendors, ATA groups, repair types, statuses)
+interface FilterOptions {
+  vendors: { value: string; label: string }[];
+  atas: { value: string; label: string }[];
+  repairTypes: { value: string; label: string }[];
+  statuses: POStatus[];
+}
+
+function deriveOptions(pos: PO[]): FilterOptions {
+  const vendors = new Set<string>();
+  const atas = new Set<string>();
+  const repairTypes = new Set<string>();
+  const statuses = new Set<string>();
+  for (const po of pos) {
+    if (po.vendorName) vendors.add(po.vendorName);
+    if (po.status) statuses.add(po.status);
+    for (const l of po.lines) {
+      if (l.ataGroup) atas.add(l.ataGroup);
+      if (l.repairType) repairTypes.add(l.repairType);
+    }
+  }
+  const toOpts = (s: Set<string>) => Array.from(s).sort().map(v => ({ value: v, label: v }));
+  return { vendors: toOpts(vendors), atas: toOpts(atas), repairTypes: toOpts(repairTypes), statuses: Array.from(statuses).sort() };
+}
+
+// line-level matching helpers (ATA filter matches on ataGroup)
+const lineAta = (l: LineItem) => l.ataGroup ?? "";
+const lineRepairType = (l: LineItem) => l.repairType ?? "";
+
+// color cycle for the "By ATA Group" bars
+const ATA_COLORS = ["bg-teal-500", "bg-blue-500", "bg-orange-500", "bg-yellow-500", "bg-purple-500", "bg-rose-500", "bg-emerald-500", "bg-indigo-500", "bg-amber-500", "bg-cyan-500"];
 
 // ─── Shared filter bar ──────────────────────────────────────────────────────
 function FilterBar({
+  options,
   vehicleFilter, setVehicleFilter,
   vendorFilter, setVendorFilter,
   ataFilter, setAtaFilter,
@@ -195,6 +197,7 @@ function FilterBar({
   statusFilter, setStatusFilter,
   showVendorFilter = true,
 }: {
+  options: FilterOptions;
   vehicleFilter: string; setVehicleFilter: (v: string) => void;
   vendorFilter: Set<string>; setVendorFilter: (v: Set<string>) => void;
   ataFilter: Set<string>; setAtaFilter: (v: Set<string>) => void;
@@ -205,7 +208,7 @@ function FilterBar({
   const toggleStatus = (s: POStatus) => {
     const next = new Set(statusFilter);
     next.has(s) ? next.delete(s) : next.add(s);
-    setStatusFilter(next.size === STATUS_OPTIONS.length ? new Set() : next);
+    setStatusFilter(next.size === options.statuses.length ? new Set() : next);
   };
 
   return (
@@ -220,23 +223,23 @@ function FilterBar({
         />
       </div>
       {showVendorFilter && (
-        <MultiSelect label="Vendors" options={VENDOR_OPTIONS} selected={vendorFilter} onChange={setVendorFilter} />
+        <MultiSelect label="Vendors" options={options.vendors} selected={vendorFilter} onChange={setVendorFilter} width="w-48" />
       )}
-      <MultiSelect label="ATA Codes" options={ATA_OPTIONS} selected={ataFilter} onChange={setAtaFilter} />
-      <MultiSelect label="Repair Types" options={REPAIR_TYPE_OPTIONS} selected={repairTypeFilter} onChange={setRepairTypeFilter} />
+      <MultiSelect label="ATA Groups" options={options.atas} selected={ataFilter} onChange={setAtaFilter} width="w-44" />
+      <MultiSelect label="Repair Types" options={options.repairTypes} selected={repairTypeFilter} onChange={setRepairTypeFilter} />
       <Button variant="outline" size="sm" className="h-9 gap-2 font-normal text-sm text-muted-foreground w-36">
         <Calendar className="h-4 w-4" />
         Last 3 Years
       </Button>
-      <div className="flex items-center gap-1 ml-auto">
-        {STATUS_OPTIONS.map(s => (
+      <div className="flex items-center gap-1 ml-auto flex-wrap">
+        {options.statuses.map(s => (
           <button
             key={s}
             onClick={() => toggleStatus(s)}
             className={`px-2.5 py-1 rounded border text-[11px] font-medium transition-all ${
               statusFilter.size === 0 || statusFilter.has(s)
-                ? STATUS_TOGGLE_ON[s]
-                : STATUS_BADGE[s] + " opacity-40"
+                ? statusToggleOn(s)
+                : statusBadge(s) + " opacity-40"
             }`}
           >
             {s}
@@ -269,7 +272,7 @@ function PORow({ po }: { po: PO }) {
           </Badge>
         </TableCell>
         <TableCell>
-          <Badge variant="outline" className={`text-[10px] ${STATUS_BADGE[po.status]}`}>
+          <Badge variant="outline" className={`text-[10px] ${statusBadge(po.status)}`}>
             {po.status}
           </Badge>
         </TableCell>
@@ -300,9 +303,9 @@ function PORow({ po }: { po: PO }) {
                         <TableRow key={line.id}>
                           <TableCell className="text-xs text-muted-foreground">{line.lineNumber}</TableCell>
                           <TableCell className="text-sm">{line.description}</TableCell>
-                          <TableCell className="text-xs font-mono text-muted-foreground">{line.ataCode}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{line.repairType}</TableCell>
-                          <TableCell className="text-sm text-right font-medium">{fmt(line.amount)}</TableCell>
+                          <TableCell className="text-xs font-mono text-muted-foreground">{line.ataGroup ?? line.ataCode ?? "—"}</TableCell>
+                          <TableCell className="text-xs text-muted-foreground">{line.repairType ?? "—"}</TableCell>
+                          <TableCell className="text-sm text-right font-medium">{line.amount != null ? fmt(line.amount) : "—"}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>
@@ -314,13 +317,13 @@ function PORow({ po }: { po: PO }) {
                   <h4 className="text-sm font-medium mb-2">Notes</h4>
                   <div className="space-y-2">
                     {po.notes.map(note => {
-                      const d = new Date(note.date);
+                      const d = note.date ? new Date(note.date) : null;
                       return (
                         <div key={note.id} className="bg-background border border-border rounded-md p-3">
                           <div className="flex justify-between mb-1">
                             <span className="text-xs text-muted-foreground font-medium">System Note</span>
                             <span className="text-[10px] text-muted-foreground">
-                              {d.toLocaleDateString()} {d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              {d && !Number.isNaN(d.getTime()) ? `${d.toLocaleDateString()} ${d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
                             </span>
                           </div>
                           <p className="text-sm">{note.text}</p>
@@ -339,24 +342,24 @@ function PORow({ po }: { po: PO }) {
 }
 
 // ─── Tab 1: All POs ──────────────────────────────────────────────────────────
-function AllPOsTab() {
+function AllPOsTab({ pos, options }: { pos: PO[]; options: FilterOptions }) {
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [vendorFilter, setVendorFilter] = useState<Set<string>>(new Set());
   const [ataFilter, setAtaFilter] = useState<Set<string>>(new Set());
   const [repairTypeFilter, setRepairTypeFilter] = useState<Set<string>>(new Set());
   const [statusFilter, setStatusFilter] = useState<Set<POStatus>>(new Set());
 
-  const filtered = useMemo(() => MOCK_POS.filter(po => {
+  const filtered = useMemo(() => pos.filter(po => {
     if (vehicleFilter && !po.vehicle.includes(vehicleFilter)) return false;
     if (vendorFilter.size > 0 && !vendorFilter.has(po.vendorName)) return false;
     if (statusFilter.size > 0 && !statusFilter.has(po.status)) return false;
-    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(l.ataCode))) return false;
-    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(l.repairType))) return false;
+    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(lineAta(l)))) return false;
+    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(lineRepairType(l)))) return false;
     return true;
-  }), [vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
+  }), [pos, vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
 
   const totalSpend = filtered.reduce((a, p) => a + p.totalAmount, 0);
-  const openCount = filtered.filter(p => p.status === "OPEN").length;
+  const openCount = filtered.filter(p => isOpenStatus(p.status)).length;
   const uniqueVehicles = new Set(filtered.map(p => p.vehicle)).size;
   const avgPerVehicle = uniqueVehicles ? totalSpend / uniqueVehicles : 0;
 
@@ -379,6 +382,7 @@ function AllPOsTab() {
       </div>
 
       <FilterBar
+        options={options}
         vehicleFilter={vehicleFilter} setVehicleFilter={setVehicleFilter}
         vendorFilter={vendorFilter} setVendorFilter={setVendorFilter}
         ataFilter={ataFilter} setAtaFilter={setAtaFilter}
@@ -404,7 +408,7 @@ function AllPOsTab() {
           <TableBody>
             {filtered.length === 0
               ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-muted-foreground">No POs match the current filters.</TableCell></TableRow>
-              : filtered.map(po => <PORow key={po.poNumber} po={po} />)
+              : filtered.map(po => <PORow key={`${po.poNumber}|${po.vehicle}`} po={po} />)
             }
           </TableBody>
         </Table>
@@ -414,7 +418,7 @@ function AllPOsTab() {
 }
 
 // ─── Tab 2: By Vendor ───────────────────────────────────────────────────────
-function ByVendorTab() {
+function ByVendorTab({ pos, options }: { pos: PO[]; options: FilterOptions }) {
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [vendorFilter, setVendorFilter] = useState<Set<string>>(new Set());
   const [ataFilter, setAtaFilter] = useState<Set<string>>(new Set());
@@ -424,25 +428,25 @@ function ByVendorTab() {
 
   const vendorStats = useMemo(() => {
     const stats: Record<string, { total: number; count: number }> = {};
-    MOCK_POS.forEach(po => {
+    pos.forEach(po => {
       if (!stats[po.vendorName]) stats[po.vendorName] = { total: 0, count: 0 };
       stats[po.vendorName].total += po.totalAmount;
       stats[po.vendorName].count++;
     });
-    return Object.entries(stats).map(([vendor, data]) => ({ vendor, ...data })).sort((a, b) => b.total - a.total);
-  }, []);
+    return Object.entries(stats).map(([vendor, data]) => ({ vendor, ...data })).sort((a, b) => b.total - a.total).slice(0, 25);
+  }, [pos]);
 
   const maxSpend = Math.max(...vendorStats.map(v => v.total), 1);
 
-  const filteredPOs = useMemo(() => MOCK_POS.filter(po => {
+  const filteredPOs = useMemo(() => pos.filter(po => {
     if (selectedVendor && po.vendorName !== selectedVendor) return false;
     if (vehicleFilter && !po.vehicle.includes(vehicleFilter)) return false;
     if (vendorFilter.size > 0 && !vendorFilter.has(po.vendorName)) return false;
     if (statusFilter.size > 0 && !statusFilter.has(po.status)) return false;
-    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(l.ataCode))) return false;
-    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(l.repairType))) return false;
+    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(lineAta(l)))) return false;
+    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(lineRepairType(l)))) return false;
     return true;
-  }), [selectedVendor, vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
+  }), [pos, selectedVendor, vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
 
   return (
     <div className="space-y-4">
@@ -478,6 +482,7 @@ function ByVendorTab() {
       </Card>
 
       <FilterBar
+        options={options}
         vehicleFilter={vehicleFilter} setVehicleFilter={setVehicleFilter}
         vendorFilter={vendorFilter} setVendorFilter={setVendorFilter}
         ataFilter={ataFilter} setAtaFilter={setAtaFilter}
@@ -512,7 +517,7 @@ function ByVendorTab() {
           <TableBody>
             {filteredPOs.length === 0
               ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-muted-foreground">No POs match the current filters.</TableCell></TableRow>
-              : filteredPOs.map(po => <PORow key={po.poNumber} po={po} />)
+              : filteredPOs.map(po => <PORow key={`${po.poNumber}|${po.vehicle}`} po={po} />)
             }
           </TableBody>
         </Table>
@@ -522,7 +527,7 @@ function ByVendorTab() {
 }
 
 // ─── Tab 3: By ATA Group ────────────────────────────────────────────────────
-function ByAtaGroupTab() {
+function ByAtaGroupTab({ pos, options }: { pos: PO[]; options: FilterOptions }) {
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [vendorFilter, setVendorFilter] = useState<Set<string>>(new Set());
   const [ataFilter, setAtaFilter] = useState<Set<string>>(new Set());
@@ -530,26 +535,30 @@ function ByAtaGroupTab() {
   const [statusFilter, setStatusFilter] = useState<Set<POStatus>>(new Set());
   const [selectedAta, setSelectedAta] = useState<string | null>(null);
 
-  const ataStats = useMemo(() => {
+  const ataGroups = useMemo(() => {
     const stats: Record<string, number> = {};
-    MOCK_POS.forEach(po => po.lines.forEach(l => {
-      const code = l.ataCode.split(" ")[0];
-      stats[code] = (stats[code] ?? 0) + l.amount;
+    pos.forEach(po => po.lines.forEach(l => {
+      const g = lineAta(l);
+      if (!g) return;
+      stats[g] = (stats[g] ?? 0) + (l.amount ?? 0);
     }));
-    return stats;
-  }, []);
+    return Object.entries(stats)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([name, spend], i) => ({ name, spend, color: ATA_COLORS[i % ATA_COLORS.length] }));
+  }, [pos]);
 
-  const filteredPOs = useMemo(() => MOCK_POS.filter(po => {
+  const filteredPOs = useMemo(() => pos.filter(po => {
     if (vehicleFilter && !po.vehicle.includes(vehicleFilter)) return false;
     if (vendorFilter.size > 0 && !vendorFilter.has(po.vendorName)) return false;
     if (statusFilter.size > 0 && !statusFilter.has(po.status)) return false;
-    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(l.ataCode))) return false;
-    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(l.repairType))) return false;
-    if (selectedAta && !po.lines.some(l => l.ataCode.startsWith(selectedAta))) return false;
+    if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(lineAta(l)))) return false;
+    if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(lineRepairType(l)))) return false;
+    if (selectedAta && !po.lines.some(l => lineAta(l) === selectedAta)) return false;
     return true;
-  }), [vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter, selectedAta]);
+  }), [pos, vehicleFilter, vendorFilter, statusFilter, ataFilter, repairTypeFilter, selectedAta]);
 
-  const maxStat = Math.max(...Object.values(ataStats), 1);
+  const maxStat = Math.max(...ataGroups.map(g => g.spend), 1);
 
   return (
     <div className="space-y-4">
@@ -559,14 +568,13 @@ function ByAtaGroupTab() {
         </CardHeader>
         <CardContent>
           <div className="space-y-2.5">
-            {ATA_GROUPS.map(group => {
-              const spend = ataStats[group.code] ?? 0;
-              const isSelected = selectedAta === group.code;
+            {ataGroups.map(group => {
+              const spend = group.spend;
+              const isSelected = selectedAta === group.name;
               const widthPct = Math.max((spend / maxStat) * 100, spend > 0 ? 2 : 0);
               return (
-                <div key={group.code} className="flex items-center gap-4 cursor-pointer group" onClick={() => setSelectedAta(isSelected ? null : group.code)}>
-                  <div className="w-32 text-right text-sm">
-                    <span className="font-mono text-muted-foreground mr-1.5">{group.code}</span>
+                <div key={group.name} className="flex items-center gap-4 cursor-pointer group" onClick={() => setSelectedAta(isSelected ? null : group.name)}>
+                  <div className="w-44 text-right text-sm truncate">
                     <span className="font-medium">{group.name}</span>
                   </div>
                   <div className="flex-1 flex items-center gap-3">
@@ -586,6 +594,7 @@ function ByAtaGroupTab() {
       </Card>
 
       <FilterBar
+        options={options}
         vehicleFilter={vehicleFilter} setVehicleFilter={setVehicleFilter}
         vendorFilter={vendorFilter} setVendorFilter={setVendorFilter}
         ataFilter={ataFilter} setAtaFilter={setAtaFilter}
@@ -595,7 +604,7 @@ function ByAtaGroupTab() {
 
       {selectedAta && (
         <div className="inline-flex items-center gap-2 bg-primary/10 border border-primary/20 text-primary px-3 py-1.5 rounded-full text-sm">
-          <span>ATA group: <strong>{selectedAta} {ATA_GROUPS.find(g => g.code === selectedAta)?.name}</strong></span>
+          <span>ATA group: <strong>{selectedAta}</strong></span>
           <button onClick={() => setSelectedAta(null)} className="hover:bg-primary/20 rounded-full p-0.5">
             <X className="w-3.5 h-3.5" />
           </button>
@@ -620,7 +629,7 @@ function ByAtaGroupTab() {
           <TableBody>
             {filteredPOs.length === 0
               ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-muted-foreground">No POs match the current filters.</TableCell></TableRow>
-              : filteredPOs.map(po => <PORow key={po.poNumber} po={po} />)
+              : filteredPOs.map(po => <PORow key={`${po.poNumber}|${po.vehicle}`} po={po} />)
             }
           </TableBody>
         </Table>
@@ -630,7 +639,7 @@ function ByAtaGroupTab() {
 }
 
 // ─── Tab 4: By Vehicle ──────────────────────────────────────────────────────
-function ByVehicleTab() {
+function ByVehicleTab({ pos, options }: { pos: PO[]; options: FilterOptions }) {
   const [vehicleFilter, setVehicleFilter] = useState("");
   const [vendorFilter, setVendorFilter] = useState<Set<string>>(new Set());
   const [ataFilter, setAtaFilter] = useState<Set<string>>(new Set());
@@ -640,28 +649,28 @@ function ByVehicleTab() {
 
   const vehicleStats = useMemo(() => {
     const stats: Record<string, { total: number; count: number; open: number; lastDate: string; topVendor: string }> = {};
-    MOCK_POS.forEach(po => {
+    pos.forEach(po => {
       if (!stats[po.vehicle]) stats[po.vehicle] = { total: 0, count: 0, open: 0, lastDate: "", topVendor: po.vendorName };
       stats[po.vehicle].total += po.totalAmount;
       stats[po.vehicle].count++;
-      if (po.status === "OPEN") stats[po.vehicle].open++;
-      if (!stats[po.vehicle].lastDate || po.openDate > stats[po.vehicle].lastDate)
+      if (isOpenStatus(po.status)) stats[po.vehicle].open++;
+      if (po.openDate && (!stats[po.vehicle].lastDate || po.openDate > stats[po.vehicle].lastDate))
         stats[po.vehicle].lastDate = po.openDate;
     });
     return Object.entries(stats).map(([vehicle, data]) => ({ vehicle, ...data })).sort((a, b) => b.total - a.total);
-  }, []);
+  }, [pos]);
 
   const filteredVehiclePos = useMemo(() => {
     if (!selectedVehicle) return [];
-    return MOCK_POS.filter(po => {
+    return pos.filter(po => {
       if (po.vehicle !== selectedVehicle) return false;
       if (vendorFilter.size > 0 && !vendorFilter.has(po.vendorName)) return false;
       if (statusFilter.size > 0 && !statusFilter.has(po.status)) return false;
-      if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(l.ataCode))) return false;
-      if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(l.repairType))) return false;
+      if (ataFilter.size > 0 && !po.lines.some(l => ataFilter.has(lineAta(l)))) return false;
+      if (repairTypeFilter.size > 0 && !po.lines.some(l => repairTypeFilter.has(lineRepairType(l)))) return false;
       return true;
     });
-  }, [selectedVehicle, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
+  }, [pos, selectedVehicle, vendorFilter, statusFilter, ataFilter, repairTypeFilter]);
 
   const filteredVehicles = useMemo(() => vehicleStats.filter(v => {
     if (vehicleFilter && !v.vehicle.includes(vehicleFilter)) return false;
@@ -693,6 +702,7 @@ function ByVehicleTab() {
       {!selectedVehicle ? (
         <>
           <FilterBar
+            options={options}
             vehicleFilter={vehicleFilter} setVehicleFilter={setVehicleFilter}
             vendorFilter={vendorFilter} setVendorFilter={setVendorFilter}
             ataFilter={ataFilter} setAtaFilter={setAtaFilter}
@@ -721,7 +731,7 @@ function ByVehicleTab() {
                     <TableCell className="text-right font-medium">{fmt(v.total)}</TableCell>
                     <TableCell className="text-center">
                       {v.open > 0
-                        ? <Badge variant="outline" className={STATUS_BADGE.OPEN}>{v.open} Open</Badge>
+                        ? <Badge variant="outline" className={statusBadge("APPROVED")}>{v.open} Open</Badge>
                         : <span className="text-muted-foreground text-sm">—</span>}
                     </TableCell>
                     <TableCell className="text-muted-foreground text-sm">{v.lastDate}</TableCell>
@@ -744,6 +754,7 @@ function ByVehicleTab() {
           </div>
 
           <FilterBar
+            options={options}
             vehicleFilter={vehicleFilter} setVehicleFilter={setVehicleFilter}
             vendorFilter={vendorFilter} setVendorFilter={setVendorFilter}
             ataFilter={ataFilter} setAtaFilter={setAtaFilter}
@@ -770,7 +781,7 @@ function ByVehicleTab() {
               <TableBody>
                 {filteredVehiclePos.length === 0
                   ? <TableRow><TableCell colSpan={9} className="h-32 text-center text-muted-foreground">No POs match the current filters.</TableCell></TableRow>
-                  : filteredVehiclePos.map(po => <PORow key={po.poNumber} po={po} />)
+                  : filteredVehiclePos.map(po => <PORow key={`${po.poNumber}|${po.vehicle}`} po={po} />)
                 }
               </TableBody>
             </Table>
@@ -783,14 +794,58 @@ function ByVehicleTab() {
 
 // ─── Page root ──────────────────────────────────────────────────────────────
 export default function PoHistoryDashboard() {
+  const { data, isLoading, isError, error, refetch } = useQuery<PoHistoryResponse>({
+    queryKey: ["/api/po-history-dashboard"],
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const pos = data?.data ?? [];
+  const options = useMemo(() => deriveOptions(pos), [pos]);
+
+  if (isLoading) {
+    return (
+      <div className="p-6 space-y-6 max-w-7xl mx-auto">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">PO History Dashboard</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Loading Holman purchase orders from Snowflake…</p>
+        </div>
+        <div className="grid grid-cols-4 gap-4">
+          {[0, 1, 2, 3].map(i => (
+            <Card key={i}><CardContent className="p-4"><div className="h-4 w-24 bg-muted rounded animate-pulse mb-2" /><div className="h-8 w-16 bg-muted rounded animate-pulse" /></CardContent></Card>
+          ))}
+        </div>
+        <div className="border border-border rounded-lg p-6 space-y-3">
+          {[...Array(8)].map((_, i) => <div key={i} className="h-6 bg-muted rounded animate-pulse" />)}
+        </div>
+      </div>
+    );
+  }
+
+  if (isError) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <h1 className="text-2xl font-semibold tracking-tight mb-4">PO History Dashboard</h1>
+        <Card>
+          <CardContent className="p-8 flex flex-col items-center gap-3 text-center">
+            <AlertCircle className="h-8 w-8 text-destructive" />
+            <p className="font-medium">Couldn't load PO history</p>
+            <p className="text-sm text-muted-foreground max-w-md">{(error as Error)?.message ?? "Unknown error"}</p>
+            <Button variant="outline" size="sm" onClick={() => refetch()}>Try again</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">PO History Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Holman purchase orders · last 3 years</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Holman purchase orders · {pos.length.toLocaleString()} most recent POs (last 3 years)
+          </p>
         </div>
-        <Button variant="outline" size="sm">Export CSV</Button>
       </div>
 
       <Tabs defaultValue="all">
@@ -810,10 +865,10 @@ export default function PoHistoryDashboard() {
         </TabsList>
 
         <div className="mt-4">
-          <TabsContent value="all"><AllPOsTab /></TabsContent>
-          <TabsContent value="vendor"><ByVendorTab /></TabsContent>
-          <TabsContent value="ata"><ByAtaGroupTab /></TabsContent>
-          <TabsContent value="vehicle"><ByVehicleTab /></TabsContent>
+          <TabsContent value="all"><AllPOsTab pos={pos} options={options} /></TabsContent>
+          <TabsContent value="vendor"><ByVendorTab pos={pos} options={options} /></TabsContent>
+          <TabsContent value="ata"><ByAtaGroupTab pos={pos} options={options} /></TabsContent>
+          <TabsContent value="vehicle"><ByVehicleTab pos={pos} options={options} /></TabsContent>
         </div>
       </Tabs>
     </div>
