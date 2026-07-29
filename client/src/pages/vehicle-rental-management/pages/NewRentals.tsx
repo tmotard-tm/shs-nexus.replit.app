@@ -1066,11 +1066,6 @@ export default function NewRentals() {
   const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
   const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
 
-  // Auto-refresh the Holman queue once per page load (Tyler 7/11): show the
-  // CURRENT portal queue on arrival instead of the last manual sync. The ref
-  // guard stops StrictMode double-mounts / re-renders from double-scraping.
-  const holmanAutoRefreshed = useRef(false);
-
   const refreshPoMut = useMutation({
     onMutate: () => setRefreshing(true),
     mutationFn: async () => {
@@ -1086,6 +1081,12 @@ export default function NewRentals() {
     onSuccess: (data: any) => {
       if (data?.rows) qc.setQueryData(["/api/vrm/holman-po-queue"], { rows: data.rows });
       else refetchPoQueue();
+      // A walk was already running server-side: keep the polling window open so
+      // this tab picks up that walk's result when it lands, and say so.
+      if (data?.inFlight) {
+        toast({ title: "Refresh already running", description: "Another walk of the Holman portal is in progress. The queue updates automatically when it lands." });
+        return;
+      }
       setRefreshing(false);
       toast({ title: "Holman queue refreshed" });
     },
@@ -1095,13 +1096,14 @@ export default function NewRentals() {
     },
   });
 
-  useEffect(() => {
-    if (!canApproveHolman || holmanAutoRefreshed.current) return;
-    holmanAutoRefreshed.current = true;
-    refreshPoMut.mutate();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canApproveHolman]);
-
+  // NO auto-refresh on mount. The 7/11 version fired the Holman scrape on
+  // every page load; Tyler reversed it 7/29 - each load launched a headless
+  // Chromium walk of the portal (up to ~150s) plus the isolated renter-resolver
+  // worker, with no server-side overlap guard, so a few navigations stacked
+  // several concurrent browser engines and dragged the whole box down. The
+  // queue now loads from the DB instantly; the Refresh button scrapes on
+  // demand, and the staleness line ("sync N min old") says when it is worth
+  // pressing. The server now also refuses to run two walks at once.
   // Cap the polling window so the spinner cannot hang forever if the scrape
   // genuinely fails; by then the queue has refetched several times.
   useEffect(() => {

@@ -2641,7 +2641,19 @@ export function registerVrmRoutes(): Router {
    * Scrapes the Holman awaiting-auth queue, matches techs, upserts to DB.
    * Requires HOLMAN_PORTAL_USER + HOLMAN_PORTAL_PASS env vars.
    */
+  // One Holman walk at a time, process-wide. Without this, every POST while a
+  // walk was still running (they take minutes) launched ANOTHER Chromium plus
+  // another renter-resolver worker - which is exactly how page-load auto-
+  // refreshes stacked engines until the box crawled (Tyler 2026-07-29). The
+  // overlap answer is the current DB queue + inFlight:true, not an error: the
+  // caller's poll picks up the running walk's result when it lands.
+  let holmanPoRefreshInFlight = false;
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
+    if (holmanPoRefreshInFlight) {
+      const rows = await listHolmanPoQueue();
+      return res.json({ ok: true, inFlight: true, rows });
+    }
+    holmanPoRefreshInFlight = true;
     try {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
@@ -2680,6 +2692,8 @@ export function registerVrmRoutes(): Router {
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
+    } finally {
+      holmanPoRefreshInFlight = false;
     }
   });
 
