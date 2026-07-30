@@ -132,6 +132,8 @@ export interface LucaWritebackResult {
   errors: number;
   /** VRM cases flipped to ready_for_pickup this run (the Tyler 2026-07-29 lane). */
   vrmReadyApplied?: number;
+  /** VRM cases flagged `escalated` from a non-ready LUCA escalation. */
+  vrmAttentionApplied?: number;
   previews: WritebackPreview[];
 }
 
