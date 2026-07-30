@@ -681,9 +681,17 @@ type RegionalModelC = MasterModel & {
   workbookStatuses: Array<{ key: string; label: string; closed: boolean }>;
 };
 
+// Every key in WORKBOOK_STATUSES needs an entry. A missing one does NOT error -
+// all three call sites do `WB_COLOR[status] ?? colors.inkMuted`, so a new status
+// silently renders GREY, i.e. indistinguishable from `new`. That is exactly what
+// happened to ready_for_pickup when it was added as the 10th state: the single
+// most time-sensitive row on the regional queue looked untouched.
+// greenDeep, not green: green means returned_closed (done, calm). Ready is the
+// loud good news - the truck is fixed and the rental is still billing.
 const WB_COLOR: Record<string, string> = {
   new: colors.inkMuted, working: colors.blue, tech_contacted: colors.blue,
   awaiting_tech: colors.amber, awaiting_shop: colors.amber, blocked: colors.red,
+  ready_for_pickup: colors.greenDeep,
   return_scheduled: colors.purple, returned_closed: colors.green, escalated: colors.redDeep,
 };
 
