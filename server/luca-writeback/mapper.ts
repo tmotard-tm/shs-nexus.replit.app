@@ -185,6 +185,13 @@ const REASON_MAP: Record<
   // refused to resolve it. A human verifies before anyone drives out. Mapping
   // this to Ready would send a tech to collect a truck that is not fixed.
   ready_not_repaired: { label: "Released but repair unfinished - verify", callStatus: null, callDerived: true },
+  // A system mirror (FleetScope van_ready, a PAID Holman PO, an old AMS note,
+  // a GPS ping) suggested the van was finished but NO shop call confirmed it
+  // (Tyler 2026-07-30: nothing is reported ready for pickup unless a shop call
+  // confirmed it). Deliberately callStatus null and deliberately ABSENT from
+  // READY_REASONS, so this can never flip a VRM case to Ready or put a truck on
+  // a pickup queue. It is a "go verify by phone" state.
+  ready_unconfirmed: { label: "Possible ready - NOT confirmed by shop, verify by phone", callStatus: null, callDerived: false },
   // Terminal artifact of the recovery loop, so the closure reaches VRM with
   // LUCA provenance rather than being inferred from a feed drop-off.
   rental_closed: { label: "Rental closed by LUCA", callStatus: null, callDerived: false },
