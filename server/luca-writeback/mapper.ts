@@ -333,6 +333,20 @@ export function decideRedelivery(
 // ─── Mappers ─────────────────────────────────────────────────────────────────
 
 /** Map one LIVHR outbox task onto an fs_trucks write. */
+/**
+ * Human label for an outbox reason, for surfaces outside this module (the VRM
+ * attention lane). REASON_MAP stays private; this is the read-only view of it.
+ * Unknown reasons humanize rather than returning empty, so a new LIVHR reason
+ * is readable on the board the day it appears instead of showing as a blank.
+ */
+export function reasonLabel(reason: string | null | undefined): string {
+  const r = (reason ?? "").trim().toLowerCase();
+  if (!r) return "Needs attention";
+  const mapped = REASON_MAP[r];
+  if (mapped) return mapped.label;
+  return humanizeReason(r);
+}
+
 export function mapOutboxTask(task: LucaOutboxTask): MappedWriteback {
   const externalId = String(task.id);
   const vehicleNumberRaw = clean(task.vehicleNumber);

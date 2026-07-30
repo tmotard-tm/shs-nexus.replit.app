@@ -7,6 +7,7 @@ import type { Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { runRightsizeSync, computeKpis } from "./sync";
+import { computeCompliance, snapshotCompliance, SEDAN_RATE_CEILING } from "./compliance";
 import { setVerifiedStage, isRightsizeStage, RIGHTSIZE_STAGES } from "./stage-write";
 import { VAN_STATUS_JOIN, VAN_STATUS_COLUMNS, vanFieldsOf, type VanStatusRow } from "./workload";
 
@@ -168,6 +169,88 @@ export function registerRightsizeRoutes(router: Router): void {
       res.json({ snapshots: r.rows });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "snapshots read failed" });
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // COMPLIANCE (vehicle-truth) view. Separate from the SMS stage tracker on
+  // purpose: this answers "what is the technician actually driving right now",
+  // the tracker answers "what did the technician tell us". Merging them is what
+  // produced three different numbers for the same initiative on 2026-07-30.
+  // ------------------------------------------------------------------
+
+  // KPI header + optional full row set for the grid.
+  router.get("/rightsize/compliance", async (req, res) => {
+    try {
+      const { rows, kpis } = await computeCompliance();
+      const wantRows = String(req.query.rows ?? "1") !== "0";
+      res.json({ kpis, rows: wantRows ? rows : undefined, sedanRateCeiling: SEDAN_RATE_CEILING });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "compliance compute failed" });
+    }
+  });
+
+  // Persist a KPI row for day-over-day movement in the huddle deck.
+  router.post("/rightsize/compliance/snapshot", async (_req, res) => {
+    try {
+      res.json(await snapshotCompliance());
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "snapshot failed" });
+    }
+  });
+
+  router.get("/rightsize/compliance/snapshots", async (req, res) => {
+    try {
+      const days = Math.min(Number(req.query.days) || 30, 180);
+      const r = await db.execute(sql`
+        SELECT id, to_char(snapshot_at,'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS snapshot_at, file_date,
+               total_open, compliant, not_compliant, by_rate_only, by_model_only, by_both,
+               never_contacted, hvac_open, daily_spend, monthly_over
+        FROM vrm_rightsize_compliance_snapshots
+        WHERE snapshot_at > NOW() - make_interval(days => ${days})
+        ORDER BY snapshot_at ASC
+      `);
+      res.json({ snapshots: r.rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "snapshots read failed" });
+    }
+  });
+
+  // The confirmed-sedan nameplate list. A TABLE rather than a hardcoded regex
+  // because the previous hardcoded list silently missed Kia Soul, Genesis G70
+  // and the Elantra Hybrid, which quietly understated compliance.
+  router.get("/rightsize/sedan-models", async (_req, res) => {
+    try {
+      const r = await db.execute(sql`
+        SELECT nameplate, label, active, added_by,
+               to_char(added_at,'YYYY-MM-DD') AS added_at, note
+        FROM vrm_rightsize_sedan_models ORDER BY nameplate
+      `);
+      res.json({ models: r.rows });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "sedan model read failed" });
+    }
+  });
+
+  router.post("/rightsize/sedan-models", async (req, res) => {
+    try {
+      const nameplate = String(req.body?.nameplate ?? "").toUpperCase().replace(/\s+/g, " ").trim();
+      if (!nameplate) return res.status(400).json({ error: "nameplate required" });
+      const label = req.body?.label ? String(req.body.label) : null;
+      const active = req.body?.active === false ? false : true;
+      const note = req.body?.note ? String(req.body.note) : null;
+      await db.execute(sql`
+        INSERT INTO vrm_rightsize_sedan_models (nameplate, label, active, added_by, note)
+        VALUES (${nameplate}, ${label}, ${active}, ${actorOf(req)}, ${note})
+        ON CONFLICT (nameplate) DO UPDATE
+          SET label = COALESCE(EXCLUDED.label, vrm_rightsize_sedan_models.label),
+              active = EXCLUDED.active,
+              added_by = EXCLUDED.added_by,
+              note = COALESCE(EXCLUDED.note, vrm_rightsize_sedan_models.note)
+      `);
+      res.json({ ok: true, nameplate, active });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message || "sedan model write failed" });
     }
   });
 }

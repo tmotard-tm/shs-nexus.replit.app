@@ -15,7 +15,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  Search, Download, RefreshCw, X, CheckCircle2, MessageCircleWarning, Clock,
+  Search, Download, RefreshCw, X, Clock,
   ArrowUp, ArrowDown, ArrowUpDown, ChevronRight,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
@@ -35,6 +35,22 @@ interface Kpis {
   nonResponderCannotWork?: number; nonResponderCannotWorkMonthly?: number;
 }
 interface SummaryResp { kpis: Kpis; state: Record<string, string>; yesterday: { kpis: Kpis; taken_at: string } | null; generatedAt: string }
+
+/**
+ * VEHICLE TRUTH. Sourced from the live Enterprise open-ticket feed, not from
+ * SMS. compliant = rate at or below the sedan ceiling OR the rented vehicle is
+ * a confirmed sedan nameplate. This is the headline for the initiative; the SMS
+ * stage numbers below it describe outreach progress, not compliance.
+ */
+interface ComplianceKpis {
+  totalOpen: number; compliant: number; notCompliant: number; compliantPct: number;
+  byRateOnly: number; byModelOnly: number; byBoth: number;
+  neverContacted: number; neverContactedMonthly: number;
+  hvacOpen: number; hvacMonthly: number; unresolvedIdentity: number;
+  dailySpend: number; notCompliantDaily: number; monthlyOverSedan: number;
+  sedanRateCeiling: number; sedanModelCount: number;
+  nonEnterpriseOpen: number; nonEnterpriseDaily: number;
+}
 interface TechRow {
   ldap: string; tech_name: string | null; position: string | null; phone_digits: string | null;
   district: string | null; tl_name: string | null; round: number;
@@ -61,7 +77,8 @@ const SEDAN_FLOOR = 54.99;
  * every dollar is still counted once — the split is presentation, not math.
  */
 const GROUPS: Array<{ key: string; label: string; stages: string[]; workload?: "cannot_work" | "workable"; fg: string; bg: string; next: string }> = [
-  { key: "secured", label: "Secured", stages: ["DONE", "RETURNED"], fg: colors.green, bg: colors.greenLight, next: "Reconcile vs Enterprise billing — Tyler, 7/23" },
+  { key: "swapped", label: "Swapped into a sedan", stages: ["DONE"], fg: colors.green, bg: colors.greenLight, next: "Confirm on the Enterprise vehicle column — compliance header above is the number of record" },
+  { key: "returned", label: "Out of rental (not right-sizing)", stages: ["RETURNED"], fg: colors.inkMuted, bg: colors.surface, next: "Informational only. Returning a rental is not right-sizing; these carry $0 and drop off the open book on the next feed." },
   { key: "committed", label: "Committed", stages: ["COMMITTED"], fg: colors.blue, bg: colors.blueLight, next: "Chase dated commitments as they lapse — tracker flags, Tyler approves nudges daily" },
   { key: "blocked", label: "Blocked", stages: ["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"], fg: colors.amber, bg: colors.amberLight, next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 7/22" },
   { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY"], fg: colors.purple, bg: colors.purpleLight, next: "Answer every open question same-day — see Awaiting reply" },
@@ -77,10 +94,19 @@ const rowGroup = (t: TechRow) =>
 const STAGE_ORDER = Array.from(new Set(GROUPS.flatMap((g) => g.stages)));
 const stageRank = (s: string) => { const i = STAGE_ORDER.indexOf(s); return i < 0 ? 999 : i; };
 const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
+/**
+ * Monthly value of a row. RETURNED is deliberately ZERO (Tyler, 2026-07-30):
+ * giving a rental back is not right-sizing, and on an open-ticket denominator
+ * those people leave the list entirely. Counting a full return at rate*30 was
+ * what inflated "secured" on the old board.
+ */
 const techMonthly = (stage: string, rate: number | null) => {
   if (rate == null || !(rate > 0)) return 0;
-  return stage === "RETURNED" ? rate * 30 : Math.max(rate - SEDAN_FLOOR, 0) * 30;
+  if (stage === "RETURNED") return 0;
+  return Math.max(rate - SEDAN_FLOOR, 0) * 30;
 };
+/** Deep link into Fleet Communications, filtered to this tech's rental thread. */
+const commsLink = (ldap: string) => `/fleet-communications?category=rental_management&q=${encodeURIComponent(ldap)}`;
 const fmtAge = (iso: string | null) => {
   if (!iso) return "—";
   const h = Math.max(0, (Date.now() - new Date(iso).getTime()) / 36e5);
@@ -204,10 +230,11 @@ export default function RightsizeTracker() {
   const [flagF, setFlagF] = useState<string[]>([]);       // needs review / awaiting reply
   const [sort, setSort] = useState<SortState>({ col: "monthly", dir: "desc" });
   const [groupSort, setGroupSort] = useState<SortState>({ col: null, dir: null });
-  const [queueSort, setQueueSort] = useState<"dollars" | "age" | "stage">("dollars");
   const [openLdap, setOpenLdap] = useState<string | null>(null);
 
   const { data: summary } = useQuery<SummaryResp>({ queryKey: ["/api/vrm/rightsize/summary"], refetchInterval: 120_000 });
+  const { data: comp } = useQuery<{ kpis: ComplianceKpis }>({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"], refetchInterval: 120_000 });
+  const ck = comp?.kpis;
   const { data: techsData } = useQuery<{ techs: TechRow[] }>({ queryKey: ["/api/vrm/rightsize/techs"], refetchInterval: 120_000 });
 
   const syncMut = useMutation({
@@ -257,7 +284,6 @@ export default function RightsizeTracker() {
       if (skip !== "source" && sourceF.length && !sourceF.includes(t.stage_source ?? "")) return false;
       if (skip !== "flag" && flagF.length) {
         const flags: string[] = [];
-        if (t.needs_review) flags.push("needs review");
         if (isAwaiting(t)) flags.push("awaiting our reply");
         if (!flags.length) flags.push("clear");
         if (!flagF.some((f) => flags.includes(f))) return false;
@@ -282,7 +308,7 @@ export default function RightsizeTracker() {
       monthly: (t) => techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate)),
       lastreply: (t) => t.last_inbound_at_s,
       van: (t) => t.van_status_label,
-      flag: (t) => (t.needs_review ? 0 : isAwaiting(t) ? 1 : 2),
+      flag: (t) => (isAwaiting(t) ? 0 : 1),
       decisive: (t) => t.decisive_text ?? t.last_inbound_text,
     };
     const cmp = sort.col ? makeSortComparator<TechRow>(acc[sort.col] ?? ((t) => (t as any)[sort.col!]), sort.dir) : null;
@@ -303,23 +329,13 @@ export default function RightsizeTracker() {
       flag: (() => {
         const p = pool("flag");
         return [
-          ["needs review", p.filter((t) => t.needs_review).length],
           ["awaiting our reply", p.filter((t) => isAwaiting(t)).length],
-          ["clear", p.filter((t) => !t.needs_review && !isAwaiting(t)).length],
+          ["clear", p.filter((t) => !isAwaiting(t)).length],
         ] as Array<[string, number]>;
       })(),
     };
   }, [techs, passes]);
 
-  const reviewQueue = useMemo(() => {
-    const rows = techs.filter((t) => t.needs_review);
-    const money = (t: TechRow) => techMonthly(t.proposed_stage ?? t.stage, t.daily_rate == null ? null : Number(t.daily_rate));
-    return rows.sort((a, b) =>
-      queueSort === "dollars" ? money(b) - money(a)
-        : queueSort === "age" ? (a.decisive_at_s ?? a.last_inbound_at_s ?? "").localeCompare(b.decisive_at_s ?? b.last_inbound_at_s ?? "")
-          : stageRank(a.stage) - stageRank(b.stage));
-  }, [techs, queueSort]);
-  const reviewDollars = useMemo(() => reviewQueue.reduce((s, t) => s + techMonthly(t.proposed_stage ?? t.stage, t.daily_rate == null ? null : Number(t.daily_rate)), 0), [reviewQueue]);
 
   const awaiting = useMemo(
     () => techs.filter(isAwaiting).sort((a, b) => (a.last_inbound_at_s ?? "").localeCompare(b.last_inbound_at_s ?? "")),
@@ -353,11 +369,10 @@ export default function RightsizeTracker() {
   // CSV = exactly what is on screen: current filter set, current sort order.
   const exportCsv = () => {
     const esc = (v: string) => (/[",\n\r]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
-    const head = ["ldap", "name", "stage", "group", "workload", "own_truck", "van_status", "proposed", "needs_review", "review_reason", "awaiting_reply", "district", "round", "tl", "vehicle", "car_class", "daily_rate", "monthly_value", "stage_source", "last_inbound", "decisive_text"];
+    const head = ["ldap", "name", "stage", "group", "workload", "own_truck", "van_status", "awaiting_reply", "district", "round", "tl", "vehicle", "car_class", "daily_rate", "monthly_value", "stage_source", "last_inbound", "decisive_text"];
     const body = sorted.map((t) => [
       t.ldap, t.tech_name ?? "", t.stage, rowGroup(t).label,
-      t.workload ?? "", t.own_truck ?? "", t.van_status_label ?? "", t.proposed_stage ?? "",
-      t.needs_review ? "YES" : "", t.review_reason ?? "", isAwaiting(t) ? "YES" : "",
+      t.workload ?? "", t.own_truck ?? "", t.van_status_label ?? "", isAwaiting(t) ? "YES" : "",
       t.district ?? "", t.round ?? "", t.tl_name ?? "", t.vehicle ?? "", t.car_class ?? "", t.daily_rate ?? "",
       Math.round(techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate))),
       t.stage_source ?? "", t.last_inbound_at_s ?? "", (t.decisive_text ?? t.last_inbound_text ?? "").slice(0, 200),
@@ -396,10 +411,31 @@ export default function RightsizeTracker() {
         </div>
       </div>
 
-      {/* governing thought */}
+      {/* governing thought — VEHICLE TRUTH leads, SMS is context */}
+      {ck && (
+        <div style={{ marginTop: 10, fontSize: 15 }}>
+          <b>{ck.compliant}</b> of <b>{ck.totalOpen}</b> open rentals are right-sized (<b>{ck.compliantPct}%</b>).
+          {" "}<b>{ck.notCompliant}</b> are not, costing <b>{money0(ck.notCompliantDaily)}</b>/day
+          {" "}(<b>{money0(ck.monthlyOverSedan)}</b>/mo above the sedan floor).
+          {ck.neverContacted > 0 && (
+            <span style={{ color: colors.amber, fontWeight: 700 }}>
+              {" "}· {ck.neverContacted} have never been texted ({money0(ck.neverContactedMonthly)}/mo).
+            </span>
+          )}
+          <div style={{ marginTop: 4, fontSize: 12, color: colors.inkSoft }}>
+            Right-sized = rate at or below ${ck.sedanRateCeiling}/day, or the rented vehicle is one of {ck.sedanModelCount} confirmed
+            sedan nameplates. Car class is not a test. Returned rentals leave the list automatically, so returns cannot inflate this.
+            {ck.hvacOpen > 0 && <> HVAC still open: <b>{ck.hvacOpen}</b> ({money0(ck.hvacMonthly)}/mo).</>}
+            {ck.nonEnterpriseOpen > 0 && <> Plus {ck.nonEnterpriseOpen} non-Enterprise rentals ({money0(ck.nonEnterpriseDaily)}/day) with no vehicle data, not scored.</>}
+          </div>
+        </div>
+      )}
+
+      {/* SMS outreach progress — context only, NOT the compliance number */}
       {k && (
-        <div style={{ marginTop: 10, fontSize: 14.5 }}>
-          Secured <b>{money0(k.securedMonthly)}</b> of <b>{money0(k.addressableMonthly)}</b>/mo addressable (<b>{k.securedPct}%</b>)
+        <div style={{ marginTop: 10, fontSize: 13, color: colors.inkSoft }}>
+          <span style={{ fontWeight: 700, color: colors.ink }}>SMS outreach:</span>{" "}
+          secured <b>{money0(k.securedMonthly)}</b> of <b>{money0(k.addressableMonthly)}</b>/mo claimed (<b>{k.securedPct}%</b>)
           {deltaSecured != null && deltaSecured !== 0 && <span style={{ color: deltaSecured > 0 ? colors.green : colors.red, fontWeight: 700 }}> {deltaSecured > 0 ? "+" : ""}{money0(deltaSecured)} today</span>}
           {" · "}{k.proposedSecuredCount > 0 ? <>plus <b>{k.proposedSecuredCount}</b> field-reported swaps/returns worth <b>{money0(k.proposedSecuredMonthly)}</b>/mo pending verification</> : "no unverified movement pending"}
           {" · "}<b>{k.awaitingReply}</b> techs awaiting our reply.
@@ -418,9 +454,9 @@ export default function RightsizeTracker() {
       {k && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 14 }}>
           {[
-            { t: "Secured (verified)", v: money0(k.securedMonthly), s: `${(k.stages.DONE || 0) + (k.stages.RETURNED || 0)} techs · ${k.securedPct}% of addressable`, fg: colors.green, bg: colors.greenLight },
-            { t: "Committed", v: `${k.stages.COMMITTED || 0} techs`, s: groupRoll.committed ? `${money0(groupRoll.committed.dollars)}/mo if executed` : "", fg: colors.blue, bg: colors.blueLight },
-            { t: "Unverified field reports", v: `${k.proposedSecuredCount}`, s: `${money0(k.proposedSecuredMonthly)}/mo claimed · verify below`, fg: colors.amber, bg: colors.amberLight },
+            { t: "Right-sized", v: ck ? `${ck.compliant} / ${ck.totalOpen}` : "—", s: ck ? `${ck.compliantPct}% of the open rental book` : "loading", fg: colors.green, bg: colors.greenLight },
+            { t: "Not right-sized", v: ck ? `${ck.notCompliant}` : "—", s: ck ? `${money0(ck.notCompliantDaily)}/day · ${money0(ck.monthlyOverSedan)}/mo over floor` : "", fg: colors.red, bg: colors.redLight ?? colors.amberLight },
+            { t: "Never contacted", v: ck ? `${ck.neverContacted}` : "—", s: ck ? `${money0(ck.neverContactedMonthly)}/mo · nobody has texted them` : "", fg: colors.amber, bg: colors.amberLight },
           ].map((c) => (
             <div key={c.t} style={{ background: c.bg, border: `1px solid ${c.fg}`, borderRadius: 12, padding: "12px 16px" }}>
               <div style={{ ...label, color: c.fg }}>{c.t}</div>
@@ -496,69 +532,32 @@ export default function RightsizeTracker() {
         </table>
       </div>
 
-      {/* review queue + awaiting reply, side by side */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: 14, marginTop: 16 }}>
-        <section style={{ border: `1px solid ${colors.amber}`, borderRadius: 10, padding: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <div style={{ ...label, color: colors.amber, display: "flex", alignItems: "center", gap: 6 }}>
-              <MessageCircleWarning size={13} /> Needs verification ({reviewQueue.length}) · {money0(reviewDollars)}/mo at stake
-            </div>
-            <select value={queueSort} onChange={(e) => setQueueSort(e.target.value as any)} style={{ ...ctl, marginLeft: "auto", padding: "3px 8px", fontSize: 11 }}>
-              <option value="dollars">$ high → low</option>
-              <option value="age">oldest first</option>
-              <option value="stage">by stage</option>
-            </select>
-          </div>
-          <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>All techs (not affected by the grid filters below) · next action: Tyler clears this queue daily before 4pm ET</div>
-          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8, maxHeight: 420, overflowY: "auto" }}>
-            {reviewQueue.length === 0 && <div style={{ fontSize: 12, color: colors.inkMuted }}>Nothing waiting. Auto-flagged field reports land here.</div>}
-            {reviewQueue.map((t) => (
-              <div key={t.ldap} style={{ border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "8px 10px" }}>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <b style={{ fontFamily: fonts.jetbrains, fontSize: 12 }}>{t.ldap}</b>
-                  <span style={{ fontSize: 12 }}>{t.tech_name}</span>
-                  <span style={{ fontSize: 10.5, color: stageGroup(t.stage).fg, fontWeight: 700 }}>{t.stage}</span>
-                  {t.proposed_stage && <span style={{ fontSize: 10.5, color: colors.amber, fontWeight: 700 }}>→ {t.proposed_stage}?</span>}
-                  <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 11, color: colors.inkMuted }}>
-                    {money0(techMonthly(t.proposed_stage ?? t.stage, t.daily_rate == null ? null : Number(t.daily_rate)))}/mo · {fmtAge(t.decisive_at_s ?? t.last_inbound_at_s)}
-                  </span>
-                </div>
-                {t.decisive_text && <div style={{ fontSize: 11.5, color: colors.inkSoft, marginTop: 3, fontStyle: "italic" }}>"{t.decisive_text.slice(0, 180)}"</div>}
-                <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-                  {t.proposed_stage && (
-                    <button type="button" onClick={() => stageMut.mutate({ ldap: t.ldap, stage: t.proposed_stage!, note: "verified from tracker review queue" })}
-                      style={{ fontSize: 11, fontWeight: 700, color: colors.green, background: colors.greenLight, border: `1px solid ${colors.green}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}>
-                      <CheckCircle2 size={11} style={{ verticalAlign: "-1.5px", marginRight: 3 }} />Confirm {t.proposed_stage}
-                    </button>
-                  )}
-                  <button type="button" onClick={() => stageMut.mutate({ ldap: t.ldap, stage: t.stage, note: "reviewed, kept prior stage" })}
-                    style={{ fontSize: 11, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}>
-                    Keep {t.stage}
-                  </button>
-                  <button type="button" onClick={() => setOpenLdap(t.ldap)}
-                    style={{ fontSize: 11, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}>
-                    Thread
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+      {/* Awaiting our reply — full width. The verification queue is gone: DONE and
+          RETURNED are no longer the number of record, so there is nothing to
+          "confirm" into secured. Compliance comes from the Enterprise vehicle
+          column in the header above. */}
+      <div style={{ marginTop: 16 }}>
         <section style={{ border: `1px solid ${colors.purple}`, borderRadius: 10, padding: 12 }}>
           <div style={{ ...label, color: colors.purple }}>Awaiting our reply ({awaiting.length}) — nobody gets ignored</div>
           <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>
-            oldest first · {awaitingStale} over 24h · next action: Tyler answers every inbound same-day, escalate anything over 24h to the TL
+            oldest first · {awaitingStale} over 24h · Reply opens the thread in Fleet Communications
           </div>
-          <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6, maxHeight: 420, overflowY: "auto" }}>
+          <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))", gap: 6, maxHeight: 360, overflowY: "auto" }}>
             {awaiting.length === 0 && <div style={{ fontSize: 12, color: colors.inkMuted }}>Every inbound has a later outbound. Clean.</div>}
             {awaiting.map((t) => (
-              <button key={t.ldap} type="button" onClick={() => setOpenLdap(t.ldap)}
-                style={{ display: "flex", gap: 8, alignItems: "center", textAlign: "left", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "6px 10px", cursor: "pointer", fontFamily: fonts.dmSans }}>
+              <div key={t.ldap} style={{ display: "flex", gap: 8, alignItems: "center", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "6px 10px" }}>
                 <b style={{ fontFamily: fonts.jetbrains, fontSize: 11.5 }}>{t.ldap}</b>
-                <span style={{ fontSize: 10.5, color: stageGroup(t.stage).fg, fontWeight: 700, whiteSpace: "nowrap" }}>{t.stage}</span>
-                <span style={{ fontSize: 11.5, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(t.last_inbound_text ?? "").slice(0, 80)}</span>
+                <span style={{ fontSize: 11.5, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{(t.last_inbound_text ?? "").slice(0, 70)}</span>
                 <span style={{ fontSize: 10.5, color: colors.red, fontFamily: fonts.jetbrains }}>{fmtAge(t.last_inbound_at_s)}</span>
-              </button>
+                <button type="button" onClick={() => setOpenLdap(t.ldap)}
+                  style={{ fontSize: 10.5, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                  Thread
+                </button>
+                <a href={commsLink(t.ldap)} target="_blank" rel="noreferrer"
+                  style={{ fontSize: 10.5, fontWeight: 700, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer", whiteSpace: "nowrap", textDecoration: "none" }}>
+                  Reply →
+                </a>
+              </div>
             ))}
           </div>
         </section>
@@ -579,10 +578,6 @@ export default function RightsizeTracker() {
         <MultiSelect label="sources" options={opts.source} values={sourceF} onChange={setSourceF} style={ctl} />
         <MultiSelect label="van statuses" options={opts.van} values={vanF} onChange={setVanF} style={ctl} />
         <MultiSelect label="flags" options={opts.flag} values={flagF} onChange={setFlagF} style={ctl} />
-        <button type="button" onClick={() => setFlagF(toggleIn(flagF, "needs review"))}
-          style={{ fontSize: 11.5, fontWeight: 600, color: flagF.includes("needs review") ? colors.amber : colors.inkSoft, background: flagF.includes("needs review") ? colors.amberLight : "transparent", border: `1px solid ${flagF.includes("needs review") ? colors.amber : colors.rule}`, borderRadius: 999, padding: "4px 12px", cursor: "pointer" }}>
-          Needs review
-        </button>
         {activeFilters > 0 && (
           <button type="button" onClick={clearAll}
             style={{ fontSize: 11.5, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 999, padding: "4px 12px", cursor: "pointer" }}>
@@ -629,7 +624,6 @@ export default function RightsizeTracker() {
                   <td style={td} title={t.tech_name ?? ""}>{t.tech_name}</td>
                   <td style={td}>
                     <span style={{ fontSize: 10.5, fontWeight: 700, color: g.fg, background: g.bg, borderRadius: 999, padding: "2px 8px" }}>{t.stage}</span>
-                    {t.needs_review && t.proposed_stage && <span style={{ fontSize: 10, color: colors.amber, marginLeft: 5, fontWeight: 700 }}>→ {t.proposed_stage}?</span>}
                   </td>
                   <td style={td}>{t.district ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains }}>{t.round ?? "—"}</td>
@@ -644,8 +638,14 @@ export default function RightsizeTracker() {
                       {t.van_status_label ?? "—"}
                     </span>
                   </td>
-                  <td style={{ ...td, fontSize: 10.5, fontWeight: 700 }}>
-                    {t.needs_review ? <span style={{ color: colors.amber }}>REVIEW</span> : isAwaiting(t) ? <span style={{ color: colors.purple }}>REPLY</span> : <span style={{ color: colors.inkMuted, fontWeight: 500 }}>—</span>}
+                  <td style={{ ...td, fontSize: 10.5, fontWeight: 700 }} onClick={(e) => e.stopPropagation()}>
+                    <a href={commsLink(t.ldap)} target="_blank" rel="noreferrer"
+                       title="Open this technician's rental thread in Fleet Communications"
+                       style={{ color: isAwaiting(t) ? colors.purple : colors.accent, textDecoration: "none",
+                                border: `1px solid ${isAwaiting(t) ? colors.purple : colors.rule}`, borderRadius: 6,
+                                padding: "2px 8px", whiteSpace: "nowrap" }}>
+                      {isAwaiting(t) ? "Reply →" : "Comms →"}
+                    </a>
                   </td>
                   <td style={{ ...td, color: colors.inkSoft }} title={t.decisive_text ?? t.last_inbound_text ?? ""}>{t.decisive_text ?? t.last_inbound_text ?? ""}</td>
                 </tr>

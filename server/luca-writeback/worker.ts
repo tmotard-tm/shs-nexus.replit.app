@@ -44,6 +44,8 @@
  */
 import { fsPool } from "../fleet-scope-db";
 import { applyReadyForPickup, isReadyReason } from "../vrm/rental-operations/ready-ingest";
+import { applyNeedsAttention, isAttentionReason } from "../vrm/rental-operations/attention-ingest";
+import { reasonLabel } from "./mapper";
 import { fleetScopeStorage } from "../fleet-scope-storage";
 import { storage } from "../storage";
 import {
@@ -429,6 +431,43 @@ async function processItem(
       }
     } else {
       console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD flip VRM case for truck ${mapped.truckNumberDisplay} to Ready for pickup`);
+    }
+  }
+
+  // ── VRM Needs Attention ─────────────────────────────────────────────────
+  // The counterpart to the ready lane above, and wired for the SAME reason it
+  // sits above resolveTruck: a truck missing from fs_trucks returns early below,
+  // so anything wired lower is silently dropped for exactly the trucks
+  // FleetScope has not caught up on.
+  //
+  // Before this existed, every non-ready escalation wrote only fs_trucks, which
+  // neither VRM page reads — so 157 escalations across 72 trucks on 2026-07-30
+  // reached no board at all. Idempotency is self-contained in the ingest (status
+  // check + task-id edge trigger), so the re-delivery the early return causes is
+  // harmless.
+  if (mapped.source === "outbox_task" && isAttentionReason(rawReasonOf(rawItem))) {
+    const reason = rawReasonOf(rawItem) ?? "";
+    if (cfg.apply) {
+      try {
+        const vrm = await applyNeedsAttention({
+          truckNumber: mapped.truckNumberDisplay,
+          reason,
+          label: reasonLabel(reason),
+          detail: (rawItem as any)?.detail ?? null,
+          externalId: mapped.externalId,
+        });
+        if (vrm.outcome === "applied") {
+          result.vrmAttentionApplied = (result.vrmAttentionApplied ?? 0) + 1;
+          console.log(`[LUCA-Writeback] ${label}: VRM case ${vrm.caseKey} -> Escalated (${reason})`);
+        } else {
+          console.log(`[LUCA-Writeback] ${label}: VRM attention no-op (${vrm.outcome}: ${vrm.detail})`);
+        }
+      } catch (err: any) {
+        // Never fatal: the FleetScope half of this run must still complete.
+        console.warn(`[LUCA-Writeback] ${label}: VRM attention write failed: ${err?.message}`);
+      }
+    } else {
+      console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD flag VRM case for truck ${mapped.truckNumberDisplay} as Escalated (${reason})`);
     }
   }
 
