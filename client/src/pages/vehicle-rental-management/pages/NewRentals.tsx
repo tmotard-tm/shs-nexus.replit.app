@@ -1010,7 +1010,6 @@ export default function NewRentals() {
   const setEvalSort = useCallback((s: SortState) => { _setEvalSort(s); writeSortPref(EVAL_SORT_KEY, s); }, []);
   const setDecisionLogSort = useCallback((s: SortState) => { _setDecisionLogSort(s); writeSortPref(DECISION_LOG_SORT_KEY, s); }, []);
   const setCheckHistorySort = useCallback((s: SortState) => { _setCheckHistorySort(s); writeSortPref(CHECK_HISTORY_SORT_KEY, s); }, []);
-  const [preparingInfo, setPreparingInfo] = useState<{ retryAfterSeconds: number } | null>(null);
   const [formRow, setFormRow] = useState<{ ldap: string; action: "approved" | "denied" } | null>(null);
   const [expandedDecisions, setExpandedDecisions] = useState<Set<string>>(new Set());
   const [historySearch, setHistorySearch] = useState("");
@@ -1177,16 +1176,9 @@ export default function NewRentals() {
   const evaluateMut = useMutation({
     mutationFn: async (ldaps: string[]) => {
       const res = await apiRequest("POST", "/api/vrm/profitability/check", { ldaps });
-      return res.json() as Promise<{ rows?: ProfitRow[]; snapshotMeta?: SnapshotMeta | null; status?: string; retryAfterSeconds?: number; message?: string }>;
+      return res.json() as Promise<{ rows?: ProfitRow[]; snapshotMeta?: SnapshotMeta | null; }>;
     },
     onSuccess: (data) => {
-      if (data.status === "preparing") {
-        setPreparingInfo({ retryAfterSeconds: data.retryAfterSeconds ?? 300 });
-        setEvaluatedRows([]);
-        setSnapshotMeta(null);
-        return;
-      }
-      setPreparingInfo(null);
       setEvaluatedRows(data.rows ?? []);
       setSnapshotMeta(data.snapshotMeta ?? null);
       qc.invalidateQueries({ queryKey: ["/api/vrm/profitability/checks"] });
@@ -2028,27 +2020,6 @@ export default function NewRentals() {
       )}
 
       {/* ── Preparing state (snapshot building) ─────────────────────────────── */}
-      {preparingInfo && evaluatedRows.length === 0 && !evaluateMut.isPending && (
-        <div
-          style={{
-            textAlign: "center",
-            padding: "48px 32px",
-            border: `1px solid ${colors.amber}`,
-            backgroundColor: colors.amberLight,
-            borderRadius: 12,
-            marginBottom: 40,
-          }}
-        >
-          <Loader2 size={32} className="animate-spin" style={{ color: colors.amber, marginBottom: 12 }} />
-          <p style={{ fontFamily: fonts.syne, fontSize: 18, fontWeight: 700, color: colors.ink, margin: "0 0 6px" }}>
-            Profitability snapshot is being prepared
-          </p>
-          <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
-            The daily profitability snapshot is currently being built from Snowflake.
-            Please try again in {Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60)} minute{Math.ceil((preparingInfo.retryAfterSeconds ?? 300) / 60) !== 1 ? "s" : ""}.
-          </p>
-        </div>
-      )}
 
       {/* ── Loading state ─────────────────────────────────────────────────────── */}
       {evaluateMut.isPending && evaluatedRows.length === 0 && (

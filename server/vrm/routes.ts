@@ -72,8 +72,7 @@ import {
   getNotificationTemplates,
   upsertNotificationTemplate,
 } from "./storage";
-import { runProfitabilitySync, checkSettleGateOnce } from "./profitability-sync";
-import { fetchProfitabilityCheck } from "./snowflake-queries";
+import { runProfitabilitySync } from "./profitability-sync";
 import { getDiscrepancies } from "./discrepancies";
 import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import {
@@ -740,103 +739,30 @@ export function registerVrmRoutes(): Router {
       const snapshotActualCount = await countProfitabilitySnapshotRows();
       const snapshotIsGloballyPopulated = snapshotActualCount > 0;
 
+      // The daily snapshot is the ONLY source for this endpoint. It is rebuilt by
+      // runProfitabilitySync() (server/vrm/profitability-sync.ts) and has been
+      // continuously populated since 2026-05-01.
+      //
+      // What used to live here (removed 2026-07-30, Tyler): a day-one bootstrap
+      // state machine — stale-'building'-lock detection, an IHR settle gate, a
+      // one-time LIVE SNOWFLAKE read, and 202 "preparing" responses. All of it
+      // existed to survive an empty snapshot. Every branch was another way for a
+      // request to do something other than return the row, including a
+      // multi-minute Snowflake round trip on the user's click.
+      //
+      // Evaluating one technician must stay what it looks like: an indexed
+      // lookup against Postgres. Bootstrap and recovery belong to the sync job,
+      // not to a request that a human is waiting on. If the snapshot is
+      // genuinely empty the sync is broken, and saying so beats hanging.
       if (!snapshotIsGloballyPopulated) {
-        // ── Day-one bootstrap: snapshot table is empty ────────────────────────
-        // If a sync is genuinely in flight, defer. But if status='building'
-        // is stale (>15 min old, or has no lastSyncStartedAt at all), the
-        // previous worker was killed mid-flight (deploy SIGTERM, etc.) and
-        // would otherwise leave the snapshot stuck forever — kick a fresh
-        // sync inline before falling through to the live read / 202 path.
-        if (meta && meta.status === "building") {
-          const STALE_BUILDING_MS = 15 * 60 * 1000;
-          const startedAt = meta.lastSyncStartedAt ? new Date(meta.lastSyncStartedAt) : null;
-          const elapsedMs = startedAt ? Date.now() - startedAt.getTime() : 0;
-          const lockIsStale = !startedAt || elapsedMs > STALE_BUILDING_MS;
-
-          if (lockIsStale) {
-            console.warn(
-              `[VRM] profitability/check — stale 'building' lock detected (startedAt=${startedAt?.toISOString() ?? "null"}, age=${Math.round(elapsedMs / 1000)}s). Kicking recovery sync.`,
-            );
-            runProfitabilitySync().catch((e: any) =>
-              console.error("[VRM] stale-lock recovery sync failed:", e.message),
-            );
-            // Fall through to settle-gate / live read path below so the
-            // caller still gets data on this request rather than another 202.
-          } else {
-            const retryAfterSeconds = Math.max(60, Math.ceil((5 * 60 * 1000 - elapsedMs) / 1000));
-            return res.status(202).json({
-              status: "preparing",
-              message: "The profitability snapshot is currently being built. Please try again shortly.",
-              retryAfterSeconds,
-            });
-          }
-        }
-
-        // Otherwise: check the settle gate. If the IHR table is settled (i.e.
-        // not in the middle of its nightly rebuild), do a one-time live
-        // Snowflake fallback so the user isn't blocked while we asynchronously
-        // build the snapshot. This is the documented day-one bootstrap path.
-        let gate: Awaited<ReturnType<typeof checkSettleGateOnce>>;
-        try {
-          gate = await checkSettleGateOnce();
-        } catch (gateErr: any) {
-          console.warn("[VRM] settle-gate check failed during day-one fallback:", gateErr?.message ?? gateErr);
-          gate = { settled: false, retryAfterSeconds: 300 };
-        }
-
-        if (!gate.settled) {
-          // IHR is mid-rebuild — refuse to read it. Kick a (gated) background
-          // sync and ask the UI to retry.
-          runProfitabilitySync().catch((e: any) =>
-            console.error("[VRM] background day-one snapshot build failed:", e.message),
-          );
-          return res.status(202).json({
-            status: "preparing",
-            message: "The profitability snapshot is being prepared. Please try again shortly.",
-            retryAfterSeconds: gate.retryAfterSeconds,
-          });
-        }
-
-        // Gate clear — perform a one-time live profitability read so the user
-        // isn't blocked. Also kick a background full sync so subsequent
-        // requests serve from snapshot. Live response carries snapshotMeta:
-        // null so the UI can label it as "Live Snowflake data
-        // (snapshot unavailable)".
-        console.warn(
-          "[VRM] profitability/check day-one fallback — snapshot empty and IHR settled; serving one-time live Snowflake read.",
+        console.error(
+          "[VRM] profitability/check — snapshot table is EMPTY; runProfitabilitySync has not completed. Refusing to read Snowflake inline.",
         );
-        runProfitabilitySync().catch((e: any) =>
-          console.error("[VRM] background day-one snapshot build failed:", e.message),
-        );
-        try {
-          const liveRows = await fetchProfitabilityCheck(cleaned);
-          // Coerce to the same shape the snapshot path emits (with flags).
-          const liveCoerced = liveRows.map((r: any) => {
-            const empl = r.empl_status ? String(r.empl_status).toUpperCase() : null;
-            const onLoa = empl === "L" || empl === "P" || empl === "S";
-            const missingIhrRow =
-              (Number(r.total_sos ?? 0) === 0) && (Number(r.working_days ?? 0) === 0);
-            return {
-              ...r,
-              daily_ppt_profit: r.daily_ppt_profit != null ? Number(r.daily_ppt_profit) : 0,
-              flags: {
-                on_loa: onLoa,
-                empl_status: empl,
-                expected_return_dt: r.expected_return_dt ?? null,
-                last_date_worked: r.last_date_worked ?? null,
-                missing_ihr_row: missingIhrRow,
-              },
-            };
-          });
-          return res.json({ rows: liveCoerced, snapshotMeta: null });
-        } catch (liveErr: any) {
-          console.error("[VRM] day-one live fallback failed:", liveErr?.message ?? liveErr);
-          return res.status(202).json({
-            status: "preparing",
-            message: "The profitability snapshot is being prepared. Please try again shortly.",
-            retryAfterSeconds: 300,
-          });
-        }
+        return res.status(503).json({
+          error:
+            "Profitability snapshot is empty — the daily sync has not completed. Run the profitability sync, then evaluate.",
+          snapshotEmpty: true,
+        });
       }
 
       // Always serve from snapshot — no Snowflake reads at request time.
