@@ -101,9 +101,38 @@ export function readConfig(): LucaWritebackConfig {
   const baseUrl = (process.env.LIVHR_BASE_URL ?? "").trim().replace(/\/+$/, "") || null;
   const token = (process.env.LIVHR_AGENT_TOKEN ?? "").trim() || null;
   const apply = /^(true|1|yes)$/i.test((process.env.LUCA_WRITEBACK_APPLY ?? "").trim());
-  const markSynced = !/^(false|0|no)$/i.test(
+  const markSyncedRequested = !/^(false|0|no)$/i.test(
     (process.env.LUCA_WRITEBACK_MARK_SYNCED ?? "").trim(),
   );
+  // ONLY A DEPLOYMENT MAY CLAIM AN OUTBOX ROW (Tyler 2026-07-30).
+  //
+  // Marking a task SYNCED consumes it: LIVHR then stops returning it, so
+  // whoever claims it is the ONLY consumer that will ever see it. The
+  // workspace and the deployment are the SAME Repl and therefore share one
+  // Secrets store, so this cannot be solved with an env var — setting
+  // LUCA_WRITEBACK_MARK_SYNCED=false to stop the dev shell would also stop
+  // prod, and then nothing would ever be consumed and every task would
+  // re-deliver forever.
+  //
+  // On 2026-07-30 the dev workspace was pointed at LIVHR PROD
+  // (LIVHR_BASE_URL=https://fleetagents.replit.app) with claiming enabled, and
+  // it consumed 32 of the day's 41 outbox rows into its throwaway heliumdb.
+  // Those escalations never reached the production VRM boards at all — the
+  // trucks simply never appeared, with no error anywhere to explain it.
+  //
+  // REPLIT_DEPLOYMENT is set in a deployment and absent in the workspace (the
+  // same signal fleet-scope-routes.ts already uses), so a dev shell can still
+  // poll, map and preview the whole pipeline — it just can no longer take a
+  // row away from production.
+  const isDeployment = !!process.env.REPLIT_DEPLOYMENT;
+  const markSynced = markSyncedRequested && isDeployment;
+  if (markSyncedRequested && !isDeployment) {
+    console.warn(
+      "[LUCA-Writeback] not a deployment — will NOT mark outbox tasks SYNCED. " +
+        "The workspace may process and preview, but only the deployment may consume " +
+        "a row, otherwise production silently loses that escalation.",
+    );
+  }
   const callOutcomesPath =
     (process.env.LUCA_WRITEBACK_CALL_OUTCOMES_PATH ?? "").trim() || null;
   return { baseUrl, token, apply, markSynced, callOutcomesPath };
