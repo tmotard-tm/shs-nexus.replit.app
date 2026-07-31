@@ -78,7 +78,9 @@ import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import {
   listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved, markHolmanPoOutcome,
   updateHolmanApprovalResult, markHolmanPoDenied, upsertHolmanRentalPoQueue,
-  getHolmanPoQueueLastSyncedAt,
+  getHolmanPoQueueLastSyncedAt, recordHolmanPoWalk, getHolmanPoSyncStatus,
+  overrideHolmanPoTechMatch, updateHolmanPoProfitability,
+  acquireHolmanWalkLease, releaseHolmanWalkLease, recordHolmanApprover,
 } from "./holman-rental-po-storage";
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
@@ -2387,6 +2389,85 @@ export function registerVrmRoutes(): Router {
     return next();
   }
 
+  /**
+   * Who may SEE the New Rentals page. Distinct from who may APPROVE (Tyler
+   * 2026-07-31): Luca views the queue, he does not authorise spend.
+   *
+   * Built as a SUPERSET of the approvers rather than a hand-typed list, so an
+   * approver can never lose view access to the page holding their own buttons.
+   * Adding someone to the approver list cannot silently leave them locked out.
+   *
+   * The New Rental Full Log is deliberately NOT restricted — Tyler 2026-07-31,
+   * after it turned out other people rely on it and nobody knows exactly who.
+   */
+  const NEW_RENTALS_VIEWER_USERNAMES = new Set<string>([
+    ...Array.from(HOLMAN_APPROVER_USERNAMES),
+    "lbuccil", // Luca Buccilli — view only
+  ]);
+
+  function requireNewRentalsAccess(req: any, res: any, next: any) {
+    const username = String(req.user?.username ?? "").trim().toLowerCase();
+    if (!NEW_RENTALS_VIEWER_USERNAMES.has(username)) {
+      return res.status(403).json({ ok: false, error: "Not authorized for New Rentals." });
+    }
+    return next();
+  }
+
+  /**
+   * What the CURRENT session may do here. The client asks rather than shipping
+   * its own copy of the allowlist — a duplicated list is one edit away from a nav
+   * item that renders for someone the server will refuse, or a button that 403s.
+   */
+  router.get("/access", (req: any, res) => {
+    const realUsername = String(req.user?.username ?? "").trim().toLowerCase();
+    // Developer "preview as user" mirrors somebody else's session. The server
+    // only knows the REAL session, so without this the gate answered for the
+    // developer and the restricted page rendered under every previewed identity.
+    // Honoured ONLY for developers — the same capability that grants preview —
+    // so this cannot be used by anyone else to probe the allowlist.
+    const asParam = String(req.query?.as ?? "").trim().toLowerCase();
+    const isDeveloper = String(req.user?.role ?? "").toLowerCase() === "developer";
+    const effective = isDeveloper && asParam ? asParam : realUsername;
+    res.json({
+      username: effective,
+      realUsername,
+      previewing: effective !== realUsername,
+      canSeeNewRentals: NEW_RENTALS_VIEWER_USERNAMES.has(effective),
+      canApproveHolman: HOLMAN_APPROVER_USERNAMES.has(effective),
+    });
+  });
+
+  /**
+   * Tokens to match a Holman driver name against a roster name.
+   *
+   * WHY: Holman returns BOTH "LASTNAME, FIRSTNAME" and bare "FIRSTNAME LASTNAME".
+   * The old parser only understood the comma form - with no comma it treated the
+   * whole string as the surname and searched `tech_name ILIKE '%MICHAEL LOVELL%'`
+   * against a roster that stores "LOVELL,MICHAEL". That can never match, so those
+   * rentals fell to `no_match`, which means NO profitability check ever ran on
+   * them. On 2026-07-31 that was 29 of 390 rows, ~7.4% of the queue.
+   *
+   * Order-independent token matching handles both forms with one rule.
+   *
+   * - Tokens shorter than 2 characters are dropped: a middle initial present on
+   *   one side and absent on the other ("SAWYER,JAMES W" vs "JAMES SAWYER")
+   *   would otherwise force a false no_match.
+   * - Generational suffixes are dropped for the same reason. This can turn a
+   *   father/son pair into 2 hits, but that returns `ambiguous`, which the queue
+   *   SHOWS. A wrong silent match would be far worse than a visible ambiguity.
+   * - No usable tokens means no_match. Never emit an empty condition list: it
+   *   would match the entire roster.
+   */
+  const NAME_SUFFIXES = new Set(["JR", "SR", "II", "III", "IV"]);
+  function driverNameTokens(raw: string): string[] {
+    return String(raw ?? "")
+      .toUpperCase()
+      .replace(/[.,]/g, " ")
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2 && !NAME_SUFFIXES.has(t));
+  }
+
   async function matchDriverNameToTech(driverName: string | null): Promise<{
     poNumber?: string;
     techLdap: string | null;
@@ -2400,17 +2481,22 @@ export function registerVrmRoutes(): Router {
     if (!driverName || /^UNKNOWN/i.test(driverName.trim())) {
       return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
     }
-    // Holman format: "LASTNAME, FIRSTNAME" — flip to "firstname lastname" for ILIKE match
-    const commaIdx = driverName.indexOf(",");
-    const lastName  = commaIdx > 0 ? driverName.slice(0, commaIdx).trim() : driverName.trim();
-    const firstName = commaIdx > 0 ? driverName.slice(commaIdx + 1).trim() : "";
+    // Every token must appear somewhere in the roster name, in any order, so
+    // "LOVELL, MICHAEL" and "MICHAEL LOVELL" resolve to the same technician.
+    const tokens = driverNameTokens(driverName);
+    if (tokens.length === 0) {
+      return { techLdap: null, techName: null, recommendation: null, score: null, matchConfidence: "no_match" };
+    }
 
     try {
+      const tokenConds = sql.join(
+        tokens.map((t) => sql`tech_name ILIKE ${"%" + t + "%"}`),
+        sql` AND `,
+      );
       const qResult = await db.execute(sql`
         SELECT tech_ldap, tech_name, recommendation, scorecard_score
         FROM vrm_profitability_snapshot
-        WHERE tech_name ILIKE ${"%" + lastName + "%"}
-          ${firstName ? sql`AND tech_name ILIKE ${"%" + firstName + "%"}` : sql``}
+        WHERE ${tokenConds}
         LIMIT 5
       `);
       const hits = qResult.rows as any[];
@@ -2553,15 +2639,21 @@ export function registerVrmRoutes(): Router {
    * GET /api/vrm/holman-po-queue
    * Returns the current mirrored Holman rental PO queue (DB cache — no Holman scrape).
    */
-  router.get("/holman-po-queue", requireHolmanApprover, async (_req, res) => {
+  // READ is open to viewers (Luca sees the queue, he does not authorise it).
+  // Every write below stays requireHolmanApprover.
+  router.get("/holman-po-queue", requireNewRentalsAccess, async (_req, res) => {
     try {
       // Actionable rows only. `lastSyncedAt` is read separately so the staleness
       // line no longer needs 200 rows of decided history to carry one timestamp.
-      const [rows, lastSyncedAt] = await Promise.all([
+      const [rows, lastSyncedAt, syncStatus] = await Promise.all([
         listHolmanPoQueue(),
         getHolmanPoQueueLastSyncedAt(),
+        getHolmanPoSyncStatus(),
       ]);
-      res.json({ rows, lastSyncedAt });
+      // syncStatus carries the WALK's verdict. Without it an empty `rows` is
+      // ambiguous: it means either "Holman has nothing pending" or "the scrape
+      // has been failing since Tuesday", and the page rendered both the same.
+      res.json({ rows, lastSyncedAt, syncStatus });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue GET error:", e.message);
       res.status(500).json({ error: e.message });
@@ -2589,8 +2681,23 @@ export function registerVrmRoutes(): Router {
    * diff); callers own the in-flight flag.
    */
   async function runHolmanPoWalk(): Promise<{ ok: boolean; scrapedCount: number; scrapeError: string | null }> {
+      // Every exit below records the walk. A walk that changes no data is still
+      // a walk that ran, and a walk that died must not look like an empty queue.
+      const walkStartedAt = new Date();
+      // Cross-instance guard. holmanPoRefreshInFlight only covers THIS process;
+      // on autoscale a second container has its own copy and walks in parallel.
+      const leaseOwner = `${process.pid}:${walkStartedAt.getTime()}`;
+      if (!(await acquireHolmanWalkLease(leaseOwner))) {
+        console.log("[VRM/HolmanPO] another instance holds the walk lease — skipping this walk.");
+        return { ok: true, scrapedCount: 0, scrapeError: null };
+      }
+      try {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
       if (scrapeErr && scraped.length === 0) {
+        await recordHolmanPoWalk({
+          startedAt: walkStartedAt, ok: false, rowsScraped: 0,
+          walkComplete: walkComplete ?? false, error: scrapeErr,
+        });
         return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr };
       }
       // Fill the REAL renter for UNKNOWN-driver POs from Holman's View Rental
@@ -2621,7 +2728,14 @@ export function registerVrmRoutes(): Router {
       await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
         sweepResolved: walkComplete !== false && !scrapeErr,
       });
+      await recordHolmanPoWalk({
+        startedAt: walkStartedAt, ok: true, rowsScraped: scraped.length,
+        walkComplete: walkComplete ?? null, error: scrapeErr ?? null,
+      });
       return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null };
+      } finally {
+        await releaseHolmanWalkLease(leaseOwner);
+      }
   }
 
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
@@ -2700,6 +2814,53 @@ export function registerVrmRoutes(): Router {
    * Approves the PO in Nexus and fires the Holman WebForms postback.
    * Dry-run by default until HOLMAN_DECISION_DRY_RUN=false is explicitly set.
    */
+  /**
+   * POST /api/vrm/holman-po-queue/:id/tech-match
+   * Resolve an ambiguous or unmatched PO to a specific technician, then re-run
+   * the SAME profitability path a matched row gets, so a manually-set row
+   * carries a real recommendation rather than an empty one.
+   *
+   * overrideHolmanPoTechMatch has existed since the queue shipped with no route
+   * and no caller, which is why an unmatched PO had no way out but to be
+   * approved with no record.
+   */
+  router.post("/holman-po-queue/:id/tech-match", requireHolmanApprover, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const techLdap = String(req.body?.techLdap ?? "").trim().toUpperCase();
+      const techName = String(req.body?.techName ?? "").trim();
+      if (!techLdap) return res.status(400).json({ ok: false, error: "techLdap required" });
+      const row = await getHolmanPoRow(id);
+      if (!row) return res.status(404).json({ ok: false, error: "PO not found" });
+      if (!["pending", "blocked", "approve_failed", "deny_failed"].includes(row.status)) {
+        return res.status(400).json({ ok: false, error: `Already ${row.status}` });
+      }
+      await overrideHolmanPoTechMatch(id, techLdap, techName || techLdap);
+      // Recommendation for the tech we just bound, through the shared path.
+      const evalRow: any = { tech_ldap: techLdap, tech_name: techName || techLdap };
+      try {
+        const snap = await db.execute(sql`
+          SELECT tech_ldap, tech_name, recommendation, scorecard_score
+          FROM vrm_profitability_snapshot WHERE UPPER(tech_ldap) = ${techLdap} LIMIT 1
+        `);
+        const hit: any = snap.rows?.[0];
+        if (hit) {
+          evalRow.recommendation = hit.recommendation;
+          evalRow.scorecard_score = hit.scorecard_score;
+          await attachEvalContextAndOverrides([evalRow], [techLdap]);
+          await updateHolmanPoProfitability(id, evalRow.recommendation ?? null, evalRow.scorecard_score ?? null);
+        }
+      } catch (e: any) {
+        // A missing recommendation is a "No Data" row, not a failed match.
+        console.warn("[VRM/HolmanPO] tech-match set, profitability not resolved:", e?.message || e);
+      }
+      res.json({ ok: true, row: await getHolmanPoRow(id) });
+    } catch (e: any) {
+      console.error("[VRM/HolmanPO] tech-match failed:", e?.message || e);
+      res.status(500).json({ ok: false, error: e?.message || "tech-match failed" });
+    }
+  });
+
   router.post("/holman-po-queue/:id/approve", requireHolmanApprover, async (req, res) => {
     const { id } = req.params;
     const { decidedByName } = req.body ?? {};
@@ -2714,6 +2875,33 @@ export function registerVrmRoutes(): Router {
         return res.status(400).json({ ok: false, error: `Already ${row.status}` });
       }
 
+      // MATCH GUARD. Refuse before anything reaches Holman.
+      //
+      // recordHolmanDecision returns null when techLdap is empty, which skipped
+      // the ENTIRE decision pipeline: no vrm_rental_decisions row, no Full Log
+      // row, no technician SMS, and on a deny no supervisor notify and no DCA
+      // update — while the PO was really authorised in Holman and the UI showed
+      // the same green success toast. Prod on 2026-07-31: 21 decided POs with no
+      // matched tech, $4,671.52 authorised with no audit trail at all.
+      //
+      // The old failure was mostly a name-matching bug (fixed) so this now blocks
+      // ~4 POs since June, and every one of them is a case where the system
+      // genuinely does not know whose money this is: two technicians share the
+      // name, or the renter is not a technician. Stopping and asking is the only
+      // correct behaviour. Resolve it with POST /holman-po-queue/:id/tech-match.
+      if (!row.techLdap || !["exact", "manual"].includes(String(row.matchConfidence ?? ""))) {
+        return res.status(400).json({
+          ok: false,
+          needsTechMatch: true,
+          matchConfidence: row.matchConfidence ?? "no_match",
+          driverName: row.driverName ?? null,
+          error: `No confirmed technician for "${row.driverName ?? "unknown driver"}" (${row.matchConfidence ?? "no_match"}). Set the technician before deciding — approving now would authorise the spend with no Decision Log, no Full Log and no technician notification.`,
+        });
+      }
+
+      // The session identity, recorded before anything is submitted, so the audit
+      // record exists even if the Holman round trip fails midway.
+      await recordHolmanApprover(id, String((req as any).user?.username ?? "").trim().toLowerCase());
       const dryRun = process.env.HOLMAN_DECISION_DRY_RUN !== "false";
       // Holman FIRST — never flip Nexus to "approved" before Holman actually confirms.
       const holmanResult = await approvePoInHolman(
@@ -2772,6 +2960,33 @@ export function registerVrmRoutes(): Router {
         return res.status(400).json({ ok: false, error: `Already ${row.status}` });
       }
 
+      // MATCH GUARD. Refuse before anything reaches Holman.
+      //
+      // recordHolmanDecision returns null when techLdap is empty, which skipped
+      // the ENTIRE decision pipeline: no vrm_rental_decisions row, no Full Log
+      // row, no technician SMS, and on a deny no supervisor notify and no DCA
+      // update — while the PO was really authorised in Holman and the UI showed
+      // the same green success toast. Prod on 2026-07-31: 21 decided POs with no
+      // matched tech, $4,671.52 authorised with no audit trail at all.
+      //
+      // The old failure was mostly a name-matching bug (fixed) so this now blocks
+      // ~4 POs since June, and every one of them is a case where the system
+      // genuinely does not know whose money this is: two technicians share the
+      // name, or the renter is not a technician. Stopping and asking is the only
+      // correct behaviour. Resolve it with POST /holman-po-queue/:id/tech-match.
+      if (!row.techLdap || !["exact", "manual"].includes(String(row.matchConfidence ?? ""))) {
+        return res.status(400).json({
+          ok: false,
+          needsTechMatch: true,
+          matchConfidence: row.matchConfidence ?? "no_match",
+          driverName: row.driverName ?? null,
+          error: `No confirmed technician for "${row.driverName ?? "unknown driver"}" (${row.matchConfidence ?? "no_match"}). Set the technician before deciding — approving now would authorise the spend with no Decision Log, no Full Log and no technician notification.`,
+        });
+      }
+
+      // The session identity, recorded before anything is submitted, so the audit
+      // record exists even if the Holman round trip fails midway.
+      await recordHolmanApprover(id, String((req as any).user?.username ?? "").trim().toLowerCase());
       const dryRun = process.env.HOLMAN_DECISION_DRY_RUN !== "false";
       // Holman FIRST — never flip Nexus to "denied" before Holman confirms the Decline.
       const holmanResult = await denyPoInHolman(row.holmanKey, row.poNumber, dryRun);

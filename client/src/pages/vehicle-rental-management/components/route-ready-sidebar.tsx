@@ -3,10 +3,15 @@ import { useLocation } from "wouter";
 import { Truck, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { navItems, fonts, colors } from "../lib/constants";
+import { useVrmAccess } from "../lib/use-vrm-access";
 
 const COLLAPSE_KEY = "vrm_sidebar_collapsed";
 
 export function RouteReadySidebar() {
+  // Restricted pages are hidden unless the SERVER says this session may see
+  // them. Fails closed while the answer is in flight.
+  const { canSeeNewRentals } = useVrmAccess();
+  const visibleNavItems = navItems.filter((n) => !n.restricted || canSeeNewRentals);
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -70,7 +75,7 @@ export function RouteReadySidebar() {
       </div>
 
       <nav className="flex-1 flex flex-col gap-0.5 px-2">
-        {navItems.map((item) => {
+        {visibleNavItems.map((item) => {
           const active = !item.wip && isActive(item.path);
           const Icon = item.icon;
 

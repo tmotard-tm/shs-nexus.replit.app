@@ -6,6 +6,7 @@ import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/use-auth";
+import { useVrmAccess } from "../lib/use-vrm-access";
 import { usePreviewRole } from "@/hooks/use-preview-role";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { formatPersonName, formatPersonNameOr } from "../lib/format-name";
@@ -1067,9 +1068,21 @@ export default function NewRentals() {
     : previewRole
       ? ""
       : (user?.username ?? "");
-  const canApproveHolman = ["jmorga1", "handers"].includes(
-    effectiveApproverUsername.trim().toLowerCase(),
-  );
+  // VIEW and APPROVE are now different questions (Tyler 2026-07-31): Luca reads
+  // the queue, he does not authorise spend. Both answers come from the SERVER so
+  // the browser never carries its own copy of the allowlist.
+  const { canSeeNewRentals, canApproveHolman: serverCanApprove } = useVrmAccess();
+  // Preview-as-user is a developer simulation of somebody else's session, so the
+  // server (which only knows the REAL session) cannot answer for it. That one
+  // path keeps a local list; it never governs a real user's access, and the
+  // server refuses regardless of what the preview renders.
+  const PREVIEW_APPROVERS = ["jmorga1", "handers"];
+  const isPreviewing = Boolean(previewUser || previewRole);
+  const canApproveHolman = isPreviewing
+    ? PREVIEW_APPROVERS.includes(effectiveApproverUsername.trim().toLowerCase())
+    : serverCanApprove;
+  // Reading the queue only needs view rights.
+  const canSeeQueue = isPreviewing ? canApproveHolman : canSeeNewRentals;
   const [decidingPoId, setDecidingPoId] = useState<string | null>(null);
   const [poDeciderName, setPoDeciderName] = useState("");
   const [poConfirmAction, setPoConfirmAction] = useState<"approve" | "deny" | null>(null);
@@ -1078,14 +1091,14 @@ export default function NewRentals() {
   // before it returns — the backend upsert still lands.
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[]; lastSyncedAt?: string | null }>({
+  const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[]; lastSyncedAt?: string | null; syncStatus?: { lastOk: boolean | null; lastWalkCompletedAt: string | null; error: string | null; rowsScraped: number | null; walkComplete: boolean | null } }>({
     queryKey: ["/api/vrm/holman-po-queue"],
     queryFn: async () => {
       const r = await fetch("/api/vrm/holman-po-queue", { credentials: "include" });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       return r.json();
     },
-    enabled: canApproveHolman,
+    enabled: canSeeQueue,
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     refetchInterval: refreshing ? 5000 : false,
@@ -1099,6 +1112,12 @@ export default function NewRentals() {
   // rows, so when the queue is empty (the normal state) there is no row to carry
   // the timestamp and the staleness line would have gone blank.
   const lastSyncedAt = poQueueData?.lastSyncedAt ?? pendingPoQueue[0]?.lastSyncedAt ?? null;
+  // An empty queue is ambiguous on its own: it means either "Holman has nothing
+  // pending" or "the scrape has been failing since Tuesday". The walk's own
+  // verdict is what tells them apart, so it is rendered, not inferred.
+  const syncStatus = poQueueData?.syncStatus ?? null;
+  const syncFailed = syncStatus?.lastOk === false;
+  const syncPartial = syncStatus?.lastOk === true && syncStatus?.walkComplete === false;
   const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
   const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
 
@@ -1148,6 +1167,30 @@ export default function NewRentals() {
     return () => clearTimeout(t);
   }, [refreshing]);
 
+  // Resolving an unmatched/ambiguous PO to a technician. The server now REFUSES
+  // to decide one of these (it would authorise the spend with no Decision Log,
+  // no Full Log and no tech SMS), so the operator needs a way out — previously
+  // overrideHolmanPoTechMatch existed with no route and no control at all.
+  const [matchingPoId, setMatchingPoId] = useState<string | null>(null);
+  const [matchLdap, setMatchLdap] = useState("");
+  const techMatchMut = useMutation({
+    mutationFn: async ({ id, techLdap }: { id: string; techLdap: string }) => {
+      const r = await fetch(`/api/vrm/holman-po-queue/${id}/tech-match`, {
+        method: "POST", credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ techLdap, techName: techLdap }),
+      });
+      if (!r.ok) { const b = await r.json().catch(() => ({})); throw new Error(b.error ?? `HTTP ${r.status}`); }
+      return r.json();
+    },
+    onSuccess: () => {
+      setMatchingPoId(null); setMatchLdap("");
+      refetchPoQueue();
+      toast({ title: "Technician set — profitability re-checked" });
+    },
+    onError: (e: any) => toast({ title: "Could not set technician", description: e.message, variant: "destructive" }),
+  });
+
   const approvePoMut = useMutation({
     mutationFn: async ({ id, name }: { id: string; name: string }) => {
       const r = await fetch(`/api/vrm/holman-po-queue/${id}/approve`, {
@@ -1174,7 +1217,10 @@ export default function NewRentals() {
         toast({ title: "Approval result unclear — verify in Holman", description: data.error ?? JSON.stringify(data), variant: "destructive" });
       }
     },
-    onError: (e: any) => toast({ title: "Approval request failed", description: e.message, variant: "destructive" }),
+    onError: (e: any) => toast({
+      title: /technician/i.test(String(e.message)) ? "Blocked — no confirmed technician" : "Approval request failed",
+      description: e.message, variant: "destructive",
+    }),
   });
 
   const denyPoMut = useMutation({
@@ -2111,7 +2157,7 @@ export default function NewRentals() {
       )}
 
       {/* ── Holman Rental POs Awaiting Authorization (restricted) ─────────────── */}
-      {canApproveHolman && (
+      {canSeeQueue && (
       <div style={{ marginBottom: 40 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <div>
@@ -2124,6 +2170,10 @@ export default function NewRentals() {
                 : "Not yet synced from Holman"}
             </span>
           </div>
+          {/* READ-ONLY for viewers: everything below acts on Holman, so it is
+              approver-only even though the queue itself is now visible to
+              Fleet leadership. */}
+          {canApproveHolman && (
           <button
             onClick={() => refreshPoMut.mutate()}
             disabled={refreshing}
@@ -2139,6 +2189,7 @@ export default function NewRentals() {
             {refreshing ? <Loader2 size={13} className="animate-spin" /> : null}
             {refreshing ? "Pulling from Holman…" : "Refresh from Holman"}
           </button>
+          )}
         </div>
 
         {/* Confirm modal overlay */}
@@ -2162,7 +2213,7 @@ export default function NewRentals() {
                 <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: "0 0 16px" }}>
                   {isApprove
                     ? `PO ${po.poNumber} for ${po.driverName ?? "unknown driver"} ($${Number(po.additionalRequestedAmt ?? 0).toFixed(2)}). This will execute the approval on the Holman portal.`
-                    : `PO ${po.poNumber} will be marked denied in Nexus. Holman portal action requires manual follow-up.`}
+                    : `PO ${po.poNumber} for ${po.driverName ?? "unknown driver"}. This will submit the Decline on the Holman portal.`}
                 </p>
                 <input
                   type="text"
@@ -2207,13 +2258,39 @@ export default function NewRentals() {
           );
         })()}
 
+        {(syncFailed || syncPartial) && (
+          <div style={{
+            marginBottom: 12, padding: "10px 14px", borderRadius: 8,
+            border: `1px solid ${syncFailed ? colors.red : colors.amber}`,
+            background: (syncFailed ? colors.red : colors.amber) + "12",
+          }}>
+            <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 700, color: syncFailed ? colors.red : colors.amber }}>
+              {syncFailed
+                ? "Holman sync FAILED — this queue may be incomplete"
+                : "Holman walk did not finish — more POs may exist than are shown"}
+            </div>
+            <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkSoft, marginTop: 3 }}>
+              {syncStatus?.error
+                ? syncStatus.error
+                : "The walk stopped at its page cap before reaching the end of the grid."}
+              {syncStatus?.lastWalkCompletedAt
+                ? ` · last attempt ${Math.max(0, Math.floor((Date.now() - new Date(syncStatus.lastWalkCompletedAt).getTime()) / 60000))}m ago`
+                : ""}
+            </div>
+          </div>
+        )}
+
         {pendingPoQueue.length === 0 && !refreshing && (
           <div style={{
             padding: "24px 20px", border: `1px dashed ${colors.rule}`,
             borderRadius: 10, textAlign: "center",
           }}>
             <p style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkMuted, margin: 0 }}>
-              {lastSyncedAt ? "No rental POs pending authorization." : "Click \"Refresh from Holman\" to pull the current awaiting-authorization queue."}
+              {syncFailed
+                ? "Queue unknown — Holman could not be reached on the last attempt. Do not read this as \"nothing pending\"."
+                : lastSyncedAt
+                  ? "No rental POs pending authorization."
+                  : "Click \"Refresh from Holman\" to pull the current awaiting-authorization queue."}
             </p>
           </div>
         )}
@@ -2223,7 +2300,7 @@ export default function NewRentals() {
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr style={{ backgroundColor: colors.surface }}>
-                  {["Truck", "Driver (Holman)", "District", "State", "PO #", "Amount", "PO Date", "Profitability Rec", "Match", ""].map((h) => (
+                  {["Truck", "Vendor", "Driver (Holman)", "District", "State", "PO #", "Amount", "PO Date", "Profitability Rec", "Match", ""].map((h) => (
                     <th key={h} style={{
                       fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600,
                       color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em",
@@ -2247,6 +2324,56 @@ export default function NewRentals() {
                     <tr key={po.id} style={{ borderBottom: idx < pendingPoQueue.length - 1 ? `1px solid ${colors.rule}` : "none", backgroundColor: failed ? colors.red + "12" : undefined }}>
                       <td style={{ padding: "12px 14px", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.ink }}>
                         {po.vehicleNumber || "—"}
+                        {canApproveHolman && !["exact", "manual"].includes(String(po.matchConfidence ?? "")) && (
+                          <div style={{ marginTop: 6 }}>
+                            {matchingPoId === po.id ? (
+                              <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                                <input
+                                  value={matchLdap}
+                                  onChange={(e) => setMatchLdap(e.target.value)}
+                                  placeholder="LDAP"
+                                  style={{ fontFamily: fonts.jetbrains, fontSize: 11, width: 84, padding: "2px 6px",
+                                           border: `1px solid ${colors.rule}`, borderRadius: 5, background: colors.surface, color: colors.ink }}
+                                />
+                                <button type="button" disabled={!matchLdap.trim() || techMatchMut.isPending}
+                                  onClick={() => techMatchMut.mutate({ id: po.id, techLdap: matchLdap.trim().toUpperCase() })}
+                                  style={{ fontSize: 10.5, fontWeight: 700, color: colors.green, background: "transparent",
+                                           border: `1px solid ${colors.green}`, borderRadius: 5, padding: "2px 6px", cursor: "pointer" }}>Set</button>
+                                <button type="button" onClick={() => { setMatchingPoId(null); setMatchLdap(""); }}
+                                  style={{ fontSize: 10.5, color: colors.inkMuted, background: "transparent", border: "none", cursor: "pointer" }}>×</button>
+                              </span>
+                            ) : (
+                              <button type="button" onClick={() => { setMatchingPoId(po.id); setMatchLdap(""); }}
+                                title="No confirmed technician — a decision is blocked until one is set"
+                                style={{ fontSize: 10.5, fontWeight: 700, color: colors.amber, background: "transparent",
+                                         border: `1px solid ${colors.amber}`, borderRadius: 5, padding: "2px 8px", cursor: "pointer" }}>
+                                Set tech
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      {/* Rental vendor. Shown because the approver needs to know
+                          WHO the rental is with: Enterprise is the contracted
+                          rate, anything else is an exception worth a second look
+                          before it is authorised. */}
+                      <td style={{ padding: "12px 14px", fontFamily: fonts.dmSans, fontSize: 12, color: colors.ink, whiteSpace: "nowrap" }}>
+                        {(() => {
+                          const v = String(po.vendorName ?? "").trim();
+                          if (!v) return <span style={{ color: colors.inkMuted }}>—</span>;
+                          // Short label for the two long legal names; anything
+                          // else shows verbatim so a new vendor is never disguised.
+                          const short = /enterprise/i.test(v) ? "Enterprise"
+                            : /avis/i.test(v) ? "Avis"
+                            : /hertz/i.test(v) ? "Hertz"
+                            : v;
+                          const isContracted = /enterprise/i.test(v);
+                          return (
+                            <span title={v} style={{ color: isContracted ? colors.ink : colors.amber, fontWeight: isContracted ? 400 : 600 }}>
+                              {short}
+                            </span>
+                          );
+                        })()}
                       </td>
                       <td style={{ padding: "12px 14px" }}>
                         <div style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink }}>
@@ -2328,6 +2455,10 @@ export default function NewRentals() {
                               }}>{failLabel}</span>
                             )}
                             <div style={{ display: "flex", gap: 6 }}>
+                            {!canApproveHolman && (
+                              <span style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkMuted }}>view only</span>
+                            )}
+                            {canApproveHolman && (<>
                             <button
                               onClick={() => { setDecidingPoId(po.id); setPoConfirmAction("approve"); }}
                               style={{
@@ -2344,6 +2475,7 @@ export default function NewRentals() {
                                 border: `1px solid ${colors.red}`, borderRadius: 6, padding: "5px 12px", cursor: "pointer",
                               }}
                             >Deny</button>
+                            </>)}
                             </div>
                           </div>
                         )}

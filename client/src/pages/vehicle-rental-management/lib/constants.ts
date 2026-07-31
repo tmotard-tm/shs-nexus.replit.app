@@ -105,11 +105,13 @@ export interface NavItem {
   path: string;
   icon: LucideIcon;
   wip?: boolean;
+  /** Visible only to the Holman rental-PO approvers. Server enforces; this hides. */
+  restricted?: boolean;
 }
 
 export const navItems: NavItem[] = [
   { label: "Executive Summary", path: "/vehicle-rental-management/executive-summary", icon: BarChart3 },
-  { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp },
+  { label: "New Rentals", path: "/vehicle-rental-management/new-rentals", icon: TrendingUp, restricted: true },
   { label: "New Rental - Full Log", path: "/vehicle-rental-management/new-rental-full-log", icon: ClipboardList },
   { label: "Rental Denial Tracker", path: "/vehicle-rental-management/rental-repair-tracker", icon: Wrench },
   { label: "Rental Operations", path: "/vehicle-rental-management/rental-operations", icon: Gauge },

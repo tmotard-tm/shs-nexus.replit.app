@@ -178,18 +178,41 @@ interface GridRow {
   key: string | null;
 }
 
-function isolateGrid(html: string): string {
+function isolateGrid(html: string): { grid: string; found: boolean } {
   const idPos = html.indexOf('id="KPIDetailsGrid_mailableGrid"');
-  if (idPos < 0) return html; // fall back to whole doc; row guard still filters
+  if (idPos < 0) return { grid: html, found: false }; // fall back to whole doc; row guard still filters
   const tableStart = html.lastIndexOf("<table", idPos);
   const tableEnd = html.indexOf("</table>", idPos);
-  if (tableStart < 0 || tableEnd < 0) return html;
-  return html.slice(tableStart, tableEnd + 8);
+  if (tableStart < 0 || tableEnd < 0) return { grid: html, found: false };
+  return { grid: html.slice(tableStart, tableEnd + 8), found: true };
 }
 
-function parseGridRows(html: string): GridRow[] {
-  const grid = isolateGrid(html);
+/**
+ * The outcome of parsing one grid page.
+ *
+ * `rows` alone cannot distinguish "Holman has nothing awaiting authorization"
+ * from "Holman changed a column and we rejected every row" — both are an empty
+ * array. That ambiguity is load-bearing: an empty scrape makes
+ * upsertHolmanRentalPoQueue omit its NOT IN clause and sweep EVERY pending PO to
+ * resolved_holman, which is terminal. One markup change could therefore erase
+ * the entire worklist while the page calmly reported "No rental POs pending
+ * authorization". So the parser reports what it threw away.
+ */
+interface GridParse {
+  rows: GridRow[];
+  /** the KPIDetailsGrid table was located in the HTML */
+  gridFound: boolean;
+  /** non-header <tr> rows seen inside the grid */
+  dataRowsSeen: number;
+  /** data rows discarded for having too few cells */
+  rowsRejected: number;
+}
+
+function parseGridRows(html: string): GridParse {
+  const { grid, found: gridFound } = isolateGrid(html);
   const out: GridRow[] = [];
+  let dataRowsSeen = 0;
+  let rowsRejected = 0;
   const trRe = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
   let trM: RegExpExecArray | null;
   while ((trM = trRe.exec(grid)) !== null) {
@@ -213,9 +236,15 @@ function parseGridRows(html: string): GridRow[] {
       }
       cells.push(stripTags(raw));
     }
-    if (cells.length === 15) out.push({ cells, key: keyFromRow });
+    dataRowsSeen++;
+    // `>= 15`, not `=== 15`. Every consumer indexes from the LEFT (cells[2],
+    // cells[4], …), so a column APPENDED by Holman is harmless — but exact
+    // equality rejected the whole grid over it. A column REMOVED still lands
+    // under 15 and is rejected, which is why the rejection count below matters.
+    if (cells.length >= 15) out.push({ cells, key: keyFromRow });
+    else rowsRejected++;
   }
-  return out;
+  return { rows: out, gridFound, dataRowsSeen, rowsRejected };
 }
 
 // ─── ID-token acquisition (the hard part) ─────────────────────────────────────
@@ -693,10 +722,20 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     // previously invisible to the queue ("missing rentals", found 2026-07-09).
     // NextPageBtn renders with class "aspNetDisabled" (and no postback href)
     // on the last page — that is the stop signal.
-    const allGridRows = [...parseGridRows(html)];
+    // Page 1. A located grid that yields rows but parses to NOTHING is a parse
+    // break, not an empty queue — and the difference decides whether the caller
+    // sweeps every pending PO into the terminal resolved_holman state.
+    // Declared before the first parse: page 1 can already prove the walk
+    // incomplete, so the flag has to exist by then.
+    let walkComplete = true;
+    const firstParse = parseGridRows(html);
+    if (firstParse.gridFound && firstParse.dataRowsSeen > 0 && firstParse.rows.length === 0) {
+      console.error(`[HolmanPortal] grid found with ${firstParse.dataRowsSeen} data row(s) but ZERO parsed (${firstParse.rowsRejected} rejected on cell count) — PARSE FAILURE, not an empty queue.`);
+      walkComplete = false;
+    }
+    const allGridRows = [...firstParse.rows];
     let pageHtml = html;
     let pagesFetched = 1;
-    let walkComplete = true;
     const MAX_PAGES = 10;
     while (pagesFetched < MAX_PAGES) {
       const nextBtn = pageHtml.match(/<a[^>]*id="KPIDetailsGrid_NextPageBtn"[^>]*>/i)?.[0] ?? "";
@@ -731,9 +770,19 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
         break;
       }
       pageHtml = await pResp.text();
-      const rows = parseGridRows(pageHtml);
-      if (rows.length === 0) break;
-      allGridRows.push(...rows);
+      const pageParse = parseGridRows(pageHtml);
+      if (pageParse.rows.length === 0) {
+        // Zero parsed rows on a later page is normally just the end of the grid.
+        // It is only the end if there was nothing to parse; if rows were present
+        // and rejected, the pager is stopping on a parse break and the walk is
+        // incomplete — silently breaking here is what hid the truncation.
+        if (pageParse.gridFound && pageParse.dataRowsSeen > 0) {
+          console.error(`[HolmanPortal] page ${pagesFetched + 1}: ${pageParse.dataRowsSeen} data row(s), ZERO parsed (${pageParse.rowsRejected} rejected) — walk INCOMPLETE.`);
+          walkComplete = false;
+        }
+        break;
+      }
+      allGridRows.push(...pageParse.rows);
       pagesFetched++;
     }
     if (pagesFetched >= MAX_PAGES) {

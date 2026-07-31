@@ -153,7 +153,28 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
   let snapshotByLdap = new Map<string, SnapshotRow>();
   let dsByLdap = new Map<string, { district: string | null; state: string | null }>();
   let tpmsByLdap = new Map<string, TpmsRow>();
-  let decisionByLdap = new Map<string, DecisionRow>();
+  /**
+   * Decisions keyed by LOG ROW, not by technician.
+   *
+   * This used to be `DISTINCT ON (UPPER(tech_ldap)) ... ORDER BY created_at DESC`
+   * keyed on LDAP alone — one NEWEST decision per person, stamped onto every
+   * rental that person ever had. Measured on prod 2026-07-31: of 2,548 stamped
+   * rows, 1,737 (68%) carried a decision made AFTER the rental it was attached
+   * to. A January rental in the CSV export displayed a July approval and July's
+   * approver's name, so "denials in Q1" counted decisions that had not happened.
+   *
+   * A decision and its log row are written together by upsertFullLogFromDecision,
+   * so proximity in time is the real link. It is applied STRICTLY: the decision
+   * must be within CORRELATION_WINDOW_MS of the log row and must be the ONLY one
+   * in that window. Anything else yields null.
+   *
+   * Null is the point. Most log rows (CSV imports, manual entries) never came
+   * from a decision at all — on prod only 603 of 2,548 have a decision within a
+   * minute and the median gap is 1.8 days. A blank Decision column is honest; a
+   * confident wrong one is what this replaces.
+   */
+  const CORRELATION_WINDOW_MS = 60 * 60 * 1000;
+  let decisionByLogId = new Map<string, DecisionRow>();
 
   if (ldaps.length > 0) {
     const ldapList = sql.join(ldaps.map((l) => sql`${l}`), sql`, `);
@@ -189,15 +210,13 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
         WHERE UPPER(enterprise_id) IN (${ldapList})
       `),
       db.execute(sql`
-        SELECT DISTINCT ON (UPPER(tech_ldap))
-               UPPER(tech_ldap)   AS tech_ldap,
+        SELECT UPPER(tech_ldap) AS tech_ldap,
                decision,
                notes,
                decided_by_name,
-               created_at::text   AS created_at
+               created_at::text  AS created_at
         FROM vrm_rental_decisions
         WHERE UPPER(tech_ldap) IN (${ldapList})
-        ORDER BY UPPER(tech_ldap), created_at DESC
       `),
     ]);
 
@@ -210,8 +229,31 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
     for (const r of (tpmsResult.rows ?? []) as unknown as TpmsRow[]) {
       tpmsByLdap.set(r.enterprise_id, r);
     }
+    // Bucket by tech, then bind each log row to the single decision inside its
+    // window. Two candidates in the same window is genuine ambiguity -> null.
+    const decisionsByTech = new Map<string, DecisionRow[]>();
     for (const r of (decisionResult.rows ?? []) as unknown as DecisionRow[]) {
-      decisionByLdap.set(r.tech_ldap, r);
+      const k = String(r.tech_ldap ?? "").toUpperCase();
+      if (!k) continue;
+      const list = decisionsByTech.get(k);
+      if (list) list.push(r); else decisionsByTech.set(k, [r]);
+    }
+    for (const log of logs) {
+      const k = (log.enterprise_id ?? "").trim().toUpperCase();
+      if (!k) continue;
+      const cands = decisionsByTech.get(k);
+      if (!cands?.length) continue;
+      // created_at is typed nullable on the raw row; a row with no timestamp
+      // cannot be correlated, so it gets no decision rather than a guessed one.
+      if (!log.created_at) continue;
+      const logMs = new Date(log.created_at).getTime();
+      if (!Number.isFinite(logMs)) continue;
+      const inWindow = cands.filter((d) => {
+        if (!d.created_at) return false;
+        const decMs = new Date(d.created_at).getTime();
+        return Number.isFinite(decMs) && Math.abs(decMs - logMs) <= CORRELATION_WINDOW_MS;
+      });
+      if (inWindow.length === 1) decisionByLogId.set(log.id, inWindow[0]);
     }
   }
 
@@ -220,7 +262,7 @@ export async function listNewRentalLogEnriched(): Promise<EnrichedNewRentalLogRo
     const snap = ldapKey ? snapshotByLdap.get(ldapKey) : undefined;
     const ds = ldapKey ? dsByLdap.get(ldapKey) : undefined;
     const tpms = ldapKey ? tpmsByLdap.get(ldapKey) : undefined;
-    const dec = ldapKey ? decisionByLdap.get(ldapKey) : undefined;
+    const dec = decisionByLogId.get(r.id);
 
     const truckNumber = r.unit_number ?? r.trim_van_num ?? tpms?.truck_no ?? null;
     const technician = r.name ?? (tpms ? `${tpms.first_name ?? ""} ${tpms.last_name ?? ""}`.trim() || null : null);

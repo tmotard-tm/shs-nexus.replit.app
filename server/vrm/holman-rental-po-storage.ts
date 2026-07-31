@@ -77,6 +77,7 @@ const SELECT_COLS = `
   holman_approve_confirmed_at AS "holmanApproveConfirmedAt",
   holman_approve_error AS "holmanApproveError",
   decided_by_name AS "decidedByName",
+  decided_by_username AS "decidedByUsername",
   decided_at AS "decidedAt",
   scraped_at AS "scrapedAt",
   last_synced_at AS "lastSyncedAt"
@@ -170,10 +171,18 @@ export async function upsertHolmanRentalPoQueue(
   const notActive = activePOs.length > 0
     ? `AND po_number NOT IN (${activePOs.map((p) => `'${p.replace(/'/g, "''")}'`).join(",")})`
     : "";
+  // `last_synced_at <= now` is a STALENESS GUARD. Two walks can overlap (the
+  // in-flight flag is module scope, which does not hold across autoscale
+  // instances), and the slower one finishes with an older activePOs list. Without
+  // this predicate that stale list resolves a PO the newer walk just discovered,
+  // and resolved_holman is terminal — nothing anywhere moves a row back out of
+  // it. A walk may only resolve rows it could actually have observed.
   const swept = await db.execute(sql.raw(`
     UPDATE holman_rental_po_queue
     SET status = 'resolved_holman', last_synced_at = '${now}'
-    WHERE status IN ('pending', 'blocked', 'approve_failed', 'deny_failed') ${notActive}
+    WHERE status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
+      AND (last_synced_at IS NULL OR last_synced_at <= '${now}')
+      ${notActive}
   `));
   const sweptCount = (swept as any)?.rowCount ?? (swept as any)?.rows?.length ?? 0;
   if (sweptCount) {
@@ -245,7 +254,119 @@ export async function listHolmanPoQueue(
  * gets its own cheap read rather than forcing 200 dead rows down the wire to
  * carry one timestamp.
  */
+export interface HolmanPoSyncStatus {
+  lastWalkStartedAt: string | null;
+  lastWalkCompletedAt: string | null;
+  lastOk: boolean | null;
+  rowsScraped: number | null;
+  walkComplete: boolean | null;
+  error: string | null;
+}
+
+/**
+ * Record the outcome of one Holman walk. Call on EVERY exit path — success,
+ * zero rows, and failure — because the whole point is that a walk which changed
+ * no data is still distinguishable from a walk that never ran.
+ */
+export async function recordHolmanPoWalk(v: {
+  startedAt: Date;
+  ok: boolean;
+  rowsScraped: number;
+  walkComplete: boolean | null;
+  error: string | null;
+}): Promise<void> {
+  try {
+    await db.execute(sql`
+      INSERT INTO holman_po_sync_meta
+        (id, last_walk_started_at, last_walk_completed_at, last_ok, rows_scraped, walk_complete, error)
+      VALUES (1, ${v.startedAt.toISOString()}, NOW(), ${v.ok}, ${v.rowsScraped}, ${v.walkComplete}, ${v.error})
+      ON CONFLICT (id) DO UPDATE SET
+        last_walk_started_at   = EXCLUDED.last_walk_started_at,
+        last_walk_completed_at = EXCLUDED.last_walk_completed_at,
+        last_ok                = EXCLUDED.last_ok,
+        rows_scraped           = EXCLUDED.rows_scraped,
+        walk_complete          = EXCLUDED.walk_complete,
+        error                  = EXCLUDED.error
+    `);
+  } catch (e: any) {
+    // Telemetry must never break the walk it is describing.
+    console.error("[VRM/HolmanPO] could not record walk telemetry:", e?.message || e);
+  }
+}
+
+const WALK_LEASE_MINUTES = 20;
+
+/**
+ * Claim the right to walk Holman, across every running instance.
+ *
+ * Returns false when another instance holds an unexpired lease. The lease is
+ * self-healing: a container that dies mid-walk simply lets it expire after
+ * WALK_LEASE_MINUTES rather than wedging the queue, which is why this is a lease
+ * and not an advisory lock (an advisory lock taken on one pooled connection and
+ * released on another does not reliably release at all).
+ */
+export async function acquireHolmanWalkLease(owner: string): Promise<boolean> {
+  try {
+    await db.execute(sql`INSERT INTO holman_po_sync_meta (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    const r = await db.execute(sql`
+      UPDATE holman_po_sync_meta
+      SET walk_lease_until = NOW() + (${WALK_LEASE_MINUTES} || ' minutes')::interval,
+          walk_lease_owner = ${owner}
+      WHERE id = 1 AND (walk_lease_until IS NULL OR walk_lease_until < NOW())
+      RETURNING 1
+    `);
+    return ((r as any)?.rows ?? []).length > 0;
+  } catch (e: any) {
+    // Never let the lease mechanism itself block the walk. Worst case we are
+    // back to the old single-instance behaviour, which is what shipped before.
+    console.error("[VRM/HolmanPO] walk lease could not be acquired, proceeding unguarded:", e?.message || e);
+    return true;
+  }
+}
+
+export async function releaseHolmanWalkLease(owner: string): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE holman_po_sync_meta
+      SET walk_lease_until = NULL, walk_lease_owner = NULL
+      WHERE id = 1 AND (walk_lease_owner = ${owner} OR walk_lease_owner IS NULL)
+    `);
+  } catch (e: any) {
+    console.error("[VRM/HolmanPO] walk lease release failed (it will expire):", e?.message || e);
+  }
+}
+
+export async function getHolmanPoSyncStatus(): Promise<HolmanPoSyncStatus> {
+  try {
+    const r = await db.execute(sql`
+      SELECT last_walk_started_at, last_walk_completed_at, last_ok, rows_scraped, walk_complete, error
+      FROM holman_po_sync_meta WHERE id = 1
+    `);
+    const x: any = r.rows?.[0];
+    if (!x) return { lastWalkStartedAt: null, lastWalkCompletedAt: null, lastOk: null, rowsScraped: null, walkComplete: null, error: null };
+    return {
+      lastWalkStartedAt: x.last_walk_started_at ? new Date(x.last_walk_started_at).toISOString() : null,
+      lastWalkCompletedAt: x.last_walk_completed_at ? new Date(x.last_walk_completed_at).toISOString() : null,
+      lastOk: x.last_ok ?? null,
+      rowsScraped: x.rows_scraped ?? null,
+      walkComplete: x.walk_complete ?? null,
+      error: x.error ?? null,
+    };
+  } catch {
+    return { lastWalkStartedAt: null, lastWalkCompletedAt: null, lastOk: null, rowsScraped: null, walkComplete: null, error: null };
+  }
+}
+
+/**
+ * When Holman was last WALKED.
+ *
+ * Reads the recorded walk, falling back to max(last_synced_at) only until the
+ * first walk under the new code lands. The fallback is the OLD, wrong-by-design
+ * behaviour and exists purely so the indicator is not blank on first deploy.
+ */
 export async function getHolmanPoQueueLastSyncedAt(): Promise<string | null> {
+  const status = await getHolmanPoSyncStatus();
+  if (status.lastWalkCompletedAt) return status.lastWalkCompletedAt;
   const r = await db.execute(sql`SELECT max(last_synced_at) AS ts FROM holman_rental_po_queue`);
   const ts = (r.rows?.[0] as any)?.ts ?? null;
   return ts ? new Date(ts).toISOString() : null;
@@ -322,6 +443,41 @@ export async function markHolmanPoDenied(id: string, decidedByName: string): Pro
     RETURNING ${sql.raw(SELECT_COLS)}
   `);
   return (result.rows[0] as unknown as HolmanRentalPoRow) ?? null;
+}
+
+/**
+ * Write the profitability verdict for a row whose technician was just set by
+ * hand. Without this a manually-matched PO would sit at "No Data" forever, which
+ * is the state the approver was trying to get OUT of.
+ */
+export async function updateHolmanPoProfitability(
+  id: string,
+  recommendation: string | null,
+  score: number | null,
+): Promise<void> {
+  await db.execute(sql`
+    UPDATE holman_rental_po_queue
+    SET profitability_recommendation = ${recommendation}, profitability_score = ${score}
+    WHERE id = ${id}
+  `);
+}
+
+/**
+ * Stamp the AUTHENTICATED approver on the PO.
+ *
+ * `decided_by_name` is whatever the approver typed into the confirmation dialog:
+ * useful as an attestation, worthless as an audit record, because it is
+ * unverified free text against a live vendor spend. This records the session
+ * identity the request actually carried.
+ */
+export async function recordHolmanApprover(id: string, username: string): Promise<void> {
+  try {
+    await db.execute(sql`
+      UPDATE holman_rental_po_queue SET decided_by_username = ${username} WHERE id = ${id}
+    `);
+  } catch (e: any) {
+    console.error("[VRM/HolmanPO] could not record approver identity:", e?.message || e);
+  }
 }
 
 export async function overrideHolmanPoTechMatch(id: string, techLdap: string, techName: string): Promise<void> {

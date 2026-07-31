@@ -805,6 +805,45 @@ export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_label TEXT;`);
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_overrode_deny BOOLEAN NOT NULL DEFAULT FALSE;`);
 
+  // ── Holman walk telemetry — the SYNC EVENT, not its side effects ──────────
+  // Freshness used to be inferred from max(last_synced_at) on the queue, which
+  // only advances when a ROW changes. A successful walk that finds zero rental
+  // POs — the steady state — changed nothing, so the page showed "STALE, 783m
+  // ago" twenty minutes after a healthy walk. Worse, a walk that DIED froze the
+  // same field identically: "queue is empty" and "the scraper has been broken
+  // for three days" rendered the same pixels.
+  //
+  // One row, id=1, written at the END of every walk including the zero-row and
+  // error cases. Freshness and failure are then facts we recorded, not
+  // inferences from data that may legitimately never change.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS holman_po_sync_meta (
+      id                  INT PRIMARY KEY DEFAULT 1,
+      last_walk_started_at   TIMESTAMPTZ,
+      last_walk_completed_at TIMESTAMPTZ,
+      last_ok                BOOLEAN,
+      rows_scraped           INT,
+      walk_complete          BOOLEAN,
+      error                  TEXT,
+      CONSTRAINT holman_po_sync_meta_singleton CHECK (id = 1)
+    );
+  `);
+  // The walk lease. `holmanPoRefreshInFlight` is a module-scope `let`, which
+  // guarantees one-walk-at-a-time only INSIDE one Node process — and the deploy
+  // target is autoscale, so two containers hold two independent copies of it and
+  // both walk at once. Overlapping walks are how a slow one's stale activePOs
+  // list sweeps a PO the fast one just found.
+  //
+  // A LEASE, not a lock: it carries an expiry, so a container that dies
+  // mid-walk cannot wedge the queue forever the way an un-released advisory lock
+  // on a pooled connection would.
+  await db.execute(sql`ALTER TABLE holman_po_sync_meta ADD COLUMN IF NOT EXISTS walk_lease_until TIMESTAMPTZ;`);
+  await db.execute(sql`ALTER TABLE holman_po_sync_meta ADD COLUMN IF NOT EXISTS walk_lease_owner TEXT;`);
+  // Approver identity of record. `decided_by_name` is free text typed into a
+  // dialog; this is the authenticated session username, which is the only value
+  // that can actually be trusted in an audit of live vendor spend.
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS decided_by_username TEXT;`);
+
   // ── Executive Summary daily rollup — one row per ET day ──
   // Nullable analytics columns are deliberate: backfilled rows (source='backfill')
   // can't reconstruct person-status buckets or per-case rates; null → chart gap,
