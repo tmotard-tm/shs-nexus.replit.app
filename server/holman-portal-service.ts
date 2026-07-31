@@ -618,6 +618,44 @@ async function ensureSession(): Promise<void> {
 
 // ─── Scrape awaiting-auth queue ───────────────────────────────────────────────
 
+/**
+ * Which awaiting-authorization POs are rental requests.
+ *
+ * WHY A LIST AND A LOG, NOT A CLEVER REGEX. This test used to be
+ *     /enterprise|rent.?a.?car/i
+ * which matches "ENTERPRISE RENT-A-CAR INC." and "AVIS RENT A CAR SYSTEM, INC"
+ * but NOT "HERTZ HLE". Every Hertz rental request was therefore skipped, and it
+ * stayed invisible for months because the skip was a bare `continue` that said
+ * nothing. On 2026-07-31 Sears had 9 open Hertz rentals and not one had ever
+ * reached the approval queue.
+ *
+ * The list is deliberately NARROW — only vendors Sears is known to rent from.
+ * It is tempting to add BUDGET / NATIONAL / DOLLAR speculatively, but this queue
+ * submits real approvals to Holman, and "NATIONAL AUTO PARTS" or "DOLLAR
+ * GENERAL" matching a bare word would pull a non-rental PO into an approval
+ * flow. A false negative is a missing row someone notices; a false positive is
+ * an approval nobody meant to make.
+ *
+ * The LOG below is what makes the narrow list safe: any vendor that is skipped
+ * is counted and named on every walk, so the next unrecognised rental vendor
+ * shows up in one run instead of after a quarter of silent drops.
+ *
+ * Division is NOT a rental signal — an ENTERPRISE row carries Division=01 and RF
+ * rows are non-rentals — so the vendor name is all we have to go on.
+ */
+const RENTAL_VENDOR_PATTERNS: RegExp[] = [
+  /enterprise/i,
+  /rent.?a.?car/i,
+  /\bhertz\b/i,
+  /\bavis\b/i,
+];
+
+export function isRentalVendor(vendorName: string): boolean {
+  const v = String(vendorName ?? "").trim();
+  if (!v) return false;
+  return RENTAL_VENDOR_PATTERNS.some((re) => re.test(v));
+}
+
 export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
   const scrapedAt = new Date();
   try {
@@ -713,6 +751,8 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     });
 
     const pos: HolmanPortalPO[] = [];
+    // vendor -> rows skipped, reported after the walk.
+    const skippedVendors = new Map<string, number>();
     for (const { cells, key } of gridRows) {
       const vehicleNumber = cells[2] ?? "";
       const driverName = cells[4] ?? "";
@@ -728,10 +768,14 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
 
       if (!poNumber) continue;
 
-      // Rental detection = vendor-name regex ONLY. Division is NOT a rental signal
-      // (an ENTERPRISE row in this capture has Division=01, and RF rows are non-rentals).
-      const isRental = /enterprise|rent.?a.?car/i.test(vendorName);
-      if (!isRental) continue;
+      // Rental detection = vendor name ONLY (see RENTAL_VENDOR_PATTERNS above).
+      // Every skip is recorded so an unrecognised rental vendor cannot go
+      // missing in silence the way HERTZ did.
+      if (!isRentalVendor(vendorName)) {
+        const k = vendorName.trim() || "(blank vendor)";
+        skippedVendors.set(k, (skippedVendors.get(k) ?? 0) + 1);
+        continue;
+      }
 
       pos.push({
         key: key ?? "",
@@ -750,6 +794,15 @@ export async function scrapeAwaitingAuth(force = false): Promise<ScrapeResult> {
     }
 
     console.log(`[HolmanPortal] ${gridRows.length} grid rows across ${pagesFetched} page(s) → ${pos.length} rental POs`);
+    if (skippedVendors.size > 0) {
+      const summary = Array.from(skippedVendors.entries())
+        .sort((a, b) => b[1] - a[1])
+        .map(([v, n]) => `${v} x${n}`)
+        .join(" · ");
+      // INFO, not a warning: most skips are legitimately non-rental repair POs.
+      // It is here so a NEW rental vendor is one grep away instead of invisible.
+      console.log(`[HolmanPortal] non-rental vendors skipped: ${summary}`);
+    }
     return { rows: pos, scrapedAt, walkComplete };
   } catch (err: any) {
     console.error("[HolmanPortal] scrapeAwaitingAuth:", err.message);

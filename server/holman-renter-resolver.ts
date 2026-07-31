@@ -25,6 +25,9 @@ export interface RenterResult {
   renterPhone: string | null;
   city: string | null;
   state: string | null;
+  /** The untouched #jsonDataMain blob. Carried so callers can pull fields the
+   *  parser does not model yet without another 35s round trip through Holman. */
+  raw?: string | null;
   error?: string;
 }
 
@@ -171,6 +174,7 @@ export async function resolveRentersHeadless(vehicles: string[]): Promise<Renter
           results.push({
             vehicle, po: row.po ?? null,
             renterName: parsed?.name ?? null, renterPhone: parsed?.phone ?? null,
+            raw: row.renterRaw ?? null,
             city: parsed?.city ?? null, state: parsed?.state ?? null,
             error: parsed?.name ? undefined : (row.rrErr || "rental request not parsed"),
           });

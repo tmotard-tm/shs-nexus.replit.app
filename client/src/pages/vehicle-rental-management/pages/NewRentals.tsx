@@ -996,6 +996,40 @@ function checkAccessor(col: string): (r: CheckRow) => unknown {
   }
 }
 
+
+/**
+ * Pager for the two history tables. One component so the decision log and the
+ * check history can never drift apart, and so "showing X-Y of Z" stays honest
+ * about how many rows the filter actually matched - a paged table that does not
+ * say how many it is hiding reads as a complete list.
+ */
+function HistoryPager(props: {
+  page: number; pages: number; total: number; pageSize: number;
+  onPage: (p: number) => void; label: string;
+}) {
+  const { page, pages, total, pageSize, onPage, label } = props;
+  if (total === 0) return null;
+  const from = (page - 1) * pageSize + 1;
+  const to = Math.min(page * pageSize, total);
+  const btn = (enabled: boolean): React.CSSProperties => ({
+    fontFamily: fonts.dmSans, fontSize: 12, padding: "3px 10px", borderRadius: 6,
+    border: `1px solid ${colors.rule}`, background: "transparent",
+    color: enabled ? colors.accent : colors.inkMuted,
+    cursor: enabled ? "pointer" : "default", opacity: enabled ? 1 : 0.45,
+  });
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
+      <span>Showing {from}-{to} of {total} {label}</span>
+      <div style={{ marginLeft: "auto", display: "flex", gap: 6, alignItems: "center" }}>
+        <button type="button" style={btn(page > 1)} disabled={page <= 1} onClick={() => onPage(page - 1)}>← Prev</button>
+        <span style={{ fontFamily: fonts.jetbrains }}>{page} / {pages}</span>
+        <button type="button" style={btn(page < pages)} disabled={page >= pages} onClick={() => onPage(page + 1)}>Next →</button>
+      </div>
+    </div>
+  );
+}
+
+
 export default function NewRentals() {
   const qc = useQueryClient();
   const { toast } = useToast();
@@ -1044,7 +1078,7 @@ export default function NewRentals() {
   // before it returns — the backend upsert still lands.
   const [refreshing, setRefreshing] = useState(false);
 
-  const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[] }>({
+  const { data: poQueueData, refetch: refetchPoQueue } = useQuery<{ rows: any[]; lastSyncedAt?: string | null }>({
     queryKey: ["/api/vrm/holman-po-queue"],
     queryFn: async () => {
       const r = await fetch("/api/vrm/holman-po-queue", { credentials: "include" });
@@ -1061,7 +1095,10 @@ export default function NewRentals() {
   // that could NOT be approved in Holman stays visible and red, never silently gone.
   const pendingPoQueue = poQueue.filter((r: any) =>
     ["pending", "blocked", "approve_failed", "deny_failed"].includes(r.status));
-  const lastSyncedAt = pendingPoQueue[0]?.lastSyncedAt ?? poQueue[0]?.lastSyncedAt ?? null;
+  // From the response, not from row[0]. The endpoint now returns ONLY actionable
+  // rows, so when the queue is empty (the normal state) there is no row to carry
+  // the timestamp and the staleness line would have gone blank.
+  const lastSyncedAt = poQueueData?.lastSyncedAt ?? pendingPoQueue[0]?.lastSyncedAt ?? null;
   const syncAgeMin = lastSyncedAt ? Math.floor((Date.now() - new Date(lastSyncedAt).getTime()) / 60000) : null;
   const isSyncStale = syncAgeMin !== null && syncAgeMin > 30;
 
@@ -1332,7 +1369,9 @@ export default function NewRentals() {
   // Token match so word order never matters: "ben erling", "erling ben",
   // "ERLING,BEN", a bare first or last name, an LDAP, or a truck number
   // (leading zeros ignored) all hit. Every token must match SOMETHING.
-  const matchesHistory = (ldap?: string | null, name?: string | null, truck?: string | null) => {
+  // useCallback so the two memos below can actually cache. As a plain function
+  // it was a new identity every render, which defeated any memo keyed on it.
+  const matchesHistory = useCallback((ldap?: string | null, name?: string | null, truck?: string | null) => {
     if (!historyQ) return true;
     const ldapNorm = String(ldap ?? "").toLowerCase();
     const nameNorm = String(name ?? "").toLowerCase().replace(/[,.]/g, " ");
@@ -1344,7 +1383,7 @@ export default function NewRentals() {
       const tokTruck = tok.replace(/^0+/, "");
       return truckNorm !== "" && tokTruck !== "" && truckNorm.includes(tokTruck);
     });
-  };
+  }, [historyQ]);
 
   const sortedCheckHistory = useMemo(() => {
     if (!checkHistorySort.col || !checkHistorySort.dir) return checkHistory;
@@ -1352,6 +1391,46 @@ export default function NewRentals() {
     if (!cmp) return checkHistory;
     return [...checkHistory].sort(cmp);
   }, [checkHistory, checkHistorySort]);
+
+  /**
+   * The two history tables used to run `.filter(matchesHistory).map(...)` inline
+   * in the JSX over ~426 decision rows and ~200 check rows, with no memo and no
+   * pagination. That rebuilt roughly 8,800 DOM nodes and several hundred inline
+   * event-handler closures on EVERY render - and a render fires on every poll
+   * tick, every mutation, and every keystroke in the search box.
+   *
+   * Memoised on [source, matchesHistory] and paged, so typing in the search box
+   * costs one filter pass over the data instead of one per keystroke per row.
+   */
+  const HISTORY_PAGE_SIZE = 25;
+  const [decisionPage, setDecisionPage] = useState(1);
+  const [checkPage, setCheckPage] = useState(1);
+
+  const filteredDecisionLog = useMemo(
+    () => sortedDecisionLog.filter((d: any) => matchesHistory(d.techLdap, d.techName, d.truckNo)),
+    [sortedDecisionLog, matchesHistory],
+  );
+  const filteredCheckHistory = useMemo(
+    () => sortedCheckHistory.filter((c: any) => matchesHistory(c.techLdap, c.techName, c.truckNo)),
+    [sortedCheckHistory, matchesHistory],
+  );
+
+  // A search that shrinks the list must not strand the reader on a page that no
+  // longer exists.
+  useEffect(() => { setDecisionPage(1); setCheckPage(1); }, [historyQ]);
+
+  const decisionPages = Math.max(1, Math.ceil(filteredDecisionLog.length / HISTORY_PAGE_SIZE));
+  const checkPages = Math.max(1, Math.ceil(filteredCheckHistory.length / HISTORY_PAGE_SIZE));
+  const decisionPageSafe = Math.min(decisionPage, decisionPages);
+  const checkPageSafe = Math.min(checkPage, checkPages);
+  const pagedDecisionLog = useMemo(
+    () => filteredDecisionLog.slice((decisionPageSafe - 1) * HISTORY_PAGE_SIZE, decisionPageSafe * HISTORY_PAGE_SIZE),
+    [filteredDecisionLog, decisionPageSafe],
+  );
+  const pagedCheckHistory = useMemo(
+    () => filteredCheckHistory.slice((checkPageSafe - 1) * HISTORY_PAGE_SIZE, checkPageSafe * HISTORY_PAGE_SIZE),
+    [filteredCheckHistory, checkPageSafe],
+  );
 
   // ── CSV export ─────────────────────────────────────────────────────────────
 
@@ -2343,7 +2422,7 @@ export default function NewRentals() {
                 </tr>
               </thead>
               <tbody>
-                {sortedDecisionLog.filter((d) => matchesHistory(d.techLdap, d.techName, d.truckNo)).map((d) => {
+                {pagedDecisionLog.map((d: any) => {
                   const decisionAsRec = d.decision === "approved" ? "Approve" : d.decision === "denied" ? "Deny" : d.decision;
                   const isOverride = decisionAsRec !== d.recommendation && d.recommendation !== "No Data";
                   // Snapshot values may be null on legacy rows; coerce numerics safely.
@@ -2501,6 +2580,8 @@ export default function NewRentals() {
                 })}
               </tbody>
             </table>
+            <HistoryPager page={decisionPageSafe} pages={decisionPages} total={filteredDecisionLog.length}
+                          pageSize={HISTORY_PAGE_SIZE} onPage={setDecisionPage} label="decisions" />
           </div>
         )}
       </div>
@@ -2537,7 +2618,7 @@ export default function NewRentals() {
                 </tr>
               </thead>
               <tbody>
-                {sortedCheckHistory.filter((c) => matchesHistory(c.techLdap, c.techName, c.truckNo)).map((c) => (
+                {pagedCheckHistory.map((c: any) => (
                   <tr
                     key={c.id}
                     style={{ transition: "background 100ms" }}
@@ -2577,6 +2658,8 @@ export default function NewRentals() {
                 ))}
               </tbody>
             </table>
+            <HistoryPager page={checkPageSafe} pages={checkPages} total={filteredCheckHistory.length}
+                          pageSize={HISTORY_PAGE_SIZE} onPage={setCheckPage} label="checks" />
           </div>
         )}
       </div>

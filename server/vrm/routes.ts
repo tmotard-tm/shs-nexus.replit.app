@@ -78,6 +78,7 @@ import { listNewRentalLogEnriched } from "./new-rental-log-enrichment";
 import {
   listHolmanPoQueue, getHolmanPoRow, markHolmanPoApproved, markHolmanPoOutcome,
   updateHolmanApprovalResult, markHolmanPoDenied, upsertHolmanRentalPoQueue,
+  getHolmanPoQueueLastSyncedAt,
 } from "./holman-rental-po-storage";
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
@@ -2554,8 +2555,13 @@ export function registerVrmRoutes(): Router {
    */
   router.get("/holman-po-queue", requireHolmanApprover, async (_req, res) => {
     try {
-      const rows = await listHolmanPoQueue();
-      res.json({ rows });
+      // Actionable rows only. `lastSyncedAt` is read separately so the staleness
+      // line no longer needs 200 rows of decided history to carry one timestamp.
+      const [rows, lastSyncedAt] = await Promise.all([
+        listHolmanPoQueue(),
+        getHolmanPoQueueLastSyncedAt(),
+      ]);
+      res.json({ rows, lastSyncedAt });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue GET error:", e.message);
       res.status(500).json({ error: e.message });
@@ -2621,7 +2627,7 @@ export function registerVrmRoutes(): Router {
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
     if (holmanPoRefreshInFlight) {
       const rows = await listHolmanPoQueue();
-      return res.json({ ok: true, inFlight: true, rows });
+      return res.json({ ok: true, rows, lastSyncedAt: await getHolmanPoQueueLastSyncedAt(), inFlight: true });
     }
     holmanPoRefreshInFlight = true;
     try {
@@ -2630,7 +2636,10 @@ export function registerVrmRoutes(): Router {
         return res.status(502).json({ ok: false, error: walk.scrapeError });
       }
       const rows = await listHolmanPoQueue();
-      res.json({ ok: true, scrapedCount: walk.scrapedCount, rows, scrapeError: walk.scrapeError });
+      res.json({
+        ok: true, scrapedCount: walk.scrapedCount, rows,
+        lastSyncedAt: await getHolmanPoQueueLastSyncedAt(), scrapeError: walk.scrapeError,
+      });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
