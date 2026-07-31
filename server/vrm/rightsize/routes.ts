@@ -191,10 +191,18 @@ export function registerRightsizeRoutes(router: Router): void {
       const compliantLdaps = rows
         .filter((r) => r.compliant && r.ldap)
         .map((r) => String(r.ldap).toUpperCase());
+      // Every technician who has an OPEN Enterprise rental right now, compliant
+      // or not. Tyler 2026-07-31: the tracker chases people who currently hold a
+      // rental — nothing else. A returned rental is not a status to track, it is
+      // an absence from this list.
+      const openLdaps = rows
+        .filter((r) => r.source === "enterprise" && r.ldap)
+        .map((r) => String(r.ldap).toUpperCase());
       res.json({
         kpis,
         rows: wantRows ? rows : undefined,
         compliantLdaps,
+        openLdaps,
         sedanRateCeiling: SEDAN_RATE_CEILING,
       });
     } catch (e: any) {

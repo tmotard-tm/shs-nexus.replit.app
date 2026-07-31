@@ -78,31 +78,33 @@ const SEDAN_FLOOR = 54.99;
  */
 const GROUPS: Array<{ key: string; label: string; stages: string[]; workload?: "cannot_work" | "workable"; fg: string; bg: string; next: string }> = [
   { key: "swapped", label: "Swapped into a sedan", stages: ["DONE"], fg: colors.green, bg: colors.greenLight, next: "Confirm on the Enterprise vehicle column — compliance header above is the number of record" },
-  { key: "returned", label: "Out of rental (not right-sizing)", stages: ["RETURNED"], fg: colors.inkMuted, bg: colors.surface, next: "Informational only. Returning a rental is not right-sizing; these carry $0 and drop off the open book on the next feed." },
   { key: "committed", label: "Committed", stages: ["COMMITTED"], fg: colors.blue, bg: colors.blueLight, next: "Chase dated commitments as they lapse — tracker flags, Tyler approves nudges daily" },
   { key: "blocked", label: "Blocked", stages: ["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"], fg: colors.amber, bg: colors.amberLight, next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 7/22" },
-  { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY"], fg: colors.purple, bg: colors.purpleLight, next: "Answer every open question same-day — see Awaiting reply" },
+  { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY", "RETURNED"], fg: colors.purple, bg: colors.purpleLight, next: "Answer every open question same-day — see Awaiting reply" },
   { key: "silent", label: "No response · can act", stages: ["NON_RESPONDER"], workload: "workable", fg: colors.red, bg: colors.redLight, next: "TL escalation + next blast wave — Tyler, 7/22" },
   { key: "cannotwork", label: "Cannot work · van at auction, declined, or spare", stages: ["NON_RESPONDER"], workload: "cannot_work", fg: colors.inkMuted, bg: colors.surface, next: "No right-size ask and no TL escalation — route to vehicle replacement / rental return — Tyler w/ Rob Anderson, 7/24" },
 ];
 /** colour lookup by stage alone (badges); the No-response colour is the default. */
 const stageGroup = (s: string) => GROUPS.find((g) => g.stages.includes(s)) ?? GROUPS[4];
 /** the MECE row a tech belongs to — stage AND van-status workload. */
+// Fallback by KEY, never by index: deleting a group used to silently re-home
+// every unmatched stage into whatever happened to sit at GROUPS[4].
+const FALLBACK_GROUP = GROUPS.find((g) => g.key === "followup")!;
 const rowGroup = (t: TechRow) =>
-  GROUPS.find((g) => g.stages.includes(t.stage) && (!g.workload || g.workload === (t.workload ?? "workable"))) ?? GROUPS[4];
+  GROUPS.find((g) => g.stages.includes(t.stage) && (!g.workload || g.workload === (t.workload ?? "workable"))) ?? FALLBACK_GROUP;
 // certainty order (Secured → Cannot work); drives both the MECE table and the stage sort
 const STAGE_ORDER = Array.from(new Set(GROUPS.flatMap((g) => g.stages)));
 const stageRank = (s: string) => { const i = STAGE_ORDER.indexOf(s); return i < 0 ? 999 : i; };
 const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
 /**
- * Monthly value of a row. RETURNED is deliberately ZERO (Tyler, 2026-07-30):
- * giving a rental back is not right-sizing, and on an open-ticket denominator
- * those people leave the list entirely. Counting a full return at rate*30 was
- * what inflated "secured" on the old board.
+ * Monthly value of a row. Everyone on this page holds an open rental on the
+ * current Enterprise feed, so the overage is real money regardless of what the
+ * technician told us over SMS. The old RETURNED→$0 special case is gone with
+ * the RETURNED group: people who gave a rental back are not a stage to track,
+ * they are simply absent from the list.
  */
-const techMonthly = (stage: string, rate: number | null) => {
+const techMonthly = (rate: number | null) => {
   if (rate == null || !(rate > 0)) return 0;
-  if (stage === "RETURNED") return 0;
   return Math.max(rate - SEDAN_FLOOR, 0) * 30;
 };
 /** Deep link into Fleet Communications, filtered to this tech's rental thread. */
@@ -112,7 +114,7 @@ const fmtAge = (iso: string | null) => {
   const h = Math.max(0, (Date.now() - new Date(iso).getTime()) / 36e5);
   return h < 1 ? `${Math.round(h * 60)}m` : h < 48 ? `${Math.round(h)}h` : `${Math.round(h / 24)}d`;
 };
-const isAwaiting = (t: TechRow) => Boolean(t.last_inbound_at_s) && !t.replied_after && !["DONE", "RETURNED", "PASS_EXCUSED"].includes(t.stage);
+const isAwaiting = (t: TechRow) => Boolean(t.last_inbound_at_s) && !t.replied_after && !["DONE", "PASS_EXCUSED"].includes(t.stage);
 
 /** number → number, date → chronological, text → case-insensitive natural; blanks always last. */
 function makeSortComparator<T>(accessor: (r: T) => unknown, dir: SortDir) {
@@ -233,7 +235,7 @@ export default function RightsizeTracker() {
   const [openLdap, setOpenLdap] = useState<string | null>(null);
 
   const { data: summary } = useQuery<SummaryResp>({ queryKey: ["/api/vrm/rightsize/summary"], refetchInterval: 120_000 });
-  const { data: comp } = useQuery<{ kpis: ComplianceKpis; compliantLdaps?: string[] }>({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"], refetchInterval: 120_000 });
+  const { data: comp } = useQuery<{ kpis: ComplianceKpis; compliantLdaps?: string[]; openLdaps?: string[] }>({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"], refetchInterval: 120_000 });
   const ck = comp?.kpis;
   /**
    * Technicians already confirmed right-sized on the Enterprise feed — by rate,
@@ -247,6 +249,16 @@ export default function RightsizeTracker() {
     [comp],
   );
   const isDoneWithSms = (ldap: string) => compliantSet.has(String(ldap).toUpperCase());
+  /**
+   * Technicians holding an OPEN rental on today's Enterprise feed. Tyler
+   * 2026-07-31: "I need to know I have to focus on who has an active rental
+   * only." The campaign roster is a frozen 7/9 list and keeps rows for people
+   * whose rental has since closed; those are not work, so they are not shown.
+   */
+  const openSet = useMemo(
+    () => new Set((comp?.openLdaps ?? []).map((l) => String(l).toUpperCase())),
+    [comp],
+  );
   const { data: techsData } = useQuery<{ techs: TechRow[] }>({ queryKey: ["/api/vrm/rightsize/techs"], refetchInterval: 120_000 });
 
   const syncMut = useMutation({
@@ -262,7 +274,16 @@ export default function RightsizeTracker() {
 
   const k = summary?.kpis;
   const yk = summary?.yesterday?.kpis ?? null;
-  const techs = techsData?.techs ?? [];
+  const allTechs = techsData?.techs ?? [];
+  // Fail OPEN. If the compliance feed is empty or still loading, show everyone
+  // rather than an empty board — a silent zero reads as "all done" and that is
+  // the worst possible way for this page to be wrong.
+  const activeTechs = useMemo(
+    () => (openSet.size === 0 ? allTechs : allTechs.filter((t) => openSet.has(String(t.ldap).toUpperCase()))),
+    [allTechs, openSet],
+  );
+  const techs = activeTechs;
+  const closedOut = allTechs.length - activeTechs.length;
 
   const groupRoll = useMemo(() => {
     const roll: Record<string, { count: number; dollars: number; stages: Record<string, number> }> = {};
@@ -271,7 +292,7 @@ export default function RightsizeTracker() {
       const g = rowGroup(t);
       const rate = t.daily_rate == null ? null : Number(t.daily_rate);
       roll[g.key].count += 1;
-      roll[g.key].dollars += techMonthly(t.stage, rate);
+      roll[g.key].dollars += techMonthly(rate);
       // The two NON_RESPONDER rows would both read "NON_RESPONDER n", which says
       // nothing. Break them down by van status instead — that IS the reason.
       const mixKey = g.stages.length === 1 && g.workload ? (t.van_status_label ?? t.van_status ?? "unknown") : t.stage;
@@ -317,7 +338,7 @@ export default function RightsizeTracker() {
       vehicle: (t) => t.vehicle,
       class: (t) => t.car_class,
       rate: (t) => (t.daily_rate == null ? null : Number(t.daily_rate)),
-      monthly: (t) => techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate)),
+      monthly: (t) => techMonthly(t.daily_rate == null ? null : Number(t.daily_rate)),
       lastreply: (t) => t.last_inbound_at_s,
       van: (t) => t.van_status_label,
       flag: (t) => (isAwaiting(t) ? 0 : 1),
@@ -360,7 +381,7 @@ export default function RightsizeTracker() {
   const awaitingStale = awaiting.filter((t) => Date.now() - new Date(t.last_inbound_at_s!).getTime() > 24 * 36e5).length;
 
   const totalDollars = GROUPS.reduce((s, g) => s + groupRoll[g.key].dollars, 0);
-  const shownDollars = useMemo(() => sorted.reduce((s, t) => s + techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate)), 0), [sorted]);
+  const shownDollars = useMemo(() => sorted.reduce((s, t) => s + techMonthly(t.daily_rate == null ? null : Number(t.daily_rate)), 0), [sorted]);
   const deltaSecured = yk && k ? k.securedMonthly - yk.securedMonthly : null;
   const activeFilters = groupF.length + stageF.length + districtF.length + tlF.length + roundF.length + classF.length + sourceF.length + vanF.length + flagF.length + (q.trim() ? 1 : 0);
   const clearAll = () => { setQ(""); setGroupF([]); setStageF([]); setDistrictF([]); setTlF([]); setRoundF([]); setClassF([]); setSourceF([]); setVanF([]); setFlagF([]); };
@@ -390,7 +411,7 @@ export default function RightsizeTracker() {
       t.ldap, t.tech_name ?? "", t.stage, rowGroup(t).label,
       t.workload ?? "", t.own_truck ?? "", t.van_status_label ?? "", isAwaiting(t) ? "YES" : "",
       t.district ?? "", t.round ?? "", t.tl_name ?? "", t.vehicle ?? "", t.car_class ?? "", t.daily_rate ?? "",
-      Math.round(techMonthly(t.stage, t.daily_rate == null ? null : Number(t.daily_rate))),
+      Math.round(techMonthly(t.daily_rate == null ? null : Number(t.daily_rate))),
       t.stage_source ?? "", t.last_inbound_at_s ?? "", (t.decisive_text ?? t.last_inbound_text ?? "").slice(0, 200),
     ].map((c) => esc(String(c))).join(","));
     const csv = [head.join(","), ...body].join("\r\n");
@@ -548,10 +569,17 @@ export default function RightsizeTracker() {
         </table>
       </div>
 
-      {/* Awaiting our reply — full width. The verification queue is gone: DONE and
-          RETURNED are no longer the number of record, so there is nothing to
-          "confirm" into secured. Compliance comes from the Enterprise vehicle
-          column in the header above. */}
+      {closedOut > 0 && (
+        <div style={{ marginTop: 8, fontSize: 11, color: colors.inkMuted }}>
+          {closedOut} campaign {closedOut === 1 ? "row is" : "rows are"} hidden — no open rental on today's
+          Enterprise feed, so there is nothing left to right-size.
+        </div>
+      )}
+
+      {/* Awaiting our reply — full width. The verification queue is gone: DONE is
+          no longer the number of record, so there is nothing to "confirm" into
+          secured. Compliance comes from the Enterprise vehicle column in the
+          header above. */}
       <div style={{ marginTop: 16 }}>
         <section style={{ border: `1px solid ${colors.purple}`, borderRadius: 10, padding: 12 }}>
           <div style={{ ...label, color: colors.purple }}>Awaiting our reply ({awaiting.length}) — nobody gets ignored</div>
@@ -647,7 +675,7 @@ export default function RightsizeTracker() {
                   <td style={td} title={t.vehicle ?? ""}>{t.vehicle ?? "—"}</td>
                   <td style={td}>{t.car_class ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains }}>{rate != null ? `$${rate.toFixed(0)}` : "—"}</td>
-                  <td style={{ ...td, fontFamily: fonts.jetbrains }}>{money0(techMonthly(t.stage, rate))}</td>
+                  <td style={{ ...td, fontFamily: fonts.jetbrains }}>{money0(techMonthly(rate))}</td>
                   <td style={{ ...td, fontSize: 11.5 }} title={t.tl_name ?? ""}>{t.tl_name ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 11 }}>{fmtAge(t.last_inbound_at_s)}</td>
                   <td style={{ ...td, fontSize: 11 }} title={`${t.own_truck ?? "no truck"} · ${t.ams_status ?? "no AMS status"}`}>
