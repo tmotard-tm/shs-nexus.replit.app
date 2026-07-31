@@ -396,6 +396,75 @@ export async function classifyInboundNow(messageId: string): Promise<ProcessResu
 
 // ----------------------------------------------------------- batch safety net
 
+/**
+ * Pull the vehicle, class and rate for every tracked technician straight from
+ * the rental book, so the tracker GRID can never disagree with the header and
+ * chart above it.
+ *
+ * WHY THIS EXISTS. `vrm_rightsize_techs.vehicle / car_class / daily_rate` were
+ * written once when the campaign was seeded on 2026-07-09 and never touched
+ * again, because "Sync now" only ever pulled SMS replies. By 7/31 that snapshot
+ * disagreed with the live book on 143 of 239 active rows: the grid still showed
+ * technicians sitting in pickups who had already swapped into sedans, while the
+ * chart counted them correctly. Two numbers, one screen, opposite answers.
+ *
+ * The values come from computeCompliance() rather than a fresh query ON PURPOSE.
+ * That is the exact function the header and chart read, identity resolution and
+ * all, so the grid agrees BY CONSTRUCTION instead of by two implementations
+ * happening to land on the same answer. Do not "optimise" this into a direct
+ * SELECT on vrm_rental_operations_cases; that fork is the bug this repairs.
+ *
+ * Only rows with a live rental are touched. Roster rows whose rental has closed
+ * keep their last-known values: they are already hidden from the page by the
+ * active-rental filter, and blanking them would silently move securedMonthly /
+ * addressableMonthly, which is a separate figure still under review.
+ */
+export async function refreshRentalFactsFromBook(): Promise<{ updated: number; tracked: number }> {
+  const { computeCompliance } = await import("./compliance");
+  const { rows } = await computeCompliance();
+
+  // One row per technician. A tech holding two open rentals gets the dearer one,
+  // because that is the one worth chasing.
+  const best = new Map<string, { vehicle: string | null; carClass: string | null; rate: number }>();
+  for (const r of rows) {
+    if (r.source !== "enterprise" || !r.ldap) continue;
+    const k = String(r.ldap).toUpperCase();
+    const cur = best.get(k);
+    if (!cur || r.rate > cur.rate) best.set(k, { vehicle: r.vehicle, carClass: r.carClass, rate: r.rate });
+  }
+
+  // Fail CLOSED on an empty book. A feed outage must leave the grid showing its
+  // last known truth, never blank it and imply everybody gave their rental back.
+  if (best.size === 0) {
+    console.warn("[VRM/Rightsize] rental book resolved 0 rentals - leaving the grid untouched.");
+    return { updated: 0, tracked: 0 };
+  }
+
+  const values = sql.join(
+    Array.from(best.entries()).map(
+      ([ldap, v]) => sql`(${ldap}, ${v.vehicle}, ${v.carClass}, ${String(v.rate)}::numeric)`,
+    ),
+    sql`, `,
+  );
+  // RETURNING rather than rowCount: the count is then driver-agnostic.
+  const res = await db.execute(sql`
+    UPDATE vrm_rightsize_techs t
+       SET vehicle = b.vehicle, car_class = b.car_class, daily_rate = b.rate, updated_at = NOW()
+      FROM (VALUES ${values}) AS b(ldap, vehicle, car_class, rate)
+     WHERE upper(t.ldap) = b.ldap
+       AND (t.vehicle    IS DISTINCT FROM b.vehicle
+         OR t.car_class  IS DISTINCT FROM b.car_class
+         OR t.daily_rate IS DISTINCT FROM b.rate)
+    RETURNING 1
+  `);
+  const updated = ((res as any)?.rows ?? []).length;
+  console.log(
+    `[VRM/Rightsize] rental facts refreshed from the book: ${updated} row(s) corrected, ` +
+      `${best.size} technicians tracked with a live rental.`,
+  );
+  return { updated, tracked: best.size };
+}
+
 export async function runRightsizeSync(opts: { trigger: string }): Promise<any> {
   const lock = await db.execute(sql`SELECT pg_try_advisory_lock(${LOCK_KEY}) AS ok`);
   if (!(lock.rows[0] as any)?.ok) return { skipped: true, reason: "another sync holds the lock" };
@@ -457,12 +526,18 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
       ON CONFLICT (k) DO UPDATE SET v = EXCLUDED.v, updated_at = NOW()
     `);
 
+    // Re-point the grid at the rental book BEFORE the KPIs are computed, so the
+    // snapshot written below reflects the corrected rows rather than the stale ones.
+    const rentalFacts = await refreshRentalFactsFromBook();
+
     const kpis = await computeKpis();
     await db.execute(sql`INSERT INTO vrm_rightsize_snapshots (trigger, kpis) VALUES (${opts.trigger}, ${JSON.stringify(kpis)}::jsonb)`);
     const result = {
       ok: true, trigger: opts.trigger, newMessages: msgs.rows.length,
       processed, advanced, flagged, untracked, unmatched,
-      alreadyDone, errors, llmCalls, watermark: newWatermark, kpis,
+      alreadyDone, errors, llmCalls, watermark: newWatermark,
+      rentalFactsUpdated: rentalFacts.updated, rentalFactsTracked: rentalFacts.tracked,
+      kpis,
     };
     console.log("[VRM/Rightsize] sync:", JSON.stringify({ ...result, kpis: undefined }));
     return result;

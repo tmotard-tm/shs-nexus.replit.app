@@ -44,6 +44,7 @@
  * the tpms_* mirrors. Nothing here writes to the existing tracker tables.
  */
 import { db } from "../../db";
+import { VAN_STATUS_JOIN, VAN_STATUS_COLUMNS, vanFieldsOf, type VanStatusRow } from "./workload";
 import { sql } from "drizzle-orm";
 
 /** Top of the sedan rate band on the ARI report. Rates cluster at or below
@@ -145,6 +146,65 @@ const nameTokens = (s: unknown) =>
 export const modelKey = (vehDesc: unknown) =>
   String(vehDesc ?? "").toUpperCase().trim().replace(/^\d{2,4}\s+/, "").replace(/\s+/g, " ").trim();
 
+/**
+ * The MECE row every OPEN RENTAL lands in, in certainty order.
+ *
+ * This is the unit the board is scored on. The old stage table counted campaign
+ * roster TECHNICIANS, so it summed to a different number than the header and
+ * could not see the 65 open rentals that were never in the campaign at all.
+ * One rental, one bucket, and the buckets sum to the open book exactly.
+ */
+export type ComplianceBucket =
+  | "rightsized"    // the vehicle or the rate already proves it
+  | "committed"     // they said they will
+  | "blocked"       // equipment / branch stock / process is in the way
+  | "followup"      // they asked something, or the reply contradicts the book
+  | "cannotwork"    // van at auction, repair declined, or already on a spare
+  | "silent"        // texted, never answered, and the ask is valid
+  | "nevertexted";  // no outreach has ever gone out on this rental
+
+const PUSHBACK = new Set(["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"]);
+const FOLLOWUP = new Set(["QUESTION", "PASS_EXCUSED", "NEW_REPLY", "RETURNED"]);
+
+/**
+ * RETURNED sits in `followup` on purpose. A technician who told us the rental
+ * went back while the Enterprise book still shows it open is a reconcile item
+ * worth real money, not a closed row. The old board filed those at $0.
+ *
+ * cannot_work is checked only AFTER the reply buckets: a tech who committed or
+ * pushed back gave us a usable answer, and the van's fate does not change what
+ * to do next. It is checked BEFORE `silent` because telling a Team Lead to
+ * chase a man whose van is at auction burns credibility (see ./workload.ts).
+ */
+function bucketOf(
+  compliant: boolean,
+  smsStage: string | null,
+  workload: "cannot_work" | "workable" | null,
+  outbound: number,
+): ComplianceBucket {
+  if (compliant) return "rightsized";
+  if (smsStage === "COMMITTED") return "committed";
+  if (smsStage && PUSHBACK.has(smsStage)) return "blocked";
+  if (smsStage && FOLLOWUP.has(smsStage)) return "followup";
+  if (workload === "cannot_work") return "cannotwork";
+  return outbound > 0 ? "silent" : "nevertexted";
+}
+
+export const BUCKET_META: Record<ComplianceBucket, { label: string; mix: string; next: string }> = {
+  rightsized:  { label: "Right-sized",                          mix: "sedan rate, sedan model, or confirmed by the tech", next: "Holding. Re-verify against the Enterprise feed each morning — Tyler, daily" },
+  committed:   { label: "Committed",                            mix: "said yes, swap not on the book yet",                next: "Chase each dated commitment the day it lapses — Tyler, daily" },
+  blocked:     { label: "Blocked",                              mix: "equipment, branch stock, or process",               next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 8/5" },
+  followup:    { label: "Follow-up",                            mix: "open question, or reply contradicts the book",       next: "Answer same-day; reconcile every RETURNED against Enterprise — Rob Anderson, 8/1" },
+  cannotwork:  { label: "Cannot work · auction, declined, spare", mix: "the right-size ask itself is wrong",              next: "No TL escalation. Route to vehicle replacement or rental return — Tyler w/ Rob Anderson, 8/4" },
+  silent:      { label: "No response · can act",                mix: "texted, never answered",                            next: "TL escalation + next blast wave — Tyler, 8/1" },
+  nevertexted: { label: "Never texted",                         mix: "opened after the campaign froze on 7/9",             next: "Add to the next blast wave — Tyler, 8/1" },
+};
+
+/** Certainty order. Drives the bar, the pills and the table. */
+export const BUCKET_ORDER: ComplianceBucket[] = [
+  "rightsized", "committed", "blocked", "followup", "cannotwork", "silent", "nevertexted",
+];
+
 export type ComplianceRow = {
   caseKey: string | null;
   ticket: string | null;
@@ -166,6 +226,7 @@ export type ComplianceRow = {
   isHvac: boolean;
   compliant: boolean;
   compliantBy: "rate" | "model" | "both" | "sms" | null;
+  bucket: ComplianceBucket;
   smsStage: string | null;
   smsConfirmed: boolean;
   monthlyOverSedan: number;
@@ -199,7 +260,11 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     db.execute(sql`SELECT ldap, name, truck_number, phone_digits, manager_name, primary_state, district FROM fs_comms_contacts`),
     db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu FROM all_techs`),
     db.execute(sql`SELECT truck_no, enterprise_id FROM tpms_last_known_truck_tech`),
-    db.execute(sql`SELECT upper(ldap) AS ldap, stage FROM vrm_rightsize_techs`),
+    db.execute(sql`
+      SELECT upper(t.ldap) AS ldap, t.stage, ${VAN_STATUS_COLUMNS}
+      FROM vrm_rightsize_techs t
+      ${VAN_STATUS_JOIN}
+    `),
     db.execute(sql`
       SELECT upper(ldap) AS ldap,
              count(*) FILTER (WHERE direction = 'outbound') AS outbound,
@@ -231,7 +296,12 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
   const cByLdap = new Map(rowsOf(contacts).map((c) => [String(c.ldap).toUpperCase(), c]));
   const tByLdap = new Map(rowsOf(techs).map((t) => [String(t.ldap).toUpperCase(), t]));
   const mByLdap = new Map(rowsOf(msgAgg).map((m) => [String(m.ldap).toUpperCase(), m]));
-  const stageByLdap = new Map(rowsOf(trackerStages).map((r) => [String(r.ldap).toUpperCase(), String(r.stage ?? "")]));
+  const stageByLdap = new Map(
+    rowsOf(trackerStages).map((r) => [
+      String(r.ldap).toUpperCase(),
+      { stage: String(r.stage ?? ""), workload: vanFieldsOf(r as VanStatusRow).workload },
+    ]),
+  );
 
   const out: ComplianceRow[] = [];
   for (const k of rowsOf(cases)) {
@@ -251,7 +321,8 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     const byRate = rate > 0 && rate <= SEDAN_RATE_CEILING;
     const byModel = mk.length > 0 && sedanSet.has(mk);
     // Third test: the technician said the swap is done. RETURNED is NOT credited.
-    const smsStage = ldap ? (stageByLdap.get(ldap) ?? null) : null;
+    const tracked = ldap ? (stageByLdap.get(ldap) ?? null) : null;
+    const smsStage = tracked?.stage ?? null;
     const smsConfirmed = smsStage === "DONE";
     const compliant = byRate || byModel || smsConfirmed;
 
@@ -284,6 +355,7 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
       compliantBy: compliant
         ? (byRate && byModel ? "both" : byRate ? "rate" : byModel ? "model" : "sms")
         : null,
+      bucket: bucketOf(compliant, smsStage, tracked?.workload ?? null, outbound),
       smsStage,
       smsConfirmed,
       monthlyOverSedan: compliant ? 0 : Math.round(Math.max(rate - 54.99, 0) * 30 * 100) / 100,
@@ -307,6 +379,28 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
   const nonEnt = out.filter((r) => r.source !== "enterprise");
   const comp = ent.filter((r) => r.compliant);
   const notComp = ent.filter((r) => !r.compliant);
+  /**
+   * Buckets are computed BEFORE the KPI object so monthlyOverSedan can be the
+   * SUM OF THE BUCKETS rather than an independently-rounded total. Rounding each
+   * bucket and then rounding the whole separately left the chart $1 off the
+   * header, which is exactly the kind of drift that costs a number its
+   * credibility in a room.
+   */
+  const bucketRollup = BUCKET_ORDER.map((key) => {
+    const b = ent.filter((r) => r.bucket === key);
+    return {
+      key,
+      label: BUCKET_META[key].label,
+      mix: BUCKET_META[key].mix,
+      next: BUCKET_META[key].next,
+      rentals: b.length,
+      monthly: Math.round(b.reduce((a, r) => a + r.monthlyOverSedan, 0)),
+      daily: Math.round(b.reduce((a, r) => a + r.rate, 0)),
+      hvac: b.filter((r) => r.isHvac).length,
+    };
+  });
+  const bucketMonthlyTotal = bucketRollup.reduce((a, b) => a + b.monthly, 0);
+
   const kpis = {
     totalOpen: ent.length,
     nonEnterpriseOpen: nonEnt.length,
@@ -334,9 +428,16 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     unresolvedIdentity: ent.filter((r) => !r.ldap).length,
     dailySpend: Math.round(ent.reduce((a, r) => a + r.rate, 0)),
     notCompliantDaily: Math.round(notComp.reduce((a, r) => a + r.rate, 0)),
-    monthlyOverSedan: Math.round(notComp.reduce((a, r) => a + r.monthlyOverSedan, 0)),
+    monthlyOverSedan: bucketMonthlyTotal,  // == Σ buckets, by construction
     sedanRateCeiling: SEDAN_RATE_CEILING,
     sedanModelCount: sedanSet.size,
+    /**
+     * The chart. One row per bucket over the OPEN ENTERPRISE BOOK, so
+     * Σ rentals === totalOpen and Σ monthly === monthlyOverSedan exactly.
+     * `rightsized` carries $0 by construction, which is the point: the dollars
+     * on this chart are what is still leaking, not what has been fixed.
+     */
+    buckets: bucketRollup,
   };
   return { rows: out, kpis };
 }

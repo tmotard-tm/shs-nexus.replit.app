@@ -1,9 +1,13 @@
 /**
  * VRM Rightsize Tracker — the rental right-size initiative board.
  *
- * Live view of the SMS campaign: verified stages (hand-confirmed) vs
- * field-reported unverified movement, refreshed on a background poll from the
- * Fleet Communications module so the huddle deck always has current numbers.
+ * TWO units on this page, deliberately separated:
+ *   1. The EXEC LAYER (governing thought, KPI cards, stacked bar, MECE table)
+ *      renders the server's per-RENTAL buckets (kpis.buckets from
+ *      /rightsize/compliance). Unit = open Enterprise rentals. It sums to the
+ *      compliance header exactly — these are the numbers on Tyler's slides.
+ *   2. The ROSTER GRID below it is the SMS-campaign work surface. Unit =
+ *      campaign technicians. It drives outreach, never the compliance math.
  * Reads /api/vrm/rightsize/* only.
  *
  * Grid standard (mandatory baseline across VRM): every column header is a
@@ -50,7 +54,14 @@ interface ComplianceKpis {
   dailySpend: number; notCompliantDaily: number; monthlyOverSedan: number;
   sedanRateCeiling: number; sedanModelCount: number;
   nonEnterpriseOpen: number; nonEnterpriseDaily: number;
+  /**
+   * One row per MECE bucket of OPEN ENTERPRISE RENTALS, in certainty order.
+   * Server-rolled so Σ rentals === totalOpen and Σ monthly === monthlyOverSedan
+   * by construction — the chart cannot drift from the header.
+   */
+  buckets?: Array<{ key: string; label: string; mix: string; next: string; rentals: number; monthly: number; daily: number; hvac: number }>;
 }
+type BucketRow = NonNullable<ComplianceKpis["buckets"]>[number];
 interface TechRow {
   ldap: string; tech_name: string | null; position: string | null; phone_digits: string | null;
   district: string | null; tl_name: string | null; round: number;
@@ -70,38 +81,53 @@ interface SortState { col: string | null; dir: SortDir }
 
 const SEDAN_FLOOR = 54.99;
 /**
- * MECE rows in certainty order. `stages` matches the verified stage; the
- * optional `workload` narrows a row to one side of the van-status split, which
- * is how "No response" stops counting techs whose van is at auction, declined,
- * or already replaced by a spare. Every tech still lands in exactly one row and
- * every dollar is still counted once — the split is presentation, not math.
+ * SMS-stage grouping for the ROSTER GRID ONLY: stage badge colours, the stage
+ * sort order, and the CSV `group` column. The exec layer (bar, legend, MECE
+ * table) does NOT derive from these any more — it renders the server's
+ * per-rental buckets so it can never sum to a different total than the header.
+ * `stages` matches the verified stage; the optional `workload` narrows a row
+ * to one side of the van-status split.
  */
-const GROUPS: Array<{ key: string; label: string; stages: string[]; workload?: "cannot_work" | "workable"; fg: string; bg: string; next: string }> = [
-  { key: "swapped", label: "Swapped into a sedan", stages: ["DONE"], fg: colors.green, bg: colors.greenLight, next: "Confirm on the Enterprise vehicle column — compliance header above is the number of record" },
-  { key: "committed", label: "Committed", stages: ["COMMITTED"], fg: colors.blue, bg: colors.blueLight, next: "Chase dated commitments as they lapse — tracker flags, Tyler approves nudges daily" },
-  { key: "blocked", label: "Blocked", stages: ["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"], fg: colors.amber, bg: colors.amberLight, next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 7/22" },
-  { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY", "RETURNED"], fg: colors.purple, bg: colors.purpleLight, next: "Answer every open question same-day — see Awaiting reply" },
-  { key: "silent", label: "No response · can act", stages: ["NON_RESPONDER"], workload: "workable", fg: colors.red, bg: colors.redLight, next: "TL escalation + next blast wave — Tyler, 7/22" },
-  { key: "cannotwork", label: "Cannot work · van at auction, declined, or spare", stages: ["NON_RESPONDER"], workload: "cannot_work", fg: colors.inkMuted, bg: colors.surface, next: "No right-size ask and no TL escalation — route to vehicle replacement / rental return — Tyler w/ Rob Anderson, 7/24" },
+const GROUPS: Array<{ key: string; label: string; stages: string[]; workload?: "cannot_work" | "workable"; fg: string; bg: string }> = [
+  { key: "swapped", label: "Swapped into a sedan", stages: ["DONE"], fg: colors.green, bg: colors.greenLight },
+  { key: "committed", label: "Committed", stages: ["COMMITTED"], fg: colors.blue, bg: colors.blueLight },
+  { key: "blocked", label: "Blocked", stages: ["PUSHBACK_EQUIP", "PUSHBACK_STOCK", "PUSHBACK_PROCESS"], fg: colors.amber, bg: colors.amberLight },
+  { key: "followup", label: "Follow-up", stages: ["QUESTION", "PASS_EXCUSED", "NEW_REPLY", "RETURNED"], fg: colors.purple, bg: colors.purpleLight },
+  { key: "silent", label: "No response · can act", stages: ["NON_RESPONDER"], workload: "workable", fg: colors.red, bg: colors.redLight },
+  { key: "cannotwork", label: "Cannot work · van at auction, declined, or spare", stages: ["NON_RESPONDER"], workload: "cannot_work", fg: colors.inkMuted, bg: colors.surface },
 ];
-/** colour lookup by stage alone (badges); the No-response colour is the default. */
-const stageGroup = (s: string) => GROUPS.find((g) => g.stages.includes(s)) ?? GROUPS[4];
-/** the MECE row a tech belongs to — stage AND van-status workload. */
+/** the roster row a tech belongs to — stage AND van-status workload. */
 // Fallback by KEY, never by index: deleting a group used to silently re-home
 // every unmatched stage into whatever happened to sit at GROUPS[4].
 const FALLBACK_GROUP = GROUPS.find((g) => g.key === "followup")!;
 const rowGroup = (t: TechRow) =>
   GROUPS.find((g) => g.stages.includes(t.stage) && (!g.workload || g.workload === (t.workload ?? "workable"))) ?? FALLBACK_GROUP;
-// certainty order (Secured → Cannot work); drives both the MECE table and the stage sort
+// certainty order; drives the grid's stage sort + stage-filter option ordering
 const STAGE_ORDER = Array.from(new Set(GROUPS.flatMap((g) => g.stages)));
+/**
+ * Exec-layer colours by bucket key. The buckets themselves (labels, counts,
+ * dollars, next actions) come from the server; colour is the only client-side
+ * decision. Right-sized green → Never-texted deep red mirrors certainty order.
+ */
+const BUCKET_COLORS: Record<string, { fg: string; bg: string }> = {
+  rightsized:  { fg: colors.green,    bg: colors.greenLight },
+  committed:   { fg: colors.blue,     bg: colors.blueLight },
+  blocked:     { fg: colors.amber,    bg: colors.amberLight },
+  followup:    { fg: colors.purple,   bg: colors.purpleLight },
+  cannotwork:  { fg: colors.inkMuted, bg: colors.surface },
+  silent:      { fg: colors.red,      bg: colors.redLight },
+  nevertexted: { fg: colors.redDeep,  bg: colors.redDeepLight },
+};
+const bucketColor = (key: string) => BUCKET_COLORS[key] ?? { fg: colors.inkMuted, bg: colors.surface };
 const stageRank = (s: string) => { const i = STAGE_ORDER.indexOf(s); return i < 0 ? 999 : i; };
 const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
 /**
- * Monthly value of a row. Everyone on this page holds an open rental on the
- * current Enterprise feed, so the overage is real money regardless of what the
- * technician told us over SMS. The old RETURNED→$0 special case is gone with
- * the RETURNED group: people who gave a rental back are not a stage to track,
- * they are simply absent from the list.
+ * Raw monthly overage of a tracked daily rate above the sedan floor. The old
+ * RETURNED→$0 special case is gone with the RETURNED group: people who gave a
+ * rental back are not a stage to track, they are simply absent from the list.
+ * NOTE the grid renders rowMonthly() (in the component), which credits
+ * right-size-confirmed technicians $0 to match the compliance engine — the
+ * roster rate is the reservation basis, not the invoice.
  */
 const techMonthly = (rate: number | null) => {
   if (rate == null || !(rate > 0)) return 0;
@@ -221,7 +247,6 @@ export default function RightsizeTracker() {
   // ── user view state — deliberately plain useState so the background refetch
   //    (which only replaces query cache data) never clobbers it ──────────────
   const [q, setQ] = useState("");
-  const [groupF, setGroupF] = useState<string[]>([]);     // coarse certainty groups (pills, multi)
   const [stageF, setStageF] = useState<string[]>([]);     // individual stages
   const [districtF, setDistrictF] = useState<string[]>([]);
   const [tlF, setTlF] = useState<string[]>([]);
@@ -259,6 +284,29 @@ export default function RightsizeTracker() {
     () => new Set((comp?.openLdaps ?? []).map((l) => String(l).toUpperCase())),
     [comp],
   );
+  /**
+   * Exec-layer rows: one per MECE bucket of open Enterprise rentals, rolled up
+   * on the server so the bar and the table sum to the header exactly.
+   */
+  const buckets = useMemo<BucketRow[]>(() => ck?.buckets ?? [], [ck]);
+  const bucketRentalTotal = useMemo(() => buckets.reduce((s, b) => s + b.rentals, 0), [buckets]);
+  const bucketDollarTotal = useMemo(() => buckets.reduce((s, b) => s + b.monthly, 0), [buckets]);
+  // The header's never-texted sentence reads the BUCKET, not kpis.neverContacted,
+  // so the sentence and the table row are one number by construction. (They are
+  // computed by slightly different predicates server-side; the bucket wins.)
+  const neverTexted = buckets.find((b) => b.key === "nevertexted");
+  /**
+   * $ / month a GRID row still leaks. Matches the engine's rule that compliant
+   * rows carry $0: a right-size-confirmed technician shows no leak even if the
+   * roster still carries an oversized reservation rate.
+   */
+  const rowMonthly = useMemo(
+    () => (t: TechRow) =>
+      compliantSet.has(String(t.ldap).toUpperCase())
+        ? 0
+        : techMonthly(t.daily_rate == null ? null : Number(t.daily_rate)),
+    [compliantSet],
+  );
   const { data: techsData } = useQuery<{ techs: TechRow[] }>({ queryKey: ["/api/vrm/rightsize/techs"], refetchInterval: 120_000 });
 
   const syncMut = useMutation({
@@ -285,29 +333,12 @@ export default function RightsizeTracker() {
   const techs = activeTechs;
   const closedOut = allTechs.length - activeTechs.length;
 
-  const groupRoll = useMemo(() => {
-    const roll: Record<string, { count: number; dollars: number; stages: Record<string, number> }> = {};
-    for (const g of GROUPS) roll[g.key] = { count: 0, dollars: 0, stages: {} };
-    for (const t of techs) {
-      const g = rowGroup(t);
-      const rate = t.daily_rate == null ? null : Number(t.daily_rate);
-      roll[g.key].count += 1;
-      roll[g.key].dollars += techMonthly(rate);
-      // The two NON_RESPONDER rows would both read "NON_RESPONDER n", which says
-      // nothing. Break them down by van status instead — that IS the reason.
-      const mixKey = g.stages.length === 1 && g.workload ? (t.van_status_label ?? t.van_status ?? "unknown") : t.stage;
-      roll[g.key].stages[mixKey] = (roll[g.key].stages[mixKey] || 0) + 1;
-    }
-    return roll;
-  }, [techs]);
-
   // One predicate for every filter. `skip` lets each dropdown count its own
   // options against everything EXCEPT itself, so counts stay live and honest.
   const passes = useMemo(() => {
     const qq = q.trim().toUpperCase();
     return (t: TechRow, skip?: string) => {
       if (skip !== "q" && qq && !(`${t.ldap} ${t.tech_name ?? ""} ${t.tl_name ?? ""} ${t.district ?? ""} ${t.vehicle ?? ""} ${t.car_class ?? ""}`.toUpperCase().includes(qq))) return false;
-      if (skip !== "group" && groupF.length && !groupF.includes(rowGroup(t).key)) return false;
       if (skip !== "stage" && stageF.length && !stageF.includes(t.stage)) return false;
       if (skip !== "van" && vanF.length && !vanF.includes(t.van_status_label ?? "")) return false;
       if (skip !== "district" && districtF.length && !districtF.includes(t.district ?? "")) return false;
@@ -323,7 +354,7 @@ export default function RightsizeTracker() {
       }
       return true;
     };
-  }, [q, groupF, stageF, districtF, tlF, roundF, classF, sourceF, vanF, flagF]);
+  }, [q, stageF, districtF, tlF, roundF, classF, sourceF, vanF, flagF]);
 
   const filtered = useMemo(() => techs.filter((t) => passes(t)), [techs, passes]);
 
@@ -338,7 +369,7 @@ export default function RightsizeTracker() {
       vehicle: (t) => t.vehicle,
       class: (t) => t.car_class,
       rate: (t) => (t.daily_rate == null ? null : Number(t.daily_rate)),
-      monthly: (t) => techMonthly(t.daily_rate == null ? null : Number(t.daily_rate)),
+      monthly: (t) => rowMonthly(t),
       lastreply: (t) => t.last_inbound_at_s,
       van: (t) => t.van_status_label,
       flag: (t) => (isAwaiting(t) ? 0 : 1),
@@ -346,7 +377,7 @@ export default function RightsizeTracker() {
     };
     const cmp = sort.col ? makeSortComparator<TechRow>(acc[sort.col] ?? ((t) => (t as any)[sort.col!]), sort.dir) : null;
     return cmp ? [...filtered].sort(cmp) : filtered;
-  }, [filtered, sort]);
+  }, [filtered, sort, rowMonthly]);
 
   // filter option lists — counted against the rest of the active filter set
   const opts = useMemo(() => {
@@ -380,28 +411,23 @@ export default function RightsizeTracker() {
   );
   const awaitingStale = awaiting.filter((t) => Date.now() - new Date(t.last_inbound_at_s!).getTime() > 24 * 36e5).length;
 
-  const totalDollars = GROUPS.reduce((s, g) => s + groupRoll[g.key].dollars, 0);
-  const shownDollars = useMemo(() => sorted.reduce((s, t) => s + techMonthly(t.daily_rate == null ? null : Number(t.daily_rate)), 0), [sorted]);
+  const shownDollars = useMemo(() => sorted.reduce((s, t) => s + rowMonthly(t), 0), [sorted, rowMonthly]);
   const deltaSecured = yk && k ? k.securedMonthly - yk.securedMonthly : null;
-  const activeFilters = groupF.length + stageF.length + districtF.length + tlF.length + roundF.length + classF.length + sourceF.length + vanF.length + flagF.length + (q.trim() ? 1 : 0);
-  const clearAll = () => { setQ(""); setGroupF([]); setStageF([]); setDistrictF([]); setTlF([]); setRoundF([]); setClassF([]); setSourceF([]); setVanF([]); setFlagF([]); };
-  const toggleIn = (vals: string[], key: string) => (vals.includes(key) ? vals.filter((v) => v !== key) : [...vals, key]);
+  const activeFilters = stageF.length + districtF.length + tlF.length + roundF.length + classF.length + sourceF.length + vanF.length + flagF.length + (q.trim() ? 1 : 0);
+  const clearAll = () => { setQ(""); setStageF([]); setDistrictF([]); setTlF([]); setRoundF([]); setClassF([]); setSourceF([]); setVanF([]); setFlagF([]); };
 
-  // MECE group rows, certainty order by default, sortable on demand
-  const groupRows = useMemo(() => {
-    const rows = GROUPS.map((g, i) => ({
-      ...g, rank: i,
-      count: groupRoll[g.key].count,
-      dollars: groupRoll[g.key].dollars,
-      pct: totalDollars > 0 ? (groupRoll[g.key].dollars / totalDollars) * 100 : 0,
-      mix: Object.entries(groupRoll[g.key].stages).sort((a, b) => stageRank(a[0]) - stageRank(b[0])),
+  // MECE bucket rows (unit: RENTALS) — certainty order by default, sortable
+  const bucketRows = useMemo(() => {
+    const rows = buckets.map((b, i) => ({
+      ...b, rank: i, ...bucketColor(b.key),
+      pct: bucketDollarTotal > 0 ? (b.monthly / bucketDollarTotal) * 100 : 0,
     }));
     const acc: Record<string, (r: (typeof rows)[number]) => unknown> = {
-      gstage: (r) => r.rank, gcount: (r) => r.count, gdollars: (r) => r.dollars, gpct: (r) => r.pct, gnext: (r) => r.next,
+      gstage: (r) => r.rank, grentals: (r) => r.rentals, gdollars: (r) => r.monthly, gpct: (r) => r.pct, gnext: (r) => r.next,
     };
     const cmp = groupSort.col ? makeSortComparator<(typeof rows)[number]>(acc[groupSort.col] ?? ((r) => (r as any)[groupSort.col!]), groupSort.dir) : null;
     return cmp ? [...rows].sort(cmp) : rows;
-  }, [groupRoll, totalDollars, groupSort]);
+  }, [buckets, bucketDollarTotal, groupSort]);
 
   // CSV = exactly what is on screen: current filter set, current sort order.
   const exportCsv = () => {
@@ -411,7 +437,7 @@ export default function RightsizeTracker() {
       t.ldap, t.tech_name ?? "", t.stage, rowGroup(t).label,
       t.workload ?? "", t.own_truck ?? "", t.van_status_label ?? "", isAwaiting(t) ? "YES" : "",
       t.district ?? "", t.round ?? "", t.tl_name ?? "", t.vehicle ?? "", t.car_class ?? "", t.daily_rate ?? "",
-      Math.round(techMonthly(t.daily_rate == null ? null : Number(t.daily_rate))),
+      Math.round(rowMonthly(t)),
       t.stage_source ?? "", t.last_inbound_at_s ?? "", (t.decisive_text ?? t.last_inbound_text ?? "").slice(0, 200),
     ].map((c) => esc(String(c))).join(","));
     const csv = [head.join(","), ...body].join("\r\n");
@@ -452,48 +478,47 @@ export default function RightsizeTracker() {
       {ck && (
         <div style={{ marginTop: 10, fontSize: 15 }}>
           <b>{ck.compliant}</b> of <b>{ck.totalOpen}</b> open rentals are right-sized (<b>{ck.compliantPct}%</b>).
-          {" "}<b>{ck.notCompliant}</b> are not, costing <b>{money0(ck.notCompliantDaily)}</b>/day
-          {" "}(<b>{money0(ck.monthlyOverSedan)}</b>/mo above the sedan floor).
-          {ck.neverContacted > 0 && (
+          {" "}<b>{ck.notCompliant}</b> are not — <b>{money0(ck.monthlyOverSedan)}</b>/mo above the sedan floor
+          {" "}({money0(ck.notCompliantDaily)}/day gross rental spend).
+          {(neverTexted?.rentals ?? ck.neverContacted) > 0 && (
             <span style={{ color: colors.amber, fontWeight: 700 }}>
-              {" "}· {ck.neverContacted} have never been texted ({money0(ck.neverContactedMonthly)}/mo).
+              {" "}· {neverTexted?.rentals ?? ck.neverContacted} have never been texted ({money0(neverTexted?.monthly ?? ck.neverContactedMonthly)}/mo).
             </span>
           )}
           <div style={{ marginTop: 4, fontSize: 12, color: colors.inkSoft }}>
             Right-sized = rate at or below ${ck.sedanRateCeiling}/day, or the rented vehicle is one of {ck.sedanModelCount} confirmed
-            sedan nameplates. Car class is not a test. Returned rentals leave the list automatically, so returns cannot inflate this.
-            {ck.hvacOpen > 0 && <> HVAC still open: <b>{ck.hvacOpen}</b> ({money0(ck.hvacMonthly)}/mo).</>}
-            {ck.nonEnterpriseOpen > 0 && <> Plus {ck.nonEnterpriseOpen} non-Enterprise rentals ({money0(ck.nonEnterpriseDaily)}/day) with no vehicle data, not scored.</>}
+            sedan nameplates, or the technician confirmed the swap by SMS (the ARI report lags the branch by days).
+            Car class is not a test. Returned rentals leave the list automatically, so returns cannot inflate this.
+            {ck.hvacOpen > 0 && <> Of the {ck.notCompliant} remaining, <b>{ck.hvacOpen}</b> are HVAC ({money0(ck.hvacMonthly)}/mo) — excluded
+            from the 7/9 round — leaving <b>{ck.notCompliant - ck.hvacOpen}</b> non-HVAC ({money0(ck.monthlyOverSedan - ck.hvacMonthly)}/mo) Fleet can chase today.</>}
+            {ck.nonEnterpriseOpen > 0 && <> Separately, {ck.nonEnterpriseOpen} non-Enterprise rentals ({money0(ck.nonEnterpriseDaily)}/day) sit
+            OUTSIDE the {ck.totalOpen}-rental denominator — no vehicle data, not scored.</>}
           </div>
         </div>
       )}
 
-      {/* SMS outreach progress — context only, NOT the compliance number */}
+      {/* SMS campaign ledger — a DIFFERENT unit and denominator, said out loud.
+          secured% credits returned rentals at full rate and runs over the
+          frozen 7/9 outreach roster, so it must never be read against the
+          compliance numbers above. Kept because Tyler uses secured%. */}
       {k && (
         <div style={{ marginTop: 10, fontSize: 13, color: colors.inkSoft }}>
-          <span style={{ fontWeight: 700, color: colors.ink }}>SMS outreach:</span>{" "}
-          secured <b>{money0(k.securedMonthly)}</b> of <b>{money0(k.addressableMonthly)}</b>/mo claimed (<b>{k.securedPct}%</b>)
+          <span style={{ fontWeight: 700, color: colors.ink }}>SMS campaign ledger</span>
+          <span style={{ fontSize: 11, color: colors.inkMuted }}> — separate scale: denominator is the {k.universe}-tech outreach
+          roster (not the {ck?.totalOpen ?? "—"}-rental open book) and it credits returned rentals at full rate, which compliance above never does</span>
+          {": "}secured <b>{money0(k.securedMonthly)}</b> of <b>{money0(k.addressableMonthly)}</b>/mo claimed (<b>{k.securedPct}%</b>)
           {deltaSecured != null && deltaSecured !== 0 && <span style={{ color: deltaSecured > 0 ? colors.green : colors.red, fontWeight: 700 }}> {deltaSecured > 0 ? "+" : ""}{money0(deltaSecured)} today</span>}
-          {" · "}{k.proposedSecuredCount > 0 ? <>plus <b>{k.proposedSecuredCount}</b> field-reported swaps/returns worth <b>{money0(k.proposedSecuredMonthly)}</b>/mo pending verification</> : "no unverified movement pending"}
-          {" · "}<b>{k.awaitingReply}</b> techs awaiting our reply.
-          {(k.nonResponderTotal ?? 0) > 0 && (
-            <div style={{ marginTop: 4, fontSize: 12.5, color: colors.inkSoft }}>
-              Truly unanswered: <b>{k.nonResponderActionable}</b> techs worth <b>{money0(k.nonResponderActionableMonthly ?? 0)}</b>/mo.
-              The other <b>{k.nonResponderCannotWork}</b> ({money0(k.nonResponderCannotWorkMonthly ?? 0)}/mo) cannot work the ask — van at
-              auction, repair declined, or already replaced by a spare. Their spend stays in the {money0(k.addressableMonthly)} addressable
-              denominator; this is a next-action split, not a change to the dollar math.
-            </div>
-          )}
+          {" · "}{k.proposedSecuredCount > 0 ? <>plus <b>{k.proposedSecuredCount}</b> field-reported swaps/returns worth <b>{money0(k.proposedSecuredMonthly)}</b>/mo pending verification</> : "no unverified movement pending"}.
         </div>
       )}
 
-      {/* 3 KPI cards */}
-      {k && (
+      {/* 3 KPI cards — right-sized, not-right-sized, share of the open book */}
+      {ck && (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginTop: 14 }}>
           {[
-            { t: "Right-sized", v: ck ? `${ck.compliant} / ${ck.totalOpen}` : "—", s: ck ? `${ck.compliantPct}% of the open rental book` : "loading", fg: colors.green, bg: colors.greenLight },
-            { t: "Not right-sized", v: ck ? `${ck.notCompliant}` : "—", s: ck ? `${money0(ck.notCompliantDaily)}/day · ${money0(ck.monthlyOverSedan)}/mo over floor` : "", fg: colors.red, bg: colors.redLight ?? colors.amberLight },
-            { t: "Never contacted", v: ck ? `${ck.neverContacted}` : "—", s: ck ? `${money0(ck.neverContactedMonthly)}/mo · nobody has texted them` : "", fg: colors.amber, bg: colors.amberLight },
+            { t: "Right-sized", v: `${ck.compliant}`, s: "sedan rate, sedan model, or tech-confirmed · $0/mo leaking", fg: colors.green, bg: colors.greenLight },
+            { t: "Not right-sized", v: `${ck.notCompliant}`, s: `${money0(ck.monthlyOverSedan)}/mo over the sedan floor · ${money0(ck.notCompliantDaily)}/day gross`, fg: colors.red, bg: colors.redLight },
+            { t: "Share of open book right-sized", v: `${ck.compliantPct}%`, s: `${ck.compliant} of ${ck.totalOpen} open Enterprise rentals`, fg: colors.blue, bg: colors.blueLight },
           ].map((c) => (
             <div key={c.t} style={{ background: c.bg, border: `1px solid ${c.fg}`, borderRadius: 12, padding: "12px 16px" }}>
               <div style={{ ...label, color: c.fg }}>{c.t}</div>
@@ -504,70 +529,73 @@ export default function RightsizeTracker() {
         </div>
       )}
 
-      {/* stacked dollar-weighted bar + multi-select coarse pills */}
-      {totalDollars > 0 && (
+      {/* stacked dollar-weighted bar + legend — unit: OPEN ENTERPRISE RENTALS.
+          Rendered straight from the server buckets so it cannot drift from the
+          header. Right-sized carries $0 by definition, so it is absent from the
+          bar on purpose: the bar is the leak, not the win. */}
+      {bucketDollarTotal > 0 && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", height: 26, borderRadius: 8, overflow: "hidden", border: `1px solid ${colors.rule}` }}>
-            {GROUPS.map((g) => {
-              const d = groupRoll[g.key].dollars;
-              if (d <= 0) return null;
-              return <div key={g.key} title={`${g.label}: ${money0(d)}/mo (${groupRoll[g.key].count})`} style={{ width: `${(d / totalDollars) * 100}%`, background: g.fg, opacity: groupF.length === 0 || groupF.includes(g.key) ? 0.85 : 0.25 }} />;
+            {buckets.map((b) => {
+              if (b.monthly <= 0) return null;
+              const c = bucketColor(b.key);
+              return <div key={b.key} title={`${b.label}: ${money0(b.monthly)}/mo (${b.rentals} rentals)`} style={{ width: `${(b.monthly / bucketDollarTotal) * 100}%`, background: c.fg, opacity: 0.85 }} />;
             })}
           </div>
           <div style={{ display: "flex", gap: 14, marginTop: 6, flexWrap: "wrap", alignItems: "center" }}>
-            {GROUPS.map((g) => {
-              const on = groupF.includes(g.key);
+            {buckets.map((b) => {
+              const c = bucketColor(b.key);
               return (
-                <button key={g.key} type="button" onClick={() => setGroupF(toggleIn(groupF, g.key))}
-                  title="Multi-select — click more than one to compare stages side by side"
-                  style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: on ? g.fg : colors.inkSoft, background: on ? g.bg : "transparent", border: `1px solid ${on ? g.fg : colors.rule}`, borderRadius: 999, padding: "3px 10px", cursor: "pointer", fontWeight: 600 }}>
-                  <span style={{ width: 9, height: 9, borderRadius: 2, background: g.fg }} />
-                  {g.label} {groupRoll[g.key].count} · {money0(groupRoll[g.key].dollars)}
-                </button>
+                <span key={b.key} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11.5, color: colors.inkSoft, fontWeight: 600 }}>
+                  <span style={{ width: 9, height: 9, borderRadius: 2, background: c.fg }} />
+                  {b.label} {b.rentals} · {money0(b.monthly)}
+                </span>
               );
             })}
-            {groupF.length > 0 && (
-              <button type="button" onClick={() => setGroupF([])} style={{ fontSize: 11, color: colors.accent, background: "transparent", border: "none", cursor: "pointer" }}>clear groups</button>
-            )}
+          </div>
+          <div style={{ marginTop: 4, fontSize: 10.5, color: colors.inkMuted }}>
+            Dollar-weighted: the bar shows what still leaks each month, so Right-sized ($0 by definition) does not appear in it.
+            Bar and table below sum to the header exactly — {bucketRentalTotal} rentals · {money0(bucketDollarTotal)}/mo.
           </div>
         </div>
       )}
 
-      {/* MECE stage table w/ next actions — certainty order by default, sortable */}
-      <div style={{ marginTop: 16, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
-          <thead>
-            <tr>
-              <SortHeader col="gstage" text="Stage" sort={groupSort} setSort={setGroupSort} />
-              <SortHeader col="gcount" text="Techs" sort={groupSort} setSort={setGroupSort} />
-              <SortHeader col="gdollars" text="$ / month" sort={groupSort} setSort={setGroupSort} />
-              <SortHeader col="gpct" text="% of $" sort={groupSort} setSort={setGroupSort} />
-              <SortHeader col="gnext" text="Next action" sort={groupSort} setSort={setGroupSort} />
-            </tr>
-          </thead>
-          <tbody>
-            {groupRows.map((g) => {
-              const on = groupF.includes(g.key);
-              return (
-                <tr key={g.key} onClick={() => setGroupF(toggleIn(groupF, g.key))}
-                  title="Click to add/remove this group from the filter"
-                  style={{ borderTop: `1px solid ${colors.rule}`, cursor: "pointer", background: on ? g.bg : undefined }}>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, color: g.fg }}>
-                    {g.label}
+      {/* MECE bucket table w/ next actions — unit: RENTALS, certainty order, sortable */}
+      {bucketRows.length > 0 && (
+        <div style={{ marginTop: 16, border: `1px solid ${colors.rule}`, borderRadius: 10, overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+            <thead>
+              <tr>
+                <SortHeader col="gstage" text="Stage" sort={groupSort} setSort={setGroupSort} />
+                <SortHeader col="grentals" text="Rentals" sort={groupSort} setSort={setGroupSort} />
+                <SortHeader col="gdollars" text="$ / month" sort={groupSort} setSort={setGroupSort} />
+                <SortHeader col="gpct" text="% of $" sort={groupSort} setSort={setGroupSort} />
+                <SortHeader col="gnext" text="Next action" sort={groupSort} setSort={setGroupSort} />
+              </tr>
+            </thead>
+            <tbody>
+              {bucketRows.map((b) => (
+                <tr key={b.key} style={{ borderTop: `1px solid ${colors.rule}` }}>
+                  <td style={{ padding: "8px 12px", fontWeight: 700, color: b.fg }}>
+                    {b.label}
                     <div style={{ fontWeight: 500, fontSize: 10.5, color: colors.inkMuted, fontFamily: fonts.jetbrains }}>
-                      {g.mix.length ? g.mix.map(([s, n]) => `${s} ${n}`).join(" · ") : "—"}
+                      {b.mix}{b.key !== "rightsized" && b.hvac > 0 ? ` · ${b.hvac} of these are HVAC` : ""}
                     </div>
                   </td>
-                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{g.count}</td>
-                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{money0(g.dollars)}</td>
-                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{g.pct.toFixed(0)}%</td>
-                  <td style={{ padding: "8px 12px", color: colors.inkSoft }}>{g.next}</td>
+                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{b.rentals}</td>
+                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{money0(b.monthly)}</td>
+                  <td style={{ padding: "8px 12px", fontFamily: fonts.jetbrains }}>{b.pct.toFixed(0)}%</td>
+                  <td style={{ padding: "8px 12px", color: colors.inkSoft }}>{b.next}</td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+              ))}
+            </tbody>
+          </table>
+          <div style={{ padding: "6px 12px", fontSize: 10.5, color: colors.inkMuted, borderTop: `1px solid ${colors.rule}` }}>
+            One rental, one row: Σ {bucketRentalTotal} rentals = the open Enterprise book · Σ {money0(bucketDollarTotal)}/mo = the header figure.
+            The technician grid further down counts campaign TECHS — a different unit, labeled there.
+          </div>
+        </div>
+      )}
 
       {closedOut > 0 && (
         <div style={{ marginTop: 8, fontSize: 11, color: colors.inkMuted }}>
@@ -608,8 +636,11 @@ export default function RightsizeTracker() {
         </section>
       </div>
 
-      {/* filter bar + tech table */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 18, flexWrap: "wrap" }}>
+      {/* filter bar + tech table — ROSTER unit (campaign technicians) */}
+      <div style={{ ...label, marginTop: 18 }}>
+        Outreach roster — one row per campaign technician (techs, not rentals) · drives the SMS chase, never the compliance math
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8, flexWrap: "wrap" }}>
         <div style={{ position: "relative" }}>
           <Search size={13} style={{ position: "absolute", left: 9, top: 8, color: colors.inkMuted }} />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search ldap, name, TL, district, vehicle"
@@ -630,7 +661,7 @@ export default function RightsizeTracker() {
           </button>
         )}
         <span style={{ fontSize: 11.5, color: colors.inkMuted, marginLeft: "auto" }}>
-          <b>{sorted.length}</b> shown of {techs.length} · {money0(shownDollars)}/mo in view
+          <b>{sorted.length}</b> shown of {techs.length} techs · {money0(shownDollars)}/mo still leaking in view (right-sized techs count $0)
           {sort.col && <> · sorted by <b>{sort.col}</b> {sort.dir}</>}
         </span>
       </div>
@@ -675,7 +706,7 @@ export default function RightsizeTracker() {
                   <td style={td} title={t.vehicle ?? ""}>{t.vehicle ?? "—"}</td>
                   <td style={td}>{t.car_class ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains }}>{rate != null ? `$${rate.toFixed(0)}` : "—"}</td>
-                  <td style={{ ...td, fontFamily: fonts.jetbrains }}>{money0(techMonthly(rate))}</td>
+                  <td style={{ ...td, fontFamily: fonts.jetbrains }} title={isDoneWithSms(t.ldap) ? "Right-sized — $0, whatever the stale reservation rate says" : undefined}>{money0(rowMonthly(t))}</td>
                   <td style={{ ...td, fontSize: 11.5 }} title={t.tl_name ?? ""}>{t.tl_name ?? "—"}</td>
                   <td style={{ ...td, fontFamily: fonts.jetbrains, fontSize: 11 }}>{fmtAge(t.last_inbound_at_s)}</td>
                   <td style={{ ...td, fontSize: 11 }} title={`${t.own_truck ?? "no truck"} · ${t.ams_status ?? "no AMS status"}`}>
