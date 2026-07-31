@@ -4,7 +4,23 @@
  * The open-rental feed gives ONLY a truck number + a renter NAME (no employee
  * ID). So we fuzzy-match the renter name against the canonical roster
  * (`all_techs`, every `employee_id` unique), pin the employee_id, then read
- * employment status. Truck is NOT an identity path.
+ * employment status.
+ *
+ * TRUCK IS NOW AN IDENTITY PATH (Tyler 2026-07-31). It was excluded on the
+ * reasoning that a truck number is not an identity. In practice it is the
+ * BETTER key: the renter name is typed by hand at Enterprise and arrives
+ * truncated ("CHRISTOPHE LOW"), doubled ("DAVID ARDILAARDILA"), run together
+ * ("LORENZO ALFONZOGAMINO"), anglicized ("JACK SHEN" for Guoxiong Shen),
+ * misspelled ("BOULEY" for BOULAY), and once with the surname missing entirely
+ * ("ANGEL SR" for Correa Sr, Angel L). The truck number is a system value and
+ * TPMS maps it to a technician independently.
+ *
+ * On 2026-07-31 that was 11 of 13 unresolved open rentals, every one confirmed
+ * by an ACTIVE technician whose TPMS and roster truck agreed.
+ *
+ * The truck never silently overrides the name: agreement raises confidence,
+ * disagreement produces REVIEW carrying both, and the truck decides alone only
+ * when the name found nobody usable.
  *
  * This module is a PURE function of its inputs (roster rows + onboarding rows +
  * renter name + rental start). No DB access here so it is unit-testable and
@@ -241,14 +257,215 @@ function findCandidates(renter: string, index: NormRoster[]): { cands: RosterRow
 
 const GRACE_DAYS = 120;
 
+/**
+ * The technician the RENTAL'S TRUCK belongs to, resolved by the caller (the
+ * ingest layer owns DB access; this module stays pure).
+ */
+export interface TruckTech {
+  employee_id: string;
+  tech_name: string;
+  employment_status: string | null;
+  effective_date: string | null;
+  last_day_worked: string | null;
+  district_no?: string | null;
+  /** which source(s) produced the truck -> technician link */
+  source: "both" | "tpms" | "roster";
+  /**
+   * False when TPMS knows this technician but `all_techs` has no row for them —
+   * a rehire on a new enterprise ID, or a new hire the roster feed has not
+   * picked up yet. 16 such technicians were live on 2026-07-31.
+   */
+  rosterKnown?: boolean;
+  /** TPMS last-seen, the only liveness signal available for a rosterKnown=false tech. */
+  lastSeenAt?: string | null;
+  /** TPMS enterprise id (LDAP), for evidence only — NEVER an employee_id. */
+  enterpriseId?: string | null;
+  /** TPMS and the roster name DIFFERENT technicians for this truck */
+  conflict?: boolean;
+}
+
 export interface ResolverInputs {
   renter: string;
   rentalStart: string | null;
   rosterIndex: NormRoster[];
   onboarding?: OnboardingRow[];
+  /** null when the truck maps to nobody */
+  truckTech?: TruckTech | null;
 }
 
+/** Employment-compatibility check shared by the name and truck paths. */
+function statusCompatible(employment_status: string | null, ev: Date | null, rs: Date | null): boolean {
+  if (employment_status && ACTIVE_ISH.has(employment_status)) return true;
+  if (!ev || !rs) return true;
+  return ev.getTime() >= rs.getTime() - GRACE_DAYS * 86_400_000;
+}
+
+/**
+ * Reconcile the renter NAME against the rental TRUCK.
+ *
+ * Order of trust: agreement > truck-alone > name-alone. A conflict never picks
+ * a winner. Attaching the wrong technician is worse than leaving it unresolved,
+ * because it charges somebody else's spend and points outreach at the wrong man.
+ */
 export function resolveIdentity(inputs: ResolverInputs): IdentityResolution {
+  const byName = resolveByName(inputs);
+  const truck = inputs.truckTech ?? null;
+  if (!truck) return byName;
+
+  const rs = toDate(inputs.rentalStart);
+  const truckEvent = eventDate({
+    employee_id: truck.employee_id,
+    tech_name: truck.tech_name,
+    employment_status: truck.employment_status,
+    effective_date: truck.effective_date,
+    last_day_worked: truck.last_day_worked,
+  });
+  // A roster-unknown tech has no employment record to be incompatible with;
+  // TPMS having seen them is the liveness signal instead.
+  const truckOk = truck.rosterKnown === false
+    ? true
+    : statusCompatible(truck.employment_status, truckEvent, rs);
+  const truckEvidence: CandidateEvidence[] = [{
+    employee_id: truck.employee_id,
+    tech_name: truck.tech_name,
+    employment_status: truck.employment_status,
+    event_date: dateStr(truckEvent),
+    compatible: truckOk,
+  }];
+
+  const nameId = byName.state === "RESOLVED" ? (byName.employee_id ?? null) : null;
+
+  // ── The truck may RESCUE, never CONTRADICT ────────────────────────────────
+  // A first pass let a truck/name disagreement force REVIEW. Simulated against
+  // the whole open book it turned dozens of confident name matches into REVIEW,
+  // because THE RENTAL TRUCK IS OFTEN NOT THE RENTER'S OWN TRUCK — a rental is
+  // frequently booked under a different unit than the technician is assigned.
+  // So a disagreement is normal, not evidence of a bad match, and a resolved
+  // name always wins.
+  if (nameId) {
+    // Agreement is still worth something: it can only raise confidence.
+    return truck.employee_id === nameId
+      ? { ...byName, confidence: "high", method: `${byName.method ?? "name"}+truck` }
+      : byName;
+  }
+
+  // From here the name found nobody usable — the case the truck exists for.
+  if (truck.conflict) {
+    return {
+      ...byName,
+      state: "REVIEW",
+      confidence: "low",
+      reason: `${byName.reason ?? "no name match"}; the rental truck maps to more than one technician (TPMS and the roster disagree)`,
+      candidates: [...(byName.candidates ?? []), ...truckEvidence],
+    };
+  }
+  if (!truckOk) {
+    return {
+      ...byName,
+      reason: `${byName.reason ?? "no name match"}; rental truck belongs to ${truck.tech_name}, whose ${STATUS[truck.employment_status ?? ""] ?? truck.employment_status} ${dateStr(truckEvent)} predates the rental`,
+      candidates: [...(byName.candidates ?? []), ...truckEvidence],
+    };
+  }
+
+  // CORROBORATION. Because the rental truck is not reliably the renter's own
+  // truck, a truck hit alone is not proof. Require the truck technician's name
+  // to echo the renter name somewhere. Without this guard "MARK ADAMS" resolved
+  // to OWENS,RONALD purely because his truck carried the rental — a confidently
+  // wrong answer, which is the one outcome this module refuses to produce.
+  if (!namesCorroborate(renterOf(inputs), truck.tech_name)) {
+    return {
+      ...byName,
+      state: "REVIEW",
+      confidence: "low",
+      reason: `${byName.reason ?? "no name match"}; the rental truck belongs to ${truck.tech_name}, whose name does not echo the renter — needs a human`,
+      candidates: [...(byName.candidates ?? []), ...truckEvidence],
+    };
+  }
+
+  // ── Known to TPMS, absent from the roster ─────────────────────────────────
+  // These are real, working technicians: rehires whose new enterprise ID the
+  // roster feed has not absorbed, or new hires not yet synced. We can name them,
+  // and naming them beats "no match" on the page.
+  //
+  // But employee_id STAYS NULL. `resolved_employee_id` is joined to
+  // all_techs.employee_id in nine places, three of them INNER JOINs (PO history,
+  // scrape targeting, rightsize sync). Writing a TPMS LDAP there would silently
+  // DROP these rentals out of those queries — strictly worse than an unresolved
+  // row, which at least shows up. So this returns REVIEW with the identity as
+  // evidence, and the real fix stays upstream in the roster feed.
+  if (truck.rosterKnown === false) {
+    const seen = truck.lastSeenAt ? String(truck.lastSeenAt).slice(0, 10) : null;
+    return {
+      state: "REVIEW",
+      employee_id: null,
+      confidence: "medium",
+      method: "truck (tpms, not on roster)",
+      tech_name: truck.tech_name,
+      district_no: truck.district_no ?? null,
+      reason: `rental truck belongs to ${truck.tech_name} (TPMS ${truck.enterpriseId ?? "?"}${seen ? `, seen ${seen}` : ""}), who is NOT in all_techs — rehire on a new enterprise id or an unsynced new hire. Named from TPMS; no employee_id assigned because downstream joins would drop the row.`,
+      candidates: truckEvidence,
+    };
+  }
+
+  return {
+    state: "RESOLVED",
+    employee_id: truck.employee_id,
+    status: STATUS[truck.employment_status ?? ""] ?? truck.employment_status,
+    status_date: dateStr(truckEvent),
+    confidence: truck.source === "both" ? "high" : "medium",
+    method: `truck (${truck.source})`,
+    tech_name: truck.tech_name,
+    district_no: truck.district_no ?? null,
+    reason: "renter name did not match the roster; resolved from the rental truck, corroborated by name",
+    candidates: truckEvidence,
+  };
+}
+
+/** The renter string off the inputs, for corroboration. */
+function renterOf(inputs: ResolverInputs): string {
+  return String(inputs.renter ?? "");
+}
+
+/**
+ * Does the truck technician's name echo the renter name?
+ *
+ * Deliberately loose, because the renter names this rescues are damaged:
+ * substring either direction catches "GAMINO" inside "ALFONZOGAMINO", and an
+ * edit distance of 1 catches "BOULEY" vs "BOULAY". Deliberately not empty,
+ * because that is what stops a rental attaching to whoever happens to hold the
+ * truck.
+ */
+function namesCorroborate(renter: string, techName: string): boolean {
+  const norm = (v: string) => String(v ?? "").toUpperCase().replace(/[^A-Z ]/g, " ")
+    .split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 3 && !SUFFIXES.has(t));
+  const a = norm(renter);
+  const b = norm(techName);
+  if (!a.length || !b.length) return false;
+  for (const x of a) {
+    for (const y of b) {
+      if (x === y) return true;
+      if (x.length >= 5 && y.length >= 5 && (x.includes(y) || y.includes(x))) return true;
+      if (x.length >= 4 && y.length >= 4 && Math.abs(x.length - y.length) <= 1 && editDistance1(x, y)) return true;
+    }
+  }
+  return false;
+}
+
+/** True when two strings differ by at most one edit. */
+function editDistance1(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [s1, s2] = a.length <= b.length ? [a, b] : [b, a];
+  if (s2.length - s1.length > 1) return false;
+  let i = 0, j = 0, diff = 0;
+  while (i < s1.length && j < s2.length) {
+    if (s1[i] === s2[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (s1.length === s2.length) { i++; j++; } else { j++; }
+  }
+  return true;
+}
+
+function resolveByName(inputs: ResolverInputs): IdentityResolution {
   const { renter, rentalStart, rosterIndex, onboarding = [] } = inputs;
   const { cands, method } = findCandidates(renter, rosterIndex);
   const rs = toDate(rentalStart);

@@ -22,7 +22,7 @@ import { sql } from "drizzle-orm";
 import { getSnowflakeService, isSnowflakeConfigured } from "../../snowflake-service";
 import { toDisplayNumber } from "../../vehicle-number-utils";
 import {
-  buildRosterIndex, resolveIdentity,
+  buildRosterIndex, resolveIdentity, type TruckTech,
   type RosterRow, type OnboardingRow, type IdentityResolution,
 } from "./identity-resolver";
 import { landPoHistory } from "./po-history";
@@ -336,6 +336,102 @@ export interface PersistResult {
   pendedCount: number;
 }
 
+/**
+ * truck number -> the technician it belongs to.
+ *
+ * Two independent sources. TPMS is the live assignment feed; all_techs carries
+ * the roster's own truck_lu / last_known_truck_lu. When both name the same
+ * person the link is as strong as an employee_id, which is why the resolver
+ * treats source==="both" as high confidence. When they disagree the entry is
+ * marked `conflict` and the resolver refuses to pick.
+ *
+ * all_techs holds BOTH a terminated and an active row for some racfids, so the
+ * DISTINCT ON orders active-first — a plain join silently returns whichever the
+ * planner reached last.
+ */
+async function loadTruckTechMap(): Promise<Map<string, TruckTech>> {
+  const norm = (v: unknown) => {
+    const d = String(v ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+    return d.length ? d : null;
+  };
+  const out = new Map<string, TruckTech>();
+
+  // LEFT JOIN, not JOIN. An inner join silently DROPPED every technician TPMS
+  // knows but `all_techs` does not — 16 live people on 2026-07-31, including the
+  // rehires holding rentals on trucks 46523, 21689 and 46911. Those rows are
+  // exactly the ones the truck path exists to rescue, so losing them here made
+  // the whole feature a no-op for the hardest cases.
+  const tpms = await db.execute(sql`
+    SELECT DISTINCT ON (ltrim(regexp_replace(t.truck_no,'[^0-9]','','g'),'0'))
+           ltrim(regexp_replace(t.truck_no,'[^0-9]','','g'),'0') AS truck,
+           UPPER(TRIM(t.enterprise_id)) AS enterprise_id,
+           TRIM(CONCAT_WS(' ', t.first_name, t.last_name)) AS tpms_name,
+           t.district_no AS tpms_district,
+           t.last_seen_at::text AS last_seen_at,
+           a.employee_id, a.tech_name, a.employment_status,
+           a.effective_date::text AS effective_date, a.last_day_worked::text AS last_day_worked,
+           a.district_no
+    FROM tpms_last_known_truck_tech t
+    LEFT JOIN all_techs a ON UPPER(TRIM(a.tech_racfid)) = UPPER(TRIM(t.enterprise_id))
+    WHERE t.truck_no IS NOT NULL
+    ORDER BY 1, (a.employment_status = 'A') DESC, a.effective_date DESC NULLS LAST, a.employee_id
+  `);
+  for (const r of (tpms.rows ?? []) as any[]) {
+    const k = norm(r.truck);
+    if (!k) continue;
+    if (r.employee_id) {
+      out.set(k, {
+        employee_id: String(r.employee_id), tech_name: String(r.tech_name ?? ""),
+        employment_status: r.employment_status ?? null,
+        effective_date: r.effective_date ?? null, last_day_worked: r.last_day_worked ?? null,
+        district_no: r.district_no ?? null, source: "tpms", rosterKnown: true,
+        enterpriseId: r.enterprise_id ?? null, lastSeenAt: r.last_seen_at ?? null,
+      });
+    } else if (r.enterprise_id && String(r.tpms_name ?? "").trim()) {
+      // Known to TPMS, absent from the roster. Carried WITHOUT an employee_id.
+      out.set(k, {
+        employee_id: "", tech_name: String(r.tpms_name),
+        employment_status: null, effective_date: null, last_day_worked: null,
+        district_no: r.tpms_district ?? null, source: "tpms", rosterKnown: false,
+        enterpriseId: r.enterprise_id, lastSeenAt: r.last_seen_at ?? null,
+      });
+    }
+  }
+
+  const roster = await db.execute(sql`
+    SELECT DISTINCT ON (ltrim(regexp_replace(COALESCE(truck_lu, last_known_truck_lu),'[^0-9]','','g'),'0'))
+           ltrim(regexp_replace(COALESCE(truck_lu, last_known_truck_lu),'[^0-9]','','g'),'0') AS truck,
+           employee_id, tech_name, employment_status,
+           effective_date::text AS effective_date, last_day_worked::text AS last_day_worked, district_no
+    FROM all_techs
+    WHERE COALESCE(truck_lu, last_known_truck_lu) IS NOT NULL
+    ORDER BY 1, (employment_status = 'A') DESC, effective_date DESC NULLS LAST, employee_id
+  `);
+  for (const r of (roster.rows ?? []) as any[]) {
+    const k = norm(r.truck);
+    if (!k || !r.employee_id) continue;
+    const prior = out.get(k);
+    if (!prior) {
+      out.set(k, {
+        employee_id: String(r.employee_id), tech_name: String(r.tech_name ?? ""),
+        employment_status: r.employment_status ?? null,
+        effective_date: r.effective_date ?? null, last_day_worked: r.last_day_worked ?? null,
+        district_no: r.district_no ?? null, source: "roster",
+      });
+    } else if (prior.rosterKnown === false) {
+      // TPMS says a roster-unknown tech holds this truck TODAY; all_techs.truck_lu
+      // is a stale historical field and lost to it (truck 46911 pointed at a
+      // terminated Ronald Owens while TPMS had Mark Adams Jr on it that morning).
+      continue;
+    } else if (prior.employee_id === String(r.employee_id)) {
+      prior.source = "both";
+    } else {
+      prior.conflict = true;
+    }
+  }
+  return out;
+}
+
 export async function persistRentalCases(o: PersistOptions): Promise<PersistResult> {
   // pool warm-up (cold-process first-write race — see runner note)
   await db.execute(sql`SELECT 1`);
@@ -361,10 +457,16 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
   const roster = o.roster ?? await loadRoster();
   const onboarding = o.onboarding ?? await loadOnboarding();
   const rosterIndex = buildRosterIndex(roster);
+  // Truck -> technician. Loaded once per run, not per case.
+  const truckTechs = await loadTruckTechMap();
   const resolutions = new Map<string, IdentityResolution>();
   let resolved = 0, review = 0, exception = 0;
   for (const c of cases) {
-    const r = resolveIdentity({ renter: c.renter_name_raw, rentalStart: c.rental_start_date, rosterIndex, onboarding });
+    const truckKey = String(c.vehicle_number ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
+    const r = resolveIdentity({
+      renter: c.renter_name_raw, rentalStart: c.rental_start_date, rosterIndex, onboarding,
+      truckTech: truckKey ? (truckTechs.get(truckKey) ?? null) : null,
+    });
     resolutions.set(c.case_key, r);
     if (r.state === "RESOLVED") resolved++;
     else if (r.state === "REVIEW") review++;
