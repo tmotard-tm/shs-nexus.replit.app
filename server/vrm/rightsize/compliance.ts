@@ -19,6 +19,13 @@
  *  3. THE TEST IS THE VEHICLE OR THE RATE, NOT THE CLASS DESCRIPTION.
  *        compliant = (rate_authorized <= sedan ceiling)
  *                 OR (the actual rented vehicle is a confirmed sedan nameplate)
+ *                 OR (the technician told us in SMS that the swap is done)
+ *
+ * The third test is Tyler's ruling (2026-07-30): "if they told me they did the
+ * swap then they did the swap." It credits a stage of DONE on the SMS tracker
+ * even when the Enterprise ticket still shows an oversized class, because the
+ * ARI report lags the branch by days. RETURNED is deliberately NOT credited —
+ * giving a rental back is not right-sizing.
  *     Rate alone qualifies because Enterprise writing a larger unit down to the
  *     sedan rate costs the company nothing extra. Vehicle alone qualifies
  *     because `Rate Authorized` on the ARI report is the RESERVATION basis, not
@@ -95,13 +102,34 @@ export async function initRightsizeComplianceSchema(): Promise<void> {
   `);
   await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_rsz_comp_snap_at ON vrm_rightsize_compliance_snapshots (snapshot_at DESC);`);
 
-  // Seed once. ON CONFLICT DO NOTHING so Fleet's edits are never clobbered on boot.
-  for (const [np, label] of SEED_SEDANS) {
-    await db.execute(sql`
-      INSERT INTO vrm_rightsize_sedan_models (nameplate, label, added_by, note)
-      VALUES (${np}, ${label}, 'seed', 'initial confirmed-sedan list, 2026-07-30')
-      ON CONFLICT (nameplate) DO NOTHING;
-    `);
+  // Seed in ONE statement, not a loop.
+  //
+  // The first version issued 36 separate INSERT round trips here. Boot DDL runs
+  // POST-listen on an autoscale container, so the container was recycled partway
+  // through: CREATE TABLE landed, the seed did not, and prod came up with an
+  // EMPTY nameplate list. An empty list silently turns the model test off, which
+  // makes every sedan fail compliance and the board under-reports. One statement
+  // is atomic and cannot half-apply.
+  //
+  // ON CONFLICT DO NOTHING so Fleet's own edits are never clobbered on boot.
+  const values = sql.join(
+    SEED_SEDANS.map(([np, label]) => sql`(${np}, ${label}, 'seed', 'initial confirmed-sedan list, 2026-07-30')`),
+    sql`, `,
+  );
+  await db.execute(sql`
+    INSERT INTO vrm_rightsize_sedan_models (nameplate, label, added_by, note)
+    VALUES ${values}
+    ON CONFLICT (nameplate) DO NOTHING;
+  `);
+
+  // Self-heal: if the table is somehow still empty we have a silent-wrong-number
+  // bug, not a cosmetic one. Say so loudly in the boot log.
+  const seeded = await db.execute(sql`SELECT count(*)::int AS n FROM vrm_rightsize_sedan_models WHERE active`);
+  const n = Number((seeded as any)?.rows?.[0]?.n ?? 0);
+  if (n === 0) {
+    console.error("[VRM/RightsizeCompliance] sedan nameplate table is EMPTY after seed — compliance will under-report until this is fixed.");
+  } else {
+    console.log(`[VRM/RightsizeCompliance] ${n} confirmed sedan nameplates active.`);
   }
 }
 
@@ -137,7 +165,9 @@ export type ComplianceRow = {
   jobTitle: string | null;
   isHvac: boolean;
   compliant: boolean;
-  compliantBy: "rate" | "model" | "both" | null;
+  compliantBy: "rate" | "model" | "both" | "sms" | null;
+  smsStage: string | null;
+  smsConfirmed: boolean;
   monthlyOverSedan: number;
   outboundCount: number;
   inboundCount: number;
@@ -159,7 +189,7 @@ export type ComplianceRow = {
  * and merged every "Michael" in the company into one record.
  */
 export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis: any }> {
-  const [cases, sedans, contacts, techs, tpms, msgAgg] = await Promise.all([
+  const [cases, sedans, contacts, techs, tpms, trackerStages, msgAgg] = await Promise.all([
     db.execute(sql`
       SELECT case_key, ticket_number, vehicle_number_padded, renter_name_raw, veh_desc, rental_class,
              rate_authorized, days_open, ticket_status, renting_state, district, source, rental_vendor
@@ -169,6 +199,7 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     db.execute(sql`SELECT ldap, name, truck_number, phone_digits, manager_name, primary_state, district FROM fs_comms_contacts`),
     db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu FROM all_techs`),
     db.execute(sql`SELECT truck_no, enterprise_id FROM tpms_last_known_truck_tech`),
+    db.execute(sql`SELECT upper(ldap) AS ldap, stage FROM vrm_rightsize_techs`),
     db.execute(sql`
       SELECT upper(ldap) AS ldap,
              count(*) FILTER (WHERE direction = 'outbound') AS outbound,
@@ -200,6 +231,7 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
   const cByLdap = new Map(rowsOf(contacts).map((c) => [String(c.ldap).toUpperCase(), c]));
   const tByLdap = new Map(rowsOf(techs).map((t) => [String(t.ldap).toUpperCase(), t]));
   const mByLdap = new Map(rowsOf(msgAgg).map((m) => [String(m.ldap).toUpperCase(), m]));
+  const stageByLdap = new Map(rowsOf(trackerStages).map((r) => [String(r.ldap).toUpperCase(), String(r.stage ?? "")]));
 
   const out: ComplianceRow[] = [];
   for (const k of rowsOf(cases)) {
@@ -218,7 +250,10 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     const rate = Number(k.rate_authorized) || 0;
     const byRate = rate > 0 && rate <= SEDAN_RATE_CEILING;
     const byModel = mk.length > 0 && sedanSet.has(mk);
-    const compliant = byRate || byModel;
+    // Third test: the technician said the swap is done. RETURNED is NOT credited.
+    const smsStage = ldap ? (stageByLdap.get(ldap) ?? null) : null;
+    const smsConfirmed = smsStage === "DONE";
+    const compliant = byRate || byModel || smsConfirmed;
 
     const c = ldap ? cByLdap.get(ldap) : null;
     const t = ldap ? tByLdap.get(ldap) : null;
@@ -246,7 +281,11 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
       jobTitle: title,
       isHvac: /HVAC/i.test(String(title ?? "")),
       compliant,
-      compliantBy: compliant ? (byRate && byModel ? "both" : byRate ? "rate" : "model") : null,
+      compliantBy: compliant
+        ? (byRate && byModel ? "both" : byRate ? "rate" : byModel ? "model" : "sms")
+        : null,
+      smsStage,
+      smsConfirmed,
       monthlyOverSedan: compliant ? 0 : Math.round(Math.max(rate - 54.99, 0) * 30 * 100) / 100,
       outboundCount: outbound,
       inboundCount: Number(m?.inbound ?? 0),
@@ -279,6 +318,15 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     byRateOnly: comp.filter((r) => r.compliantBy === "rate").length,
     byModelOnly: comp.filter((r) => r.compliantBy === "model").length,
     byBoth: comp.filter((r) => r.compliantBy === "both").length,
+    bySmsOnly: comp.filter((r) => r.compliantBy === "sms").length,
+    // What is actually LEFT, split so HVAC never hides the real chase list.
+    // HVAC was excluded from round 1 on 7/9 and that exclusion was never
+    // revisited, so mixing them in makes the remaining number look worse than
+    // the work Fleet can actually action today.
+    remainingHvac: notComp.filter((r) => r.isHvac).length,
+    remainingHvacMonthly: Math.round(notComp.filter((r) => r.isHvac).reduce((a, r) => a + r.monthlyOverSedan, 0)),
+    remainingNonHvac: notComp.filter((r) => !r.isHvac).length,
+    remainingNonHvacMonthly: Math.round(notComp.filter((r) => !r.isHvac).reduce((a, r) => a + r.monthlyOverSedan, 0)),
     neverContacted: notComp.filter((r) => r.neverContacted).length,
     neverContactedMonthly: Math.round(notComp.filter((r) => r.neverContacted).reduce((a, r) => a + r.monthlyOverSedan, 0)),
     hvacOpen: notComp.filter((r) => r.isHvac).length,

@@ -184,7 +184,19 @@ export function registerRightsizeRoutes(router: Router): void {
     try {
       const { rows, kpis } = await computeCompliance();
       const wantRows = String(req.query.rows ?? "1") !== "0";
-      res.json({ kpis, rows: wantRows ? rows : undefined, sedanRateCeiling: SEDAN_RATE_CEILING });
+      // Always ship the compliant LDAP set, even when the caller skips rows.
+      // Once a technician is right-size confirmed we stop chasing them on the
+      // SMS side (Tyler 2026-07-30), so the tracker needs to know who is done
+      // without pulling the whole grid down.
+      const compliantLdaps = rows
+        .filter((r) => r.compliant && r.ldap)
+        .map((r) => String(r.ldap).toUpperCase());
+      res.json({
+        kpis,
+        rows: wantRows ? rows : undefined,
+        compliantLdaps,
+        sedanRateCeiling: SEDAN_RATE_CEILING,
+      });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "compliance compute failed" });
     }

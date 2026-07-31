@@ -233,8 +233,20 @@ export default function RightsizeTracker() {
   const [openLdap, setOpenLdap] = useState<string | null>(null);
 
   const { data: summary } = useQuery<SummaryResp>({ queryKey: ["/api/vrm/rightsize/summary"], refetchInterval: 120_000 });
-  const { data: comp } = useQuery<{ kpis: ComplianceKpis }>({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"], refetchInterval: 120_000 });
+  const { data: comp } = useQuery<{ kpis: ComplianceKpis; compliantLdaps?: string[] }>({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"], refetchInterval: 120_000 });
   const ck = comp?.kpis;
+  /**
+   * Technicians already confirmed right-sized on the Enterprise feed — by rate,
+   * by sedan model, or by their own SMS confirmation. Tyler 2026-07-30: once a
+   * tech is right-size confirmed we STOP tracking their SMS here. They drop out
+   * of "Awaiting our reply" and are badged in the grid, so the outreach surface
+   * only ever shows people who still owe us a swap.
+   */
+  const compliantSet = useMemo(
+    () => new Set((comp?.compliantLdaps ?? []).map((l) => String(l).toUpperCase())),
+    [comp],
+  );
+  const isDoneWithSms = (ldap: string) => compliantSet.has(String(ldap).toUpperCase());
   const { data: techsData } = useQuery<{ techs: TechRow[] }>({ queryKey: ["/api/vrm/rightsize/techs"], refetchInterval: 120_000 });
 
   const syncMut = useMutation({
@@ -338,8 +350,12 @@ export default function RightsizeTracker() {
 
 
   const awaiting = useMemo(
-    () => techs.filter(isAwaiting).sort((a, b) => (a.last_inbound_at_s ?? "").localeCompare(b.last_inbound_at_s ?? "")),
-    [techs],
+    () =>
+      techs
+        // Right-sized already: nothing left to chase, so they leave the SMS queue.
+        .filter((t) => isAwaiting(t) && !compliantSet.has(String(t.ldap).toUpperCase()))
+        .sort((a, b) => (a.last_inbound_at_s ?? "").localeCompare(b.last_inbound_at_s ?? "")),
+    [techs, compliantSet],
   );
   const awaitingStale = awaiting.filter((t) => Date.now() - new Date(t.last_inbound_at_s!).getTime() > 24 * 36e5).length;
 
@@ -540,7 +556,8 @@ export default function RightsizeTracker() {
         <section style={{ border: `1px solid ${colors.purple}`, borderRadius: 10, padding: 12 }}>
           <div style={{ ...label, color: colors.purple }}>Awaiting our reply ({awaiting.length}) — nobody gets ignored</div>
           <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2 }}>
-            oldest first · {awaitingStale} over 24h · Reply opens the thread in Fleet Communications
+            oldest first · {awaitingStale} over 24h · Reply opens the thread in Fleet Communications ·
+            technicians already right-sized are removed from this queue automatically
           </div>
           <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(430px, 1fr))", gap: 6, maxHeight: 360, overflowY: "auto" }}>
             {awaiting.length === 0 && <div style={{ fontSize: 12, color: colors.inkMuted }}>Every inbound has a later outbound. Clean.</div>}
@@ -639,13 +656,18 @@ export default function RightsizeTracker() {
                     </span>
                   </td>
                   <td style={{ ...td, fontSize: 10.5, fontWeight: 700 }} onClick={(e) => e.stopPropagation()}>
-                    <a href={commsLink(t.ldap)} target="_blank" rel="noreferrer"
-                       title="Open this technician's rental thread in Fleet Communications"
-                       style={{ color: isAwaiting(t) ? colors.purple : colors.accent, textDecoration: "none",
-                                border: `1px solid ${isAwaiting(t) ? colors.purple : colors.rule}`, borderRadius: 6,
-                                padding: "2px 8px", whiteSpace: "nowrap" }}>
-                      {isAwaiting(t) ? "Reply →" : "Comms →"}
-                    </a>
+                    {isDoneWithSms(t.ldap) ? (
+                      <span title="Right-sized on the Enterprise feed — SMS tracking stopped for this tech"
+                            style={{ color: colors.green, fontWeight: 700 }}>RIGHT-SIZED</span>
+                    ) : (
+                      <a href={commsLink(t.ldap)} target="_blank" rel="noreferrer"
+                         title="Open this technician's rental thread in Fleet Communications"
+                         style={{ color: isAwaiting(t) ? colors.purple : colors.accent, textDecoration: "none",
+                                  border: `1px solid ${isAwaiting(t) ? colors.purple : colors.rule}`, borderRadius: 6,
+                                  padding: "2px 8px", whiteSpace: "nowrap" }}>
+                        {isAwaiting(t) ? "Reply →" : "Comms →"}
+                      </a>
+                    )}
                   </td>
                   <td style={{ ...td, color: colors.inkSoft }} title={t.decisive_text ?? t.last_inbound_text ?? ""}>{t.decisive_text ?? t.last_inbound_text ?? ""}</td>
                 </tr>
