@@ -209,6 +209,52 @@ export const INBOUND_MESSAGE_COLUMNS = sql`
  * complete no-op, so a webhook-processed message is not re-processed - and
  * crucially not re-flagged for review - when the sweep sees it again.
  */
+/**
+ * Does this reply read as a swap that ALREADY HAPPENED?
+ *
+ * WHY THIS EXISTS (Tyler, 2026-07-31). Three technicians sat in COMMITTED while
+ * their own words said the job was finished:
+ *   RCAMPB1 "I've made the switch into a smaller sedan, I am in a Nissan Versa"
+ *   OPAYNE  "Rental has been switched to a sedan"
+ *   ANORMA0 "I'm already in a small sedan"
+ * Two of them were still being counted as not-right-sized, worth $822/mo, and
+ * they only surfaced because someone happened to read a thread. The classifier
+ * under-called; the failure was silent.
+ *
+ * This is a BACKSTOP, not a second classifier. It never writes `stage` - it can
+ * only raise `needs_review` with a DONE proposal, which is the same boundary the
+ * Bedrock second opinion respects. A false positive therefore costs one glance
+ * at a review chip; a false negative costs real money and stays invisible.
+ *
+ * Deliberately conservative: any forward-looking hedge in the same message
+ * ("I'll swap tomorrow", "going to switch") suppresses it, because "I will get
+ * it done first thing tomorrow morning" must stay COMMITTED.
+ */
+const COMPLETED_PATTERNS: RegExp[] = [
+  /\bi(?:'m| am|m)\s+(?:now\s+|already\s+)?in\s+(?:a|an|the)\b/i,
+  /\b(?:made|did)\s+the\s+(?:switch|swap|change|exchange)\b/i,
+  /\b(?:swapped|switched|exchanged|traded|downsized)\b/i,
+  /\b(?:has|have|been)\s+(?:switched|swapped|changed|exchanged)\b/i,
+  /\b(?:picked\s+up|got|have)\s+(?:a|an|my)\s+(?:new\s+)?(?:car|sedan|altima|sentra|malibu|corolla|camry|accord|civic|versa|elantra|sonata|jetta|k5|k4|forte|impala|charger|prius|mirage)\b/i,
+  /\b(?:it'?s|its|this is|that'?s)\s+(?:all\s+)?(?:done|complete|completed|taken care of|handled|squared away)\b/i,
+  /\balready\s+(?:swapped|switched|done|complete|completed|taken care of)\b/i,
+];
+const FUTURE_HEDGES: RegExp[] = [
+  /\bi'?ll\b/i, /\bwill\s+(?:be\s+)?(?:swap|switch|get|go|call|do|change|trade)/i,
+  /\bgoing to\b/i, /\bgonna\b/i, /\bplan(?:ning)? to\b/i,
+  /\btomorrow\b/i, /\bnext week\b/i, /\bthis (?:week|weekend)\b/i,
+  /\bwhen i (?:get|can|have)\b/i, /\bas soon as\b/i,
+];
+/** Tapbacks quote OUR outbound text back at us and are never the tech's words. */
+const TAPBACK = /^\s*(?:liked|loved|laughed at|emphasi[sz]ed|disliked|questioned)\s+["\u201c]/i;
+
+export function readsAsCompleted(text: string): boolean {
+  const t = String(text ?? "").trim();
+  if (!t || TAPBACK.test(t)) return false;
+  if (FUTURE_HEDGES.some((re) => re.test(t))) return false;
+  return COMPLETED_PATTERNS.some((re) => re.test(t));
+}
+
 export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessContext): Promise<ProcessResult> {
   const messageId = String(m.id);
 
@@ -291,6 +337,9 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
   // come out of it as a proposal, whichever brain produced the verdict.
   const mutation = stageMutationFor(verdict, tracked.stage);
   let advanced = false, flagged = false;
+  // Set whenever a DONE/RETURNED proposal is already on the record, so the
+  // completion backstop below never double-flags the same message.
+  let doneProposed = false;
   if (mutation.kind === "advance") {
     await db.execute(sql`
       UPDATE vrm_rightsize_techs
@@ -308,6 +357,7 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
       WHERE ldap = ${ldap}
     `);
     flagged = true;
+    if (mutation.stage === "DONE" || mutation.stage === "RETURNED") doneProposed = true;
   }
 
   // A tense-ambiguous reply ("All swapped out on Friday") keeps its regex
@@ -325,6 +375,7 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
         WHERE ldap = ${ldap}
       `);
       flagged = true;
+      if (secondMutation.stage === "DONE" || secondMutation.stage === "RETURNED") doneProposed = true;
       await db.execute(sql`
         INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
         VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
@@ -333,6 +384,30 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
         ON CONFLICT DO NOTHING
       `);
     }
+  }
+
+  // COMPLETION BACKSTOP. Neither brain advanced this technician to DONE and
+  // neither proposed it, yet the reply reads as a finished swap. Raise it for
+  // review rather than let a completed swap sit silently in COMMITTED. Writes a
+  // proposal only - `stage` stays exactly where the classifier left it.
+  const endStage = mutation.kind === "advance" ? mutation.stage : tracked.stage;
+  if (endStage !== "DONE" && endStage !== "RETURNED" && !doneProposed && readsAsCompleted(rawBody)) {
+    await db.execute(sql`
+      UPDATE vrm_rightsize_techs
+      SET proposed_stage = 'DONE', needs_review = TRUE,
+          review_reason = 'reply reads as a completed swap but the stage did not advance',
+          decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
+      WHERE ldap = ${ldap}
+    `);
+    flagged = true;
+    await db.execute(sql`
+      INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
+      VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
+              ${tracked.stage}, 'DONE', 'propose_review',
+              'completion-language backstop: past-tense swap with no forward hedge',
+              ${ctx.actor}, 'completion_backstop', NULL, NULL)
+      ON CONFLICT DO NOTHING
+    `);
   }
 
   // Written LAST and on purpose: this row is the idempotency marker, so it only
