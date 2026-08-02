@@ -317,5 +317,39 @@ test("truncateSummary bounds length", () => {
 
 // ─── Result ──────────────────────────────────────────────────────────────────
 
+
+// ─── LUCA P1 outcome taxonomy (added 2026-08-02) ─────────────────────────────
+// LIVHR gained three outbox reasons and four rental_call_outcome values. An
+// unmapped reason still reaches the attention lane (isAttentionReason is a
+// denylist) but stamps NO call status, so the board silently keeps a stale one.
+// That is exactly how `ready_for_pickup` went unmapped until 2026-07-29.
+
+console.log("LUCA P1 taxonomy:");
+
+test("unrepairable_needs_tow stamps Needs Tow, not Relocated", () => {
+  const r = mapOutboxTask({ ...readyTask, reason: "unrepairable_needs_tow" });
+  assert.equal(r.truckWrite!.lastCallStatus, "Needs Tow");
+  assert.match(r.truckWrite!.lastCallSummary ?? "", /Unrepairable/i);
+});
+
+test("truck_recovered stamps Recovered — the opposite of shop_no_truck", () => {
+  const r = mapOutboxTask({ ...readyTask, reason: "truck_recovered" });
+  assert.equal(r.truckWrite!.lastCallStatus, "Recovered");
+  assert.match(r.truckWrite!.lastCallSummary ?? "", /collected/i);
+});
+
+test("outcome_unverified stamps NO status — an unidentified claim is not actionable", () => {
+  const r = mapOutboxTask({ ...readyTask, reason: "outcome_unverified" });
+  assert.equal(r.truckWrite!.lastCallStatus, undefined);
+  assert.match(r.truckWrite!.lastCallSummary ?? "", /NOT verified/i);
+});
+
+test("none of the three new reasons can flip a case to Ready", () => {
+  for (const reason of ["unrepairable_needs_tow", "truck_recovered", "outcome_unverified"]) {
+    const r = mapOutboxTask({ ...readyTask, reason });
+    assert.notEqual(r.truckWrite!.lastCallStatus, "Ready", `${reason} must never map to Ready`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

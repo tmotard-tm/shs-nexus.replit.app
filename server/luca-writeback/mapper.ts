@@ -205,6 +205,27 @@ const REASON_MAP: Record<
   eta_slip: { label: "Repair ETA slipped", callStatus: "In Repair", callDerived: true },
   repeated_action: { label: "Repeated action loop", callStatus: null, callDerived: false },
   po_authorization: { label: "Shop waiting on PO authorization", callStatus: "In Authorization", callDerived: true },
+  // ── LUCA P1 outcome taxonomy, added 2026-08-02 ───────────────────────────
+  // These arrive from LIVHR's new hard rules (RULE_UNREPAIRABLE_NEEDS_TOW,
+  // RULE_TRUCK_RECOVERED, RULE_UNVERIFIED_OUTCOME). Without an entry here each
+  // falls to the default branch with callStatus null: the case IS still flagged
+  // for attention (isAttentionReason is a denylist, not an allowlist) but the
+  // board's call-status column silently stays stale. That is the identical
+  // failure mode that left `ready_for_pickup` unmapped until 2026-07-29.
+  //
+  // The shop cannot repair it where it sits and it must be collected or towed.
+  // Deliberately NOT "Relocated": that truck has already moved, this one still
+  // needs transport arranged.
+  unrepairable_needs_tow: { label: "Unrepairable at this shop - needs collection or tow", callStatus: "Needs Tow", callDerived: true },
+  // The shop already released the truck. This is the OPPOSITE of shop_no_truck,
+  // which is what it used to be recorded as - so the truck was hunted as lost
+  // while its rental kept billing.
+  truck_recovered: { label: "Truck already collected - verify rental returned and close", callStatus: "Recovered", callDerived: true },
+  // A shop stated a terminal outcome but never confirmed WHICH vehicle (no VIN,
+  // plate, fleet number or RO read back). Deliberately callStatus null, exactly
+  // like ready_unconfirmed: an unidentified claim must never stamp a status a
+  // human would act on. It still reaches the attention lane.
+  outcome_unverified: { label: "Shop claim NOT verified against the vehicle - confirm by phone", callStatus: null, callDerived: true },
   general: { label: "Escalation", callStatus: null, callDerived: false },
 };
 
@@ -223,6 +244,14 @@ const OUTCOME_TO_STATUS: Record<string, string> = {
   TOTALED: "Totaled",
   REPAIR_DECLINED: "Repair Declined",
   OTHER: "Other",
+  // Added 2026-08-02, in lockstep with the four new rentalCallOutcomeEnum
+  // values on LIVHR. INCONCLUSIVE means the call dropped and carries no
+  // information; UNVERIFIED means the shop spoke but we could not tie the claim
+  // to this vehicle. Neither may read as a resolved state.
+  INCONCLUSIVE: "Inconclusive - call dropped",
+  UNVERIFIED: "Unverified - confirm by phone",
+  RECOVERED: "Recovered",
+  UNREPAIRABLE_NEEDS_TOW: "Needs Tow",
 };
 
 /** Canonical outcome → fs_call_logs.outcome (Nexus's 3-valued vocabulary). */
