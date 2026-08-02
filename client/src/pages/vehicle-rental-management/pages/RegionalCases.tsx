@@ -70,6 +70,7 @@ interface MasterRow {
   no_rental_auth: boolean;
   tpms_tech: string | null;
   renter_own_truck: string | null;
+  tpms_own_truck: string | null;
   wrong_truck: boolean;
   odometer: number | null;
   odometer_date: string | null;
@@ -768,6 +769,8 @@ export default function RegionalCases() {
   const [markF, setMarkF] = useState("");
   const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
+  // Rental booked on a truck that is not the renter's own (TPMS first).
+  const [wrongTruckOnly, setWrongTruckOnly] = useState(false);
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
@@ -803,6 +806,7 @@ export default function RegionalCases() {
     (includePended || r.ticket_status !== "PENDED") &&
     (wbFilter.length === 0 || wbFilter.includes(r.workbook?.status ?? "new"))
   ), [regionPool, includePended, wbFilter]);
+  const wrongTruckCount = useMemo(() => basePool.filter((r) => r.wrong_truck).length, [basePool]);
   // What each toggle would remove, and what it is deliberately keeping. One
   // helper for both buckets so the two can never drift apart.
   const deadEndCounts = useMemo(() => {
@@ -892,11 +896,12 @@ export default function RegionalCases() {
       if (hideDeclines && r.ams_bucket === "declined" && !r.assigned_truck_mismatch) return false;
       if (hideAuctions && r.ams_bucket === "auction" && !r.assigned_truck_mismatch) return false;
       if (mismatchOnly && !r.type_mismatch) return false;
+      if (wrongTruckOnly && !r.wrong_truck) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly, hideDeclines, hideAuctions]);
+  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly, hideDeclines, hideAuctions]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -1090,6 +1095,12 @@ export default function RegionalCases() {
           placeholder="Search truck, tech, shop…"
           style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, background: colors.surface,
             border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 11px", minWidth: 230, outline: "none" }} />
+        {/* Rental booked on a truck that is not the renter's own. Counted off
+            basePool so the number does not shift as other filters narrow. */}
+        <label title="Rental truck differs from the renter's own truck (TPMS assignment, falling back to the roster)"
+               style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer", whiteSpace: "nowrap" }}>
+          <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
+        </label>
         {/* Say WHICH number this is. "265 cases" and "265 workable" look the
             same but answer different questions, and with dead ends hidden by
             default the honest label is the second one. */}

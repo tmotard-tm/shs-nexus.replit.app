@@ -69,6 +69,7 @@ interface MasterRow {
   no_rental_auth: boolean;
   tpms_tech: string | null;
   renter_own_truck: string | null;
+  tpms_own_truck: string | null;
   wrong_truck: boolean;
   odometer: number | null;
   odometer_date: string | null;
@@ -686,6 +687,8 @@ export default function RentalOperations() {
   const [markF, setMarkF] = useState("");
   const [includePended, setIncludePended] = useState(false);
   const [mismatchOnly, setMismatchOnly] = useState(false);
+  // Rental booked on a truck that is not the renter's own (TPMS first).
+  const [wrongTruckOnly, setWrongTruckOnly] = useState(false);
   const [newHireOnly, setNewHireOnly] = useState(false);
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
@@ -706,6 +709,7 @@ export default function RentalOperations() {
   // Default matches the Rentals Ops Dashboard (OPEN only). PENDED (turned-in /
   // closing tickets) are ingested but opt-in, so the headline count ties out.
   const basePool = useMemo(() => rows.filter((r) => includePended || r.ticket_status !== "PENDED"), [rows, includePended]);
+  const wrongTruckCount = useMemo(() => basePool.filter((r) => r.wrong_truck).length, [basePool]);
   const pendedTotal = useMemo(() => rows.filter((r) => r.ticket_status === "PENDED").length, [rows]);
   // counts computed over the current pool so tab badges + KPIs always match the grid
   const stats = useMemo(() => {
@@ -783,11 +787,12 @@ export default function RentalOperations() {
         if (markF === "none" ? m !== "none" : m !== markF) return false;
       }
       if (mismatchOnly && !r.type_mismatch) return false;
+      if (wrongTruckOnly && !r.wrong_truck) return false;
       if (newHireOnly && !isNewHire(r)) return false;
       if (urgentEmpOnly && !isUrgentEmp(r)) return false;
       return true;
     });
-  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, newHireOnly, urgentEmpOnly]);
+  }, [rows, basePool, cohort, search, amsF, catF, classF, markF, mismatchOnly, wrongTruckOnly, newHireOnly, urgentEmpOnly]);
 
   const sorted = useMemo(() => {
     const acc: Record<string, (r: MasterRow) => unknown> = {
@@ -1095,6 +1100,12 @@ export default function RentalOperations() {
         </select>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }} title="PENDED = renter turned the vehicle in / ticket closing. Off by default so the count matches the Rentals Ops Dashboard."><input type="checkbox" checked={includePended} onChange={(e) => setIncludePended(e.target.checked)} /> include PENDED{pendedTotal ? ` (${pendedTotal})` : ""}</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={mismatchOnly} onChange={(e) => setMismatchOnly(e.target.checked)} /> mismatch</label>
+        {/* The rental is booked on a truck that is not the renter's own. Counted
+            off basePool so the number does not move as other filters narrow. */}
+        <label title="Rental truck differs from the renter's own truck (TPMS assignment, falling back to the roster)"
+               style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
+          <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
+        </label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave</label>
         <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{sorted.length} shown{isFetching ? " · refreshing…" : ""}</span>

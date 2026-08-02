@@ -425,8 +425,9 @@ export interface MasterRow {
   has_rental_auth: boolean;
   no_rental_auth: boolean;         // no APPROVED rental PO (and has some history)
   tpms_tech: string | null;        // TPMS-assigned tech for this truck
-  renter_own_truck: string | null; // the renter's own assigned truck
-  wrong_truck: boolean;            // renter is driving a truck other than their own
+  renter_own_truck: string | null; // the renter's own assigned truck (TPMS first)
+  tpms_own_truck: string | null;   // strictly the TPMS assignment, null if TPMS has none
+  wrong_truck: boolean;            // the RENTAL truck is not the renter's own truck
   odometer: number | null;
   odometer_date: string | null;
   portal_msg_count: number | null; // Holman message-trail entries (portal scrape)
@@ -576,7 +577,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
       shop.po_number AS shop_po_number, shop.po_status AS shop_po_status, shop.po_date AS shop_po_date,
       hv.tpms_assigned_tech_name AS tpms_tech, hv.odometer, hv.odometer_date,
-      COALESCE(atr.truck_lu, atr.last_known_truck_lu) AS renter_own_truck,
+      -- The renter's own truck, TPMS FIRST. all_techs.truck_lu is a historical
+      -- field and goes stale: on 2026-07-31 truck 46911 still named a terminated
+      -- Ronald Owens there while TPMS had Mark Adams Jr on it that morning.
+      COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu) AS renter_own_truck,
+      rt.tpms_truck AS tpms_own_truck,
       ownp.own_pad AS assigned_truck,
       ph.msg_count AS portal_msg_count, ph.shop_phone AS portal_shop_phone,
       (ph.truck_no IS NOT NULL) AS has_portal,
@@ -590,8 +595,17 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN holman_vehicles_cache hv ON hv.vehicle_number_display = c.case_key
     LEFT JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+    -- Live truck assignment for the renter. LIMIT 1 is load-bearing: a tech can
+    -- appear on more than one TPMS row.
     LEFT JOIN LATERAL (
-      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
+      SELECT t.truck_no AS tpms_truck
+      FROM tpms_last_known_truck_tech t
+      WHERE UPPER(TRIM(t.enterprise_id)) = UPPER(TRIM(atr.tech_racfid))
+      ORDER BY t.last_seen_at DESC NULLS LAST
+      LIMIT 1
+    ) rt ON TRUE
+    LEFT JOIN LATERAL (
+      SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad
     ) ownp ON true
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
     LEFT JOIN vrm_holman_portal_hist aph ON aph.truck_no = ownp.own_pad
@@ -760,7 +774,8 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       po_evidence_from_portal: evidenceFromPortal,
       po_count: anyPo, last_rental_date: r.last_rental_date ?? null,
       has_rental_auth: hasRentalAuth, no_rental_auth: noRentalAuth,
-      tpms_tech: r.tpms_tech ?? null, renter_own_truck: ownTruck, wrong_truck: wrongTruck,
+      tpms_tech: r.tpms_tech ?? null, renter_own_truck: ownTruck,
+      tpms_own_truck: r.tpms_own_truck ? String(r.tpms_own_truck) : null, wrong_truck: wrongTruck,
       odometer: odo, odometer_date: r.odometer_date ?? null,
       portal_msg_count: r.portal_msg_count == null ? null : Number(r.portal_msg_count),
       portal_shop_phone: r.portal_shop_phone ?? null, has_portal: !!r.has_portal,
@@ -1199,6 +1214,7 @@ export async function getLucaFeed(): Promise<any> {
       employment_status: r.employee_status,
       tpms_tech: r.tpms_tech,
       renter_own_truck: r.renter_own_truck,
+      tpms_own_truck: r.tpms_own_truck,
       wrong_truck: r.wrong_truck,
       workload_bucket: r.workload_bucket,
       assigned_truck_has_repair_po: r.assigned_truck_has_repair_po,
