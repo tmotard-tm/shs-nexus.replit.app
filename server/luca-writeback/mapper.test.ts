@@ -351,5 +351,46 @@ test("none of the three new reasons can flip a case to Ready", () => {
   }
 });
 
+
+// ─── Lifecycle column + outcome bucketing (premortem 2026-08-02) ─────────────
+// Two independent premortems found the same defect: the mapper wrote the human
+// display label into fs_call_logs.status, which every Nexus consumer treats as
+// the call LIFECYCLE. 189 trucks were pinned to "Calling" forever (9 with a
+// confirmed Ready that never reached the pickup step) and 137 follow-ups were
+// firing on trucks LUCA had already resolved.
+
+console.log("lifecycle + outcome bucketing:");
+
+test("call logs are written with a LIFECYCLE status, never a display label", () => {
+  const m = mapCallOutcome(readyOutcome);
+  // latestCallUnresolved() treats anything outside {completed, failed} as a
+  // call still in flight; getPendingFollowUps() only sees status='completed'.
+  assert.equal(m.callLog!.status, "completed");
+  // The human label still reaches the board, on the column that owns it.
+  assert.equal(m.truckWrite!.lastCallStatus, "Ready");
+});
+
+test("a dropped call is no-contact, not a definitive not-ready", () => {
+  const m = mapCallOutcome({ ...readyOutcome, conversationId: "c_inc", outcome: "INCONCLUSIVE" });
+  assert.equal(m.callLog!.outcome, "CALL_NO_CONTACT");
+});
+
+test("a recovered truck stops the follow-up loop", () => {
+  // getPendingFollowUps keeps chasing anything that is not VEHICLE_READY, so
+  // VEHICLE_NOT_READY here means calling a shop about a truck that already left.
+  const m = mapCallOutcome({ ...readyOutcome, conversationId: "c_rec", outcome: "RECOVERED" });
+  assert.equal(m.callLog!.outcome, "VEHICLE_READY");
+  // But it must NOT read as ready-for-pickup on the board: lucaReadyFor() gates
+  // on fs_trucks.last_call_status === "Ready".
+  assert.notEqual(m.truckWrite!.lastCallStatus, "Ready");
+});
+
+test("unverified and needs-tow stay on the follow-up board", () => {
+  for (const outcome of ["UNVERIFIED", "UNREPAIRABLE_NEEDS_TOW"]) {
+    const m = mapCallOutcome({ ...readyOutcome, conversationId: `c_${outcome}`, outcome });
+    assert.equal(m.callLog!.outcome, "VEHICLE_NOT_READY", `${outcome} must keep following up`);
+  }
+});
+
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

@@ -258,6 +258,27 @@ const OUTCOME_TO_STATUS: Record<string, string> = {
 const OUTCOME_TO_LOG_OUTCOME: Record<string, string> = {
   READY_PICKUP: "VEHICLE_READY",
   NO_ANSWER: "CALL_NO_CONTACT",
+  // Added 2026-08-02. Everything absent here fell to VEHICLE_NOT_READY, which
+  // is the bucket getPendingFollowUps() keeps chasing (its predicate is
+  // `outcome IS DISTINCT FROM 'VEHICLE_READY'`).
+  //
+  // The call dropped and nobody was reached, so this is a no-contact retry, not
+  // a definitive "we spoke to the shop and it isn't ready". Matches Nexus's own
+  // mapping of No Answer / Voicemail.
+  INCONCLUSIVE: "CALL_NO_CONTACT",
+  // The truck already left the shop. In this 3-value vocabulary VEHICLE_READY
+  // is the "done, stop following up" bucket — without it we keep calling a shop
+  // about a truck that is gone, which is the exact failure the new outcome
+  // exists to end. It cannot put the truck on a pickup queue: lucaReadyFor()
+  // gates on fs_trucks.last_call_status === 'Ready', and RECOVERED writes
+  // "Recovered" there.
+  RECOVERED: "VEHICLE_READY",
+  // Explicit rather than defaulted: a shop DID speak, we just could not tie the
+  // claim to a vehicle, so we want the follow-up to keep chasing the read-back.
+  UNVERIFIED: "VEHICLE_NOT_READY",
+  // Explicit for the same reason: the truck is not coming back on its own and a
+  // human is arranging transport, so it stays on the follow-up board.
+  UNREPAIRABLE_NEEDS_TOW: "VEHICLE_NOT_READY",
 };
 
 const SUMMARY_MAX = 500;
@@ -491,7 +512,26 @@ export function mapCallOutcome(item: LucaCallOutcomeItem): MappedWriteback {
     batchId: "LUCA",
     elevenLabsConversationId: externalId,
     callTimestamp: safeCallDate,
-    status,
+    // fs_call_logs.status is the call LIFECYCLE (in_progress / completed /
+    // failed), NOT the analyzed "Ready / In Repair" label — fleet-scope-routes
+    // says so at the latestCallUnresolved() helper, and the human label already
+    // lives on fs_trucks.last_call_status (written as truckWrite.lastCallStatus
+    // below) and in shopNotes.
+    //
+    // Writing the label here broke two consumers, both live in prod today and
+    // both confirmed by two independent premortems on 2026-08-02:
+    //   * /queue/today — latestCallUnresolved() treats any status outside
+    //     {completed, failed} as a call still in flight, so every truck whose
+    //     latest call came from LUCA was pinned to "Calling" forever and
+    //     lucaReadyFor() could never be true. 189 trucks were in that trap, 9 of
+    //     them carrying a confirmed Ready that never reached the pickup step.
+    //   * getPendingFollowUps() — its "latest call" subquery is
+    //     WHERE status='completed', so LUCA rows were invisible and an older
+    //     Nexus row kept generating follow-ups after LUCA had already resolved
+    //     the truck. 137 follow-ups were due on trucks with a newer LUCA call.
+    //
+    // The display is unaffected: lucaStatusFor() reads fs_trucks.last_call_status.
+    status: "completed",
     outcome: OUTCOME_TO_LOG_OUTCOME[outcome] ?? "VEHICLE_NOT_READY",
     shopNotes: truncateSummary(`[LUCA] ${summaryText}`),
     estimatedReadyDate: eta,
