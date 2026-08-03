@@ -2859,7 +2859,11 @@ export function registerVrmRoutes(): Router {
       try {
         const walk = await runHolmanPoWalk();
         console.log(`[VRM/HolmanPO] cron walk done: ${walk.ok ? `${walk.scrapedCount} rows` : `FAILED ${walk.scrapeError}`}`);
-        return res.json({
+        // A failed walk must be a non-2xx: the ARGUS dispatcher records success
+        // from the HTTP status (fleet_agent_actions.success = res.ok), so a 200
+        // wrapping ok:false would log a failed walk as a green dispatch and the
+        // failure would exist nowhere outside this container's console.
+        return res.status(walk.ok ? 200 : 502).json({
           ok: walk.ok, started: true, skipped: walk.skipped === true,
           scrapedCount: walk.scrapedCount, newCount: walk.newCount,
           actionableCount: walk.actionableCount, reopenedCount: walk.reopenedCount,
