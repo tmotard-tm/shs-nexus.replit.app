@@ -32,6 +32,11 @@ export interface HolmanRentalPoRow {
   decidedAt: string | null;
   scrapedAt: string;
   lastSyncedAt: string;
+  gridLastSeenAt: string | null;
+  reopenedAt: string | null;
+  reopenCount: number;
+  reopenedFromStatus: string | null;
+  reopenReason: string | null;
   district: string | null;
   state: string | null;
 }
@@ -80,8 +85,46 @@ const SELECT_COLS = `
   decided_by_username AS "decidedByUsername",
   decided_at AS "decidedAt",
   scraped_at AS "scrapedAt",
-  last_synced_at AS "lastSyncedAt"
+  last_synced_at AS "lastSyncedAt",
+  grid_last_seen_at AS "gridLastSeenAt",
+  reopened_at AS "reopenedAt",
+  reopen_count AS "reopenCount",
+  reopened_from_status AS "reopenedFromStatus",
+  reopen_reason AS "reopenReason"
 `;
+
+/**
+ * How long a decided PO may keep appearing on Holman's awaiting grid before the
+ * queue re-opens it.
+ *
+ * Measured 2026-08-03: approvals submitted through our WebForms postback stay
+ * on the grid for ~30–85 min while Holman's side clears them; approvals made by
+ * a human inside the portal vanish in <6 min. 120 min is comfortably past the
+ * worst observed lag, so anything still listed after that is NOT clearance lag —
+ * it is either a NEW authorization round on the same PO number (weekly rental
+ * extensions do exactly this, usually at the same $0.00 amount) or a decision
+ * that never actually applied. Both must come back to the operator.
+ *
+ * A false re-open self-heals: the row returns as `pending`, and when Holman
+ * finally clears it the resolved_holman sweep retires it on the next walk.
+ */
+export const HOLMAN_PO_REOPEN_GRACE_MINUTES = 120;
+
+// Reopen predicate, assembled from module-level constants only (safe for sql.raw).
+// A decided row comes back to the worklist when Holman's grid contradicts the
+// decision. Three triggers, most specific first:
+//   amount_changed        — the ask itself changed (pre-existing rule);
+//   resubmitted           — same PO re-listed under a different Submitted date:
+//                           a new authorization cycle;
+//   holman_still_awaiting — still/again awaiting though the decision is older
+//                           than any plausible clearance lag (see above).
+// NB: ON CONFLICT SET expressions all read the OLD row, so these compare the
+// frozen as-decided values against what the walk just scraped.
+const PO_DECIDED = `holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')`;
+const PO_AMOUNT_CHANGED = `holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt`;
+const PO_RESUBMITTED = `holman_rental_po_queue.submitted_date IS DISTINCT FROM EXCLUDED.submitted_date`;
+const PO_DECISION_STALE = `(COALESCE(holman_rental_po_queue.decided_at, holman_rental_po_queue.last_synced_at) IS NULL OR COALESCE(holman_rental_po_queue.decided_at, holman_rental_po_queue.last_synced_at) < EXCLUDED.scraped_at - INTERVAL '${HOLMAN_PO_REOPEN_GRACE_MINUTES} minutes')`;
+const PO_REOPEN = `(${PO_DECIDED} AND (${PO_AMOUNT_CHANGED} OR ${PO_RESUBMITTED} OR ${PO_DECISION_STALE}))`;
 
 export async function upsertHolmanRentalPoQueue(
   rows: HolmanPortalPO[],
@@ -112,7 +155,7 @@ export async function upsertHolmanRentalPoQueue(
         po_date, submitted_date, approval_process,
         tech_ldap, tech_name, profitability_recommendation, profitability_score, match_confidence,
         exemption_label, exemption_overrode_deny,
-        status, approved_in_holman, scraped_at, last_synced_at
+        status, approved_in_holman, scraped_at, last_synced_at, grid_last_seen_at
       ) VALUES (
         ${row.poNumber}, ${row.repairNumber || null}, ${row.key},
         ${row.vehicleNumber || null}, ${row.driverName || null}, ${row.vendorName || null}, ${row.division || null},
@@ -120,7 +163,7 @@ export async function upsertHolmanRentalPoQueue(
         ${row.poDate || null}, ${row.submittedDate || null}, ${row.approvalProcess || null},
         ${m?.techLdap || null}, ${m?.techName || null}, ${m?.recommendation || null}, ${m?.score || null}, ${m?.matchConfidence || "no_match"},
         ${m?.exemptionLabel || null}, ${m?.exemptionOverrodeDeny ?? false},
-        'pending', false, ${now}, ${now}
+        'pending', false, ${now}, ${now}, ${now}
       )
       ON CONFLICT (po_number) DO UPDATE SET
         holman_key              = EXCLUDED.holman_key,
@@ -142,22 +185,40 @@ export async function upsertHolmanRentalPoQueue(
         match_confidence        = COALESCE(EXCLUDED.match_confidence, holman_rental_po_queue.match_confidence),
         scraped_at              = EXCLUDED.scraped_at,
         last_synced_at          = EXCLUDED.last_synced_at,
-        status = CASE
-          WHEN holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
-           AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt
-          THEN 'pending'
-          ELSE holman_rental_po_queue.status
+        grid_last_seen_at       = EXCLUDED.grid_last_seen_at,
+        reopened_at = CASE WHEN ${sql.raw(PO_REOPEN)} THEN EXCLUDED.scraped_at ELSE holman_rental_po_queue.reopened_at END,
+        reopen_count = holman_rental_po_queue.reopen_count + CASE WHEN ${sql.raw(PO_REOPEN)} THEN 1 ELSE 0 END,
+        reopened_from_status = CASE WHEN ${sql.raw(PO_REOPEN)} THEN holman_rental_po_queue.status ELSE holman_rental_po_queue.reopened_from_status END,
+        reopen_reason = CASE
+          WHEN ${sql.raw(PO_REOPEN)} THEN CASE
+            WHEN ${sql.raw(PO_AMOUNT_CHANGED)} THEN 'amount_changed'
+            WHEN ${sql.raw(PO_RESUBMITTED)} THEN 'resubmitted'
+            ELSE 'holman_still_awaiting'
+          END
+          ELSE holman_rental_po_queue.reopen_reason
         END,
-        approved_in_holman = CASE
-          WHEN holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
-           AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt
-          THEN false
-          ELSE holman_rental_po_queue.approved_in_holman
-        END
+        holman_approve_error = CASE WHEN ${sql.raw(PO_REOPEN)} THEN NULL ELSE holman_rental_po_queue.holman_approve_error END,
+        approved_in_holman = CASE WHEN ${sql.raw(PO_REOPEN)} THEN false ELSE holman_rental_po_queue.approved_in_holman END,
+        status = CASE WHEN ${sql.raw(PO_REOPEN)} THEN 'pending' ELSE holman_rental_po_queue.status END
       WHERE holman_rental_po_queue.status IN ('pending', 'blocked', 'approve_failed', 'deny_failed')
-         OR (holman_rental_po_queue.status IN ('approved', 'denied', 'resolved_holman')
-             AND holman_rental_po_queue.additional_requested_amt IS DISTINCT FROM EXCLUDED.additional_requested_amt)
+         OR ${sql.raw(PO_REOPEN)}
     `);
+  }
+
+  // Record the sighting for EVERY scraped PO, including rows the upsert's WHERE
+  // clause deliberately froze (fresh decided rows inside the grace window).
+  // Without this stamp, "is Holman still listing a PO we already decided?" is
+  // unanswerable from the DB — which is exactly how two same-amount
+  // re-authorizations stayed invisible on 2026-08-03 until the operator found
+  // them in the portal himself. The < guard keeps an overlapping older walk
+  // from dragging the stamp backwards (same race the sweep guards against).
+  if (activePOs.length > 0) {
+    const seenList = activePOs.map((p) => `'${p.replace(/'/g, "''")}'`).join(",");
+    await db.execute(sql.raw(`
+      UPDATE holman_rental_po_queue SET grid_last_seen_at = '${now}'
+      WHERE po_number IN (${seenList})
+        AND (grid_last_seen_at IS NULL OR grid_last_seen_at < '${now}')
+    `));
   }
 
   // Rows that dropped off the Holman queue while still pending = resolved on Holman side

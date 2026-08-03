@@ -2684,6 +2684,7 @@ export function registerVrmRoutes(): Router {
   async function runHolmanPoWalk(): Promise<{
     ok: boolean; scrapedCount: number; scrapeError: string | null; skipped?: boolean;
     newCount: number; actionableCount: number; alreadyDecidedCount: number;
+    reopenedCount: number;
   }> {
       // Every exit below records the walk. A walk that changes no data is still
       // a walk that ran, and a walk that died must not look like an empty queue.
@@ -2695,7 +2696,7 @@ export function registerVrmRoutes(): Router {
         console.log("[VRM/HolmanPO] another instance holds the walk lease — skipping this walk.");
         // skipped=true lets the caller say "another refresh is running" instead
         // of reporting a truthless "0 POs scraped" as if the grid were empty.
-        return { ok: true, scrapedCount: 0, scrapeError: null, skipped: true, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0 };
+        return { ok: true, scrapedCount: 0, scrapeError: null, skipped: true, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0, reopenedCount: 0 };
       }
       try {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
@@ -2704,7 +2705,7 @@ export function registerVrmRoutes(): Router {
           startedAt: walkStartedAt, ok: false, rowsScraped: 0,
           walkComplete: walkComplete ?? false, error: scrapeErr,
         });
-        return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0 };
+        return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0, reopenedCount: 0 };
       }
       // Fill the REAL renter for UNKNOWN-driver POs from Holman's View Rental
       // Request box (Tyler 2026-07-11). The renter chain runs in an isolated
@@ -2750,11 +2751,35 @@ export function registerVrmRoutes(): Router {
       await upsertHolmanRentalPoQueue(scraped, enriched, scrapedAt, {
         sweepResolved: walkComplete !== false && !scrapeErr,
       });
+      // Which decided rows did the upsert actually pull BACK onto the worklist?
+      // Measured after the fact instead of predicted here: the reopen rule
+      // (grace window / resubmit date / amount change) lives in the SQL, and a
+      // second copy in TS would only drift from it.
+      let reopenedCount = 0;
+      const decidedPrevPos = Array.from(countedPos).filter((p) => {
+        const prev = prevStatuses.get(p);
+        return !!prev && !(ACTIONABLE_PO_STATUSES as readonly string[]).includes(prev);
+      });
+      if (decidedPrevPos.length > 0) {
+        const postStatuses = await getQueueStatusesForPoNumbers(decidedPrevPos);
+        for (const p of decidedPrevPos) {
+          const st = postStatuses.get(p);
+          if (st && (ACTIONABLE_PO_STATUSES as readonly string[]).includes(st)) reopenedCount++;
+        }
+        if (reopenedCount > 0) {
+          // Loud on purpose: a reopen means Holman lists a PO as awaiting that
+          // we recorded as decided — a new authorization round on the same PO,
+          // or a decision that never applied. The operator must see it again.
+          console.log(`[VRM/HolmanPO] re-opened ${reopenedCount} decided PO(s) — back on Holman's awaiting grid`);
+          alreadyDecidedCount -= reopenedCount;
+          actionableCount += reopenedCount;
+        }
+      }
       await recordHolmanPoWalk({
         startedAt: walkStartedAt, ok: true, rowsScraped: scraped.length,
         walkComplete: walkComplete ?? null, error: scrapeErr ?? null,
       });
-      return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null, newCount, actionableCount, alreadyDecidedCount };
+      return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null, newCount, actionableCount, alreadyDecidedCount, reopenedCount };
       } finally {
         await releaseHolmanWalkLease(leaseOwner);
       }
@@ -2784,6 +2809,7 @@ export function registerVrmRoutes(): Router {
         scrapeError: walk.scrapeError, skipped: walk.skipped === true,
         newCount: walk.newCount, actionableCount: walk.actionableCount,
         alreadyDecidedCount: walk.alreadyDecidedCount,
+        reopenedCount: walk.reopenedCount,
       });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);

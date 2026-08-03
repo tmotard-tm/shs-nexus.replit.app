@@ -1161,9 +1161,11 @@ export default function NewRentals() {
       const nNew = Number(data?.newCount ?? 0);
       const nActionable = Number(data?.actionableCount ?? 0);
       const nDecided = Number(data?.alreadyDecidedCount ?? 0);
+      const nReopened = Number(data?.reopenedCount ?? 0);
       const description = scraped === 0
         ? "Holman's awaiting-authorization grid has no rental POs right now."
         : `Holman shows ${scraped} rental PO${scraped === 1 ? "" : "s"}: ${nNew} new · ${nActionable} awaiting action` +
+          (nReopened > 0 ? ` · ${nReopened} re-opened — back on Holman's awaiting list after a decision` : "") +
           (nDecided > 0 ? ` · ${nDecided} already decided — still clearing on Holman's side` : "");
       toast({ title: "Holman queue refreshed", description });
     },
@@ -2409,6 +2411,19 @@ export default function NewRentals() {
                         {failed && po.holmanApproveError && (
                           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.red, fontWeight: 600, marginTop: 4, maxWidth: 460, lineHeight: 1.35 }}>
                             {failLabel} in Holman — not approved: {po.holmanApproveError}
+                          </div>
+                        )}
+                        {/* A decided PO Holman put back on its awaiting grid (rental
+                            extensions re-authorize on the SAME PO number, usually at
+                            the same $0.00). Before 8/3 these were silently hidden —
+                            the operator found them in the portal himself. */}
+                        {po.reopenedAt && !terminal && (
+                          <div style={{ fontFamily: fonts.dmSans, fontSize: 11, color: colors.amber, fontWeight: 600, marginTop: 4, maxWidth: 460, lineHeight: 1.35 }}>
+                            Re-opened — Holman lists this PO as awaiting again
+                            {po.reopenedFromStatus ? ` (was ${po.reopenedFromStatus === "resolved_holman" ? "resolved in Holman" : po.reopenedFromStatus}${po.decidedAt ? ` ${new Date(po.decidedAt).toLocaleDateString()}` : ""}${po.decidedByName ? ` by ${po.decidedByName}` : ""})` : ""}.
+                            {po.reopenReason === "amount_changed" ? " The requested amount changed — review the new ask."
+                              : po.reopenReason === "resubmitted" ? " Re-submitted with a new date — likely a new authorization round (rental extension)."
+                              : " It never left Holman's awaiting list after the decision — a new authorization round, or the earlier decision didn't apply."}
                           </div>
                         )}
                       </td>

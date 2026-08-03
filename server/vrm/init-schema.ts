@@ -804,6 +804,15 @@ export async function initVrmSchema(): Promise<void> {
   // became Approve, so the approver is notified instead of a silent flip.
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_label TEXT;`);
   await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS exemption_overrode_deny BOOLEAN NOT NULL DEFAULT FALSE;`);
+  // 2026-08-03: decided POs can RETURN to Holman's awaiting grid (weekly rental
+  // extensions re-authorize on the SAME PO number, usually at the same $0.00
+  // amount). grid_last_seen_at records every sighting regardless of status;
+  // reopen_* audit when/why a decided row was pulled back onto the worklist.
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS grid_last_seen_at TIMESTAMPTZ;`);
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS reopened_at TIMESTAMPTZ;`);
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS reopen_count INTEGER NOT NULL DEFAULT 0;`);
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS reopened_from_status TEXT;`);
+  await db.execute(sql`ALTER TABLE holman_rental_po_queue ADD COLUMN IF NOT EXISTS reopen_reason TEXT;`);
 
   // ── Holman walk telemetry — the SYNC EVENT, not its side effects ──────────
   // Freshness used to be inferred from max(last_synced_at) on the queue, which
