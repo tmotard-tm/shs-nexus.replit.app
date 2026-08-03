@@ -95,6 +95,18 @@ export async function ensureWorkersBuilt(): Promise<void> {
  *   VRM_SCRAPE_BUDGET_MIN=n    override the wall-clock budget, in minutes.
  */
 export async function runDeltaSweep(): Promise<void> {
+  // Manual shop-phone locks are episode-scoped (Tyler 8/3): once a case has
+  // been off the board for a week, the lock clears and the phone reverts to
+  // the scrape pick, so a future rental on the same truck starts fresh. Runs
+  // BEFORE target selection so a truck unlocked this run can be re-scraped in
+  // the same run. DB-only — runs even when Chromium is skipped — and its
+  // failure must never block the sweep.
+  try {
+    const { expireStaleShopPhoneLocks } = await import("./scrape-service");
+    await expireStaleShopPhoneLocks();
+  } catch (e: any) {
+    console.warn(`[VRM RentalOps] shop-phone lock expiry failed (sweep continues): ${e?.message || e}`);
+  }
   const skip = process.env.VRM_SKIP_HOLMAN_SCRAPE;
   const skipScrape = skip === "1" || skip?.toLowerCase() === "true";
   if (skipScrape) {

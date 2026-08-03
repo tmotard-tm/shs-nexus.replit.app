@@ -153,14 +153,14 @@ function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
   });
 }
 
-/** What a single truck's write actually did. `unchanged` means we looked and the
- * portal said exactly what we already had stored. */
-type UpsertOutcome = { changed: boolean; empty: boolean };
-
-// Exported for tests: the manual-phone lock guard below is the one behavior
-// that MUST survive refactors, and it is only exercisable through this path.
-export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): Promise<UpsertOutcome> {
-  const events = (rawHist || []).map(trimEvent);
+/** THE shop pick over a (trimmed) event list. upsertTruck runs it on fresh
+ * portal payloads; the lock-expiry reset (expireStaleShopPhoneLocks) runs it on
+ * the STORED hist so an expired lock reverts to exactly what a scrape of that
+ * same history would have written — one pick, two callers, zero drift. */
+function pickShopFromEvents(events: any[]): {
+  poCount: number; msgCount: number;
+  shopName: string | null; shopPhone: string | null; shopAddress: string | null; shopSrc: string | null;
+} {
   // MOST RECENT first (Tyler: "pulls the most recent repair shop PO"), with a
   // deterministic poNumber tiebreak so equal repair dates never order randomly.
   const pos = events.filter((e) => e.type === "PO" && e.poNumber && e.poNumber !== "0")
@@ -170,9 +170,7 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
   const shopPos = pos.filter(isRealShop);
   const openShop = shopPos.find((p) => String(p.status || "").toUpperCase() === "APPROVED");
   const pick = openShop || shopPos[0] || null;
-
-  const histJson = JSON.stringify(events);
-  const next = {
+  return {
     poCount: pos.length,
     msgCount,
     shopName: (pick?.vendorName ?? null) as string | null,
@@ -180,6 +178,18 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
     shopAddress: (pick?.vendorAddress ?? null) as string | null,
     shopSrc: (openShop ? "open PO" : (pick ? "last PO" : null)) as string | null,
   };
+}
+
+/** What a single truck's write actually did. `unchanged` means we looked and the
+ * portal said exactly what we already had stored. */
+type UpsertOutcome = { changed: boolean; empty: boolean };
+
+// Exported for tests: the manual-phone lock guard below is the one behavior
+// that MUST survive refactors, and it is only exercisable through this path.
+export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): Promise<UpsertOutcome> {
+  const events = (rawHist || []).map(trimEvent);
+  const histJson = JSON.stringify(events);
+  const next = pickShopFromEvents(events);
 
   // DELTA WRITE. "Only bring in from the scraper what's different" applies to the
   // table too, not just to which trucks we visit.
@@ -215,7 +225,10 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
   // MANUAL PHONE LOCK (Tyler 8/3): an operator-entered phone with the lock set
   // is preserved verbatim through every scrape — the portal's own number still
   // lands inside hist (KEEP_PO keeps vendorPhone per PO), so nothing is lost,
-  // but the picked shop_phone column belongs to the human until they unlock it.
+  // but the picked shop_phone column belongs to the human until they unlock it
+  // — or until the lock EXPIRES: expireStaleShopPhoneLocks (below) clears locks
+  // whose case has been off the board for a week, so a future rental for the
+  // same truck starts fresh instead of inheriting a months-old number.
   // Overriding `next` BEFORE the compare keeps the no-op branch honest: a
   // locked phone can never make an otherwise-identical revisit look "changed".
   const phoneLocked = prev?.shop_phone_locked === true;
@@ -619,6 +632,9 @@ export async function findScrapeGaps(opts: { limit?: number } = {}): Promise<str
  *
  * `phone` must arrive already validated (10 bare digits or null to clear);
  * the route owns user-input validation, this owns the write.
+ *
+ * Locks are episode-scoped, not eternal: expireStaleShopPhoneLocks (below)
+ * auto-clears a lock once its case has been off the board for a week.
  */
 export async function setShopPhone(opts: {
   truck: string;
@@ -647,4 +663,115 @@ export async function setShopPhone(opts: {
     previousLocked: prev?.shop_phone_locked === true,
     created: !prev,
   };
+}
+
+// ── Lock expiry ─────────────────────────────────────────────────────────────
+// A manual lock is scoped to the rental EPISODE that prompted it, not to the
+// truck forever (Tyler 8/3): "once the rental falls off the list, if it is
+// later added back on, the locked contact information would need to be reset
+// and have the ability to be pulled back in via the scraper."
+//
+// The board's own lifecycle clocks decide when that episode is over:
+// vrm_rental_operations_cases.present_in_latest is board membership, and
+// ingest stamps dropped_from_feed_at the run a case leaves the feed. A locked
+// truck stays locked while ANY present case references it — as the rental
+// itself (case_key) or as the renter's identity-resolved assigned truck (the
+// assigned tab and the redirect pencil can lock those too). Once nothing on
+// the board references it, a grace window starts; only after the window does
+// the lock clear. The grace exists because the feed flickers — the ETL loader
+// has known gaps, and a case that vanishes for a day mid-rental must not cost
+// an operator their lock.
+const SHOP_PHONE_LOCK_GRACE_DAYS = 7;
+
+export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; expired: number }> {
+  const res = await db.execute(sql`
+    WITH case_refs AS (
+      -- Every truck a case references, with that case's board state + clock:
+      -- the rental truck itself…
+      SELECT c.case_key AS truck, c.present_in_latest,
+             GREATEST(COALESCE(c.dropped_from_feed_at, 'epoch'::timestamptz),
+                      COALESCE(c.last_seen_at,         'epoch'::timestamptz)) AS board_clock
+      FROM vrm_rental_operations_cases c
+      UNION ALL
+      -- …and the renter's assigned truck. Same identity resolution as
+      -- UNIVERSE_CTE's assigned arm, but with NO declined/auction filter: the
+      -- assigned-truck tab can set a lock on ANY case, so every case must
+      -- keep its assigned truck's lock alive while it is on the board.
+      SELECT own.own_pad AS truck, c.present_in_latest,
+             GREATEST(COALESCE(c.dropped_from_feed_at, 'epoch'::timestamptz),
+                      COALESCE(c.last_seen_at,         'epoch'::timestamptz)) AS board_clock
+      FROM vrm_rental_operations_cases c
+      JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+      JOIN all_techs atr ON atr.employee_id = COALESCE(i.override_employee_id, i.resolved_employee_id)
+      JOIN LATERAL (SELECT NULLIF(lpad(ltrim(regexp_replace(COALESCE(atr.truck_lu, atr.last_known_truck_lu), '[^0-9]', '', 'g'), '0'), 5, '0'), '00000') AS own_pad) own ON true
+      WHERE own.own_pad IS NOT NULL
+    ),
+    ref_agg AS (
+      SELECT truck, bool_or(present_in_latest) AS on_board, max(board_clock) AS last_on_board
+      FROM case_refs GROUP BY 1
+    )
+    SELECT h.truck_no, h.hist, h.shop_phone, h.shop_phone_edited_at,
+           COALESCE(r.on_board, false) AS on_board, r.last_on_board
+    FROM vrm_holman_portal_hist h
+    LEFT JOIN ref_agg r ON r.truck = h.truck_no
+    WHERE h.shop_phone_locked = true
+  `);
+  const rows = res.rows as any[];
+  const graceMs = SHOP_PHONE_LOCK_GRACE_DAYS * 86_400_000;
+  const now = Date.now();
+  const old = (ts: any) => ts == null || now - new Date(ts).getTime() > graceMs;
+  // Both clocks must be past the grace: the board clock (case left a week ago)
+  // AND the edit clock — so a lock placed five minutes ago never insta-expires
+  // just because its case dropped last month, and a lock on a truck the board
+  // has never referenced still ages out by edit date instead of living forever.
+  const expired = rows.filter((r) => r.on_board !== true && old(r.last_on_board) && old(r.shop_phone_edited_at));
+
+  let applied = 0;
+  for (const r of expired) {
+    let pick: ReturnType<typeof pickShopFromEvents>;
+    try {
+      const raw = Array.isArray(r.hist) ? r.hist : JSON.parse(String(r.hist ?? "[]"));
+      pick = pickShopFromEvents(Array.isArray(raw) ? raw : []);
+    } catch {
+      // Malformed hist: still expire — fail toward scraper ownership. The next
+      // visit rewrites hist and the pick along with it.
+      pick = pickShopFromEvents([]);
+    }
+    // Race guard, ATOMIC at write time: the snapshot above may be stale by the
+    // time this row is written. `shop_phone_locked = true` catches a concurrent
+    // unlock; re-checking the edit clock IN the UPDATE catches a concurrent
+    // re-edit/re-lock — setShopPhone always stamps edited_at = NOW(), which
+    // fails the age predicate, so an operator writing mid-sweep always wins.
+    // (Board clocks need no re-check: a case flipping mid-run only shifts an
+    // expiry that is already 7+ days past its episode by one sweep.)
+    // edited_by/edited_at survive as the audit trail of the LAST manual edit;
+    // source stops claiming manual.
+    const upd = await db.execute(sql`
+      UPDATE vrm_holman_portal_hist
+      SET shop_phone = ${pick.shopPhone}, shop_phone_locked = false,
+          shop_phone_source = ${pick.shopPhone ? "scrape" : null}
+      WHERE truck_no = ${r.truck_no} AND shop_phone_locked = true
+        AND (shop_phone_edited_at IS NULL
+             OR shop_phone_edited_at < NOW() - make_interval(days => ${SHOP_PHONE_LOCK_GRACE_DAYS}))`);
+    if ((upd.rowCount ?? 0) === 0) {
+      // Someone edited or unlocked this row between snapshot and write — their
+      // state stands, and no audit row may claim an expiry that never applied.
+      console.log(`[VRM RentalOps] shop-phone lock expiry SKIPPED for ${r.truck_no}: row changed mid-run (operator wins)`);
+      continue;
+    }
+    applied++;
+    try {
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, actor, target_truck, payload)
+        VALUES (${r.truck_no}, 'shop_phone_lock_expire', 'system', ${r.truck_no},
+                ${JSON.stringify({ previousPhone: r.shop_phone ?? null, restoredPhone: pick.shopPhone, lastOnBoard: r.last_on_board ?? null, graceDays: SHOP_PHONE_LOCK_GRACE_DAYS })}::jsonb)`);
+    } catch (e: any) {
+      console.warn(`[VRM RentalOps] lock-expiry audit insert failed for ${r.truck_no} (reset applied): ${e?.message || e}`);
+    }
+    console.log(`[VRM RentalOps] shop-phone lock EXPIRED for ${r.truck_no}: case off board > ${SHOP_PHONE_LOCK_GRACE_DAYS}d — manual ${r.shop_phone ?? "(none)"} → scrape ${pick.shopPhone ?? "(none)"}`);
+  }
+  if (rows.length) {
+    console.log(`[VRM RentalOps] shop-phone lock expiry: ${rows.length} locked, ${applied} expired`);
+  }
+  return { locked: rows.length, expired: applied };
 }

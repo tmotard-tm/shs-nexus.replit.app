@@ -62,3 +62,4 @@
 - [Samsara /devices health](samsara-devices-health.md) — includeHealth=true rejects limit=512 (use 100 + cursor); 2 devices/vehicle (VG gateway + CM camera); roll up worst-of per canonical truck number.
 - [Holman phantom cache rows](holman-phantom-cache-rows.md) — upsert-only sync never removes failed-assign manual rows; self-heal keys on manual+never-synced, NOT number format (real Holman numbers can be alphanumeric).
 - [fs_call_logs status vocab collision](fs-call-logs-status-vocab-collision.md) — LUCA writes display labels into the lifecycle column; queue "unresolved" + follow-up 'completed' filters misread every LUCA row; new outcomes must update BOTH mapper outcome maps.
+- [Manual-override pins are episode-scoped](manual-override-expiry.md) — locks over scraped fields expire via board lifecycle clocks + dual-clock grace; reset reuses the scraper's pick; sweep UPDATEs must re-check predicates in-write, audit gated on rowCount.

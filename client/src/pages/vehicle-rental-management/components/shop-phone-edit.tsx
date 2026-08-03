@@ -113,7 +113,7 @@ export function ShopPhoneEditModal({ target, onClose, onSaved }: {
             </span>
             <span style={{ display: "block", fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>
               {locked
-                ? "Holman refreshes keep pulling PO history but leave this number exactly as entered, until someone unlocks it here."
+                ? "Holman refreshes keep pulling PO history but leave this number exactly as entered, until someone unlocks it here. If this case leaves the board, the lock clears on its own after about a week, so a future rental starts fresh."
                 : "The next Holman scrape overwrites this number if the portal shows a different one. Lock it to make your entry stick."}
             </span>
           </span>
