@@ -1,15 +1,16 @@
 ---
 name: Holman PO refresh liveness & grid lag
-description: Why "refresh does nothing" on the awaiting-auth queue is usually feedback, not the scraper — Holman grid clears approvals async, token is session-stable
+description: Why "refresh does nothing" on the awaiting-auth queue is feedback + Holman clearance lag, not scraper staleness — token is TEMPLATE-stable, listing is live per-request
 ---
 
 # Holman awaiting-auth refresh: what's live and what lags
 
-- The HTTP-only walk (cached 20-min session, ~2s, no Chromium) fetches **live** grid data on every DetailsListing GET. The KPI widget id token (`129_…`) is **session-stable**: identical ctx id across forced `_Zones` re-renders is NORMAL, not a sign that force=false or that data is frozen.
-- **Holman clears approved POs from its own awaiting-auth grid asynchronously** — observed lag ranges from a few minutes to >13 min. A walk right after approvals re-scrapes the just-approved POs; the queue upsert correctly skips locally-decided rows (WHERE status IN pending/blocked/… gate), so nothing visibly changes. This is by design — it prevents approvals from bouncing back as pending.
-- Consequence: an operator pressing Refresh right after approving sees zero change and reads it as "refresh broken." Check the walk meta (`holman_po_sync_meta` single row: last_walk_started/completed/ok/rows) and per-row `last_synced_at` bumps before suspecting the scraper.
-- Approval postbacks DO land: grid shrank by exactly the approved POs between walks (6 rentals → 3 within minutes of 5 approvals). `holman_approve_confirmed_at` ~30ms after attempted_at is just local timestamping, not evidence of a no-op.
+- The KPI widget id token (`129_…`) is **TEMPLATE-stable, not per-render or per-session**: five separate fresh logins in one morning all harvested the identical token while the grid data changed every walk (6→7→7→8→3 rentals). Token identity proves NOTHING about data freshness — never read "same ctx id" as "stale snapshot."
+- The DetailsListing GET is **live per-request** (same token, different data across walks), including on a warm cached session. The HTTP-only ~2s walk IS a genuine on-demand refresh; no fresh-login-per-press is needed.
+- **Holman clears approved POs from its own awaiting-auth grid asynchronously with highly variable lag — sub-minute to ~80+ minutes observed.** A walk right after approvals re-scrapes just-approved POs; the queue upsert correctly skips locally-decided rows, so nothing visibly changes. By design: prevents approvals bouncing back as pending.
+- The 30-min ARGUS cron effectively fresh-logins every tick anyway (session TTL 20 min < 30-min cadence).
+- Approval postbacks DO land (grid shrank by exactly the approved POs between walks). `holman_approve_confirmed_at` ~30ms after attempted_at is local timestamping, not a no-op signal.
 
-**Why:** Full investigation 2026-08-03 (4 refresh presses in 6 min, all walks ok, "nothing happened") traced to Holman-side clearance lag + a client feedback bug — NOT scraper staleness.
+**Why:** Full investigation 2026-08-03 ("refresh button does nothing"): four presses in 6 min — every walk ran fine and found nothing new; the breakage was operator feedback, never the scraper. General trap: a react-query `setQueryData` that writes a PARTIAL response shape silently wipes sibling top-level fields (staleness header, failure banner) the UI renders from.
 
-**How to apply:** For any "queue not refreshing" complaint: (1) prod `holman_po_sync_meta` proves walks ran; (2) diff row `last_synced_at`/`scraped_at` stamps against decision times to see what the grid held; (3) then audit the CLIENT feedback path — known trap: refresh mutation's `setQueryData` writing `{rows}` only clobbers top-level `lastSyncedAt`/`syncStatus` off the query cache (header regresses to "Not yet synced", failure banner can't render) with no refetch until refocus.
+**How to apply:** For any "queue not refreshing" complaint: (1) prod `holman_po_sync_meta` proves walks ran; (2) diff row `last_synced_at`/`scraped_at` stamps against decision times to see what the grid held; (3) expect just-approved POs to linger in Holman's grid for up to an hour-plus — tell the operator, don't "fix" the scraper.

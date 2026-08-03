@@ -81,6 +81,7 @@ import {
   getHolmanPoQueueLastSyncedAt, recordHolmanPoWalk, getHolmanPoSyncStatus,
   overrideHolmanPoTechMatch, updateHolmanPoProfitability,
   acquireHolmanWalkLease, releaseHolmanWalkLease, recordHolmanApprover,
+  getQueueStatusesForPoNumbers, ACTIONABLE_PO_STATUSES,
 } from "./holman-rental-po-storage";
 import { scrapeAwaitingAuth, approvePoInHolman, denyPoInHolman,
   resolveRentersForVehicles } from "../holman-portal-service";
@@ -2680,7 +2681,10 @@ export function registerVrmRoutes(): Router {
    * verbatim from the former route body (indentation kept to preserve the
    * diff); callers own the in-flight flag.
    */
-  async function runHolmanPoWalk(): Promise<{ ok: boolean; scrapedCount: number; scrapeError: string | null }> {
+  async function runHolmanPoWalk(): Promise<{
+    ok: boolean; scrapedCount: number; scrapeError: string | null; skipped?: boolean;
+    newCount: number; actionableCount: number; alreadyDecidedCount: number;
+  }> {
       // Every exit below records the walk. A walk that changes no data is still
       // a walk that ran, and a walk that died must not look like an empty queue.
       const walkStartedAt = new Date();
@@ -2689,7 +2693,9 @@ export function registerVrmRoutes(): Router {
       const leaseOwner = `${process.pid}:${walkStartedAt.getTime()}`;
       if (!(await acquireHolmanWalkLease(leaseOwner))) {
         console.log("[VRM/HolmanPO] another instance holds the walk lease — skipping this walk.");
-        return { ok: true, scrapedCount: 0, scrapeError: null };
+        // skipped=true lets the caller say "another refresh is running" instead
+        // of reporting a truthless "0 POs scraped" as if the grid were empty.
+        return { ok: true, scrapedCount: 0, scrapeError: null, skipped: true, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0 };
       }
       try {
       const { rows: scraped, scrapedAt, error: scrapeErr, walkComplete } = await scrapeAwaitingAuth(true);
@@ -2698,7 +2704,7 @@ export function registerVrmRoutes(): Router {
           startedAt: walkStartedAt, ok: false, rowsScraped: 0,
           walkComplete: walkComplete ?? false, error: scrapeErr,
         });
-        return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr };
+        return { ok: false as const, scrapedCount: 0, scrapeError: scrapeErr, newCount: 0, actionableCount: 0, alreadyDecidedCount: 0 };
       }
       // Fill the REAL renter for UNKNOWN-driver POs from Holman's View Rental
       // Request box (Tyler 2026-07-11). The renter chain runs in an isolated
@@ -2722,6 +2728,22 @@ export function registerVrmRoutes(): Router {
       } catch (e: any) {
         console.warn("[VRM/HolmanPO] renter resolve failed (non-fatal):", e?.message);
       }
+      // What this walk actually FOUND, measured against the queue as it stood
+      // BEFORE the upsert: brand-new POs vs rows the operator already decided
+      // that Holman's grid is still clearing (observed lag ran ~80 minutes on
+      // 2026-08-03 — those lingerers made on-demand refreshes look like no-ops).
+      const prevStatuses = await getQueueStatusesForPoNumbers(scraped.map((po) => String(po.poNumber)));
+      let newCount = 0, actionableCount = 0, alreadyDecidedCount = 0;
+      const countedPos = new Set<string>(); // the grid can repeat a PO across rows — count each PO once
+      for (const po of scraped) {
+        const poNo = String(po.poNumber);
+        if (countedPos.has(poNo)) continue;
+        countedPos.add(poNo);
+        const prev = prevStatuses.get(poNo);
+        if (!prev) { newCount++; actionableCount++; continue; }
+        if ((ACTIONABLE_PO_STATUSES as readonly string[]).includes(prev)) actionableCount++;
+        else alreadyDecidedCount++;
+      }
       const enriched = await Promise.all(
         scraped.map(async (po) => ({ poNumber: po.poNumber, ...(await matchDriverNameToTech(po.driverName)) }))
       );
@@ -2732,7 +2754,7 @@ export function registerVrmRoutes(): Router {
         startedAt: walkStartedAt, ok: true, rowsScraped: scraped.length,
         walkComplete: walkComplete ?? null, error: scrapeErr ?? null,
       });
-      return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null };
+      return { ok: true, scrapedCount: scraped.length, scrapeError: scrapeErr ?? null, newCount, actionableCount, alreadyDecidedCount };
       } finally {
         await releaseHolmanWalkLease(leaseOwner);
       }
@@ -2741,7 +2763,12 @@ export function registerVrmRoutes(): Router {
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
     if (holmanPoRefreshInFlight) {
       const rows = await listHolmanPoQueue();
-      return res.json({ ok: true, rows, lastSyncedAt: await getHolmanPoQueueLastSyncedAt(), inFlight: true });
+      return res.json({
+        ok: true, rows,
+        lastSyncedAt: await getHolmanPoQueueLastSyncedAt(),
+        syncStatus: await getHolmanPoSyncStatus(),
+        inFlight: true,
+      });
     }
     holmanPoRefreshInFlight = true;
     try {
@@ -2749,10 +2776,14 @@ export function registerVrmRoutes(): Router {
       if (!walk.ok) {
         return res.status(502).json({ ok: false, error: walk.scrapeError });
       }
-      const rows = await listHolmanPoQueue();
+      const [rows, lastSyncedAt, syncStatus] = await Promise.all([
+        listHolmanPoQueue(), getHolmanPoQueueLastSyncedAt(), getHolmanPoSyncStatus(),
+      ]);
       res.json({
-        ok: true, scrapedCount: walk.scrapedCount, rows,
-        lastSyncedAt: await getHolmanPoQueueLastSyncedAt(), scrapeError: walk.scrapeError,
+        ok: true, scrapedCount: walk.scrapedCount, rows, lastSyncedAt, syncStatus,
+        scrapeError: walk.scrapeError, skipped: walk.skipped === true,
+        newCount: walk.newCount, actionableCount: walk.actionableCount,
+        alreadyDecidedCount: walk.alreadyDecidedCount,
       });
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);

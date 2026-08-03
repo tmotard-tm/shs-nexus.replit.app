@@ -1134,16 +1134,38 @@ export default function NewRentals() {
     // "refreshing then nothing changed" symptom was the POST timing out before
     // onSuccess could fire.
     onSuccess: (data: any) => {
-      if (data?.rows) qc.setQueryData(["/api/vrm/holman-po-queue"], { rows: data.rows });
-      else refetchPoQueue();
-      // A walk was already running server-side: keep the polling window open so
-      // this tab picks up that walk's result when it lands, and say so.
-      if (data?.inFlight) {
+      // Keep the FULL response shape in the cache. Writing `{ rows }` alone
+      // wiped lastSyncedAt/syncStatus off the query, so the header regressed to
+      // "Not yet synced from Holman" right after a SUCCESSFUL refresh and the
+      // failure banner could never render (root cause of the 8/3 "refresh does
+      // nothing" report, alongside Holman's own slow grid clearance).
+      if (data?.rows) {
+        qc.setQueryData(["/api/vrm/holman-po-queue"], {
+          rows: data.rows,
+          lastSyncedAt: data.lastSyncedAt ?? null,
+          syncStatus: data.syncStatus ?? null,
+        });
+      } else refetchPoQueue();
+      // A walk was already running — in this process (inFlight) or on another
+      // autoscale instance (skipped, via the DB lease): keep the polling window
+      // open so this tab picks up that walk's result when it lands, and say so.
+      if (data?.inFlight || data?.skipped) {
         toast({ title: "Refresh already running", description: "Another walk of the Holman portal is in progress. The queue updates automatically when it lands." });
         return;
       }
       setRefreshing(false);
-      toast({ title: "Holman queue refreshed" });
+      // Say what the walk FOUND. "Scraped 3 — 0 new, 2 already decided" must
+      // read differently from a dead button: on 8/3 four presses all worked,
+      // found nothing new, and gave no acknowledgment beyond this bare toast.
+      const scraped = Number(data?.scrapedCount ?? 0);
+      const nNew = Number(data?.newCount ?? 0);
+      const nActionable = Number(data?.actionableCount ?? 0);
+      const nDecided = Number(data?.alreadyDecidedCount ?? 0);
+      const description = scraped === 0
+        ? "Holman's awaiting-authorization grid has no rental POs right now."
+        : `Holman shows ${scraped} rental PO${scraped === 1 ? "" : "s"}: ${nNew} new · ${nActionable} awaiting action` +
+          (nDecided > 0 ? ` · ${nDecided} already decided — still clearing on Holman's side` : "");
+      toast({ title: "Holman queue refreshed", description });
     },
     onError: () => {
       refetchPoQueue();

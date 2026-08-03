@@ -206,6 +206,26 @@ export async function upsertHolmanRentalPoQueue(
 export const ACTIONABLE_PO_STATUSES = ["pending", "blocked", "approve_failed", "deny_failed"] as const;
 
 /**
+ * Status of each EXISTING queue row for a set of scraped PO numbers, keyed by
+ * po_number. Read before the walk's upsert, it lets the refresh report what it
+ * actually found — new POs vs rows already decided in Nexus that Holman's grid
+ * is still clearing (observed lag up to ~80 min on 2026-08-03). Without those
+ * counts a "walked fine, nothing changed" refresh is indistinguishable from a
+ * dead button, which is exactly how it read to the operator.
+ */
+export async function getQueueStatusesForPoNumbers(poNumbers: string[]): Promise<Map<string, string>> {
+  const uniq = Array.from(new Set(poNumbers.map((p) => String(p ?? "").trim()).filter(Boolean)));
+  if (uniq.length === 0) return new Map();
+  // Same IN-list construction as listHolmanPoQueue: drizzle binds a JS array
+  // as ONE parameter and Postgres rejects it ("requires array on right side").
+  const list = sql.join(uniq.map((v) => sql`${v}`), sql`, `);
+  const r = await db.execute(
+    sql`SELECT po_number, status FROM holman_rental_po_queue WHERE po_number IN (${list})`,
+  );
+  return new Map((r.rows as any[]).map((row) => [String(row.po_number), String(row.status)]));
+}
+
+/**
  * The actionable Holman PO queue.
  *
  * `statuses` defaults to the actionable set and the LIMIT is applied AFTER the
