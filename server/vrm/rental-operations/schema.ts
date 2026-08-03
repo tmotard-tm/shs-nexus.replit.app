@@ -288,6 +288,18 @@ export async function initRentalOperationsSchema(): Promise<void> {
       imported_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+  // Manual shop-phone edit + lock (Tyler 2026-08-03): operators can correct the
+  // phone the scraper picked, and `locked` pins it against every future scrape
+  // (sweep, per-truck Refresh, backfill script — they all go through
+  // upsertTruck, which preserves a locked phone). shop_phone_source records
+  // provenance: 'manual' while a human's number is in the column, 'scrape' once
+  // an UNLOCKED manual value is replaced by portal content. `source='manual'`
+  // rows (hist=[], scraped_at NULL) are created when a phone is entered for a
+  // never-scraped truck; scraped_at stays NULL so delta targeting still visits.
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_locked BOOLEAN NOT NULL DEFAULT false;`);
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_source VARCHAR(20);`);
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_edited_by VARCHAR(120);`);
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_edited_at TIMESTAMPTZ;`);
 
   console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/call_log/portal_hist)");
 }

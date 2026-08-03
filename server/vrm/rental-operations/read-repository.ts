@@ -431,7 +431,13 @@ export interface MasterRow {
   odometer: number | null;
   odometer_date: string | null;
   portal_msg_count: number | null; // Holman message-trail entries (portal scrape)
-  portal_shop_phone: string | null;// shop phone from the portal scrape
+  portal_shop_phone: string | null;// shop phone from the portal scrape (or a manual edit)
+  /** manual phone edit + lock (Tyler 8/3): locked=true means scrapes preserve shop_phone */
+  shop_phone_locked: boolean;
+  shop_phone_source: string | null;    // 'manual' | 'scrape' | null (legacy scrape-era rows)
+  shop_phone_edited_by: string | null;
+  shop_phone_edited_at: string | null;
+  assigned_phone_locked: boolean;      // same lock, for the assigned truck's phone
   has_portal: boolean;             // has a scraped Holman portal row
   callable: boolean;               // LUCA should call this shop (effective target below); never true for PENDED (ticket already closing)
   // current repair shop (most recent APPROVED repair PO, else latest repair PO)
@@ -584,8 +590,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       rt.tpms_truck AS tpms_own_truck,
       ownp.own_pad AS assigned_truck,
       ph.msg_count AS portal_msg_count, ph.shop_phone AS portal_shop_phone,
+      ph.shop_phone_locked, ph.shop_phone_source, ph.shop_phone_edited_by,
+      to_char(ph.shop_phone_edited_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS shop_phone_edited_at,
       (ph.truck_no IS NOT NULL) AS has_portal,
       aph.shop_phone AS assigned_portal_phone,
+      aph.shop_phone_locked AS assigned_phone_locked,
       apo.open_po_count AS assigned_open_po,
       ashop.vendor_name AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
       ashop.vendor_city AS assigned_shop_city, ashop.vendor_state AS assigned_shop_state,
@@ -779,6 +788,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       odometer: odo, odometer_date: r.odometer_date ?? null,
       portal_msg_count: r.portal_msg_count == null ? null : Number(r.portal_msg_count),
       portal_shop_phone: r.portal_shop_phone ?? null, has_portal: !!r.has_portal,
+      shop_phone_locked: r.shop_phone_locked === true,
+      shop_phone_source: r.shop_phone_source ?? null,
+      shop_phone_edited_by: r.shop_phone_edited_by ?? null,
+      shop_phone_edited_at: r.shop_phone_edited_at ?? null,
+      assigned_phone_locked: r.assigned_phone_locked === true,
       callable,
       shop_name: r.shop_name ?? null, shop_address: r.shop_address ?? null, shop_city: r.shop_city ?? null,
       shop_state: r.shop_state ?? null, shop_zip: r.shop_zip ?? null,
@@ -1336,7 +1350,8 @@ export async function getLucaRentalList(): Promise<any> {
       shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
       shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
       popho.phone AS po_phone, popho.vendor AS po_phone_vendor,
-      ph.shop_phone AS portal_shop_phone, ph.shop_name AS portal_shop_name
+      ph.shop_phone AS portal_shop_phone, ph.shop_name AS portal_shop_name,
+      ph.shop_phone_locked AS portal_phone_locked, ph.shop_phone_source AS portal_phone_source
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
@@ -1386,16 +1401,24 @@ export async function getLucaRentalList(): Promise<any> {
   // with the board about a redirect target.
   const __master = await getRentalOpsMaster();
   const __masterByKey = new Map(__master.rows.map((m: any) => [String(m.case_key), m]));
-  let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneRejected = 0, statusCorrected = 0;
+  let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneManual = 0, phoneRejected = 0, statusCorrected = 0;
   const rentals = (res.rows as any[]).map((r) => {
     const shopName: string | null = r.shop_name ? String(r.shop_name).trim() : null;
     if (shopName) shopWithPo++;
     if (shopName && r.shop_po_status_etl != null && r.shop_po_status !== r.shop_po_status_etl) statusCorrected++;
-    // The phone must belong to the vendor whose NAME we return, or be null.
+    // The phone must belong to the vendor whose NAME we return, or be null —
+    // EXCEPT a manual number (Tyler 8/3): a human typed it for THIS truck, so
+    // it outranks both pickers and skips the vendor-name check. It stays
+    // authoritative while shop_phone_source='manual' (always true when locked;
+    // an UNLOCKED manual value loses the flag the moment a scrape replaces it).
     let shopPhone: string | null = null;
     if (shopName) {
+      const manualPhone = (r.portal_phone_locked === true || r.portal_phone_source === "manual")
+        ? cleanPhone(r.portal_shop_phone) : null;
       const poPhone = cleanPhone(r.po_phone);
-      if (poPhone && vendorKey(r.po_phone_vendor) === vendorKey(shopName)) {
+      if (manualPhone) {
+        shopPhone = manualPhone; phoneManual++;
+      } else if (poPhone && vendorKey(r.po_phone_vendor) === vendorKey(shopName)) {
         shopPhone = poPhone; phoneFromPo++;
       } else {
         const portalPhone = cleanPhone(r.portal_shop_phone);
@@ -1484,13 +1507,13 @@ export async function getLucaRentalList(): Promise<any> {
   const sh = await getSourceHealth();
   console.log(
     `[VRM/RentalOps] luca-rental-list: ${rentals.length} rentals · shop-of-record ${shopWithPo} ` +
-    `(phone: ${phoneFromPo} from PO, ${phoneFromPortal} from portal, ${phoneRejected} rejected as wrong-vendor/junk` +
+    `(phone: ${phoneFromPo} from PO, ${phoneFromPortal} from portal, ${phoneManual} manual, ${phoneRejected} rejected as wrong-vendor/junk` +
     `; ${statusCorrected} PO statuses corrected by the portal layer)`,
   );
   return {
     generatedAt: new Date().toISOString(), source: "vrm_rental_operations",
     total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate,
-    shopOfRecord: { withShop: shopWithPo, withPhone: phoneFromPo + phoneFromPortal, phoneFromPo, phoneFromPortal, phoneRejected, statusCorrected },
+    shopOfRecord: { withShop: shopWithPo, withPhone: phoneFromPo + phoneFromPortal + phoneManual, phoneFromPo, phoneFromPortal, phoneManual, phoneRejected, statusCorrected },
     rentals,
   };
 }
@@ -1654,7 +1677,9 @@ async function readPortalSnapshot(truck: string): Promise<any | null> {
   try {
     const pRes = await db.execute(sql`
       SELECT hist, source, to_char(scraped_at,'YYYY-MM-DD') AS scraped_at,
-             shop_name, shop_phone, shop_address, shop_src, po_count, msg_count
+             shop_name, shop_phone, shop_address, shop_src, po_count, msg_count,
+             shop_phone_locked, shop_phone_source, shop_phone_edited_by,
+             to_char(shop_phone_edited_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS shop_phone_edited_at
       FROM vrm_holman_portal_hist WHERE truck_no = ${truck} LIMIT 1`);
     if (!pRes.rows.length) return null;
     const p = pRes.rows[0] as any;
@@ -1678,7 +1703,15 @@ async function readPortalSnapshot(truck: string): Promise<any | null> {
     }
     return {
       source: p.source, scrapedAt: p.scraped_at, msgCount: Number(p.msg_count || 0), poCount: Number(p.po_count || 0),
-      shop: { name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src },
+      shop: {
+        name: p.shop_name, phone: p.shop_phone, address: p.shop_address, src: p.shop_src,
+        // manual edit + lock (Tyler 8/3) — the drawer shows provenance and lets
+        // the operator edit; a manual phone outranks the per-PO vendorPhone.
+        phoneLocked: p.shop_phone_locked === true,
+        phoneSource: p.shop_phone_source ?? null,
+        phoneEditedBy: p.shop_phone_edited_by ?? null,
+        phoneEditedAt: p.shop_phone_edited_at ?? null,
+      },
       messages, poDetail,
     };
   } catch (e: any) {

@@ -536,6 +536,56 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST an operator-entered shop phone for ONE truck (Tyler 8/3) — the manual
+  // Edit behind the phone shown on Rental Operations / Cases by Region.
+  //   body { phone: "10 digits" | "", locked: boolean, case_key?: string }
+  // "" clears the number. locked=true pins the value against every future
+  // scrape — the delta sweep, the per-truck Refresh and the backfill script all
+  // go through upsertTruck, which preserves a locked phone verbatim. The path
+  // param is the TRUCK whose portal row is edited (same convention as /scrape:
+  // the control edits the truck on screen, which for the redirect line is the
+  // tech's assigned truck, not the rental case).
+  router.post("/rental-operations/master/:truck/shop-phone", async (req, res) => {
+    try {
+      const rawPhone = req.body?.phone;
+      const locked = req.body?.locked === true;
+      if (rawPhone === undefined) return res.status(400).json({ error: "phone required ('' clears the number)" });
+      let phone: string | null = null;
+      const s = String(rawPhone ?? "").trim();
+      if (s) {
+        let d = s.replace(/\D/g, "");
+        if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
+        // Same junk filter as the LUCA feed's cleanPhone: repeated-digit
+        // fillers (5555555555…) are not phone numbers.
+        if (d.length !== 10 || /^(\d)\1{9}$/.test(d)) {
+          return res.status(400).json({ error: "enter a real 10-digit phone number (or clear the field to remove it)" });
+        }
+        phone = d;
+      }
+      const { setShopPhone } = await import("./scrape-service");
+      const actor = actorOf(req);
+      const saved = await setShopPhone({ truck: req.params.truck, phone, locked, actor });
+      // Durable audit trail in the same table as marks/notes. target_truck set
+      // = vehicle-scoped, and the type is neither 'mark' nor 'note', so no
+      // case-level query or drawer list picks it up as a comment.
+      try {
+        const caseKey = String(req.body?.case_key || saved.truck).trim().slice(0, 10);
+        const caseRow: any = await db.execute(sql`SELECT id FROM vrm_rental_operations_cases WHERE case_key = ${caseKey} LIMIT 1`);
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+          VALUES (${caseKey}, ${(caseRow.rows[0] as any)?.id ?? null}, 'shop_phone_edit', ${saved.truck}, ${actor},
+                  ${JSON.stringify({ phone: saved.phone, locked: saved.locked, previous_phone: saved.previousPhone, previous_locked: saved.previousLocked })}::jsonb)`);
+      } catch (ae: any) {
+        console.warn("[VRM/RentalOps] shop-phone audit write failed (non-fatal):", ae?.message || ae);
+      }
+      console.log(`[VRM/RentalOps] shop-phone ${saved.truck} -> ${saved.phone ?? "(cleared)"}${saved.locked ? " [LOCKED]" : ""} (by ${actor})`);
+      res.json({ ok: true, ...saved });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] shop-phone save failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "shop-phone save failed" });
+    }
+  });
+
   // GET what the delta sweep WOULD do right now, without doing it. Read-only:
   // one targeting query, no browser.
   //

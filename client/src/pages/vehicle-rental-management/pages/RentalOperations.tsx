@@ -16,9 +16,10 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
-  MessageSquare,
+  MessageSquare, Pencil, Lock,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
+import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -75,6 +76,11 @@ interface MasterRow {
   odometer_date: string | null;
   portal_msg_count: number | null;
   portal_shop_phone: string | null;
+  shop_phone_locked: boolean;
+  shop_phone_source: string | null;
+  shop_phone_edited_by: string | null;
+  shop_phone_edited_at: string | null;
+  assigned_phone_locked: boolean;
   has_portal: boolean;
   callable: boolean;
   shop_name: string | null;
@@ -693,6 +699,7 @@ export default function RentalOperations() {
   const [urgentEmpOnly, setUrgentEmpOnly] = useState(false);
   const [sort, setSort] = useState<SortState>({ col: "days_open", dir: "desc" });
   const [panelKey, setPanelKey] = useState<string | null>(null);
+  const [phoneEdit, setPhoneEdit] = useState<ShopPhoneEditTarget | null>(null);
 
   // The as-of stamp has to age in place. React only re-renders this page on state
   // or query changes, so without a tick a board left open on the wall all afternoon
@@ -1239,11 +1246,28 @@ export default function RentalOperations() {
                       <span>{r.shop_name}{r.shop_po_status && <span style={{ color: r.shop_po_status === "APPROVED" ? colors.green : colors.inkMuted, fontSize: 10, marginLeft: 6 }}>{r.shop_po_status === "APPROVED" ? "open PO" : "last PO"}</span>}</span>
                     ) : <span style={{ color: colors.inkMuted }}>none</span>}
                     {r.portal_shop_phone
-                      ? <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains }}>{fmtPhone(r.portal_shop_phone)}</div>
-                      : r.shop_name && !isDeclinedAuction(r.ams_bucket) ? <div style={{ fontSize: 10, color: colors.amber }}>{r.has_portal ? "no phone on file" : "not scraped"}</div> : null}
+                      ? <div style={{ fontSize: 11, color: colors.green, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 4 }}>
+                          <span>{fmtPhone(r.portal_shop_phone)}</span>
+                          {r.shop_phone_locked && <span title={`Phone locked${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — Holman scrapes cannot replace it`} style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
+                          {r.shop_phone_source === "manual" && !r.shop_phone_locked && <span title={`Entered manually${r.shop_phone_edited_by ? ` by ${r.shop_phone_edited_by}` : ""} — unlocked, so the next scrape may replace it`} style={{ fontSize: 9, color: colors.inkMuted, fontFamily: fonts.dmSans }}>manual</span>}
+                          <button type="button" title="Edit shop phone" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.case_key, caseKey: r.case_key, shopName: r.shop_name, phone: r.portal_shop_phone, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
+                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                        </div>
+                      : r.shop_name && !isDeclinedAuction(r.ams_bucket) ? (
+                        <div style={{ fontSize: 10, color: colors.amber, display: "flex", alignItems: "center", gap: 4 }}>
+                          <span>{r.has_portal ? "no phone on file" : "not scraped"}</span>
+                          <button type="button" title="Enter shop phone manually" onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.case_key, caseKey: r.case_key, shopName: r.shop_name, phone: null, locked: r.shop_phone_locked, editedBy: r.shop_phone_edited_by, editedAt: r.shop_phone_edited_at }); }}
+                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                        </div>
+                      ) : null}
                     {r.redirect_to_assigned && (
                       <div style={{ fontSize: 10.5, color: colors.green, marginTop: 3, display: "flex", alignItems: "center", gap: 3 }} title={`We no longer own the rental van (${r.ams_status}). LUCA calls the shop repairing the tech's assigned truck ${r.call_target_truck}.`}>
                         <CornerDownRight size={11} /> call assigned #{r.call_target_truck}: {r.call_shop_name || "?"}{r.call_shop_phone ? ` · ${fmtPhone(r.call_shop_phone)}` : ""}
+                        {r.assigned_phone_locked && <span title="Assigned truck's shop phone is locked — scrapes cannot replace it" style={{ display: "inline-flex" }}><Lock size={10} color={colors.amber} /></span>}
+                        {r.call_target_truck && (
+                          <button type="button" title={`Edit shop phone for assigned truck ${r.call_target_truck}`} onClick={(e) => { e.stopPropagation(); setPhoneEdit({ truck: r.call_target_truck!, caseKey: r.case_key, shopName: r.call_shop_name, phone: r.call_shop_phone, locked: r.assigned_phone_locked }); }}
+                            style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted, padding: 1, display: "inline-flex" }}><Pencil size={10} /></button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -1285,6 +1309,8 @@ export default function RentalOperations() {
       </div>
 
       {panelKey && <DetailPanel caseKey={panelKey} row={rows.find((r) => r.case_key === panelKey)} onClose={() => setPanelKey(null)} onMark={doMark} />}
+      {phoneEdit && <ShopPhoneEditModal target={phoneEdit} onClose={() => setPhoneEdit(null)}
+        onSaved={() => { qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); if (panelKey) qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${panelKey}`] }); }} />}
       {pickupFor && <PickupTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
@@ -1343,7 +1369,13 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
   const ams = assigned.amsStatus ?? null;
   const amsB = amsBucketOfLabel(ams);
   const pointless = !hasOpenRepair && (amsB === "assigned" || amsB === "in_use" || amsB === "spare");
-  const phone = shop ? (assigned.portal?.poDetail?.[shop.poNumber]?.vendorPhone || assigned.portal?.shop?.phone) : assigned.portal?.shop?.phone;
+  // Manual precedence (Tyler 8/3): an operator-entered number for THIS truck
+  // (locked or source='manual') outranks the per-PO vendor phone — the same
+  // rule as the rental drawer, so both tabs and the grid agree on the number.
+  const shopMeta = (assigned.portal?.shop ?? null) as any;
+  const manualPhone = !!shopMeta && (shopMeta.phoneSource === "manual" || shopMeta.phoneLocked);
+  const phone = manualPhone ? shopMeta?.phone
+    : shop ? (assigned.portal?.poDetail?.[shop.poNumber]?.vendorPhone || assigned.portal?.shop?.phone) : assigned.portal?.shop?.phone;
   return (
     <>
       {/* summary grid — same shape as the rental tab's ticket/economics grid */}
@@ -1368,7 +1400,15 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
             </div>
             <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[shop.vendorAddress, shop.vendorCity, shop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
             {phone
-              ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(phone)}<SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} /></div>
+              ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <span>{fmtPhone(phone)}</span>
+                  {manualPhone
+                    ? <span title={shopMeta?.phoneLocked ? "Locked — Holman refreshes keep pulling PO history but cannot replace this number" : "Entered manually — unlocked, so the next scrape may replace it"}
+                        style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, fontFamily: fonts.dmSans, color: shopMeta?.phoneLocked ? colors.amber : colors.inkMuted, background: shopMeta?.phoneLocked ? colors.amberLight : colors.surface, border: `1px solid ${shopMeta?.phoneLocked ? colors.amber : colors.rule}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                        {shopMeta?.phoneLocked ? <Lock size={9} /> : null} manual{shopMeta?.phoneEditedBy ? ` · ${shopMeta.phoneEditedBy}` : ""}
+                      </span>
+                    : <SourceBadge kind="scrape" detail={assigned.portal?.scrapedAt ? fmtDate(assigned.portal.scrapedAt) : undefined} />}
+                </div>
               : <button type="button" onClick={() => onScrape(assigned.truck)} disabled={scraping}
                   style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>
                   {scraping ? `Scraping ${assigned.truck}…` : `No phone yet — pull truck ${assigned.truck} from Holman`}
@@ -1754,6 +1794,7 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const { toast } = useToast();
   const [note, setNote] = useState("");
   const [truckTab, setTruckTab] = useState<"rental" | "assigned">("rental");
+  const [phoneEdit, setPhoneEdit] = useState<ShopPhoneEditTarget | null>(null);
   // Every Holman scrape targets the truck currently on screen, never the case key.
   const activeTruck = truckTab === "assigned" && data?.assignedTruck?.truck
     ? data.assignedTruck.truck : caseKey;
@@ -1893,10 +1934,33 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   </div>
                   <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || portal?.shop?.address || "no address on PO"}</div>
                   {(() => {
-                    const ph = portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone;
+                    // A manual number (locked or not) outranks the per-PO phone
+                    // from the scrape — the operator set it for THIS truck.
+                    const shopMeta = (portal?.shop ?? null) as any;
+                    const manual = !!shopMeta && (shopMeta.phoneSource === "manual" || shopMeta.phoneLocked);
+                    const ph = manual ? shopMeta?.phone : (portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone);
+                    const openEdit = () => setPhoneEdit({ truck: caseKey, caseKey, shopName: currentShop.vendorName, phone: shopMeta?.phone ?? ph ?? null, locked: !!shopMeta?.phoneLocked, editedBy: shopMeta?.phoneEditedBy, editedAt: shopMeta?.phoneEditedAt });
+                    const editBtn = (
+                      <button type="button" title="Edit shop phone (with optional lock against scrapes)" onClick={openEdit}
+                        style={{ background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, cursor: "pointer", color: colors.inkMuted, padding: "2px 7px", display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10.5, fontFamily: fonts.dmSans, fontWeight: 600 }}>
+                        <Pencil size={10} /> Edit
+                      </button>
+                    );
                     return ph
-                      ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains }}>{fmtPhone(ph)}<SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} /></div>
-                      : <button type="button" onClick={() => scrapeMut.mutate(caseKey)} disabled={scrapeMut.isPending} style={{ marginTop: 6, fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>;
+                      ? <div style={{ fontSize: 16, color: colors.green, marginTop: 5, fontWeight: 700, fontFamily: fonts.jetbrains, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <span>{fmtPhone(ph)}</span>
+                          {manual
+                            ? <span title={shopMeta?.phoneLocked ? "Locked — Holman refreshes keep pulling PO history but cannot replace this number" : "Entered manually — unlocked, so the next scrape may replace it"}
+                                style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5, fontWeight: 700, fontFamily: fonts.dmSans, color: shopMeta?.phoneLocked ? colors.amber : colors.inkMuted, background: shopMeta?.phoneLocked ? colors.amberLight : colors.surface, border: `1px solid ${shopMeta?.phoneLocked ? colors.amber : colors.rule}`, borderRadius: 999, padding: "1px 7px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                                {shopMeta?.phoneLocked ? <Lock size={9} /> : null} manual{shopMeta?.phoneEditedBy ? ` · ${shopMeta.phoneEditedBy}` : ""}
+                              </span>
+                            : <SourceBadge kind="scrape" detail={portal?.scrapedAt ? fmtDate(portal.scrapedAt) : undefined} />}
+                          {editBtn}
+                        </div>
+                      : <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+                          <button type="button" onClick={() => scrapeMut.mutate(caseKey)} disabled={scrapeMut.isPending} style={{ fontSize: 12, fontWeight: 600, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer" }}>{scrapeMut.isPending ? "Scraping Holman…" : "No phone yet — pull from Holman"}</button>
+                          <button type="button" onClick={openEdit} style={{ fontSize: 12, fontWeight: 600, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "5px 10px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}><Pencil size={11} /> Enter manually</button>
+                        </div>;
                   })()}
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
@@ -1970,6 +2034,8 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
         )}
         </div>
       </div>
+      {phoneEdit && <ShopPhoneEditModal target={phoneEdit} onClose={() => setPhoneEdit(null)}
+        onSaved={() => { qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); }} />}
 
     </div>
   );

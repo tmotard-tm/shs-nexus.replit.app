@@ -157,7 +157,9 @@ function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
  * portal said exactly what we already had stored. */
 type UpsertOutcome = { changed: boolean; empty: boolean };
 
-async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): Promise<UpsertOutcome> {
+// Exported for tests: the manual-phone lock guard below is the one behavior
+// that MUST survive refactors, and it is only exercisable through this path.
+export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): Promise<UpsertOutcome> {
   const events = (rawHist || []).map(trimEvent);
   // MOST RECENT first (Tyler: "pulls the most recent repair shop PO"), with a
   // deterministic poNumber tiebreak so equal repair dates never order randomly.
@@ -206,9 +208,24 @@ async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): 
   // through to the full write.
   const cur = await db.execute(sql`
     SELECT (hist = ${histJson}::jsonb) AS hist_same,
-           po_count, msg_count, shop_name, shop_phone, shop_address, shop_src
+           po_count, msg_count, shop_name, shop_phone, shop_address, shop_src,
+           shop_phone_locked, shop_phone_source
     FROM vrm_holman_portal_hist WHERE truck_no = ${caseKey}`);
   const prev = (cur.rows as any[])[0];
+  // MANUAL PHONE LOCK (Tyler 8/3): an operator-entered phone with the lock set
+  // is preserved verbatim through every scrape — the portal's own number still
+  // lands inside hist (KEEP_PO keeps vendorPhone per PO), so nothing is lost,
+  // but the picked shop_phone column belongs to the human until they unlock it.
+  // Overriding `next` BEFORE the compare keeps the no-op branch honest: a
+  // locked phone can never make an otherwise-identical revisit look "changed".
+  const phoneLocked = prev?.shop_phone_locked === true;
+  if (phoneLocked) next.shopPhone = (prev.shop_phone ?? null) as string | null;
+  // Provenance follows the value: 'manual' survives while locked (or while an
+  // unlocked manual number happens to still match); the moment an UNLOCKED
+  // value is genuinely replaced by portal content it becomes 'scrape'.
+  const nextPhoneSource: string | null = phoneLocked
+    ? (prev?.shop_phone_source ?? "manual")
+    : (prev && (prev.shop_phone ?? null) === next.shopPhone ? (prev.shop_phone_source ?? null) : "scrape");
   if (prev) {
     // A false "changed" only costs one UPDATE we would otherwise have written
     // anyway, so err toward writing.
@@ -224,14 +241,17 @@ async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: string): 
       return { changed: false, empty: events.length === 0 };
     }
   }
+  // shop_phone_locked / edited_by / edited_at are deliberately NOT in this SET:
+  // the lock and its audit trail belong to the operator and outlive scrapes.
   await db.execute(sql`
-    INSERT INTO vrm_holman_portal_hist (truck_no, hist, source, scraped_at, po_count, msg_count, shop_name, shop_phone, shop_address, shop_src)
+    INSERT INTO vrm_holman_portal_hist (truck_no, hist, source, scraped_at, po_count, msg_count, shop_name, shop_phone, shop_address, shop_src, shop_phone_source)
     VALUES (${caseKey}, ${histJson}::jsonb, 'on_demand_scrape', ${scrapedAt}, ${next.poCount}, ${next.msgCount},
-            ${next.shopName}, ${next.shopPhone}, ${next.shopAddress}, ${next.shopSrc})
+            ${next.shopName}, ${next.shopPhone}, ${next.shopAddress}, ${next.shopSrc}, ${nextPhoneSource})
     ON CONFLICT (truck_no) DO UPDATE SET
       hist=EXCLUDED.hist, source=EXCLUDED.source, scraped_at=EXCLUDED.scraped_at, po_count=EXCLUDED.po_count,
       msg_count=EXCLUDED.msg_count, shop_name=EXCLUDED.shop_name, shop_phone=EXCLUDED.shop_phone,
-      shop_address=EXCLUDED.shop_address, shop_src=EXCLUDED.shop_src, imported_at=NOW()
+      shop_address=EXCLUDED.shop_address, shop_src=EXCLUDED.shop_src, shop_phone_source=EXCLUDED.shop_phone_source,
+      imported_at=NOW()
   `);
   return { changed: true, empty: events.length === 0 };
 }
@@ -582,4 +602,49 @@ export async function findScrapeGaps(opts: { limit?: number } = {}): Promise<str
     ${opts.limit ? sql`LIMIT ${opts.limit}` : sql.empty()}
   `);
   return (res.rows as any[]).map((r) => String(r.truck));
+}
+
+/**
+ * Operator-entered shop phone (Tyler 8/3): write the number the human gave us
+ * into the SAME column every consumer reads (board grid, drawer, CSV exports,
+ * LUCA feed + dispatch), with `locked` deciding whether future scrapes may
+ * replace it. Lives in this file because this file owns vrm_holman_portal_hist
+ * write semantics — upsertTruck above is the ONLY other writer, and its lock
+ * handling and this function must stay in sync.
+ *
+ * If the truck has never been scraped, the row is created with hist=[] and
+ * scraped_at NULL — deliberately: NULL scraped_at keeps the truck in
+ * findScrapeTargets' never_scraped tier, so the sweep still fills in its PO
+ * history later (without touching a locked phone).
+ *
+ * `phone` must arrive already validated (10 bare digits or null to clear);
+ * the route owns user-input validation, this owns the write.
+ */
+export async function setShopPhone(opts: {
+  truck: string;
+  phone: string | null;
+  locked: boolean;
+  actor: string;
+}): Promise<{ truck: string; phone: string | null; locked: boolean; previousPhone: string | null; previousLocked: boolean; created: boolean }> {
+  const truckNo = toDisplayNumber(opts.truck);
+  if (!truckNo) throw new Error(`invalid truck number: ${JSON.stringify(opts.truck)}`);
+  const prevRes = await db.execute(sql`
+    SELECT shop_phone, shop_phone_locked FROM vrm_holman_portal_hist WHERE truck_no = ${truckNo}`);
+  const prev = (prevRes.rows as any[])[0] ?? null;
+  await db.execute(sql`
+    INSERT INTO vrm_holman_portal_hist
+      (truck_no, hist, source, scraped_at, po_count, msg_count,
+       shop_phone, shop_phone_locked, shop_phone_source, shop_phone_edited_by, shop_phone_edited_at)
+    VALUES (${truckNo}, '[]'::jsonb, 'manual', NULL, 0, 0,
+            ${opts.phone}, ${opts.locked}, 'manual', ${opts.actor}, NOW())
+    ON CONFLICT (truck_no) DO UPDATE SET
+      shop_phone = ${opts.phone}, shop_phone_locked = ${opts.locked},
+      shop_phone_source = 'manual', shop_phone_edited_by = ${opts.actor}, shop_phone_edited_at = NOW()
+  `);
+  return {
+    truck: truckNo, phone: opts.phone, locked: opts.locked,
+    previousPhone: prev?.shop_phone ?? null,
+    previousLocked: prev?.shop_phone_locked === true,
+    created: !prev,
+  };
 }
