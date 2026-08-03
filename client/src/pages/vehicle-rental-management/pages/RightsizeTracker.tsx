@@ -41,10 +41,11 @@ interface Kpis {
 interface SummaryResp { kpis: Kpis; state: Record<string, string>; yesterday: { kpis: Kpis; taken_at: string } | null; generatedAt: string }
 
 /**
- * VEHICLE TRUTH. Sourced from the live Enterprise open-ticket feed, not from
- * SMS. compliant = rate at or below the sedan ceiling OR the rented vehicle is
- * a confirmed sedan nameplate. This is the headline for the initiative; the SMS
- * stage numbers below it describe outreach progress, not compliance.
+ * VEHICLE TRUTH. Sourced from the live Enterprise open-ticket feed. compliant =
+ * the rented vehicle is a confirmed sedan nameplate OR the technician confirmed
+ * the swap by SMS. Rate is NOT a test (Tyler, 8/3): a discounted rate on the
+ * same oversized vehicle is not right-sizing. This is the headline for the
+ * initiative; the SMS stage numbers below it describe outreach progress.
  */
 interface ComplianceKpis {
   totalOpen: number; compliant: number; notCompliant: number; compliantPct: number;
@@ -486,9 +487,10 @@ export default function RightsizeTracker() {
             </span>
           )}
           <div style={{ marginTop: 4, fontSize: 12, color: colors.inkSoft }}>
-            Right-sized = rate at or below ${ck.sedanRateCeiling}/day, or the rented vehicle is one of {ck.sedanModelCount} confirmed
-            sedan nameplates, or the technician confirmed the swap by SMS (the ARI report lags the branch by days).
-            Car class is not a test. Returned rentals leave the list automatically, so returns cannot inflate this.
+            Right-sized = the rented vehicle is one of {ck.sedanModelCount} confirmed sedan nameplates, or the technician
+            confirmed the swap by SMS (the ARI report lags the branch by days). A matched or discounted rate does NOT
+            count (8/3): the vehicle itself has to change. Car class is not a test either. Returned rentals leave the
+            list automatically, so returns cannot inflate this.
             {ck.hvacOpen > 0 && <> Of the {ck.notCompliant} remaining, <b>{ck.hvacOpen}</b> are HVAC ({money0(ck.hvacMonthly)}/mo) — excluded
             from the 7/9 round — leaving <b>{ck.notCompliant - ck.hvacOpen}</b> non-HVAC ({money0(ck.monthlyOverSedan - ck.hvacMonthly)}/mo) Fleet can chase today.</>}
             {ck.nonEnterpriseOpen > 0 && <> Separately, {ck.nonEnterpriseOpen} non-Enterprise rentals ({money0(ck.nonEnterpriseDaily)}/day) sit

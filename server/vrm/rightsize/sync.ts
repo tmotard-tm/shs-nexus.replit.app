@@ -324,6 +324,7 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
   const verdict = await resolveVerdict(rawBody, tracked.stage, {
     ...(ctx.deps ?? {}),
     loadOutboundContext: ctx.deps?.loadOutboundContext ?? (() => lastOutboundTo(ldap, m.created_utc)),
+    loadRentedVehicle: ctx.deps?.loadRentedVehicle ?? (() => rentedVehicleFor(ldap)),
   });
 
   await db.execute(sql`
@@ -410,6 +411,41 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
     `);
   }
 
+  // PROOF OF LIFE. A NON_RESPONDER who sent us ANYTHING is no longer silent,
+  // even when no brain could classify the words (chit-chat, a photo, a tapback,
+  // or Bedrock capped/unavailable). Without this the reply lands in the thread
+  // while the board keeps calling them "texted, never answered" - the exact lie
+  // reverify.ts was built to catch after the fact. Mirrors reverify's floor:
+  // propose NEW_REPLY for review, never touch stage.
+  if (!advanced && !flagged && tracked.stage === "NON_RESPONDER") {
+    // Never clobber a stronger pending proposal: an earlier DONE/RETURNED
+    // sitting in the review queue outranks proof-of-life, and the human who
+    // confirms it will see this reply in the thread anyway. Claim the slot
+    // only when it is empty or already holds a NEW_REPLY (then just refresh
+    // the evidence to the newest message). The WHERE clause is the guard, so
+    // concurrent processors cannot race past it.
+    const claimed = await db.execute(sql`
+      UPDATE vrm_rightsize_techs
+      SET proposed_stage = 'NEW_REPLY', needs_review = TRUE,
+          review_reason = 'reply received but not classifiable; tech is no longer a non-responder - read the thread',
+          decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
+      WHERE ldap = ${ldap}
+        AND (proposed_stage IS NULL OR proposed_stage = 'NEW_REPLY')
+      RETURNING ldap
+    `);
+    if ((claimed.rows?.length ?? 0) > 0) {
+      flagged = true;
+      await db.execute(sql`
+        INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
+        VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
+                ${tracked.stage}, 'NEW_REPLY', 'propose_review',
+                'proof of life: inbound with no confident classification from a NON_RESPONDER',
+                ${ctx.actor}, 'proof_of_life', NULL, NULL)
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
+
   // Written LAST and on purpose: this row is the idempotency marker, so it only
   // exists once the whole unit of work above succeeded.
   const action = verdict.mode === "auto" ? "auto_advance" : verdict.mode === "review" ? "propose_review" : "none";
@@ -436,6 +472,41 @@ async function lastOutboundTo(ldap: string, beforeUtc: string): Promise<string |
     `);
     const body = (r.rows[0] as any)?.body;
     return body ? String(body) : null;
+  } catch {
+    return null; // context is a nicety, never a reason to fail a classification
+  }
+}
+
+/**
+ * What the rental report currently shows this technician driving, for LLM
+ * context only (policy 8/3: classification leans on the Make And Model listed
+ * on the rental report, never the rate). Truck-number sources mirror
+ * computeCompliance's identity resolution; the system prompt itself warns the
+ * model that the report can lag a completed swap by days.
+ */
+async function rentedVehicleFor(ldap: string): Promise<string | null> {
+  try {
+    const bare = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
+    const trucks = await db.execute(sql`
+      SELECT truck_number AS t FROM fs_comms_contacts WHERE upper(trim(ldap)) = ${ldap}
+      UNION ALL SELECT truck_lu FROM all_techs WHERE upper(trim(tech_racfid)) = ${ldap}
+      UNION ALL SELECT last_known_truck_lu FROM all_techs WHERE upper(trim(tech_racfid)) = ${ldap}
+      UNION ALL SELECT truck_no FROM tpms_last_known_truck_tech WHERE upper(trim(enterprise_id)) = ${ldap}
+    `);
+    const want = new Set((trucks.rows as any[]).map((r) => bare(r.t)).filter(Boolean));
+    if (!want.size) return null;
+    const cases = await db.execute(sql`
+      SELECT vehicle_number_padded, veh_desc, rental_class, days_open
+      FROM vrm_rental_operations_cases
+      WHERE present_in_latest AND COALESCE(veh_desc, '') <> ''
+    `);
+    const hit = (cases.rows as any[])
+      .filter((c) => want.has(bare(c.vehicle_number_padded)))
+      .sort((a, b) => Number(b.days_open ?? 0) - Number(a.days_open ?? 0))[0];
+    if (!hit) return null;
+    const desc = String(hit.veh_desc).trim();
+    const cls = String(hit.rental_class ?? "").trim();
+    return cls ? `${desc} (${cls})` : desc;
   } catch {
     return null; // context is a nicety, never a reason to fail a classification
   }

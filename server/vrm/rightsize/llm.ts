@@ -32,7 +32,10 @@ import {
   type ClassifyResult,
 } from "./classifier";
 
-/** Stages the model is allowed to return. NONE = "I am not confident". */
+/** Stages the model is allowed to return. NONE = "I am not confident".
+ *  RATE_ONLY is a model-only label (policy 8/3: rate talk is not right-sizing);
+ *  applyTruthBoundary maps it to a NEW_REPLY review proposal - it is never a
+ *  tracker stage itself. */
 export const LLM_STAGES = [
   "DONE",
   "RETURNED",
@@ -41,6 +44,7 @@ export const LLM_STAGES = [
   "PUSHBACK_EQUIP",
   "PUSHBACK_STOCK",
   "PUSHBACK_PROCESS",
+  "RATE_ONLY",
   "NONE",
 ] as const;
 export type LlmStage = (typeof LLM_STAGES)[number];
@@ -53,6 +57,10 @@ export interface LlmClassifyInput {
   currentStage: string;
   /** The outbound message the tech is replying to, when readily available. */
   outboundContext?: string | null;
+  /** What the rental report currently shows them driving ("26 CHRY PACI
+   *  (MINIVAN)"), when readily available. The report lags a completed swap by
+   *  days, and the prompt says so. */
+  rentedVehicle?: string | null;
 }
 
 /** A classifier verdict plus provenance, so every row records which brain ruled. */
@@ -128,10 +136,13 @@ Classify ONLY the technician's reply. Return one stage:
 - PUSHBACK_EQUIP: a sedan will not fit their tools/equipment/appliances.
 - PUSHBACK_STOCK: the rental branch has no sedans available, or has them on a waitlist / will call when one arrives. The technician is willing; supply is the blocker.
 - PUSHBACK_PROCESS: a policy, manager, contract or process blocker that is neither equipment nor stock.
+- RATE_ONLY: the reply is about PRICE, not the vehicle. The branch matched, adjusted, discounted or kept "the same" RATE, but nothing says the vehicle itself was swapped. A cheaper rate on the same oversized vehicle is NOT right-sizing.
 - NONE: anything else, or you are not confident. Chit-chat, acknowledgements, out-of-office, unrelated fleet talk.
 
 Rules:
 - Tense is decisive. A promise is COMMITTED, never DONE.
+- A rate adjustment alone is NEVER DONE (policy 2026-08-03). DONE requires the vehicle itself to have changed: swapped, exchanged, or a named smaller car in hand. If the only claim is about rate or price, return RATE_ONLY.
+- You may be given the vehicle the rental report currently shows for this technician. The report lags the branch by days, so a credible past-tense swap claim is still DONE even if the report shows the old vehicle. Never use the report alone to contradict the technician's words.
 - Never infer beyond the words. If the reply is ambiguous, return NONE with low confidence. NONE is a correct and expected answer.
 - DONE and RETURNED are only ever PROPOSED to a human reviewer, so report what the words actually say and let the human confirm.
 
@@ -141,6 +152,9 @@ Respond with ONLY valid JSON, no prose and no markdown fences:
 export function buildUserPrompt(input: LlmClassifyInput): string {
   const parts: string[] = [];
   parts.push(`Technician's current tracked stage: ${input.currentStage || "UNKNOWN"}`);
+  if (input.rentedVehicle) {
+    parts.push(`Vehicle the rental report currently shows for them (may lag a recent swap): ${String(input.rentedVehicle).slice(0, 120)}`);
+  }
   if (input.outboundContext) {
     parts.push(`Our last outbound message to them:\n"""\n${String(input.outboundContext).slice(0, 700)}\n"""`);
   }
@@ -215,6 +229,12 @@ export function applyTruthBoundary(
     case "COMMITTED":
       mode = "auto";
       break;
+    case "RATE_ONLY":
+      // Policy 8/3: rate talk is not right-sizing. Surfaced as a NEW_REPLY
+      // review so a human re-engages for the actual swap; never a stage of its
+      // own and never anything close to DONE.
+      mode = "review";
+      break;
     default:
       return null;
   }
@@ -223,9 +243,11 @@ export function applyTruthBoundary(
   if (SECURED_STAGES.has(raw.stage)) mode = "review";
 
   return {
-    proposal: raw.stage,
+    proposal: raw.stage === "RATE_ONLY" ? "NEW_REPLY" : raw.stage,
     mode,
-    reason: `bedrock: ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`,
+    reason: raw.stage === "RATE_ONLY"
+      ? `bedrock: rate-only reply - not right-sized, follow up for the actual swap (policy 8/3): ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`
+      : `bedrock: ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`,
     source: "bedrock",
     confidence: raw.confidence,
     modelId,
@@ -322,6 +344,8 @@ export interface VerdictDeps {
   budget?: { remaining: number };
   /** Lazily fetched only when the LLM is actually about to be called. */
   loadOutboundContext?: () => Promise<string | null>;
+  /** The rental-report vehicle for this tech, same lazy contract as above. */
+  loadRentedVehicle?: () => Promise<string | null>;
 }
 
 /**
@@ -434,8 +458,12 @@ async function callLlm(rawBody: string, currentStage: string, deps: VerdictDeps)
   if (deps.loadOutboundContext) {
     outboundContext = await deps.loadOutboundContext().catch(() => null);
   }
+  let rentedVehicle: string | null = null;
+  if (deps.loadRentedVehicle) {
+    rentedVehicle = await deps.loadRentedVehicle().catch(() => null);
+  }
   const call = deps.llm ?? classifyWithBedrock;
-  return call({ body: rawBody, currentStage, outboundContext }).catch(() => null);
+  return call({ body: rawBody, currentStage, outboundContext, rentedVehicle }).catch(() => null);
 }
 
 // ------------------------------------------------------------ write boundary

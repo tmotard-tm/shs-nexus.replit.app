@@ -290,6 +290,23 @@ async function main() {
     ok("threshold, NONE, and stickiness all block a verdict");
   }
 
+  // ------------------------------------------- POLICY 8/3: rate is not DONE
+  section("POLICY 8/3: RATE_ONLY becomes a NEW_REPLY review proposal, never DONE");
+  {
+    const model = "test-model";
+    const v = applyTruthBoundary({ stage: "RATE_ONLY", confidence: 0.9, reason: "branch matched the rate" }, "NON_RESPONDER", model);
+    assert.ok(v, "RATE_ONLY above threshold produces a verdict");
+    assert.equal(v!.proposal, "NEW_REPLY", "RATE_ONLY maps to NEW_REPLY, never a secured stage");
+    assert.equal(v!.mode, "review", "and always as a review proposal");
+    assert.deepEqual(stageMutationFor(v!, "NON_RESPONDER"), { kind: "propose", stage: "NEW_REPLY" });
+    assert.ok(parseLlmVerdict('{"stage":"RATE_ONLY","confidence":0.9,"reason":"rate matched"}'), "RATE_ONLY is a legal model stage");
+    // The regex path agrees: rate talk is flagged for follow-up, not banked.
+    const rx = await resolveVerdict("they matched the sedan rate for me", "NON_RESPONDER", { isLlmEnabled: () => false });
+    assert.equal(rx.proposal, "NEW_REPLY", "regex rate talk proposes NEW_REPLY");
+    assert.equal(rx.mode, "review");
+    ok("rate talk can never bank a DONE from either brain");
+  }
+
   // ------------------------------------------------------- prompt hygiene
   section("prompt carries stage + outbound context without leaking anything else");
   {
@@ -299,7 +316,18 @@ async function main() {
     assert.match(p, /all swapped/);
     const noCtx = buildUserPrompt({ body: "all swapped", currentStage: "COMMITTED" });
     assert.ok(!/last outbound/i.test(noCtx), "no empty context block when there is none");
-    ok("user prompt shape");
+    // Policy 8/3: the rental-report vehicle rides along when available...
+    const withVeh = buildUserPrompt({ body: "x", currentStage: "NON_RESPONDER", rentedVehicle: "26 CHRY PACI (MINIVAN)" });
+    assert.match(withVeh, /26 CHRY PACI \(MINIVAN\)/, "rental-report vehicle is shown to the model");
+    assert.ok(!/rental report/i.test(noCtx), "...and absent when there is none");
+    // The lazy loader seam delivers it to the LLM input.
+    const sVeh = spy(null);
+    await resolveVerdict("completely unclassifiable rambling", "NON_RESPONDER", {
+      llm: sVeh.fn, isLlmEnabled: bedrockOn, loadRentedVehicle: async () => "26 FORD F150 (PICKUP)",
+    });
+    assert.equal(sVeh.calls.length, 1);
+    assert.equal(sVeh.calls[0].rentedVehicle, "26 FORD F150 (PICKUP)", "loadRentedVehicle feeds the prompt input");
+    ok("user prompt shape, incl. the rental-report vehicle");
   }
 
   // ------------------------------------- the webhook seam cannot break Twilio

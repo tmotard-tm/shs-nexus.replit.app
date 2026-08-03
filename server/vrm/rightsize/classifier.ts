@@ -47,9 +47,12 @@
  *     "their system is down" MGARZAS) and rate confirmations ("they will adjust
  *     the daily rate to match a full sedan rate" SREKIS, "I got the full-Size
  *     Sedan rate and the current vehicle I have are the same" JHABIBI) were
- *     both swept into COMMITTED. Both now have rules. Rate confirmation is
- *     COMPLIANCE under the official policy (sedan, OR a documented sedan rate),
- *     so it proposes DONE - and like every other DONE, only ever as a proposal.
+ *     both swept into COMMITTED. Both now have rules. POLICY REVERSAL (Tyler,
+ *     2026-08-03), superseding the 7/30 rate rule: a matched/adjusted RATE
+ *     alone is NOT right-sizing - the vehicle itself must change. Rate-only
+ *     replies used to propose DONE; they now propose NEW_REPLY for review so a
+ *     human goes back for the actual swap instead of the reply silently
+ *     banking a compliance the fleet never received.
  *
  * Also: a bare interrogative word mid-sentence no longer forces QUESTION.
  * "There are no sedans in my area. They've arranged to have someone reach out
@@ -150,7 +153,8 @@ const RX = {
    *  PROCESS blocker, and the bare verb "return the vehicle" must not bank it. */
   returnIntent: /\b(would (love|like) to|want(ed)? to|trying to|need to|have to|going to|about to|planning to|can'?t|cannot|unable to)\s+(return|turn|drop|give)\b/i,
 
-  /** Rate compliance: policy says a sedan OR a documented sedan rate counts. */
+  /** Rate talk detector. Policy 8/3: a matched/adjusted rate is NOT compliance;
+   *  these replies are flagged for follow-up because the vehicle is unchanged. */
   rateConfirmed: /\bsedan rate\b|\b(rate|price|charge)\b[^.!?]{0,40}\b(is|are|be)\s+the same\b|\b(same|match(ing|ed|es)?|adjust(ed|ing)?|drop(ped)?|lower(ed)?|reduc(e|ed)|chang(e|ed))\b[^.!?]{0,40}\b(daily )?(rate|price)\b|\bno (extra |additional )?charge\b|\bat (a |the )?(smaller|sedan|lower) (vehicle )?rate\b/i,
 
   /** Equipment fit. Widened window, and the complaint may be about the GEAR
@@ -205,9 +209,11 @@ export function classifyReply(input: ClassifyInput): ClassifyResult {
   if (RX.perfectDone.test(body) && !isQuestion && !isHardFuture) {
     return { proposal: "DONE", mode: "review", reason: "perfect-tense swap language (exec-visible, needs verify)" };
   }
-  // Documented sedan rate is compliance under the official policy.
+  // Rate talk is NOT compliance (Tyler, 2026-08-03): the branch matching or
+  // adjusting the RATE leaves the tech in the same oversized vehicle. Flag for
+  // a human to re-engage - never bank it as DONE, never let it sit unread.
   if (RX.rateConfirmed.test(body) && !isHardFuture) {
-    return { proposal: "DONE", mode: "review", reason: "rate confirmed at/matching the sedan rate; compliant by rate (exec-visible, needs verify)" };
+    return { proposal: "NEW_REPLY", mode: "review", reason: "rate-match/adjustment talk; rate alone is not right-sized (policy 8/3) - vehicle swap still owed, follow up" };
   }
 
   // --- blockers before questions: a stock/equipment/process report that happens
