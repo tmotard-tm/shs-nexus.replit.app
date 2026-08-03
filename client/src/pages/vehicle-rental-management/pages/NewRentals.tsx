@@ -1099,9 +1099,15 @@ export default function NewRentals() {
       return r.json();
     },
     enabled: canSeeQueue,
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-    refetchInterval: refreshing ? 5000 : false,
+    staleTime: 15_000,
+    // The queue must surface work WITHOUT the operator pressing anything. This
+    // endpoint is a plain DB SELECT - it does NOT walk Holman - so polling it is
+    // cheap, and it is the only way rows written by the 30-min background walk
+    // ever reach a page that is already open. Both of these were false before
+    // 2026-08-03, so a background walk could land three approvable rentals and
+    // the open page would show none of them until a manual reload.
+    refetchOnWindowFocus: true,
+    refetchInterval: refreshing ? 5000 : 60_000,
   });
   const poQueue = poQueueData?.rows ?? [];
   // Actionable worklist: pending AND the loud not-done states (blocked / failed) so a PO

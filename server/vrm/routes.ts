@@ -2666,13 +2666,14 @@ export function registerVrmRoutes(): Router {
    * Scrapes the Holman awaiting-auth queue, matches techs, upserts to DB.
    * Requires HOLMAN_PORTAL_USER + HOLMAN_PORTAL_PASS env vars.
    */
-  // One Holman walk at a time, process-wide. Without this, every POST while a
-  // walk was still running (they take minutes) launched ANOTHER Chromium plus
-  // another renter-resolver worker - which is exactly how page-load auto-
-  // refreshes stacked engines until the box crawled (Tyler 2026-07-29). The
-  // overlap answer is the current DB queue + inFlight:true, not an error: the
-  // caller's poll picks up the running walk's result when it lands.
-  let holmanPoRefreshInFlight = false;
+  // One Holman walk at a time. Without a guard, every POST while a walk was
+  // still running launched ANOTHER Chromium plus another renter-resolver worker
+  // - which is how page-load auto-refreshes stacked engines until the box
+  // crawled (Tyler 2026-07-29). That guard used to be a module-scope boolean
+  // here; it is now acquireHolmanWalkLease() inside runHolmanPoWalk. The boolean
+  // was wrong twice over: it did not hold across autoscale containers, and it
+  // could wedge true forever if a container was suspended mid-walk, after which
+  // every Refresh press returned stale rows under ok:true. A DB lease expires.
 
   /**
    * The walk itself - scrape, renter fill, tech match, upsert - shared by the
@@ -2689,8 +2690,9 @@ export function registerVrmRoutes(): Router {
       // Every exit below records the walk. A walk that changes no data is still
       // a walk that ran, and a walk that died must not look like an empty queue.
       const walkStartedAt = new Date();
-      // Cross-instance guard. holmanPoRefreshInFlight only covers THIS process;
-      // on autoscale a second container has its own copy and walks in parallel.
+      // The ONLY overlap guard. It is DB-backed on purpose: this app is autoscale,
+      // so a per-process flag both misses a second container and survives as
+      // stale state when one is suspended mid-walk.
       const leaseOwner = `${process.pid}:${walkStartedAt.getTime()}`;
       if (!(await acquireHolmanWalkLease(leaseOwner))) {
         console.log("[VRM/HolmanPO] another instance holds the walk lease — skipping this walk.");
@@ -2786,16 +2788,16 @@ export function registerVrmRoutes(): Router {
   }
 
   router.post("/holman-po-queue/refresh", requireHolmanApprover, async (_req, res) => {
-    if (holmanPoRefreshInFlight) {
-      const rows = await listHolmanPoQueue();
-      return res.json({
-        ok: true, rows,
-        lastSyncedAt: await getHolmanPoQueueLastSyncedAt(),
-        syncStatus: await getHolmanPoSyncStatus(),
-        inFlight: true,
-      });
-    }
-    holmanPoRefreshInFlight = true;
+    // NO in-memory in-flight gate here, deliberately. It used to early-return the
+    // CURRENT rows with ok:true, so a wedged flag made every press look like a
+    // successful refresh while never touching Holman - the operator pressed
+    // Refresh, got a green result, and saw the same stale queue (2026-08-03).
+    // The flag wedges because the cron route sets it, responds, then walks
+    // detached; autoscale can suspend the container once the response is sent,
+    // so the clearing finally never runs and the next wake starts stuck.
+    // Concurrency belongs to acquireHolmanWalkLease inside runHolmanPoWalk: DB
+    // backed, correct across containers, and self-expiring, which an in-memory
+    // boolean can never be. A genuinely held lease comes back as skipped:true.
     try {
       const walk = await runHolmanPoWalk();
       if (!walk.ok) {
@@ -2814,8 +2816,6 @@ export function registerVrmRoutes(): Router {
     } catch (e: any) {
       console.error("[VRM] holman-po-queue refresh error:", e.message);
       res.status(500).json({ ok: false, error: e.message });
-    } finally {
-      holmanPoRefreshInFlight = false;
     }
   });
 
@@ -2835,29 +2835,40 @@ export function registerVrmRoutes(): Router {
    */
   router.post("/holman-po-queue/cron-refresh", async (_req, res) => {
     try {
-      if (holmanPoRefreshInFlight) {
-        return res.json({ ok: true, skipped: true, reason: "a walk is already in flight" });
+      // Freshness is read from the RECORDED WALK, not from row timestamps. Row
+      // stamps only advance for rows the upsert actually touched, so a queue of
+      // frozen-decided rows could report a freshness that no walk earned - and
+      // the reverse, a real walk that changed nothing looked like no walk at all.
+      // holman_po_sync_meta records the walk EVENT, which is the thing being gated.
+      const sync = await getHolmanPoSyncStatus();
+      const lastWalk = sync?.lastWalkCompletedAt ? new Date(sync.lastWalkCompletedAt).getTime() : 0;
+      const sinceWalkMs = lastWalk ? Date.now() - lastWalk : Number.POSITIVE_INFINITY;
+      // 20 min against a 30-min cadence. At the old 25 the gate sat close enough
+      // to the schedule that ordinary drift, or one operator Refresh landing
+      // mid-window, pushed the next scheduled fire inside the gate and ate it -
+      // which is how a 30-minute queue went 44 minutes without a walk (2026-08-03).
+      if (Number.isFinite(sinceWalkMs) && sinceWalkMs < 20 * 60_000) {
+        return res.json({ ok: true, skipped: true, reason: `walked ${Math.round(sinceWalkMs / 60_000)} min ago` });
       }
-      const rows = await listHolmanPoQueue();
-      const newest = rows.reduce((mx: number, r: any) => {
-        const t = r?.lastSyncedAt ? new Date(r.lastSyncedAt).getTime() : 0;
-        return Number.isFinite(t) && t > mx ? t : mx;
-      }, 0);
-      if (newest && Date.now() - newest < 25 * 60_000) {
-        return res.json({ ok: true, skipped: true, reason: `queue synced ${Math.round((Date.now() - newest) / 60_000)} min ago` });
+      // AWAITED, not detached. The old code responded first and walked in a void
+      // IIFE; on autoscale the container can be suspended the moment the response
+      // is sent, orphaning the walk mid-flight and stranding its in-memory flag.
+      // Holding the request open keeps the container alive for the walk's real
+      // duration (measured 2-22s). No in-memory gate: the DB lease inside
+      // runHolmanPoWalk is the cross-container guard and returns skipped:true.
+      try {
+        const walk = await runHolmanPoWalk();
+        console.log(`[VRM/HolmanPO] cron walk done: ${walk.ok ? `${walk.scrapedCount} rows` : `FAILED ${walk.scrapeError}`}`);
+        return res.json({
+          ok: walk.ok, started: true, skipped: walk.skipped === true,
+          scrapedCount: walk.scrapedCount, newCount: walk.newCount,
+          actionableCount: walk.actionableCount, reopenedCount: walk.reopenedCount,
+          scrapeError: walk.scrapeError,
+        });
+      } catch (e: any) {
+        console.error("[VRM/HolmanPO] cron walk error:", e?.message || e);
+        return res.status(500).json({ ok: false, error: e?.message });
       }
-      holmanPoRefreshInFlight = true;
-      res.json({ ok: true, started: true });
-      void (async () => {
-        try {
-          const walk = await runHolmanPoWalk();
-          console.log(`[VRM/HolmanPO] cron walk done: ${walk.ok ? `${walk.scrapedCount} rows` : `FAILED ${walk.scrapeError}`}`);
-        } catch (e: any) {
-          console.error("[VRM/HolmanPO] cron walk error:", e?.message || e);
-        } finally {
-          holmanPoRefreshInFlight = false;
-        }
-      })();
     } catch (e: any) {
       // Only reachable before the flag flips (the list read); the detached walk
       // owns the flag from then on.
