@@ -162,7 +162,7 @@ const AUDIT: Array<[string, string | null, ClassifyResult["mode"], string]> = [
   ["Swap was completed last week", "DONE", "review", "JLOP105: 'was completed' as well as 'is complete'"],
   ["Got a 2025 Chevy Malibu from enterprise on Monday", "DONE", "review", "SPITTM4: got a <named compliant car>"],
   ["Vehicle switch was completed on July 13.", "DONE", "review", "KELLIN: past-tense switch with a calendar date"],
-  ["I got the full-Size Sedan rate and the current vehicle I have are the same", "NEW_REPLY", "review", "JHABIBI: rate-match is follow-up, not DONE (policy 8/3)"],
+  ["I got the full-Size Sedan rate and the current vehicle I have are the same", "DONE", "review", "JHABIBI: documented sedan rate is compliance"],
   ["They have no full size sedans or smaller available", "PUSHBACK_STOCK", "auto", "JOBRIEN: negator not adjacent to the noun"],
   ["The rental car company doesn't have any full size sedans or smaller.", "PUSHBACK_STOCK", "auto", "CTUCKE2: doesn't have any <qualified> sedans"],
   ["this tool that I use to pull ovens out of the wall or unstacked dryers is too big for the trunk", "PUSHBACK_EQUIP", "auto", "JWILL12: gear 'too big', not car 'too small'"],
@@ -193,18 +193,18 @@ assert.equal(from("I returned the parts, they don't fit").proposal, null, "widen
 for (const body of ["All swapped out on Friday", "Swap was completed last week"]) {
   assert.equal(from(body).mode, "review", `DONE must still only ever be PROPOSED: "${body}"`);
 }
-// POLICY 8/3 (Tyler): rate talk never proposes DONE - the vehicle must change.
-// These replies are flagged NEW_REPLY/review so a human re-engages for the swap.
+// Rate policy (Tyler, clarified 8/3): securing the sedan rate IS right-sizing,
+// so a rate-matched reply is a completion report - proposed DONE, never auto.
 for (const body of [
   "I got the full-Size Sedan rate and the current vehicle I have are the same",
   "They matched the sedan rate for me",
   "they adjusted the daily rate, no extra charge",
 ]) {
   const r = from(body);
-  assert.equal(r.proposal, "NEW_REPLY", `rate-only reply proposes NEW_REPLY: "${body}"`);
-  assert.equal(r.mode, "review", `rate-only reply needs review: "${body}"`);
+  assert.equal(r.proposal, "DONE", `rate-secured reply proposes DONE: "${body}"`);
+  assert.equal(r.mode, "review", `and only ever as a proposal: "${body}"`);
 }
-// A reply that reports an actual swap AND mentions rate still reads as DONE.
+// A reply that reports an actual swap AND mentions rate also reads as DONE.
 assert.equal(from("Swapped it out, and the rate is the same").proposal, "DONE", "swap language outranks rate talk");
 
 console.log("classifier.test.ts: all assertions passed");

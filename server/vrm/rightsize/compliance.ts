@@ -16,8 +16,9 @@
  *     vehicles. On an open-ticket denominator a returned rental simply leaves
  *     the list, so returns can no longer inflate the numerator.
  *
- *  3. THE TEST IS THE VEHICLE, NOT THE RATE AND NOT THE CLASS DESCRIPTION.
- *        compliant = (the actual rented vehicle is a confirmed sedan nameplate)
+ *  3. THE TEST IS THE VEHICLE OR THE RATE, NOT THE CLASS DESCRIPTION.
+ *        compliant = (rate_authorized <= sedan ceiling)
+ *                 OR (the actual rented vehicle is a confirmed sedan nameplate)
  *                 OR (the technician told us in SMS that the swap is done)
  *
  * The SMS test is Tyler's ruling (2026-07-30): "if they told me they did the
@@ -25,18 +26,16 @@
  * even when the Enterprise ticket still shows an oversized class, because the
  * ARI report lags the branch by days. RETURNED is deliberately NOT credited —
  * giving a rental back is not right-sizing.
- *     RATE IS NOT A TEST — POLICY REVERSAL (Tyler, 2026-08-03), superseding the
- *     7/30 rate-ceiling rule. A rate at or below the sedan ceiling proves only
- *     that Enterprise discounted the reservation, not that the vehicle changed,
- *     and this initiative is about getting people into smaller vehicles. Rate
- *     stays on every row for the $ math and SEDAN_RATE_CEILING survives for
- *     display/history, but rate can no longer make a rental compliant on its
- *     own. Vehicle alone still qualifies because `Rate Authorized` on the ARI
- *     report is the RESERVATION basis, not the invoiced rate — a real sedan
- *     showing an SUV rate is a stale reservation field, not an overcharge.
- *     `Car Class Authorized Description` is deliberately NOT a test: it reports
- *     FULLSIZE for Pacificas, F-150s and a Tacoma, which is what made the 7/30
- *     hand count read 195 when only 142 of those were physically cars.
+ *     RATE AND VEHICLE ARE TWO DIFFERENT THINGS (Tyler, clarified 2026-08-03):
+ *     some techs secured the sedan RATE while keeping their larger rental —
+ *     right-sized by rate, the company pays sedan money. Others show a sedan
+ *     VEHICLE at a rate above the ceiling — right-sized by the vehicle,
+ *     because `Rate Authorized` on the ARI report is the RESERVATION basis,
+ *     not the invoiced rate; a real sedan showing an SUV rate is a stale
+ *     reservation field, not an overcharge. `Car Class Authorized Description`
+ *     is deliberately NOT a test: it reports FULLSIZE for Pacificas, F-150s and
+ *     a Tacoma, which is what made the 7/30 hand count read 195 when only 142
+ *     of those were physically cars.
  *
  * The sedan nameplate list is a TABLE, not a hardcoded regex, because the
  * previous hardcoded list silently missed Kia Soul, Genesis G70 and the Elantra
@@ -52,8 +51,7 @@ import { sql } from "drizzle-orm";
 
 /** Top of the sedan rate band on the ARI report. Rates cluster at or below
  *  59.75 and then jump to 68.00 with nothing in between, so this is a real gap
- *  in the data rather than a chosen threshold. Since 8/3 this is DISPLAY AND
- *  HISTORY ONLY: rate no longer makes a rental compliant (see header). */
+ *  in the data rather than a chosen threshold. */
 export const SEDAN_RATE_CEILING = 59.75;
 
 /** Seed nameplates, stored as "MAKE MODEL" exactly as ARI abbreviates them in
@@ -159,7 +157,7 @@ export const modelKey = (vehDesc: unknown) =>
  * One rental, one bucket, and the buckets sum to the open book exactly.
  */
 export type ComplianceBucket =
-  | "rightsized"    // the vehicle proves it, or the tech confirmed the swap
+  | "rightsized"    // the vehicle or the rate already proves it
   | "committed"     // they said they will
   | "blocked"       // equipment / branch stock / process is in the way
   | "followup"      // they asked something, or the reply contradicts the book
@@ -195,7 +193,7 @@ function bucketOf(
 }
 
 export const BUCKET_META: Record<ComplianceBucket, { label: string; mix: string; next: string }> = {
-  rightsized:  { label: "Right-sized",                          mix: "sedan on the report, or confirmed by the tech",     next: "Holding. Re-verify against the Enterprise feed each morning — Tyler, daily" },
+  rightsized:  { label: "Right-sized",                          mix: "sedan rate, sedan model, or confirmed by the tech", next: "Holding. Re-verify against the Enterprise feed each morning — Tyler, daily" },
   committed:   { label: "Committed",                            mix: "said yes, swap not on the book yet",                next: "Chase each dated commitment the day it lapses — Tyler, daily" },
   blocked:     { label: "Blocked",                              mix: "equipment, branch stock, or process",               next: "Equipment-exception ruling + branch-stock escalation — Tyler w/ Gina, 8/5" },
   followup:    { label: "Follow-up",                            mix: "open question, or reply contradicts the book",       next: "Answer same-day; reconcile every RETURNED against Enterprise — Rob Anderson, 8/1" },
@@ -229,8 +227,8 @@ export type ComplianceRow = {
   jobTitle: string | null;
   isHvac: boolean;
   compliant: boolean;
-  /** "both" = sedan on the report AND SMS-confirmed. Rate is not a basis (8/3). */
-  compliantBy: "model" | "both" | "sms" | null;
+  /** "both" = sedan rate AND sedan model. SMS shows as "sms" only when alone. */
+  compliantBy: "rate" | "model" | "both" | "sms" | null;
   bucket: ComplianceBucket;
   smsStage: string | null;
   smsConfirmed: boolean;
@@ -323,14 +321,13 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
 
     const mk = modelKey(k.veh_desc);
     const rate = Number(k.rate_authorized) || 0;
+    const byRate = rate > 0 && rate <= SEDAN_RATE_CEILING;
     const byModel = mk.length > 0 && sedanSet.has(mk);
-    // Second test: the technician said the swap is done. RETURNED is NOT credited.
+    // Third test: the technician said the swap is done. RETURNED is NOT credited.
     const tracked = ldap ? (stageByLdap.get(ldap) ?? null) : null;
     const smsStage = tracked?.stage ?? null;
     const smsConfirmed = smsStage === "DONE";
-    // Rate is deliberately NOT consulted (Tyler 8/3): a discounted rate on the
-    // same oversized vehicle is not right-sizing. See the header.
-    const compliant = byModel || smsConfirmed;
+    const compliant = byRate || byModel || smsConfirmed;
 
     const c = ldap ? cByLdap.get(ldap) : null;
     const t = ldap ? tByLdap.get(ldap) : null;
@@ -359,7 +356,7 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
       isHvac: /HVAC/i.test(String(title ?? "")),
       compliant,
       compliantBy: compliant
-        ? (byModel && smsConfirmed ? "both" : byModel ? "model" : "sms")
+        ? (byRate && byModel ? "both" : byRate ? "rate" : byModel ? "model" : "sms")
         : null,
       bucket: bucketOf(compliant, smsStage, tracked?.workload ?? null, outbound),
       smsStage,
@@ -415,11 +412,8 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     compliant: comp.length,
     notCompliant: notComp.length,
     compliantPct: ent.length ? Math.round((comp.length / ent.length) * 1000) / 10 : 0,
-    // Pinned 0 since 8/3: rate is not a compliance basis any more. The key and
-    // its snapshot column survive so day-over-day history keeps lining up.
-    byRateOnly: 0,
+    byRateOnly: comp.filter((r) => r.compliantBy === "rate").length,
     byModelOnly: comp.filter((r) => r.compliantBy === "model").length,
-    // Since 8/3, "both" = sedan on the report AND SMS-confirmed (was rate+model).
     byBoth: comp.filter((r) => r.compliantBy === "both").length,
     bySmsOnly: comp.filter((r) => r.compliantBy === "sms").length,
     // What is actually LEFT, split so HVAC never hides the real chase list.

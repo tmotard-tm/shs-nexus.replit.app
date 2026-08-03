@@ -33,9 +33,10 @@ import {
 } from "./classifier";
 
 /** Stages the model is allowed to return. NONE = "I am not confident".
- *  RATE_ONLY is a model-only label (policy 8/3: rate talk is not right-sizing);
- *  applyTruthBoundary maps it to a NEW_REPLY review proposal - it is never a
- *  tracker stage itself. */
+ *  RATE_ONLY is a model-only label: securing the sedan RATE counts as
+ *  right-sized (Tyler, clarified 8/3) even when the larger unit is kept, so
+ *  applyTruthBoundary maps it to a DONE review proposal with a rate-specific
+ *  reason - it is never a tracker stage itself. */
 export const LLM_STAGES = [
   "DONE",
   "RETURNED",
@@ -136,12 +137,12 @@ Classify ONLY the technician's reply. Return one stage:
 - PUSHBACK_EQUIP: a sedan will not fit their tools/equipment/appliances.
 - PUSHBACK_STOCK: the rental branch has no sedans available, or has them on a waitlist / will call when one arrives. The technician is willing; supply is the blocker.
 - PUSHBACK_PROCESS: a policy, manager, contract or process blocker that is neither equipment nor stock.
-- RATE_ONLY: the reply is about PRICE, not the vehicle. The branch matched, adjusted, discounted or kept "the same" RATE, but nothing says the vehicle itself was swapped. A cheaper rate on the same oversized vehicle is NOT right-sizing.
+- RATE_ONLY: the reply is about PRICE, not the vehicle. The branch matched, adjusted, discounted or kept "the same" RATE, but nothing says the vehicle itself was swapped. Use this label - not DONE - whenever the only claim is about rate.
 - NONE: anything else, or you are not confident. Chit-chat, acknowledgements, out-of-office, unrelated fleet talk.
 
 Rules:
 - Tense is decisive. A promise is COMMITTED, never DONE.
-- A rate adjustment alone is NEVER DONE (policy 2026-08-03). DONE requires the vehicle itself to have changed: swapped, exchanged, or a named smaller car in hand. If the only claim is about rate or price, return RATE_ONLY.
+- DONE requires the vehicle itself to have changed: swapped, exchanged, or a named smaller car in hand. If the only claim is about rate or price, return RATE_ONLY so the reviewer sees exactly what was secured.
 - You may be given the vehicle the rental report currently shows for this technician. The report lags the branch by days, so a credible past-tense swap claim is still DONE even if the report shows the old vehicle. Never use the report alone to contradict the technician's words.
 - Never infer beyond the words. If the reply is ambiguous, return NONE with low confidence. NONE is a correct and expected answer.
 - DONE and RETURNED are only ever PROPOSED to a human reviewer, so report what the words actually say and let the human confirm.
@@ -230,23 +231,26 @@ export function applyTruthBoundary(
       mode = "auto";
       break;
     case "RATE_ONLY":
-      // Policy 8/3: rate talk is not right-sizing. Surfaced as a NEW_REPLY
-      // review so a human re-engages for the actual swap; never a stage of its
-      // own and never anything close to DONE.
+      // Securing the sedan rate IS right-sizing (Tyler, clarified 8/3): some
+      // techs get the rate matched while keeping the larger unit. Proposed as
+      // DONE with a rate-specific reason so the reviewer verifies the rate
+      // actually shows on the report; never auto-applied.
       mode = "review";
       break;
     default:
       return null;
   }
+  const proposal = raw.stage === "RATE_ONLY" ? "DONE" : raw.stage;
   // Belt and braces: even if the switch above is ever edited carelessly, a
-  // secured proposal can only leave here as a review proposal.
-  if (SECURED_STAGES.has(raw.stage)) mode = "review";
+  // secured proposal can only leave here as a review proposal. Checked on the
+  // PROPOSAL too, so RATE_ONLY -> DONE can never slip out as auto.
+  if (SECURED_STAGES.has(raw.stage) || SECURED_STAGES.has(proposal)) mode = "review";
 
   return {
-    proposal: raw.stage === "RATE_ONLY" ? "NEW_REPLY" : raw.stage,
+    proposal,
     mode,
     reason: raw.stage === "RATE_ONLY"
-      ? `bedrock: rate-only reply - not right-sized, follow up for the actual swap (policy 8/3): ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`
+      ? `bedrock: sedan rate secured, no vehicle change claimed - compliant by rate, verify on the report: ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`
       : `bedrock: ${raw.reason || "no reason given"} (confidence ${raw.confidence.toFixed(2)})`,
     source: "bedrock",
     confidence: raw.confidence,

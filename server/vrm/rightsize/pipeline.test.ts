@@ -290,21 +290,22 @@ async function main() {
     ok("threshold, NONE, and stickiness all block a verdict");
   }
 
-  // ------------------------------------------- POLICY 8/3: rate is not DONE
-  section("POLICY 8/3: RATE_ONLY becomes a NEW_REPLY review proposal, never DONE");
+  // --------------------------------- rate policy: RATE_ONLY -> DONE proposal
+  section("Rate policy (clarified 8/3): RATE_ONLY proposes DONE for review, never auto");
   {
     const model = "test-model";
     const v = applyTruthBoundary({ stage: "RATE_ONLY", confidence: 0.9, reason: "branch matched the rate" }, "NON_RESPONDER", model);
     assert.ok(v, "RATE_ONLY above threshold produces a verdict");
-    assert.equal(v!.proposal, "NEW_REPLY", "RATE_ONLY maps to NEW_REPLY, never a secured stage");
-    assert.equal(v!.mode, "review", "and always as a review proposal");
-    assert.deepEqual(stageMutationFor(v!, "NON_RESPONDER"), { kind: "propose", stage: "NEW_REPLY" });
+    assert.equal(v!.proposal, "DONE", "sedan rate secured = compliant by rate, proposed DONE");
+    assert.equal(v!.mode, "review", "and always as a review proposal - human verifies the report");
+    assert.match(v!.reason, /rate/i, "reason tells the reviewer this is a rate claim, not a swap claim");
+    assert.deepEqual(stageMutationFor(v!, "NON_RESPONDER"), { kind: "propose", stage: "DONE" });
     assert.ok(parseLlmVerdict('{"stage":"RATE_ONLY","confidence":0.9,"reason":"rate matched"}'), "RATE_ONLY is a legal model stage");
-    // The regex path agrees: rate talk is flagged for follow-up, not banked.
+    // The regex path agrees: rate talk proposes DONE, only ever for review.
     const rx = await resolveVerdict("they matched the sedan rate for me", "NON_RESPONDER", { isLlmEnabled: () => false });
-    assert.equal(rx.proposal, "NEW_REPLY", "regex rate talk proposes NEW_REPLY");
+    assert.equal(rx.proposal, "DONE", "regex rate talk proposes DONE");
     assert.equal(rx.mode, "review");
-    ok("rate talk can never bank a DONE from either brain");
+    ok("rate compliance is proposed, never auto-banked");
   }
 
   // ------------------------------------------------------- prompt hygiene
