@@ -1772,7 +1772,8 @@ export const loaOutreach = pgTable("fs_loa_outreach", {
   lastBody: text("last_body"), // rendered body of the last daily send (resend sends the same text)
   pendingResendAt: timestamp("pending_resend_at"), // when the single resend is due; null = none pending
   resendSentAt: timestamp("resend_sent_at"),
-  repliedAt: timestamp("replied_at"), // any inbound reply (cancels the pending resend)
+  repliedAt: timestamp("replied_at"), // any inbound reply (cancels the pending resend + stops future daily sends)
+  sendDayCount: integer("send_day_count").notNull().default(0), // distinct ET days texted this cycle; >= 2 stops daily sends permanently
   formCompletedAt: timestamp("form_completed_at"), // form submitted → permanently excluded
   formTruckNumber: text("form_truck_number"), // truck # the tech entered on the form
   formData: jsonb("form_data"), // the six submitted answers, verbatim

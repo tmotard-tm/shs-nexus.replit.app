@@ -15,6 +15,9 @@
  *   quiet hours) that any inbound reply cancels (see inbound.ts hook).
  * - A completed public-form submission permanently excludes the tech from all
  *   future automated sends unless staff re-enable (reenabledAt >= formCompletedAt).
+ * - Cadence cap: a tech is texted on at most LOA_MAX_SEND_DAYS (2) distinct ET
+ *   days per cycle. Any inbound reply ALSO stops further daily sends. Both
+ *   stops are permanent until staff re-enable (which resets the day counter).
  * - Advisory-locked ("loa-rental-outreach") + per-day idempotent (lastCycleDate
  *   per tech AND a completed sync_logs row per ET day) so double triggers can't
  *   double-text. Run records: sync_logs sync_type 'loa_rental_outreach'.
@@ -53,6 +56,12 @@ export const LOA_OUTREACH_CATEGORY = "loa_rental";
 export const LOA_SEND_ET_HOUR = 10;
 /** Resend delay — inside the 24h window and before evening quiet hours. */
 const RESEND_DELAY_MS = 6 * 60 * 60 * 1000;
+/**
+ * Hard cap on the outreach cycle: text a tech on at most this many DISTINCT
+ * ET days. Once reached (with no reply and no form), daily sends stop
+ * permanently — staff re-enable resets the counter for a fresh cycle.
+ */
+export const LOA_MAX_SEND_DAYS = 2;
 
 export const DEFAULT_LOA_TEMPLATE_NAME = "LOA Rental Outreach (default)";
 export const DEFAULT_LOA_TEMPLATE_BODY = `Hello, this is Sears Home Services.
@@ -317,6 +326,17 @@ export function isFormExcluded(row: Pick<LoaOutreachRow, "formCompletedAt" | "re
   return !(row.reenabledAt && row.reenabledAt >= row.formCompletedAt);
 }
 
+/** Any inbound reply stops future DAILY sends (staff re-enable at/after the reply wins). */
+export function isReplyExcluded(row: Pick<LoaOutreachRow, "repliedAt" | "reenabledAt">): boolean {
+  if (!row.repliedAt) return false;
+  return !(row.reenabledAt && row.reenabledAt >= row.repliedAt);
+}
+
+/** 2-day cap reached with no reply/form → permanently stop (re-enable resets the counter). */
+export function isSendCapExcluded(row: Pick<LoaOutreachRow, "sendDayCount">): boolean {
+  return row.sendDayCount >= LOA_MAX_SEND_DAYS;
+}
+
 /** Get-or-create the per-tech state row (mints the unguessable token once). */
 export async function getOrCreateOutreachRow(
   ldap: string,
@@ -381,12 +401,12 @@ export async function markLoaFormCompleted(
     .where(eq(loaOutreach.ldap, key));
 }
 
-/** Staff escape hatch: resume automated outreach after a form submission. */
+/** Staff escape hatch: resume automated outreach after a form submission, reply, or the 2-day cap. Resets the day counter for a fresh cycle. */
 export async function reenableLoaOutreach(ldap: string, by: string): Promise<boolean> {
   const key = (ldap || "").trim().toUpperCase();
   const res = await fsDb
     .update(loaOutreach)
-    .set({ reenabledAt: new Date(), reenabledBy: by, updatedAt: new Date() })
+    .set({ reenabledAt: new Date(), reenabledBy: by, sendDayCount: 0, updatedAt: new Date() })
     .where(eq(loaOutreach.ldap, key))
     .returning({ ldap: loaOutreach.ldap });
   return res.length > 0;
@@ -504,7 +524,7 @@ export async function runLoaOutreach(
         for (const rec of recipients) {
           try {
             const state = await getOrCreateOutreachRow(rec.ldap, rec.name, rec.truckNumber);
-            if (isFormExcluded(state)) {
+            if (isFormExcluded(state) || isReplyExcluded(state) || isSendCapExcluded(state)) {
               result.excluded++;
               continue;
             }
@@ -550,6 +570,9 @@ export async function runLoaOutreach(
                   // never blank out a known truck number
                   truckNumber: rec.truckNumber || state.truckNumber,
                   lastCycleDate: today,
+                  // Count DISTINCT send days only (a same-day forced re-run
+                  // must not consume a second day of the 2-day cap).
+                  sendDayCount: dsql`CASE WHEN ${loaOutreach.lastCycleDate} IS DISTINCT FROM ${today} THEN ${loaOutreach.sendDayCount} + 1 ELSE ${loaOutreach.sendDayCount} END`,
                   lastSentAt: new Date(),
                   lastSentPhones: rec.phones.join(","),
                   lastBody: body,
@@ -621,7 +644,7 @@ export async function processLoaResends(): Promise<{ resent: number; errors: num
   let errors = 0;
   for (const row of due) {
     try {
-      if (isFormExcluded(row) || !row.lastBody || !row.lastSentPhones) {
+      if (isFormExcluded(row) || isReplyExcluded(row) || !row.lastBody || !row.lastSentPhones) {
         await fsDb
           .update(loaOutreach)
           .set({ pendingResendAt: null, updatedAt: new Date() })

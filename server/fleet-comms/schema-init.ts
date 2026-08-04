@@ -195,6 +195,32 @@ CREATE TABLE IF NOT EXISTS "fs_loa_outreach" (
   "updated_at" timestamp DEFAULT now()
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_loa_outreach_token" ON "fs_loa_outreach" ("token");
+
+-- 2-day outreach cap: count of DISTINCT ET days a tech has been texted this
+-- cycle. >= 2 permanently stops daily sends (staff re-enable resets to 0).
+-- The backfill runs ONLY when the column is first added (guarded by a
+-- column-existence check) so a later staff re-enable (which resets the counter
+-- to 0) is never re-capped by a restart.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_loa_outreach' AND column_name = 'send_day_count'
+  ) THEN
+    ALTER TABLE "fs_loa_outreach" ADD COLUMN "send_day_count" integer NOT NULL DEFAULT 0;
+    -- One-time backfill for rows created before the cap existed: count their
+    -- real distinct ET send days from the message log, capped at 2.
+    UPDATE "fs_loa_outreach" o
+    SET "send_day_count" = LEAST(sub.days, 2)
+    FROM (
+      SELECT "ldap", COUNT(DISTINCT ("created_at" AT TIME ZONE 'UTC' AT TIME ZONE 'America/New_York')::date)::int AS days
+      FROM "fs_comms_messages"
+      WHERE "category" = 'loa_rental' AND "direction" = 'outbound' AND "ldap" IS NOT NULL
+      GROUP BY "ldap"
+    ) sub
+    WHERE o."ldap" = sub."ldap" AND o."last_cycle_date" IS NOT NULL;
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS "idx_fs_loa_outreach_pending_resend" ON "fs_loa_outreach" ("pending_resend_at") WHERE "pending_resend_at" IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS "fs_comms_send_batches" (
