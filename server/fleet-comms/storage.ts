@@ -17,8 +17,60 @@ import {
   type CommsThread,
   type CommsMessage,
 } from "@shared/fleet-scope-schema";
-import { and, eq, desc, sql, inArray } from "drizzle-orm";
+import { and, eq, desc, sql, inArray, getTableColumns } from "drizzle-orm";
 import { normalizeDigits, preview } from "./lib";
+
+type SqlCondition = Parameters<typeof and>[number];
+
+/**
+ * Category-scoped inbox rows use the newest message IN that category for the
+ * row preview, timestamp, direction, and ordering. The thread table's summary
+ * is global, so using it in a category tab can preview a message that strict
+ * thread detail correctly hides after the row is opened.
+ */
+export async function getCategoryScopedThreadRows(opts: {
+  category: string;
+  conditions?: SqlCondition[];
+  limit: number;
+}): Promise<CommsThread[]> {
+  const conditions = opts.conditions ?? [];
+  const latestMessage = fsDb
+    .selectDistinctOn([commsMessages.threadId], {
+      threadId: commsMessages.threadId,
+      body: commsMessages.body,
+      mediaUrl: commsMessages.mediaUrl,
+      createdAt: commsMessages.createdAt,
+      direction: commsMessages.direction,
+      category: commsMessages.category,
+    })
+    .from(commsMessages)
+    .where(eq(commsMessages.category, opts.category))
+    .orderBy(commsMessages.threadId, desc(commsMessages.createdAt), desc(commsMessages.id))
+    .as("category_latest_message");
+  const rows = await fsDb
+    .select({
+      ...getTableColumns(commsThreads),
+      categoryPreviewBody: latestMessage.body,
+      categoryPreviewMediaUrl: latestMessage.mediaUrl,
+      categoryMessageAt: latestMessage.createdAt,
+      categoryMessageDirection: latestMessage.direction,
+      categoryMessageCategory: latestMessage.category,
+    })
+    .from(commsThreads)
+    .innerJoin(latestMessage, eq(latestMessage.threadId, commsThreads.id))
+    .where(conditions.length ? and(...conditions) : undefined)
+    .orderBy(desc(latestMessage.createdAt), desc(commsThreads.id))
+    .limit(opts.limit);
+
+  return rows
+    .map(({ categoryPreviewBody, categoryPreviewMediaUrl, categoryMessageAt, categoryMessageDirection, categoryMessageCategory, ...thread }) => ({
+      ...thread,
+      lastMessagePreview: preview(categoryPreviewBody || (categoryPreviewMediaUrl ? "(image)" : "")),
+      lastMessageAt: categoryMessageAt,
+      lastMessageDirection: categoryMessageDirection,
+      lastCategory: categoryMessageCategory,
+    }));
+}
 
 /**
  * Resolve the current job title ("position") for a set of technician LDAPs from
@@ -507,6 +559,47 @@ export async function setOptOut(
     });
   // Reflect on any threads currently carrying this number.
   await fsDb.update(commsThreads).set({ optedOut }).where(eq(commsThreads.phoneDigits, phoneDigits));
+}
+
+/**
+ * One page of a thread's messages for the detail view (cursor pagination:
+ * newest `limit` DESC, returned ascending; `before` pages backwards).
+ *
+ * When `category` is set the page is STRICTLY scoped to that category —
+ * inbound included (Task #577). The old `category OR direction='inbound'`
+ * escape (which kept 72h-attribution strays visible) leaked every other
+ * lane's inbound texts into a filtered thread. Discoverability is preserved
+ * via `hiddenCount`: how many of the thread's messages (any direction) fall
+ * OUTSIDE the scoped category, so the UI can point at the All tab instead of
+ * looking like data loss. `hiddenCount` is 0 when unscoped.
+ */
+export async function getThreadMessagesPage(opts: {
+  threadId: string;
+  category?: string | null;
+  before?: Date | null;
+  limit?: number;
+}): Promise<{ messages: CommsMessage[]; hasMore: boolean; hiddenCount: number }> {
+  const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+  const conds: any[] = [eq(commsMessages.threadId, opts.threadId)];
+  if (opts.category) conds.push(eq(commsMessages.category, opts.category));
+  if (opts.before) conds.push(sql`${commsMessages.createdAt} < ${opts.before}`);
+  const pageDesc = await fsDb
+    .select()
+    .from(commsMessages)
+    .where(and(...conds))
+    .orderBy(desc(commsMessages.createdAt))
+    .limit(limit + 1);
+  const hasMore = pageDesc.length > limit;
+  const messages = pageDesc.slice(0, limit).reverse();
+  let hiddenCount = 0;
+  if (opts.category) {
+    const [row] = await fsDb
+      .select({ cnt: sql<number>`count(*)::int` })
+      .from(commsMessages)
+      .where(and(eq(commsMessages.threadId, opts.threadId), sql`${commsMessages.category} <> ${opts.category}`));
+    hiddenCount = Number(row?.cnt ?? 0);
+  }
+  return { messages, hasMore, hiddenCount };
 }
 
 /** The last OUTBOUND category to this thread within `windowMs` (for 72h attribution). */

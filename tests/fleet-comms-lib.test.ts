@@ -14,6 +14,8 @@ import {
   TEMPLATE_TOKENS,
   COMMS_CATEGORIES,
 } from "../server/fleet-comms/lib.js";
+import { COMMS_CATEGORY_LABELS } from "../shared/fleet-scope-schema.js";
+import { resolveComposerCategory } from "../client/src/lib/comms-category.js";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * Master Fleet Communications — pure-logic unit tests (Task #524).
@@ -30,6 +32,12 @@ test("isValidCategory accepts the canonical categories and rejects others", () =
   assert.equal(isValidCategory(""), false);
   assert.equal(isValidCategory(null), false);
   assert.equal(isValidCategory(123 as unknown), false);
+});
+
+test("composer category follows scoped tab and clears stale state on All without thread history", () => {
+  assert.equal(resolveComposerCategory("rental_management", "samsara"), "rental_management");
+  assert.equal(resolveComposerCategory("all", "samsara"), "samsara");
+  assert.equal(resolveComposerCategory("all", null), "");
 });
 
 test("normalizeDigits keeps the last 10 digits and strips formatting", () => {
@@ -159,5 +167,17 @@ test("localHourToUtc maps a local wall-clock hour to the correct UTC instant (qu
   ];
   for (const [tz, [y, m, d, h], expected] of cases) {
     assert.equal(localHourToUtc(tz, y, m, d, h).toISOString(), expected, `${tz} ${y}-${m}-${d} hour=${h}`);
+  }
+});
+
+test("samsara is a first-class category and every category has a label", () => {
+  assert.ok((COMMS_CATEGORIES as readonly string[]).includes("samsara"));
+  assert.equal(isValidCategory("samsara"), true);
+  assert.equal(COMMS_CATEGORY_LABELS.samsara, "Samsara");
+  // Header tabs, selects, and CSV export all derive labels from this map —
+  // a category without a label would render raw slugs everywhere.
+  for (const c of COMMS_CATEGORIES) {
+    const label = COMMS_CATEGORY_LABELS[c];
+    assert.ok(typeof label === "string" && label.trim().length > 0, `label for ${c}`);
   }
 });

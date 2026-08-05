@@ -35,3 +35,10 @@ bash timeout) via a workflow, not bash backgrounding:**
 - TS2802 ("`Set`/`Map` can only be iterated with --downlevelIteration / target es2015+"):
   this repo's tsconfig target trips it on direct `for…of` over a Map/Set or `[...set]` spread.
   Use `Array.from(x)` instead — that's the codebase convention.
+
+## node:test suites that hang at exit
+`npx tsx --test` integration suites touching the Neon pool can pass every test
+then hang forever (pool/WS keeps the event loop alive) — a piped `| tail` then
+shows NOTHING on timeout because the buffer never flushes. Run them with
+`--test-force-exit` (works with tsx, prints the TAP summary, exits cleanly),
+or via a console workflow writing to a logfile you poll.

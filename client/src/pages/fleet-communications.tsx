@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { resolveComposerCategory } from "@/lib/comms-category";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -314,14 +315,14 @@ export default function FleetCommunications() {
   const [unreadOnly, setUnreadOnly] = useState(false);
   const [scope, setScope] = useState<"active" | "archived">("active");
   const [body, setBody] = useState("");
-  const [sendCategory, setSendCategory] = useState<string>("general_fleet");
-  // Keep replies in the lane you're looking at: when a category tab is active,
-  // default the thread composer's category to it — otherwise a reply sent from
-  // the Rental Management view would be tagged general_fleet and immediately
-  // disappear from the category-filtered thread you just sent it from.
-  useEffect(() => {
-    if (category !== "all") setSendCategory(category);
-  }, [category]);
+  // No silent category default (Task #577): the composer starts UNSELECTED so
+  // every send is deliberately tagged — Send stays disabled and the control is
+  // flagged while a category is missing. Two contextual prefills keep this
+  // low-friction (both are visible in the dropdown, never silent):
+  //  1. Active category tab → composer. Keeps replies in the lane you're
+  //     looking at — with strict category isolation, a reply tagged elsewhere
+  //     would immediately disappear from the filtered thread you sent it from.
+  const [sendCategory, setSendCategory] = useState<string>("");
   const [managerCc, setManagerCc] = useState(false);
   const [attachment, setAttachment] = useState<{ url: string; preview: string } | null>(null);
   const [composeOpen, setComposeOpen] = useState(false);
@@ -399,9 +400,11 @@ export default function FleetCommunications() {
     .filter((t) => positionFilter === "all" || shortPosition(t.position) === positionFilter);
 
   // Category isolation: when a category tab is active, the open thread loads
-  // ONLY that category's messages (server filters), so e.g. Rental Management
-  // never shows decommissioning history. "All" keeps the full mixed thread.
-  const { data: detail } = useQuery<{ thread: Thread; messages: Message[]; pending: any[]; contact: Contact | null; hasMore?: boolean }>({
+  // ONLY that category's messages — inbound included (server filters strictly;
+  // Task #577). "All" keeps the full mixed thread. `hiddenCount` reports how
+  // many of the thread's messages the active filter hides, so the view can
+  // point at the All tab instead of looking like data loss.
+  const { data: detail } = useQuery<{ thread: Thread; messages: Message[]; pending: any[]; contact: Contact | null; hasMore?: boolean; hiddenCount?: number }>({
     queryKey: ["/api/fs/comms/threads", selectedId, category],
     enabled: !!selectedId,
     queryFn: async () => {
@@ -614,6 +617,9 @@ export default function FleetCommunications() {
 
   const thread = detail?.thread;
   const messages = [...olderMessages, ...(detail?.messages ?? [])];
+  // Messages the active category filter hides (0 on the All tab) — drives the
+  // "hidden by this filter" note in the thread view.
+  const hiddenCount = detail?.hiddenCount ?? 0;
   // The thread's current number on file — used to flag any message that used a
   // different (e.g. older) number, so merged old-number texts stay labeled.
   const threadDigits = (thread?.phoneDigits || (detail?.contact?.phone || "").replace(/\D/g, "")).slice(-10);
@@ -663,6 +669,9 @@ export default function FleetCommunications() {
 
   const handleSend = () => {
     if (!thread || (!body.trim() && !attachment)) return;
+    // No category picked (and no prefill applied): Send is already disabled,
+    // but Enter-to-send lands here too — the flagged select says what's missing.
+    if (!sendCategory) return;
     // With a specific number subtab active, lock the reply to THAT number so
     // the server can't re-resolve it back to the number on file (e.g. replying
     // on the personal number an LOA tech has actually been answering from).
@@ -679,6 +688,10 @@ export default function FleetCommunications() {
       managerCc,
     });
   };
+
+  // Composer "category required" affordance: flips on as soon as the user has
+  // typed (or attached) something without a category selected.
+  const needsSendCategory = !sendCategory && (!!body.trim() || !!attachment);
 
   // ── Multi-select for bulk messaging ──
   // Only tech threads with an LDAP are selectable (bulk resolves recipients by
@@ -710,10 +723,14 @@ export default function FleetCommunications() {
     setBulkOpen(true);
   };
 
-  // When opening a thread, default the send category to its last category.
+  //  2. Thread's last category → composer, on the All tab only. Prefills the
+  //     lane the conversation is already in; a scoped category tab wins (see
+  //     prefill #1 above) so a reply never jumps out of the active lane.
+  // Recompute (including clearing to "") on every tab/thread context change;
+  // otherwise All or a no-history thread can inherit the previous lane.
   useEffect(() => {
-    if (thread?.lastCategory) setSendCategory(thread.lastCategory);
-  }, [thread?.id, thread?.lastCategory]);
+    setSendCategory(resolveComposerCategory(category, thread?.lastCategory));
+  }, [category, thread?.id, thread?.lastCategory]);
 
   if (config && !config.enabled && !config.canManage) {
     return (
@@ -1113,6 +1130,20 @@ export default function FleetCommunications() {
                 </div>
               )}
 
+              {/* Strict category isolation hides other lanes' messages; say so
+                  (with a one-click way to All) so filtered never reads as lost. */}
+              {category !== "all" && hiddenCount > 0 && (
+                <div className="px-3 py-1.5 border-b border-indigo-100 dark:border-indigo-500/20 bg-indigo-50/60 dark:bg-indigo-500/10 text-[11px] text-indigo-700 dark:text-indigo-300 flex items-center gap-1.5 flex-wrap" data-testid="hidden-messages-note">
+                  <Tag className="w-3 h-3 flex-shrink-0" />
+                  <span>
+                    {hiddenCount} message{hiddenCount === 1 ? "" : "s"} in other categories {hiddenCount === 1 ? "is" : "are"} hidden by the {config?.categories.find((c) => c.value === category)?.label ?? category} filter.
+                  </span>
+                  <button onClick={() => setCategory("all")} className="font-semibold underline underline-offset-2 hover:no-underline" data-testid="button-view-all-messages">
+                    View all
+                  </button>
+                </div>
+              )}
+
               {threadNumbers.length >= 2 && (
                 <div className="px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex items-center gap-1.5 flex-wrap" data-testid="number-subtabs">
                   <button
@@ -1228,8 +1259,11 @@ export default function FleetCommunications() {
                 )}
                 <div className="flex items-center gap-2 flex-wrap">
                   <Select value={sendCategory} onValueChange={setSendCategory}>
-                    <SelectTrigger className="w-44 h-8 text-xs" data-testid="select-send-category">
-                      <SelectValue />
+                    <SelectTrigger
+                      className={`w-44 h-8 text-xs ${needsSendCategory ? "border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/40" : ""}`}
+                      data-testid="select-send-category"
+                    >
+                      <SelectValue placeholder="Select category…" />
                     </SelectTrigger>
                     <SelectContent>
                       {config?.categories.map((c) => (
@@ -1237,6 +1271,11 @@ export default function FleetCommunications() {
                       ))}
                     </SelectContent>
                   </Select>
+                  {needsSendCategory && (
+                    <span className="text-[11px] font-medium text-amber-600 dark:text-amber-500" data-testid="hint-send-category">
+                      Pick a category to send
+                    </span>
+                  )}
                   <label className="flex items-center gap-1.5 text-xs">
                     <Checkbox checked={managerCc} onCheckedChange={(v) => setManagerCc(!!v)} data-testid="checkbox-manager-cc" />
                     CC Lead{detail?.contact?.managerName ? ` (${detail.contact.managerName})` : detail?.contact ? " (none on file)" : ""}
@@ -1285,10 +1324,10 @@ export default function FleetCommunications() {
                     onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
                     placeholder={thread.optedOut ? "This contact opted out — texting is blocked" : "Type a message..."}
                     disabled={thread.optedOut}
-                    className="min-h-[44px] max-h-32 text-sm"
+                    className="min-h-[96px] max-h-60 text-sm"
                     data-testid="input-message-body"
                   />
-                  <Button onClick={handleSend} disabled={sendMut.isPending || (!body.trim() && !attachment) || thread.optedOut} className="bg-gradient-to-br from-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0 shadow-md shadow-indigo-500/25" data-testid="button-send">
+                  <Button onClick={handleSend} disabled={sendMut.isPending || (!body.trim() && !attachment) || !sendCategory || thread.optedOut} className="bg-gradient-to-br from-indigo-500 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white border-0 shadow-md shadow-indigo-500/25" data-testid="button-send">
                     {sendMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
                   </Button>
                 </div>
@@ -1691,7 +1730,9 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 }) {
   const { toast } = useToast();
   const [selected, setSelected] = useState<Map<string, Contact>>(new Map());
-  const [cat, setCat] = useState("general_fleet");
+  // Starts with NO category (Task #577) — Send stays disabled until one is
+  // deliberately picked, so nothing lands silently under General Fleet.
+  const [cat, setCat] = useState("");
   const [body, setBody] = useState("");
   const [managerCc, setManagerCc] = useState(false);
   const [ackStale, setAckStale] = useState(false);
@@ -1700,7 +1741,7 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 
   const reset = () => {
     setSelected(new Map());
-    setBody(""); setManagerCc(false); setAckStale(false);
+    setCat(""); setBody(""); setManagerCc(false); setAckStale(false);
     setRecipientMode("tech"); setManualPhone("");
   };
 
@@ -1782,9 +1823,11 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
 
   const sending = singleMut.isPending || bulkMut.isPending || phoneMut.isPending;
   const staleBlock = !!health?.isStale && count > 1 && !ackStale;
+  // Typing without a category flags the select and keeps Send disabled.
+  const needsCat = !cat && !!body.trim();
   const canSend = recipientMode === "phone"
-    ? phoneValid && !!body.trim() && !sending
-    : count > 0 && !!body.trim() && !sending && !staleBlock;
+    ? phoneValid && !!cat && !!body.trim() && !sending
+    : count > 0 && !!cat && !!body.trim() && !sending && !staleBlock;
 
   const doSend = () => {
     if (recipientMode === "phone") phoneMut.mutate();
@@ -1816,10 +1859,20 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
           )}
 
           <Select value={cat} onValueChange={setCat}>
-            <SelectTrigger data-testid="select-compose-category"><SelectValue /></SelectTrigger>
+            <SelectTrigger
+              className={needsCat ? "border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/40" : undefined}
+              data-testid="select-compose-category"
+            >
+              <SelectValue placeholder="Select a category (required)" />
+            </SelectTrigger>
             <SelectContent>{categories.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
           </Select>
-          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Message... (supports {name}, {truck}, {district}, {ldap}, {managerName})" data-testid="input-compose-body" />
+          {needsCat && (
+            <div className="text-xs font-medium text-amber-600 dark:text-amber-500" data-testid="hint-compose-category">
+              Pick a category before sending.
+            </div>
+          )}
+          <Textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Message... (supports {name}, {truck}, {district}, {ldap}, {managerName})" className="min-h-[96px] max-h-60" data-testid="input-compose-body" />
           {recipientMode === "tech" && (
             <>
               <label className="flex items-center gap-2 text-sm">
@@ -1845,7 +1898,7 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
           )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => { onOpenChange(false); reset(); }}>Cancel</Button>
           <Button onClick={doSend} disabled={!canSend} data-testid="button-compose-send">
             {sending ? <Loader2 className="w-4 h-4 animate-spin" /> : count > 1 ? `Send to ${count}` : "Send"}
           </Button>
@@ -1885,7 +1938,9 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
   onSent?: () => void;
 }) {
   const { toast } = useToast();
-  const [cat, setCat] = useState("general_fleet");
+  // Starts with NO category (Task #577) — Preview/Send stay disabled until one
+  // is deliberately picked (choosing a template also applies its category).
+  const [cat, setCat] = useState("");
   const [body, setBody] = useState("");
   const [mode, setMode] = useState<"list" | "ldaps" | "trucks" | "district" | "rental">("ldaps");
   const [ldaps, setLdaps] = useState("");
@@ -1919,7 +1974,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
     setEstimate(null);
   };
 
-  const reset = () => { setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPositions(new Set()); setRentalStatuses(new Set()); setRentalExcluded(new Set()); };
+  const reset = () => { setCat(""); setBody(""); setLdaps(""); setTrucks(""); setDistrict(""); setSelected(new Map()); setEstimate(null); setAckStale(false); setRentalPositions(new Set()); setRentalStatuses(new Set()); setRentalExcluded(new Set()); };
 
   // Contacts directory for the rental-mode position filter (ldap → position).
   // Same query key as the RecipientPicker's full fetch, so the cache is shared
@@ -2084,6 +2139,8 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
 
   // Re-preview whenever the audience/body changes so the estimate stays fresh.
   const stale = !estimate;
+  // Typing without a category flags the select and keeps Preview disabled.
+  const needsCat = !cat && !!body.trim();
 
   return (
     <Dialog open={open} onOpenChange={(v) => { onOpenChange(v); if (!v) reset(); }}>
@@ -2094,9 +2151,19 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
         <DialogHeader><DialogTitle>Bulk message</DialogTitle></DialogHeader>
         <div className="space-y-3">
           <Select value={cat} onValueChange={setCat}>
-            <SelectTrigger data-testid="select-bulk-category"><SelectValue /></SelectTrigger>
+            <SelectTrigger
+              className={needsCat ? "border-amber-400 dark:border-amber-500 ring-2 ring-amber-400/40" : undefined}
+              data-testid="select-bulk-category"
+            >
+              <SelectValue placeholder="Select a category (required)" />
+            </SelectTrigger>
             <SelectContent>{categories.map((c) => <SelectItem key={c.value} value={c.value}>{c.label}</SelectItem>)}</SelectContent>
           </Select>
+          {needsCat && (
+            <div className="text-xs font-medium text-amber-600 dark:text-amber-500" data-testid="hint-bulk-category">
+              Pick a category before previewing the send.
+            </div>
+          )}
 
           <div className="flex gap-1.5 flex-wrap">
             {([["list", "Pick from list"], ["ldaps", "LDAP list"], ["trucks", "Truck list"], ["district", "District"], ["rental", "In rental"]] as const).map(([m, label]) => (
@@ -2237,7 +2304,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
             </div>
           )}
 
-          <Textarea value={body} onChange={(e) => { setBody(e.target.value); setEstimate(null); }} placeholder="Message (supports {name}, {truck}, {district}, {ldap}, {managerName})" data-testid="input-bulk-body" />
+          <Textarea value={body} onChange={(e) => { setBody(e.target.value); setEstimate(null); }} placeholder="Message (supports {name}, {truck}, {district}, {ldap}, {managerName})" className="min-h-[96px] max-h-60" data-testid="input-bulk-body" />
           <label className="flex items-center gap-2 text-sm">
             <Checkbox checked={managerCc} onCheckedChange={(v) => setManagerCc(!!v)} /> CC each technician's Lead
           </label>
@@ -2285,7 +2352,7 @@ function BulkDialog({ open, onOpenChange, categories, health, presetLdaps, renta
           {stale ? (
             <Button
               onClick={() => previewMut.mutate()}
-              disabled={!body.trim() || !hasAudience || previewMut.isPending}
+              disabled={!cat || !body.trim() || !hasAudience || previewMut.isPending}
               data-testid="button-bulk-preview"
             >
               {previewMut.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : "Preview"}

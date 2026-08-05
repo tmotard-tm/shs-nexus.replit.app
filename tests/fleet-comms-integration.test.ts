@@ -14,6 +14,9 @@
  *     re-run copies nothing new).
  *   - Contacts-sync anti-wipe guards (0-row abort + low-pull abort never
  *     tombstone the last-good directory).
+ *   - Thread-detail category scoping (Task #577): a category-scoped page is
+ *     STRICT — other-category messages (inbound included) are excluded and
+ *     surfaced only via hiddenCount; unscoped pages return everything.
  *
  * All test rows use the fixed `ZZT524` prefix so a failed run cannot collide
  * with real data, and everything is cleaned up before/after.
@@ -45,6 +48,8 @@ import {
   isOptedOut,
   getOrCreateTechThread,
   lastOutboundCategoryWithin,
+  getThreadMessagesPage,
+  getCategoryScopedThreadRows,
 } from "../server/fleet-comms/storage.js";
 import { syncCommsContacts, type RosterRow } from "../server/fleet-comms/contacts-sync.js";
 import { migrateLegacyComms } from "../server/run-comms-migrate.js";
@@ -53,6 +58,9 @@ import { migrateLegacyComms } from "../server/run-comms-migrate.js";
 const TECH1_LDAP = "ZZT524TECH1";
 const TECH2_LDAP = "ZZT524TECH2";
 const TECH3_LDAP = "ZZT524TECH3";
+const TECH4_LDAP = "ZZT524TECH4";
+const TECH5_LDAP = "ZZT524TECH5";
+const TECH6_LDAP = "ZZT524TECH6";
 const MGR_LDAP = "ZZT524MGR1";
 
 const SOLO_DIGITS = "5550524001"; // -> exactly one contact (TECH1)
@@ -61,6 +69,9 @@ const UNKNOWN_DIGITS = "5550524003"; // -> no contact
 const OPTOUT_DIGITS = "5550524004";
 const MGR_DIGITS = "5550524005";
 const STOPSTART_DIGITS = "5550524006";
+const SCOPING_DIGITS = "5550524007";
+const PREVIEW_DIGITS = "5550524008";
+const PREVIEW2_DIGITS = "5550524009";
 
 const SOLO_PHONE = "+1" + SOLO_DIGITS;
 const OPTOUT_PHONE = "+1" + OPTOUT_DIGITS;
@@ -73,7 +84,7 @@ const REG1_DEDUPE = `legacy:reg:${REG1_ID}`;
 const DECOMM_MGR_DEDUPE = `legacy:decomm:${DECOMM_MGR_ID}`;
 const DECOMM_TECH_DEDUPE = `legacy:decomm:${DECOMM_TECH_ID}`;
 
-const ALL_LDAPS = [TECH1_LDAP, TECH2_LDAP, TECH3_LDAP, MGR_LDAP];
+const ALL_LDAPS = [TECH1_LDAP, TECH2_LDAP, TECH3_LDAP, TECH4_LDAP, TECH5_LDAP, TECH6_LDAP, MGR_LDAP];
 const ALL_DIGITS = [
   SOLO_DIGITS,
   SHARED_DIGITS,
@@ -81,6 +92,9 @@ const ALL_DIGITS = [
   OPTOUT_DIGITS,
   MGR_DIGITS,
   STOPSTART_DIGITS,
+  SCOPING_DIGITS,
+  PREVIEW_DIGITS,
+  PREVIEW2_DIGITS,
 ];
 const ALL_DEDUPE = [REG1_DEDUPE, DECOMM_MGR_DEDUPE, DECOMM_TECH_DEDUPE];
 const TEST_TRIGGER = "_t524_test";
@@ -364,4 +378,104 @@ test("health endpoint contract: fsDb.execute stats are read via .rows[0] (regres
   const contactStats = (contactResult?.rows ?? contactResult ?? [])[0];
   assert.ok(contactStats, "contact stats row present via .rows[0]");
   assert.ok("active" in contactStats && "total" in contactStats);
+});
+
+test("thread-detail category scoping is STRICT: other-category inbound excluded, same-category kept, hiddenCount reports the rest", async () => {
+  const thread = await getOrCreateTechThread(TECH4_LDAP, { phoneDigits: SCOPING_DIGITS });
+  const phone = "+1" + SCOPING_DIGITS;
+  await appendMessage({ threadId: thread.id, ldap: TECH4_LDAP, category: "rental_management", direction: "outbound", body: "S1 rental outbound", phone, status: "sent" });
+  await appendMessage({ threadId: thread.id, ldap: TECH4_LDAP, category: "rental_management", direction: "inbound", body: "S2 rental inbound reply", phone, status: "received" });
+  // A late reply the 72h attribution tagged into another lane — the old
+  // `category OR direction='inbound'` escape leaked this into every scoped view.
+  await appendMessage({ threadId: thread.id, ldap: TECH4_LDAP, category: "general_fleet", direction: "inbound", body: "S3 stray general inbound", phone, status: "received" });
+  // New Samsara category is usable end-to-end at the storage layer.
+  await appendMessage({ threadId: thread.id, ldap: TECH4_LDAP, category: "samsara", direction: "outbound", body: "S4 samsara outbound", phone, status: "sent" });
+
+  // Scoped to rental_management: BOTH rental messages (inbound included); the
+  // stray general_fleet inbound is EXCLUDED; hiddenCount counts the other two.
+  const scoped = await getThreadMessagesPage({ threadId: thread.id, category: "rental_management" });
+  assert.deepEqual(scoped.messages.map((m) => m.body).sort(), ["S1 rental outbound", "S2 rental inbound reply"]);
+  assert.ok(scoped.messages.every((m) => m.category === "rental_management"));
+  assert.equal(scoped.hiddenCount, 2);
+  assert.equal(scoped.hasMore, false);
+
+  // Samsara scope returns only the samsara message.
+  const samsara = await getThreadMessagesPage({ threadId: thread.id, category: "samsara" });
+  assert.deepEqual(samsara.messages.map((m) => m.body), ["S4 samsara outbound"]);
+  assert.equal(samsara.hiddenCount, 3);
+
+  // Unscoped ("All" tab): the full mixed thread, nothing reported hidden.
+  const all = await getThreadMessagesPage({ threadId: thread.id });
+  assert.deepEqual(
+    all.messages.map((m) => m.body).sort(),
+    ["S1 rental outbound", "S2 rental inbound reply", "S3 stray general inbound", "S4 samsara outbound"],
+  );
+  assert.equal(all.hiddenCount, 0);
+});
+
+test("category-scoped inbox preview and ordering use that category's newest message", async () => {
+  const thread = await getOrCreateTechThread(TECH5_LDAP, { phoneDigits: PREVIEW_DIGITS });
+  const phone = "+1" + PREVIEW_DIGITS;
+  const rental = await appendMessage({
+    threadId: thread.id,
+    ldap: TECH5_LDAP,
+    category: "rental_management",
+    direction: "inbound",
+    body: "Rental preview that must stay visible",
+    phone,
+    status: "received",
+  });
+  await appendMessage({
+    threadId: thread.id,
+    ldap: TECH5_LDAP,
+    category: "general_fleet",
+    direction: "inbound",
+    body: "Newer global preview that must be hidden on Rental",
+    phone,
+    status: "received",
+  });
+  const secondThread = await getOrCreateTechThread(TECH6_LDAP, { phoneDigits: PREVIEW2_DIGITS });
+  const secondPhone = "+1" + PREVIEW2_DIGITS;
+  await appendMessage({
+    threadId: secondThread.id,
+    ldap: TECH6_LDAP,
+    category: "rental_management",
+    direction: "inbound",
+    body: "Newer rental preview should sort first",
+    phone: secondPhone,
+    status: "received",
+  });
+  // Force opposite orderings:
+  // - Rental recency: secondThread (12:02) > thread (12:00)
+  // - Global recency: thread's General Fleet message (12:03) > secondThread
+  const rentalOlderAt = new Date("2026-08-05T12:00:00.000Z");
+  const rentalNewerAt = new Date("2026-08-05T12:02:00.000Z");
+  const globalNewestAt = new Date("2026-08-05T12:03:00.000Z");
+  await fsDb
+    .update(commsMessages)
+    .set({ createdAt: rentalOlderAt })
+    .where(and(eq(commsMessages.threadId, thread.id), eq(commsMessages.category, "rental_management")));
+  await fsDb
+    .update(commsMessages)
+    .set({ createdAt: globalNewestAt })
+    .where(and(eq(commsMessages.threadId, thread.id), eq(commsMessages.category, "general_fleet")));
+  await fsDb
+    .update(commsMessages)
+    .set({ createdAt: rentalNewerAt })
+    .where(and(eq(commsMessages.threadId, secondThread.id), eq(commsMessages.category, "rental_management")));
+  await fsDb.update(commsThreads).set({ lastMessageAt: globalNewestAt }).where(eq(commsThreads.id, thread.id));
+  await fsDb.update(commsThreads).set({ lastMessageAt: rentalNewerAt }).where(eq(commsThreads.id, secondThread.id));
+
+  const rows = await getCategoryScopedThreadRows({
+    category: "rental_management",
+    conditions: [inArray(commsThreads.id, [thread.id, secondThread.id])],
+    limit: 10,
+  });
+
+  assert.equal(rows.length, 2);
+  assert.deepEqual(rows.map((row) => row.id), [secondThread.id, thread.id]);
+  assert.equal(rows[1].lastMessagePreview, "Rental preview that must stay visible");
+  assert.equal(rows[1].lastMessageDirection, "inbound");
+  assert.equal(rows[1].lastCategory, "rental_management");
+  assert.equal(new Date(rows[1].lastMessageAt!).getTime(), rentalOlderAt.getTime());
 });

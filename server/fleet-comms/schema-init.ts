@@ -109,6 +109,10 @@ CREATE TABLE IF NOT EXISTS "fs_comms_messages" (
 );
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_thread" ON "fs_comms_messages" ("thread_id", "created_at");
 CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_ldap" ON "fs_comms_messages" ("ldap");
+-- Category-tab inbox: newest matching message per thread, ordered by category
+-- recency. The id tiebreaker keeps same-timestamp selection deterministic.
+CREATE INDEX IF NOT EXISTS "idx_fs_comms_messages_category_thread_created"
+  ON "fs_comms_messages" ("category", "thread_id", "created_at" DESC, "id" DESC);
 -- Dedupe inbound retries and status-callback races by Twilio SID.
 CREATE UNIQUE INDEX IF NOT EXISTS "uq_fs_comms_messages_twilio_sid"
   ON "fs_comms_messages" ("twilio_sid") WHERE "twilio_sid" IS NOT NULL;

@@ -51,6 +51,8 @@ import {
   recordPhoneChange,
   getContactByLdap,
   getPositionsForLdaps,
+  getThreadMessagesPage,
+  getCategoryScopedThreadRows,
   archiveThread,
   restoreThread,
   bulkArchiveUnmatched,
@@ -415,11 +417,6 @@ export function registerCommsRoutes(app: Router): void {
       const limit = Math.min(Number(req.query.limit) || 100, 300);
 
       const conds: any[] = [];
-      if (category && isValidCategory(category)) {
-        conds.push(
-          sql`EXISTS (SELECT 1 FROM fs_comms_messages m WHERE m.thread_id = ${commsThreads.id} AND m.category = ${category})`,
-        );
-      }
       // Lifecycle: a tech's thread drops out of the main inbox 14 days after we
       // detect their termination (contact goes active=false with a
       // termination_detected_at), but the history stays reachable via the
@@ -471,20 +468,24 @@ export function registerCommsRoutes(app: Router): void {
         );
       }
 
-      const rows = await retryOnceOnTransient(() => fsDb
-        .select()
-        .from(commsThreads)
-        .where(conds.length ? and(...conds) : undefined)
-        // Order strictly by most-recent activity (standard messaging-app behavior).
-        // We intentionally do NOT sort unread-first: opening a thread marks it read,
-        // and an unread-first sort made the just-opened thread jump out of the top
-        // block down into the read block, so the list reshuffled unpredictably on
-        // every open/poll. Unread is surfaced purely as a bold row + count badge,
-        // with the separate "unread only" filter for focus. `NULLS LAST` keeps
-        // no-message threads at the bottom; the id tiebreaker keeps same-timestamp
-        // rows in a stable order across refetches.
-        .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
-        .limit(limit));
+      const rows = await retryOnceOnTransient(() =>
+        category && isValidCategory(category)
+          ? getCategoryScopedThreadRows({ category, conditions: conds, limit })
+          : fsDb
+              .select()
+              .from(commsThreads)
+              .where(conds.length ? and(...conds) : undefined)
+              // Order strictly by most-recent activity (standard messaging-app behavior).
+              // We intentionally do NOT sort unread-first: opening a thread marks it read,
+              // and an unread-first sort made the just-opened thread jump out of the top
+              // block down into the read block, so the list reshuffled unpredictably on
+              // every open/poll. Unread is surfaced purely as a bold row + count badge,
+              // with the separate "unread only" filter for focus. `NULLS LAST` keeps
+              // no-message threads at the bottom; the id tiebreaker keeps same-timestamp
+              // rows in a stable order across refetches.
+              .orderBy(sql`${commsThreads.lastMessageAt} DESC NULLS LAST`, desc(commsThreads.id))
+              .limit(limit),
+      );
       // Attach each tech's current position (job title) from the synced roster.
       const posMap = await getPositionsForLdaps(rows.map((r: any) => r.ldap));
       res.json(
@@ -534,31 +535,28 @@ export function registerCommsRoutes(app: Router): void {
       // if more history remains, then return the page ascending for display.
       const limit = Math.min(Number(req.query.limit) || 50, 200);
       const before = String(req.query.before || "").trim();
-      const msgConds: any[] = [eq(commsMessages.threadId, id)];
-      // Category isolation: when the inbox has a category tab active, the open
-      // thread shows ONLY that category's messages (and pending sends), so the
-      // Rental Management view isn't flooded with decommissioning history etc.
+      // Category isolation is STRICT (Task #577): with a category tab active,
+      // the open thread shows ONLY that category's messages — inbound included —
+      // plus that category's pending sends. An earlier `category OR
+      // direction='inbound'` escape kept 72h-attribution strays visible, but it
+      // also leaked every other lane's inbound texts into the filtered view (the
+      // exact bleed-through the tabs exist to prevent). Discoverability is
+      // preserved via `hiddenCount` instead: the client shows a "view under All"
+      // note whenever the thread has messages outside the scoped category.
       const msgCategory = String(req.query.category || "").trim();
       const categoryScoped = !!msgCategory && isValidCategory(msgCategory);
-      // Category isolation keeps a category tab from showing another lane's
-      // OUTBOUND campaign history. Inbound replies always belong to the open
-      // conversation, though: attribution tags a reply general_fleet when the
-      // last-outbound window has lapsed, and hiding it here made replies show
-      // in the inbox list but vanish from the thread. Scope by category OR keep
-      // any inbound message.
-      if (categoryScoped) msgConds.push(or(eq(commsMessages.category, msgCategory), eq(commsMessages.direction, "inbound")));
+      let beforeDate: Date | null = null;
       if (before) {
-        const beforeDate = new Date(before);
-        if (!isNaN(beforeDate.getTime())) msgConds.push(sql`${commsMessages.createdAt} < ${beforeDate}`);
+        const parsed = new Date(before);
+        if (!isNaN(parsed.getTime())) beforeDate = parsed;
       }
-      const pageDesc = await retryOnceOnTransient(() => fsDb
-        .select()
-        .from(commsMessages)
-        .where(and(...msgConds))
-        .orderBy(desc(commsMessages.createdAt))
-        .limit(limit + 1));
-      const hasMore = pageDesc.length > limit;
-      const messages = pageDesc.slice(0, limit).reverse();
+      const { messages, hasMore, hiddenCount } = await retryOnceOnTransient(() =>
+        getThreadMessagesPage({
+          threadId: id,
+          category: categoryScoped ? msgCategory : null,
+          before: beforeDate,
+          limit,
+        }));
 
       // Pending (quiet-hours / queued) outbound items shown as synthetic rows —
       // only on the first page (no cursor), since they belong at the bottom.
@@ -588,6 +586,7 @@ export function registerCommsRoutes(app: Router): void {
         pending,
         contact: contact ? { ...contact, position } : null,
         hasMore,
+        hiddenCount,
       });
     } catch (e: any) {
       console.error("[Fleet-Comms] thread detail error:", e?.message);
