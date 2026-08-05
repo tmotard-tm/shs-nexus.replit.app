@@ -42,7 +42,9 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
-  ChevronRight,, HelpCircle } from "lucide-react";
+  ChevronRight,
+  HelpCircle,
+} from "lucide-react";
 import type { ReactNode } from "react";
 import type { Truck, CallLog, MainStatus } from "@shared/fleet-scope-schema";
 import { MAIN_STATUSES } from "@shared/fleet-scope-schema";
