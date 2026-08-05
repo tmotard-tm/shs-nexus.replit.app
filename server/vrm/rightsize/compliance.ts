@@ -261,7 +261,7 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     `),
     db.execute(sql`SELECT nameplate FROM vrm_rightsize_sedan_models WHERE active`),
     db.execute(sql`SELECT ldap, name, truck_number, phone_digits, manager_name, primary_state, district FROM fs_comms_contacts`),
-    db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu FROM all_techs`),
+    db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu, employment_status FROM all_techs`),
     db.execute(sql`SELECT truck_no, enterprise_id FROM tpms_last_known_truck_tech`),
     db.execute(sql`
       SELECT upper(t.ldap) AS ldap, t.stage, ${VAN_STATUS_COLUMNS}
@@ -287,9 +287,17 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     const L = String(ldap ?? "").toUpperCase();
     if (k && L && !truckIdx.has(k)) truckIdx.set(k, L);
   };
+  // PRECEDENCE MATTERS (2026-08-05). truck_lu is the CURRENT assignment;
+  // last_known_truck_lu is the PREVIOUS holder. Indexing both at equal priority put a
+  // former assignee ahead of the live one and mis-attributed rentals - Geary Jordan was
+  // credited with Elijah Moquin's rental on truck 61843. Terminated techs keep a
+  // truck_lu long after they leave, so they never seed the index.
+  const liveTech = (t: any) => String(t?.employment_status ?? "").toUpperCase() !== "T";
   for (const c of rowsOf(contacts)) addTruck(c.truck_number, c.ldap);
-  for (const t of rowsOf(techs)) { addTruck(t.truck_lu, t.ldap); addTruck(t.last_known_truck_lu, t.ldap); }
+  for (const t of rowsOf(techs)) if (liveTech(t)) addTruck(t.truck_lu, t.ldap);
   for (const t of rowsOf(tpms)) addTruck(t.truck_no, t.enterprise_id);
+  // history: lowest precedence, never overrides a live assignment
+  for (const t of rowsOf(techs)) if (liveTech(t)) addTruck(t.last_known_truck_lu, t.ldap);
 
   const nameIdx = [
     ...rowsOf(contacts).map((c) => ({ ldap: String(c.ldap).toUpperCase(), set: new Set(nameTokens(c.name)) })),
@@ -308,15 +316,21 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
 
   const out: ComplianceRow[] = [];
   for (const k of rowsOf(cases)) {
+    // RENTER NAME FIRST (2026-08-05). The ARI report names the person holding the
+    // rental on every row. The truck number only says whose van is in the shop, and it
+    // goes stale the moment someone transfers or leaves. Truck-first attribution put 11
+    // messages in front of the wrong technician on 8/4.
     const truck = bareTruck(k.vehicle_number_padded);
-    let ldap: string | null = truckIdx.get(truck) ?? null;
-    let matchedBy: ComplianceRow["matchedBy"] = ldap ? "truck" : "none";
+    let ldap: string | null = null;
+    let matchedBy: ComplianceRow["matchedBy"] = "none";
+    const want = new Set(nameTokens(k.renter_name_raw));
+    if (want.size >= 2) {
+      const hit = nameIdx.find((n) => Array.from(want).filter((w) => n.set.has(w)).length >= 2);
+      if (hit) { ldap = hit.ldap; matchedBy = "name"; }
+    }
     if (!ldap) {
-      const want = new Set(nameTokens(k.renter_name_raw));
-      if (want.size >= 2) {
-        const hit = nameIdx.find((n) => Array.from(want).filter((w) => n.set.has(w)).length >= 2);
-        if (hit) { ldap = hit.ldap; matchedBy = "name"; }
-      }
+      ldap = truckIdx.get(truck) ?? null;
+      if (ldap) matchedBy = "truck";
     }
 
     const mk = modelKey(k.veh_desc);
