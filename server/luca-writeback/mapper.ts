@@ -254,31 +254,64 @@ const OUTCOME_TO_STATUS: Record<string, string> = {
   UNREPAIRABLE_NEEDS_TOW: "Needs Tow",
 };
 
-/** Canonical outcome → fs_call_logs.outcome (Nexus's 3-valued vocabulary). */
+/**
+ * Canonical LUCA outcome → fs_call_logs.outcome.
+ *
+ * EXHAUSTIVE over every value of rentalCallOutcomeEnum (LIVHR shared/schema.ts)
+ * BY DESIGN. The old table mapped 6 of 14 and let the other 8 fall to a
+ * `?? "VEHICLE_NOT_READY"` default, which silently converted "we have no
+ * mapping for this" into the factual assertion "the vehicle is not ready".
+ * Measured 2026-08-03/04: that default plus two explicit entries corrupted 38
+ * call records, including 13 where the shop plainly said the van was ready and
+ * 12 where the shop said it never had the truck (Tyler, 2026-08-05).
+ *
+ * THE RULE: only assert VEHICLE_READY / VEHICLE_NOT_READY when the call
+ * actually established that fact about the vehicle. Everything else is
+ * OUTCOME_UNKNOWN. An unknown is still `IS DISTINCT FROM 'VEHICLE_READY'`, so
+ * getPendingFollowUps() (fleet-scope-storage.ts:1885) keeps chasing it exactly
+ * as before — the follow-up behaviour the 2026-08-02 author wanted is fully
+ * preserved without lying about the truck.
+ *
+ * Finer-grained detail is NOT lost: mapper writes the specific state to
+ * fs_trucks.last_call_status ("Ready" / "No Answer" / "Recovered" / …), and the
+ * shop's verbatim claim survives in fs_call_logs.blockers.
+ */
 const OUTCOME_TO_LOG_OUTCOME: Record<string, string> = {
+  // ── Established facts about the vehicle ──────────────────────────────────
   READY_PICKUP: "VEHICLE_READY",
-  NO_ANSWER: "CALL_NO_CONTACT",
-  // Added 2026-08-02. Everything absent here fell to VEHICLE_NOT_READY, which
-  // is the bucket getPendingFollowUps() keeps chasing (its predicate is
-  // `outcome IS DISTINCT FROM 'VEHICLE_READY'`).
-  //
-  // The call dropped and nobody was reached, so this is a no-contact retry, not
-  // a definitive "we spoke to the shop and it isn't ready". Matches Nexus's own
-  // mapping of No Answer / Voicemail.
-  INCONCLUSIVE: "CALL_NO_CONTACT",
-  // The truck already left the shop. In this 3-value vocabulary VEHICLE_READY
-  // is the "done, stop following up" bucket — without it we keep calling a shop
-  // about a truck that is gone, which is the exact failure the new outcome
-  // exists to end. It cannot put the truck on a pickup queue: lucaReadyFor()
-  // gates on fs_trucks.last_call_status === 'Ready', and RECOVERED writes
-  // "Recovered" there.
+  // The truck already left the shop. VEHICLE_READY is the "done, stop
+  // following up" bucket. It cannot put the truck on a pickup queue:
+  // lucaReadyFor() gates on fs_trucks.last_call_status === "Ready", and
+  // RECOVERED writes "Recovered" there.
   RECOVERED: "VEHICLE_READY",
-  // Explicit rather than defaulted: a shop DID speak, we just could not tie the
-  // claim to a vehicle, so we want the follow-up to keep chasing the read-back.
-  UNVERIFIED: "VEHICLE_NOT_READY",
-  // Explicit for the same reason: the truck is not coming back on its own and a
-  // human is arranging transport, so it stays on the follow-up board.
+  // The shop told us why it is not ready. These are real observations.
+  HAS_ETA: "VEHICLE_NOT_READY",
+  WAITING_PARTS: "VEHICLE_NOT_READY",
+  WAITING_AUTH: "VEHICLE_NOT_READY",
+  TOTALED: "VEHICLE_NOT_READY",
+  REPAIR_DECLINED: "VEHICLE_NOT_READY",
+  // Not coming back on its own; a human is arranging transport. Stays on the
+  // follow-up board.
   UNREPAIRABLE_NEEDS_TOW: "VEHICLE_NOT_READY",
+
+  // ── Nobody was reached ───────────────────────────────────────────────────
+  NO_ANSWER: "CALL_NO_CONTACT",
+
+  // ── We learned nothing definitive about the vehicle ──────────────────────
+  // A shop DID speak, we just could not tie the claim to a specific vehicle.
+  // Recording VEHICLE_NOT_READY here asserted the opposite of what the shop
+  // said on 8 calls; the shop had said "ready for pickup".
+  UNVERIFIED: "OUTCOME_UNKNOWN",
+  // The call connected and the shop spoke, but the exchange was cut short.
+  // CALL_NO_CONTACT told a human nobody was reached, which was false on all 12
+  // measured rows, and it inflated the no-contact counters that
+  // holman-shop-ladder.ts and scheduler.ts escalate on.
+  INCONCLUSIVE: "OUTCOME_UNKNOWN",
+  // The shop does not have this truck, so it tells us nothing about whether the
+  // vehicle is ready. last_call_status carries the specific state.
+  NO_TRUCK: "OUTCOME_UNKNOWN",
+  RELOCATED: "OUTCOME_UNKNOWN",
+  OTHER: "OUTCOME_UNKNOWN",
 };
 
 const SUMMARY_MAX = 500;
@@ -532,7 +565,11 @@ export function mapCallOutcome(item: LucaCallOutcomeItem): MappedWriteback {
     //
     // The display is unaffected: lucaStatusFor() reads fs_trucks.last_call_status.
     status: "completed",
-    outcome: OUTCOME_TO_LOG_OUTCOME[outcome] ?? "VEHICLE_NOT_READY",
+    // Never assert a fact for a value we do not know. The table above is
+    // exhaustive over the enum; anything reaching this default is a NEW
+    // outcome value that has not been triaged yet, and "unknown" is the only
+    // honest thing to say about it.
+    outcome: OUTCOME_TO_LOG_OUTCOME[outcome] ?? "OUTCOME_UNKNOWN",
     shopNotes: truncateSummary(`[LUCA] ${summaryText}`),
     estimatedReadyDate: eta,
     blockers: clean(item.blockers),

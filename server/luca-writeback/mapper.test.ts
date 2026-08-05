@@ -256,10 +256,11 @@ test("missing conversationId → unmappable; missing vehicle number → no_vehic
   assert.equal(m2.skip, "no_vehicle_number");
 });
 
-test("unknown outcome value degrades to 'Other' / VEHICLE_NOT_READY", () => {
+test("unknown outcome value degrades to 'Other' / OUTCOME_UNKNOWN, never a fact", () => {
   const m = mapCallOutcome({ ...readyOutcome, conversationId: "c5", outcome: "SOMETHING_NEW" });
   assert.equal(m.truckWrite!.lastCallStatus, "Other");
-  assert.equal(m.callLog!.outcome, "VEHICLE_NOT_READY");
+  // An untriaged outcome must NOT read as "we established the van is not ready".
+  assert.equal(m.callLog!.outcome, "OUTCOME_UNKNOWN");
 });
 
 // ─── Duplicate delivery / dedup decision ─────────────────────────────────────
@@ -370,9 +371,12 @@ test("call logs are written with a LIFECYCLE status, never a display label", () 
   assert.equal(m.truckWrite!.lastCallStatus, "Ready");
 });
 
-test("a dropped call is no-contact, not a definitive not-ready", () => {
+test("an inconclusive call is unknown, not no-contact and not not-ready", () => {
+  // The shop DID answer and speak; the exchange was cut short. CALL_NO_CONTACT
+  // told a human nobody was reached (false on all 12 measured rows) and fed the
+  // no-contact counters the escalation ladders trigger on.
   const m = mapCallOutcome({ ...readyOutcome, conversationId: "c_inc", outcome: "INCONCLUSIVE" });
-  assert.equal(m.callLog!.outcome, "CALL_NO_CONTACT");
+  assert.equal(m.callLog!.outcome, "OUTCOME_UNKNOWN");
 });
 
 test("a recovered truck stops the follow-up loop", () => {
@@ -385,11 +389,55 @@ test("a recovered truck stops the follow-up loop", () => {
   assert.notEqual(m.truckWrite!.lastCallStatus, "Ready");
 });
 
-test("unverified and needs-tow stay on the follow-up board", () => {
-  for (const outcome of ["UNVERIFIED", "UNREPAIRABLE_NEEDS_TOW"]) {
+test("an unverifiable claim is unknown, not a not-ready assertion", () => {
+  // The shop said "ready for pickup" on 8 measured calls and we stored the
+  // opposite because we could not tie the claim to a vehicle.
+  const m = mapCallOutcome({ ...readyOutcome, conversationId: "c_unver", outcome: "UNVERIFIED" });
+  assert.equal(m.callLog!.outcome, "OUTCOME_UNKNOWN");
+});
+
+test("truck-not-at-this-shop is unknown, not a not-ready assertion", () => {
+  for (const outcome of ["NO_TRUCK", "RELOCATED"]) {
     const m = mapCallOutcome({ ...readyOutcome, conversationId: `c_${outcome}`, outcome });
-    assert.equal(m.callLog!.outcome, "VEHICLE_NOT_READY", `${outcome} must keep following up`);
+    assert.equal(m.callLog!.outcome, "OUTCOME_UNKNOWN", `${outcome} says nothing about readiness`);
   }
+});
+
+test("genuine not-ready observations still assert VEHICLE_NOT_READY", () => {
+  for (const outcome of ["HAS_ETA", "WAITING_PARTS", "WAITING_AUTH", "TOTALED", "REPAIR_DECLINED", "UNREPAIRABLE_NEEDS_TOW"]) {
+    const m = mapCallOutcome({ ...readyOutcome, conversationId: `c_${outcome}`, outcome });
+    assert.equal(m.callLog!.outcome, "VEHICLE_NOT_READY", `${outcome} is a real observation`);
+  }
+});
+
+test("every outcome except VEHICLE_READY keeps getPendingFollowUps chasing", () => {
+  // getPendingFollowUps (fleet-scope-storage.ts:1885) filters on
+  // `outcome IS DISTINCT FROM 'VEHICLE_READY'`. OUTCOME_UNKNOWN satisfies it,
+  // so the follow-up behaviour is preserved without lying about the truck.
+  for (const outcome of ["UNVERIFIED", "INCONCLUSIVE", "NO_TRUCK", "RELOCATED", "OTHER", "SOMETHING_NEW"]) {
+    const m = mapCallOutcome({ ...readyOutcome, conversationId: `c_chase_${outcome}`, outcome });
+    assert.notEqual(m.callLog!.outcome, "VEHICLE_READY", `${outcome} must stay on the board`);
+  }
+});
+
+test("the outcome table is EXHAUSTIVE over the LUCA enum (regression guard)", () => {
+  // The 2026-08-05 defect existed because 8 of 14 enum values had no entry and
+  // fell to a default that asserted VEHICLE_NOT_READY. If someone adds a value
+  // to rentalCallOutcomeEnum without mapping it here, this fails.
+  const ENUM = ["HAS_ETA", "NO_ANSWER", "WAITING_PARTS", "WAITING_AUTH", "READY_PICKUP",
+    "TOTALED", "REPAIR_DECLINED", "NO_TRUCK", "RELOCATED", "OTHER", "INCONCLUSIVE",
+    "UNVERIFIED", "RECOVERED", "UNREPAIRABLE_NEEDS_TOW"];
+  const unmapped: string[] = [];
+  for (const outcome of ENUM) {
+    const m = mapCallOutcome({ ...readyOutcome, conversationId: `c_ex_${outcome}`, outcome });
+    // Reaching OUTCOME_UNKNOWN is legal ONLY for the four deliberately-unknown
+    // values; anything else landing there means it fell through the default.
+    if (m.callLog!.outcome === "OUTCOME_UNKNOWN"
+        && !["NO_TRUCK", "RELOCATED", "OTHER", "INCONCLUSIVE", "UNVERIFIED"].includes(outcome)) {
+      unmapped.push(outcome);
+    }
+  }
+  assert.equal(unmapped.length, 0, `unmapped enum values: ${unmapped.join(", ")}`);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

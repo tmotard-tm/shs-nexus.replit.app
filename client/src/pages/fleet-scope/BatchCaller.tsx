@@ -42,8 +42,7 @@ import {
   ChevronDown,
   ChevronUp,
   ChevronsUpDown,
-  ChevronRight,
-} from "lucide-react";
+  ChevronRight,, HelpCircle } from "lucide-react";
 import type { ReactNode } from "react";
 import type { Truck, CallLog, MainStatus } from "@shared/fleet-scope-schema";
 import { MAIN_STATUSES } from "@shared/fleet-scope-schema";
@@ -669,6 +668,10 @@ export default function BatchCaller() {
         return <Badge variant="default" className="bg-red-600 text-white no-default-hover-elevate"><PhoneOff className="w-3 h-3 mr-1" />Failed</Badge>;
       case "CALL_NO_CONTACT":
         return <Badge variant="default" className="bg-blue-600 text-white no-default-hover-elevate"><Phone className="w-3 h-3 mr-1" />No Answer</Badge>;
+      case "OUTCOME_UNKNOWN":
+        // The call happened but told us nothing definitive about the vehicle.
+        // Deliberately NOT green or yellow: it is neither ready nor not-ready.
+        return <Badge variant="default" className="bg-slate-500 text-white no-default-hover-elevate"><HelpCircle className="w-3 h-3 mr-1" />Unverified</Badge>;
       default:
         return <Badge variant="secondary">{outcome}</Badge>;
     }
