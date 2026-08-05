@@ -13,6 +13,9 @@ import {
   BULK_CONFIRM_THRESHOLD,
   TEMPLATE_TOKENS,
   COMMS_CATEGORIES,
+  COMMS_API_SOURCES,
+  resolveCommsApiSource,
+  apiDefaultCategoryFor,
 } from "../server/fleet-comms/lib.js";
 import { COMMS_CATEGORY_LABELS } from "../shared/fleet-scope-schema.js";
 import { resolveComposerCategory } from "../client/src/lib/comms-category.js";
@@ -179,5 +182,39 @@ test("samsara is a first-class category and every category has a label", () => {
   for (const c of COMMS_CATEGORIES) {
     const label = COMMS_CATEGORY_LABELS[c];
     assert.ok(typeof label === "string" && label.trim().length > 0, `label for ${c}`);
+  }
+});
+
+/* ── External API caller sources (Task #580) ─────────────────────────────── */
+
+test("resolveCommsApiSource: newmav resolves (case/whitespace tolerant) with vehicle_assignments default", () => {
+  const src = resolveCommsApiSource("newmav");
+  assert.ok(src);
+  assert.equal(src!.defaultCategory, "vehicle_assignments");
+  assert.equal(src!.id, "svc:newmav");
+  assert.equal(src!.name, "NewMav");
+  assert.deepEqual(resolveCommsApiSource("  NewMav "), src);
+  assert.deepEqual(resolveCommsApiSource("NEWMAV"), src);
+});
+
+test("resolveCommsApiSource: unknown/absent sources resolve to null (legacy behavior)", () => {
+  assert.equal(resolveCommsApiSource("someotherapp"), null);
+  assert.equal(resolveCommsApiSource(""), null);
+  assert.equal(resolveCommsApiSource(null), null);
+  assert.equal(resolveCommsApiSource(undefined), null);
+});
+
+test("apiDefaultCategoryFor: per-source default vs legacy general_fleet fallback", () => {
+  assert.equal(apiDefaultCategoryFor(resolveCommsApiSource("newmav")), "vehicle_assignments");
+  assert.equal(apiDefaultCategoryFor(null), "general_fleet");
+  assert.equal(apiDefaultCategoryFor(undefined), "general_fleet");
+});
+
+test("every registered API source has a valid category, svc: actor id, and display name", () => {
+  for (const [key, src] of Object.entries(COMMS_API_SOURCES)) {
+    assert.equal(key, key.toLowerCase(), `registry key ${key} must be lowercase (lookup lowercases input)`);
+    assert.ok(isValidCategory(src.defaultCategory), `defaultCategory for ${key}`);
+    assert.ok(src.id.startsWith("svc:"), `actor id for ${key} must be a svc: service actor`);
+    assert.ok(src.name.trim().length > 0, `display name for ${key}`);
   }
 });

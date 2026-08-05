@@ -44,6 +44,8 @@ import {
   TEMPLATE_TOKENS,
   estimateBulkSend,
   BULK_CONFIRM_THRESHOLD,
+  resolveCommsApiSource,
+  apiDefaultCategoryFor,
 } from "./lib";
 import {
   markThreadViewed,
@@ -1009,14 +1011,38 @@ export function registerCommsRoutes(app: Router): void {
     const expected = process.env.COMMS_SEND_API_KEY;
     return !!(expected && typeof provided === "string" && provided === expected);
   }
+  // Known external API callers (Task #580): a key-authed request may identify
+  // itself via the `x-comms-source` header (or a `source` body field); known
+  // sources (see COMMS_API_SOURCES in lib.ts) get their own service actor and
+  // a per-source default category applied whenever the request omits
+  // `category` (e.g. NewMav → Vehicle Assignments). An explicit valid category
+  // in the request always wins. Unknown or absent sources keep the legacy
+  // behavior (svc:comms-api actor, general_fleet default).
+  function resolveApiSource(req: any) {
+    const raw = req.headers["x-comms-source"] || req.body?.source || "";
+    const src = resolveCommsApiSource(raw);
+    if (!src && String(raw).trim()) {
+      console.warn(`[Fleet-Comms] api send: unknown source "${String(raw).trim()}" — using legacy defaults`);
+    }
+    return src;
+  }
   // Auth: a valid COMMS_SEND_API_KEY OR an existing UI session (gate). Key
-  // callers get a synthetic service actor so sends are attributed + audited.
+  // callers get a synthetic service actor so sends are attributed + audited;
+  // known sources (above) get their own actor instead of the generic one.
   async function apiOrGate(req: any, res: any, next: any) {
     if (commsApiKeyOk(req)) {
-      req.user = req.user || { id: "svc:comms-api", role: "service", username: "comms-api" };
+      const src = resolveApiSource(req);
+      req.commsApiSource = src;
+      req.user = req.user || (src
+        ? { id: src.id, role: "service", username: src.name }
+        : { id: "svc:comms-api", role: "service", username: "comms-api" });
       return next();
     }
     return gate(req, res, next);
+  }
+  // Default category for a key-authed request: per-source default, else legacy.
+  function apiDefaultCategory(req: any): string {
+    return apiDefaultCategoryFor(req.commsApiSource);
   }
   // Live only when the global switch is on AND the caller explicitly confirms.
   function liveAllowed(b: any): boolean {
@@ -1024,10 +1050,12 @@ export function registerCommsRoutes(app: Router): void {
   }
 
   // POST /comms/api/send — single message (ldap or explicit phone).
+  // { ldap?|phone, body, category?, source?, mediaUrl?, managerCc?, force?, dryRun?, confirm? }
+  // `source` (or x-comms-source header) tags the sending app; see COMMS_API_SOURCES.
   app.post("/comms/api/send", apiOrGate, async (req: any, res) => {
     try {
       const { ldap, phone, category, body, mediaUrl, managerCc, force } = req.body || {};
-      const cat = category || "general_fleet";
+      const cat = category || apiDefaultCategory(req);
       const hasMedia = Array.isArray(mediaUrl) && mediaUrl.length > 0;
       if (!isValidCategory(cat)) return res.status(400).json({ message: "Valid category required" });
       if ((!body || !String(body).trim()) && !hasMedia) return res.status(400).json({ message: "Message body or attachment required" });
@@ -1046,7 +1074,7 @@ export function registerCommsRoutes(app: Router): void {
         senderName: a.name,
         dryRun: !live,
       });
-      res.json({ live, ...result });
+      res.json({ live, category: cat, source: req.commsApiSource?.name ?? null, ...result });
     } catch (e: any) {
       console.error("[Fleet-Comms] api/send error:", e?.message);
       res.status(500).json({ message: e?.message });
@@ -1056,13 +1084,14 @@ export function registerCommsRoutes(app: Router): void {
   // POST /comms/api/send-batch — personalized batch: each message has its own
   // recipient (ldap or phone) AND its own body. This is the style the UI bulk
   // send cannot do. { messages: [{ ldap?, phone?, body, category?, mediaUrl?,
-  // managerCc? }], category?, force?, dryRun?, confirm? }
+  // managerCc? }], category?, source?, force?, dryRun?, confirm? } — `source`
+  // (or x-comms-source header) sets the sender actor + default category.
   app.post("/comms/api/send-batch", apiOrGate, async (req: any, res) => {
     try {
       const { messages, category, force } = req.body || {};
       if (!Array.isArray(messages) || !messages.length) return res.status(400).json({ message: "messages[] required" });
       if (messages.length > SEND_CAP) return res.status(400).json({ message: `Too many messages (max ${SEND_CAP})` });
-      const defCat = category || "general_fleet";
+      const defCat = category || apiDefaultCategory(req);
       for (let i = 0; i < messages.length; i++) {
         const m = messages[i] || {};
         const c = m.category || defCat;
@@ -1087,7 +1116,7 @@ export function registerCommsRoutes(app: Router): void {
           senderName: a.name,
           dryRun: !live,
         });
-        results.push({ ldap: m.ldap ?? null, phone: m.phone ?? null, ...r });
+        results.push({ ldap: m.ldap ?? null, phone: m.phone ?? null, category: m.category || defCat, ...r });
       }
       const summary: Record<string, number> = {};
       for (const r of results) summary[r.status] = (summary[r.status] || 0) + 1;
@@ -1101,11 +1130,11 @@ export function registerCommsRoutes(app: Router): void {
   // POST /comms/api/bulk — same body to an audience resolved by ldaps[],
   // truckNumbers[], or filter.district (lifecycle-excluded exactly like the UI
   // bulk send). Dry run returns the resolved recipient list; live queues + kicks
-  // a drain. { category?, body, managerCc?, ldaps?|truckNumbers?|filter, dryRun?, confirm? }
+  // a drain. { category?, source?, body, managerCc?, ldaps?|truckNumbers?|filter, dryRun?, confirm? }
   app.post("/comms/api/bulk", apiOrGate, async (req: any, res) => {
     try {
       const { category, body, managerCc } = req.body || {};
-      const cat = category || "general_fleet";
+      const cat = category || apiDefaultCategory(req);
       if (!isValidCategory(cat)) return res.status(400).json({ message: "Valid category required" });
       if (!body || !String(body).trim()) return res.status(400).json({ message: "Message body required" });
       const { contacts, desc, unresolvedTrucks } = await resolveBulkAudience(req.body);

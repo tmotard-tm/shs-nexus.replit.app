@@ -28,6 +28,33 @@ export function canonicalDistrict(d: string | null | undefined): string {
   return String(d ?? "").replace(/[^0-9]/g, "").replace(/^0+/, "");
 }
 
+// ── External API caller sources (Task #580) ─────────────────────────────────
+// A key-authed send-API request may identify itself via the `x-comms-source`
+// header (or a `source` body field). Known sources get their own service actor
+// (threads show WHO sent it) and a per-source default category used whenever
+// the request omits `category`. An explicit valid category always wins.
+// Unknown/absent sources keep the legacy behavior (svc:comms-api, general_fleet).
+export interface CommsApiSource {
+  id: string;
+  name: string;
+  defaultCategory: CommsCategory;
+}
+export const COMMS_API_SOURCES: Record<string, CommsApiSource> = {
+  newmav: { id: "svc:newmav", name: "NewMav", defaultCategory: "vehicle_assignments" },
+};
+
+/** Resolve a raw source identifier (header or body) to a known source, or null. */
+export function resolveCommsApiSource(raw: unknown): CommsApiSource | null {
+  const key = String(raw ?? "").trim().toLowerCase();
+  if (!key) return null;
+  return COMMS_API_SOURCES[key] ?? null;
+}
+
+/** Default category for a key-authed API send: per-source default, else legacy. */
+export function apiDefaultCategoryFor(src: CommsApiSource | null | undefined): CommsCategory {
+  return src?.defaultCategory ?? "general_fleet";
+}
+
 /** Whitelisted template token placeholders. Unknown tokens block saving. */
 export const TEMPLATE_TOKENS = [
   "name",
