@@ -678,6 +678,18 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
 
     const kpis = await computeKpis();
     await db.execute(sql`INSERT INTO vrm_rightsize_snapshots (trigger, kpis) VALUES (${opts.trigger}, ${JSON.stringify(kpis)}::jsonb)`);
+
+    // Compliance snapshot for the huddle deck's day-over-day trend. This table
+    // was created on 7/30 and sat at ZERO rows until 8/5 because snapshotCompliance()
+    // was only ever wired to a manual route, so the deck had no trend to read and the
+    // numbers were rebuilt by hand every morning. Never let a sync run without one.
+    // Non-fatal: a snapshot failure must not roll back a good sync.
+    try {
+      const { snapshotCompliance } = await import("./compliance");
+      await snapshotCompliance();
+    } catch (e: any) {
+      console.error("[VRM/Rightsize] compliance snapshot failed:", e?.message);
+    }
     const result = {
       ok: true, trigger: opts.trigger, newMessages: msgs.rows.length,
       processed, advanced, flagged, untracked, unmatched,

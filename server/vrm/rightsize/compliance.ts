@@ -54,6 +54,11 @@ import { sql } from "drizzle-orm";
  *  in the data rather than a chosen threshold. */
 export const SEDAN_RATE_CEILING = 59.75;
 
+/** Program economics, not a rate-sheet delta. Fleet books savings at this rate
+ *  per right-sized rental (Tyler, 2026-08-05). The observable ARI daily delta is
+ *  only $4-8; the rest is fuel, mileage and the wider program cost. */
+export const SAVINGS_PER_RENTAL_MONTHLY = 420;
+
 /** Seed nameplates, stored as "MAKE MODEL" exactly as ARI abbreviates them in
  *  Rented Veh Make / Rented Veh Model. Confirmed passenger cars only: no
  *  crossovers, no "small SUV", nothing that merely looks car-adjacent. */
@@ -82,6 +87,35 @@ export async function initRightsizeComplianceSchema(): Promise<void> {
       added_at   TIMESTAMPTZ DEFAULT NOW(),
       note       TEXT
     );
+  `);
+
+  // Trade exclusions. HVAC was carved out on 7/9, but job_title alone does NOT
+  // identify the trade: on 8/5 only 4 of 8 Refrigerator/HVAC hybrids carried a
+  // Tech 3 title and none carried "HVAC". A hardcoded regex will always leak, so
+  // Fleet maintains this list the same way it maintains the sedan nameplates.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rightsize_trade_exclusions (
+      ldap       VARCHAR(60) PRIMARY KEY,
+      label      TEXT,
+      active     BOOLEAN NOT NULL DEFAULT TRUE,
+      added_by   TEXT,
+      added_at   TIMESTAMPTZ DEFAULT NOW(),
+      note       TEXT
+    );
+  `);
+  const tradeSeed = sql.join(
+    ([
+      ["CANDER4","Refrigerator/HVAC hybrid"],["ADITTA1","Refrigerator/HVAC hybrid"],
+      ["VTARASY","Refrigerator/HVAC hybrid"],["JCARDO3","Refrigerator/HVAC hybrid"],
+      ["PDUNKL","Refrigerator/HVAC hybrid"],["DPLANT","Refrigerator/HVAC hybrid"],
+      ["SFNU0","Refrigerator/HVAC hybrid"],["CSCOTT","Refrigerator/HVAC hybrid"],
+    ] as Array<[string,string]>).map(([l,lab]) => sql`(${l}, ${lab}, 'seed', 'self-declared refrigeration / sealed-system work, 2026-08-05')`),
+    sql`, `,
+  );
+  await db.execute(sql`
+    INSERT INTO vrm_rightsize_trade_exclusions (ldap, label, added_by, note)
+    VALUES ${tradeSeed}
+    ON CONFLICT (ldap) DO NOTHING;
   `);
 
   // Day-over-day KPI history so the huddle deck can show movement without
@@ -226,6 +260,12 @@ export type ComplianceRow = {
   district: string | null;
   jobTitle: string | null;
   isHvac: boolean;
+  /** on leave: employment_status L, or an open row in loa_leaves */
+  isLoa: boolean;
+  /** employment_status T */
+  isTerminated: boolean;
+  /** technician told us the rental went back. Not right-sizing, its own metric. */
+  isReturned: boolean;
   compliant: boolean;
   /** "both" = sedan rate AND sedan model. SMS shows as "sms" only when alone. */
   compliantBy: "rate" | "model" | "both" | "sms" | null;
@@ -253,7 +293,7 @@ export type ComplianceRow = {
  * and merged every "Michael" in the company into one record.
  */
 export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis: any }> {
-  const [cases, sedans, contacts, techs, tpms, trackerStages, msgAgg] = await Promise.all([
+  const [cases, sedans, contacts, techs, tpms, tradeEx, loaOpen, trackerStages, msgAgg] = await Promise.all([
     db.execute(sql`
       SELECT case_key, ticket_number, vehicle_number_padded, renter_name_raw, veh_desc, rental_class,
              rate_authorized, days_open, ticket_status, renting_state, district, source, rental_vendor
@@ -263,6 +303,8 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     db.execute(sql`SELECT ldap, name, truck_number, phone_digits, manager_name, primary_state, district FROM fs_comms_contacts`),
     db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu, employment_status FROM all_techs`),
     db.execute(sql`SELECT truck_no, enterprise_id FROM tpms_last_known_truck_tech`),
+    db.execute(sql`SELECT upper(ldap) AS ldap FROM vrm_rightsize_trade_exclusions WHERE active`),
+    db.execute(sql`SELECT upper(enterprise_id) AS ldap FROM loa_leaves WHERE closed = false`),
     db.execute(sql`
       SELECT upper(t.ldap) AS ldap, t.stage, ${VAN_STATUS_COLUMNS}
       FROM vrm_rightsize_techs t
@@ -279,6 +321,8 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
   ]);
 
   const rowsOf = (r: any) => (r?.rows ?? r ?? []) as any[];
+  const tradeExcluded = new Set(rowsOf(tradeEx).map((r) => String(r.ldap).toUpperCase()));
+  const onLeave = new Set(rowsOf(loaOpen).map((r) => String(r.ldap).toUpperCase()));
   const sedanSet = new Set(rowsOf(sedans).map((r) => String(r.nameplate).toUpperCase()));
 
   const truckIdx = new Map<string, string>();
@@ -367,7 +411,14 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
       state: k.renting_state ?? c?.primary_state ?? null,
       district: k.district ?? c?.district ?? null,
       jobTitle: title,
-      isHvac: /HVAC/i.test(String(title ?? "")),
+      // Title OR the maintained trade list. Title alone misses every refrigeration
+      // and mixed-trade technician working under a generic appliance title.
+      isHvac: /HVAC|Rfr|Refrig|Technician HV/i.test(String(title ?? ""))
+        || (!!ldap && tradeExcluded.has(ldap)),
+      isLoa: String(t?.employment_status ?? "").toUpperCase() === "L"
+        || (!!ldap && onLeave.has(ldap)),
+      isTerminated: String(t?.employment_status ?? "").toUpperCase() === "T",
+      isReturned: smsStage === "RETURNED",
       compliant,
       compliantBy: compliant
         ? (byRate && byModel ? "both" : byRate ? "rate" : byModel ? "model" : "sms")
@@ -396,6 +447,18 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
   const nonEnt = out.filter((r) => r.source !== "enterprise");
   const comp = ent.filter((r) => r.compliant);
   const notComp = ent.filter((r) => !r.compliant);
+  /**
+   * ADDRESSABLE is the denominator the initiative is actually measured on:
+   * the open Enterprise book less the excluded trades (HVAC + Refrigerator/HVAC
+   * hybrid) and less anyone out of scope (returned the rental, on leave, or off
+   * roll). Excluded technicians leave the numerator AND the denominator - crediting
+   * a carve-out you are not chasing inflates the percentage.
+   */
+  const inScope = (r: ComplianceRow) =>
+    !r.isHvac && !r.isLoa && !r.isTerminated && !r.isReturned;
+  const addressable = ent.filter(inScope);
+  const rightSized = addressable.filter((r) => r.compliant);
+  const leftToChase = addressable.filter((r) => !r.compliant);
   /**
    * Buckets are computed BEFORE the KPI object so monthlyOverSedan can be the
    * SUM OF THE BUCKETS rather than an independently-rounded total. Rounding each
@@ -442,6 +505,22 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     neverContactedMonthly: Math.round(notComp.filter((r) => r.neverContacted).reduce((a, r) => a + r.monthlyOverSedan, 0)),
     hvacOpen: notComp.filter((r) => r.isHvac).length,
     hvacMonthly: Math.round(notComp.filter((r) => r.isHvac).reduce((a, r) => a + r.monthlyOverSedan, 0)),
+    // ---- The addressable pyramid the huddle deck reads (Tyler, 2026-08-05) ----
+    // 352 open  -  excluded trade  -  out of scope  =  addressable
+    // addressable  =  rightSized + left.  Both halves must reconcile.
+    excludedTrade: ent.filter((r) => r.isHvac).length,
+    outOfScope: ent.filter((r) => !r.isHvac && (r.isLoa || r.isTerminated || r.isReturned)).length,
+    returned: ent.filter((r) => !r.isHvac && r.isReturned).length,
+    onLeave: ent.filter((r) => !r.isHvac && !r.isReturned && r.isLoa).length,
+    terminated: ent.filter((r) => !r.isHvac && !r.isReturned && !r.isLoa && r.isTerminated).length,
+    addressable: addressable.length,
+    rightSized: rightSized.length,
+    left: leftToChase.length,
+    rightSizedPct: addressable.length
+      ? Math.round((rightSized.length / addressable.length) * 1000) / 10 : 0,
+    savingsCapturedMonthly: rightSized.length * SAVINGS_PER_RENTAL_MONTHLY,
+    savingsRemainingMonthly: leftToChase.length * SAVINGS_PER_RENTAL_MONTHLY,
+    savingsPerRentalMonthly: SAVINGS_PER_RENTAL_MONTHLY,
     unresolvedIdentity: ent.filter((r) => !r.ldap).length,
     dailySpend: Math.round(ent.reduce((a, r) => a + r.rate, 0)),
     notCompliantDaily: Math.round(notComp.reduce((a, r) => a + r.rate, 0)),
