@@ -2386,7 +2386,7 @@ export function evaluateReadyGuard(
   return { downgrade: false, reason: null };
 }
 
-async function summarizeCallTranscript(
+export async function summarizeCallTranscript(
   transcriptText: string,
   callType: "repair" | "tech",
   truckNumber: string,
@@ -2515,7 +2515,7 @@ Respond ONLY with valid JSON, no other text.`;
   return { status: "Error", summary: "Summary unavailable — analysis failed.", estimatedReadyDate: null, blockers: null };
 }
 
-async function applyCallResultToTruck(
+export async function applyCallResultToTruck(
   truck: any,
   callType: "repair" | "tech",
   conversationId: string,
@@ -2563,11 +2563,52 @@ async function applyCallResultToTruck(
     // A transcript means the call connected, so a summarizer "failure" is really
     // "connected but no usable status" -> CALL_NO_CONTACT (retry). CALL_FAILED is
     // reserved for the pre-dial path where no ElevenLabs conversation exists.
-    const mappedOutcome = (status === "Ready" || status === "Will Pick Up") ? "VEHICLE_READY"
-      : (status === "No Answer" || status === "Voicemail" || status === "On Hold"
-         || status === "Vehicle Not Found" || status === "No Contact"
-         || status === "Call Failed" || status === "Failed") ? "CALL_NO_CONTACT"
-      : "VEHICLE_NOT_READY";
+    //
+    // EXHAUSTIVE BY DESIGN (2026-08-05). This previously ended in a bare
+    // `: "VEHICLE_NOT_READY"` catch-all, which silently converted "we have no
+    // mapping for this status" into the factual assertion "the vehicle is not
+    // ready" — the same defect fixed in luca-writeback/mapper.ts the same day.
+    // Measured against fs_trucks.last_call_status in prod, 8 of the 15 statuses
+    // that actually occur were landing there wrongly, including "Recovered"
+    // (the truck is already back) and "Shop Does Not Have Truck".
+    //
+    // THE RULE: only assert VEHICLE_READY / VEHICLE_NOT_READY when the call
+    // established that fact about the vehicle. Everything else is
+    // OUTCOME_UNKNOWN, which is still DISTINCT FROM 'VEHICLE_READY' so
+    // getPendingFollowUps() keeps chasing it exactly as before.
+    const READY = new Set(["Ready", "Will Pick Up", "Recovered"]);
+    const NO_CONTACT = new Set([
+      "No Answer", "Voicemail", "On Hold", "No Contact",
+      "Call Failed", "Failed", "No Shop Contact",
+    ]);
+    // The shop told us WHY it is not ready. Real observations about the vehicle.
+    const NOT_READY = new Set([
+      "Parts Ordered", "In Authorization", "In Repair",
+      "Needs Tow", "Repair Declined", "Totaled",
+    ]);
+    // We learned nothing definitive about the vehicle. "Shop Does Not Have
+    // Truck" and "Relocated" say where it ISN'T, not whether it is ready.
+    const UNKNOWN = new Set([
+      "Shop Does Not Have Truck", "Vehicle Not Found", "Relocated",
+      "Unverified - confirm by phone", "Inconclusive - call dropped",
+      // Both spellings occur: "Other" in fs_trucks.last_call_status, "Other
+      // Issues" straight from the summarizer. Seen live in the 2026-08-05
+      // backfill dry run.
+      "Other", "Other Issues",
+    ]);
+    const mappedOutcome = READY.has(status) ? "VEHICLE_READY"
+      : NO_CONTACT.has(status) ? "CALL_NO_CONTACT"
+      : NOT_READY.has(status) ? "VEHICLE_NOT_READY"
+      : UNKNOWN.has(status) ? "OUTCOME_UNKNOWN"
+      : "OUTCOME_UNKNOWN";
+    if (!READY.has(status) && !NO_CONTACT.has(status)
+        && !NOT_READY.has(status) && !UNKNOWN.has(status)) {
+      // Loud, because the previous silent default is what produced the bad
+      // statuses. A new summarizer status should be triaged, not absorbed.
+      console.warn(
+        `[ElevenLabs] unmapped call status "${status}" — recorded OUTCOME_UNKNOWN; add it to one of the sets in applyCallResultToTruck`,
+      );
+    }
     const today = new Date();
     let nextFollowUp: string | undefined;
     if (mappedOutcome === "VEHICLE_NOT_READY" && estimatedReadyDate) {
@@ -2636,7 +2677,7 @@ function invalidDialReason(rawPhone: string): string | null {
   return null;
 }
 
-async function fetchElevenLabsConversation(conversationId: string, apiKey: string): Promise<any | null> {
+export async function fetchElevenLabsConversation(conversationId: string, apiKey: string): Promise<any | null> {
   try {
     const res = await fetch(`https://api.elevenlabs.io/v1/convai/conversations/${conversationId}`, {
       headers: { "xi-api-key": apiKey },
