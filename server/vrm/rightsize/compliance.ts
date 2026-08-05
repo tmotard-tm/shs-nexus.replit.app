@@ -303,7 +303,18 @@ export async function computeCompliance(): Promise<{ rows: ComplianceRow[]; kpis
     db.execute(sql`SELECT ldap, name, truck_number, phone_digits, manager_name, primary_state, district FROM fs_comms_contacts`),
     db.execute(sql`SELECT tech_racfid AS ldap, first_name, last_name, job_title, truck_lu, last_known_truck_lu, employment_status FROM all_techs`),
     db.execute(sql`SELECT truck_no, enterprise_id FROM tpms_last_known_truck_tech`),
-    db.execute(sql`SELECT upper(ldap) AS ldap FROM vrm_rightsize_trade_exclusions WHERE active`),
+    // Degrade, do not crash. This table is created by
+    // initRightsizeComplianceSchema(), so on any deployment where compute runs
+    // before init has landed (a fresh publish, a read-only replica, an ad-hoc
+    // script) the whole compliance page 500s on a missing relation instead of
+    // rendering with one exclusion source absent. Losing the hybrid carve-out
+    // makes the HVAC count too LOW, which is visible and safe; a blank
+    // dashboard is neither.
+    db.execute(sql`SELECT upper(ldap) AS ldap FROM vrm_rightsize_trade_exclusions WHERE active`)
+      .catch((e: any) => {
+        console.warn("[VRM/Rightsize] trade exclusions unavailable, continuing without them:", e?.message || e);
+        return { rows: [] } as any;
+      }),
     db.execute(sql`SELECT upper(enterprise_id) AS ldap FROM loa_leaves WHERE closed = false`),
     db.execute(sql`
       SELECT upper(t.ldap) AS ldap, t.stage, ${VAN_STATUS_COLUMNS}
