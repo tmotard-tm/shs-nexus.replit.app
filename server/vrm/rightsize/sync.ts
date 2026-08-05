@@ -33,6 +33,7 @@ import {
   type VerdictDeps,
 } from "./llm";
 import { buildPhoneIndex, resolveInboundLdap, PHONE_OWNERS_SQL, type PhoneIndex, type PhoneOwnerRow } from "./phone";
+import { loadSedanVocabulary, type SedanVocabulary } from "./corroborate";
 import { VAN_STATUS_JOIN, VAN_STATUS_COLUMNS, vanFieldsOf, type VanStatusRow } from "./workload";
 
 const LOCK_KEY = 771_2026; // arbitrary app-scoped advisory lock id
@@ -177,6 +178,12 @@ export interface ProcessContext {
   actor: string;
   /** Shared Bedrock budget + injection seams. */
   deps?: VerdictDeps;
+  /**
+   * Active sedan nameplates, mapped to the words technicians actually type.
+   * Built ONCE per run (it is a table read) and handed down. Omit it and every
+   * secured verdict stays a proposal - the gate is fail-closed on purpose.
+   */
+  sedanVocabulary?: SedanVocabulary;
 }
 
 export type ProcessOutcome =
@@ -279,7 +286,9 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
     return { outcome: "unmatched" };
   }
 
-  const tRes = await db.execute(sql`SELECT ldap, stage, proposed_stage FROM vrm_rightsize_techs WHERE ldap = ${ldap}`);
+  // daily_rate rides along because the corroboration gate checks a rate-match
+  // claim against what the report actually shows.
+  const tRes = await db.execute(sql`SELECT ldap, stage, proposed_stage, daily_rate FROM vrm_rightsize_techs WHERE ldap = ${ldap}`);
   const tracked = tRes.rows[0] as any | undefined;
 
   if (!tracked) {
@@ -334,9 +343,18 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
     WHERE ldap = ${ldap}
   `);
 
-  // stageMutationFor is the single write boundary: DONE/RETURNED can only ever
-  // come out of it as a proposal, whichever brain produced the verdict.
-  const mutation = stageMutationFor(verdict, tracked.stage);
+  // stageMutationFor is the single write boundary. A DONE/RETURNED now leaves
+  // it as an `advance` only when the corroboration gate can back the claim with
+  // data we own (the active sedan list, or the tracked daily rate). Without the
+  // vocabulary it stays propose-only, exactly as before.
+  const corroboration = ctx.sedanVocabulary
+    ? { vocab: ctx.sedanVocabulary, body: rawBody, dailyRate: tracked.daily_rate == null ? null : Number(tracked.daily_rate) }
+    : undefined;
+  const mutation = stageMutationFor(verdict, tracked.stage, corroboration);
+  // The gate's own words, when it had something specific to say - "swap
+  // reported into a trax, which is not a sedan" is far more useful in
+  // review_reason than the generic classifier reason it would otherwise carry.
+  const writeReason = mutation.kind === "none" ? verdict.reason : mutation.reason ?? verdict.reason;
   let advanced = false, flagged = false;
   // Set whenever a DONE/RETURNED proposal is already on the record, so the
   // completion backstop below never double-flags the same message.
@@ -346,14 +364,19 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
       UPDATE vrm_rightsize_techs
       SET stage = ${mutation.stage}, stage_source = ${verdict.source === "bedrock" ? "auto_llm" : "auto"}, stage_changed_at = NOW(),
           decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)},
-          commit_date_text = COALESCE(${verdict.commitDateText ?? null}, commit_date_text), updated_at = NOW()
+          commit_date_text = COALESCE(${verdict.commitDateText ?? null}, commit_date_text),
+          -- Settling a stage retires any older proposal on the same row, the
+          -- same way a manual verify does. Otherwise an auto-applied DONE would
+          -- still read as needs_review and sit in the queue it just left.
+          proposed_stage = NULL, needs_review = FALSE, review_reason = NULL,
+          updated_at = NOW()
       WHERE ldap = ${ldap}
     `);
     advanced = true;
   } else if (mutation.kind === "propose") {
     await db.execute(sql`
       UPDATE vrm_rightsize_techs
-      SET proposed_stage = ${mutation.stage}, needs_review = TRUE, review_reason = ${verdict.reason},
+      SET proposed_stage = ${mutation.stage}, needs_review = TRUE, review_reason = ${writeReason},
           decisive_at = ${m.created_utc}::timestamptz, decisive_text = ${rawBody.slice(0, 500)}, updated_at = NOW()
       WHERE ldap = ${ldap}
     `);
@@ -448,12 +471,20 @@ export async function processInboundMessage(m: InboundMessageRow, ctx: ProcessCo
 
   // Written LAST and on purpose: this row is the idempotency marker, so it only
   // exists once the whole unit of work above succeeded.
-  const action = verdict.mode === "auto" ? "auto_advance" : verdict.mode === "review" ? "propose_review" : "none";
+  // Derived from the MUTATION, not the verdict's mode. A corroborated DONE
+  // still carries mode 'review' (the classifier never marks a secured stage
+  // auto) but was genuinely written to `stage`, and the audit row has to say
+  // what actually happened.
+  const action =
+    mutation.kind === "advance" ? "auto_advance" : mutation.kind === "propose" ? "propose_review" : "none";
+  const eventReason = mutation.kind === "advance" && mutation.reason
+    ? `${verdict.reason}; ${mutation.reason}`
+    : writeReason;
   await db.execute(sql`
     INSERT INTO vrm_rightsize_events (ldap, message_id, message_at, message_text, old_stage, new_stage, action, reason, actor, verdict_source, model_id, confidence)
     VALUES (${ldap}, ${messageId}, ${m.created_utc}::timestamptz, ${rawBody.slice(0, 1000)},
             ${tracked.stage}, ${verdict.proposal}, ${action},
-            ${resolved.via === "message_ldap" ? verdict.reason : `${verdict.reason} [attributed via ${resolved.via}: ${resolved.phone}]`},
+            ${resolved.via === "message_ldap" ? eventReason : `${eventReason} [attributed via ${resolved.via}: ${resolved.phone}]`},
             ${ctx.actor}, ${verdict.source}, ${verdict.modelId ?? null}, ${verdict.confidence ?? null})
     ON CONFLICT DO NOTHING
   `);
@@ -527,8 +558,10 @@ export async function classifyInboundNow(messageId: string): Promise<ProcessResu
   `);
   const row = r.rows[0] as unknown as InboundMessageRow | undefined;
   if (!row) return { outcome: "not_found" };
+  const [phoneIndex, sedanVocabulary] = await Promise.all([loadPhoneIndex(), loadSedanVocabulary()]);
   const result = await processInboundMessage(row, {
-    phoneIndex: await loadPhoneIndex(),
+    phoneIndex,
+    sedanVocabulary,
     actor: "svc:rightsize-webhook",
     deps: { budget: { remaining: 1 } },
   });
@@ -620,6 +653,9 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
 
     // Every number each tech owns, resolved once for the whole run.
     const phoneIndex = await loadPhoneIndex();
+    // The active sedan list, likewise once per run. It is what lets a reported
+    // swap be written to `stage` instead of parking in the review queue.
+    const sedanVocabulary = await loadSedanVocabulary();
     // One shared Bedrock budget for the run. The webhook already handled most
     // of these in real time, so the sweep normally spends almost nothing.
     const budget = { remaining: llmMaxPerRun() };
@@ -644,7 +680,7 @@ export async function runRightsizeSync(opts: { trigger: string }): Promise<any> 
     for (const row of msgs.rows as unknown as InboundMessageRow[]) {
       const before = budget.remaining;
       try {
-        const r = await processInboundMessage(row, { phoneIndex, actor: "svc:rightsize-sync", deps: { budget } });
+        const r = await processInboundMessage(row, { phoneIndex, sedanVocabulary, actor: "svc:rightsize-sync", deps: { budget } });
         if (r.outcome === "already_processed") alreadyDone += 1;
         else if (r.outcome === "unmatched") unmatched += 1;
         else if (r.outcome === "untracked_renter") { untracked += 1; processed += 1; }

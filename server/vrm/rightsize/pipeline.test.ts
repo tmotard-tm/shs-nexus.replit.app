@@ -148,7 +148,7 @@ async function main() {
   // ------------------------------------------------------ THE TRUTH BOUNDARY
   section("TRUTH BOUNDARY: DONE/RETURNED from the LLM are proposals only");
   {
-    const model = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+    const model = "us.anthropic.claude-sonnet-5";
     for (const stage of ["DONE", "RETURNED"] as const) {
       for (const confidence of [0.71, 0.9, 1.0]) {
         const v = applyTruthBoundary({ stage, confidence, reason: "tech says it is done" }, "NON_RESPONDER", model);

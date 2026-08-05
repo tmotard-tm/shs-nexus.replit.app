@@ -31,6 +31,9 @@ import {
   normalizeMessageText,
   type ClassifyResult,
 } from "./classifier";
+import { corroborateSecured, type CorroborationContext } from "./corroborate";
+
+export type { CorroborationContext } from "./corroborate";
 
 /** Stages the model is allowed to return. NONE = "I am not confident".
  *  RATE_ONLY is a model-only label: securing the sedan RATE counts as
@@ -92,7 +95,15 @@ export interface BedrockCallResult {
 
 // ------------------------------------------------------------------ config
 
-export const DEFAULT_MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0";
+export const DEFAULT_MODEL_ID = "us.anthropic.claude-sonnet-5";
+
+/**
+ * Current-generation Claude profiles reject `temperature` with a 400. Learned
+ * at runtime on the first rejection (see invokeBedrock) rather than hardcoded,
+ * so a model swap never needs a matching code change here. Process-lifetime
+ * only; it re-learns on restart, which costs one extra request.
+ */
+const MODELS_REJECTING_TEMPERATURE = new Set<string>();
 
 /**
  * Model is env-overridable, falling back to the same profile the FleetScope
@@ -275,15 +286,19 @@ export async function invokeBedrock(
   const region = process.env.AWS_REGION || "us-east-2";
   const modelId = opts.modelId || llmModelId();
   const endpoint = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/converse`;
-  const body = JSON.stringify({
-    system: [{ text: systemPrompt }],
-    messages: [{ role: "user", content: [{ text: userPrompt }] }],
-    inferenceConfig: { maxTokens: opts.maxTokens ?? 200, temperature: 0 },
-  });
+  const buildBody = (withTemperature: boolean) =>
+    JSON.stringify({
+      system: [{ text: systemPrompt }],
+      messages: [{ role: "user", content: [{ text: userPrompt }] }],
+      inferenceConfig: withTemperature
+        ? { maxTokens: opts.maxTokens ?? 200, temperature: 0 }
+        : { maxTokens: opts.maxTokens ?? 200 },
+    });
 
   const maxAttempts = 3;
   let lastErr = "";
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const body = buildBody(!MODELS_REJECTING_TEMPERATURE.has(modelId));
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -298,6 +313,19 @@ export async function invokeBedrock(
       };
     }
     lastErr = `${res.status} ${await res.text()}`;
+    // Claude Sonnet 5 and the other current-generation profiles REJECT
+    // `temperature` outright ("`temperature` is deprecated for this model", 400).
+    // Because classifyWithBedrock swallows throws and returns null, a hard 400
+    // here would look exactly like "the model had no opinion" and the classifier
+    // would go silently dead across the whole run. Learn it once per process and
+    // retry immediately without the parameter, rather than pinning a model list
+    // that goes stale on the next release.
+    if (res.status === 400 && /temperature/i.test(lastErr) && !MODELS_REJECTING_TEMPERATURE.has(modelId)) {
+      MODELS_REJECTING_TEMPERATURE.add(modelId);
+      console.warn(`[VRM/Rightsize] ${modelId} rejects temperature; retrying without it`);
+      attempt -= 1; // the probe should not cost a real attempt; it can only fire once per model
+      continue;
+    }
     if ((res.status === 429 || res.status >= 500) && attempt < maxAttempts) {
       await new Promise((r) => setTimeout(r, 400 * Math.pow(3, attempt - 1)));
       continue;
@@ -473,8 +501,8 @@ async function callLlm(rawBody: string, currentStage: string, deps: VerdictDeps)
 // ------------------------------------------------------------ write boundary
 
 export type StageMutation =
-  | { kind: "advance"; stage: string }
-  | { kind: "propose"; stage: string }
+  | { kind: "advance"; stage: string; reason?: string }
+  | { kind: "propose"; stage: string; reason?: string }
   | { kind: "none" };
 
 /**
@@ -482,11 +510,43 @@ export type StageMutation =
  * Re-asserts the truth boundary independently of whichever brain produced the
  * verdict: DONE/RETURNED are downgraded to a proposal here even if the verdict
  * somehow arrived marked 'auto'.
+ *
+ * CHANGED 8/5: the boundary is no longer "never write a secured stage", it is
+ * "never write a secured stage on the technician's word alone". Pass a
+ * CorroborationContext and a claim we can check against data we own - the
+ * active sedan list, or the tracked daily rate - is written through; a claim
+ * that names a NON-sedan is held AND labelled as non-compliant. Omit the
+ * context and the behaviour is byte-for-byte what it was before: propose only.
+ *
+ * This is what closed the 31-unit gap between the tracker (200 right-sized) and
+ * the hand audit (231): those units were all sitting in proposed_stage waiting
+ * on a click nobody was making.
  */
-export function stageMutationFor(verdict: RightsizeVerdict, currentStage: string): StageMutation {
+export function stageMutationFor(
+  verdict: RightsizeVerdict,
+  currentStage: string,
+  corroboration?: CorroborationContext,
+): StageMutation {
   if (!verdict.proposal) return { kind: "none" };
-  if (SECURED_STAGES.has(verdict.proposal)) return { kind: "propose", stage: verdict.proposal };
+  if (SECURED_STAGES.has(verdict.proposal)) {
+    // FAIL-CLOSED. With no corroboration context this is the old behaviour
+    // exactly: a secured proposal is never written to `stage`.
+    if (!corroboration) return { kind: "propose", stage: verdict.proposal };
+    const ruling = corroborateSecured(verdict.proposal, corroboration, isRateOnlyVerdict(verdict));
+    if (ruling.apply) return { kind: "advance", stage: verdict.proposal, reason: ruling.reason };
+    return { kind: "propose", stage: verdict.proposal, reason: ruling.reason };
+  }
   if (verdict.mode === "auto" && verdict.proposal !== currentStage) return { kind: "advance", stage: verdict.proposal };
   if (verdict.mode === "review") return { kind: "propose", stage: verdict.proposal };
   return { kind: "none" };
+}
+
+/**
+ * RATE_ONLY is not a stage - applyTruthBoundary maps it to a DONE proposal and
+ * marks it in the reason. The corroboration gate has to know the difference,
+ * because a rate claim is checked against daily_rate and a swap claim is
+ * checked against the sedan list.
+ */
+export function isRateOnlyVerdict(verdict: RightsizeVerdict): boolean {
+  return /sedan rate secured|compliant by rate/i.test(String(verdict.reason ?? ""));
 }
