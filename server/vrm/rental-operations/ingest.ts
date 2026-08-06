@@ -581,6 +581,15 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
     console.error("[vrm-exec] daily rollup after ingest failed (non-fatal):", (e as Error)?.message);
   }
 
+  // New rows landed — the exec summary must not keep serving pre-sync numbers
+  // for its full TTL. Dynamic import (cycle-safe), never fails the ingest.
+  try {
+    const { clearSummaryCache } = await import("../executive-summary/summary-cache");
+    clearSummaryCache("rental-ops ingest landed");
+  } catch (e) {
+    console.error("[vrm-exec] summary cache clear after ingest failed (non-fatal):", (e as Error)?.message);
+  }
+
   return { runId, resolved, review, exception, dropped, totalCases, enterpriseCount, holmanCount, pendedCount };
 }
 

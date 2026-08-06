@@ -26,7 +26,7 @@ import {
   AdvisoryLockUnavailableError,
 } from "../fleetscope-snowflake-sync-lock";
 import { getSnowflakeService, isSnowflakeConfigured } from "../snowflake-service";
-import { normalizeDigits } from "./lib";
+import { normalizeDigits, snapshotDateSupersedesLivePin } from "./lib";
 import { recordPhoneChange, mergeResolvedUnmatchedThreads, bulkArchiveUnmatched } from "./storage";
 import { enrichThreadContacts } from "./enrich";
 
@@ -42,6 +42,8 @@ export interface RosterRow {
   MANAGER_LDAP: string | null;
   MANAGER_NAME: string | null;
   PHONE: string | number | null;
+  /** FILE_DATE of the TPMS_EXTRACT row the phone came from (live-pin guard). */
+  PHONE_FILE_DATE?: string | Date | null;
   DISTRICT: string | null;
   PRIMARYSTATE: string | null;
   TRUCK_LU: string | null;
@@ -65,6 +67,7 @@ const SYNC_SQL = `
       SELECT
         UPPER(TRIM(ENTERPRISE_ID)) AS LDAP,
         MOBILEPHONENUMBER,
+        FILE_DATE,
         FULL_NAME,
         DISTRICT,
         PRIMARYSTATE,
@@ -87,6 +90,7 @@ const SYNC_SQL = `
     COALESCE(r.SUP_LDAP, t.MANAGER_ENT_ID)      AS MANAGER_LDAP,
     COALESCE(r.SUPERVISOR_NAME, t.MANAGER_NAME) AS MANAGER_NAME,
     t.MOBILEPHONENUMBER                         AS PHONE,
+    t.FILE_DATE                                 AS PHONE_FILE_DATE,
     t.DISTRICT,
     t.PRIMARYSTATE,
     t.TRUCK_LU
@@ -218,6 +222,29 @@ export async function syncCommsContacts(
     const existingByLdap = new Map<string, CommsContact>();
     for (const c of existing) existingByLdap.set(c.ldap, c);
 
+    // Live-pull pins: a number pulled LIVE from TPMS (thread-header "Pull from
+    // TPMS") is newer than any snapshot until the snapshot's FILE_DATE passes
+    // the pull day. For pinned contacts we null the incoming phone so the
+    // existing preferNonNull merge keeps the live number — no special-case
+    // write path, no bogus phone-history rows.
+    let livePins = new Map<string, Date>();
+    try {
+      const livePinRes: any = await fsDb.execute(sql`
+        SELECT ldap, MAX(changed_at) AS last_live
+        FROM fs_comms_phone_history
+        WHERE source = 'live_tpms'
+        GROUP BY ldap
+      `);
+      livePins = new Map<string, Date>(
+        (livePinRes.rows ?? []).map((r: any) => [String(r.ldap).toUpperCase(), new Date(r.last_live)]),
+      );
+    } catch (e: any) {
+      // Fail OPEN (no pins) — a broken pin lookup must never wedge the daily
+      // contacts sync; worst case is the pre-feature behavior for one run.
+      console.warn(`[CommsContactsSync] live-pin lookup failed (proceeding unpinned): ${e?.message || e}`);
+    }
+    let livePinsHeld = 0;
+
     const now = new Date();
     const seen = new Set<string>();
     let created = 0;
@@ -225,10 +252,19 @@ export async function syncCommsContacts(
     let reactivated = 0;
     let phoneChanges = 0;
 
+    const fileDateByLdap = new Map<string, unknown>();
     const values = rows.map((r) => {
       const ldap = (r.LDAP || "").trim().toUpperCase();
-      const phone = r.PHONE != null ? String(r.PHONE).trim() : null;
-      const phoneDigits = normalizeDigits(phone) || null;
+      fileDateByLdap.set(ldap, r.PHONE_FILE_DATE ?? null);
+      let phone = r.PHONE != null ? String(r.PHONE).trim() : null;
+      let phoneDigits = normalizeDigits(phone) || null;
+      const pin = livePins.get(ldap);
+      if (pin && !snapshotDateSupersedesLivePin(r.PHONE_FILE_DATE ?? null, pin)) {
+        // Snapshot not yet newer than the live pull — hold the live number.
+        if (phoneDigits) livePinsHeld++;
+        phone = null;
+        phoneDigits = null;
+      }
       seen.add(ldap);
       return {
         ldap,
@@ -249,6 +285,16 @@ export async function syncCommsContacts(
       };
     });
 
+    // Index for the in-transaction late-pin re-check (mid-sync live pulls).
+    const valuesByLdap = new Map(values.map((v) => [v.ldap, v]));
+    const latePinned = new Set<string>();
+
+    if (livePinsHeld > 0) {
+      console.log(
+        `[CommsContactsSync] live-TPMS pin held for ${livePinsHeld} contact(s) — snapshot FILE_DATE not yet past the live pull day`,
+      );
+    }
+
     // Detect phone changes + created/updated/reactivated counts against existing.
     for (const v of values) {
       const prev = existingByLdap.get(v.ldap);
@@ -268,6 +314,37 @@ export async function syncCommsContacts(
     const toTombstone = existing.filter((c) => c.active && !seen.has(c.ldap));
     let tombstoned = 0;
     await fsDb.transaction(async (tx) => {
+      // Serialize with the live "Pull from TPMS" route (same advisory xact
+      // lock) and re-check for pins that landed AFTER the pre-transaction pin
+      // load: a pull committing mid-sync must not be clobbered by this
+      // upsert's already-mapped stale snapshot value. Fail-open on re-check
+      // errors (never wedge the daily sync).
+      await tx.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fs_comms_live_phone_pin')::bigint)`);
+      try {
+        const late: any = await tx.execute(sql`
+          SELECT ldap, MAX(changed_at) AS last_live
+          FROM fs_comms_phone_history
+          WHERE source = 'live_tpms'
+          GROUP BY ldap
+        `);
+        for (const lr of late.rows ?? []) {
+          const lateLdap = String(lr.ldap).toUpperCase();
+          const pinAt = new Date(lr.last_live);
+          const known = livePins.get(lateLdap);
+          if (known && pinAt.getTime() <= known.getTime()) continue; // already applied in mapping
+          const v = valuesByLdap.get(lateLdap);
+          if (v && v.phoneDigits && !snapshotDateSupersedesLivePin(fileDateByLdap.get(lateLdap) ?? null, pinAt)) {
+            v.phone = null;
+            v.phoneDigits = null;
+            v.phoneLastVerifiedAt = null;
+            latePinned.add(lateLdap);
+            livePinsHeld++;
+            console.log(`[CommsContactsSync] late live-TPMS pin for ${lateLdap} — holding a mid-sync pull`);
+          }
+        }
+      } catch (e: any) {
+        console.warn(`[CommsContactsSync] late-pin re-check failed (continuing): ${e?.message || e}`);
+      }
       const CHUNK = 400;
       for (let i = 0; i < values.length; i += CHUNK) {
         const chunk = values.slice(i, i + CHUNK);
@@ -317,6 +394,7 @@ export async function syncCommsContacts(
     // phone keep the last known-good value when the incoming row is null
     // (preferNonNull). Post-swap, best-effort — not part of the atomic swap.
     for (const v of values) {
+      if (latePinned.has(v.ldap)) continue; // the mid-sync pull already wrote history + thread denorm
       const prev = existingByLdap.get(v.ldap);
       const phoneChanged = !!v.phoneDigits && v.phoneDigits !== (prev?.phoneDigits ?? null);
       if (phoneChanged) await recordPhoneChange(v.ldap, v.phone, "sync").catch(() => {});

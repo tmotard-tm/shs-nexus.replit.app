@@ -34,7 +34,8 @@ import {
 import { and, or, eq, ilike, desc, asc, sql, inArray } from "drizzle-orm";
 import { getBooleanSetting, setSetting } from "../app-settings";
 import { db } from "../db";
-import { syncLogs } from "@shared/schema";
+import { syncLogs, tpmsTechProfiles } from "@shared/schema";
+import { getTPMSService } from "../tpms-service";
 import {
   isValidCategory,
   findUnknownTokens,
@@ -1268,6 +1269,85 @@ export function registerCommsRoutes(app: Router): void {
         position: r.ldap ? posMap.get(String(r.ldap).toUpperCase()) ?? null : null,
       })),
     );
+  });
+
+  // ── Live phone pull from TPMS ───────────────────────────────────────────
+  // The contacts sync reads the Snowflake TPMS_EXTRACT snapshot, which lags
+  // TPMS by ~a day — useless when a number was fixed in TPMS TODAY and the
+  // tech must be texted TODAY. This pulls the number LIVE from TPMS for one
+  // contact and lands it through the normal history/normalization path.
+  // The daily sync won't clobber it back: it holds any live-pulled number
+  // until the snapshot's FILE_DATE passes the pull day (contacts-sync.ts +
+  // snapshotDateSupersedesLivePin in lib.ts).
+  app.post("/comms/contacts/:ldap/pull-tpms-phone", gate, async (req: any, res) => {
+    const ldap = String(req.params.ldap || "").trim().toUpperCase();
+    if (!ldap) return res.status(400).json({ message: "LDAP is required" });
+    try {
+      const contact = await getContactByLdap(ldap);
+      if (!contact) return res.status(404).json({ message: `No comms contact for ${ldap}` });
+
+      let techInfo: { contactNo?: string } | null = null;
+      try {
+        techInfo = await getTPMSService().getTechInfo(ldap);
+      } catch (e: any) {
+        const notFound = e?.statusCode === 400 || /no data|no tech info/i.test(String(e?.message || ""));
+        return res.status(notFound ? 404 : 502).json({
+          message: notFound
+            ? `TPMS has no record for ${ldap} — number left unchanged`
+            : `TPMS lookup failed — number left unchanged (${String(e?.message || e).slice(0, 180)})`,
+        });
+      }
+
+      const rawPhone = (techInfo?.contactNo || "").trim();
+      const digits = normalizeDigits(rawPhone) || "";
+      if (!rawPhone || digits.length < 10) {
+        return res.status(422).json({ message: `TPMS has no valid mobile number on file for ${ldap} — number left unchanged` });
+      }
+
+      const now = new Date();
+      if (digits === (contact.phoneDigits || "")) {
+        // Same number — just stamp the verification so staff can see it's fresh.
+        await fsDb
+          .update(commsContacts)
+          .set({ phoneLastVerifiedAt: now, updatedAt: now })
+          .where(eq(commsContacts.ldap, ldap));
+        return res.json({ changed: false, phone: contact.phone, phoneDigits: digits });
+      }
+
+      const actor = req.user?.username || req.user?.enterpriseId || "staff";
+      // Atomic under the shared pin lock: the contact update, the live_tpms
+      // history row (the "pin" that stops the daily sync from reverting this
+      // number), and the thread denorm commit together. Same advisory xact
+      // lock as the contacts-sync upsert, so a pull can never land inside the
+      // sync's read→write window and get clobbered by the stale snapshot.
+      await fsDb.transaction(async (txn) => {
+        await txn.execute(sql`SELECT pg_advisory_xact_lock(hashtext('fs_comms_live_phone_pin')::bigint)`);
+        await txn
+          .update(commsContacts)
+          .set({ phone: rawPhone, phoneDigits: digits, phoneLastVerifiedAt: now, updatedAt: now })
+          .where(eq(commsContacts.ldap, ldap));
+        await recordPhoneChange(ldap, rawPhone, "live_tpms", `thread-header pull by ${actor}`, txn);
+        // Tech-thread denormalized number (inbox list/search/header).
+        await txn
+          .update(commsThreads)
+          .set({ phoneDigits: digits })
+          .where(and(eq(commsThreads.kind, "tech"), eq(commsThreads.ldap, ldap)));
+      });
+      // Best-effort heal of the tpms_tech_profiles mirror so the two
+      // directories agree until the next profile sync (non-fatal).
+      try {
+        await db
+          .update(tpmsTechProfiles)
+          .set({ mobilePhone: rawPhone, updatedAt: now })
+          .where(eq(tpmsTechProfiles.enterpriseId, ldap));
+      } catch { /* mirror heal is best-effort */ }
+
+      console.log(`[Comms] Live TPMS phone pull for ${ldap} by ${actor}: ${contact.phoneDigits || "none"} -> ${digits}`);
+      return res.json({ changed: true, previousPhone: contact.phone, phone: rawPhone, phoneDigits: digits });
+    } catch (e: any) {
+      console.error("[Comms] pull-tpms-phone failed:", e);
+      return res.status(500).json({ message: String(e?.message || e) });
+    }
   });
 
   // Distinct districts across ACTIVE contacts — powers the New-message district

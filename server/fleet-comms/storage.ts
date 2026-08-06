@@ -618,14 +618,16 @@ export async function lastOutboundCategoryWithin(
   return age <= windowMs ? row.category : null;
 }
 
-/** Append a phone-history row (used by sync + manual link). */
+/** Append a phone-history row (used by sync + manual link). Pass a
+ * transaction handle to make a live-pull pin atomic with its contact update. */
 export async function recordPhoneChange(
   ldap: string,
   phone: string | null,
   source: string,
   note?: string,
+  dbc: { insert: typeof fsDb.insert } = fsDb,
 ): Promise<void> {
-  await fsDb.insert(commsPhoneHistory).values({
+  await dbc.insert(commsPhoneHistory).values({
     ldap: ldap.trim().toUpperCase(),
     phone: phone ?? null,
     phoneDigits: normalizeDigits(phone) || null,

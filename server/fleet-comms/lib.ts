@@ -188,3 +188,38 @@ export function estimateBulkSend(bodies: string[], mps = COMMS_THROUGHPUT_MPS): 
     needsConfirmation: recipients >= BULK_CONFIRM_THRESHOLD,
   };
 }
+
+/**
+ * Should a nightly-snapshot phone (TPMS_EXTRACT row dated FILE_DATE) be
+ * allowed to overwrite a number that was pulled LIVE from TPMS?
+ *
+ * The snapshot lags TPMS by ~a day, so right after a live pull it still
+ * carries the OLD number — letting it win would silently revert a same-day
+ * phone fix until the extract catches up. Rule: the snapshot wins only when
+ * its FILE_DATE is STRICTLY after the (ET) day of the live pull — by then it
+ * contains that change. Unknown/absent FILE_DATE → hold the live value
+ * (conservative and self-expiring: the next dated snapshot resolves it).
+ */
+export function snapshotDateSupersedesLivePin(
+  fileDate: unknown,
+  liveChangedAt: Date | string | null | undefined,
+): boolean {
+  if (!liveChangedAt) return true; // no live pin — snapshot free to write
+  const live = new Date(liveChangedAt as any);
+  if (isNaN(live.getTime())) return true; // unreadable pin — don't wedge the sync
+  const fd = fileDateIso(fileDate);
+  if (!fd) return false;
+  // TPMS extract days are US business days — compare in ET, not UTC, or an
+  // evening pull (ET) counts as "tomorrow" and the stale file wins a day early.
+  const liveEtDay = live.toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+  return fd > liveEtDay;
+}
+
+function fileDateIso(fileDate: unknown): string | null {
+  if (fileDate instanceof Date && !isNaN(fileDate.getTime())) return fileDate.toISOString().slice(0, 10);
+  if (typeof fileDate === "string") {
+    const m = fileDate.match(/^(\d{4}-\d{2}-\d{2})/);
+    if (m) return m[1];
+  }
+  return null;
+}

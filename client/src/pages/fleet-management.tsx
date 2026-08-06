@@ -889,12 +889,22 @@ export default function FleetManagement() {
     return m;
   }, [offboardingFlagsData]);
 
-  // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake)
+  // Rental Ops open vehicle set — cross-references Rental Operations page open rentals (Snowflake).
+  // When Show OOS is on, ask the server to keep rentals on out-of-service trucks in the set
+  // (mirrors the Rental Operations page's includeOos behavior) so the Rentals count uncovers them.
   const { data: rentalOpsData } = useQuery<{ vehicleNumbers: string[] }>({
-    queryKey: ['/api/rental-ops/open-vehicle-numbers'],
+    queryKey: ['/api/rental-ops/open-vehicle-numbers', showOos ? 'includeOos' : 'activeOnly'],
+    queryFn: async () => {
+      const res = await fetch(`/api/rental-ops/open-vehicle-numbers${showOos ? '?includeOos=true' : ''}`, { credentials: 'include' });
+      if (!res.ok) throw new Error(`Failed to load open rentals: ${res.status}`);
+      return res.json();
+    },
     staleTime: 30 * 60 * 1000,
     refetchOnWindowFocus: false,
     retry: false,
+    // Keep the previous set while the OOS/active variant loads so the Rentals count
+    // doesn't flash 0 when the Show OOS toggle flips.
+    placeholderData: (prev) => prev,
   });
   const rentalOpsVehicleSet = useMemo(() => {
     const s = new Set<string>();

@@ -19260,7 +19260,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const normV = (v: string) => v ? toDisplayNumber(v) : "";
       const isEntVendor = (v: string | null) => !v || /enterprise/i.test(v) || /toll/i.test(v);
 
-      const openVnsCacheKey = `open-vns:${req.query?.fileDate || 'latest'}`;
+      const includeOosOpenVnsQ = req.query?.includeOos === "true";
+      const openVnsCacheKey = `open-vns:${req.query?.fileDate || 'latest'}:${includeOosOpenVnsQ}`;
       const openVnsCached = getRentalOpsCache(openVnsCacheKey);
       if (openVnsCached) { console.log(`[RentalOps] Cache hit: ${openVnsCacheKey}`); return res.json({ ...openVnsCached.data, _cachedAt: openVnsCached.cachedAt }); }
 
@@ -19283,7 +19284,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         holmanNonEntVns.add(vn);
       }
 
-      const oosVehicles = await getOosVehicleSet();
+      // Same OOS semantics as /summary: strip OOS trucks by default, keep them when includeOos=true
+      const oosVehicles = includeOosOpenVnsQ ? new Set<string>() : await getOosVehicleSet();
       const allVns: string[] = [];
       for (const vn of entVns) {
         if (!oosVehicles.has(vn)) allVns.push(vn);

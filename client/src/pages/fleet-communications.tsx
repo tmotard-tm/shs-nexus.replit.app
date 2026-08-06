@@ -454,6 +454,27 @@ export default function FleetCommunications() {
     enabled: !!selectedId || composeOpen,
   });
 
+  // Live phone pull from TPMS — for when a number was just fixed in TPMS and
+  // the tech must be texted today (the nightly snapshot the contacts sync
+  // reads lags ~a day). Invalidating /threads also refreshes the open thread
+  // detail (prefix match), so the header number updates in place.
+  const pullPhoneMutation = useMutation({
+    mutationFn: async (ldap: string) =>
+      (await apiRequest("POST", `/api/fs/comms/contacts/${encodeURIComponent(ldap)}/pull-tpms-phone`)).json(),
+    onSuccess: (data: any) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/contacts"] });
+      toast(
+        data?.changed
+          ? {
+              title: "Phone updated from TPMS",
+              description: `${data.previousPhone || "No number"} → ${data.phone}. Texts (including queued ones) now go to the new number.`,
+            }
+          : { title: "Already current", description: `TPMS has the same number on file${data?.phone ? ` (${data.phone})` : ""}.` },
+      );
+    },
+    onError: (e: any) => toast({ title: "TPMS pull failed", description: String(e?.message || e), variant: "destructive" }),
+  });
   const archiveMutation = useMutation({
     mutationFn: async (id: string) => (await apiRequest("POST", `/api/fs/comms/threads/${id}/archive`)).json(),
     onSuccess: () => {
@@ -1084,6 +1105,20 @@ export default function FleetCommunications() {
                   </div>
                 </div>
                 <div className="flex items-center gap-1 flex-shrink-0">
+                  {thread.ldap && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      title="Pull from TPMS — fetch this tech's current phone number live (use right after fixing a number in TPMS)"
+                      onClick={() => pullPhoneMutation.mutate(thread.ldap!)}
+                      disabled={pullPhoneMutation.isPending}
+                      data-testid="button-pull-tpms-phone"
+                    >
+                      {pullPhoneMutation.isPending
+                        ? <Loader2 className="w-4 h-4 animate-spin" />
+                        : <RefreshCw className="w-4 h-4" />}
+                    </Button>
+                  )}
                   {(thread.archivedAt || thread.deletedAt) ? (
                     <Button
                       size="icon"

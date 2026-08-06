@@ -37,6 +37,53 @@ let scrapeSweepInFlight = false;
 // appendFleetStatusIfMainIn makes the appends themselves safe regardless.)
 let healReadyConflictsInFlight = false;
 
+// ── background auto-sync (Executive Summary stale-data self-heal) ───────────
+// The exec summary computes from vrm_rental_operations_* tables, so it is only
+// as fresh as the last ingest. On autoscale nothing dependable pokes the cron
+// route, so a viewed-but-stale summary requests a sync HERE — same in-flight
+// flags as the manual /sync route (a concurrent manual click still 409s), plus
+// a cooldown so page polls can't stack repeated full re-lands (the fingerprint
+// is provenance-only; persistRentalCases always rewrites).
+let lastAutoSyncAttempt = 0;
+const AUTO_SYNC_COOLDOWN_MS = 30 * 60_000;
+
+export function requestRentalOpsAutoSync(reason: string): "started" | "in-flight" | "cooldown" {
+  if (syncInFlight || scrapeSweepInFlight) return "in-flight";
+  const now = Date.now();
+  if (now - lastAutoSyncAttempt < AUTO_SYNC_COOLDOWN_MS) return "cooldown";
+  lastAutoSyncAttempt = now;
+  syncInFlight = true;
+  (async () => {
+    // Durable cross-instance guard: the in-memory cooldown is per-process, so
+    // on autoscale N instances (or a crash-looping ingest) could each re-land
+    // every 30 min. Any import run STARTED recently — running, completed, or
+    // failed — means someone already tried; back off and let the staleness
+    // gate re-evaluate later. (Same watermark pattern as the cron route.)
+    const recent = await db.execute(sql`
+      SELECT 1 FROM vrm_rental_operations_import_runs
+      WHERE started_at > NOW() - INTERVAL '30 minutes'
+      LIMIT 1
+    `);
+    if (recent.rows.length) {
+      console.log(`[VRM/RentalOps] auto-sync skipped (${reason}): an import run started within 30 min`);
+      return;
+    }
+    console.log(`[VRM/RentalOps] auto-sync starting (${reason})`);
+    const { runRentalOpsIngest } = await import("./ingest");
+    const r = await runRentalOpsIngest({ runType: "scheduled_sync", amsMode: "cached", landPo: true });
+    if (r.skipped) {
+      console.log(`[VRM/RentalOps] auto-sync skipped (${r.skipReason})`);
+      return;
+    }
+    invalidateQueuePoContextCache(`auto-sync:${reason}`);
+    invalidateTodaysQueueCache(`auto-sync:${reason}`);
+    console.log(`[VRM/RentalOps] auto-sync done (${reason}): ${r.totalCases} cases, file ${r.fileDate}`);
+  })()
+    .catch((e: any) => console.error(`[VRM/RentalOps] auto-sync FAILED (${reason}):`, e?.message || e))
+    .finally(() => { syncInFlight = false; });
+  return "started";
+}
+
 /**
  * Who is making this change.
  *

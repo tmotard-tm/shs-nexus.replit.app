@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
 import { RegConversations } from "@/components/fleet-scope/RegConversations";
+import { buildMonthlyExpiryCounts, monthKeyFor, monthLabelFor } from "./registration-month-buckets";
 import {
   Table,
   TableBody,
@@ -794,14 +795,9 @@ export default function Registration() {
       if (expiryMonthFilter && truck.regExpDate) {
         const expDate = new Date(truck.regExpDate);
         if (!isNaN(expDate.getTime())) {
-          // Special handling for January 2026: show trucks with ALREADY expired registrations
-          if (expiryMonthFilter === '2026-01') {
-            const jan2026Start = new Date(2026, 0, 1);
-            matchesExpiryMonth = expDate < jan2026Start;
-          } else {
-            const truckMonthKey = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}`;
-            matchesExpiryMonth = truckMonthKey === expiryMonthFilter;
-          }
+          matchesExpiryMonth = monthKeyFor(expDate) === expiryMonthFilter;
+        } else {
+          matchesExpiryMonth = false;
         }
       } else if (expiryMonthFilter && !truck.regExpDate) {
         matchesExpiryMonth = false;
@@ -897,62 +893,12 @@ export default function Registration() {
     setTagStateFilters(new Set());
   };
 
-  // Calculate monthly expiry counts for assigned trucks
-  const monthlyExpiryCounts = useMemo(() => {
-    if (!data?.trucks) return [];
-    
-    const counts: Record<string, number> = {};
-    const today = new Date();
-    
-    // Special handling for January 2026: count trucks with ALREADY expired registrations
-    const jan2026Start = new Date(2026, 0, 1); // January 1, 2026
-    const jan2026Key = '2026-01';
-    let jan2026ExpiredCount = 0;
-    
-    data.trucks
-      .filter(truck => truck.assignmentStatus === 'Assigned' && truck.regExpDate && !truck.truckNumber.startsWith('088'))
-      .forEach(truck => {
-        const expDate = new Date(truck.regExpDate);
-        if (!isNaN(expDate.getTime())) {
-          // For January 2026, count trucks that expired BEFORE January 2026
-          if (expDate < jan2026Start) {
-            jan2026ExpiredCount++;
-          }
-          // Regular counting for other months
-          const monthKey = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}`;
-          counts[monthKey] = (counts[monthKey] || 0) + 1;
-        }
-      });
-    
-    // Override January 2026 with already-expired count
-    counts[jan2026Key] = jan2026ExpiredCount;
-    
-    // Get current month start and 12 months ahead
-    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-    const twelveMonthsAhead = new Date(today.getFullYear(), today.getMonth() + 12, 1);
-    
-    // Sort by date - include all past months with data, plus up to 12 months ahead
-    const sortedMonths = Object.entries(counts)
-      .filter(([_, count]) => count > 0) // Only include months with trucks
-      .map(([key, count]) => {
-        const [year, month] = key.split('-').map(Number);
-        const date = new Date(year, month - 1, 1);
-        const isJan2026 = key === jan2026Key;
-        return {
-          key,
-          count,
-          date,
-          label: isJan2026 ? 'Jan 2026 (Expired)' : date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-          isPast: date < currentMonthStart,
-          isCurrent: date.getFullYear() === today.getFullYear() && date.getMonth() === today.getMonth(),
-          isExpiredCount: isJan2026, // Flag to indicate this is an "already expired" count
-        };
-      })
-      .filter(month => month.date <= twelveMonthsAhead) // Only limit future months, keep all past months
-      .sort((a, b) => a.date.getTime() - b.date.getTime());
-    
-    return sortedMonths;
-  }, [data?.trucks]);
+  // Calculate monthly expiry counts for assigned trucks — each truck counts
+  // exactly once, in its natural expiration month (pure logic, unit-tested).
+  const monthlyExpiryCounts = useMemo(
+    () => (data?.trucks ? buildMonthlyExpiryCounts(data.trucks) : []),
+    [data?.trucks],
+  );
 
   const processFlowData = useMemo(() => {
     if (!data?.trucks) return [];
@@ -972,24 +918,16 @@ export default function Registration() {
     }> = {};
 
     const today = new Date();
-    const jan2026Start = new Date(2026, 0, 1);
 
     assignedTrucks.forEach(truck => {
       const expDate = new Date(truck.regExpDate);
       if (isNaN(expDate.getTime())) return;
 
-      let monthKey: string;
-      let label: string;
-      if (expDate < jan2026Start) {
-        monthKey = '2026-01';
-        label = 'Jan 2026 (Expired)';
-      } else {
-        monthKey = `${expDate.getFullYear()}-${String(expDate.getMonth() + 1).padStart(2, '0')}`;
-        label = expDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-      }
+      const monthKey = monthKeyFor(expDate);
+      const label = monthLabelFor(expDate);
 
       if (!monthBuckets[monthKey]) {
-        monthBuckets[monthKey] = { label, total: 0, initialTextSent: 0, timeSlotConfirmed: 0, submittedToHolman: 0, alreadySent: 0, date: expDate < jan2026Start ? jan2026Start : new Date(expDate.getFullYear(), expDate.getMonth(), 1) };
+        monthBuckets[monthKey] = { label, total: 0, initialTextSent: 0, timeSlotConfirmed: 0, submittedToHolman: 0, alreadySent: 0, date: new Date(expDate.getFullYear(), expDate.getMonth(), 1) };
       }
 
       const bucket = monthBuckets[monthKey];

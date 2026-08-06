@@ -10,7 +10,11 @@
 // the only one that pulls metrics + rollup + insights together.
 
 import type { Router } from "express";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
 import { getRentalOpsMaster } from "../rental-operations/read-repository";
+import { requestRentalOpsAutoSync } from "../rental-operations/routes";
+import { getSummaryCache, setSummaryCache, clearSummaryCache } from "./summary-cache";
 import { classifyBucket } from "./buckets";
 import {
   buildCaseFacts,
@@ -91,8 +95,31 @@ export async function getExecutiveSummary(): Promise<ExecSummaryPayload> {
     sectionErrors.aiBrief = msg(e);
   }
 
+  // True data age: the summary is computed FROM the ingested rental-ops tables,
+  // so its freshness is the last completed ingest — NOT this compute time.
+  // scheduled_sync ONLY: it is the one run type that covers BOTH sources
+  // (enterprise + holman sweep). A manual_enterprise_import is partial — letting
+  // it advance this clock would report "synced just now" over stale Holman rows
+  // AND suppress the auto-sync that would actually fix them.
+  let dataAsOf: string | null = null;
+  let dataFileDate: string | null = null;
+  try {
+    const last = await db.execute(sql`
+      SELECT finished_at, file_date FROM vrm_rental_operations_import_runs
+      WHERE status = 'completed' AND run_type = 'scheduled_sync'
+      ORDER BY started_at DESC LIMIT 1
+    `);
+    const row = last.rows[0] as { finished_at?: string | Date; file_date?: string } | undefined;
+    dataAsOf = row?.finished_at ? new Date(row.finished_at).toISOString() : null;
+    dataFileDate = row?.file_date ?? null;
+  } catch (e) {
+    sectionErrors.dataAge = msg(e);
+  }
+
   return {
     generatedAt: new Date().toISOString(),
+    dataAsOf,
+    dataFileDate,
     headline: agg.headline,
     buckets: agg.buckets,
     breakdowns: agg.breakdowns,
@@ -128,18 +155,40 @@ async function upsertTodayIfStale(payload: ExecSummaryPayload): Promise<void> {
   });
 }
 
-// Per-instance cache (accepted on autoscale — see plan).
-let cache: { at: number; payload: ExecSummaryPayload } | null = null;
+// Per-instance cache (accepted on autoscale — lives in summary-cache.ts so
+// ingest can bust it the moment new rows land).
 const TTL_MS = 5 * 60_000;
 const STALE_FALLBACK_MS = 30 * 60_000;
+
+// If the underlying ingest is older than this, viewing the summary requests a
+// background rental-ops sync (cooldown + in-flight guards live on the trigger).
+// Lazy view-triggered, same reasoning as upsertTodayIfStale: autoscale has no
+// dependable in-process timers, and dev has nothing poking the cron route.
+const DATA_STALE_MS = 6 * 60 * 60_000;
+
+function maybeRequestAutoSync(payload: ExecSummaryPayload): void {
+  const asOf = payload.dataAsOf ? Date.parse(payload.dataAsOf) : NaN;
+  if (Number.isFinite(asOf) && Date.now() - asOf <= DATA_STALE_MS) return;
+  const r = requestRentalOpsAutoSync("exec-summary data stale");
+  if (r === "started") {
+    console.log("[vrm-exec] rental-ops data stale — background sync started");
+  }
+}
 
 export function registerExecutiveSummaryRoutes(router: Router): void {
   router.get("/executive-summary", async (req, res) => {
     try {
       const force = req.query.refresh === "true";
-      if (!force && cache && Date.now() - cache.at < TTL_MS) return res.json(cache.payload);
+      const cached = getSummaryCache();
+      if (!force && cached && Date.now() - cached.at < TTL_MS) {
+        // Serving from cache must still notice stale underlying data — the
+        // whole complaint is a summary that never causes a sync.
+        maybeRequestAutoSync(cached.payload);
+        return res.json(cached.payload);
+      }
       const payload = await getExecutiveSummary();
-      cache = { at: Date.now(), payload };
+      setSummaryCache(payload);
+      maybeRequestAutoSync(payload);
       void upsertTodayIfStale(payload).catch((e) =>
         console.error("[vrm-exec] lazy rollup failed (non-fatal):", (e as Error)?.message),
       );
@@ -149,8 +198,10 @@ export function registerExecutiveSummaryRoutes(router: Router): void {
       res.json(payload);
     } catch (e) {
       // Bounded-stale fallback (known Neon-WS-drop pattern on heavy aggregators).
-      if (cache && Date.now() - cache.at < STALE_FALLBACK_MS) {
-        return res.json({ ...cache.payload, stale: true });
+      // No auto-sync here: if reads are failing, piling an ingest on top helps nothing.
+      const cached = getSummaryCache();
+      if (cached && Date.now() - cached.at < STALE_FALLBACK_MS) {
+        return res.json({ ...cached.payload, stale: true });
       }
       console.error("[vrm-exec] summary failed:", e);
       res.status(500).json({ error: (e as Error)?.message ?? "executive summary failed" });
@@ -163,14 +214,15 @@ export function registerExecutiveSummaryRoutes(router: Router): void {
       if (!["admin", "developer"].includes(String(role ?? ""))) {
         return res.status(403).json({ error: "admin only" });
       }
+      const cached = getSummaryCache();
       const payload =
-        cache && Date.now() - cache.at < TTL_MS ? cache.payload : await getExecutiveSummary();
+        cached && Date.now() - cached.at < TTL_MS ? cached.payload : await getExecutiveSummary();
       const text = await regenerateExecBrief(payload);
       if (text == null) {
         // Fail-soft internally, but the admin asked explicitly — surface it.
         return res.status(502).json({ error: "AI brief generation failed (check Bedrock credentials/quota)" });
       }
-      cache = null; // next GET re-reads the stored brief
+      clearSummaryCache("brief regenerated"); // next GET re-reads the stored brief
       res.json({ text });
     } catch (e) {
       console.error("[vrm-exec] brief regenerate failed:", e);

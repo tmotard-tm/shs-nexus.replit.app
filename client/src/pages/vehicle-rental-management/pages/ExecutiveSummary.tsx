@@ -68,6 +68,10 @@ interface TrendPoint {
 
 interface ExecSummaryPayload {
   generatedAt: string;
+  /** finished_at of the last completed rental-ops ingest — the real data age. */
+  dataAsOf?: string | null;
+  /** Snowflake file_date that ingest landed (the data's vintage day). */
+  dataFileDate?: string | null;
   headline: {
     openTotal: number;
     byVendor: Record<string, number>;
@@ -141,6 +145,33 @@ const RANGES = [
 const money0 = (n: number) => `$${Math.round(n).toLocaleString()}`;
 const money2 = (n: number) => `$${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+function agoLabel(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return null;
+  const m = Math.round(ms / 60_000);
+  if (m < 1) return "just now";
+  if (m < 60) return `${m} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 36) return `${h} hr ago`;
+  return `${Math.round(h / 24)} days ago`;
+}
+
+const DATA_STALE_WARN_MS = 24 * 60 * 60_000;
+
+// Symmetric section grids: fixed even column counts for the fixed-count
+// sections (8 KPIs and 8 buckets → 2×4, charts → 2×2) so rows always line up;
+// auto-fit for the variable-count insights so any number of cards spreads the
+// full row evenly. Classes (not inline) because they need media queries.
+const GRID_CSS = `
+  .exec-grid-4 { display: grid; gap: 12px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .exec-grid-2 { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .exec-grid-fluid { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); }
+  @media (max-width: 1200px) { .exec-grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (max-width: 680px) { .exec-grid-4 { grid-template-columns: minmax(0, 1fr); } }
+  @media (max-width: 1180px) { .exec-grid-2 { grid-template-columns: minmax(0, 1fr); } }
+`;
+
 // ---------------------------------------------------------------- small pieces
 
 function SectionTitle({ children, note }: { children: React.ReactNode; note?: string }) {
@@ -209,18 +240,41 @@ export default function ExecutiveSummary() {
   const [vendorPill, setVendorPill] = useState<VendorPill>("All");
   const [range, setRange] = useState<(typeof RANGES)[number]["key"]>("90");
   const [drawer, setDrawer] = useState<{ title: string; subtitle?: string; cases: ExecCaseRow[] } | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   const { data, isLoading, isFetching, error, refetch } = useQuery<ExecSummaryPayload>({
     queryKey: ["/api/vrm/executive-summary"],
     refetchInterval: 300_000,
   });
 
+  // Refresh = pull the latest FROM Rental Operations, not just recompute the
+  // same tables: run a real rental-ops sync first (409 = one already running,
+  // fine), then force a recompute past the server cache.
   const forceRefresh = async () => {
+    setRefreshing(true);
     try {
+      try {
+        await apiRequest("POST", "/api/vrm/rental-operations/sync");
+        // New rows landed — anything on the rental-ops board is stale too.
+        queryClient.invalidateQueries({
+          predicate: (q) => String(q.queryKey[0] ?? "").startsWith("/api/vrm/rental-operations"),
+        });
+      } catch (e) {
+        const msg = (e as Error)?.message ?? "";
+        if (!msg.includes("409")) {
+          toast({
+            title: "Rental data sync failed",
+            description: `${msg} — recomputing from the last synced data instead.`,
+            variant: "destructive",
+          });
+        }
+      }
       await apiRequest("GET", "/api/vrm/executive-summary?refresh=true");
       await queryClient.invalidateQueries({ queryKey: ["/api/vrm/executive-summary"] });
     } catch (e) {
       toast({ title: "Refresh failed", description: (e as Error)?.message, variant: "destructive" });
+    } finally {
+      setRefreshing(false);
     }
   };
 
@@ -353,11 +407,12 @@ export default function ExecutiveSummary() {
   if (isLoading || !data || !view || !charts) {
     return (
       <div style={{ display: "grid", gap: 16 }}>
+        <style>{GRID_CSS}</style>
         <Skeleton h={56} />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12 }}>
+        <div className="exec-grid-4">
           {[0, 1, 2, 3].map((i) => <Skeleton key={i} h={92} />)}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div className="exec-grid-2">
           <Skeleton h={260} /><Skeleton h={260} />
         </div>
         <Skeleton h={180} />
@@ -369,16 +424,33 @@ export default function ExecutiveSummary() {
   const filtered = vendorPill !== "All";
   const globalNote = filtered ? "whole fleet — not vendor-filtered" : undefined;
   const sectionErrs = data.sectionErrors ? Object.keys(data.sectionErrors) : [];
+  const dataAgeMs = data.dataAsOf ? Date.now() - new Date(data.dataAsOf).getTime() : null;
+  const dataIsOld = dataAgeMs != null && dataAgeMs > DATA_STALE_WARN_MS;
 
   return (
     <div style={{ display: "grid", gap: 22 }}>
+      <style>{GRID_CSS}</style>
       {/* ---------------------------------------------------------- header */}
       <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12 }}>
         <div style={{ marginRight: "auto" }}>
-          <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }}>
-            As of {new Date(data.generatedAt).toLocaleString()}
+          <div style={{ fontFamily: fonts.dmSans, fontSize: 12, color: colors.inkMuted }} data-testid="text-data-age">
+            {data.dataAsOf ? (
+              <>
+                Rental data synced {agoLabel(data.dataAsOf)}
+                {data.dataFileDate ? ` (${data.dataFileDate} file)` : ""}
+                {" · computed "}{new Date(data.generatedAt).toLocaleTimeString()}
+              </>
+            ) : (
+              <>As of {new Date(data.generatedAt).toLocaleString()}</>
+            )}
             {data.stale && <span style={{ color: colors.amber }}> · showing last good data (live pull failed)</span>}
           </div>
+          {dataIsOld && (
+            <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, marginTop: 2 }} data-testid="text-data-stale-warning">
+              <AlertTriangle size={11} style={{ display: "inline", verticalAlign: "-1px", marginRight: 4 }} />
+              Rental data hasn't synced since {new Date(data.dataAsOf!).toLocaleString()} — Refresh pulls the latest now.
+            </div>
+          )}
           {sectionErrs.length > 0 && (
             <div style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.amber, marginTop: 2 }}>
               <AlertTriangle size={11} style={{ display: "inline", verticalAlign: "-1px", marginRight: 4 }} />
@@ -405,15 +477,16 @@ export default function ExecutiveSummary() {
         </div>
         <button
           onClick={forceRefresh}
-          disabled={isFetching}
+          disabled={refreshing || isFetching}
           data-testid="button-refresh"
           style={{
             display: "inline-flex", alignItems: "center", gap: 6, fontFamily: fonts.dmSans, fontSize: 12.5, fontWeight: 600,
             color: colors.inkSoft, background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 8,
-            padding: "7px 13px", cursor: isFetching ? "default" : "pointer", opacity: isFetching ? 0.6 : 1,
+            padding: "7px 13px", cursor: refreshing || isFetching ? "default" : "pointer", opacity: refreshing || isFetching ? 0.6 : 1,
           }}
         >
-          <RefreshCw size={13} className={isFetching ? "animate-spin" : undefined} /> Refresh
+          <RefreshCw size={13} className={refreshing || isFetching ? "animate-spin" : undefined} />
+          {refreshing ? "Syncing…" : "Refresh"}
         </button>
       </div>
 
@@ -458,7 +531,7 @@ export default function ExecutiveSummary() {
       {/* ---------------------------------------------------------- KPI row */}
       <div>
         <SectionTitle note={filtered ? `filtered to ${vendorPill}` : undefined}>Headline</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(215px, 1fr))", gap: 12 }}>
+        <div className="exec-grid-4">
           <KpiCard
             label="Open rentals"
             value={view.openTotal}
@@ -533,7 +606,7 @@ export default function ExecutiveSummary() {
             ))}
           </div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 12 }}>
+        <div className="exec-grid-2">
           <ChartCard title="Open rentals by vendor + daily spend">
             <ResponsiveContainer>
               <ComposedChart data={charts.openSpend}>
@@ -602,7 +675,7 @@ export default function ExecutiveSummary() {
       {/* ---------------------------------------------------------- buckets */}
       <div>
         <SectionTitle note="every open rental lands in exactly one bucket — click to see the vehicles">Why are they still open?</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(255px, 1fr))", gap: 12 }}>
+        <div className="exec-grid-4">
           {BUCKET_ORDER.map((key) => {
             const b = view.buckets.find((x) => x.bucket === key)!;
             const meta = BUCKET_META[key];
@@ -631,7 +704,7 @@ export default function ExecutiveSummary() {
       {/* ---------------------------------------------------------- breakdowns */}
       <div>
         <SectionTitle note={globalNote}>Where the money goes</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))", gap: 12 }}>
+        <div className="exec-grid-2">
           <ChartCard title="Top districts by open rentals">
             <ResponsiveContainer>
               <BarChart data={data.breakdowns.byDistrict} layout="vertical" margin={{ left: 8 }}>
@@ -669,7 +742,7 @@ export default function ExecutiveSummary() {
       {/* ---------------------------------------------------------- insights */}
       <div>
         <SectionTitle note="click any card to see the exact vehicles behind the number">What needs attention</SectionTitle>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 12 }}>
+        <div className="exec-grid-fluid">
           {data.insights.map((ins) => {
             const tint = SEVERITY_TINT[ins.severity];
             return (

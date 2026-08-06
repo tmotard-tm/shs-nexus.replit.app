@@ -133,6 +133,11 @@ export interface ExecSummaryPayload {
   insights: InsightCard[];
   trends: TrendPoint[];
   aiBrief: { text: string; generatedAt: string } | null;
+  /** finished_at of the last completed rental-ops ingest — the REAL data age.
+   *  generatedAt is only when this payload was computed from those tables. */
+  dataAsOf?: string | null;
+  /** Snowflake file_date that ingest landed (the data's vintage day). */
+  dataFileDate?: string | null;
   sectionErrors?: Record<string, string>;
   stale?: boolean;
 }
