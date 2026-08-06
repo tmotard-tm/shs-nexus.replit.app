@@ -30,6 +30,7 @@ import { fleetScopeStorage } from "./fleet-scope-storage";
 import { fsDb } from "./fleet-scope-db";
 import { db } from "./db";
 import { loadQueuePoContext, loadLatestLucaDispatches, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
+import { evaluateStep9Disposition, cleanDisplayPhone, phoneDigits, nameFold, STEP9_PROBLEM_LABELS } from "./vrm/rental-operations/shop-record-flags";
 import { loadWorkbookStates, WORKBOOK_CLOSED_STATUSES, type WorkbookState } from "./vrm/rental-operations/workbook";
 import { resolveOwnerRouting, OWNER_ROSTER, type Region } from "./vrm/rental-operations/annex-a-routing";
 import {
@@ -673,33 +674,17 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   // (Step 5's bad-status list only covers retry-able outcomes). Built BEFORE
   // Step 8 because a location/record problem invalidates PO inference for the
   // same truck. Numbered 9 so existing client step groups keep their ids.
-  const LUCA_PROBLEM_LABELS: Record<string, { why: string; act: string }> = {
-    'Shop Does Not Have Truck': {
-      why: 'LUCA called the shop on file and the shop says it does NOT have this truck.',
-      act: 'Find where the truck actually is (Samsara/AMS location, latest POs), then correct the shop of record.',
-    },
-    'Relocated': {
-      why: 'LUCA learned the truck was moved to a different shop.',
-      act: 'Confirm the new shop and its phone number, then update the shop of record so calls go to the right place.',
-    },
-    'No Shop Contact': {
-      why: 'LUCA has no working way to reach the shop — the number on file looks wrong or dead.',
-      act: 'Find the right phone number (PO paperwork / web), fix the record, and call to verify the truck is there.',
-    },
-    'Needs Tow': {
-      why: 'The shop reported the truck needs a tow.',
-      act: 'Arrange transport for the truck, then confirm the repair plan with the receiving shop.',
-    },
-    'Unverified - confirm by phone': {
-      why: "LUCA's call ended without a trustworthy status — the outcome could not be verified.",
-      act: "Call the shop yourself and confirm the truck's real status.",
-    },
-  };
+  // Labels + copy live in shop-record-flags.ts (evaluateStep9Disposition).
+  // The disposition is EVIDENCE-AWARE: the persisted last_call_status is a
+  // snapshot from dispatch time, so when the LIVE reconciled record proves the
+  // blocker was since fixed ('No Shop Contact' with a dialable pick phone, or
+  // a corrected shop of record after 'Shop Does Not Have Truck'/'Relocated'),
+  // the item demotes to 'monitor' instead of contradicting its own card.
   const step9Candidates = [...allTrucks].filter(t => {
     if (assigned.has(t.id)) return false;
     if (['Tags', 'Declined Repair'].includes(t.mainStatus ?? '')) return false;
     const label = lucaStatusFor(t);
-    if (label && label in LUCA_PROBLEM_LABELS) return true;
+    if (label && STEP9_PROBLEM_LABELS.has(label)) return true;
     const wb = workbookStates.get(caseKeyByCanon.get(canon(t.truckNumber)) ?? '');
     return wb?.status === 'escalated';
   }).sort((a, b) => (lastCallDateFor(b)?.getTime() ?? 0) - (lastCallDateFor(a)?.getTime() ?? 0));
@@ -707,18 +692,29 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     if (assigned.has(t.id)) continue;
     assigned.add(t.id);
     const label = lucaStatusFor(t);
-    const spec = label ? LUCA_PROBLEM_LABELS[label] : undefined;
     const lastDate = lastCallDateFor(t);
+    const cKey9 = canon(t.truckNumber);
+    const p9 = poMap.get(cKey9);
+    // Namespaced lookup: exact case provenance first, then this truck's own
+    // dispatch — never a digit-colliding stranger's (see buildLucaDispatchMap).
+    const dial9 = lucaDialedMap.get(`case:${canon(actionKeyFor(t))}`) ?? lucaDialedMap.get(`truck:${cKey9}`) ?? null;
+    const disp = evaluateStep9Disposition({
+      label,
+      pickShopName: p9?.shopName ?? null,
+      pickShopPhone: p9?.shopPhone ?? null,
+      fallbackPhone: cleanDisplayPhone(t.repairPhone),
+      dial: dial9,
+      lastCallDate: lastDate,
+    });
     items.push({
       step: 9, stepTitle: 'VERIFY TRUCK LOCATION / SHOP RECORD',
-      lane: 'action',
-      whyText: spec
-        ? `${spec.why}${lastDate ? ` (call on ${fmtDay(lastDate)})` : ''}`
-        : "LUCA escalated this case to a human — it can't resolve it by calling again.",
+      lane: disp?.lane ?? 'action',
+      whyText: disp?.why
+        ?? "LUCA escalated this case to a human — it can't resolve it by calling again.",
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: label, lastCallDate: lastDate?.toISOString() ?? null,
-      actionText: spec?.act ?? 'Read the last call summary on the case, then take over the shop conversation.',
+      actionText: disp?.act ?? 'Read the last call summary on the case, then take over the shop conversation.',
       sortKey: lastDate?.getTime() ?? 0,
       repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
     });
@@ -1051,10 +1047,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // Fallback repair_phone must not surface portal placeholder junk
     // (222-222-2222 & friends) — the reconciled context phone is already
     // junk-guarded server-side; the fs_trucks mirror is not.
-    const fallbackRepairPhone = (() => {
-      const d = String(t.repairPhone ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
-      return d.length === 10 && !/^(\d)\1{9}$/.test(d) ? t.repairPhone ?? null : null;
-    })();
+    const fallbackRepairPhone = cleanDisplayPhone(t.repairPhone);
     it.contextChips = {
       effStatus: p?.effStatus ?? null,
       openPoDate: p?.shopPoDate ?? null,
@@ -1072,16 +1065,14 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // human must verify shop info before acting on it (SOP for "shop does not
     // have truck"). Compared on phone digits and (case-folded) shop name;
     // missing values never flag.
-    const dial = lucaDialedMap.get(key) ?? null;
+    const dial = lucaDialedMap.get(`case:${canon(key)}`) ?? lucaDialedMap.get(`truck:${canon(t.truckNumber)}`) ?? null;
     it.lucaDialed = dial;
     if (dial) {
-      const digits = (s: string | null) => String(s ?? '').replace(/\D/g, '').replace(/^1(?=\d{10}$)/, '');
-      const fold = (s: string | null) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
-      const curPhone = digits(it.contextChips.shopPhone);
-      const dialPhone = digits(dial.shopPhone);
+      const curPhone = phoneDigits(it.contextChips.shopPhone);
+      const dialPhone = phoneDigits(dial.shopPhone);
       const phoneMismatch = !!curPhone && !!dialPhone && curPhone !== dialPhone;
-      const curName = fold(it.contextChips.shopName);
-      const dialName = fold(dial.shopName);
+      const curName = nameFold(it.contextChips.shopName);
+      const dialName = nameFold(dial.shopName);
       const nameMismatch = !!curName && !!dialName && curName !== dialName;
       it.shopInfoMismatch = phoneMismatch || nameMismatch;
     }

@@ -236,6 +236,84 @@ describe("VRM fleet-status authority (DB-backed)", { skip: !process.env.DATABASE
     assert.equal(after, before, "failed mirror must compensate-delete the appended history row");
   });
 
+  // ── appendFleetStatusIfMainIn (compare-at-write guard) ────────────────────
+  // The guard exists so AUTOMATED writers deciding from a snapshot (LUCA ready
+  // routing, the heal backfill) cannot clobber a newer human decision or append
+  // duplicates under concurrency. All cases below write the case's CURRENT
+  // values, so effective state never changes (suite invariant).
+
+  test("guarded append refuses an unknown case without throwing", async () => {
+    const g = await fs.appendFleetStatusIfMainIn("no-such-case-xyz", ["Repairing"], main, sub, ACTOR);
+    assert.equal(g.applied, false);
+    assert.match(String(g.skippedReason), /unknown case/);
+  });
+
+  test("guarded append backs off when the effective status left the replaceable set", async () => {
+    // Simulates the race the guard exists for: the caller classified from a
+    // snapshot, but by write time the status is no longer replaceable.
+    const before = await countHistoryRows();
+    const g = await fs.appendFleetStatusIfMainIn(caseKey, ["__no_such_status__"], main, sub, ACTOR);
+    assert.equal(g.applied, false);
+    assert.match(String(g.skippedReason), /status changed before write/);
+    assert.equal(g.current?.fsMain, main, "the observed at-write status must be reported");
+    assert.equal(await countHistoryRows(), before, "a refused guard must write NOTHING");
+  });
+
+  test("guarded append applies while the status is still replaceable", async () => {
+    const before = await countHistoryRows();
+    const g = await fs.appendFleetStatusIfMainIn(caseKey, [main], main, sub, ACTOR);
+    assert.equal(g.applied, true, String(g.skippedReason));
+    assert.ok(g.result?.mirroredTruckNumber, "guarded apply must mirror like a plain append");
+    assert.equal(await countHistoryRows(), before + 1);
+    const latest = (await fs.loadFleetStatusStates([caseKey])).get(caseKey);
+    assert.equal(latest?.actor, ACTOR);
+  });
+
+  test("guard predicate: absence rules are asymmetric by design", () => {
+    const SET = ["Repairing", "Confirming Status"] as const;
+    const ok = { vrmMain: "Repairing", fsMain: "Repairing", fsRowFound: true };
+    assert.equal(fs.evaluateGuardedAppend(ok, SET).pass, true);
+
+    // VRM history is append-only: null can only mean "never seeded", not a
+    // cleared decision — it must NOT block (or unseeded cases stay red forever).
+    assert.equal(fs.evaluateGuardedAppend({ ...ok, vrmMain: null }, SET).pass, true);
+
+    // A recorded VRM decision outside the set refuses.
+    const vrmMoved = fs.evaluateGuardedAppend({ ...ok, vrmMain: "Ready for Pickup" }, SET);
+    assert.equal(vrmMoved.pass, false);
+    assert.match((vrmMoved as { reason: string }).reason, /VRM=/);
+
+    // The fs_trucks side classified the snapshot, so absence there = change:
+    // a vanished row refuses…
+    const rowGone = fs.evaluateGuardedAppend({ ...ok, fsMain: null, fsRowFound: false }, SET);
+    assert.equal(rowGone.pass, false);
+    assert.match((rowGone as { reason: string }).reason, /left fs_trucks/);
+
+    // …a cleared (null) status refuses…
+    const cleared = fs.evaluateGuardedAppend({ ...ok, fsMain: null }, SET);
+    assert.equal(cleared.pass, false);
+    assert.match((cleared as { reason: string }).reason, /FleetScope="—"/);
+
+    // …and a moved status refuses.
+    const fsMoved = fs.evaluateGuardedAppend({ ...ok, fsMain: "Scheduling" }, SET);
+    assert.equal(fsMoved.pass, false);
+    assert.match((fsMoved as { reason: string }).reason, /FleetScope="Scheduling"/);
+  });
+
+  test("concurrent guarded writers serialize per case — exactly one appends", async () => {
+    // A applies (current main is in its set); B is queued behind A on the same
+    // case and must re-read AFTER A committed — its set excludes A's value, so
+    // it refuses instead of double-appending from the same stale read.
+    const before = await countHistoryRows();
+    const [a, b] = await Promise.all([
+      fs.appendFleetStatusIfMainIn(caseKey, [main], main, sub, ACTOR),
+      fs.appendFleetStatusIfMainIn(caseKey, ["__no_such_status__"], main, sub, ACTOR),
+    ]);
+    assert.equal(a.applied, true, String(a.skippedReason));
+    assert.equal(b.applied, false, "the queued writer must observe the committed state, not the snapshot");
+    assert.equal(await countHistoryRows(), before + 1, "exactly one append may land");
+  });
+
   test("reconcile seed pass is idempotent", async () => {
     await fs.reconcileFleetStatuses("test-seed-1");
     const second = await fs.reconcileFleetStatuses("test-seed-2");

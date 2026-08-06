@@ -210,6 +210,139 @@ export async function appendFleetStatus(
   return { ok: true, state, mirroredTruckId, mirroredTruckNumber };
 }
 
+// ── Guarded append (compare-at-write) ────────────────────────────────────────
+// For AUTOMATED status writers (LUCA ready routing, heal backfills) that
+// decide from a snapshot — a cached queue, a truck row read earlier in a
+// worker — and must not clobber a newer human decision made in the window
+// before their append lands.
+
+const guardedAppendQueues = new Map<string, Promise<unknown>>();
+
+export interface GuardedAppendOutcome {
+  applied: boolean;
+  /** Why the append was refused; null when applied. */
+  skippedReason: string | null;
+  /** Effective status observed at write time (null = row absent). */
+  current: { vrmMain: string | null; fsMain: string | null } | null;
+  result: AppendFleetStatusResult | null;
+}
+
+/** What the guarded append observed when it re-read state at write time. */
+export interface GuardObservation {
+  vrmMain: string | null;
+  fsMain: string | null;
+  /** Whether a matching fs_trucks row existed at all at write time. */
+  fsRowFound: boolean;
+}
+
+/**
+ * The guard predicate, pure so every null/missing combination is testable
+ * offline. The two sides deliberately treat absence DIFFERENTLY:
+ *
+ * - VRM fleet_status history is append-only — rows are never deleted or
+ *   nulled, so `vrmMain === null` can only mean "no decision was ever
+ *   recorded" (a case reconcile hasn't seeded yet). It cannot be the result
+ *   of a racing edit, so it passes; a recorded decision must still be in the
+ *   replaceable set.
+ * - fs_trucks is the side the caller's snapshot classified on (it is what the
+ *   queue and the worker gate read), and it CAN change underneath us: the
+ *   consolidate sync can drop the row, and a write can clear the status. At
+ *   snapshot time the status was necessarily a non-null replaceable value —
+ *   that's what made the caller fire — so absence at write time is evidence
+ *   of change, never of "no decision": back off.
+ */
+export function evaluateGuardedAppend(
+  obs: GuardObservation,
+  replaceableMains: readonly string[],
+): { pass: true } | { pass: false; reason: string } {
+  if (obs.vrmMain !== null && !replaceableMains.includes(obs.vrmMain)) {
+    return { pass: false, reason: `status changed before write (VRM="${obs.vrmMain}") — the newer decision wins` };
+  }
+  if (!obs.fsRowFound) {
+    return { pass: false, reason: "truck row left fs_trucks after the snapshot" };
+  }
+  if (obs.fsMain === null || !replaceableMains.includes(obs.fsMain)) {
+    return { pass: false, reason: `status changed before write (FleetScope="${obs.fsMain ?? "—"}") — the newer decision wins` };
+  }
+  return { pass: true };
+}
+
+/**
+ * Append `mainStatus`/`subStatus` ONLY while the case's effective status —
+ * re-read at write time, not taken from any caller snapshot — still permits it
+ * per `evaluateGuardedAppend` (see its doc for the asymmetric absence rule:
+ * never-seeded VRM history passes; a missing fs_trucks row or cleared
+ * fs_trucks status refuses). A per-case in-process queue serializes concurrent
+ * guarded writers (a double-fired heal, a heal overlapping the in-process
+ * worker), so the second caller re-reads after the first committed and refuses
+ * instead of appending a duplicate. Humans write through plain
+ * appendFleetStatus and always win: an operator edit landing before the
+ * re-read moves the status out of the set and the guarded append backs off.
+ */
+export async function appendFleetStatusIfMainIn(
+  caseKey: string,
+  replaceableMains: readonly string[],
+  mainStatus: string,
+  subStatus: string | null,
+  actor: string,
+): Promise<GuardedAppendOutcome> {
+  const prev = guardedAppendQueues.get(caseKey) ?? Promise.resolve();
+  const run = prev
+    .catch(() => {})
+    .then(async (): Promise<GuardedAppendOutcome> => {
+      const res = await db.execute(sql`
+        WITH c AS (
+          SELECT case_key, vehicle_number, vehicle_number_padded
+          FROM vrm_rental_operations_cases
+          WHERE case_key = ${caseKey}
+          LIMIT 1
+        ),
+        latest AS (
+          SELECT mark_value FROM vrm_rental_operation_actions
+          WHERE action_type = ${FLEET_STATUS_ACTION_TYPE} AND case_key = ${caseKey}
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1
+        ),
+        truck AS (
+          SELECT ft.main_status
+          FROM fs_trucks ft, c
+          WHERE COALESCE(NULLIF(LTRIM(ft.truck_number, '0'), ''), '0')
+              = COALESCE(NULLIF(LTRIM(COALESCE(c.vehicle_number_padded, c.vehicle_number, c.case_key), '0'), ''), '0')
+          ORDER BY ft.last_updated_at DESC NULLS LAST
+          LIMIT 1
+        )
+        SELECT
+          (SELECT case_key FROM c) AS case_key,
+          (SELECT mark_value FROM latest) AS vrm_main,
+          (SELECT main_status FROM truck) AS fs_main,
+          EXISTS(SELECT 1 FROM truck) AS fs_row_found
+      `);
+      const row = rowsOf(res)[0];
+      if (!row?.case_key) {
+        return { applied: false, skippedReason: `unknown case ${caseKey}`, current: null, result: null };
+      }
+      const obs: GuardObservation = {
+        vrmMain: str(row.vrm_main),
+        fsMain: str(row.fs_main),
+        fsRowFound: Boolean(row.fs_row_found),
+      };
+      const current = { vrmMain: obs.vrmMain, fsMain: obs.fsMain };
+      const verdict = evaluateGuardedAppend(obs, replaceableMains);
+      if (!verdict.pass) {
+        return { applied: false, skippedReason: verdict.reason, current, result: null };
+      }
+      const result = await appendFleetStatus(caseKey, mainStatus, subStatus, actor);
+      return { applied: true, skippedReason: null, current, result };
+    });
+  guardedAppendQueues.set(caseKey, run);
+  void run
+    .catch(() => {})
+    .finally(() => {
+      if (guardedAppendQueues.get(caseKey) === run) guardedAppendQueues.delete(caseKey);
+    });
+  return run;
+}
+
 export interface ReconcileResult {
   seeded: number;
   adopted: number;

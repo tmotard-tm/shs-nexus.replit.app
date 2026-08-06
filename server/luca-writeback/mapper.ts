@@ -152,6 +152,63 @@ export const FS_TERMINAL_MAIN_STATUSES: readonly string[] = [
 ];
 
 /**
+ * True when a mapped terminal status still needs to land: the task carries one
+ * and the truck is not already in a terminal main. Shared by the worker's
+ * VRM-append router and its direct fs_trucks fallback so the two gates can
+ * never drift — and it is what makes re-delivery idempotent: once the VRM
+ * mirror (or the direct write) stamps the terminal status, a retried task
+ * no-ops here.
+ */
+export function terminalNeedsWrite(
+  mapped: Pick<MappedWriteback, "terminal">,
+  truck: { mainStatus?: string | null },
+): boolean {
+  if (!mapped.terminal) return false;
+  return !FS_TERMINAL_MAIN_STATUSES.includes(truck.mainStatus ?? "");
+}
+
+export const FS_MAIN_SCHEDULING = "Scheduling";
+export const FS_SUB_TO_BE_SCHEDULED = "To be scheduled for tech pickup";
+
+/**
+ * Fleet-status mains a phone-confirmed Ready may replace — exactly the set the
+ * Ops Queue flags as STATUS CONFLICT on a ready row (todays-queue step 3:
+ * "call/verification shows ready but FleetScope not updated"). Anything else —
+ * Scheduling and later pipeline states, terminal mains, deliberate ops states
+ * like Relocate Van / Truck Swap — was set on purpose and must not be fought.
+ */
+export const READY_REPLACEABLE_MAIN_STATUSES: readonly string[] = [
+  "Repairing",
+  "Confirming Status",
+  "Decision Pending",
+];
+
+/**
+ * True when a surviving phone-confirmed "Ready" should ALSO move the truck into
+ * the pickup pipeline (Scheduling / "To be scheduled for tech pickup") — the
+ * same correction a human makes when the step board says "Correct all systems
+ * then arrange pickup". Gates the worker's VRM-first ready-status append:
+ *  - `finalWrite` must still carry lastCallStatus "Ready" AFTER the worker's
+ *    monotonic stale-call guard ran — a stale Ready never flips status;
+ *  - an item carrying a terminal status always outranks ready, whether the
+ *    terminal rode the VRM append or the direct-write fallback (mainStatus on
+ *    the final write);
+ *  - the truck must currently sit in a conflict-set main — which is also what
+ *    makes re-delivery idempotent: once the status lands, the truck leaves the
+ *    set and a retried task no-ops here.
+ */
+export function readyStatusNeedsWrite(
+  mapped: Pick<MappedWriteback, "terminal">,
+  finalWrite: { lastCallStatus?: unknown; mainStatus?: unknown },
+  truck: { mainStatus?: string | null },
+): boolean {
+  if (mapped.terminal) return false;
+  if (finalWrite.lastCallStatus !== "Ready") return false;
+  if (finalWrite.mainStatus != null) return false;
+  return READY_REPLACEABLE_MAIN_STATUSES.includes(truck.mainStatus ?? "");
+}
+
+/**
  * Escalation reason → dashboard mapping.
  *
  * The left side MUST stay in lockstep with EscalationReason on LIVHR

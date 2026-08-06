@@ -10,16 +10,17 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory } from "./read-repository";
+import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory, loadQueuePoContext, reconciledShopFor, type QueuePoContext } from "./read-repository";
 import { registerRegionRoutes } from "./region-routes";
 import { loadWorkbookStates, WORKBOOK_STATUSES, WORKBOOK_STATUS_LABEL, WORKBOOK_CLOSED_STATUSES } from "./workbook";
 import { getTodaysQueueCached, invalidateTodaysQueueCache } from "../../todays-queue";
 import { invalidateQueuePoContextCache } from "./read-repository";
-import { appendFleetStatus, loadFleetStatusStates, maybeReconcileFleetStatuses } from "./fleet-status";
+import { appendFleetStatus, appendFleetStatusIfMainIn, loadFleetStatusStates, maybeReconcileFleetStatuses } from "./fleet-status";
 import { appendSchedulePickup } from "./schedule-pickup";
 import { CLASSIFICATIONS, todayET } from "./bucket-classify";
 import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
+import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED } from "../../luca-writeback/mapper";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -30,6 +31,11 @@ let syncInFlight = false;
 // full set of concurrent browser sessions on the same box. Module-level rather
 // than a DB lock because the sweep is in-process and this is a single instance.
 let scrapeSweepInFlight = false;
+
+// One heal sweep at a time: a double-fired request would re-classify from the
+// same cached queue snapshot and race its sibling. (The per-case guard inside
+// appendFleetStatusIfMainIn makes the appends themselves safe regardless.)
+let healReadyConflictsInFlight = false;
 
 /**
  * Who is making this change.
@@ -177,6 +183,72 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST /rental-operations/queue/heal-ready-conflicts — one-shot backfill for
+  // trucks LUCA phone-confirmed READY while FleetScope still says Repairing /
+  // Confirming Status / Decision Pending (the step board's red STATUS CONFLICT
+  // rows). Going forward the LUCA writeback appends this status itself
+  // (routeReadyStatusViaVrm); this heals rows whose calls landed BEFORE that
+  // existed. Dry-run by default — body { apply: true } to write. Only
+  // LUCA-confirmed rows are touched (manual verified marks stay human-owned),
+  // and only via the vocab-validated VRM append, actor = the requester.
+  router.post("/rental-operations/queue/heal-ready-conflicts", async (req, res) => {
+    if (healReadyConflictsInFlight) {
+      return res.status(409).json({ error: "a heal sweep is already running — retry when it finishes" });
+    }
+    healReadyConflictsInFlight = true;
+    try {
+      const apply = req.body?.apply === true || String(req.body?.apply ?? "") === "true";
+      const queue = await getTodaysQueueCached();
+      const candidates = (queue.items as any[]).filter(
+        (it) => it.step === 3 && it.isConflict && it.readyReason === "luca",
+      );
+      const results: Array<Record<string, unknown>> = [];
+      let healed = 0;
+      let skipped = 0;
+      for (const it of candidates) {
+        const caseKey = it.caseKey ?? null;
+        if (!caseKey) {
+          skipped++;
+          results.push({ truckNumber: it.truckNumber, ok: false, skipped: "no rental case — cannot append VRM fleet-status" });
+          continue;
+        }
+        if (!apply) {
+          results.push({ truckNumber: it.truckNumber, caseKey, ok: true, would: `${it.fleetScopeStatus} -> ${FS_MAIN_SCHEDULING} / ${FS_SUB_TO_BE_SCHEDULED}` });
+          continue;
+        }
+        try {
+          // Compare-at-write: the queue snapshot above may be up to 30s stale
+          // (plus loop time). The guard re-reads the effective status and
+          // refuses when an operator or LUCA moved it meanwhile — a newer
+          // decision always wins over this backfill.
+          const g = await appendFleetStatusIfMainIn(
+            caseKey,
+            ["Repairing", "Confirming Status", "Decision Pending"],
+            FS_MAIN_SCHEDULING,
+            FS_SUB_TO_BE_SCHEDULED,
+            actorOf(req),
+          );
+          if (g.applied) {
+            healed++;
+            results.push({ truckNumber: it.truckNumber, caseKey, ok: true, from: it.fleetScopeStatus });
+          } else {
+            skipped++;
+            results.push({ truckNumber: it.truckNumber, caseKey, ok: false, skipped: g.skippedReason });
+          }
+        } catch (e: any) {
+          results.push({ truckNumber: it.truckNumber, caseKey, ok: false, error: e?.message ?? String(e) });
+        }
+      }
+      if (apply && healed > 0) invalidateTodaysQueueCache("ready-conflict-heal");
+      res.json({ ok: true, dryRun: !apply, candidates: candidates.length, healed, skipped, results });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] heal-ready-conflicts failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "heal failed" });
+    } finally {
+      healReadyConflictsInFlight = false;
+    }
+  });
+
   // POST /rental-operations/queue/research — escalate a case to research (the
   // shop can't be validated from POs + calls on file), or clear the
   // escalation. Body: { key, active }. Append-only, newest row wins; a later
@@ -260,14 +332,25 @@ export function registerRentalOperationsRoutes(router: Router): void {
       // (loadWorkbookStates), not a per-row lookup, and it is attached here
       // rather than inside getRentalOpsMaster so the LUCA feed and the external
       // API - which share that read model - keep their existing contract.
-      const [model, workbooks] = await Promise.all([
+      const [model, workbooks, poCtx] = await Promise.all([
         getRentalOpsMaster({ includeDropped }),
         loadWorkbookStates(),
+        // Reconciled shop-of-record pick (same 5-min SWR cache the queue and
+        // case drawer read) — attached per row so the board displays the SAME
+        // phone LUCA dials, never the raw portal scrape (whose top-level phone
+        // can belong to a DIFFERENT vendor than the repair PO).
+        // On failure resolve to NULL, not an empty map: an empty map would
+        // stamp reconciledShop:null ("authoritatively no pick") on every row
+        // and blank all board phones; null skips the field so the client
+        // falls back to the raw portal number until the next request.
+        loadQueuePoContext().catch((): Map<string, QueuePoContext> | null => null),
       ]);
+      const canonKey = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
       const rows = (model.rows ?? []).map((r: any) => {
         const wb = workbooks.get(String(r.case_key));
         return {
           ...r,
+          ...(poCtx ? { reconciledShop: reconciledShopFor(poCtx.get(canonKey(r.case_key))) } : {}),
           workbook_status: wb?.status ?? "new",
           workbook_actor: wb?.actor ?? null,
           workbook_updated_at: wb?.updated_at ?? null,

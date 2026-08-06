@@ -14,3 +14,4 @@ description: Ops Queue "vehicle ready" policy — closed-PO/passed-ERD evidence 
 - Supersede: a verify mark is void once ANY newer call lands; a research mark is void only once a RESOLVED call lands (No Answer/Failed/Inconclusive/No Shop Contact don't clear it).
 - Verified-ready beats research; research suppresses `po_closed_confirm` and `shop_unreachable_callback`.
 - Any new "is it ready?" consumer must gate on phone confirmation (luca||verified), never on PO/ERD state alone.
+- A LUCA Ready call now ALSO flips fleet status (Repairing/Confirming Status/Decision Pending → Scheduling + "To be scheduled for tech pickup") via the guarded append — see vrm-automated-status-writes.md. There is no "Ready" main status in the vocab; step-3 status-conflict rows were the symptom of skipping this write.

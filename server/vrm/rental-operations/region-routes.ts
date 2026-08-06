@@ -11,7 +11,7 @@
  * population. All the regional logic lives in ./region.
  */
 import type { Router } from "express";
-import { getRentalOpsMaster, type MasterRow } from "./read-repository";
+import { getRentalOpsMaster, loadQueuePoContext, reconciledShopFor, type MasterRow, type QueuePoContext } from "./read-repository";
 import {
   resolveCaseRegion,
   assertRegionCoverage,
@@ -94,17 +94,24 @@ export function registerRegionRoutes(router: Router): void {
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      const [model, homeStates, workbooks] = await Promise.all([
+      const [model, homeStates, workbooks, poCtx] = await Promise.all([
         getRentalOpsMaster({ includeDropped }),
         loadTechHomeStates(),
         loadWorkbookStates(),
+        // Same reconciled shop-of-record pick the master board attaches — the
+        // two boards must show the identical phone (symmetry, Tyler 2026-08-06).
+        // On failure resolve NULL (skip the field → client portal fallback),
+        // never an empty map (= reconciledShop:null = blanks every phone).
+        loadQueuePoContext().catch((): Map<string, QueuePoContext> | null => null),
       ]);
+      const canonKey = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
 
       // Attach the technician's home state BEFORE resolving regions — it is
       // the primary Annex A signal.
       const withState = model.rows.map((r) => ({
         ...r,
         tech_home_state: homeStates.get(String((r as any).employee_id ?? "").trim()) ?? null,
+        ...(poCtx ? { reconciledShop: reconciledShopFor(poCtx.get(canonKey((r as any).case_key))) } : {}),
       }));
 
       const rows: RegionalRow[] = withState.map((r) => {

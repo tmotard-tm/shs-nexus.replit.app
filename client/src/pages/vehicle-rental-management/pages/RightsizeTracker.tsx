@@ -312,12 +312,12 @@ export default function RightsizeTracker() {
 
   const syncMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rightsize/sync", {}),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/summary"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/techs"] }); toast({ title: "Synced fresh replies" }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/summary"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/techs"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"] }); toast({ title: "Synced fresh replies" }); },
     onError: (e: any) => toast({ title: "Sync failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const stageMut = useMutation({
     mutationFn: (p: { ldap: string; stage: string; note?: string }) => apiRequest("POST", `/api/vrm/rightsize/tech/${p.ldap}/stage`, { stage: p.stage, note: p.note }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/summary"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/techs"] }); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/summary"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/techs"] }); qc.invalidateQueries({ queryKey: ["/api/vrm/rightsize/compliance?rows=0"] }); },
     onError: (e: any) => toast({ title: "Update failed", description: String(e?.message || e), variant: "destructive" }),
   });
 

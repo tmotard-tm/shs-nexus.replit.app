@@ -10,6 +10,7 @@ import { sql, type SQL } from "drizzle-orm";
 import { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
 import { NEVER_SHOP_SQL_RE } from "./vendor-class";
 import { pepBoysPhoneLateral } from "./pepboys-directory";
+import { buildLucaDispatchMap, type LucaDispatchInfo } from "./shop-record-flags";
 
 // ── board classifier (ported 1:1 from make_rental_fleet_gallery.py) ──────────
 const VAN_SUV_TRUCK = /SUV|VAN|P\/UP|PICKUP|TRUCK/i;
@@ -2041,43 +2042,42 @@ async function readCallLog(trucks: string[]): Promise<any[]> {
   }
 }
 
-/** Newest LUCA dispatch per truck — the shop name/number LUCA actually dialed.
+/** Board/queue/drawer-aligned "shop of record" projection of a QueuePoContext.
+ * ONE serializer so every surface (case drawer, master board rows, regional
+ * rows) ships the identical reconciled pick — display code must anchor on it,
+ * never re-derive a shop/phone client-side from raw PO or portal fields. */
+export function reconciledShopFor(ctx: QueuePoContext | undefined | null) {
+  return ctx ? {
+    shopName: ctx.shopName,
+    shopPhone: ctx.shopPhone,
+    effStatus: ctx.effStatus,
+    shopPoDate: ctx.shopPoDate,
+    poNumber: ctx.poNumber,
+    openPoCount: ctx.openPoCount,
+    portalAt: ctx.portalAt,
+  } : null;
+}
+
+/** Newest LUCA dispatch per key — the shop name/number LUCA actually dialed.
  * Queue + drawers show this next to the current reconciled shop pick so a human
  * can see at a glance whether LUCA called the shop we NOW believe has the
- * truck ("shop does not have truck" triage). Keyed by canonical truck number
- * (digits, zeros stripped); rows may exist padded AND unpadded, so the map
- * keeps the newest per canonical key. Never throws. */
-export interface LucaDispatchInfo {
-  shopName: string | null;
-  shopPhone: string | null;
-  at: string | null;
-  dialed: boolean;
-  dryRun: boolean;
-}
+ * truck ("shop does not have truck" triage). Keys are NAMESPACED — `truck:` /
+ * `case:` + canonical digits (see buildLucaDispatchMap in shop-record-flags):
+ * a case key that is digit-identical to a DIFFERENT truck's number must never
+ * shadow that truck's real dispatch, or step 9 would read someone else's dial
+ * as provenance and silently demote a red card. Redirect dispatches
+ * (case_key ≠ target_truck) stay findable by case. Never throws. */
+export type { LucaDispatchInfo };
 export async function loadLatestLucaDispatches(): Promise<Map<string, LucaDispatchInfo>> {
-  const canon = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
   try {
     const res = await db.execute(sql`
-      SELECT DISTINCT ON (ltrim(regexp_replace(target_truck, '\\D', '', 'g'), '0'))
-             target_truck, shop_name, shop_phone, dialed, dry_run,
+      SELECT target_truck, case_key, shop_name, shop_phone, dialed, dry_run,
              to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS at
       FROM vrm_rental_operations_call_log
       WHERE source = 'luca_dispatch'
-      ORDER BY ltrim(regexp_replace(target_truck, '\\D', '', 'g'), '0'), created_at DESC
+      ORDER BY created_at DESC
     `);
-    const out = new Map<string, LucaDispatchInfo>();
-    for (const r of (res.rows as any[])) {
-      const key = canon(r.target_truck);
-      if (!key) continue;
-      out.set(key, {
-        shopName: r.shop_name ?? null,
-        shopPhone: r.shop_phone ?? null,
-        at: r.at ?? null,
-        dialed: r.dialed === true,
-        dryRun: r.dry_run === true,
-      });
-    }
-    return out;
+    return buildLucaDispatchMap(res.rows as any[]);
   } catch (e: any) {
     console.warn("[VRM/RentalOps] luca-dispatch read failed (non-fatal):", e?.message || e);
     return new Map();
@@ -2221,15 +2221,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   ]);
 
   const canonKey = (s: string) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
-  const toReconciled = (ctx: QueuePoContext | undefined) => ctx ? {
-    shopName: ctx.shopName,
-    shopPhone: ctx.shopPhone,
-    effStatus: ctx.effStatus,
-    shopPoDate: ctx.shopPoDate,
-    poNumber: ctx.poNumber,
-    openPoCount: ctx.openPoCount,
-    portalAt: ctx.portalAt,
-  } : null;
+  const toReconciled = (ctx: QueuePoContext | undefined) => reconciledShopFor(ctx);
 
   return {
     case: caseRow,

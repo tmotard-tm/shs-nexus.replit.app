@@ -20,6 +20,9 @@ import {
   truncateSummary,
   FS_MAIN_DECLINED_REPAIR,
   FS_SUB_SUBMITTED_FOR_SALE,
+  FS_TERMINAL_MAIN_STATUSES,
+  readyStatusNeedsWrite,
+  READY_REPLACEABLE_MAIN_STATUSES,
   type LucaOutboxTask,
   type LucaCallOutcomeItem,
 } from "./mapper";
@@ -438,6 +441,74 @@ test("the outcome table is EXHAUSTIVE over the LUCA enum (regression guard)", ()
     }
   }
   assert.equal(unmapped.length, 0, `unmapped enum values: ${unmapped.join(", ")}`);
+});
+
+// ─── Ready → Scheduling status gate (status-conflict fix 2026-08-06) ─────────
+// Every LUCA-ready truck showed as a red STATUS CONFLICT on the Ops Queue step
+// board: the writeback stamped lastCallStatus="Ready" but nothing moved
+// mainStatus out of Repairing / Confirming Status / Decision Pending — the
+// exact set todays-queue flags. readyStatusNeedsWrite gates the VRM-first
+// append that now performs the same correction a human would.
+
+console.log("readyStatusNeedsWrite:");
+
+const readyWrite = { lastCallStatus: "Ready" };
+
+test("fires for each of the three conflict statuses", () => {
+  for (const ms of READY_REPLACEABLE_MAIN_STATUSES) {
+    assert.equal(readyStatusNeedsWrite({ terminal: null }, readyWrite, { mainStatus: ms }), true, ms);
+  }
+});
+
+test("never fires outside the conflict set — deliberate states are not fought", () => {
+  for (const ms of ["Scheduling", "Tags", "PMF", "In Transit", "On Road", "Relocate Van", "Truck Swap", "", null]) {
+    assert.equal(readyStatusNeedsWrite({ terminal: null }, readyWrite, { mainStatus: ms as any }), false, String(ms));
+  }
+});
+
+test("terminal mains are untouchable even with a Ready call", () => {
+  for (const ms of FS_TERMINAL_MAIN_STATUSES) {
+    assert.equal(readyStatusNeedsWrite({ terminal: null }, readyWrite, { mainStatus: ms }), false, ms);
+  }
+});
+
+test("a stale-dropped or non-Ready call never flips status", () => {
+  // buildFinalWrite deletes the whole call tuple when it is older than the
+  // truck's lastCallDate — the gate must see that as "nothing to act on".
+  assert.equal(readyStatusNeedsWrite({ terminal: null }, {}, { mainStatus: "Repairing" }), false, "stale tuple dropped");
+  for (const s of ["In Repair", "Recovered", "Needs Tow", undefined]) {
+    assert.equal(readyStatusNeedsWrite({ terminal: null }, { lastCallStatus: s }, { mainStatus: "Repairing" }), false, String(s));
+  }
+});
+
+test("an item carrying a terminal status outranks ready", () => {
+  assert.equal(
+    readyStatusNeedsWrite(
+      { terminal: { mainStatus: FS_MAIN_DECLINED_REPAIR, subStatus: null } },
+      readyWrite,
+      { mainStatus: "Repairing" },
+    ),
+    false,
+  );
+});
+
+test("a final write already carrying a terminal main (direct fallback) outranks ready", () => {
+  assert.equal(
+    readyStatusNeedsWrite(
+      { terminal: null },
+      { lastCallStatus: "Ready", mainStatus: FS_MAIN_DECLINED_REPAIR },
+      { mainStatus: "Repairing" },
+    ),
+    false,
+  );
+});
+
+test("the mapped Ready shapes satisfy the gate end-to-end", () => {
+  // truck_ready outbox task + READY_PICKUP call outcome both stamp "Ready".
+  const t = mapOutboxTask(readyTask);
+  assert.equal(readyStatusNeedsWrite(t, t.truckWrite as any, { mainStatus: "Confirming Status" }), true);
+  const c = mapCallOutcome(readyOutcome);
+  assert.equal(readyStatusNeedsWrite(c, c.truckWrite as any, { mainStatus: "Repairing" }), true);
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

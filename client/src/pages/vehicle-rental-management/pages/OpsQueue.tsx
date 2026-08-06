@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { TechTextModal } from "../components/tech-text-modal";
 import { ShopInfoPanel } from "../components/shop-info-panel";
+import { DetailPanel } from "../components/case-detail-panel";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -990,12 +991,15 @@ function QueueRow({
   schedEditing,
   vocabulary,
   actions,
+  onOpenCase,
 }: {
   item: QueueItem;
   editing: boolean;
   schedEditing: boolean;
   vocabulary: QueueResponse["vocabulary"];
   actions: Omit<RowActionsProps, "item" | "editing" | "schedEditing" | "showOwnerSelect">;
+  /** Row-level click-through: open the full case-file panel for item.caseKey. */
+  onOpenCase?: (caseKey: string) => void;
 }) {
   const dismissed = !!item.dismissedToday;
   const hasFooter =
@@ -1004,12 +1008,18 @@ function QueueRow({
     ((item.step === 8 || item.step === 9) && item.research) ||
     (editing && item.caseKey) ||
     (schedEditing && item.caseKey);
+  const clickable = !!item.caseKey && !!onOpenCase;
   return (
-    <div style={{
-      display: "grid", gridTemplateColumns: "26px 210px minmax(260px, 1fr) 220px auto",
-      columnGap: 20, alignItems: "start", padding: "14px 16px",
-      borderBottom: `1px solid ${colors.rule}`, opacity: dismissed ? 0.45 : 1,
-    }}>
+    <div
+      onClick={clickable ? () => onOpenCase!(item.caseKey!) : undefined}
+      title={clickable ? "Open the case file — POs, comments, call log" : undefined}
+      data-testid={`queue-row-${item.truckNumber}`}
+      style={{
+        display: "grid", gridTemplateColumns: "26px 210px minmax(260px, 1fr) 220px auto",
+        columnGap: 20, alignItems: "start", padding: "14px 16px",
+        borderBottom: `1px solid ${colors.rule}`, opacity: dismissed ? 0.45 : 1,
+        cursor: clickable ? "pointer" : undefined,
+      }}>
       <div style={{ paddingTop: 1 }}><StepCircle step={item.step} /></div>
 
       <IdentityCell item={item} dismissed={dismissed} />
@@ -1104,7 +1114,10 @@ function QueueRow({
         item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
       ]} />
 
-      <RowActions item={item} editing={editing} schedEditing={schedEditing} showOwnerSelect={false} {...actions} />
+      {/* Buttons act on the row without opening the case file. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "contents" }}>
+        <RowActions item={item} editing={editing} schedEditing={schedEditing} showOwnerSelect={false} {...actions} />
+      </div>
     </div>
   );
 }
@@ -1118,6 +1131,7 @@ function BucketRow({
   vocabulary,
   hints,
   actions,
+  onOpenCase,
 }: {
   item: QueueItem;
   editing: boolean;
@@ -1126,18 +1140,26 @@ function BucketRow({
   /** classification key → human action directive (server classificationDefs). */
   hints: Record<string, string>;
   actions: Omit<RowActionsProps, "item" | "editing" | "schedEditing" | "showOwnerSelect">;
+  /** Row-level click-through: open the full case-file panel for item.caseKey. */
+  onOpenCase?: (caseKey: string) => void;
 }) {
   const dismissed = !!item.dismissedToday;
   const cls = item.classifications ?? [];
   const primary = cls[0];
   const directive = primary ? hints[primary.key] : undefined;
   const chips = item.contextChips;
+  const clickable = !!item.caseKey && !!onOpenCase;
   return (
-    <div style={{
-      display: "grid", gridTemplateColumns: "210px minmax(260px, 1fr) 250px auto",
-      columnGap: 20, alignItems: "start", padding: "14px 16px",
-      borderBottom: `1px solid ${colors.rule}`, opacity: dismissed ? 0.45 : 1,
-    }}>
+    <div
+      onClick={clickable ? () => onOpenCase!(item.caseKey!) : undefined}
+      title={clickable ? "Open the case file — POs, comments, call log" : undefined}
+      data-testid={`bucket-row-${item.truckNumber}`}
+      style={{
+        display: "grid", gridTemplateColumns: "210px minmax(260px, 1fr) 250px auto",
+        columnGap: 20, alignItems: "start", padding: "14px 16px",
+        borderBottom: `1px solid ${colors.rule}`, opacity: dismissed ? 0.45 : 1,
+        cursor: clickable ? "pointer" : undefined,
+      }}>
       <IdentityCell item={item} dismissed={dismissed} />
 
       <div style={{ minWidth: 0 }}>
@@ -1270,7 +1292,10 @@ function BucketRow({
         item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
       ]} />
 
-      <RowActions item={item} editing={editing} schedEditing={schedEditing} showOwnerSelect {...actions} />
+      {/* Buttons act on the row without opening the case file. */}
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "contents" }}>
+        <RowActions item={item} editing={editing} schedEditing={schedEditing} showOwnerSelect {...actions} />
+      </div>
     </div>
   );
 }
@@ -1293,6 +1318,9 @@ export default function OpsQueue() {
   const [textFor, setTextFor] = useState<string | null>(null);
   // Which item the shop-info popout panel is open for. Null = closed.
   const [shopEditFor, setShopEditFor] = useState<QueueItem | null>(null);
+  // Which case the full case-file panel (POs / comments / call log) is open
+  // for — the same DetailPanel the Rental Operations board opens. Null = closed.
+  const [panelKey, setPanelKey] = useState<string | null>(null);
 
   const { data, isLoading, isFetching, refetch } = useQuery<QueueResponse>({
     queryKey: ["/api/vrm/rental-operations/queue"],
@@ -1405,6 +1433,23 @@ export default function OpsQueue() {
     if (!item.key) return;
     researchMut.mutate({ key: item.key, active });
   }, [researchMut]);
+
+  // Operator mark (Rental OPEN / CLOSE ticket / Needs PICK UP) from inside the
+  // case-file panel — the same shared action rows the Rental Operations and
+  // Cases by Region boards write, so a mark set here shows there and vice versa.
+  const markMut = useMutation({
+    mutationFn: (v: { caseKey: string; mark: string }) =>
+      apiRequest("POST", `/api/vrm/rental-operations/master/${v.caseKey}/actions`, { action_type: "mark", mark_value: v.mark }),
+    onSuccess: (_r, v) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${v.caseKey}`] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+    },
+    onError: (e: any) => toast({ title: "Mark failed", description: e?.message || "Unknown error", variant: "destructive" }),
+  });
+  const doMark = useCallback((caseKey: string, mark: string, current: string | null) => {
+    markMut.mutate({ caseKey, mark: current === mark ? "none" : mark });
+  }, [markMut]);
 
   const toggleEdit = useCallback((truckId: string) => {
     setEditingRows((prev) => {
@@ -1717,6 +1762,7 @@ export default function OpsQueue() {
                         vocabulary={vocabulary}
                         hints={hints}
                         actions={rowActions}
+                        onOpenCase={setPanelKey}
                       />
                     ))}
                   </div>
@@ -1745,6 +1791,7 @@ export default function OpsQueue() {
                       vocabulary={vocabulary}
                       hints={hints}
                       actions={rowActions}
+                      onOpenCase={setPanelKey}
                     />
                   ))}
                 </div>
@@ -1849,6 +1896,7 @@ export default function OpsQueue() {
                             schedEditing={schedRows.has(item.truckId)}
                             vocabulary={vocabulary}
                             actions={rowActions}
+                            onOpenCase={setPanelKey}
                           />
                         ))}
                       </div>
@@ -1883,9 +1931,13 @@ export default function OpsQueue() {
                 {noActionExpanded && noAction.map((item) => (
                   <div
                     key={item.truckId}
+                    onClick={item.caseKey ? () => setPanelKey(item.caseKey) : undefined}
+                    title={item.caseKey ? "Open the case file — POs, comments, call log" : undefined}
+                    data-testid={`no-action-row-${item.truckNumber}`}
                     style={{
                       display: "flex", alignItems: "center", gap: 10, padding: "8px 16px",
                       borderBottom: `1px solid ${colors.rule}`, opacity: 0.65,
+                      cursor: item.caseKey ? "pointer" : undefined,
                     }}
                   >
                     <span style={{ fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink }}>{item.truckNumber}</span>
@@ -1907,6 +1959,21 @@ export default function OpsQueue() {
 
       {textFor && <TechTextModal caseKey={textFor} onClose={() => setTextFor(null)} />}
       {shopEditFor && <ShopInfoPanel item={shopEditFor} onClose={() => setShopEditFor(null)} />}
+      {/* The same case-file panel the Rental Operations / Cases by Region
+          boards open. Queue items carry less row context than a MasterRow, so
+          only the fields the queue actually knows are passed — the panel
+          fetches everything else itself. */}
+      {panelKey && (() => {
+        const it = allItems.find((i) => i.caseKey === panelKey);
+        return (
+          <DetailPanel
+            caseKey={panelKey}
+            row={it ? { assigned_truck: it.assignedTruck ?? null, tpms_tech: it.techName ?? null } : undefined}
+            onClose={() => setPanelKey(null)}
+            onMark={doMark}
+          />
+        );
+      })()}
     </div>
   );
 }

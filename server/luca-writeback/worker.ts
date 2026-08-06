@@ -45,7 +45,17 @@
 import { fsPool } from "../fleet-scope-db";
 import { applyReadyForPickup, isReadyReason } from "../vrm/rental-operations/ready-ingest";
 import { applyNeedsAttention, isAttentionReason } from "../vrm/rental-operations/attention-ingest";
-import { reasonLabel } from "./mapper";
+import { appendFleetStatus, appendFleetStatusIfMainIn } from "../vrm/rental-operations/fleet-status";
+import { invalidateTodaysQueueCache } from "../todays-queue";
+import {
+  reasonLabel,
+  normalizeTruckNumber,
+  terminalNeedsWrite,
+  readyStatusNeedsWrite,
+  READY_REPLACEABLE_MAIN_STATUSES,
+  FS_MAIN_SCHEDULING,
+  FS_SUB_TO_BE_SCHEDULED,
+} from "./mapper";
 import { fleetScopeStorage } from "../fleet-scope-storage";
 import { storage } from "../storage";
 import {
@@ -56,7 +66,6 @@ import {
   mapOutboxTask,
   mapCallOutcome,
   decideRedelivery,
-  FS_TERMINAL_MAIN_STATUSES,
   type LucaOutboxTask,
   type LucaCallOutcomeItem,
   type MappedWriteback,
@@ -350,14 +359,118 @@ function buildFinalWrite(
     }
   }
 
-  if (mapped.terminal) {
-    const currentMain = truck.mainStatus ?? "";
-    if (!FS_TERMINAL_MAIN_STATUSES.includes(currentMain)) {
-      write.mainStatus = mapped.terminal.mainStatus;
-      write.subStatus = mapped.terminal.subStatus;
-    }
+  if (terminalNeedsWrite(mapped, truck)) {
+    write.mainStatus = mapped.terminal!.mainStatus;
+    write.subStatus = mapped.terminal!.subStatus;
   }
   return write;
+}
+
+/**
+ * VRM-first terminal status (authority directive 2026-08-06: VRM owns rental
+ * state; FleetScope mirrors it). Append the terminal outcome to VRM
+ * fleet-status history — vocabulary-validated, and write-through mirrored onto
+ * fs_trucks by appendFleetStatus itself — instead of writing fs_trucks first
+ * and leaving VRM's lazy adopt sweep to pick it up later. Returns true when
+ * VRM handled (or, in log-only mode, would handle) the status so the caller
+ * strips it from the direct fs_trucks write; any failure returns false LOUDLY
+ * and the legacy direct write + adopt sweep remain the safety net.
+ */
+async function routeTerminalViaVrm(
+  mapped: MappedWriteback,
+  truck: { mainStatus?: string | null },
+  apply: boolean,
+  label: string,
+): Promise<boolean> {
+  if (!terminalNeedsWrite(mapped, truck)) return false;
+  const terminal = mapped.terminal!;
+  // case_key is the 5-digit display form of the truck number — the exact
+  // derivation the ready/attention lanes use (ready-ingest).
+  const norm = normalizeTruckNumber(mapped.truckNumberDisplay ?? mapped.truckNumberCanonical);
+  if (!norm) {
+    console.warn(`[LUCA-Writeback] ${label}: terminal status but unusable truck number — using direct fs_trucks write`);
+    return false;
+  }
+  const caseKey = norm.display;
+  const desc = `${terminal.mainStatus}${terminal.subStatus ? ` / ${terminal.subStatus}` : ""}`;
+  if (!apply) {
+    console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD append VRM fleet-status ${caseKey} -> ${desc} (mirror would update fs_trucks)`);
+    return true;
+  }
+  try {
+    await appendFleetStatus(caseKey, terminal.mainStatus, terminal.subStatus, "LUCA");
+    invalidateTodaysQueueCache("luca-terminal-status");
+    console.log(`[LUCA-Writeback] ${label}: VRM fleet-status ${caseKey} -> ${desc} (mirrored to fs_trucks)`);
+    return true;
+  } catch (err: any) {
+    console.warn(
+      `[LUCA-Writeback] ${label}: VRM fleet-status append failed for ${caseKey} (${err?.message ?? err}) — falling back to direct fs_trucks write`,
+    );
+    return false;
+  }
+}
+
+/**
+ * VRM-first ready status (same authority directive as routeTerminalViaVrm): a
+ * phone-confirmed Ready ALSO moves the truck out of the three mains the Ops
+ * Queue flags as STATUS CONFLICT (Repairing / Confirming Status / Decision
+ * Pending) into Scheduling / "To be scheduled for tech pickup" — the exact
+ * correction a human makes when the board says "Correct all systems then
+ * arrange pickup"; step 2 then prompts for the pickup date. Before this,
+ * EVERY LUCA-ready truck sat red forever because the writeback stamped only
+ * call fields.
+ *
+ * Runs AFTER buildFinalWrite so the monotonic stale-call guard has already
+ * spoken — a stale Ready never flips status. Unlike the terminal path there is
+ * deliberately NO direct fs_trucks fallback: on append failure the truck stays
+ * in the conflict set and the red row IS the divergence signal; a silent
+ * direct write would hide the failure and let VRM history drift from the
+ * mirror.
+ */
+async function routeReadyStatusViaVrm(
+  mapped: MappedWriteback,
+  finalWrite: Record<string, unknown>,
+  truck: { mainStatus?: string | null },
+  apply: boolean,
+  label: string,
+): Promise<boolean> {
+  if (!readyStatusNeedsWrite(mapped, finalWrite, truck)) return false;
+  const norm = normalizeTruckNumber(mapped.truckNumberDisplay ?? mapped.truckNumberCanonical);
+  if (!norm) {
+    console.warn(`[LUCA-Writeback] ${label}: ready status but unusable truck number — leaving fleet status as-is`);
+    return false;
+  }
+  const caseKey = norm.display;
+  const desc = `${FS_MAIN_SCHEDULING} / ${FS_SUB_TO_BE_SCHEDULED}`;
+  if (!apply) {
+    console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD append VRM fleet-status ${caseKey} -> ${desc} (ready call resolves "${truck.mainStatus}")`);
+    return true;
+  }
+  try {
+    // Compare-at-write: the guard re-reads the effective status and refuses
+    // when an operator (or another writer) moved it out of the replaceable set
+    // after resolveTruck read the row — READY_REPLACEABLE_MAIN_STATUSES is
+    // enforced both here and at read time on purpose.
+    const g = await appendFleetStatusIfMainIn(
+      caseKey,
+      READY_REPLACEABLE_MAIN_STATUSES,
+      FS_MAIN_SCHEDULING,
+      FS_SUB_TO_BE_SCHEDULED,
+      "LUCA",
+    );
+    if (!g.applied) {
+      console.log(`[LUCA-Writeback] ${label}: ready-status append skipped for ${caseKey} — ${g.skippedReason}`);
+      return false;
+    }
+    invalidateTodaysQueueCache("luca-ready-status");
+    console.log(`[LUCA-Writeback] ${label}: VRM fleet-status ${caseKey} -> ${desc} (ready call resolves "${truck.mainStatus}")`);
+    return true;
+  } catch (err: any) {
+    console.warn(
+      `[LUCA-Writeback] ${label}: VRM ready-status append failed for ${caseKey} (${err?.message ?? err}) — status left as-is; the queue keeps showing the conflict`,
+    );
+    return false;
+  }
 }
 
 /**
@@ -546,7 +659,33 @@ async function processItem(
     }
   }
 
-  const finalWrite = buildFinalWrite(mapped, truck);
+  // VRM-first: a terminal status appends to VRM fleet-status history (whose
+  // write-through mirror updates fs_trucks); only on failure does it ride the
+  // direct write below as fallback.
+  const terminalViaVrm = await routeTerminalViaVrm(mapped, truck, cfg.apply, label);
+  const finalWrite = buildFinalWrite(terminalViaVrm ? { ...mapped, terminal: null } : mapped, truck);
+  if (terminalViaVrm) {
+    // The append's fs_trucks mirror already stamped last_updated_by =
+    // "VRM:LUCA" — the true last STATUS writer. This follow-up write carries
+    // call fields only, so it must not reset the marker to "LUCA": the
+    // reconcile adopt guard (last_updated_by NOT LIKE 'VRM:%') relies on it
+    // to refuse re-adopting a stale fs_trucks value during divergence windows.
+    // (Same convention as the VRM phone mirror, which never touches it.)
+    delete (finalWrite as Record<string, unknown>).lastUpdatedBy;
+  }
+
+  // VRM-first ready status: a surviving phone-confirmed Ready also moves the
+  // truck out of the STATUS CONFLICT mains into the pickup pipeline. Ordered
+  // after the terminal router — a terminal outcome always outranks ready (the
+  // gate refuses any item carrying one). Uses finalWrite, not truckWrite, so
+  // a Ready dropped by the stale-call guard can never flip status.
+  const readyStatusViaVrm = await routeReadyStatusViaVrm(mapped, finalWrite, truck, cfg.apply, label);
+  if (readyStatusViaVrm) {
+    // Same convention as the terminal path above: the append's mirror stamped
+    // last_updated_by = "VRM:LUCA"; this follow-up write carries call fields
+    // only and must not reset that marker.
+    delete (finalWrite as Record<string, unknown>).lastUpdatedBy;
+  }
 
   if (!cfg.apply) {
     result.wouldApply++;
