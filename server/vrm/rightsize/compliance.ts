@@ -109,6 +109,7 @@ export async function initRightsizeComplianceSchema(): Promise<void> {
       ["VTARASY","Refrigerator/HVAC hybrid"],["JCARDO3","Refrigerator/HVAC hybrid"],
       ["PDUNKL","Refrigerator/HVAC hybrid"],["DPLANT","Refrigerator/HVAC hybrid"],
       ["SFNU0","Refrigerator/HVAC hybrid"],["CSCOTT","Refrigerator/HVAC hybrid"],
+      ["AFRELIC","Refrigerator/HVAC hybrid"],
     ] as Array<[string,string]>).map(([l,lab]) => sql`(${l}, ${lab}, 'seed', 'self-declared refrigeration / sealed-system work, 2026-08-05')`),
     sql`, `,
   );
