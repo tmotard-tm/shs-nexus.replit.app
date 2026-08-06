@@ -15191,14 +15191,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
+  // ── Profile resolver ─────────────────────────────────────────────────────
+  // tech_id is NOT unique in tpms_tech_profiles — see server/tpms-profile-resolver.ts.
+  // Every profile route resolves the URL param to exactly ONE row (enterprise_id
+  // first, unambiguous tech_id second, 409 on ambiguity) and all writes key on
+  // the resolved row's enterprise_id, never tech_id.
+  const { resolveTechProfile } = await import("./tpms-profile-resolver");
+
   app.get("/api/tpms/techs/:techId/profile", requireAuth, async (req: any, res) => {
     try {
-      const { techId } = req.params;
-      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      
-      if (!profile) {
-        return res.status(404).json({ message: "Tech profile not found" });
-      }
+      const resolved = await resolveTechProfile(req.params.techId);
+      if (!resolved.ok) return res.status(resolved.status).json(resolved.body);
+      const profile = resolved.profile;
       
       let liveData = null;
       try {
@@ -15220,11 +15224,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   app.get("/api/tpms/techs/:techId", requireAuth, async (req: any, res) => {
     try {
       const { techId } = req.params;
-      const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      
-      if (!profile) {
-        return res.status(404).json({ message: "Tech profile not found" });
-      }
+      const resolved = await resolveTechProfile(techId);
+      if (!resolved.ok) return res.status(resolved.status).json(resolved.body);
+      const profile = resolved.profile;
       
       let liveData: any = null;
       let liveSource: 'api' | 'cache' | 'none' = 'none';
@@ -15278,10 +15280,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         return res.status(400).json({ message: "No valid fields to update" });
       }
       
-      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      if (!existing) {
-        return res.status(404).json({ message: "Tech profile not found" });
-      }
+      const resolvedPut = await resolveTechProfile(techId);
+      if (!resolvedPut.ok) return res.status(resolvedPut.status).json(resolvedPut.body);
+      const existing = resolvedPut.profile;
       
       const changeEntries: any[] = [];
       
@@ -15313,7 +15314,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       await db.update(tpmsTechProfiles)
         .set({ ...updates, updatedAt: new Date() })
-        .where(eq(tpmsTechProfiles.techId, techId));
+        .where(eq(tpmsTechProfiles.enterpriseId, existing.enterpriseId));
       
       let tpmsSyncSent = false;
       let tpmsSyncError: string | null = null;
@@ -15347,9 +15348,21 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const { techId } = req.params;
       const limit = Math.min(parseInt(req.query.limit as string || "100", 10), 500);
       
-      // Local CDC log entries
+      // Resolve uniquely (enterprise_id first, unambiguous tech_id second) so a
+      // shared tech_id can't surface another tech's history/live state.
+      const resolvedHist = await resolveTechProfile(techId);
+      if (!resolvedHist.ok) return res.status(resolvedHist.status).json(resolvedHist.body);
+      const profile = resolvedHist.profile;
+      
+      // Local CDC log entries — match on enterprise_id (unique) OR the legacy techId key.
+      // Use the RESOLVED profile's techId (callers now pass enterpriseId in the URL,
+      // so matching the raw route param against tpms_change_log.techId would miss
+      // legacy rows keyed by tech_id).
       const history = await db.select().from(tpmsChangeLog)
-        .where(eq(tpmsChangeLog.techId, techId))
+        .where(or(
+          eq(tpmsChangeLog.enterpriseId, profile.enterpriseId),
+          eq(tpmsChangeLog.techId, profile.techId),
+        ))
         .orderBy(desc(tpmsChangeLog.createdAt))
         .limit(limit);
       
@@ -15358,8 +15371,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       let tpmsStateSource: 'api' | 'cache' | 'none' = 'none';
       let tpmsApiHistory: any[] = [];
       try {
-        const [profile] = await db.select({ enterpriseId: tpmsTechProfiles.enterpriseId })
-          .from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
         if (profile?.enterpriseId) {
           const tpmsService = getTPMSService();
           const { getTpmsApiService } = await import("./tpms-api-service");
@@ -15367,7 +15378,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
 
           const [profileResult, apiHistory] = await Promise.allSettled([
             tpmsService.getTechInfoWithCache(profile.enterpriseId),
-            tpmsApiService.getChangeHistory(profile.enterpriseId, techId),
+            tpmsApiService.getChangeHistory(profile.enterpriseId, profile.techId),
           ]);
 
           if (profileResult.status === 'fulfilled' && profileResult.value) {
@@ -15406,16 +15417,15 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
       
-      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      if (!existing) {
-        return res.status(404).json({ message: "Tech profile not found" });
-      }
+      const resolvedAdd = await resolveTechProfile(techId);
+      if (!resolvedAdd.ok) return res.status(resolvedAdd.status).json(resolvedAdd.body);
+      const existing = resolvedAdd.profile;
       
       const addresses = [...(existing.shippingAddresses as any[] || []), newAddress];
       
       await db.update(tpmsTechProfiles)
         .set({ shippingAddresses: addresses, updatedAt: new Date() })
-        .where(eq(tpmsTechProfiles.techId, techId));
+        .where(eq(tpmsTechProfiles.enterpriseId, existing.enterpriseId));
       
       await db.insert(tpmsChangeLog).values({
         userId, username, techId, enterpriseId: existing.enterpriseId,
@@ -15455,8 +15465,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
       
-      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      if (!existing) return res.status(404).json({ message: "Tech profile not found" });
+      const resolvedEditAddr = await resolveTechProfile(techId);
+      if (!resolvedEditAddr.ok) return res.status(resolvedEditAddr.status).json(resolvedEditAddr.body);
+      const existing = resolvedEditAddr.profile;
       
       const addresses = [...(existing.shippingAddresses as any[] || [])];
       if (idx < 0 || idx >= addresses.length) return res.status(400).json({ message: "Invalid address index" });
@@ -15465,7 +15476,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       await db.update(tpmsTechProfiles)
         .set({ shippingAddresses: addresses, updatedAt: new Date() })
-        .where(eq(tpmsTechProfiles.techId, techId));
+        .where(eq(tpmsTechProfiles.enterpriseId, existing.enterpriseId));
       
       await db.insert(tpmsChangeLog).values({
         userId, username, techId, enterpriseId: existing.enterpriseId,
@@ -15501,8 +15512,9 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const userId = req.user?.id || req.user?.username || "system";
       const username = req.user?.username || "system";
       
-      const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, techId)).limit(1);
-      if (!existing) return res.status(404).json({ message: "Tech profile not found" });
+      const resolvedDelAddr = await resolveTechProfile(techId);
+      if (!resolvedDelAddr.ok) return res.status(resolvedDelAddr.status).json(resolvedDelAddr.body);
+      const existing = resolvedDelAddr.profile;
       
       const addresses = [...(existing.shippingAddresses as any[] || [])];
       if (idx < 0 || idx >= addresses.length) return res.status(400).json({ message: "Invalid address index" });
@@ -15511,7 +15523,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       
       await db.update(tpmsTechProfiles)
         .set({ shippingAddresses: addresses, updatedAt: new Date() })
-        .where(eq(tpmsTechProfiles.techId, techId));
+        .where(eq(tpmsTechProfiles.enterpriseId, existing.enterpriseId));
       
       await db.insert(tpmsChangeLog).values({
         userId, username, techId, enterpriseId: existing.enterpriseId,
@@ -15587,12 +15599,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const tpmsService = getTPMSService();
       
       for (const tid of techIds) {
-        const [existing] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, tid)).limit(1);
-        if (!existing) continue;
+        const resolvedSched = await resolveTechProfile(tid);
+        if (!resolvedSched.ok) continue; // skip missing/ambiguous ids — never bulk-stamp a shared tech_id
+        const existing = resolvedSched.profile;
         
         await db.update(tpmsTechProfiles)
           .set({ shippingSchedule: schedule, updatedAt: new Date() })
-          .where(eq(tpmsTechProfiles.techId, tid));
+          .where(eq(tpmsTechProfiles.enterpriseId, existing.enterpriseId));
         
         await db.insert(tpmsChangeLog).values({
           userId, username, techId: tid, enterpriseId: existing.enterpriseId,
@@ -15753,7 +15766,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       let confirmed = 0;
       const pendingLogs = await db.select().from(tpmsChangeLog).where(isNull(tpmsChangeLog.confirmedAt));
       for (const log of pendingLogs) {
-        const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
+        // enterprise_id is unique — tech_id is NOT (shared tech_ids exist); prefer it
+        const [profile] = log.enterpriseId
+          ? await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, log.enterpriseId)).limit(1)
+          : await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
         if (!profile) continue;
         
         const currentValue = (profile as any)[log.fieldChanged];
@@ -15839,7 +15855,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         let confirmed = 0;
         const pendingLogs = await db.select().from(tpmsChangeLog).where(isNull(tpmsChangeLog.confirmedAt));
         for (const log of pendingLogs) {
-          const [profile] = await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
+          // enterprise_id is unique — tech_id is NOT (shared tech_ids exist); prefer it
+          const [profile] = log.enterpriseId
+            ? await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.enterpriseId, log.enterpriseId)).limit(1)
+            : await db.select().from(tpmsTechProfiles).where(eq(tpmsTechProfiles.techId, log.techId)).limit(1);
           if (!profile) continue;
           const currentValue = (profile as any)[log.fieldChanged];
           const currentStr = typeof currentValue === "object" ? JSON.stringify(currentValue) : String(currentValue ?? "");

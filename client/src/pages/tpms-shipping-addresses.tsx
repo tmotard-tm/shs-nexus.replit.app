@@ -81,7 +81,7 @@ export default function TpmsShippingAddresses() {
       const results = [];
       for (const t of selected) {
         try {
-          await apiRequest("POST", `/api/tpms/techs/${t.techId}/addresses`, address);
+          await apiRequest("POST", `/api/tpms/techs/${encodeURIComponent(t.enterpriseId || t.techId || "")}/addresses`, address);
           results.push({ techId: t.techId, success: true });
         } catch (e: any) {
           results.push({ techId: t.techId, success: false, error: e.message });

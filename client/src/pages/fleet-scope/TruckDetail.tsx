@@ -407,7 +407,11 @@ export default function TruckDetail() {
   });
 
   // CDC pending changes for this truck's tech
-  const tpmsTechId = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0 ? tpmsTechProfile[0]?.techId : null;
+  // enterprise_id is the UNIQUE profile key — tech_id can be shared by multiple techs
+  // (the server 409s ambiguous tech_ids), so prefer enterpriseId in route params.
+  const tpmsTechId = Array.isArray(tpmsTechProfile) && tpmsTechProfile.length > 0
+    ? (tpmsTechProfile[0]?.enterpriseId || tpmsTechProfile[0]?.techId)
+    : null;
   const { data: tpmsChangeHistoryData } = useQuery<{ techId: string; cdcLog: any[]; currentTpmsState: any; tpmsStateSource: string; pendingCount: number }>({
     queryKey: ["/api/tpms/techs", tpmsTechId, "change-history"],
     queryFn: async () => {

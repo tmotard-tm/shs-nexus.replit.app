@@ -90,7 +90,7 @@ export default function ShippingAddresses() {
       const results = [];
       for (const tech of data.techs) {
         try {
-          const res = await apiRequest("POST", `/api/tpms/techs/${tech.techId}/addresses`, data.address);
+          const res = await apiRequest("POST", `/api/tpms/techs/${encodeURIComponent(tech.enterpriseId || tech.techId)}/addresses`, data.address);
           results.push({ techId: tech.techId, success: true });
         } catch (err: any) {
           results.push({ techId: tech.techId, success: false, error: err.message });
@@ -111,7 +111,7 @@ export default function ShippingAddresses() {
 
   const editMutation = useMutation({
     mutationFn: async (data: { techId: string; index: number; address: any }) => {
-      await apiRequest("PUT", `/api/tpms/techs/${data.techId}/addresses/${data.index}`, data.address);
+      await apiRequest("PUT", `/api/tpms/techs/${encodeURIComponent(data.techId)}/addresses/${data.index}`, data.address);
     },
     onSuccess: () => {
       toast({ title: "Address updated", description: "Shipping address updated and synced to TPMS." });
@@ -127,7 +127,7 @@ export default function ShippingAddresses() {
 
   const deleteMutation = useMutation({
     mutationFn: async (data: { techId: string; index: number }) => {
-      await apiRequest("DELETE", `/api/tpms/techs/${data.techId}/addresses/${data.index}`);
+      await apiRequest("DELETE", `/api/tpms/techs/${encodeURIComponent(data.techId)}/addresses/${data.index}`);
     },
     onSuccess: () => {
       toast({ title: "Address removed", description: "Shipping address removed and synced to TPMS." });
@@ -354,7 +354,7 @@ export default function ShippingAddresses() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-7 w-7"
-                                      onClick={() => openEditDialog(tech.techId, 0, primaryAddr)}
+                                      onClick={() => openEditDialog(tech.enterpriseId || tech.techId, 0, primaryAddr)}
                                     >
                                       <Pencil className="h-3.5 w-3.5" />
                                     </Button>
@@ -363,7 +363,7 @@ export default function ShippingAddresses() {
                                       variant="ghost"
                                       size="icon"
                                       className="h-7 w-7 text-red-500 hover:text-red-700"
-                                      onClick={() => handleDeleteAddress(tech.techId, 0)}
+                                      onClick={() => handleDeleteAddress(tech.enterpriseId || tech.techId, 0)}
                                     >
                                       <Trash2 className="h-3.5 w-3.5" />
                                     </Button>

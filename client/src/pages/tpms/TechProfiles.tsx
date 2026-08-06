@@ -166,9 +166,9 @@ export default function TechProfiles() {
     tpmsStateSource: string;
     pendingCount: number;
   } | ChangeLogEntry[]>({
-    queryKey: ["/api/tpms/techs", selectedTech?.techId, "change-history"],
+    queryKey: ["/api/tpms/techs", selectedTech?.enterpriseId || selectedTech?.techId, "change-history"],
     queryFn: async () => {
-      const res = await fetch(`/api/tpms/techs/${selectedTech!.techId}/change-history`);
+      const res = await fetch(`/api/tpms/techs/${encodeURIComponent(selectedTech!.enterpriseId || selectedTech!.techId)}/change-history`);
       if (!res.ok) throw new Error("Failed to load change history");
       return res.json();
     },
@@ -186,7 +186,7 @@ export default function TechProfiles() {
 
   const updateMutation = useMutation({
     mutationFn: async (data: { techId: string; updates: Record<string, any> }) => {
-      const res = await apiRequest("PUT", `/api/tpms/techs/${data.techId}`, data.updates);
+      const res = await apiRequest("PUT", `/api/tpms/techs/${encodeURIComponent(data.techId)}`, data.updates);
       return res.json();
     },
     onSuccess: (result: any) => {
@@ -228,7 +228,8 @@ export default function TechProfiles() {
   const handleSave = () => {
     if (!selectedTech) return;
     updateMutation.mutate({
-      techId: selectedTech.techId,
+      // enterprise_id is the UNIQUE key — tech_id can be shared by multiple techs
+      techId: selectedTech.enterpriseId || selectedTech.techId,
       updates: {
         firstName: editData.firstName,
         lastName: editData.lastName,
