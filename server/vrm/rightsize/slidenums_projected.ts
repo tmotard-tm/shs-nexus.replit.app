@@ -96,9 +96,28 @@ const tally = (xs: any[]) => {
   const total = k("addressable") + k("excludedTrade") + k("outOfScope");
   const money = (n: number) => "$" + (n * SAVINGS_PER_RENTAL_MONTHLY).toLocaleString("en-US");
 
+  // THE NUMBER NEXUS SHOWS. compliance across ALL open rentals, not just the
+  // addressable subset. This is what the dashboard and Tyler read, and what
+  // vrm_rightsize_compliance_snapshots.compliant stores. The deck MUST lead
+  // with this or it contradicts the dashboard in the room. 8/4 book 226 ->
+  // 8/5 book 229; the addressable-only view (208) is a different denominator
+  // and reads as a fall when it is not one.
+  const compliantAll = k("byRateOnly") + k("byModelOnly") + k("byBoth") + k("bySmsOnly");
+  const projCompliantAll = compliantAll + creditedDone;
+  const carvedOutNotCompliant = total - projCompliantAll - projLeft.length;
+
   const out = {
     asOf: new Date().toISOString(),
     basis: "code + corroboration gate applied to parked proposals",
+    nexusBasis: {
+      compliantAllRentalsNow: compliantAll,
+      projectedCompliantAllRentals: projCompliantAll,
+      stillToChase: projLeft.length,
+      carvedOutNotCompliant,
+      pctOfAllOpen: Math.round((projCompliantAll / total) * 1000) / 10,
+      capturedMonthly: "$" + (projCompliantAll * SAVINGS_PER_RENTAL_MONTHLY).toLocaleString("en-US"),
+      capturedAnnual: "$" + (projCompliantAll * SAVINGS_PER_RENTAL_MONTHLY * 12).toLocaleString("en-US"),
+    },
     current: {
       openEnterpriseRentals: total,
       hvacRefrigeration: k("excludedTrade"),
@@ -135,6 +154,11 @@ const tally = (xs: any[]) => {
       bucketsSumToLeft: Object.values(tally(projLeft)).reduce((a, c) => a + c, 0) === projLeft.length,
       noDoubleCredit: unexplained.length === 0,
       leftMovedByExactlyReleased: k("left") - projLeft.length === creditedDone + creditedRet,
+      // The three-way split the slide prints must cover every open rental once.
+      nexusSplitCoversBook: projCompliantAll + projLeft.length + carvedOutNotCompliant === total,
+      // Sanity: the all-rows figure must match the stored snapshot (229 on 8/6).
+      compliantAllEqualsVerifiedLegs:
+        compliantAll === k("byRateOnly") + k("byModelOnly") + k("byBoth") + k("bySmsOnly"),
     },
     leftByBucket: tally(projLeft),
     money: {
