@@ -44,7 +44,35 @@ export type PoVendorType = "repair" | "tow" | "parts" | "rental_placeholder" | "
 
 // Name-only regexes. NEVER test these against a PO description / ATA group.
 export const TOLL_RE = /\bTOLL/i;
-export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|JUMP\s?START|LOCKOUT|WINCH/i;
+export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH/i;
+
+// ── HARD RULE (Tyler, 2026-08-05): never the shop of record ─────────────────
+// "We recognize all the towing and recovery companies, and we never list those
+// as the current shop. … This should be the most recent actual repair shop, not
+// a towing company, not TRAC, not Safelite. It needs to be Pep Boys or one of
+// our listed vendors."
+//
+// This is DELIBERATELY stronger than the tow classification above: Tyler's
+// older parts/labor exception still lets a tow-named vendor count as an OPEN
+// REPAIR (classifyPoVendor → 'repair', so open_po_count / callable semantics
+// are unchanged), but such a vendor may NEVER surface as the current shop on
+// any board/queue/feed, and LUCA must never be pointed at it. Glass-only
+// outfits (Safelite & co.) and roadside brokers (TRAC) are in the same bucket.
+//
+// NEVER_SHOP_RE (JS) and NEVER_SHOP_SQL_RE (Postgres, \m/\M word boundaries)
+// MUST stay in sync — the SQL form filters the shop_pick/shop_strict CTEs, the
+// JS form filters the portal-side picker. Unit-tested in ./vendor-class.test.ts.
+export const NEVER_SHOP_RE =
+  /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH|SAFELITE|\bGLASS\b|\bTRACS?\b/i;
+export const NEVER_SHOP_SQL_RE =
+  String.raw`\mTRXNOW\M|\mTOW\M|\mTOWING\M|WRECKER|ROADSIDE|RECOVERY|JUMP ?START|LOCKOUT|WINCH|SAFELITE|\mGLASS\M|\mTRACS?\M`;
+
+/** True when this vendor name may NEVER be listed/dialed as the current shop,
+ * regardless of what its PO lines say. Null-safe; empty names are not banned
+ * here (they are already non-callable via classifyPoVendor → 'other'). */
+export function isNeverShopVendor(name: string | null | undefined): boolean {
+  return NEVER_SHOP_RE.test(String(name ?? ""));
+}
 export const PARTS_RE = /\bJASPER\b|HOLMAN PARTS|PARTS DISTRIBUTION|\bNAPA\b|AUTOZONE|O'?REILLY|ADVANCE AUTO|GENUINE PARTS|WORLDPAC/i;
 // \bENTERPRISE\b is deliberately the SINGULAR with word boundaries: every
 // singular-ENTERPRISE vendor in 3y of ETL data is the rental company

@@ -300,6 +300,34 @@ export async function initRentalOperationsSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_source VARCHAR(20);`);
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_edited_by VARCHAR(120);`);
   await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_phone_edited_at TIMESTAMPTZ;`);
+  // Manual shop-NAME override (queue popout panel, 2026-08-05): unlike the
+  // phone, the reconciled shop name is DERIVED per-read from PO history
+  // (shop_pick), so a manual name lives in its own column and wins by presence —
+  // no separate locked flag; scrapes never write shop_name_override. It expires
+  // on the same episode-scoped clock as phone locks (expireStaleShopPhoneLocks).
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override VARCHAR(160);`);
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override_by VARCHAR(120);`);
+  await db.execute(sql`ALTER TABLE vrm_holman_portal_hist ADD COLUMN IF NOT EXISTS shop_name_override_at TIMESTAMPTZ;`);
+  // JUNK-PHONE HEAL (Tyler 8/5, value-guarded, idempotent): old scrapes left
+  // portal placeholder numbers (2222222222-style repeated digits) and other
+  // unusable values in shop_phone. Read paths now clean them out of every
+  // display, but the stored junk would still win the "sticky valid phone"
+  // no-op compare and linger forever — null it once so the precedence chain
+  // (Pep Boys directory, per-PO vendor match, …) takes over. Locked rows are
+  // operator property and the /shop-phone route validates input, so manual
+  // junk cannot exist; the guard skips locked rows anyway.
+  await db.execute(sql`
+    UPDATE vrm_holman_portal_hist
+    SET shop_phone = NULL, shop_phone_source = NULL
+    WHERE shop_phone IS NOT NULL
+      AND shop_phone_locked IS NOT TRUE
+      AND NOT (
+        (length(regexp_replace(shop_phone, '\\D', '', 'g')) = 10
+          AND regexp_replace(shop_phone, '\\D', '', 'g') !~ '^([0-9])\\1{9}$')
+        OR (length(regexp_replace(shop_phone, '\\D', '', 'g')) = 11
+          AND regexp_replace(shop_phone, '\\D', '', 'g') LIKE '1%'
+          AND substring(regexp_replace(shop_phone, '\\D', '', 'g') from 2) !~ '^([0-9])\\1{9}$')
+      );`);
 
   console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/call_log/portal_hist)");
 }

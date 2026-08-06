@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { Link } from "wouter";
 import { SidebarProvider, SidebarTrigger, SidebarInset } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/fleet-scope/app-sidebar";
@@ -9,7 +9,6 @@ import { Sidebar as GlobalNavMenu } from "@/components/layout/sidebar";
 
 import AllVehicles from "./AllVehicles";
 import Dashboard from "./Dashboard";
-import ActionTracker from "./ActionTracker";
 import ExecutiveSummary from "./ExecutiveSummary";
 import MetricsDashboard from "./MetricsDashboard";
 import HolmanResearch from "./HolmanResearch";
@@ -21,7 +20,7 @@ import Registration from "./Registration";
 import Decommissioning from "./Decommissioning";
 import ProcurementHistory from "./ProcurementHistory";
 import ToolAudit from "./ToolAudit";
-import BatchCaller from "./BatchCaller";
+import CallHistory from "./CallHistory";
 import TechProfitability from "./TechProfitability";
 import TodaysQueue from "./TodaysQueue";
 import { VehicleSearch, DiscrepancyFinder } from "./PlaceholderPages";
@@ -58,7 +57,10 @@ export default function FleetScopeLayout() {
               <Switch>
                 <Route path="/fleet-scope" component={AllVehicles} />
                 <Route path="/fleet-scope/dashboard" component={Dashboard} />
-                <Route path="/fleet-scope/action-tracker" component={ActionTracker} />
+                {/* Action Tracker retired — its work moved into the persona buckets on Today's Queue */}
+                <Route path="/fleet-scope/action-tracker">
+                  <Redirect to="/fleet-scope/queue" />
+                </Route>
                 <Route path="/fleet-scope/executive-summary" component={ExecutiveSummary} />
                 <Route path="/fleet-scope/metrics" component={MetricsDashboard} />
                 <Route path="/fleet-scope/holman-research" component={HolmanResearch} />
@@ -70,7 +72,9 @@ export default function FleetScopeLayout() {
                 <Route path="/fleet-scope/registration" component={Registration} />
                 <Route path="/fleet-scope/decommissioning/procurement-history" component={ProcurementHistory} />
                 <Route path="/fleet-scope/decommissioning" component={Decommissioning} />
-                <Route path="/fleet-scope/batch-caller" component={BatchCaller} />
+                <Route path="/fleet-scope/call-history" component={CallHistory} />
+                {/* Old bookmarks: the Batch Caller page became read-only Call History */}
+                <Route path="/fleet-scope/batch-caller" component={CallHistory} />
                 <Route path="/fleet-scope/rental-profitability" component={TechProfitability} />
                 <Route path="/fleet-scope/queue" component={TodaysQueue} />
                 <Route path="/fleet-scope/vehicle-search" component={VehicleSearch} />

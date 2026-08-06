@@ -1,30 +1,78 @@
-import { useState, useEffect, useCallback } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+/**
+ * Today's Queue — Fleet Scope's READ-ONLY mirror of the VRM Ops Queue board.
+ *
+ * Bucket-first (spec docs/specs/2026-08-05-persona-bucket-queue-design.md §9):
+ * the same owner buckets, classifications, SLA chips, and dismissed state the
+ * VRM page shows — but no actions here. Owner reassign, dismiss-for-today, and
+ * fleet-status edits all live on VRM Rental Operations (status flows one-way
+ * VRM → FS, Tyler 2026-08-04). Rows open the truck detail panel.
+ */
+import { useState, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { RefreshCw, CheckCircle2, Circle, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Loader2, Bot } from "lucide-react";
+import { RefreshCw, AlertTriangle, ChevronDown, ChevronRight, Clock, Phone, Bot, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { apiRequest } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { TruckDetailPanel } from "@/components/fleet-scope/TruckDetailPanel";
+
+interface ItemClassification {
+  key: string;
+  label: string;
+  priority: number;
+  owner: string;
+  needsRouting: boolean;
+  anchorDate: string | null;
+  slaDueDate: string | null;
+  businessDaysLate: number;
+}
+
+interface ContextChips {
+  effStatus: string | null;
+  openPoDate: string | null;
+  shopName: string | null;
+  shopPhone: string | null;
+  portalAt: string | null;
+  lastLucaOutcome: string | null;
+  lastLucaDate: string | null;
+  daysInRental: number | null;
+}
 
 interface QueueItem {
   step: number;
   stepTitle: string;
+  /** Triage lane: phone-confirmed pickup work / needs a human fix / watch-only. */
+  lane?: "ready" | "action" | "monitor";
+  /** Plain-English evidence: WHY the truck is on the queue. */
+  whyText?: string;
   truckId: string;
   truckNumber: string;
   techName: string | null;
   fleetScopeStatus: string;
+  /** Effective (portal-corrected) status of the shop-of-record PO. */
   holmanStatus: string | null;
   lucaStatus: string | null;
   lastCallDate: string | null;
   actionText: string;
   sortKey: number;
   isConflict?: boolean;
-  suggestions?: Array<{ vehicleNumber: string; status: string; address: string; distanceMiles: number | null; mileage: number | null }>;
   repairPhone: string | null;
   techState: string | null;
-  readyReason?: 'luca' | 'holman' | 'date';
+  readyReason?: 'luca' | 'manual' | 'holman' | 'date';
+  /** Manual "verified ready with the shop" mark (set on the VRM Ops Queue). */
+  readyVerified?: { by: string; at: string } | null;
+  /** "Escalated to research" mark (set on the VRM Ops Queue). */
+  research?: { by: string; at: string } | null;
+  scheduledPickupDate?: string | null;
+  // Persona-bucket decoration (server/todays-queue.ts)
+  key?: string;
+  caseKey?: string | null;
+  owner?: string;
+  ownerBasis?: string;
+  region?: string | null;
+  needsRouting?: boolean;
+  classifications?: ItemClassification[];
+  dismissedToday?: { by: string } | null;
+  contextChips?: ContextChips;
 }
 
 interface NoActionItem {
@@ -35,241 +83,529 @@ interface NoActionItem {
   holmanStatus: string | null;
 }
 
+interface Bucket {
+  owner: string;
+  open: number;
+  dueToday: number;
+  overdue: number;
+  needsRouting: number;
+}
+
 interface QueueResponse {
   success: boolean;
   items: QueueItem[];
   noAction: NoActionItem[];
+  buckets?: Bucket[];
   generatedAt: string;
 }
 
-const STATE_TO_REGION: Record<string, string> = {
-  VA: "East Coast & Southeast", FL: "East Coast & Southeast", NY: "East Coast & Southeast",
-  GA: "East Coast & Southeast", MD: "East Coast & Southeast", NC: "East Coast & Southeast",
-  PA: "East Coast & Southeast", MA: "East Coast & Southeast", CT: "East Coast & Southeast",
-  DE: "East Coast & Southeast", RI: "East Coast & Southeast", NJ: "East Coast & Southeast",
-  WV: "East Coast & Southeast", ME: "East Coast & Southeast", SC: "East Coast & Southeast",
-  TX: "Central & Midwest", IL: "Central & Midwest", OH: "Central & Midwest",
-  KY: "Central & Midwest", IN: "Central & Midwest", MI: "Central & Midwest",
-  MO: "Central & Midwest", TN: "Central & Midwest", WI: "Central & Midwest",
-  IA: "Central & Midwest", KS: "Central & Midwest", OK: "Central & Midwest",
-  ND: "Central & Midwest", NE: "Central & Midwest", MN: "Central & Midwest",
-  CA: "West Coast & Deep South", AL: "West Coast & Deep South", AR: "West Coast & Deep South",
-  CO: "West Coast & Deep South", MS: "West Coast & Deep South", WA: "West Coast & Deep South",
-  AZ: "West Coast & Deep South", ID: "West Coast & Deep South", LA: "West Coast & Deep South",
-  OR: "West Coast & Deep South", UT: "West Coast & Deep South", HI: "West Coast & Deep South",
+// Region filter — server-computed item.region (Annex A vocabulary).
+const REGION_CODES = ["east", "central", "west"] as const;
+const REGION_LABELS: Record<string, string> = {
+  east: "East Coast & Southeast",
+  central: "Central & Midwest",
+  west: "West Coast & Deep South",
 };
-
-const REGION_OPTIONS = ["East Coast & Southeast", "Central & Midwest", "West Coast & Deep South"];
-
 const REGION_COLORS: Record<string, { active: string; inactive: string }> = {
-  "East Coast & Southeast": {
+  east: {
     active: "bg-blue-500 text-white border-blue-500",
     inactive: "border-blue-300 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20",
   },
-  "Central & Midwest": {
+  central: {
     active: "bg-amber-500 text-white border-amber-500",
     inactive: "border-amber-300 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-900/20",
   },
-  "West Coast & Deep South": {
+  west: {
     active: "bg-emerald-500 text-white border-emerald-500",
     inactive: "border-emerald-300 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/20",
   },
 };
 
+// De-redded (2026-08-05): red is reserved for real urgency (overdue SLA,
+// status conflicts) — steps are green (pickup pipeline), amber (needs a human
+// fix), or neutral (watch-only). Mirrors the VRM Ops Queue palette.
 const STEP_COLORS: Record<number, string> = {
-  1: "bg-orange-100 text-orange-800 border-orange-200 dark:bg-orange-900/30 dark:text-orange-300",
-  2: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300",
+  1: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300",
+  2: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300",
   3: "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-300",
-  4: "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-300",
-  5: "bg-purple-100 text-purple-800 border-purple-200 dark:bg-purple-900/30 dark:text-purple-300",
-  6: "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-300",
-  7: "bg-rose-100 text-rose-800 border-rose-200 dark:bg-rose-900/30 dark:text-rose-300",
+  4: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300",
+  5: "bg-muted text-muted-foreground border-border",
+  6: "bg-muted text-muted-foreground border-border",
+  7: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300",
+  8: "bg-muted text-muted-foreground border-border",
+  9: "bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300",
 };
 
 const STEP_HEADER_COLORS: Record<number, string> = {
-  1: "border-l-4 border-l-orange-400",
-  2: "border-l-4 border-l-blue-400",
+  1: "border-l-4 border-l-green-400",
+  2: "border-l-4 border-l-green-400",
   3: "border-l-4 border-l-green-400",
-  4: "border-l-4 border-l-red-400",
-  5: "border-l-4 border-l-purple-400",
-  6: "border-l-4 border-l-yellow-400",
-  7: "border-l-4 border-l-rose-400",
+  4: "border-l-4 border-l-amber-400",
+  5: "border-l-4 border-l-muted-foreground/30",
+  6: "border-l-4 border-l-muted-foreground/30",
+  7: "border-l-4 border-l-amber-400",
+  8: "border-l-4 border-l-muted-foreground/30",
+  9: "border-l-4 border-l-amber-400",
 };
 
-function todayKey(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
+// Triage lanes (server stamps item.lane; step fallback for stale cache).
+type Lane = "ready" | "action" | "monitor";
+const LANE_ORDER: Lane[] = ["ready", "action", "monitor"];
+const LANE_STEPS: Record<Lane, number[]> = {
+  ready: [3, 2, 1],
+  action: [9, 4, 7],
+  monitor: [8, 5, 6],
+};
+const LANE_META: Record<Lane, { title: string; desc: string; header: string; text: string }> = {
+  ready: {
+    title: "READY FOR PICKUP",
+    desc: "Phone-confirmed ready, scheduling, or waiting on rental-return confirmation — move these today.",
+    header: "border-l-[5px] border-l-green-500 bg-green-50 dark:bg-green-900/20",
+    text: "text-green-700 dark:text-green-400",
+  },
+  action: {
+    title: "NEEDS ACTION — VERIFY LOCATION / FIX RECORD",
+    desc: "LUCA hit a wall a human must clear: wrong shop or phone on file, shop says the truck isn't there, authorization stuck.",
+    header: "border-l-[5px] border-l-amber-500 bg-amber-50 dark:bg-amber-900/20",
+    text: "text-amber-700 dark:text-amber-400",
+  },
+  monitor: {
+    title: "MONITORING — NOTHING REQUIRED TODAY",
+    desc: "PO/date inference and LUCA's own retry cadence. A closed PO is billing paperwork, not proof the truck is ready.",
+    header: "border-l-[5px] border-l-muted-foreground/30 bg-muted/30",
+    text: "text-muted-foreground",
+  },
+};
+function laneOf(item: QueueItem): Lane {
+  if (item.lane) return item.lane;
+  if (item.step === 1 || item.step === 2 || item.step === 3) return "ready";
+  if (item.step === 4 || item.step === 7 || item.step === 9) return "action";
+  return "monitor";
 }
 
-function getDoneKey(): string {
-  return `fs-queue-done-${todayKey()}`;
-}
-
-function loadDoneSet(): Set<string> {
-  try {
-    const raw = localStorage.getItem(getDoneKey());
-    if (!raw) return new Set();
-    return new Set(JSON.parse(raw) as string[]);
-  } catch {
-    return new Set();
-  }
-}
-
-function saveDoneSet(ids: Set<string>) {
-  try {
-    localStorage.setItem(getDoneKey(), JSON.stringify([...ids]));
-  } catch { /* ignore */ }
-}
+const PRIORITY_META: Record<number, { label: string; header: string; pill: string }> = {
+  1: { label: "P1 — Money / replacement", header: "border-l-4 border-l-rose-500", pill: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300" },
+  2: { label: "P2 — Move the repair", header: "border-l-4 border-l-amber-400", pill: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" },
+  3: { label: "P3 — Follow-ups", header: "border-l-4 border-l-blue-400", pill: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" },
+  4: { label: "P4 — Housekeeping", header: "border-l-4 border-l-muted-foreground/30", pill: "bg-muted text-muted-foreground" },
+};
 
 function StatusPill({ label, value }: { label: string; value: string | null }) {
-  if (!value) return <span className="text-xs text-muted-foreground italic">—</span>;
+  if (!value) return <span className="text-sm text-muted-foreground italic">—</span>;
   return (
     <span className="inline-flex items-center gap-1">
-      <span className="text-xs text-muted-foreground">{label}:</span>
-      <span className="text-xs font-medium">{value}</span>
+      <span className="text-sm text-muted-foreground">{label}:</span>
+      <span className="text-sm font-medium">{value}</span>
     </span>
   );
 }
 
+// Full LUCA write-back vocabulary (server/luca-writeback/mapper.ts
+// OUTCOME_TO_STATUS) plus legacy ElevenLabs-era labels still stored in
+// fs_trucks.last_call_status. Unknown labels fall back to a neutral pill.
+const LUCA_STATUS_COLORS: Record<string, string> = {
+  // Resolved / positive
+  "Ready": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+  "Recovered": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+  "Will Pick Up": "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+  // Repair in motion
+  "In Repair": "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+  // Waiting on parts / approval
+  "In Authorization": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
+  "Parts Ordered": "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300",
+  // Contact failures — retry states, not emergencies (amber, not red)
+  "No Answer": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  "Call Failed": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  "Failed": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  "No Shop Contact": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  // Needs human transport / escalation
+  "Needs Tow": "bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300",
+  // Terminal negatives
+  "Totaled": "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
+  "Repair Declined": "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300",
+  // Truck is not where we thought it was
+  "Shop Does Not Have Truck": "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
+  "Relocated": "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
+  // Uncertain — needs a human confirm
+  "Inconclusive - call dropped": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+  "Unverified - confirm by phone": "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+};
+
 function LucaStatusBadge({ status }: { status: string | null }) {
-  if (!status) return <span className="text-xs text-muted-foreground">—</span>;
-  const color =
-    status === "Ready" ? "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" :
-    status === "No Answer" || status === "Call Failed" || status === "Failed" ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" :
-    status === "In Repair" ? "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300" :
-    status === "In Authorization" || status === "Parts Ordered" ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300" :
-    "bg-muted text-muted-foreground";
-  return <span className={cn("text-xs font-medium px-1.5 py-0.5 rounded", color)}>{status}</span>;
+  if (!status) return <span className="text-sm text-muted-foreground">—</span>;
+  const color = LUCA_STATUS_COLORS[status] ?? "bg-muted text-muted-foreground";
+  return <span className={cn("text-sm font-medium px-1.5 py-0.5 rounded", color)}>{status}</span>;
+}
+
+/** ET day, to match the server's queue bucketing (ops runs on ET). */
+function todayETISO(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York" }).format(new Date());
+}
+
+function formatShortDate(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+/** Read-only pickup-date chip — the date itself is set on the VRM Ops Queue. */
+function PickupChip({ date }: { date: string | null | undefined }) {
+  if (!date) return null;
+  const due = date <= todayETISO();
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 text-sm font-medium px-1.5 py-0.5 rounded",
+        due
+          ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300"
+          : "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300"
+      )}
+      title="Tech pickup date — scheduled from VRM Rental Operations"
+    >
+      <CalendarDays className="h-3 w-3" />
+      Pickup {formatShortDate(date)}
+    </span>
+  );
+}
+
+function ClassificationPill({ c, primary }: { c: ItemClassification; primary: boolean }) {
+  const meta = PRIORITY_META[c.priority] ?? PRIORITY_META[3];
+  return (
+    <span className={cn(
+      "rounded-full font-medium",
+      primary ? "text-sm px-2 py-0.5 font-semibold" : "text-xs px-1.5 py-0.5",
+      meta.pill,
+    )}>
+      {c.label}
+      {c.needsRouting && " ⚠"}
+    </span>
+  );
+}
+
+function SlaChip({ c }: { c: ItemClassification }) {
+  if (c.businessDaysLate > 0) {
+    return (
+      <span className="text-sm font-bold px-2 py-0.5 rounded-full bg-red-600 text-white">
+        overdue {c.businessDaysLate}d
+      </span>
+    );
+  }
+  if (c.slaDueDate) {
+    const dueToday = c.slaDueDate <= todayETISO();
+    return (
+      <span className={cn(
+        "text-sm font-medium px-2 py-0.5 rounded-full",
+        dueToday ? "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300" : "bg-muted text-muted-foreground",
+      )}>
+        due {formatShortDate(c.slaDueDate)}
+      </span>
+    );
+  }
+  return null;
+}
+
+function BucketBar({ buckets, active, onPick }: {
+  buckets: Bucket[];
+  active: string | null;
+  onPick: (owner: string | null) => void;
+}) {
+  return (
+    <div className="grid gap-2 px-4 py-3" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))" }}>
+      <button
+        data-testid="bucket-everyone"
+        onClick={() => onPick(null)}
+        className={cn(
+          "text-left rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/40",
+          active === null && "ring-2 ring-primary",
+        )}
+      >
+        <div className="text-base font-bold">Everyone</div>
+        <div className="text-sm text-muted-foreground">{buckets.reduce((n, b) => n + b.open, 0)} open</div>
+      </button>
+      {buckets.map((b) => (
+        <button
+          key={b.owner}
+          data-testid={`bucket-${b.owner.replace(/\W+/g, "-").toLowerCase()}`}
+          onClick={() => onPick(b.owner)}
+          className={cn(
+            "text-left rounded-lg border border-border bg-background px-3 py-2 transition-colors hover:bg-muted/40",
+            active === b.owner && "ring-2 ring-primary",
+          )}
+        >
+          <div className="text-base font-bold">{b.owner}</div>
+          <div className="text-sm text-muted-foreground">
+            {b.open} open{b.dueToday > 0 && <> · {b.dueToday} due</>}
+            {b.overdue > 0 && <span className="text-red-600 dark:text-red-400 font-bold"> · {b.overdue} overdue</span>}
+          </div>
+          {b.needsRouting > 0 && <div className="text-xs text-red-600 dark:text-red-400">⚠ {b.needsRouting} needs routing</div>}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function DismissedNote({ item }: { item: QueueItem }) {
+  if (!item.dismissedToday) return null;
+  return (
+    <div className="text-xs text-muted-foreground mt-0.5">
+      dismissed today by {item.dismissedToday.by} (on VRM Rental Operations)
+    </div>
+  );
+}
+
+// ─── Row layout primitives ────────────────────────────────────────────────────
+// One fixed column grid shared by every row so the board scans VERTICALLY:
+//   step | who | the story (Why → Do) | facts | actions.
+// Strict 3-step type scale: base (truck # + Do), sm (supporting text),
+// 11px uppercase micro-labels. Mirrors VRM's OpsQueue rows.
+
+const ROW_LABEL_CLS = "text-[11px] font-bold uppercase tracking-wider text-muted-foreground leading-[19px]";
+const ROW_TEXT_CLS = "text-sm text-muted-foreground leading-[19px]";
+
+/** WHO column: truck number on top, then tech name / owner stacked. */
+function IdentityCell({ item, dismissed }: { item: QueueItem; dismissed: boolean }) {
+  return (
+    <div className="flex flex-col gap-0.5 min-w-0">
+      <div className="flex items-baseline gap-2">
+        <span className={cn("font-mono text-base font-semibold", dismissed && "line-through")}>{item.truckNumber}</span>
+        {item.techState && <span className={ROW_LABEL_CLS}>{item.techState}</span>}
+      </div>
+      {item.techName && (
+        <span className={cn(ROW_TEXT_CLS, "truncate")} title={item.techName}>{item.techName}</span>
+      )}
+      {item.owner && <span className={cn(ROW_LABEL_CLS, "text-primary")}>{item.owner}</span>}
+    </div>
+  );
+}
+
+/** FACTS column: a tiny aligned label/value table (LUCA / FS / PO / …). */
+function FactsCell({ rows }: { rows: Array<{ label: string; node: React.ReactNode } | null | false> }) {
+  const shown = rows.filter(Boolean) as Array<{ label: string; node: React.ReactNode }>;
+  if (shown.length === 0) return <span />;
+  return (
+    <div className="grid grid-cols-[52px_minmax(0,1fr)] gap-x-2 gap-y-1 content-start">
+      {shown.map((r) => (
+        <div key={r.label} className="contents">
+          <span className={ROW_LABEL_CLS}>{r.label}</span>
+          <span className={cn(ROW_TEXT_CLS, "min-w-0")}>{r.node}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function QueueRow({
   item,
-  done,
-  onToggleDone,
-  callingId,
-  onCallShop,
   onRowClick,
 }: {
   item: QueueItem;
-  done: boolean;
-  onToggleDone: (id: string) => void;
-  callingId: string | null;
-  onCallShop: (id: string) => void;
   onRowClick: (id: string) => void;
 }) {
-  const isCalling = callingId === item.truckId;
-  const showCallButton = item.step === 5 && !!item.repairPhone;
-
+  const dismissed = !!item.dismissedToday;
+  const showShopPhone = (item.step === 5 || item.step === 8 || item.step === 9) && item.repairPhone;
   return (
     <div
       className={cn(
-        "flex items-start gap-3 px-4 py-3 transition-all duration-200 cursor-pointer",
+        "grid grid-cols-[26px_200px_minmax(260px,1fr)_220px_auto] gap-x-5 items-start px-4 py-3.5",
+        "transition-all duration-200 cursor-pointer",
         "border-b border-border last:border-0",
         "hover:bg-muted/30",
-        done && "opacity-40"
+        dismissed && "opacity-40"
       )}
       onClick={() => onRowClick(item.truckId)}
     >
-      <div className="flex-shrink-0 pt-0.5">
-        <span className={cn("inline-flex items-center justify-center rounded-full text-xs font-bold w-6 h-6 border", STEP_COLORS[item.step])}>
+      <div className="pt-0.5">
+        <span className={cn("inline-flex items-center justify-center rounded-full text-sm font-bold w-6 h-6 border", STEP_COLORS[item.step])}>
           {item.step}
         </span>
       </div>
 
-      <div className="flex-1 min-w-0">
-        <div className="flex flex-wrap items-center gap-2 mb-1">
-          <span className={cn("font-mono text-sm font-semibold", done && "line-through")}>{item.truckNumber}</span>
-          {item.techName && <span className="text-sm text-muted-foreground">{item.techName}</span>}
-          {item.techState && (
-            <span className="text-xs font-medium bg-muted text-muted-foreground px-1.5 py-0.5 rounded">{item.techState}</span>
-          )}
-          <StatusPill label="FS" value={item.fleetScopeStatus} />
-          <StatusPill label="Holman" value={item.holmanStatus} />
-          <LucaStatusBadge status={item.lucaStatus} />
-        </div>
+      <IdentityCell item={item} dismissed={dismissed} />
 
-        <div className={cn(
-          "text-sm flex items-start gap-1.5",
-          item.isConflict ? "text-red-600 dark:text-red-400 font-medium" : "text-foreground",
-          done && "line-through text-muted-foreground"
+      {/* THE STORY: Why (evidence) → Do (instruction), labels in a fixed
+          gutter so the text always starts at the same x. */}
+      <div className="grid grid-cols-[36px_minmax(0,1fr)] gap-x-2.5 gap-y-1 content-start">
+        {item.whyText && !dismissed && (
+          <>
+            <span className={ROW_LABEL_CLS}>Why</span>
+            <span className={ROW_TEXT_CLS}>{item.whyText}</span>
+          </>
+        )}
+        <span className={cn(ROW_LABEL_CLS, "leading-[22px]", item.isConflict ? "text-red-600 dark:text-red-400" : "text-primary")}>Do</span>
+        <span className={cn(
+          "text-base leading-[22px] font-medium",
+          item.isConflict ? "text-red-600 dark:text-red-400" : "text-foreground",
+          dismissed && "line-through text-muted-foreground"
         )}>
-          {item.isConflict && <AlertTriangle className="h-4 w-4 flex-shrink-0 mt-0.5" />}
-          <span>→ {item.actionText}</span>
+          {item.isConflict && <AlertTriangle className="inline h-4 w-4 mr-1 -mt-0.5" />}
+          {item.actionText}
+        </span>
+
+        <div className="col-start-2 flex flex-col items-start gap-1.5">
+          <DismissedNote item={item} />
+
+          {item.step === 3 && item.readyReason === 'luca' && !item.isConflict && (
+            <span className="mt-0.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
+              <Bot className="h-3.5 w-3.5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-green-700 dark:text-green-400">LUCA confirmed READY via phone call</span>
+            </span>
+          )}
+
+          {item.step === 3 && item.readyReason === 'manual' && !item.isConflict && (
+            <span className="mt-0.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
+              <Phone className="h-3.5 w-3.5 text-green-600 dark:text-green-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-green-700 dark:text-green-400">
+                Verified ready by {item.readyVerified?.by ?? 'staff'} (manual shop call)
+              </span>
+            </span>
+          )}
+
+          {(item.step === 8 || item.step === 9) && item.research && (
+            <span className="mt-0.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800">
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+              <span className="text-sm font-semibold text-amber-700 dark:text-amber-400">
+                Escalated to research by {item.research.by} — manage on the VRM Ops Queue
+              </span>
+            </span>
+          )}
         </div>
-
-        {item.step === 3 && item.readyReason === 'luca' && !item.isConflict && (
-          <div className="mt-1.5 inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-green-50 border border-green-200 dark:bg-green-900/20 dark:border-green-800">
-            <Bot className="h-3.5 w-3.5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <span className="text-xs font-semibold text-green-700 dark:text-green-400">LucaAI confirmed READY via phone call</span>
-          </div>
-        )}
-
-        {item.step === 7 && (
-          <div className="mt-1.5 space-y-0.5">
-            {item.suggestions && item.suggestions.length > 0 ? (
-              item.suggestions.map((s, i) => (
-                <div key={i} className="text-xs text-muted-foreground pl-4">
-                  → Unit {s.vehicleNumber}
-                  {s.distanceMiles !== null && <span className="mx-1">·</span>}
-                  {s.distanceMiles !== null && <span className="font-medium">{s.distanceMiles} mi away</span>}
-                  {s.mileage !== null && <span className="mx-1">·</span>}
-                  {s.mileage !== null && <span>{s.mileage.toLocaleString()} mi on odometer</span>}
-                  {s.status && <span className="mx-1">·</span>}
-                  {s.status && <span>{s.status}</span>}
-                  {s.address && <span className="mx-1">·</span>}
-                  {s.address && <span>{s.address}</span>}
-                </div>
-              ))
-            ) : (
-              <div className="text-xs text-muted-foreground pl-4 italic">No suggested replacements available — manual search required.</div>
-            )}
-          </div>
-        )}
       </div>
 
-      <div className="flex-shrink-0 self-start pt-0.5 flex items-center gap-1.5">
-        {showCallButton && (
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-2.5 text-xs gap-1.5 text-purple-700 border-purple-300 hover:bg-purple-50 dark:text-purple-400 dark:border-purple-700 dark:hover:bg-purple-900/20"
-            onClick={(e) => { e.stopPropagation(); onCallShop(item.truckId); }}
-            disabled={isCalling || !!callingId}
-            title="Call repair shop via LucaAI"
+      <FactsCell rows={[
+        item.lucaStatus ? { label: "LUCA", node: <LucaStatusBadge status={item.lucaStatus} /> } : null,
+        item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        item.holmanStatus ? { label: "PO", node: item.holmanStatus } : null,
+        item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
+      ]} />
+
+      <div className="flex items-center gap-1.5 pt-0.5">
+        {showShopPhone && (
+          <a
+            href={`tel:${item.repairPhone}`}
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex items-center gap-1.5 h-7 px-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors whitespace-nowrap"
+            title="Shop phone — call manually (LUCA calls are dispatched from VRM Rental Operations)"
           >
-            {isCalling ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Phone className="h-3.5 w-3.5" />
-            )}
-            {isCalling ? "Calling…" : "Call Shop"}
-          </Button>
+            <Phone className="h-3.5 w-3.5" />
+            {item.repairPhone}
+          </a>
         )}
-        <Button
-          size="sm"
-          variant={done ? "secondary" : "outline"}
-          className={cn("h-7 px-2.5 text-xs gap-1.5", done && "text-green-700 dark:text-green-400")}
-          onClick={(e) => { e.stopPropagation(); onToggleDone(item.truckId); }}
-        >
-          {done ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
-          {done ? "Done" : "Mark Done"}
-        </Button>
       </div>
     </div>
   );
 }
 
+/** Bucket-view row: classification pills + SLA + context chips. Read-only. */
+function BucketRow({
+  item,
+  onRowClick,
+}: {
+  item: QueueItem;
+  onRowClick: (id: string) => void;
+}) {
+  const dismissed = !!item.dismissedToday;
+  const cls = item.classifications ?? [];
+  const primary = cls[0];
+  const chips = item.contextChips;
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[200px_minmax(260px,1fr)_250px] gap-x-5 items-start px-4 py-3.5",
+        "transition-all duration-200 cursor-pointer",
+        "border-b border-border last:border-0",
+        "hover:bg-muted/30",
+        dismissed && "opacity-40"
+      )}
+      onClick={() => onRowClick(item.truckId)}
+    >
+      <IdentityCell item={item} dismissed={dismissed} />
+
+      <div className="min-w-0">
+        {/* Category + urgency first — this is what the person triages by. */}
+        <div className="flex flex-wrap items-center gap-1.5 mb-2">
+          {primary && <ClassificationPill c={primary} primary />}
+          {primary && <SlaChip c={primary} />}
+          {cls.slice(1).map((c) => <ClassificationPill key={c.key} c={c} primary={false} />)}
+        </div>
+
+        {/* THE STORY: Why → Do, labels in a fixed gutter. */}
+        <div className="grid grid-cols-[36px_minmax(0,1fr)] gap-x-2.5 gap-y-1 content-start">
+          {item.whyText && !dismissed && (
+            <>
+              <span className={ROW_LABEL_CLS}>Why</span>
+              <span className={ROW_TEXT_CLS}>{item.whyText}</span>
+            </>
+          )}
+          <span className={cn(ROW_LABEL_CLS, "leading-[22px]", item.isConflict ? "text-red-600 dark:text-red-400" : "text-primary")}>Do</span>
+          <span className={cn(
+            "text-base leading-[22px] font-medium",
+            item.isConflict ? "text-red-600 dark:text-red-400" : "text-foreground",
+            dismissed && "line-through text-muted-foreground"
+          )}>
+            {item.isConflict && <AlertTriangle className="inline h-4 w-4 mr-1 -mt-0.5" />}
+            {item.actionText}
+          </span>
+
+          <div className="col-start-2 flex flex-col items-start gap-1">
+            <DismissedNote item={item} />
+          </div>
+        </div>
+      </div>
+
+      <FactsCell rows={[
+        item.lucaStatus
+          ? {
+              label: "LUCA",
+              node: (
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  <LucaStatusBadge status={item.lucaStatus} />
+                  {chips?.lastLucaDate && <span className="text-muted-foreground/70">{formatShortDate(chips.lastLucaDate)}</span>}
+                </span>
+              ),
+            }
+          : null,
+        item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        (chips?.effStatus || item.holmanStatus)
+          ? {
+              label: "PO",
+              node: chips?.effStatus
+                ? <>{chips.effStatus}{chips.openPoDate && <span className="text-muted-foreground/70"> · {formatShortDate(chips.openPoDate)}</span>}</>
+                : item.holmanStatus,
+            }
+          : null,
+        chips?.shopName
+          ? {
+              label: "Shop",
+              node: (
+                <>
+                  {chips.shopName}
+                  {chips.shopPhone && (
+                    <a
+                      href={`tel:${chips.shopPhone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap font-mono"
+                    >
+                      {" "}{chips.shopPhone}
+                    </a>
+                  )}
+                </>
+              ),
+            }
+          : null,
+        chips?.portalAt ? { label: "Portal", node: formatShortDate(chips.portalAt) } : null,
+        chips?.daysInRental != null ? { label: "Rental", node: `${chips.daysInRental} days so far` } : null,
+        item.scheduledPickupDate ? { label: "Pickup", node: <PickupChip date={item.scheduledPickupDate} /> } : null,
+      ]} />
+    </div>
+  );
+}
+
 export default function TodaysQueue() {
-  const { toast } = useToast();
-  const queryClient = useQueryClient();
-  const [doneSet, setDoneSet] = useState<Set<string>>(() => loadDoneSet());
+  const [activeBucket, setActiveBucket] = useState<string | null>(null);
   const [collapsedSteps, setCollapsedSteps] = useState<Set<number>>(new Set());
+  // Monitoring is watch-only noise for most sessions — start it collapsed.
+  const [collapsedLanes, setCollapsedLanes] = useState<Set<Lane>>(new Set<Lane>(["monitor"]));
   const [noActionExpanded, setNoActionExpanded] = useState(false);
   const [selectedRegions, setSelectedRegions] = useState<Set<string>>(new Set());
-  const [callingId, setCallingId] = useState<string | null>(null);
   const [selectedTruckId, setSelectedTruckId] = useState<string | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
 
@@ -278,21 +614,20 @@ export default function TodaysQueue() {
     staleTime: 2 * 60 * 1000,
   });
 
-  const toggleDone = useCallback((truckId: string) => {
-    setDoneSet(prev => {
-      const next = new Set(prev);
-      if (next.has(truckId)) next.delete(truckId);
-      else next.add(truckId);
-      saveDoneSet(next);
-      return next;
-    });
-  }, []);
-
   const toggleStep = useCallback((step: number) => {
     setCollapsedSteps(prev => {
       const next = new Set(prev);
       if (next.has(step)) next.delete(step);
       else next.add(step);
+      return next;
+    });
+  }, []);
+
+  const toggleLane = useCallback((lane: Lane) => {
+    setCollapsedLanes(prev => {
+      const next = new Set(prev);
+      if (next.has(lane)) next.delete(lane);
+      else next.add(lane);
       return next;
     });
   }, []);
@@ -306,56 +641,45 @@ export default function TodaysQueue() {
     });
   }, []);
 
-  const handleCallShop = useCallback(async (truckId: string) => {
-    setCallingId(truckId);
-    try {
-      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-repair-shop`, {});
-      toast({
-        title: "Call initiated",
-        description: "The repair shop is being called now.",
-      });
-      await queryClient.invalidateQueries({ queryKey: ["/api/fs/queue/today"] });
-    } catch (error: unknown) {
-      toast({
-        title: "Failed to start call",
-        description: error instanceof Error ? error.message : "Could not initiate call to repair shop.",
-        variant: "destructive",
-      });
-    } finally {
-      setCallingId(null);
-    }
-  }, [toast, queryClient]);
-
   const handleRowClick = useCallback((truckId: string) => {
     setSelectedTruckId(truckId);
     setDetailPanelOpen(true);
   }, []);
 
-  useEffect(() => {
-    setDoneSet(loadDoneSet());
-  }, []);
-
   const allItems = data?.items ?? [];
   const noAction = data?.noAction ?? [];
+  const buckets = data?.buckets ?? [];
 
+  // Everyone view: region filter on the server-computed item.region
   const items = selectedRegions.size === 0
     ? allItems
-    : allItems.filter(item => {
-        if (!item.techState) return false;
-        const region = STATE_TO_REGION[item.techState];
-        return region ? selectedRegions.has(region) : false;
-      });
+    : allItems.filter(item => item.region != null && selectedRegions.has(item.region));
 
-  const stepGroups = items.reduce<Record<number, QueueItem[]>>((acc, item) => {
-    if (!acc[item.step]) acc[item.step] = [];
-    acc[item.step].push(item);
+  const needsRoutingItems = allItems.filter(i => i.needsRouting && !i.dismissedToday);
+
+  // Bucket view: this owner's items, grouped by top-classification priority
+  const bucketItems = activeBucket === null ? [] : allItems.filter(i => i.owner === activeBucket);
+  const bucketOpen = bucketItems.filter(i => !i.dismissedToday);
+  const bucketDismissed = bucketItems.filter(i => !!i.dismissedToday);
+  const priorityGroups = bucketOpen.reduce<Record<number, QueueItem[]>>((acc, item) => {
+    const p = item.classifications?.[0]?.priority ?? 3;
+    (acc[p] ??= []).push(item);
     return acc;
   }, {});
+  for (const group of Object.values(priorityGroups)) {
+    group.sort((a, b) => {
+      const ca = a.classifications?.[0]; const cb = b.classifications?.[0];
+      const lateDiff = (cb?.businessDaysLate ?? 0) - (ca?.businessDaysLate ?? 0);
+      if (lateDiff !== 0) return lateDiff;
+      const da = ca?.slaDueDate ?? "9999-99-99"; const db = cb?.slaDueDate ?? "9999-99-99";
+      if (da !== db) return da < db ? -1 : 1;
+      return a.sortKey - b.sortKey;
+    });
+  }
+  const priorityNumbers = Object.keys(priorityGroups).map(Number).sort((a, b) => a - b);
 
-  const stepNumbers = Object.keys(stepGroups).map(Number).sort((a, b) => a - b);
-
-  const totalActionable = items.length;
-  const doneCount = items.filter(i => doneSet.has(i.truckId)).length;
+  const dismissedCount = allItems.filter(i => !!i.dismissedToday).length;
+  const openCount = allItems.length - dismissedCount;
 
   const generatedAt = data?.generatedAt ? new Date(data.generatedAt) : null;
 
@@ -364,21 +688,21 @@ export default function TodaysQueue() {
       <div className="sticky top-0 z-10 bg-background border-b border-border px-4 py-3 space-y-2">
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
-            <h1 className="text-lg font-semibold">Today's Queue</h1>
+            <h1 className="text-xl font-semibold">Today's Queue</h1>
             {!isLoading && (
               <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">
-                  {doneCount}/{totalActionable} done
+                <Badge variant="secondary" className="text-sm">
+                  {dismissedCount} dismissed · {openCount} open
                 </Badge>
                 {noAction.length > 0 && (
-                  <span className="text-xs text-muted-foreground">+{noAction.length} no action</span>
+                  <span className="text-sm text-muted-foreground">+{noAction.length} no action</span>
                 )}
               </div>
             )}
           </div>
           <div className="flex items-center gap-2">
             {generatedAt && (
-              <span className="text-xs text-muted-foreground flex items-center gap-1">
+              <span className="text-sm text-muted-foreground flex items-center gap-1">
                 <Clock className="h-3 w-3" />
                 {generatedAt.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}
               </span>
@@ -396,105 +720,218 @@ export default function TodaysQueue() {
           </div>
         </div>
 
-        <div className="flex items-center gap-1.5 flex-wrap">
-          {REGION_OPTIONS.map(region => {
-            const isActive = selectedRegions.has(region);
-            const colors = REGION_COLORS[region];
-            return (
-              <button
-                key={region}
-                onClick={() => toggleRegion(region)}
-                className={cn(
-                  "text-xs font-medium px-2.5 py-1 rounded-full border transition-colors",
-                  isActive ? colors.active : colors.inactive
-                )}
-              >
-                {region}
-              </button>
-            );
-          })}
-          {selectedRegions.size > 0 && (
-            <button
-              onClick={() => setSelectedRegions(new Set())}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors ml-1 underline underline-offset-2"
-            >
-              Clear
-            </button>
-          )}
+        <div className="text-sm text-muted-foreground">
+          Read-only mirror — owner assignments, dismissals, and status changes are made on VRM Rental Operations.
         </div>
+
+        {activeBucket === null && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {REGION_CODES.map(region => {
+              const isActive = selectedRegions.has(region);
+              const colors = REGION_COLORS[region];
+              return (
+                <button
+                  key={region}
+                  onClick={() => toggleRegion(region)}
+                  className={cn(
+                    "text-sm font-medium px-2.5 py-1 rounded-full border transition-colors",
+                    isActive ? colors.active : colors.inactive
+                  )}
+                >
+                  {REGION_LABELS[region]}
+                </button>
+              );
+            })}
+            {selectedRegions.size > 0 && (
+              <button
+                onClick={() => setSelectedRegions(new Set())}
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors ml-1 underline underline-offset-2"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        )}
       </div>
+
+      {!isLoading && buckets.length > 0 && (
+        <div className="border-b border-border bg-muted/10">
+          <BucketBar buckets={buckets} active={activeBucket} onPick={setActiveBucket} />
+        </div>
+      )}
+
+      {activeBucket === null && needsRoutingItems.length > 0 && (
+        <div className="mx-4 mt-3 px-3.5 py-2.5 rounded-lg border border-red-500 bg-red-50 dark:bg-red-900/20">
+          <div className="text-sm font-bold text-red-700 dark:text-red-400 mb-1 flex items-center gap-1.5">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            Needs routing — no Annex A region matched; parked with {needsRoutingItems[0]?.owner ?? "Rob Anderson"}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {needsRoutingItems.map(i => (
+              <span key={i.truckId} className="text-sm font-mono bg-background px-2 py-0.5 rounded">
+                {i.truckNumber}{i.techState ? ` · ${i.techState}` : ""}{i.techName ? ` · ${i.techName}` : ""}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 overflow-auto">
         {isLoading ? (
-          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-base">
             <RefreshCw className="h-4 w-4 animate-spin mr-2" />
             Building queue…
           </div>
         ) : !data?.success ? (
-          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-base">
             Failed to load queue. Try refreshing.
           </div>
         ) : allItems.length === 0 && noAction.length === 0 ? (
-          <div className="flex items-center justify-center h-48 text-muted-foreground text-sm">
+          <div className="flex items-center justify-center h-48 text-muted-foreground text-base">
             No vehicles in the system yet.
           </div>
+        ) : activeBucket !== null ? (
+          bucketItems.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-base gap-2">
+              <span>Nothing in {activeBucket}'s bucket right now.</span>
+              <button
+                onClick={() => setActiveBucket(null)}
+                className="text-sm underline underline-offset-2 hover:text-foreground transition-colors"
+              >
+                Back to Everyone
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-border">
+              {priorityNumbers.map(p => {
+                const meta = PRIORITY_META[p] ?? PRIORITY_META[3];
+                const group = priorityGroups[p];
+                return (
+                  <div key={p} className="bg-background">
+                    <div className={cn("w-full flex items-center gap-2.5 px-4 py-2.5", meta.header, "bg-muted/20")}>
+                      <span className="text-base font-semibold tracking-wide uppercase text-foreground/80">
+                        {meta.label}
+                      </span>
+                      <Badge variant="outline" className="text-sm h-5 px-1.5">{group.length}</Badge>
+                    </div>
+                    {group.map(item => (
+                      <BucketRow key={item.truckId} item={item} onRowClick={handleRowClick} />
+                    ))}
+                  </div>
+                );
+              })}
+              {bucketDismissed.length > 0 && (
+                <div className="bg-muted/20">
+                  <div className="w-full flex items-center gap-2.5 px-4 py-2.5 border-l-4 border-l-muted-foreground/20">
+                    <span className="text-base font-semibold tracking-wide uppercase text-muted-foreground">
+                      Dismissed today
+                    </span>
+                    <Badge variant="outline" className="text-sm h-5 px-1.5">{bucketDismissed.length}</Badge>
+                  </div>
+                  {bucketDismissed.map(item => (
+                    <BucketRow key={item.truckId} item={item} onRowClick={handleRowClick} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
         ) : items.length === 0 && selectedRegions.size > 0 ? (
-          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-sm gap-2">
+          <div className="flex flex-col items-center justify-center h-48 text-muted-foreground text-base gap-2">
             <span>No items in the selected region{selectedRegions.size > 1 ? "s" : ""}.</span>
             <button
               onClick={() => setSelectedRegions(new Set())}
-              className="text-xs underline underline-offset-2 hover:text-foreground transition-colors"
+              className="text-sm underline underline-offset-2 hover:text-foreground transition-colors"
             >
               Clear filter
             </button>
           </div>
         ) : (
           <div className="divide-y divide-border">
-            {stepNumbers.map(step => {
-              const group = stepGroups[step];
-              const title = group[0].stepTitle;
-              const collapsed = collapsedSteps.has(step);
-              const groupDone = group.filter(i => doneSet.has(i.truckId)).length;
-              const allDone = groupDone === group.length;
+            {LANE_ORDER.map(lane => {
+              const meta = LANE_META[lane];
+              const laneItems = items.filter(i => laneOf(i) === lane);
+              if (laneItems.length === 0) return null;
+              const laneGroups = laneItems.reduce<Record<number, QueueItem[]>>((acc, item) => {
+                (acc[item.step] ??= []).push(item);
+                return acc;
+              }, {});
+              const laneSteps = [
+                ...LANE_STEPS[lane].filter(s => laneGroups[s]),
+                // Lane overrides (e.g. step-8 research rows) render after, in order.
+                ...Object.keys(laneGroups).map(Number).filter(s => !LANE_STEPS[lane].includes(s)).sort((a, b) => a - b),
+              ];
+              const laneOpen = laneItems.filter(i => !i.dismissedToday).length;
+              const laneCollapsed = collapsedLanes.has(lane);
 
               return (
-                <div key={step} className={cn("bg-background", allDone && "opacity-60")}>
+                <div key={lane} className="bg-background">
                   <button
                     className={cn(
-                      "w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-muted/40 transition-colors",
-                      STEP_HEADER_COLORS[step]
+                      "w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:brightness-[0.98] transition-all",
+                      meta.header
                     )}
-                    onClick={() => toggleStep(step)}
+                    onClick={() => toggleLane(lane)}
+                    data-testid={`lane-${lane}`}
+                    aria-expanded={!laneCollapsed}
                   >
-                    <div className="flex items-center gap-2.5">
-                      <span className={cn("inline-flex items-center justify-center rounded-full text-xs font-bold w-5 h-5 border flex-shrink-0", STEP_COLORS[step])}>
-                        {step}
-                      </span>
-                      <span className="text-sm font-semibold tracking-wide uppercase text-foreground/80">
-                        {title}
-                      </span>
-                      <Badge variant="outline" className="text-xs h-5 px-1.5">
-                        {groupDone}/{group.length}
-                      </Badge>
+                    <div className="flex flex-col gap-0.5 min-w-0">
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className={cn("text-lg font-bold tracking-wide uppercase", meta.text)}>
+                          {meta.title}
+                        </span>
+                        <Badge variant="outline" className="text-sm h-5 px-2 bg-background">
+                          {laneOpen} open{laneItems.length - laneOpen > 0 ? ` · ${laneItems.length - laneOpen} dismissed` : ""}
+                        </Badge>
+                      </div>
+                      <span className="text-sm text-muted-foreground">{meta.desc}</span>
                     </div>
-                    {collapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                    {laneCollapsed ? <ChevronRight className={cn("h-4 w-4 flex-shrink-0", meta.text)} /> : <ChevronDown className={cn("h-4 w-4 flex-shrink-0", meta.text)} />}
                   </button>
 
-                  {!collapsed && (
-                    <div>
-                      {group.map(item => (
-                        <QueueRow
-                          key={item.truckId}
-                          item={item}
-                          done={doneSet.has(item.truckId)}
-                          onToggleDone={toggleDone}
-                          callingId={callingId}
-                          onCallShop={handleCallShop}
-                          onRowClick={handleRowClick}
-                        />
-                      ))}
-                    </div>
-                  )}
+                  {!laneCollapsed && laneSteps.map(step => {
+                    const group = laneGroups[step];
+                    const title = group[0].stepTitle;
+                    const collapsed = collapsedSteps.has(step);
+                    const groupDismissed = group.filter(i => !!i.dismissedToday).length;
+                    const allDismissed = groupDismissed === group.length;
+
+                    return (
+                      <div key={step} className={cn("bg-background", allDismissed && "opacity-60")}>
+                        <button
+                          className={cn(
+                            "w-full flex items-center justify-between pl-7 pr-4 py-2.5 text-left hover:bg-muted/40 transition-colors",
+                            STEP_HEADER_COLORS[step]
+                          )}
+                          onClick={() => toggleStep(step)}
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className={cn("inline-flex items-center justify-center rounded-full text-sm font-bold w-5 h-5 border flex-shrink-0", STEP_COLORS[step])}>
+                              {step}
+                            </span>
+                            <span className="text-base font-semibold tracking-wide uppercase text-foreground/80">
+                              {title}
+                            </span>
+                            <Badge variant="outline" className="text-sm h-5 px-1.5">
+                              {groupDismissed}/{group.length}
+                            </Badge>
+                          </div>
+                          {collapsed ? <ChevronRight className="h-4 w-4 text-muted-foreground" /> : <ChevronDown className="h-4 w-4 text-muted-foreground" />}
+                        </button>
+
+                        {!collapsed && (
+                          <div>
+                            {group.map(item => (
+                              <QueueRow
+                                key={item.truckId}
+                                item={item}
+                                onRowClick={handleRowClick}
+                              />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -506,10 +943,10 @@ export default function TodaysQueue() {
                   onClick={() => setNoActionExpanded(v => !v)}
                 >
                   <div className="flex items-center gap-2.5">
-                    <span className="text-sm font-semibold tracking-wide uppercase text-muted-foreground">
+                    <span className="text-base font-semibold tracking-wide uppercase text-muted-foreground">
                       No action required today
                     </span>
-                    <Badge variant="outline" className="text-xs h-5 px-1.5">{noAction.length}</Badge>
+                    <Badge variant="outline" className="text-sm h-5 px-1.5">{noAction.length}</Badge>
                   </div>
                   {noActionExpanded ? <ChevronDown className="h-4 w-4 text-muted-foreground" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                 </button>
@@ -522,10 +959,10 @@ export default function TodaysQueue() {
                         className="flex items-center gap-3 px-4 py-2 border-b border-border last:border-0 opacity-60 cursor-pointer hover:bg-muted/30 transition-colors"
                         onClick={() => handleRowClick(item.truckId)}
                       >
-                        <span className="font-mono text-sm">{item.truckNumber}</span>
-                        {item.techName && <span className="text-xs text-muted-foreground">{item.techName}</span>}
+                        <span className="font-mono text-base">{item.truckNumber}</span>
+                        {item.techName && <span className="text-sm text-muted-foreground">{item.techName}</span>}
                         <StatusPill label="FS" value={item.fleetScopeStatus} />
-                        <StatusPill label="Holman" value={item.holmanStatus} />
+                        <StatusPill label="PO" value={item.holmanStatus} />
                       </div>
                     ))}
                   </div>

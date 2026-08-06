@@ -6,7 +6,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useParams, useLocation, useSearch } from "wouter";
 import { type Truck, type Action, type TrackingRecord, insertTruckSchema, MAIN_STATUSES, SUB_STATUSES, REPAIR_OR_SALE_OPTIONS, type MainStatus } from "@shared/fleet-scope-schema";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
-import { StatusReminder } from "@/components/fleet-scope/StatusReminder";
 import { ActionTimeline } from "@/components/fleet-scope/ActionTimeline";
 import { useUser } from "@/context/FleetScopeUserContext";
 import { useAuth } from "@/hooks/use-auth";
@@ -182,9 +181,6 @@ export default function TruckDetail() {
   const getBackUrl = () => {
     const params = new URLSearchParams(searchString);
     const from = params.get("from");
-    if (from === "action-tracker") {
-      return "/fleet-scope/action-tracker";
-    }
     if (from === "dashboard") {
       return "/fleet-scope/dashboard";
     }
@@ -467,7 +463,6 @@ export default function TruckDetail() {
   const [refreshingTrackingId, setRefreshingTrackingId] = useState<string | null>(null);
 
   const [expandedSections, setExpandedSections] = useState<string[]>([]);
-  const [showStatusReminder, setShowStatusReminder] = useState(false);
   const [showStatusConfirmDialog, setShowStatusConfirmDialog] = useState(false);
   const pendingFormDataRef = useRef<any>(null);
 
@@ -540,23 +535,6 @@ export default function TruckDetail() {
     }
   }, [watchedMainStatus]);
 
-  // Show reminder when non-status fields change
-  useEffect(() => {
-    if (!truck || !formValues) return;
-    
-    // Check if any field other than status has been modified from original
-    const statusUnchanged = 
-      formValues.mainStatus === (truck.mainStatus || "Confirming Status") &&
-      formValues.subStatus === (truck.subStatus || null);
-    
-    // If status fields haven't changed but form is dirty, show reminder
-    if (form.formState.isDirty && statusUnchanged) {
-      setShowStatusReminder(true);
-    } else {
-      setShowStatusReminder(false);
-    }
-  }, [formValues, truck, form.formState.isDirty]);
-
   useEffect(() => {
     if (truck) {
       const truckAny = truck as any;
@@ -622,7 +600,7 @@ export default function TruckDetail() {
         title: "Success",
         description: "Truck details updated successfully",
       });
-      // Navigate back to the correct page (Action Tracker or Dashboard)
+      // Navigate back to the correct page (Dashboard or Queue)
       setLocation(getBackUrl());
     },
     onError: (error: any) => {
@@ -635,7 +613,11 @@ export default function TruckDetail() {
   });
 
   const performSave = (data: any) => {
-    mutation.mutate(data);
+    // Status & shop-phone fields are VRM-owned (edited in VRM Rental
+    // Operations, mirrored down); strip them from updates so stale form
+    // values never trip the server-side ownership guard.
+    const { mainStatus, subStatus, repairPhone, ...rest } = data ?? {};
+    mutation.mutate(rest);
   };
 
   // Add tracking number mutation
@@ -865,7 +847,7 @@ export default function TruckDetail() {
                               render={({ field }) => (
                                 <FormItem>
                                   <FormLabel>Status</FormLabel>
-                                  <Select onValueChange={field.onChange} value={field.value}>
+                                  <Select onValueChange={field.onChange} value={field.value} disabled>
                                     <FormControl>
                                       <SelectTrigger data-testid="select-main-status">
                                         <SelectValue placeholder="Select status" />
@@ -879,6 +861,9 @@ export default function TruckDetail() {
                                       ))}
                                     </SelectContent>
                                   </Select>
+                                  <p className="text-xs text-muted-foreground">
+                                    Managed in VRM Rental Operations
+                                  </p>
                                   <FormMessage />
                                 </FormItem>
                               )}
@@ -894,6 +879,7 @@ export default function TruckDetail() {
                                     <Select 
                                       onValueChange={(value) => field.onChange(value === "_none_" ? null : value)} 
                                       value={field.value || "_none_"}
+                                      disabled
                                     >
                                       <FormControl>
                                         <SelectTrigger data-testid="select-sub-status">
@@ -915,10 +901,6 @@ export default function TruckDetail() {
                               />
                             )}
                           </div>
-                          <StatusReminder 
-                            show={showStatusReminder} 
-                            autoHideDelay={0}
-                          />
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -991,9 +973,13 @@ export default function TruckDetail() {
                                     {...field}
                                     placeholder="(555) 123-4567"
                                     className="font-mono"
+                                    disabled
                                     data-testid="input-repair-phone"
                                   />
                                 </FormControl>
+                                <p className="text-xs text-muted-foreground">
+                                  Managed in VRM Rental Operations
+                                </p>
                                 <FormMessage />
                               </FormItem>
                             )}

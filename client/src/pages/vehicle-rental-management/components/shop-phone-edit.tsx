@@ -53,6 +53,16 @@ export function ShopPhoneEditModal({ target, onClose, onSaved }: {
   const { toast } = useToast();
   const [text, setText] = useState(() => fmt10(digits10(target.phone ?? "")));
   const [locked, setLocked] = useState(target.locked);
+  // LOCK BY DEFAULT (Tyler 8/5): typing a different number auto-enables the
+  // lock; a deliberate toggle click wins after that.
+  const [lockTouched, setLockTouched] = useState(false);
+  const onTextChange = (v: string) => {
+    setText(v);
+    if (!lockTouched) {
+      const nd = digits10(v);
+      setLocked(nd.length > 0 && nd !== digits10(target.phone ?? "") ? true : target.locked);
+    }
+  };
   const d = digits10(text);
   const junk = d.length === 10 && /^(\d)\1{9}$/.test(d);
   const valid = (d.length === 0 || d.length === 10) && !junk;
@@ -94,7 +104,7 @@ export function ShopPhoneEditModal({ target, onClose, onSaved }: {
         <div style={{ marginTop: 14 }}>
           <div style={label}>Phone number</div>
           <input type="tel" autoFocus value={text} placeholder="(555) 123-4567"
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => onTextChange(e.target.value)}
             onBlur={() => setText(fmt10(d))}
             style={{ marginTop: 5, width: "100%", boxSizing: "border-box", fontFamily: fonts.jetbrains, fontSize: 15, fontWeight: 600, color: colors.ink, background: colors.surface, border: `1px solid ${!valid ? colors.red : colors.rule}`, borderRadius: 8, padding: "9px 11px" }} />
           <div style={{ fontFamily: fonts.dmSans, fontSize: 11, marginTop: 4, color: !valid ? colors.red : colors.inkMuted }}>
@@ -104,7 +114,7 @@ export function ShopPhoneEditModal({ target, onClose, onSaved }: {
           </div>
         </div>
 
-        <button type="button" onClick={() => setLocked((v) => !v)}
+        <button type="button" onClick={() => { setLockTouched(true); setLocked((v) => !v); }}
           style={{ marginTop: 12, width: "100%", textAlign: "left", display: "flex", gap: 10, alignItems: "flex-start", background: locked ? colors.amberLight : colors.surface, border: `1px solid ${locked ? colors.amber : colors.rule}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
           {locked ? <Lock size={15} color={colors.amber} style={{ flexShrink: 0, marginTop: 1 }} /> : <LockOpen size={15} color={colors.inkMuted} style={{ flexShrink: 0, marginTop: 1 }} />}
           <span>
@@ -114,7 +124,7 @@ export function ShopPhoneEditModal({ target, onClose, onSaved }: {
             <span style={{ display: "block", fontFamily: fonts.dmSans, fontSize: 11, color: colors.inkSoft, marginTop: 2 }}>
               {locked
                 ? "Holman refreshes keep pulling PO history but leave this number exactly as entered, until someone unlocks it here. If this case leaves the board, the lock clears on its own after about a week, so a future rental starts fresh."
-                : "The next Holman scrape overwrites this number if the portal shows a different one. Lock it to make your entry stick."}
+                : "Unlocked means a scrape may replace this number when the portal shows a different valid one (it can never blank a valid number). Manual entries lock automatically — untick only if you want the scraper to correct you. Before saving, verify the number actually belongs to the shop shown — name, number, and address should all match."}
             </span>
           </span>
         </button>

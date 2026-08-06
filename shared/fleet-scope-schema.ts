@@ -556,6 +556,11 @@ export const trucks = pgTable("fs_trucks", {
   lastDateCalled: text("last_date_called"), // Last date the shop/vendor was called
   callStatus: text("call_status"), // Brief call status note (max 50 chars)
   eta: text("eta"), // Estimated time of arrival date
+  // Tech-pickup date (YYYY-MM-DD) — when the tech returns the rental and
+  // collects the repaired truck. VRM-owned: set from the VRM Ops Queue
+  // (schedule_pickup action) and mirrored here; drives the queue's
+  // SCHEDULE TECH PICKUP step (due/future partition).
+  scheduledPickupDate: text("scheduled_pickup_date"),
   
   // Rental tracking fields
   // Renter per the Rental Ops report (Enterprise RENTER_NAME / Holman first+last),

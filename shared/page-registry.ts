@@ -488,15 +488,6 @@ export const PAGES: PageDefinition[] = [
     permissionKey: "fleetScope",
   },
   {
-    key: "fsActionTracker",
-    label: "Action Tracker",
-    description: "Track fleet actions and follow-ups",
-    path: "/fleet-scope/action-tracker",
-    icon: Wrench,
-    category: "fleetScope",
-    permissionKey: "fleetScope",
-  },
-  {
     key: "fsExecutiveSummary",
     label: "Executive Summary",
     description: "High-level fleet performance overview",
@@ -579,9 +570,9 @@ export const PAGES: PageDefinition[] = [
   },
   {
     key: "fsBatchCaller",
-    label: "Batch Caller",
-    description: "Automated batch calling system",
-    path: "/fleet-scope/batch-caller",
+    label: "Call History",
+    description: "Read-only repair and tech call history (calls are placed by LUCA)",
+    path: "/fleet-scope/call-history",
     icon: Wrench,
     category: "fleetScope",
     permissionKey: "fleetScope",

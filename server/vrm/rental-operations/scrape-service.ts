@@ -34,7 +34,7 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { toCanonical, toDisplayNumber } from "../../vehicle-number-utils";
 import type { SvcHistoryResult } from "./holman-svc-scrape";
-import { classifyPoVendor, type PoClassLine } from "./vendor-class";
+import { classifyPoVendor, isNeverShopVendor, type PoClassLine } from "./vendor-class";
 // THE reconciliation, imported — never re-typed here. See the note above
 // findScrapeTargets for what the previous hand-copy cost.
 import { poEffectiveCte, SHOP_PICK_CTE } from "./read-repository";
@@ -108,10 +108,14 @@ function trimEvent(e: any) {
   return o;
 }
 // Shop selection uses the SAME classifier as the ETL land (Tyler's PO rule):
-// tow/roadside vendors are skipped UNLESS parts and/or labor are on the PO.
+// tow/roadside vendors are skipped UNLESS parts and/or labor are on the PO —
+// PLUS the 2026-08-05 hard rule: a towing/recovery/roadside/glass NAME may
+// never be picked as the shop at all, parts/labor or not (isNeverShopVendor,
+// same test the shop_pick/shop_strict CTEs apply on the ETL side).
 // The portal's lineItems carry `typeDesc` (PARTS | LABOR | RENTAL | ROADSIDE | …).
 const isRealShop = (p: any) =>
-  classifyPoVendor({ vendorName: p?.vendorName ?? null, lines: (p?.lineItems as PoClassLine[]) ?? null }).vendorType === "repair";
+  !isNeverShopVendor(p?.vendorName)
+  && classifyPoVendor({ vendorName: p?.vendorName ?? null, lines: (p?.lineItems as PoClassLine[]) ?? null }).vendorType === "repair";
 function parseDate(s: any): number { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; }
 
 function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
@@ -168,16 +172,31 @@ function pickShopFromEvents(events: any[]): {
       || String(b.poNumber ?? "").localeCompare(String(a.poNumber ?? ""), undefined, { numeric: true }));
   const msgCount = events.filter((e) => e.type === "MSG").length;
   const shopPos = pos.filter(isRealShop);
-  const openShop = shopPos.find((p) => String(p.status || "").toUpperCase() === "APPROVED");
-  const pick = openShop || shopPos[0] || null;
+  // Tyler 2026-08-05: "We go by the date the last shop was at, even if there's
+  // a previous PO that still says approved." The old open-PO-first preference
+  // is retired — most recent eligible shop PO wins, full stop (same ordering
+  // the shop_pick/shop_strict CTEs use on the ETL side).
+  const pick = shopPos[0] || null;
+  const pickOpen = !!pick && String(pick.status || "").toUpperCase() === "APPROVED";
   return {
     poCount: pos.length,
     msgCount,
     shopName: (pick?.vendorName ?? null) as string | null,
     shopPhone: (pick?.vendorPhone ?? null) as string | null,
     shopAddress: (pick?.vendorAddress ?? null) as string | null,
-    shopSrc: (openShop ? "open PO" : (pick ? "last PO" : null)) as string | null,
+    shopSrc: (pickOpen ? "open PO" : (pick ? "last PO" : null)) as string | null,
   };
+}
+
+/** A phone is USABLE when it cleans to a real 10-digit number — repeated-digit
+ * fillers (5555555555, 2222222222…) don't count. Same rule as the /shop-phone
+ * route's validation and the LUCA feed's cleanPhone. The sticky-phone guard in
+ * upsertTruck keys on this. */
+export function isUsablePhone(v: unknown): boolean {
+  if (v == null) return false;
+  let d = String(v).replace(/\D/g, "");
+  if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
+  return d.length === 10 && !/^(\d)\1{9}$/.test(d);
 }
 
 /** What a single truck's write actually did. `unchanged` means we looked and the
@@ -233,6 +252,16 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
   // locked phone can never make an otherwise-identical revisit look "changed".
   const phoneLocked = prev?.shop_phone_locked === true;
   if (phoneLocked) next.shopPhone = (prev.shop_phone ?? null) as string | null;
+  // STICKY VALID PHONE (Tyler 8/5): once a USABLE number is stored — scraped or
+  // manually entered — a later scrape may only replace it with ANOTHER usable
+  // number, never wipe it with nothing or repeated-digit filler. This is what
+  // keeps numbers accurate without re-running the scraper daily: a good number
+  // stays until better information (a new valid portal number, a manual edit,
+  // or the episode-end lock expiry) replaces it. Keeping prev's value also
+  // keeps prev's provenance via the source-follows-value rule below.
+  else if (isUsablePhone(prev?.shop_phone) && !isUsablePhone(next.shopPhone)) {
+    next.shopPhone = (prev!.shop_phone ?? null) as string | null;
+  }
   // Provenance follows the value: 'manual' survives while locked (or while an
   // unlocked manual number happens to still match); the moment an UNLOCKED
   // value is genuinely replaced by portal content it becomes 'scrape'.
@@ -665,6 +694,45 @@ export async function setShopPhone(opts: {
   };
 }
 
+/**
+ * Manual shop-NAME override (queue popout panel, 2026-08-05). Unlike the phone
+ * — where scrapes and the operator write the SAME column and `locked` referees
+ * — the reconciled shop name is derived per-read from PO history (shop_pick),
+ * so the manual name lives in its own column and wins by PRESENCE: readers
+ * COALESCE(shop_name_override, <pick>). Scrapes never touch it, so there is no
+ * separate locked flag; it expires on the same episode-scoped clock as phone
+ * locks (expireStaleShopPhoneLocks below).
+ *
+ * `name` must arrive already validated (trimmed, non-empty, length-capped) or
+ * null to clear; the route owns user-input validation, this owns the write.
+ */
+export async function setShopName(opts: {
+  truck: string;
+  name: string | null;
+  actor: string;
+}): Promise<{ truck: string; name: string | null; previousName: string | null; created: boolean }> {
+  const truckNo = toDisplayNumber(opts.truck);
+  if (!truckNo) throw new Error(`invalid truck number: ${JSON.stringify(opts.truck)}`);
+  const prevRes = await db.execute(sql`
+    SELECT shop_name_override FROM vrm_holman_portal_hist WHERE truck_no = ${truckNo}`);
+  const prev = (prevRes.rows as any[])[0] ?? null;
+  await db.execute(sql`
+    INSERT INTO vrm_holman_portal_hist
+      (truck_no, hist, source, scraped_at, po_count, msg_count,
+       shop_name_override, shop_name_override_by, shop_name_override_at)
+    VALUES (${truckNo}, '[]'::jsonb, 'manual', NULL, 0, 0,
+            ${opts.name}, ${opts.actor}, NOW())
+    ON CONFLICT (truck_no) DO UPDATE SET
+      shop_name_override = ${opts.name},
+      shop_name_override_by = ${opts.actor}, shop_name_override_at = NOW()
+  `);
+  return {
+    truck: truckNo, name: opts.name,
+    previousName: prev?.shop_name_override ?? null,
+    created: !prev,
+  };
+}
+
 // ── Lock expiry ─────────────────────────────────────────────────────────────
 // A manual lock is scoped to the rental EPISODE that prompted it, not to the
 // truck forever (Tyler 8/3): "once the rental falls off the list, if it is
@@ -683,7 +751,7 @@ export async function setShopPhone(opts: {
 // an operator their lock.
 const SHOP_PHONE_LOCK_GRACE_DAYS = 7;
 
-export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; expired: number }> {
+export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; expired: number; nameOverrides: number; nameExpired: number }> {
   const res = await db.execute(sql`
     WITH case_refs AS (
       -- Every truck a case references, with that case's board state + clock:
@@ -710,11 +778,12 @@ export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; exp
       SELECT truck, bool_or(present_in_latest) AS on_board, max(board_clock) AS last_on_board
       FROM case_refs GROUP BY 1
     )
-    SELECT h.truck_no, h.hist, h.shop_phone, h.shop_phone_edited_at,
+    SELECT h.truck_no, h.hist, h.shop_phone, h.shop_phone_edited_at, h.shop_phone_locked,
+           h.shop_name_override, h.shop_name_override_at,
            COALESCE(r.on_board, false) AS on_board, r.last_on_board
     FROM vrm_holman_portal_hist h
     LEFT JOIN ref_agg r ON r.truck = h.truck_no
-    WHERE h.shop_phone_locked = true
+    WHERE h.shop_phone_locked = true OR h.shop_name_override IS NOT NULL
   `);
   const rows = res.rows as any[];
   const graceMs = SHOP_PHONE_LOCK_GRACE_DAYS * 86_400_000;
@@ -724,7 +793,8 @@ export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; exp
   // AND the edit clock — so a lock placed five minutes ago never insta-expires
   // just because its case dropped last month, and a lock on a truck the board
   // has never referenced still ages out by edit date instead of living forever.
-  const expired = rows.filter((r) => r.on_board !== true && old(r.last_on_board) && old(r.shop_phone_edited_at));
+  const lockedRows = rows.filter((r) => r.shop_phone_locked === true);
+  const expired = lockedRows.filter((r) => r.on_board !== true && old(r.last_on_board) && old(r.shop_phone_edited_at));
 
   let applied = 0;
   for (const r of expired) {
@@ -770,8 +840,40 @@ export async function expireStaleShopPhoneLocks(): Promise<{ locked: number; exp
     }
     console.log(`[VRM RentalOps] shop-phone lock EXPIRED for ${r.truck_no}: case off board > ${SHOP_PHONE_LOCK_GRACE_DAYS}d — manual ${r.shop_phone ?? "(none)"} → scrape ${pick.shopPhone ?? "(none)"}`);
   }
-  if (rows.length) {
-    console.log(`[VRM RentalOps] shop-phone lock expiry: ${rows.length} locked, ${applied} expired`);
+
+  // Shop-NAME overrides expire on the SAME episode clock. Clearing is simpler
+  // than the phone path: the override column just goes back to NULL and every
+  // reader falls through to the reconciled PO pick — nothing to restore.
+  const nameRows = rows.filter((r) => r.shop_name_override != null);
+  const nameExpired = nameRows.filter((r) => r.on_board !== true && old(r.last_on_board) && old(r.shop_name_override_at));
+  let nameApplied = 0;
+  for (const r of nameExpired) {
+    // Same atomic race guard as the phone path: re-check the edit clock IN the
+    // UPDATE so an operator re-editing mid-sweep always wins.
+    const upd = await db.execute(sql`
+      UPDATE vrm_holman_portal_hist
+      SET shop_name_override = NULL
+      WHERE truck_no = ${r.truck_no} AND shop_name_override IS NOT NULL
+        AND (shop_name_override_at IS NULL
+             OR shop_name_override_at < NOW() - make_interval(days => ${SHOP_PHONE_LOCK_GRACE_DAYS}))`);
+    if ((upd.rowCount ?? 0) === 0) {
+      console.log(`[VRM RentalOps] shop-name override expiry SKIPPED for ${r.truck_no}: row changed mid-run (operator wins)`);
+      continue;
+    }
+    nameApplied++;
+    try {
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, actor, target_truck, payload)
+        VALUES (${r.truck_no}, 'shop_name_override_expire', 'system', ${r.truck_no},
+                ${JSON.stringify({ previousName: r.shop_name_override ?? null, lastOnBoard: r.last_on_board ?? null, graceDays: SHOP_PHONE_LOCK_GRACE_DAYS })}::jsonb)`);
+    } catch (e: any) {
+      console.warn(`[VRM RentalOps] name-override expiry audit insert failed for ${r.truck_no} (reset applied): ${e?.message || e}`);
+    }
+    console.log(`[VRM RentalOps] shop-name override EXPIRED for ${r.truck_no}: case off board > ${SHOP_PHONE_LOCK_GRACE_DAYS}d — "${r.shop_name_override}" → PO pick`);
   }
-  return { locked: rows.length, expired: applied };
+
+  if (rows.length) {
+    console.log(`[VRM RentalOps] shop lock expiry: ${lockedRows.length} phone-locked (${applied} expired), ${nameRows.length} name-overridden (${nameApplied} expired)`);
+  }
+  return { locked: lockedRows.length, expired: applied, nameOverrides: nameRows.length, nameExpired: nameApplied };
 }

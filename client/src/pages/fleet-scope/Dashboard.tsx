@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { type Truck, normalizeOwnerName } from "@shared/fleet-scope-schema";
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
-import { StatusReminder, useStatusReminder } from "@/components/fleet-scope/StatusReminder";
+import { useStatusReminder } from "@/components/fleet-scope/StatusReminder";
 import { IssueIndicator, useIssueStats } from "@/components/fleet-scope/IssueIndicator";
 import { MultiSelectFilter } from "@/components/fleet-scope/MultiSelectFilter";
 import { computeTruckIssues } from "@/lib/truckIssues";
@@ -50,8 +50,6 @@ import {
   RefreshCw,
   Database,
   CalendarCheck,
-  PhoneCall,
-  PhoneForwarded,
   Loader2,
   Pencil,
   Wrench,
@@ -119,7 +117,7 @@ const PRESET_OWNERS = [
   "Sean C",
 ];
 
-// Owner-name normalization is shared with the server and Action Tracker — see
+// Owner-name normalization is shared with the server — see
 // normalizeOwnerName in @shared/fleet-scope-schema (imported above).
 
 function determineOwner(truck: Truck): OwnerType {
@@ -169,7 +167,7 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { format, formatDistanceToNow } from "date-fns";
 import ExcelJS from 'exceljs';
-import { downloadExcelWorkbook, addJsonWorksheet, readExcelFile } from '@/lib/xlsx-utils';
+import { downloadExcelWorkbook, addJsonWorksheet } from '@/lib/xlsx-utils';
 
 // localStorage key for dashboard filters
 const DASHBOARD_FILTERS_KEY = "dashboard-filters";
@@ -192,7 +190,6 @@ type StoredFilters = {
   upsStatusFilter: string[];
   pickSlotFilter: string[];
   gaveHolmanFilter: string[];
-  holmanStatusFilter: string[];
   spareVanFilter: string[];
   regTestSlotFilter: string[];
   stateFilter: string[];
@@ -369,10 +366,6 @@ export default function Dashboard() {
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importResults, setImportResults] = useState<{success: number; errors: string[]} | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [isCallImportDialogOpen, setIsCallImportDialogOpen] = useState(false);
-  const [callImportFile, setCallImportFile] = useState<File | null>(null);
-  const [callImportResults, setCallImportResults] = useState<{updated: number; notFound: number; errors: string[]} | null>(null);
-  const callImportFileRef = useRef<HTMLInputElement>(null);
   const [isShopListDialogOpen, setIsShopListDialogOpen] = useState(false);
   const [shopListFile, setShopListFile] = useState<File | null>(null);
   const [shopListResults, setShopListResults] = useState<{processedAt: string; rowsProcessed: number; trucksUpdated: number; rowsSkipped: number; notFound: string[]; error: string | null} | null>(null);
@@ -407,8 +400,6 @@ export default function Dashboard() {
   const [gaveHolmanFilter, setGaveHolmanFilter] = useState<string[]>(storedFilters.gaveHolmanFilter ?? []);
   const GAVE_HOLMAN_OPTIONS = ["Yes", "No", "(Blank)"];
   
-  // Holman Status filter state (scraper)
-  const [holmanStatusFilter, setHolmanStatusFilter] = useState<string[]>(storedFilters.holmanStatusFilter ?? []);
 
   // Spare Van filter state
   const [spareVanFilter, setSpareVanFilter] = useState<string[]>(storedFilters.spareVanFilter ?? []);
@@ -452,7 +443,6 @@ export default function Dashboard() {
       upsStatusFilter,
       pickSlotFilter,
       gaveHolmanFilter,
-      holmanStatusFilter,
       spareVanFilter,
       regTestSlotFilter,
       stateFilter,
@@ -462,10 +452,10 @@ export default function Dashboard() {
       dateRepairSortOrder,
       billPaidSortOrder,
     });
-  }, [searchQuery, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder]);
+  }, [searchQuery, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder]);
 
   // Check if any column filters are active
-  const hasActiveColumnFilters = regStickerFilter.length > 0 || completedFilter.length > 0 || amsFilter.length > 0 || regExpiryFilter.length > 0 || assignedFilter.length > 0 || upsStatusFilter.length > 0 || pickSlotFilter.length > 0 || gaveHolmanFilter.length > 0 || holmanStatusFilter.length > 0 || spareVanFilter.length > 0 || regTestSlotFilter.length > 0 || stateFilter.length > 0 || regionFilter.length > 0 || callStatusFilter.length > 0 || byovFilter.length > 0;
+  const hasActiveColumnFilters = regStickerFilter.length > 0 || completedFilter.length > 0 || amsFilter.length > 0 || regExpiryFilter.length > 0 || assignedFilter.length > 0 || upsStatusFilter.length > 0 || pickSlotFilter.length > 0 || gaveHolmanFilter.length > 0 || spareVanFilter.length > 0 || regTestSlotFilter.length > 0 || stateFilter.length > 0 || regionFilter.length > 0 || callStatusFilter.length > 0 || byovFilter.length > 0;
 
   // Clear all column filters
   const clearColumnFilters = () => {
@@ -477,7 +467,6 @@ export default function Dashboard() {
     setUpsStatusFilter([]);
     setPickSlotFilter([]);
     setGaveHolmanFilter([]);
-    setHolmanStatusFilter([]);
     setSpareVanFilter([]);
     setRegTestSlotFilter([]);
     setStateFilter([]);
@@ -539,18 +528,6 @@ export default function Dashboard() {
   } | null>(null);
   const [isUpsDialogOpen, setIsUpsDialogOpen] = useState(false);
 
-  // LucaAI Refresh All state
-  const [isLucaDialogOpen, setIsLucaDialogOpen] = useState(false);
-  const [lucaJobId, setLucaJobId] = useState<string | null>(null);
-  const [lucaProgress, setLucaProgress] = useState<{
-    total: number;
-    completed: number;
-    failed: number;
-    skipped: number;
-    done: boolean;
-    results: Array<{ truckNumber: string; callType: string; status: string; conversationId?: string; error?: string }>;
-  } | null>(null);
-  
   // Truck consolidation dialog state
   const [isConsolidateDialogOpen, setIsConsolidateDialogOpen] = useState(false);
   const [consolidatePasteText, setConsolidatePasteText] = useState("");
@@ -575,8 +552,6 @@ export default function Dashboard() {
     }>;
   } | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
-  const [callingTruckId, setCallingTruckId] = useState<string | null>(null);
-  const [callingTechTruckId, setCallingTechTruckId] = useState<string | null>(null);
 
   // Bulk sync state
   const [isBulkSyncDialogOpen, setIsBulkSyncDialogOpen] = useState(false);
@@ -594,7 +569,7 @@ export default function Dashboard() {
   } | null>(null);
 
   // Status change reminder
-  const { showReminder, hideReminder, shouldShowReminder } = useStatusReminder();
+  const { showReminder } = useStatusReminder();
 
   // Pagination state - show 50 trucks per page for better performance
   const [currentPage, setCurrentPage] = useState(1);
@@ -675,54 +650,9 @@ export default function Dashboard() {
 
 
 
-  const { data: scraperStatusMap } = useQuery<Record<string, { status: string; lastScraped: string; location: string; primaryIssue: string; priority: string }>>({
-    queryKey: ["/api/fs/trucks/scraper-status"],
-    queryFn: async () => {
-      try {
-        const directRes = await fetch("https://web-scraper-tool-seanchen37.replit.app/api/public/vehicles", {
-          signal: AbortSignal.timeout(15000),
-        });
-        if (directRes.ok) {
-          const result = await directRes.json();
-          const vehicles = result.vehicles || [];
-          const vehicleMap: Record<string, any> = {};
-          for (const v of vehicles) {
-            const num = (v.vehicle_number || '').toString().padStart(6, '0');
-            vehicleMap[num] = {
-              status: v.status || '',
-              lastScraped: v.last_scraped || '',
-              location: v.location || '',
-              primaryIssue: v.primary_issue || '',
-              priority: v.priority || '',
-              repairVendorPhone: v.repair_vendor?.phone || '',
-              recommendation: v.recommendation || '',
-            };
-          }
-          return vehicleMap;
-        }
-      } catch (e) {
-        console.log("[Scraper] Direct fetch failed, falling back to server proxy");
-      }
-      const res = await fetch("/api/fs/trucks/scraper-status");
-      if (!res.ok) throw new Error("Failed to fetch scraper status");
-      return res.json();
-    },
-  });
-
   const { data: byovEnrollmentMap } = useQuery<Record<string, boolean>>({
     queryKey: ["/api/fs/byov-enrollment-status"],
   });
-
-  const HOLMAN_STATUS_OPTIONS = useMemo(() => {
-    if (!scraperStatusMap) return [];
-    const statuses = new Set<string>();
-    Object.values(scraperStatusMap).forEach(v => {
-      if (v.status) statuses.add(v.status.replace(/_/g, ' '));
-    });
-    const sorted = Array.from(statuses).sort();
-    sorted.push("(No Data)");
-    return sorted;
-  }, [scraperStatusMap]);
 
   const { data: rentalSummary } = useQuery<{
     totalActive: number;
@@ -1191,15 +1121,6 @@ export default function Dashboard() {
       const matchesUpsFilter = matchesUpsStatusMultiFilter(truck, upsStatusFilter);
       const matchesPickSlotFilter = matchesPickSlotMultiFilter(truck.pickUpSlotBooked, pickSlotFilter);
       const matchesGaveHolman = matchesGaveHolmanMultiFilter(truck.gaveHolman, gaveHolmanFilter);
-      const matchesHolmanStatus = holmanStatusFilter.length === 0 || (() => {
-        const NONE_MARKER = "__NONE_SELECTED__";
-        if (holmanStatusFilter[0] === NONE_MARKER) return false;
-        const truckNum = truck.truckNumber?.toString().padStart(6, '0') || '';
-        const scraperData = scraperStatusMap?.[truckNum];
-        const displayStatus = scraperData?.status ? scraperData.status.replace(/_/g, ' ') : null;
-        if (!displayStatus) return holmanStatusFilter.includes("(No Data)");
-        return holmanStatusFilter.includes(displayStatus);
-      })();
       const matchesSpareVan = matchesSpareVanMultiFilter(truck.spareVanAssignmentInProcess, spareVanFilter);
       const matchesRegTestSlot = matchesPickSlotMultiFilter(truck.regTestSlotBooked, regTestSlotFilter);
       const matchesState = matchesStateMultiFilter(truck, stateFilter);
@@ -1223,7 +1144,7 @@ export default function Dashboard() {
 
       return matchesSearch && matchesMainStatus && matchesSubStatus && matchesIssueFilter && 
              matchesTruckNumberFilter && matchesColumnStatusFilter && matchesOwnerFilter &&
-             matchesRegStickerFilter && matchesCompletedFilter && matchesAmsFilter && matchesRegExpiryFilter && matchesAssignedFilter && matchesUpsFilter && matchesPickSlotFilter && matchesGaveHolman && matchesHolmanStatus && matchesSpareVan && matchesRegTestSlot && matchesState && matchesRegion && matchesCallStatus && matchesByov;
+             matchesRegStickerFilter && matchesCompletedFilter && matchesAmsFilter && matchesRegExpiryFilter && matchesAssignedFilter && matchesUpsFilter && matchesPickSlotFilter && matchesGaveHolman && matchesSpareVan && matchesRegTestSlot && matchesState && matchesRegion && matchesCallStatus && matchesByov;
     }) || [];
     
     // Helper function to parse date strings (handles formats like "M/D/YYYY", "MM/DD/YYYY", "YYYY-MM-DD")
@@ -1298,7 +1219,7 @@ export default function Dashboard() {
       
       return 0;
     });
-  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, holmanStatusFilter, scraperStatusMap, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder, terminatedVehicleSet, hrStatusVehicleMap]);
+  }, [trucks, debouncedSearch, mainStatusFilter, subStatusFilter, issueFilter, truckNumberFilter, columnStatusFilter, callStatusFilter, ownerFilter, regStickerFilter, completedFilter, amsFilter, regExpiryFilter, assignedFilter, upsStatusFilter, pickSlotFilter, gaveHolmanFilter, spareVanFilter, regTestSlotFilter, stateFilter, regionFilter, byovFilter, byovEnrollmentMap, regExpirySortOrder, dateRepairSortOrder, billPaidSortOrder, terminatedVehicleSet, hrStatusVehicleMap]);
 
   // Pagination calculations
   const totalPages = Math.ceil(filteredTrucks.length / TRUCKS_PER_PAGE);
@@ -1352,29 +1273,6 @@ export default function Dashboard() {
       toast({
         title: "Import failed",
         description: error.message || "Failed to import trucks",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const callImportMutation = useMutation({
-    mutationFn: async (rows: any[]) => {
-      const res = await apiRequest("POST", "/api/fs/trucks/call-import", { rows });
-      return await res.json();
-    },
-    onSuccess: (data: { updated: number; notFound: number; errors: string[] }) => {
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-      setCallImportResults(data);
-      setCallImportFile(null);
-      toast({
-        title: "Call import completed",
-        description: `Updated ${data.updated} trucks${data.notFound ? `, ${data.notFound} not found` : ""}${data.errors?.length ? `, ${data.errors.length} errors` : ""}`,
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "Call import failed",
-        description: error.message || "Failed to import call data",
         variant: "destructive",
       });
     },
@@ -1654,38 +1552,15 @@ export default function Dashboard() {
     setEditValue(currentValue === null || currentValue === undefined ? "" : String(currentValue));
   };
 
-  // Save inline edit
+  // Save inline edit. Main/sub status are VRM-owned (edited in VRM Rental
+  // Operations, mirrored down) and are no longer sent from Fleet Scope.
   const saveEdit = (truckId: string, field: string, value: any) => {
-    // When mainStatus changes to "Approved for sale", auto-set subStatus to "Clearing Softeon Inventory" and owner to "Jenn D."
-    if (field === "mainStatus" && value === "Approved for sale") {
-      apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
-        mainStatus: value,
-        subStatus: "Clearing Softeon Inventory",
-        shsOwner: "Jenn D",
-        lastUpdatedBy: currentUser || "User"
-      }).then(() => {
-        queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-        hideReminder(truckId);
-      }).catch((error: any) => {
-        toast({
-          title: "Update failed",
-          description: error.message || "Failed to update truck",
-          variant: "destructive",
-        });
-      });
-      return;
-    }
-    
-    // When registrationStickerValid changes to "Ordered duplicates", auto-set subStatus to "Ordering duplicate tags"
+    // When registrationStickerValid changes to "Ordered duplicates", the
+    // SERVER auto-sets subStatus to "Ordering duplicate tags" (status fields
+    // cannot be written from Fleet Scope clients anymore).
     if (field === "registrationStickerValid" && value === "Ordered duplicates") {
-      // Find the truck to get its current mainStatus (required for subStatus validation)
-      const truck = trucks?.find(t => t.id === truckId);
-      const currentMainStatus = truck?.mainStatus || "Confirming Status";
-      
       apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
         registrationStickerValid: value,
-        mainStatus: currentMainStatus, // Include current mainStatus to satisfy validation
-        subStatus: "Ordering duplicate tags",
         lastUpdatedBy: currentUser || "User"
       }).then(() => {
         queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
@@ -1705,53 +1580,7 @@ export default function Dashboard() {
     }
     
     inlineEditMutation.mutate({ truckId, field, value });
-    // Show reminder for non-status field changes
-    if (field !== "mainStatus" && field !== "subStatus") {
-      showReminder(truckId);
-    } else {
-      hideReminder(truckId);
-    }
-  };
-
-  // Helper function to determine owner for "Approved for sale" substatus
-  const getOwnerForApprovedForSale = (subStatus: string | null): string | null => {
-    if (subStatus === "Clearing Softeon Inventory" || subStatus === "Vehicle Termination Form completed") {
-      return "Jenn D";
-    }
-    if (subStatus === "Fleet Administrator review" || subStatus === "Procurement to transfer form to leadership") {
-      return "Bob B";
-    }
-    if (subStatus === "Leadership to approve Docusign") {
-      return "Samantha W";
-    }
-    return null; // Don't change owner for other substatuses
-  };
-
-  // Save sub-status with mainStatus included (required for validation)
-  const saveSubStatus = (truckId: string, mainStatus: string, subStatus: string | null) => {
-    const updates: Record<string, any> = { mainStatus, subStatus };
-    
-    // Auto-set owner for "Approved for sale" substatuses
-    if (mainStatus === "Approved for sale") {
-      const newOwner = getOwnerForApprovedForSale(subStatus);
-      if (newOwner) {
-        updates.shsOwner = newOwner;
-      }
-    }
-    
-    apiRequest("PATCH", `/api/fs/trucks/${truckId}`, { 
-      ...updates,
-      lastUpdatedBy: currentUser || "User"
-    }).then(() => {
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-      hideReminder(truckId);
-    }).catch((error: any) => {
-      toast({
-        title: "Update failed",
-        description: error.message || "Failed to update truck",
-        variant: "destructive",
-      });
-    });
+    showReminder(truckId);
   };
 
   // Handle boolean field change
@@ -1889,44 +1718,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleCallRepairShop = async (truckId: string) => {
-    setCallingTruckId(truckId);
-    try {
-      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-repair-shop`, {});
-      toast({
-        title: "Call initiated",
-        description: "The repair shop is being called now.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Failed to start call",
-        description: error.message || "Could not initiate call to repair shop.",
-        variant: "destructive",
-      });
-    } finally {
-      setCallingTruckId(null);
-    }
-  };
-
-  const handleCallTechnician = async (truckId: string) => {
-    setCallingTechTruckId(truckId);
-    try {
-      await apiRequest("POST", `/api/fs/trucks/${truckId}/call-technician`, {});
-      toast({
-        title: "Call initiated",
-        description: "The technician is being called now.",
-      });
-    } catch (error: any) {
-      toast({
-        title: "Failed to start call",
-        description: error.message || "Could not initiate call to technician.",
-        variant: "destructive",
-      });
-    } finally {
-      setCallingTechTruckId(null);
-    }
-  };
-
   const resetSyncDialog = () => {
     setSyncResults(null);
     setIsSyncDialogOpen(false);
@@ -1958,57 +1749,6 @@ export default function Dashboard() {
   const resetUpsDialog = () => {
     setUpsRefreshResults(null);
     setIsUpsDialogOpen(false);
-  };
-
-  // LucaAI Refresh All — start mutation
-  const startLucaRefreshMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/fs/elevenlabs/backfill-all/start", {});
-      return response.json();
-    },
-    onSuccess: (data: { jobId: string; total: number; eligible: number; skipped?: number }) => {
-      setLucaJobId(data.jobId);
-      // Seed initial progress immediately so the UI shows 0/total before first poll
-      setLucaProgress({
-        total: data.total,
-        completed: 0,
-        failed: 0,
-        skipped: data.skipped ?? 0,
-        done: data.total === 0,
-        results: [],
-      });
-    },
-    onError: (error: any) => {
-      toast({
-        title: "LucaAI refresh failed",
-        description: error.message || "Failed to start refresh job",
-        variant: "destructive",
-      });
-    },
-  });
-
-  // Poll LucaAI job status every 2s while running
-  useEffect(() => {
-    if (!lucaJobId || lucaProgress?.done) return;
-    const interval = setInterval(async () => {
-      try {
-        const response = await fetch(`/api/fs/elevenlabs/backfill-all/status/${lucaJobId}`, { credentials: "include" });
-        if (!response.ok) return;
-        const data = await response.json();
-        setLucaProgress(data);
-        if (data.done) {
-          clearInterval(interval);
-          queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-        }
-      } catch (_e) {}
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [lucaJobId, lucaProgress?.done]);
-
-  const resetLucaDialog = () => {
-    setIsLucaDialogOpen(false);
-    setLucaJobId(null);
-    setLucaProgress(null);
   };
 
   const handleImportCSV = () => {
@@ -2092,103 +1832,6 @@ export default function Dashboard() {
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
-  };
-
-  const resetCallImportDialog = () => {
-    setCallImportFile(null);
-    setCallImportResults(null);
-    setIsCallImportDialogOpen(false);
-    if (callImportFileRef.current) {
-      callImportFileRef.current.value = "";
-    }
-  };
-
-  const handleCallImportFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) {
-      setCallImportFile(file);
-    }
-  };
-
-  const normalizeDate = (value: any): string => {
-    if (!value) return "";
-    const str = String(value).trim();
-    if (!str) return "";
-    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
-    const d = new Date(str);
-    if (!isNaN(d.getTime())) {
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-    if (typeof value === 'number') {
-      const excelEpoch = new Date(1899, 11, 30);
-      const date = new Date(excelEpoch.getTime() + value * 86400000);
-      if (!isNaN(date.getTime())) {
-        return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-      }
-    }
-    return "";
-  };
-
-  const handleCallImport = () => {
-    if (!callImportFile) return;
-
-    const ext = callImportFile.name.split('.').pop()?.toLowerCase();
-
-    if (ext === 'xlsx' || ext === 'xls') {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        try {
-          const jsonData = await readExcelFile(e.target?.result as ArrayBuffer);
-          processCallImportData(jsonData);
-        } catch (err: any) {
-          toast({ title: "Failed to parse file", description: err.message, variant: "destructive" });
-        }
-      };
-      reader.readAsArrayBuffer(callImportFile);
-    } else {
-      Papa.parse(callImportFile, {
-        header: true,
-        skipEmptyLines: true,
-        complete: (results) => {
-          processCallImportData(results.data);
-        },
-        error: (error) => {
-          toast({ title: "CSV parsing failed", description: error.message, variant: "destructive" });
-        },
-      });
-    }
-  };
-
-  const processCallImportData = (data: any[]) => {
-    const rows = data.map((row: any) => {
-      const lcRow: Record<string, any> = {};
-      for (const key of Object.keys(row)) {
-        lcRow[key.toLowerCase().trim()] = row[key];
-      }
-      const getValue = (...fields: string[]) => {
-        for (const f of fields) {
-          const val = lcRow[f.toLowerCase()];
-          if (val !== undefined && val !== null && String(val).trim() !== "") {
-            return String(val).trim();
-          }
-        }
-        return "";
-      };
-
-      const truckNumber = getValue("truck #", "truck number", "trucknumber", "truck_number", "truck#");
-      const callStatus = getValue("call status", "callstatus", "call_status");
-      const eta = getValue("eta");
-      const lastDateCalled = normalizeDate(lcRow["last called"] ?? lcRow["last call"] ?? lcRow["last date called"] ?? lcRow["lastdatecalled"] ?? lcRow["last_date_called"] ?? lcRow["lastcalled"] ?? "");
-
-      return { truckNumber, callStatus, eta, lastDateCalled };
-    }).filter((r: any) => r.truckNumber);
-
-    if (rows.length === 0) {
-      toast({ title: "No valid rows found", description: "Make sure the file has a 'Truck #' column", variant: "destructive" });
-      return;
-    }
-
-    callImportMutation.mutate(rows);
   };
 
   const exportToCSV = () => {
@@ -2471,108 +2114,8 @@ export default function Dashboard() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={isCallImportDialogOpen} onOpenChange={setIsCallImportDialogOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" data-testid="button-call-import">
-                <Upload className="w-3 h-3 mr-1" />
-                Call Import
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-md">
-              <DialogHeader>
-                <DialogTitle>Call Import</DialogTitle>
-                <DialogDescription>
-                  Upload an XLSX or CSV file to update Call Status, ETA, and Last Called for existing trucks.
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="bg-muted/50 rounded-lg p-3 text-xs space-y-1">
-                <p className="font-medium text-sm">Required column format:</p>
-                <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
-                  <span className="font-mono font-medium">Truck #</span>
-                  <span className="text-muted-foreground">Truck number (e.g. 036096)</span>
-                  <span className="font-mono font-medium">Call Status</span>
-                  <span className="text-muted-foreground">Text, max 50 characters</span>
-                  <span className="font-mono font-medium">ETA</span>
-                  <span className="text-muted-foreground">Text (e.g. "Next Week", "2/15")</span>
-                  <span className="font-mono font-medium">Last Called</span>
-                  <span className="text-muted-foreground">Date (MM/DD/YYYY or YYYY-MM-DD)</span>
-                </div>
-                <p className="text-muted-foreground pt-1">Only provided columns will be updated. Blank cells are skipped.</p>
-              </div>
-
-              {callImportResults ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-green-600">
-                    <CheckCircle2 className="w-5 h-5" />
-                    <span className="font-medium">Import Complete</span>
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-sm">
-                      <strong>{callImportResults.updated}</strong> trucks updated
-                      {callImportResults.notFound > 0 && (
-                        <>, <strong>{callImportResults.notFound}</strong> not found</>
-                      )}
-                    </p>
-                    {callImportResults.errors.length > 0 && (
-                      <div>
-                        <p className="text-sm text-destructive font-medium mb-1">
-                          {callImportResults.errors.length} errors:
-                        </p>
-                        <div className="max-h-32 overflow-y-auto text-xs text-muted-foreground space-y-1 bg-muted p-2 rounded">
-                          {callImportResults.errors.map((error, i) => (
-                            <div key={i}>{error}</div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <Button onClick={resetCallImportDialog} className="w-full" data-testid="button-close-call-import">
-                    Close
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="border-2 border-dashed rounded-lg p-6 text-center">
-                    <input
-                      ref={callImportFileRef}
-                      type="file"
-                      accept=".csv,.xlsx,.xls"
-                      onChange={handleCallImportFileSelect}
-                      className="hidden"
-                      id="call-import-upload"
-                      data-testid="input-call-import-file"
-                    />
-                    <label htmlFor="call-import-upload" className="cursor-pointer">
-                      <FileUp className="w-12 h-12 mx-auto mb-2 text-muted-foreground" />
-                      <p className="text-sm font-medium mb-1">
-                        {callImportFile ? callImportFile.name : "Click to upload XLSX or CSV"}
-                      </p>
-                      <p className="text-xs text-muted-foreground">
-                        .xlsx, .xls, or .csv
-                      </p>
-                    </label>
-                  </div>
-                  
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <span className="inline-flex w-full">
-                        <Button
-                          onClick={handleCallImport}
-                          disabled={!callImportFile || callImportMutation.isPending}
-                          className="w-full"
-                          data-testid="button-start-call-import"
-                        >
-                          {callImportMutation.isPending ? "Importing..." : "Import Call Data"}
-                        </Button>
-                      </span>
-                    </TooltipTrigger>
-                    {!callImportFile && <TooltipContent>Select a file above before importing</TooltipContent>}
-                  </Tooltip>
-                </div>
-              )}
-            </DialogContent>
-          </Dialog>
+          {/* Call Import removed 2026-08-04: call data flows exclusively from
+              LUCA via VRM Rental Operations; Fleet Scope is a read-only mirror. */}
           
           <Dialog open={isShopListDialogOpen} onOpenChange={setIsShopListDialogOpen}>
             <DialogTrigger asChild>
@@ -2822,121 +2365,6 @@ export default function Dashboard() {
             </DialogContent>
           </Dialog>
           
-          <Dialog open={isLucaDialogOpen} onOpenChange={(open) => { if (!open) resetLucaDialog(); else setIsLucaDialogOpen(true); }}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm" data-testid="button-refresh-luca">
-                <PhoneCall className="w-3 h-3 mr-1" />
-                Refresh LucaAI
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>Refresh All LucaAI Call Data</DialogTitle>
-                <DialogDescription>
-                  Fetch the latest call status for all trucks with recorded ElevenLabs conversations.
-                </DialogDescription>
-              </DialogHeader>
-
-              {lucaProgress?.done ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-green-600">
-                    <CheckCircle2 className="w-5 h-5" />
-                    <span className="font-medium">Refresh Complete</span>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <div className="bg-muted rounded p-2">
-                      <div className="text-2xl font-bold text-green-600">{lucaProgress.completed}</div>
-                      <div className="text-xs text-muted-foreground">Updated</div>
-                    </div>
-                    <div className="bg-muted rounded p-2">
-                      <div className="text-2xl font-bold text-amber-600">{lucaProgress.failed}</div>
-                      <div className="text-xs text-muted-foreground">Failed</div>
-                    </div>
-                    <div className="bg-muted rounded p-2">
-                      <div className="text-2xl font-bold text-muted-foreground">{lucaProgress.skipped}</div>
-                      <div className="text-xs text-muted-foreground">Skipped</div>
-                    </div>
-                  </div>
-                  {lucaProgress.results.filter(r => r.status === "failed").length > 0 && (
-                    <div>
-                      <p className="text-sm font-medium text-destructive mb-1">Failed trucks:</p>
-                      <div className="max-h-32 overflow-y-auto text-xs text-muted-foreground space-y-1 bg-muted p-2 rounded">
-                        {lucaProgress.results.filter(r => r.status === "failed").map((r, i) => (
-                          <div key={i}>
-                            <strong>{r.truckNumber}</strong> ({r.callType}): {r.error}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                  <Button onClick={resetLucaDialog} className="w-full" data-testid="button-close-luca">
-                    Close
-                  </Button>
-                </div>
-              ) : lucaJobId ? (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-2 text-blue-600">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    <span className="font-medium">Refreshing...</span>
-                  </div>
-                  {lucaProgress && (
-                    <div className="space-y-2">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-muted-foreground">Progress</span>
-                        <span className="font-medium">{lucaProgress.completed + lucaProgress.failed} / {lucaProgress.total}</span>
-                      </div>
-                      <div className="w-full bg-muted rounded-full h-2">
-                        <div
-                          className="bg-blue-500 h-2 rounded-full transition-all"
-                          style={{ width: lucaProgress.total > 0 ? `${Math.round(((lucaProgress.completed + lucaProgress.failed) / lucaProgress.total) * 100)}%` : "0%" }}
-                        />
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {lucaProgress.completed} updated, {lucaProgress.failed} failed so far
-                      </p>
-                    </div>
-                  )}
-                  <p className="text-xs text-muted-foreground">
-                    This may take a moment depending on how many trucks have calls. You can close this dialog — the job will continue in the background.
-                  </p>
-                  <Button variant="outline" onClick={resetLucaDialog} className="w-full">
-                    Close (job continues)
-                  </Button>
-                </div>
-              ) : (
-                <div className="space-y-4">
-                  <div className="text-sm text-muted-foreground">
-                    <p className="mb-2">This will:</p>
-                    <ul className="list-disc list-inside space-y-1">
-                      <li>Find all trucks with a stored ElevenLabs conversation ID</li>
-                      <li>Fetch the full transcript and current status from ElevenLabs</li>
-                      <li>Re-run the AI analysis and update each truck's call status</li>
-                      <li>Trucks with no recorded calls are skipped automatically</li>
-                    </ul>
-                  </div>
-                  <Button
-                    onClick={() => startLucaRefreshMutation.mutate()}
-                    disabled={startLucaRefreshMutation.isPending}
-                    className="w-full"
-                    data-testid="button-start-luca-refresh"
-                  >
-                    {startLucaRefreshMutation.isPending ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Starting...
-                      </>
-                    ) : (
-                      <>
-                        <PhoneCall className="w-4 h-4 mr-2" />
-                        Start Refresh
-                      </>
-                    )}
-                  </Button>
-                </div>
-              )}
-            </DialogContent>
-          </Dialog>
-
           <Dialog open={isConsolidateDialogOpen} onOpenChange={setIsConsolidateDialogOpen}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm" data-testid="button-consolidate">
@@ -3534,28 +2962,6 @@ export default function Dashboard() {
                             <th className="px-2 py-2 text-center text-xs font-medium uppercase tracking-labels text-muted-foreground hidden lg:table-cell" title="Van Picked Up">
                               Van Picked Up
                             </th>
-                            <th className="px-2 py-2 text-center text-xs font-medium uppercase tracking-labels text-muted-foreground hidden lg:table-cell" title="Holman Repair Status" data-testid="header-holman-status">
-                              <div className="flex flex-col items-center gap-1">
-                                <span>Holman Status</span>
-                                <MultiSelectFilter
-                                  options={HOLMAN_STATUS_OPTIONS}
-                                  selectedValues={holmanStatusFilter}
-                                  onSelectionChange={setHolmanStatusFilter}
-                                  label="Holman Status"
-                                  showSearch={false}
-                                  optionColors={{
-                                    'REPAIR COMPLETE': 'bg-green-500',
-                                    'IN REPAIR': 'bg-blue-500',
-                                    'IN AUTHORIZATION': 'bg-amber-500',
-                                    'DECLINED': 'bg-red-500',
-                                    'DISPUTED': 'bg-orange-500',
-                                    'ABANDONED': 'bg-red-800',
-                                    'UNKNOWN': 'bg-gray-400',
-                                    '(No Data)': 'bg-gray-300',
-                                  }}
-                                />
-                              </div>
-                            </th>
                             <th className="px-2 py-2 text-center text-xs font-medium uppercase tracking-labels text-muted-foreground">
                               Actions
                             </th>
@@ -3567,7 +2973,7 @@ export default function Dashboard() {
                         <tbody className="bg-background divide-y divide-border">
                           {filteredTrucks.length === 0 ? (
                             <tr>
-                              <td colSpan={20} className="px-4 py-12 text-center">
+                              <td colSpan={19} className="px-4 py-12 text-center">
                                 <Filter className="w-10 h-10 mx-auto mb-3 text-muted-foreground opacity-50" />
                                 <h3 className="text-base font-medium mb-2">No matching trucks</h3>
                                 <p className="text-sm text-muted-foreground mb-3">
@@ -3732,48 +3138,23 @@ export default function Dashboard() {
                                 </div>
                               </td>
                               <td className="px-2 py-2">
-                                <div className="flex items-start gap-2">
-                                  <div className="flex flex-col gap-1">
-                                    <Select
-                                      value={truck.mainStatus || "Confirming Status"}
-                                      onValueChange={(value) => saveEdit(truck.id, "mainStatus", value)}
-                                    >
-                                      <SelectTrigger className="h-auto p-0 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 [&>svg]:hidden" data-testid={`select-status-${index}`}>
-                                        <StatusBadge 
-                                          status={truck.status as any} 
-                                          mainStatus={truck.mainStatus}
-                                          subStatus={truck.subStatus}
-                                          showSubStatusOnly={false}
-                                        />
-                                      </SelectTrigger>
-                                      <SelectContent>
-                                        {MAIN_STATUSES.map((status) => (
-                                          <SelectItem key={status} value={status}>{status}</SelectItem>
-                                        ))}
-                                      </SelectContent>
-                                    </Select>
-                                    {truck.mainStatus && SUB_STATUSES[truck.mainStatus as MainStatus]?.length > 0 && (
-                                      <Select
-                                        value={truck.subStatus || "_none_"}
-                                        onValueChange={(value) => saveSubStatus(truck.id, truck.mainStatus!, value === "_none_" ? null : value)}
-                                      >
-                                        <SelectTrigger className="h-6 text-xs px-1 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 w-auto max-w-[180px] [&>svg]:hidden" data-testid={`select-substatus-${index}`}>
-                                          <SelectValue>{truck.subStatus || "Select sub-status..."}</SelectValue>
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                          <SelectItem value="_none_">No sub-status</SelectItem>
-                                          {SUB_STATUSES[truck.mainStatus as MainStatus]?.map((sub) => (
-                                            <SelectItem key={sub} value={sub}>{sub}</SelectItem>
-                                          ))}
-                                        </SelectContent>
-                                      </Select>
-                                    )}
-                                  </div>
-                                  <StatusReminder 
-                                    show={shouldShowReminder(truck.id)} 
-                                    onDismiss={() => hideReminder(truck.id)}
-                                    position="inline"
+                                {/* Status is VRM-owned: edited in VRM Rental Operations, mirrored here. */}
+                                <div
+                                  className="flex flex-col gap-1"
+                                  title="Status is managed in VRM Rental Operations and mirrors to Fleet Scope automatically"
+                                  data-testid={`status-display-${index}`}
+                                >
+                                  <StatusBadge 
+                                    status={truck.status as any} 
+                                    mainStatus={truck.mainStatus}
+                                    subStatus={truck.subStatus}
+                                    showSubStatusOnly={false}
                                   />
+                                  {truck.subStatus && (
+                                    <span className="text-xs text-muted-foreground px-1" data-testid={`text-substatus-${index}`}>
+                                      {truck.subStatus}
+                                    </span>
+                                  )}
                                 </div>
                               </td>
                               <td className="px-2 py-2 text-sm hidden sm:table-cell" data-testid={`text-owner-${index}`}>
@@ -4018,30 +3399,6 @@ export default function Dashboard() {
                                   </SelectContent>
                                 </Select>
                               </td>
-                              <td className="px-2 py-1 text-center hidden lg:table-cell" data-testid={`text-holman-status-${index}`}>
-                                {(() => {
-                                  const truckNum = truck.truckNumber?.toString().padStart(6, '0') || '';
-                                  const scraperData = scraperStatusMap?.[truckNum];
-                                  if (!scraperData || !scraperData.status) return <span className="text-muted-foreground">—</span>;
-                                  const statusColors: Record<string, string> = {
-                                    'REPAIR_COMPLETE': 'text-green-700 dark:text-green-400',
-                                    'IN_REPAIR': 'text-blue-700 dark:text-blue-400',
-                                    'IN_AUTHORIZATION': 'text-amber-700 dark:text-amber-400',
-                                    'DECLINED': 'text-red-700 dark:text-red-400',
-                                    'DISPUTED': 'text-orange-700 dark:text-orange-400',
-                                    'ABANDONED': 'text-red-800 dark:text-red-300',
-                                  };
-                                  const displayStatus = scraperData.status.replace(/_/g, ' ');
-                                  const colorClass = statusColors[scraperData.status] || 'text-foreground';
-                                  const lastScraped = scraperData.lastScraped ? new Date(scraperData.lastScraped).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '';
-                                  return (
-                                    <div title={scraperData.primaryIssue || ''}>
-                                      <span className={`text-xs font-medium ${colorClass}`}>{displayStatus}</span>
-                                      {lastScraped && <div className="text-[10px] text-muted-foreground leading-tight">{lastScraped}</div>}
-                                    </div>
-                                  );
-                                })()}
-                              </td>
                               <td className="px-2 py-2 text-center">
                                 {(() => {
                                   const statusBadgeClasses = (s: string) => {
@@ -4066,58 +3423,6 @@ export default function Dashboard() {
                                             <span className="hidden sm:inline">View</span>
                                           </Button>
                                         </Link>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                data-testid={`button-call-${index}`}
-                                                disabled={!truck.repairPhone || callingTruckId === truck.id}
-                                                onClick={(e: React.MouseEvent) => {
-                                                  e.stopPropagation();
-                                                  handleCallRepairShop(truck.id);
-                                                }}
-                                                className={!truck.repairPhone ? "opacity-30" : "text-green-600 dark:text-green-400"}
-                                              >
-                                                {callingTruckId === truck.id ? (
-                                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                                ) : (
-                                                  <PhoneCall className="w-4 h-4" />
-                                                )}
-                                              </Button>
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            {truck.repairPhone ? `Call Shop: ${truck.repairPhone}` : "No shop phone"}
-                                          </TooltipContent>
-                                        </Tooltip>
-                                        <Tooltip>
-                                          <TooltipTrigger asChild>
-                                            <span>
-                                              <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                data-testid={`button-call-tech-${index}`}
-                                                disabled={!truck.techPhone || callingTechTruckId === truck.id}
-                                                onClick={(e: React.MouseEvent) => {
-                                                  e.stopPropagation();
-                                                  handleCallTechnician(truck.id);
-                                                }}
-                                                className={!truck.techPhone ? "opacity-30" : "text-blue-600 dark:text-blue-400"}
-                                              >
-                                                {callingTechTruckId === truck.id ? (
-                                                  <RefreshCw className="w-4 h-4 animate-spin" />
-                                                ) : (
-                                                  <PhoneForwarded className="w-4 h-4" />
-                                                )}
-                                              </Button>
-                                            </span>
-                                          </TooltipTrigger>
-                                          <TooltipContent>
-                                            {truck.techPhone ? `Call Tech: ${truck.techPhone}` : "No tech phone"}
-                                          </TooltipContent>
-                                        </Tooltip>
                                       </div>
                                       {(shopStatus || techStatus) && (
                                         <div className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">

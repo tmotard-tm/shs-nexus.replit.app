@@ -17,7 +17,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, CornerDownRight,
-  MessageSquare, Pencil, Lock,
+  MessageSquare, Pencil, Lock, Bot,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
@@ -110,6 +110,14 @@ interface MasterRow {
   mark_note: string | null;
   mark_actor: string | null;
   mark_at: string | null;
+  /** Manual "verified ready with the shop" mark (shared with the Ops Queue). */
+  ready_verified: boolean;
+  ready_verified_by: string | null;
+  ready_verified_at: string | null;
+  /** "Escalated to research" mark (shop can't be validated from POs/calls). */
+  research_active: boolean;
+  research_by: string | null;
+  research_at: string | null;
   present_in_latest: boolean;
   last_seen_at: string | null;
 }
@@ -204,6 +212,7 @@ interface CallLogItem {
   dryRun: boolean | null;
   truck?: string | null;        // which truck the call was about (case or assigned)
   shopName?: string | null;
+  shopPhone?: string | null;    // the number LUCA actually dialed (dispatch rows only)
 }
 // An investigation note written ABOUT a truck (not about one rental case).
 // caseKey is the rental case it was written from — kept so provenance survives
@@ -219,6 +228,8 @@ interface CaseDetail {
   portal?: PortalData | null;
   assignedTruck?: AssignedTruckDetail | null;
   callLog?: CallLogItem[];
+  /** Server-reconciled shop-of-record — the SAME pick the board table/queue show. */
+  reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null;
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -938,6 +949,26 @@ export default function RegionalCases() {
   }, [filtered, sort, groupByDistrict]);
 
   // mutations
+  // Shared verification state (same rows the Ops Queue and Rental Operations
+  // read/write): a human confirmed READY with the shop, or escalated to research.
+  const verifyMut = useMutation({
+    mutationFn: (v: { caseKey: string; verified: boolean }) =>
+      apiRequest("POST", "/api/vrm/rental-operations/queue/ready-verified", { key: v.caseKey, verified: v.verified }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] });
+      toast({ title: v.verified ? "Marked verified ready" : "Verification undone", description: v.verified ? "Reflected on the Ops Queue and Rental Operations." : undefined });
+    },
+    onError: (e: any) => toast({ title: "Verify failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const researchMut = useMutation({
+    mutationFn: (v: { caseKey: string; active: boolean }) =>
+      apiRequest("POST", "/api/vrm/rental-operations/queue/research", { key: v.caseKey, active: v.active }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] });
+      toast({ title: v.active ? "Escalated to research" : "Research escalation cleared", description: v.active ? "Reflected on the Ops Queue and Rental Operations." : undefined });
+    },
+    onError: (e: any) => toast({ title: "Research escalation failed", description: String(e?.message || e), variant: "destructive" }),
+  });
   const markMut = useMutation({
     mutationFn: (v: { caseKey: string; mark: string }) =>
       apiRequest("POST", `/api/vrm/rental-operations/master/${v.caseKey}/actions`, { action_type: "mark", mark_value: v.mark }),
@@ -1163,6 +1194,7 @@ export default function RegionalCases() {
               <Th col="days" label="Days" style={{ textAlign: "right" }} />
               <Th col="npos" label="POs" style={{ textAlign: "right" }} />
               <th style={{ ...thStyle, textAlign: "center" }}>Text</th>
+              <th style={{ ...thStyle, textAlign: "center" }} title="Shop verification — ✓ verified ready by phone · R escalate to research">Verify</th>
               <th style={{ ...thStyle, minWidth: 150 }}>Status / Next action</th>
             </tr>
           </thead>
@@ -1182,7 +1214,7 @@ export default function RegionalCases() {
                 <Fragment key={r.case_key}>
                 {showDistrictHeader && (
                   <tr>
-                    <td colSpan={10} style={{ padding: "7px 10px", background: colors.background,
+                    <td colSpan={11} style={{ padding: "7px 10px", background: colors.background,
                       borderTop: `1px solid ${colors.rule}`, borderBottom: `1px solid ${colors.rule}`,
                       fontFamily: fonts.dmSans, fontSize: 11.5, fontWeight: 600, color: colors.inkSoft,
                       position: "sticky", top: 32, zIndex: 1 }}>
@@ -1200,7 +1232,11 @@ export default function RegionalCases() {
                   </tr>
                 )}
                 <tr onClick={() => setPanelKey(r.case_key)} style={{ cursor: "pointer", background: tint, opacity: r.operator_mark === "closed" ? 0.72 : 1 }}>
-                  <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>{r.case_key}</td>
+                  <td style={{ ...tdStyle, fontFamily: fonts.jetbrains, fontWeight: 700 }}>
+                    {r.case_key}
+                    {r.ready_verified && <Chip text="VERIFIED" fg={colors.green} bg={colors.greenLight} />}
+                    {r.research_active && !r.ready_verified && <Chip text="RESEARCH" fg={colors.amber} bg={colors.amberLight} />}
+                  </td>
                   <td style={tdStyle}>
                     {r.renter_name_raw}
                     {r.ticket_status === "PENDED" && <Chip text="PENDED" fg={colors.red} bg={colors.redLight} />}
@@ -1279,6 +1315,24 @@ export default function RegionalCases() {
                       </button>
                     ) : <span style={{ color: colors.inkMuted, fontSize: 11 }} title="No technician resolved on this rental">—</span>}
                   </td>
+                  <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: "inline-flex", gap: 3 }}>
+                      <button type="button"
+                        title={r.ready_verified
+                          ? `Verified ready by ${r.ready_verified_by || "?"}${r.ready_verified_at ? ` on ${fmtDate(r.ready_verified_at)}` : ""} — click to undo`
+                          : "You called the shop and confirmed the truck IS ready (moves it to Vehicle ready on the Ops Queue)"}
+                        disabled={verifyMut.isPending}
+                        onClick={() => verifyMut.mutate({ caseKey: r.case_key, verified: !r.ready_verified })}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${r.ready_verified ? colors.green : colors.rule}`, background: r.ready_verified ? colors.green : "transparent", color: r.ready_verified ? "#fff" : colors.inkSoft, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓</button>
+                      <button type="button"
+                        title={r.research_active
+                          ? `Escalated to research by ${r.research_by || "?"}${r.research_at ? ` on ${fmtDate(r.research_at)}` : ""} — click to clear`
+                          : "Shop can't be validated from POs and calls on file — escalate to research"}
+                        disabled={researchMut.isPending}
+                        onClick={() => researchMut.mutate({ caseKey: r.case_key, active: !r.research_active })}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${r.research_active ? colors.amber : colors.rule}`, background: r.research_active ? colors.amber : "transparent", color: r.research_active ? "#fff" : colors.inkSoft, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>R</button>
+                    </div>
+                  </td>
                   <td style={tdStyle} onClick={(e) => { e.stopPropagation(); setWorkbookKey(r.case_key); }} title="Open the workbook for this case">
                     {(() => {
                       const wb = r.workbook ?? ({ status: "new" } as WorkbookStateC);
@@ -1311,7 +1365,7 @@ export default function RegionalCases() {
                 </Fragment>
               );
             })}
-            {sorted.length === 0 && <tr><td colSpan={10} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={11} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1820,8 +1874,21 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
   const notes = (data?.actions || []).filter((a) => a.action_type === "note");
   const poList = data?.poHistory || [];
-  // current shop = the most-recent APPROVED repair PO (open), else the latest repair PO (fallback)
-  const currentShop = poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED") || poList.find((p) => p.vendorType === "repair") || null;
+  // Anchor "Current shop" on the SERVER-reconciled shop-of-record — the same
+  // pick the board table, charts and Today's Queue show (portal-corrected
+  // effective status, APPROVED-first). Re-deriving it here from raw ETL
+  // poStatus is exactly what made the drawer disagree with the table. Fall
+  // back to the old raw pick when the payload predates the field.
+  const reconciled = data?.reconciledShop ?? null;
+  const currentShop =
+    (reconciled?.poNumber ? poList.find((p) => p.poNumber === reconciled.poNumber) : null)
+    || poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
+    || poList.find((p) => p.vendorType === "repair")
+    || null;
+  const effShopStatus: string | null = reconciled?.effStatus ?? currentShop?.poStatus ?? null;
+  // Newest LUCA dispatch about THIS rental truck — the shop LUCA actually dialed.
+  const lucaDial = (data?.callLog || []).find((cl) => cl.source === "luca_dispatch" &&
+    (!cl.truck || String(cl.truck).replace(/^0+/, "") === String(caseKey).replace(/^0+/, ""))) ?? null;
   const portal = data?.portal ?? null;
   const assigned = data?.assignedTruck ?? null;
   const addNote = useMutation({
@@ -1945,17 +2012,20 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 {currentShop?.uploadTimestamp && <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: fonts.jetbrains, fontSize: 10 }}>PO data synced {fmtDateTime(currentShop.uploadTimestamp)}</span>}
               </div>
               {currentShop ? (
-                <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${currentShop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${effShopStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{currentShop.vendorName}
-                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: currentShop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{currentShop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: effShopStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{effShopStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
                   </div>
                   <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || portal?.shop?.address || "no address on PO"}</div>
                   {(() => {
-                    // A manual number (locked or not) outranks the per-PO phone
-                    // from the scrape — the operator set it for THIS truck.
+                    // Precedence: manual/locked number (operator set it for
+                    // THIS truck) → reconciled board number (what the table
+                    // shows and LUCA's feed uses) → per-PO scrape → global
+                    // scrape. Showing the per-PO number first is what made
+                    // the drawer's phone disagree with the table.
                     const shopMeta = (portal?.shop ?? null) as any;
                     const manual = !!shopMeta && (shopMeta.phoneSource === "manual" || shopMeta.phoneLocked);
-                    const ph = manual ? shopMeta?.phone : (portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone);
+                    const ph = manual ? shopMeta?.phone : (reconciled?.shopPhone || portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone);
                     const openEdit = () => setPhoneEdit({ truck: caseKey, caseKey, shopName: currentShop.vendorName, phone: shopMeta?.phone ?? ph ?? null, locked: !!shopMeta?.phoneLocked, editedBy: shopMeta?.phoneEditedBy, editedAt: shopMeta?.phoneEditedAt });
                     const editBtn = (
                       <button type="button" title="Edit shop phone (with optional lock against scrapes)" onClick={openEdit}
@@ -1982,6 +2052,33 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
               ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
+              {/* Provenance: the shop LUCA actually dialed on its last dispatch.
+                  A mismatch vs. the current shop above means the call outcome
+                  may describe the WRONG shop — verify before acting on it. */}
+              {lucaDial && (() => {
+                const digits = (s?: string | null) => String(s ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+                const fold = (s?: string | null) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                const curPh = digits(reconciled?.shopPhone ?? portal?.shop?.phone);
+                const dialPh = digits(lucaDial.shopPhone);
+                const phoneMismatch = !!curPh && !!dialPh && curPh !== dialPh;
+                const nameMismatch = !!fold(lucaDial.shopName) && !!fold(currentShop?.vendorName) && fold(lucaDial.shopName) !== fold(currentShop?.vendorName);
+                const mismatch = phoneMismatch || nameMismatch;
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: colors.inkSoft }}>
+                    <Bot size={12} style={{ color: mismatch ? colors.red : colors.inkMuted, flexShrink: 0 }} />
+                    <span>
+                      LUCA last dialed{lucaDial.dryRun ? " (dry-run)" : ""}: <b style={{ color: colors.ink }}>{lucaDial.shopName || "unknown shop"}</b>
+                      {lucaDial.shopPhone ? <span style={{ fontFamily: fonts.jetbrains }}> · {fmtPhone(lucaDial.shopPhone)}</span> : null}
+                      {lucaDial.at ? <span style={{ color: colors.inkMuted }}> · {fmtDate(lucaDial.at)}</span> : null}
+                    </span>
+                    {mismatch && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: colors.red, backgroundColor: colors.redLight, padding: "1px 7px", borderRadius: 999 }}>
+                        <AlertTriangle size={10} /> differs from current shop — verify shop info
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
             {/* marks */}
             <section>

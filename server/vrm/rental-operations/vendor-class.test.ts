@@ -11,7 +11,7 @@
  * Exits 0 when all cases pass, 1 otherwise.
  */
 import assert from "node:assert/strict";
-import { classifyPoVendor, summarizePoLines, poLineType, isQualifyingRepairPo } from "./vendor-class";
+import { classifyPoVendor, summarizePoLines, poLineType, isQualifyingRepairPo, isNeverShopVendor, NEVER_SHOP_RE, NEVER_SHOP_SQL_RE } from "./vendor-class";
 import { deriveWorkloadBucket } from "./workload";
 
 let passed = 0;
@@ -140,6 +140,67 @@ test("summarizePoLines reports counts + flags", () => {
 test("isQualifyingRepairPo mirrors Tyler's rule", () => {
   assert.equal(isQualifyingRepairPo({ vendorName: "TRXNOW", lines: [L("ROADSIDE")] }), false);
   assert.equal(isQualifyingRepairPo({ vendorName: "TRXNOW", lines: [L("PARTS")] }), true);
+});
+
+// ── HARD RULE (Tyler 2026-08-05): never the shop of record ───────────────────
+// "We never list [towing and recovery companies] as the current shop … not a
+// towing company, not TRAC, not Safelite." Stronger than the classification
+// above: parts/labor lines may still make such a PO COUNT as an open repair,
+// but the vendor may never be LISTED or DIALED as the current shop.
+console.log("\nvendor-class — never-shop-of-record rule (Tyler 2026-08-05)");
+
+test("towing/recovery names are never-shop (truck 36221's Suburban Towing regression)", () => {
+  for (const name of [
+    "SUBURBAN TOWING+RECOVERY",      // the reported truck-36221 case
+    "ADAMIS TOWING AND RECOVERY, IN",
+    "ABC RECOVERY LLC",              // recovery-only name, no TOW token
+    "9-H TOWING & WRECKER",
+    "ACE WRECKER",
+    "A+M TOW+ROAD SERVICE INC.",
+    "TRXNOW",
+  ]) assert.equal(isNeverShopVendor(name), true, name);
+});
+test("glass and roadside-broker names are never-shop", () => {
+  for (const name of [
+    "SAFELITE AUTOGLASS",
+    "A-CLASS AUTO GLASS",
+    "BIG STONE GLASS CO., INC.",
+    "TRAC INTERSTAR",
+    "TRACS",
+  ]) assert.equal(isNeverShopVendor(name), true, name);
+});
+test("real repair shops are NOT never-shop (word boundaries hold)", () => {
+  for (const name of [
+    "PEP BOYS # 1649",
+    "CASTLE CHEVROLET NORTH",        // the shop 36221 should list instead
+    "DAME ENTERPRISES LLC",
+    "TRACY'S AUTO REPAIR",           // TRAC must not match inside TRACY
+    "FIRST CLASS AUTO REPAIR",       // GLASS must not match inside CLASS
+    "TRACTOR SUPPLY",                // TRAC must not match inside TRACTOR
+    "MYERS AUTO SERVICE, INC.",
+  ]) assert.equal(isNeverShopVendor(name), false, name);
+});
+test("never-shop is INDEPENDENT of Tyler's parts/labor exception", () => {
+  // Parts/labor still promotes the PO to 'repair' for open-count purposes…
+  assert.equal(classifyPoVendor({ vendorName: "SUBURBAN TOWING+RECOVERY", lines: [L("PARTS"), L("LABOR")] }).vendorType, "repair");
+  // …but the vendor stays banned from the shop-of-record pick.
+  assert.equal(isNeverShopVendor("SUBURBAN TOWING+RECOVERY"), true);
+});
+test("RECOVERY names now classify 'tow' without parts/labor (TOW_RE extension)", () => {
+  assert.equal(classifyPoVendor({ vendorName: "ABC RECOVERY LLC", lines: [L("ROADSIDE")] }).vendorType, "tow");
+});
+test("JS and SQL never-shop patterns agree on every fixture", () => {
+  // The SQL form uses Postgres \m/\M word boundaries; translate to JS \b and
+  // verify both patterns give identical answers, so the CTE filter and the
+  // portal-side picker cannot drift.
+  const sqlAsJs = new RegExp(NEVER_SHOP_SQL_RE.replace(/\\[mM]/g, "\\b").replace(/ \?/g, "\\s?"), "i");
+  for (const name of [
+    "SUBURBAN TOWING+RECOVERY", "ABC RECOVERY LLC", "9-H TOWING & WRECKER",
+    "ACE WRECKER", "A+M TOW+ROAD SERVICE INC.", "TRXNOW", "SAFELITE AUTOGLASS",
+    "A-CLASS AUTO GLASS", "TRAC INTERSTAR", "TRACS", "JUMP START SERVICES",
+    "PEP BOYS # 1649", "CASTLE CHEVROLET NORTH", "DAME ENTERPRISES LLC",
+    "TRACY'S AUTO REPAIR", "FIRST CLASS AUTO REPAIR", "TRACTOR SUPPLY",
+  ]) assert.equal(sqlAsJs.test(name), NEVER_SHOP_RE.test(name), name);
 });
 
 console.log("\nworkload — Tyler's LUCA workload rule");

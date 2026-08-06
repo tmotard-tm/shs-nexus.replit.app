@@ -687,11 +687,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // NOTE: POST /api/elevenlabs/webhook is registered in server/index.ts BEFORE
-  // the global express.json() middleware so that express.raw() can capture the
-  // original bytes for HMAC-SHA256 signature verification. Do NOT register it here.
-
   // Mount Fleet-Scope module routes at /api/fs/*
+  // Settles when the background Fleet-Scope schema init finishes (or fails).
+  // VRM's init chains on it because its boot fleet-status reconcile reads
+  // fs_trucks — with the two inits racing, a fresh DB could run the reconcile
+  // before fs_trucks existed.
+  let fleetScopeInitSettled: Promise<unknown> = Promise.resolve();
   if (fsDb) {
     // Schema init is idempotent (CREATE TABLE IF NOT EXISTS) and the fs_ tables
     // already exist in any real environment.
@@ -700,7 +701,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // serveStatic could mount, so autoscale's health-check on `/` failed and the
     // instance crash-looped ("Cannot GET /"). The fs_ tables already exist in prod,
     // so mount the routes immediately and let the init reconcile in the background.
-    initFleetScopeSchema().catch((e: any) => {
+    fleetScopeInitSettled = initFleetScopeSchema().catch((e: any) => {
       console.error("[Fleet-Scope] background schema init failed (non-fatal; tables expected to already exist):", e?.message || e);
     });
     const fsRouter = registerFleetScopeRoutes(requireAuth);
@@ -714,7 +715,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
   try {
     // Background (non-awaited) idempotent init — see Fleet-Scope note above. Mount
     // VRM routes immediately; the vrm_ tables already exist in prod.
-    initVrmSchema()
+    // Chained after the Fleet-Scope init SETTLES (not necessarily succeeds):
+    // initVrmSchema() ends with the boot fleet-status reconcile, which reads
+    // fs_trucks. If FS init failed on an existing DB the tables are still there;
+    // on a truly fresh DB the reconcile's readiness guard defers and the lazy
+    // queue-GET retry (failure does not consume the throttle) heals it.
+    fleetScopeInitSettled
+      .then(() => initVrmSchema())
       .then(() =>
         // Executive Summary one-time trend backfill — flag-guarded, idempotent,
         // must run AFTER the schema init that creates vrm_exec_daily_metrics.

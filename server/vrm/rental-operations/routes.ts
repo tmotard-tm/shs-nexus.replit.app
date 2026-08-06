@@ -13,6 +13,13 @@ import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory } from "./read-repository";
 import { registerRegionRoutes } from "./region-routes";
 import { loadWorkbookStates, WORKBOOK_STATUSES, WORKBOOK_STATUS_LABEL, WORKBOOK_CLOSED_STATUSES } from "./workbook";
+import { getTodaysQueueCached, invalidateTodaysQueueCache } from "../../todays-queue";
+import { invalidateQueuePoContextCache } from "./read-repository";
+import { appendFleetStatus, loadFleetStatusStates, maybeReconcileFleetStatuses } from "./fleet-status";
+import { appendSchedulePickup } from "./schedule-pickup";
+import { CLASSIFICATIONS, todayET } from "./bucket-classify";
+import { OWNER_ROSTER } from "./annex-a-routing";
+import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -47,6 +54,202 @@ export function registerRentalOperationsRoutes(router: Router): void {
   // EAST / CENTRAL / WEST split of the rental cases. Logic lives in
   // ./region + ./region-routes so this shared file takes one line.
   registerRegionRoutes(router);
+
+  // ── Fleet status (VRM-owned) + Ops Queue ──────────────────────────────────
+  // VRM is the authority for rental fleet status; FleetScope mirrors it
+  // (Tyler 2026-08-04: status flows one-way VRM → FS).
+  //
+  // GET /rental-operations/queue — the same Today's Queue builder FleetScope
+  // renders (server/todays-queue.ts), enriched with each row's rental case key
+  // + current VRM fleet-status state so rows are EDITABLE here. The fleet-status
+  // reconcile (seed/adopt/phone-mirror) runs lazily and throttled on this GET —
+  // autoscale kills timers, so request-path is the only reliable trigger.
+  router.get("/rental-operations/queue", async (_req, res) => {
+    try {
+      await maybeReconcileFleetStatuses("queue-get").catch((e: any) =>
+        console.warn("[VRM/RentalOps] lazy fleet-status reconcile failed:", e?.message || e));
+      // Short-TTL cached build (shared with the FS mirror); the builder stamps
+      // caseKey on every item and noAction row. Fleet-status states are
+      // attached per-request (one cheap DISTINCT ON query) so even a cached
+      // payload reflects a status edit the instant the client refetches.
+      const queue = await getTodaysQueueCached();
+      const states = await loadFleetStatusStates();
+
+      const items = queue.items.map((it) => {
+        const caseKey = it.caseKey ?? null;
+        return { ...it, caseKey, fleetStatus: caseKey ? states.get(caseKey) ?? null : null };
+      });
+      const noAction = queue.noAction.map((it) => {
+        const caseKey = it.caseKey ?? null;
+        return { ...it, caseKey, fleetStatus: caseKey ? states.get(caseKey) ?? null : null };
+      });
+
+      res.json({
+        ...queue,
+        items,
+        noAction,
+        vocabulary: { mainStatuses: MAIN_STATUSES, subStatuses: SUB_STATUSES, classifications: CLASSIFICATIONS },
+      });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] queue failed:", e?.message || e);
+      res.status(500).json({ success: false, error: e?.message || "queue failed" });
+    }
+  });
+
+  // POST /rental-operations/queue/owner — manual owner pin for a queue item.
+  // Body: { key, owner } where key is the item's caseKey (or canonical truck
+  // number for case-less trucks) and owner is a roster name, or "auto" to
+  // clear the pin so Annex A routing takes over again. Append-only
+  // vrm_rental_operation_actions row; the builder reads the newest per key.
+  router.post("/rental-operations/queue/owner", async (req, res) => {
+    try {
+      const b = req.body ?? {};
+      const key = String(b.key ?? "").trim();
+      const owner = String(b.owner ?? "").trim();
+      if (!key) return res.status(400).json({ error: "key required" });
+      if (key.length > 10) return res.status(400).json({ error: "key too long" });
+      if (!owner) return res.status(400).json({ error: "owner required" });
+      const auto = owner.toLowerCase() === "auto";
+      if (!auto && !(OWNER_ROSTER as readonly string[]).includes(owner)) {
+        return res.status(400).json({ error: `owner must be one of: ${OWNER_ROSTER.join(", ")} — or "auto" to clear` });
+      }
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, assigned_to, payload, actor)
+        VALUES (${key}, 'assign_owner', ${auto ? null : owner},
+                ${JSON.stringify({ auto: auto ? "true" : "false" })}::jsonb, ${actorOf(req)})
+      `);
+      invalidateTodaysQueueCache("owner-assign");
+      res.json({ ok: true, key, owner: auto ? null : owner });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] queue owner assign failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "owner assign failed" });
+    }
+  });
+
+  // POST /rental-operations/queue/dismiss — mark a queue item handled for
+  // TODAY (ET). Body: { key, itemKey?, undo? }. Self-expires at midnight ET:
+  // the builder only honors rows whose payload day equals today.
+  router.post("/rental-operations/queue/dismiss", async (req, res) => {
+    try {
+      const b = req.body ?? {};
+      const key = String(b.key ?? "").trim();
+      const itemKey = String(b.itemKey ?? key).trim() || key;
+      if (!key) return res.status(400).json({ error: "key required" });
+      if (key.length > 10) return res.status(400).json({ error: "key too long" });
+      const undo = b.undo === true || String(b.undo ?? "") === "true";
+      const day = todayET();
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, payload, actor)
+        VALUES (${key}, 'queue_dismiss',
+                ${JSON.stringify({ itemKey, day, undo: undo ? "true" : "false" })}::jsonb, ${actorOf(req)})
+      `);
+      invalidateTodaysQueueCache("queue-dismiss");
+      res.json({ ok: true, key, itemKey, day, dismissed: !undo });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] queue dismiss failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "queue dismiss failed" });
+    }
+  });
+
+  // POST /rental-operations/queue/ready-verified — a human confirmed with the
+  // shop that the truck IS ready for pickup (or undoes that mark). Shared by
+  // the Ops Queue, Rental Operations, and Cases by Region views. Body:
+  // { key, verified } where key is the caseKey (or canonical truck number for
+  // case-less trucks). Append-only; the queue builder reads the newest row and
+  // lets any NEWER LUCA call supersede the mark.
+  router.post("/rental-operations/queue/ready-verified", async (req, res) => {
+    try {
+      const b = req.body ?? {};
+      const key = String(b.key ?? "").trim();
+      if (!key) return res.status(400).json({ error: "key required" });
+      if (key.length > 10) return res.status(400).json({ error: "key too long" });
+      const verified = b.verified === true || String(b.verified ?? "") === "true";
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, payload, actor)
+        VALUES (${key}, 'ready_verified',
+                ${JSON.stringify({ verified: verified ? "true" : "false" })}::jsonb, ${actorOf(req)})
+      `);
+      invalidateTodaysQueueCache("ready-verified");
+      res.json({ ok: true, key, verified });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] ready-verified failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "ready-verified failed" });
+    }
+  });
+
+  // POST /rental-operations/queue/research — escalate a case to research (the
+  // shop can't be validated from POs + calls on file), or clear the
+  // escalation. Body: { key, active }. Append-only, newest row wins; a later
+  // RESOLVED call (real outcome, not No Answer) auto-clears it in the queue.
+  router.post("/rental-operations/queue/research", async (req, res) => {
+    try {
+      const b = req.body ?? {};
+      const key = String(b.key ?? "").trim();
+      if (!key) return res.status(400).json({ error: "key required" });
+      if (key.length > 10) return res.status(400).json({ error: "key too long" });
+      const active = b.active === true || String(b.active ?? "") === "true";
+      await db.execute(sql`
+        INSERT INTO vrm_rental_operation_actions (case_key, action_type, payload, actor)
+        VALUES (${key}, 'research_escalation',
+                ${JSON.stringify({ active: active ? "true" : "false" })}::jsonb, ${actorOf(req)})
+      `);
+      invalidateTodaysQueueCache("research-escalation");
+      res.json({ ok: true, key, active });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] research escalation failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "research escalation failed" });
+    }
+  });
+
+  // POST /rental-operations/cases/:caseKey/fleet-status — THE fleet-status
+  // write. Appends a vrm_rental_operation_actions row (append-only history,
+  // workbook pattern) and write-through mirrors to fs_trucks.
+  router.post("/rental-operations/cases/:caseKey/fleet-status", async (req, res) => {
+    try {
+      const caseKey = String(req.params.caseKey || "").trim();
+      if (!caseKey) return res.status(400).json({ error: "caseKey required" });
+      const b = req.body ?? {};
+      const main = b.main_status ?? b.mainStatus;
+      const sub = b.sub_status ?? b.subStatus ?? null;
+      const result = await appendFleetStatus(caseKey, main, sub, actorOf(req));
+      invalidateTodaysQueueCache("fleet-status");
+      res.json({ ...result, caseKey });
+    } catch (e: any) {
+      const code = Number(e?.statusCode) || 500;
+      if (code >= 500) console.error("[VRM/RentalOps] fleet-status save failed:", e?.message || e);
+      res.status(code).json({ error: e?.message || "fleet-status save failed" });
+    }
+  });
+
+  // POST /rental-operations/cases/:caseKey/schedule-pickup — set or clear the
+  // tech-pickup date (VRM-owned; mirrors to fs_trucks.scheduled_pickup_date)
+  // and optionally file the rental-return route block through the Standard
+  // Activities API. Replaces the queue's old "check with Morgan" step.
+  // Body: { date: 'YYYY-MM-DD' | null, fileRouteBlock?: boolean (default true) }
+  router.post("/rental-operations/cases/:caseKey/schedule-pickup", async (req, res) => {
+    try {
+      const caseKey = String(req.params.caseKey || "").trim();
+      if (!caseKey) return res.status(400).json({ error: "caseKey required" });
+      const b = req.body ?? {};
+      const rawDate =
+        b.date === null || b.date === undefined || String(b.date).trim() === ""
+          ? null
+          : String(b.date).trim();
+      const fileRouteBlock = rawDate !== null && b.fileRouteBlock !== false;
+      const result = await appendSchedulePickup({
+        caseKey,
+        date: rawDate,
+        fileRouteBlock,
+        actor: actorOf(req),
+      });
+      invalidateTodaysQueueCache("schedule-pickup");
+      res.json(result);
+    } catch (e: any) {
+      const code = Number(e?.statusCode) || 500;
+      if (code >= 500) console.error("[VRM/RentalOps] schedule-pickup save failed:", e?.message || e);
+      res.status(code).json({ error: e?.message || "schedule-pickup save failed" });
+    }
+  });
 
   // GET master grid model (rich rows + cohorts + source health two-clock)
   router.get("/rental-operations/master", async (req, res) => {
@@ -280,6 +483,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
         RETURNING id, to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS created_at
       `);
       const action: any = ins.rows[0];
+      invalidateTodaysQueueCache("workbook-action");
 
       // Mirror the comment onto the vehicle's AMS record (Tyler 2026-07-29), so
       // the rest of the business sees what the rental team learned. Deliberately
@@ -372,6 +576,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
               override_by=NULL, override_at=NULL, updated_at=NOW()
           WHERE case_key=${caseKey}
         `);
+        invalidateTodaysQueueCache("identity-override-clear");
         return res.json({ ok: true, cleared: true });
       }
       const tech = await db.execute(sql`
@@ -390,6 +595,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
         RETURNING case_key, override_employee_id, override_status, override_tech_name
       `);
       if (!upd.rows.length) return res.status(404).json({ error: "case has no resolution row yet" });
+      invalidateTodaysQueueCache("identity-override");
       res.json({ ok: true, override: upd.rows[0], actor });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "override failed" });
@@ -405,6 +611,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
     try {
       const { runRentalOpsIngest } = await import("./ingest");
       const result = await runRentalOpsIngest({ runType: "scheduled_sync", amsMode: "cached", landPo: true });
+      invalidateQueuePoContextCache("manual-sync");
+      invalidateTodaysQueueCache("manual-sync");
       res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] sync failed:", e?.message || e);
@@ -474,6 +682,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
         // portal against the PO rows the land just wrote.
         const { runDeltaSweep } = await import("./sweep-runner");
         await runDeltaSweep();
+        invalidateQueuePoContextCache("cron-ingest");
+        invalidateTodaysQueueCache("cron-ingest");
         console.log(`[VRM/RentalOps] cron run done in ${((Date.now() - startedAt) / 1000).toFixed(1)}s`);
       })()
         .catch((e) => console.error("[VRM/RentalOps] cron run FAILED:", e?.stack || e?.message || e))
@@ -491,7 +701,10 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.post("/rental-operations/materialize-portal-pos", async (_req, res) => {
     try {
       const { materializePortalOnlyPos } = await import("./portal-po-materialize");
-      res.json({ ok: true, result: await materializePortalOnlyPos() });
+      const result = await materializePortalOnlyPos();
+      invalidateQueuePoContextCache("materialize-portal-pos");
+      invalidateTodaysQueueCache("materialize-portal-pos");
+      res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] materialize-portal-pos failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "materialize failed" });
@@ -502,7 +715,10 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.post("/rental-operations/refresh-po", async (_req, res) => {
     try {
       const { landPoHistory } = await import("./po-history");
-      res.json({ ok: true, result: await landPoHistory() });
+      const result = await landPoHistory();
+      invalidateQueuePoContextCache("refresh-po");
+      invalidateTodaysQueueCache("refresh-po");
+      res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] refresh-po failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "refresh-po failed" });
@@ -529,6 +745,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
       // No selection filter: an operator asking for THIS truck always gets a live
       // look, even if the delta targeting would not have picked it.
       const report = await scrapeAndStore([req.params.caseKey]);
+      invalidateQueuePoContextCache("per-truck-scrape");
+      invalidateTodaysQueueCache("per-truck-scrape");
       res.json({ ok: true, report });
     } catch (e: any) {
       console.error("[VRM/RentalOps] scrape failed:", e?.message || e);
@@ -548,7 +766,6 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.post("/rental-operations/master/:truck/shop-phone", async (req, res) => {
     try {
       const rawPhone = req.body?.phone;
-      const locked = req.body?.locked === true;
       if (rawPhone === undefined) return res.status(400).json({ error: "phone required ('' clears the number)" });
       let phone: string | null = null;
       const s = String(rawPhone ?? "").trim();
@@ -562,6 +779,11 @@ export function registerRentalOperationsRoutes(router: Router): void {
         }
         phone = d;
       }
+      // LOCK BY DEFAULT (Tyler 8/5): an operator-entered number sticks until
+      // someone changes it — omitting `locked` means true when a number is
+      // provided. Explicit locked:false is honored ("let the scraper correct
+      // me"); clearing the number always unlocks.
+      const locked = phone != null && req.body?.locked !== false;
       const { setShopPhone } = await import("./scrape-service");
       const actor = actorOf(req);
       const saved = await setShopPhone({ truck: req.params.truck, phone, locked, actor });
@@ -579,10 +801,83 @@ export function registerRentalOperationsRoutes(router: Router): void {
         console.warn("[VRM/RentalOps] shop-phone audit write failed (non-fatal):", ae?.message || ae);
       }
       console.log(`[VRM/RentalOps] shop-phone ${saved.truck} -> ${saved.phone ?? "(cleared)"}${saved.locked ? " [LOCKED]" : ""} (by ${actor})`);
+      invalidateQueuePoContextCache("shop-phone");
+      invalidateTodaysQueueCache("shop-phone");
       res.json({ ok: true, ...saved });
     } catch (e: any) {
       console.error("[VRM/RentalOps] shop-phone save failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "shop-phone save failed" });
+    }
+  });
+
+  // POST operator-entered shop info (name + phone) for ONE truck — the queue
+  // popout panel's save (2026-08-05). Generalizes /shop-phone:
+  //   body { shop_name?: string|"", phone?: string|"", locked?: boolean, case_key?: string }
+  // A field left undefined is untouched; "" clears it. Name overrides win by
+  // presence (readers COALESCE over the PO pick) and expire on the same
+  // episode clock as phone locks. Phone semantics are identical to /shop-phone.
+  router.post("/rental-operations/master/:truck/shop-info", async (req, res) => {
+    try {
+      const hasName = req.body?.shop_name !== undefined;
+      const hasPhone = req.body?.phone !== undefined;
+      if (!hasName && !hasPhone) return res.status(400).json({ error: "nothing to save: provide shop_name and/or phone ('' clears)" });
+
+      let name: string | null = null;
+      if (hasName) {
+        const s = String(req.body?.shop_name ?? "").trim().replace(/\s+/g, " ");
+        if (s.length > 160) return res.status(400).json({ error: "shop name too long (160 chars max)" });
+        name = s || null;
+      }
+      let phone: string | null = null;
+      if (hasPhone) {
+        const s = String(req.body?.phone ?? "").trim();
+        if (s) {
+          let d = s.replace(/\D/g, "");
+          if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
+          if (d.length !== 10 || /^(\d)\1{9}$/.test(d)) {
+            return res.status(400).json({ error: "enter a real 10-digit phone number (or clear the field to remove it)" });
+          }
+          phone = d;
+        }
+      }
+      // LOCK BY DEFAULT (Tyler 8/5): same rule as /shop-phone — a provided
+      // number locks unless the caller explicitly says locked:false; clearing
+      // always unlocks.
+      const locked = phone != null && req.body?.locked !== false;
+
+      const { setShopPhone, setShopName } = await import("./scrape-service");
+      const actor = actorOf(req);
+      const savedName = hasName ? await setShopName({ truck: req.params.truck, name, actor }) : null;
+      const savedPhone = hasPhone ? await setShopPhone({ truck: req.params.truck, phone, locked, actor }) : null;
+      const truck = (savedName ?? savedPhone)!.truck;
+
+      // Durable audit trail — same table/convention as shop_phone_edit.
+      try {
+        const caseKey = String(req.body?.case_key || truck).trim().slice(0, 10);
+        const caseRow: any = await db.execute(sql`SELECT id FROM vrm_rental_operations_cases WHERE case_key = ${caseKey} LIMIT 1`);
+        const caseId = (caseRow.rows[0] as any)?.id ?? null;
+        if (savedName && savedName.name !== savedName.previousName) {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+            VALUES (${caseKey}, ${caseId}, 'shop_name_edit', ${truck}, ${actor},
+                    ${JSON.stringify({ shop_name: savedName.name, previous_name: savedName.previousName })}::jsonb)`);
+        }
+        if (savedPhone) {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+            VALUES (${caseKey}, ${caseId}, 'shop_phone_edit', ${truck}, ${actor},
+                    ${JSON.stringify({ phone: savedPhone.phone, locked: savedPhone.locked, previous_phone: savedPhone.previousPhone, previous_locked: savedPhone.previousLocked })}::jsonb)`);
+        }
+      } catch (ae: any) {
+        console.warn("[VRM/RentalOps] shop-info audit write failed (non-fatal):", ae?.message || ae);
+      }
+      console.log(`[VRM/RentalOps] shop-info ${truck}${savedName ? ` name -> ${savedName.name ?? "(cleared)"}` : ""}${savedPhone ? ` phone -> ${savedPhone.phone ?? "(cleared)"}${savedPhone.locked ? " [LOCKED]" : ""}` : ""} (by ${actor})`);
+      invalidateQueuePoContextCache("shop-info");
+      invalidateTodaysQueueCache("shop-info");
+      res.json({ ok: true, truck, name: savedName ? { value: savedName.name, previous: savedName.previousName } : undefined, phone: savedPhone ? { value: savedPhone.phone, locked: savedPhone.locked } : undefined });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] shop-info save failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "shop-info save failed" });
     }
   });
 

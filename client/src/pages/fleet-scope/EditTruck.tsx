@@ -43,7 +43,7 @@ export default function EditTruck() {
     resolver: zodResolver(insertTruckSchema),
     defaultValues: {
       truckNumber: "",
-      mainStatus: "Research required" as MainStatus,
+      mainStatus: "Confirming Status" as MainStatus,
       subStatus: null as string | null,
       shsOwner: "",
       registrationStickerValid: "",
@@ -78,7 +78,7 @@ export default function EditTruck() {
     if (truck && !isNew) {
       form.reset({
         truckNumber: truck.truckNumber,
-        mainStatus: (truck.mainStatus || "Research required") as MainStatus,
+        mainStatus: (truck.mainStatus || "Confirming Status") as MainStatus,
         subStatus: truck.subStatus || null,
         shsOwner: truck.shsOwner || "",
         registrationStickerValid: truck.registrationStickerValid || "",
@@ -161,7 +161,12 @@ export default function EditTruck() {
   });
 
   const onSubmit = form.handleSubmit((data) => {
-    mutation.mutate(data);
+    // Status & shop-phone fields are VRM-owned (edited in VRM Rental
+    // Operations, mirrored down) — stripped in BOTH modes. New trucks are
+    // initialized server-side as "Research required"; updates must not trip
+    // the server-side ownership guard with stale form values.
+    const { mainStatus, subStatus, repairPhone, ...rest } = data as Record<string, any>;
+    mutation.mutate(rest);
   });
 
   if (isLoading && !isNew) {
@@ -249,7 +254,7 @@ export default function EditTruck() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Status *</FormLabel>
-                        <Select onValueChange={field.onChange} value={field.value}>
+                        <Select onValueChange={field.onChange} value={field.value} disabled>
                           <FormControl>
                             <SelectTrigger data-testid="select-main-status">
                               <SelectValue placeholder="Select status" />
@@ -263,6 +268,11 @@ export default function EditTruck() {
                             ))}
                           </SelectContent>
                         </Select>
+                        <p className="text-xs text-muted-foreground">
+                          {isNew
+                            ? 'New trucks start as "Confirming Status" — status is managed in VRM Rental Operations'
+                            : "Managed in VRM Rental Operations"}
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}
@@ -278,6 +288,7 @@ export default function EditTruck() {
                           <Select 
                             onValueChange={(value) => field.onChange(value === "_none_" ? null : value)} 
                             value={field.value || "_none_"}
+                            disabled
                           >
                             <FormControl>
                               <SelectTrigger data-testid="select-sub-status">
@@ -459,9 +470,13 @@ export default function EditTruck() {
                             {...field}
                             placeholder="(555) 123-4567"
                             className="font-mono"
+                            disabled
                             data-testid="input-repair-phone"
                           />
                         </FormControl>
+                        <p className="text-xs text-muted-foreground">
+                          Managed in VRM Rental Operations
+                        </p>
                         <FormMessage />
                       </FormItem>
                     )}

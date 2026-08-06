@@ -27,7 +27,6 @@ import {
   TrendingUp,
   DollarSign,
   Wrench,
-  ListChecks,
   AlertTriangle,
   User,
   LogOut,
@@ -75,8 +74,7 @@ const navGroups = [
     label: "Tools",
     items: [
       { title: "Holman Research", href: "/fleet-scope/holman-research", icon: Wrench },
-      { title: "Batch Caller", href: "/fleet-scope/batch-caller", icon: Phone },
-      { title: "Action Tracker", href: "/fleet-scope/action-tracker", icon: ListChecks },
+      { title: "Call History", href: "/fleet-scope/call-history", icon: Phone },
     ],
   },
 ];

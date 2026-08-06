@@ -8,6 +8,8 @@
 import { db } from "../../db";
 import { sql, type SQL } from "drizzle-orm";
 import { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
+import { NEVER_SHOP_SQL_RE } from "./vendor-class";
+import { pepBoysPhoneLateral } from "./pepboys-directory";
 
 // ── board classifier (ported 1:1 from make_rental_fleet_gallery.py) ──────────
 const VAN_SUV_TRUCK = /SUV|VAN|P\/UP|PICKUP|TRUCK/i;
@@ -198,6 +200,19 @@ export function qualifyingRepairPo(alias: string): SQL {
 }
 
 /**
+ * HARD RULE (Tyler, 2026-08-05): a towing/recovery/roadside/glass vendor may
+ * NEVER be the shop of record, even when the parts/labor exception counts its
+ * PO as an open repair. Applied on the vendor NAME (not the stored vendor_type)
+ * so rows classified before the rule landed are covered too. This predicate is
+ * the eligibility test for shop_pick/shop_strict ONLY — open_po_count and the
+ * callable/cohort semantics still ride on qualifyingRepairPo above.
+ */
+export function eligibleShopOfRecord(alias: string): SQL {
+  const a = sql.raw(alias);
+  return sql`(${a}.is_qualifying_repair AND (${a}.vendor_name IS NULL OR ${a}.vendor_name !~* ${NEVER_SHOP_SQL_RE}))`;
+}
+
+/**
  * Builds the `portal_po` + `po_eff` CTE pair. PO_EFFECTIVE_CTE below is the
  * unscoped instance the read model uses; the builder exists so a consumer that
  * only cares about a few hundred trucks can narrow the scan WITHOUT forking the
@@ -295,11 +310,23 @@ export const PO_AGG_CTE = sql`
   )
 `;
 
-// Shop of record under MOST_RECENT_SHOP_ORDER, but ranked on the EFFECTIVE
-// status. Without this the model contradicts itself: a truck can land in
-// no_open_repair (portal says the PO is PAID) while shop_po_status still reads
-// APPROVED and LUCA dials that shop. DISTINCT ON per truck replaces the old
-// per-case LATERAL for the same reason as po_agg.
+// Shop of record — the MOST RECENT eligible repair-shop PO by DATE, regardless
+// of PO status, never a towing/recovery/roadside/glass vendor.
+//
+// TYLER'S RULING (2026-08-05, verbatim): "We go by the date the last shop was
+// at, even if there's a previous PO that still says approved, indicating it's
+// open. That doesn't mean it has anything to do with today. … We never list
+// [towing and recovery companies] as the current shop."
+//
+// That ruling retired the old APPROVED-first ordering this CTE carried (the
+// premortem VC-2 divergence: a months-old still-APPROVED PO outranked last
+// week's real repair — truck 22350 picked its 2026-01-01 PO over 2026-02-26,
+// truck 36221 listed SUBURBAN TOWING+RECOVERY over the newer real shop).
+// shop_pick and shop_strict are now the SAME pick under the same rule; both
+// names are kept so the board queries (shop_pick) and the LUCA feeds
+// (shop_strict) keep their aliases. If you change one, change both.
+// DISTINCT ON per truck replaces the old per-case LATERAL for the same reason
+// as po_agg. The status shipped with the pick stays the EFFECTIVE one.
 export const SHOP_PICK_CTE = sql`
   shop_pick AS (
     SELECT DISTINCT ON (q.vehicle_number_padded)
@@ -308,24 +335,14 @@ export const SHOP_PICK_CTE = sql`
            q.eff_status AS po_status, q.po_status AS etl_po_status,
            to_char(q.po_date, 'YYYY-MM-DD') AS po_date
     FROM po_eff q
-    WHERE q.is_qualifying_repair
-    ORDER BY q.vehicle_number_padded, (q.eff_status = 'APPROVED') DESC,
-             q.po_date DESC NULLS LAST, q.po_number DESC
+    WHERE ${eligibleShopOfRecord("q")}
+    ORDER BY q.vehicle_number_padded, q.po_date DESC NULLS LAST, q.po_number DESC
   )
 `;
 
-// Shop of record under STRICT date ordering — "the MOST RECENT repair shop PO",
-// full stop, no APPROVED-first preference. Used by the LUCA-facing feeds
-// (luca-rental-list SHOP_*, po-history is_current_shop) ONLY.
-//
-// Divergence from SHOP_PICK_CTE, deliberate and flagged (premortem VC-2): the
-// board ordering sorts APPROVED-first, so a months-old still-APPROVED PO
-// outranks last week's real repair — on truck 22350 that picks the 2026-01-01 PO
-// over the 2026-02-26 one. The board/drawer keep that ordering (changing it
-// needs a Tyler ruling); the LUCA feeds do NOT, and ship SHOP_PO_DATE so the
-// consumer can see the age of what it got. The portal reconciliation shrinks the
-// trap on its own: a PO the portal has since marked PAID/VOID no longer sorts
-// APPROVED-first over on the board side.
+// Same pick as shop_pick (see the 2026-08-05 ruling above), kept under its own
+// alias for the LUCA-facing consumers (luca-rental-list SHOP_*, po-history
+// is_current_shop).
 //
 // Why this is a CTE over po_eff and no longer a LATERAL over the raw ETL table
 // (review finding, 7/21 — this was the ONE surface left unreconciled): the
@@ -334,9 +351,7 @@ export const SHOP_PICK_CTE = sql`
 // 7 trucks the reconciled board had already moved to no_open_repair, and a
 // different status on 30 of 382 rentals — i.e. one LUCA-facing surface said the
 // repair was open while the other said it was closed, which is the exact failure
-// this whole reconciliation exists to kill. The PICK is unchanged (date ordering
-// ignores status, so the same PO wins); what changes is that the STATUS shipped
-// with it is now the effective one. The raw ETL value rides along as
+// this whole reconciliation exists to kill. The raw ETL value rides along as
 // etl_po_status so the feed can still show its receipt.
 export const SHOP_STRICT_CTE = sql`
   shop_strict AS (
@@ -346,7 +361,7 @@ export const SHOP_STRICT_CTE = sql`
            q.eff_status AS po_status, q.po_status AS etl_po_status,
            to_char(q.po_date, 'YYYY-MM-DD') AS po_date
     FROM po_eff q
-    WHERE q.is_qualifying_repair
+    WHERE ${eligibleShopOfRecord("q")}
     ORDER BY q.vehicle_number_padded, q.po_date DESC NULLS LAST, q.po_number DESC
   )
 `;
@@ -354,6 +369,182 @@ export const SHOP_STRICT_CTE = sql`
 // LUCA workload buckets (Tyler's workload rule) live in ./workload — pure, so
 // they are unit-testable without a DB. Re-exported here for callers.
 export { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
+
+// ── Queue PO context ─────────────────────────────────────────────────────────
+// The Today's Queue builder's window onto the RECONCILED PO layer. Composes the
+// exact same CTEs as getRentalOpsMaster (never a parallel query — the queue and
+// the board must not disagree about whether a repair is open), full fleet (no
+// scopeJoin: the queue covers trucks that have no rental case).
+export interface QueuePoContext {
+  /** Portal-corrected effective status of the shop-of-record PO (APPROVED/PAID/…). */
+  effStatus: string | null;
+  openPoCount: number;
+  /**
+   * Earliest open qualifying-repair PO date (YYYY-MM-DD) — the queue's
+   * "entered repair" anchor, replacing the old raw-Snowflake MIN(PO_DATE).
+   * Reconciled: a PO the portal closed no longer anchors the clock.
+   */
+  repairStartDate: string | null;
+  /** Newest observation backing the open flag (falls back to any repair evidence). */
+  openEvidenceAt: string | null;
+  portalAt: string | null;
+  shopName: string | null;
+  shopPoDate: string | null;
+  shopPhone: string | null;
+  /** PO number backing the shop-of-record pick — lets drawers anchor their
+   *  "Current shop" card on the SAME PO the board table shows. */
+  poNumber: string | null;
+  /** Manual shop-phone lock in effect (operator's number pinned vs scrapes). */
+  shopPhoneLocked: boolean;
+  /** shopName comes from a manual override, not the reconciled PO pick. */
+  shopNameOverridden: boolean;
+}
+
+async function buildQueuePoContext(): Promise<Map<string, QueuePoContext>> {
+  const canon = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
+  const res = await db.execute(sql`
+    WITH ${PO_EFFECTIVE_CTE}, ${PO_AGG_CTE}, ${SHOP_PICK_CTE},
+    q_start AS (
+      SELECT q.vehicle_number_padded AS truck,
+             to_char(MIN(q.po_date), 'YYYY-MM-DD') AS repair_start_date
+      FROM po_eff q
+      WHERE q.is_qualifying_repair AND q.eff_status = 'APPROVED'
+      GROUP BY 1
+    )
+    SELECT agg.truck,
+           agg.open_po_count,
+           qs.repair_start_date,
+           to_char(COALESCE(agg.open_evidence_at, agg.repair_evidence_at), 'YYYY-MM-DD"T"HH24:MI:SSZ') AS open_evidence_at,
+           to_char(COALESCE(agg.open_portal_at, agg.repair_portal_at), 'YYYY-MM-DD"T"HH24:MI:SSZ') AS portal_at,
+           sp.po_status AS eff_status,
+           sp.vendor_name AS shop_name,
+           sp.po_date AS shop_po_date,
+           sp.po_number AS shop_po_number,
+           ph.shop_phone AS portal_shop_phone, ph.shop_name AS portal_shop_name,
+           ph.shop_phone_locked, ph.shop_phone_source,
+           ph.shop_name_override,
+           popho.phone AS po_phone, popho.vendor AS po_phone_vendor,
+           pbdir.pb_phone, pbdir.pb_matched_by
+    FROM po_agg agg
+    LEFT JOIN shop_pick sp ON sp.truck = agg.truck
+    LEFT JOIN q_start qs ON qs.truck = agg.truck
+    LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = agg.truck
+    -- Phone for THE EXACT shop-of-record PO out of the portal trail (same
+    -- premortem-VC-1 pattern as the LUCA feed): keeps name and phone on the
+    -- same vendor instead of trusting the truck-level portal pick blindly.
+    LEFT JOIN LATERAL (
+      SELECT e->>'vendorPhone' AS phone, e->>'vendorName' AS vendor
+      FROM vrm_holman_portal_hist ph2
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(ph2.hist) = 'array' THEN ph2.hist ELSE '[]'::jsonb END
+      ) e
+      WHERE ph2.truck_no = agg.truck
+        AND e->>'type' = 'PO'
+        AND e->>'poNumber' = sp.po_number
+        AND COALESCE(e->>'vendorPhone','') <> ''
+      LIMIT 1
+    ) popho ON true
+    ${pepBoysPhoneLateral("sp")}
+  `);
+  const out = new Map<string, QueuePoContext>();
+  for (const r of (((res as any).rows ?? res) ?? []) as any[]) {
+    // Phone precedence (Tyler 2026-08-05 + 8/3 lock rule): a manually locked
+    // number always wins; a store-number-exact Pep Boys directory match beats
+    // scrapes; a scraped phone is used only when it belongs to the SAME vendor
+    // as the shop shown (name-keyed) — never the truck-level portal number of
+    // some other vendor; a zip/city directory match backstops; else null.
+    // Manual name override wins by presence (queue popout panel): a human said
+    // "the truck is at THIS shop", so it replaces the PO pick everywhere this
+    // context feeds. Vendor-name-keyed phone checks below key on the OVERRIDE
+    // name then — an operator renaming the shop should also enter its phone
+    // (the panel encourages both), since scraped phones for the old vendor
+    // rightly stop matching.
+    const nameOverride: string | null = r.shop_name_override ? String(r.shop_name_override).trim() || null : null;
+    const shopName: string | null = nameOverride ?? r.shop_name ?? null;
+    let shopPhone: string | null = null;
+    if (shopName) {
+      const manual = (r.shop_phone_locked === true || r.shop_phone_source === "manual")
+        ? cleanPhone(r.portal_shop_phone) : null;
+      const pbPhone = cleanPhone(r.pb_phone);
+      const poPhone = cleanPhone(r.po_phone);
+      const poMatches = poPhone != null && vendorKey(r.po_phone_vendor) === vendorKey(shopName);
+      const portalPhone = cleanPhone(r.portal_shop_phone);
+      const portalMatches = portalPhone != null && vendorKey(r.portal_shop_name) === vendorKey(shopName);
+      shopPhone =
+        manual
+        ?? (pbPhone != null && r.pb_matched_by === "store" ? pbPhone : null)
+        ?? (poMatches ? poPhone : null)
+        ?? pbPhone
+        ?? (portalMatches ? portalPhone : null);
+    }
+    out.set(canon(r.truck), {
+      effStatus: r.eff_status ?? null,
+      openPoCount: Number(r.open_po_count ?? 0),
+      repairStartDate: r.repair_start_date ?? null,
+      openEvidenceAt: r.open_evidence_at ? String(r.open_evidence_at) : null,
+      portalAt: r.portal_at ? String(r.portal_at) : null,
+      shopName,
+      shopPoDate: r.shop_po_date ?? null,
+      shopPhone,
+      poNumber: r.shop_po_number != null ? String(r.shop_po_number) : null,
+      shopPhoneLocked: r.shop_phone_locked === true,
+      shopNameOverridden: nameOverride != null,
+    });
+  }
+  return out;
+}
+
+// ── loadQueuePoContext result cache (stale-while-revalidate) ────────────────
+// The portal_po CTE explodes 500+ TOASTed hist JSONB trails into ~45k rows on
+// EVERY execution — measured 2.6–6.5s, and it dominated every Today's Queue
+// rebuild. The underlying data changes only when a scrape or the ETL lands
+// (hours apart; the ETL's own lag is measured in DAYS — see MasterRow's
+// po_evidence_age notes), so a 5-minute read cache is invisible next to the
+// source lag. Semantics:
+//   · fresh (< TTL): serve cached;
+//   · stale: serve cached IMMEDIATELY and refresh in the background — after
+//     boot, no request ever blocks on the heavy query again;
+//   · invalidateQueuePoContextCache(): the manual PO-refresh routes (sync,
+//     cron ingest, scrape, refresh-po, materialize) and shop-phone edits call
+//     this so a human-triggered refresh is visible on the next queue build.
+// Queue-only: getRentalOpsMaster runs its own live query and is unaffected.
+const PO_CONTEXT_TTL_MS = 5 * 60_000;
+let poCtxEpoch = 0;
+let poCtxCache: { at: number; value: Map<string, QueuePoContext> } | null = null;
+let poCtxInflight: Promise<Map<string, QueuePoContext>> | null = null;
+
+export function invalidateQueuePoContextCache(reason: string): void {
+  poCtxEpoch++;
+  poCtxCache = null;
+  poCtxInflight = null; // detach: an in-flight build may hold pre-write data
+  console.log(`[RentalOps] PO-context cache invalidated (${reason})`);
+}
+
+function refreshQueuePoContext(): Promise<Map<string, QueuePoContext>> {
+  if (poCtxInflight) return poCtxInflight;
+  const epoch = poCtxEpoch;
+  const promise = buildQueuePoContext()
+    .then((value) => {
+      if (epoch === poCtxEpoch) poCtxCache = { at: Date.now(), value };
+      return value;
+    })
+    .finally(() => {
+      if (poCtxInflight === promise) poCtxInflight = null;
+    });
+  poCtxInflight = promise;
+  return promise;
+}
+
+export async function loadQueuePoContext(): Promise<Map<string, QueuePoContext>> {
+  if (poCtxCache) {
+    if (Date.now() - poCtxCache.at >= PO_CONTEXT_TTL_MS) {
+      refreshQueuePoContext().catch((e: any) =>
+        console.warn("[RentalOps] background PO-context refresh failed (serving stale):", e?.message || e));
+    }
+    return poCtxCache.value;
+  }
+  return refreshQueuePoContext();
+}
 
 export interface MasterRow {
   case_key: string;
@@ -438,9 +629,16 @@ export interface MasterRow {
   shop_phone_edited_by: string | null;
   shop_phone_edited_at: string | null;
   assigned_phone_locked: boolean;      // same lock, for the assigned truck's phone
+  /** manual shop-NAME override (queue popout panel): when true, shop_name below
+   *  IS the operator's entry, not the reconciled PO pick. Wins by presence;
+   *  expires on the same episode clock as phone locks. */
+  shop_name_overridden: boolean;
+  shop_name_override_by: string | null;
+  shop_name_override_at: string | null;
   has_portal: boolean;             // has a scraped Holman portal row
   callable: boolean;               // LUCA should call this shop (effective target below); never true for PENDED (ticket already closing)
   // current repair shop (most recent APPROVED repair PO, else latest repair PO)
+  // — or the manual override when shop_name_overridden is true.
   shop_name: string | null;
   shop_address: string | null;
   shop_city: string | null;
@@ -487,6 +685,14 @@ export interface MasterRow {
   mark_note: string | null;
   mark_actor: string | null;
   mark_at: string | null;
+  /** Manual "verified ready with the shop" mark (shared with the Ops Queue). */
+  ready_verified: boolean;
+  ready_verified_by: string | null;
+  ready_verified_at: string | null;
+  /** "Escalated to research" mark (shop can't be validated from POs/calls). */
+  research_active: boolean;
+  research_by: string | null;
+  research_at: string | null;
   // provenance
   present_in_latest: boolean;
   last_seen_at: string | null;
@@ -567,6 +773,10 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       (i.override_employee_id IS NOT NULL) AS identity_is_override,
       m.mark_value AS operator_mark, m.note AS mark_note, m.actor AS mark_actor,
       to_char(m.created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS mark_at,
+      (rv.verified = 'true') AS ready_verified, rv.actor AS ready_verified_by,
+      to_char(rv.created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS ready_verified_at,
+      (re.active = 'true') AS research_active, re.actor AS research_by,
+      to_char(re.created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS research_at,
       po.open_po_count, po.etl_open_po_count, po.portal_corrected_po_count,
       po.any_po_count, po.last_rental_date, po.has_rental_auth,
       to_char(COALESCE(po.open_evidence_at, po.repair_evidence_at),'YYYY-MM-DD"T"HH24:MI:SSZ') AS po_evidence_at,
@@ -579,7 +789,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
            THEN po.open_portal_at IS NOT NULL AND po.open_portal_at >= po.open_evidence_at
            ELSE po.repair_portal_at IS NOT NULL AND po.repair_portal_at >= po.repair_evidence_at
       END AS po_evidence_from_portal,
-      shop.vendor_name AS shop_name, shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
+      COALESCE(ph.shop_name_override, shop.vendor_name) AS shop_name,
+      (ph.shop_name_override IS NOT NULL) AS shop_name_overridden,
+      ph.shop_name_override_by,
+      to_char(ph.shop_name_override_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS shop_name_override_at,
+      shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
       shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
       shop.po_number AS shop_po_number, shop.po_status AS shop_po_status, shop.po_date AS shop_po_date,
       hv.tpms_assigned_tech_name AS tpms_tech, hv.odometer, hv.odometer_date,
@@ -596,7 +810,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       aph.shop_phone AS assigned_portal_phone,
       aph.shop_phone_locked AS assigned_phone_locked,
       apo.open_po_count AS assigned_open_po,
-      ashop.vendor_name AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
+      COALESCE(aph.shop_name_override, ashop.vendor_name) AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
       ashop.vendor_city AS assigned_shop_city, ashop.vendor_state AS assigned_shop_state,
       ashop.vendor_zip AS assigned_shop_zip, ashop.po_number AS assigned_shop_po_number,
       ashop.po_status AS assigned_shop_po_status, ashop.po_date AS assigned_shop_po_date
@@ -624,6 +838,20 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       WHERE a.case_key = c.case_key AND a.action_type = 'mark'
       ORDER BY a.created_at DESC LIMIT 1
     ) m ON true
+    -- Manual "verified ready with the shop" / "escalated to research" marks —
+    -- shared with the Ops Queue (same append-only actions table, newest wins).
+    LEFT JOIN LATERAL (
+      SELECT payload->>'verified' AS verified, actor, created_at
+      FROM vrm_rental_operation_actions a
+      WHERE a.case_key = c.case_key AND a.action_type = 'ready_verified'
+      ORDER BY a.created_at DESC LIMIT 1
+    ) rv ON true
+    LEFT JOIN LATERAL (
+      SELECT payload->>'active' AS active, actor, created_at
+      FROM vrm_rental_operation_actions a
+      WHERE a.case_key = c.case_key AND a.action_type = 'research_escalation'
+      ORDER BY a.created_at DESC LIMIT 1
+    ) re ON true
     -- po_agg / shop_pick are the RECONCILED PO layer (see PO_EFFECTIVE_CTE):
     -- Snowflake base, portal correction applied per PO where the portal saw it
     -- more recently. The assigned-truck copies (apo/ashop) read the same CTEs so
@@ -700,6 +928,15 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
     const odo = r.odometer == null ? null : Number(r.odometer);
 
     const amsBucket = amsBucketOf(r.ams_status);
+
+    // JUNK-PHONE GATE (Tyler 8/5: "I'm never going to see 2222222222 as my
+    // contact"): the stored portal phone is cleaned BEFORE anything downstream
+    // reads it — display fields, the callable flag, and the call_* projection
+    // all see a real 10-digit number or nothing. Legacy junk left in the column
+    // by old scrapes is also nulled at boot (schema.ts heal), but this gate
+    // means even a junk row that sneaks in mid-day can never surface.
+    r.portal_shop_phone = cleanPhone(r.portal_shop_phone);
+    r.assigned_portal_phone = cleanPhone(r.assigned_portal_phone);
 
     // ── effective LUCA call target (assigned-truck redirect) ──────────────────
     const isDeclAuction = amsBucket === "declined" || amsBucket === "auction";
@@ -792,6 +1029,9 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       shop_phone_source: r.shop_phone_source ?? null,
       shop_phone_edited_by: r.shop_phone_edited_by ?? null,
       shop_phone_edited_at: r.shop_phone_edited_at ?? null,
+      shop_name_overridden: r.shop_name_overridden === true,
+      shop_name_override_by: r.shop_name_override_by ?? null,
+      shop_name_override_at: r.shop_name_override_at ?? null,
       assigned_phone_locked: r.assigned_phone_locked === true,
       callable,
       shop_name: r.shop_name ?? null, shop_address: r.shop_address ?? null, shop_city: r.shop_city ?? null,
@@ -809,6 +1049,12 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       ams_status: r.ams_status ?? null, ams_bucket: amsBucket,
       operator_mark: r.operator_mark ?? null, mark_note: r.mark_note ?? null,
       mark_actor: r.mark_actor ?? null, mark_at: r.mark_at ?? null,
+      ready_verified: r.ready_verified === true,
+      ready_verified_by: r.ready_verified_by ?? null,
+      ready_verified_at: r.ready_verified_at ?? null,
+      research_active: r.research_active === true,
+      research_by: r.research_by ?? null,
+      research_at: r.research_at ?? null,
       present_in_latest: !!r.present_in_latest, last_seen_at: r.last_seen_at,
     };
   });
@@ -1350,8 +1596,10 @@ export async function getLucaRentalList(): Promise<any> {
       shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
       shop.vendor_state AS shop_state, shop.vendor_zip AS shop_zip,
       popho.phone AS po_phone, popho.vendor AS po_phone_vendor,
+      pbdir.pb_phone, pbdir.pb_matched_by,
       ph.shop_phone AS portal_shop_phone, ph.shop_name AS portal_shop_name,
-      ph.shop_phone_locked AS portal_phone_locked, ph.shop_phone_source AS portal_phone_source
+      ph.shop_phone_locked AS portal_phone_locked, ph.shop_phone_source AS portal_phone_source,
+      ph.shop_name_override
     FROM vrm_rental_operations_cases c
     LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
     LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = c.case_key
@@ -1389,6 +1637,7 @@ export async function getLucaRentalList(): Promise<any> {
         AND COALESCE(e->>'vendorPhone','') <> ''
       LIMIT 1
     ) popho ON true
+    ${pepBoysPhoneLateral("shop")}
     WHERE c.present_in_latest = true AND COALESCE(c.ticket_status, '') <> 'PENDED'
     ORDER BY c.days_open DESC NULLS LAST, c.case_key
   `);
@@ -1401,9 +1650,13 @@ export async function getLucaRentalList(): Promise<any> {
   // with the board about a redirect target.
   const __master = await getRentalOpsMaster();
   const __masterByKey = new Map(__master.rows.map((m: any) => [String(m.case_key), m]));
-  let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneManual = 0, phoneRejected = 0, statusCorrected = 0;
+  let shopWithPo = 0, phoneFromPo = 0, phoneFromPortal = 0, phoneManual = 0, phoneFromDirectory = 0, phoneRejected = 0, statusCorrected = 0;
   const rentals = (res.rows as any[]).map((r) => {
-    const shopName: string | null = r.shop_name ? String(r.shop_name).trim() : null;
+    // Manual name override wins by presence (queue popout panel) — LUCA must
+    // call the shop the operator says the truck is at, same as the board and
+    // the queue (all three COALESCE the same column, so they cannot disagree).
+    const nameOverride: string | null = r.shop_name_override ? String(r.shop_name_override).trim() || null : null;
+    const shopName: string | null = nameOverride ?? (r.shop_name ? String(r.shop_name).trim() : null);
     if (shopName) shopWithPo++;
     if (shopName && r.shop_po_status_etl != null && r.shop_po_status !== r.shop_po_status_etl) statusCorrected++;
     // The phone must belong to the vendor whose NAME we return, or be null —
@@ -1411,15 +1664,23 @@ export async function getLucaRentalList(): Promise<any> {
     // it outranks both pickers and skips the vendor-name check. It stays
     // authoritative while shop_phone_source='manual' (always true when locked;
     // an UNLOCKED manual value loses the flag the moment a scrape replaces it).
+    // Pep Boys directory (Tyler 2026-08-05): a store-number-exact directory
+    // match outranks scrapes; a zip/city match backstops a missing/rejected
+    // scrape phone (same chain as buildQueuePoContext — keep them in sync).
     let shopPhone: string | null = null;
     if (shopName) {
       const manualPhone = (r.portal_phone_locked === true || r.portal_phone_source === "manual")
         ? cleanPhone(r.portal_shop_phone) : null;
+      const pbPhone = cleanPhone(r.pb_phone);
       const poPhone = cleanPhone(r.po_phone);
       if (manualPhone) {
         shopPhone = manualPhone; phoneManual++;
+      } else if (pbPhone && r.pb_matched_by === "store") {
+        shopPhone = pbPhone; phoneFromDirectory++;
       } else if (poPhone && vendorKey(r.po_phone_vendor) === vendorKey(shopName)) {
         shopPhone = poPhone; phoneFromPo++;
+      } else if (pbPhone) {
+        shopPhone = pbPhone; phoneFromDirectory++;
       } else {
         const portalPhone = cleanPhone(r.portal_shop_phone);
         if (portalPhone && vendorKey(r.portal_shop_name) === vendorKey(shopName)) {
@@ -1507,13 +1768,13 @@ export async function getLucaRentalList(): Promise<any> {
   const sh = await getSourceHealth();
   console.log(
     `[VRM/RentalOps] luca-rental-list: ${rentals.length} rentals · shop-of-record ${shopWithPo} ` +
-    `(phone: ${phoneFromPo} from PO, ${phoneFromPortal} from portal, ${phoneManual} manual, ${phoneRejected} rejected as wrong-vendor/junk` +
+    `(phone: ${phoneFromPo} from PO, ${phoneFromPortal} from portal, ${phoneManual} manual, ${phoneFromDirectory} from Pep Boys directory, ${phoneRejected} rejected as wrong-vendor/junk` +
     `; ${statusCorrected} PO statuses corrected by the portal layer)`,
   );
   return {
     generatedAt: new Date().toISOString(), source: "vrm_rental_operations",
     total: rentals.length, lastSyncAt: sh.lastSyncAt, lastFileDate: sh.lastFileDate,
-    shopOfRecord: { withShop: shopWithPo, withPhone: phoneFromPo + phoneFromPortal + phoneManual, phoneFromPo, phoneFromPortal, phoneManual, phoneRejected, statusCorrected },
+    shopOfRecord: { withShop: shopWithPo, withPhone: phoneFromPo + phoneFromPortal + phoneManual + phoneFromDirectory, phoneFromPo, phoneFromPortal, phoneManual, phoneFromDirectory, phoneRejected, statusCorrected },
     rentals,
   };
 }
@@ -1740,7 +2001,8 @@ async function readCallLog(trucks: string[]): Promise<any[]> {
                l.conversation_id,
                l.dry_run,
                l.target_truck AS truck,
-               l.shop_name
+               l.shop_name,
+               l.shop_phone
         FROM vrm_rental_operations_call_log l
         WHERE ltrim(l.target_truck, '0') IN (${inList})
         UNION ALL
@@ -1753,7 +2015,8 @@ async function readCallLog(trucks: string[]): Promise<any[]> {
                f.elevenlabs_conversation_id AS conversation_id,
                NULL::boolean AS dry_run,
                f.truck_number AS truck,
-               NULL::text AS shop_name
+               NULL::text AS shop_name,
+               NULL::text AS shop_phone
         FROM fs_call_logs f
         WHERE ltrim(f.truck_number, '0') IN (${inList})
           AND (f.batch_id = 'LUCA' OR f.call_type IN ('shop','repair'))
@@ -1770,10 +2033,54 @@ async function readCallLog(trucks: string[]): Promise<any[]> {
       dryRun: r.dry_run ?? null,
       truck: r.truck ?? null,
       shopName: r.shop_name ?? null,
+      shopPhone: r.shop_phone ?? null,
     }));
   } catch (e: any) {
     console.warn("[VRM/RentalOps] call-log read failed (non-fatal):", e?.message || e);
     return [];
+  }
+}
+
+/** Newest LUCA dispatch per truck — the shop name/number LUCA actually dialed.
+ * Queue + drawers show this next to the current reconciled shop pick so a human
+ * can see at a glance whether LUCA called the shop we NOW believe has the
+ * truck ("shop does not have truck" triage). Keyed by canonical truck number
+ * (digits, zeros stripped); rows may exist padded AND unpadded, so the map
+ * keeps the newest per canonical key. Never throws. */
+export interface LucaDispatchInfo {
+  shopName: string | null;
+  shopPhone: string | null;
+  at: string | null;
+  dialed: boolean;
+  dryRun: boolean;
+}
+export async function loadLatestLucaDispatches(): Promise<Map<string, LucaDispatchInfo>> {
+  const canon = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
+  try {
+    const res = await db.execute(sql`
+      SELECT DISTINCT ON (ltrim(regexp_replace(target_truck, '\\D', '', 'g'), '0'))
+             target_truck, shop_name, shop_phone, dialed, dry_run,
+             to_char(created_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS at
+      FROM vrm_rental_operations_call_log
+      WHERE source = 'luca_dispatch'
+      ORDER BY ltrim(regexp_replace(target_truck, '\\D', '', 'g'), '0'), created_at DESC
+    `);
+    const out = new Map<string, LucaDispatchInfo>();
+    for (const r of (res.rows as any[])) {
+      const key = canon(r.target_truck);
+      if (!key) continue;
+      out.set(key, {
+        shopName: r.shop_name ?? null,
+        shopPhone: r.shop_phone ?? null,
+        at: r.at ?? null,
+        dialed: r.dialed === true,
+        dryRun: r.dry_run === true,
+      });
+    }
+    return out;
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] luca-dispatch read failed (non-fatal):", e?.message || e);
+    return new Map();
   }
 }
 
@@ -1896,7 +2203,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   // PO history (Snowflake live w/ cached fallback) + portal snapshot for the
   // rental-case truck AND the renter's assigned truck, plus the merged call
   // log — all in parallel so the two Snowflake fetches never serialize.
-  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms, assignedNotes] = await Promise.all([
+  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms, assignedNotes, poCtx] = await Promise.all([
     fetchPoHistoryWithFallback(caseKey),
     hasAssigned ? fetchPoHistoryWithFallback(assignedTruckNo!) : Promise.resolve(null),
     readPortalSnapshot(caseKey),
@@ -1904,7 +2211,25 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     readCallLog(hasAssigned ? [caseKey, assignedTruckNo!] : [caseKey]),
     hasAssigned ? readAmsStatusForTruck(assignedTruckNo!) : Promise.resolve(null),
     hasAssigned ? readTruckNotes(assignedTruckNo!) : Promise.resolve([]),
+    // Reconciled shop-of-record pick (SHOP_PICK over po_eff) — the SAME value
+    // the board table and the queue show. The drawer must anchor its "Current
+    // shop" on this instead of re-deriving one client-side from raw poHistory
+    // (raw ETL status ≠ portal-corrected effective status — that fork is
+    // exactly the table-vs-drawer mismatch this field kills). Served from the
+    // 5-min SWR cache, so this costs ~0ms.
+    loadQueuePoContext().catch((): Map<string, QueuePoContext> => new Map()),
   ]);
+
+  const canonKey = (s: string) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
+  const toReconciled = (ctx: QueuePoContext | undefined) => ctx ? {
+    shopName: ctx.shopName,
+    shopPhone: ctx.shopPhone,
+    effStatus: ctx.effStatus,
+    shopPoDate: ctx.shopPoDate,
+    poNumber: ctx.poNumber,
+    openPoCount: ctx.openPoCount,
+    portalAt: ctx.portalAt,
+  } : null;
 
   return {
     case: caseRow,
@@ -1913,8 +2238,10 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poHistory: casePo.poHistory,
     poSource: casePo.poSource,
     portal: casePortal,
+    /** Board/queue-aligned shop of record for the rental truck (null = none). */
+    reconciledShop: toReconciled(poCtx.get(canonKey(caseKey))),
     ...(hasAssigned && assignedPo
-      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms, notes: assignedNotes } }
+      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms, notes: assignedNotes, reconciledShop: toReconciled(poCtx.get(canonKey(assignedTruckNo!))) } }
       : {}),
     callLog,
   };

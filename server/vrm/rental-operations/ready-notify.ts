@@ -2,9 +2,9 @@
  * What happens the moment a case flips to Ready for Pickup (Tyler 2026-07-29):
  *
  *   1. EMAIL the region's recovery owner - West=Sandeep, Central=Oscar,
- *      East=Olga - resolved with the SAME district-vote logic Cases by Region
- *      renders, so the page and the mailbox can never disagree about whose
- *      queue the case is in. Nexus has no email transport, so the actual send
+ *      East=Olga - resolved with the SAME Annex A state-first logic Cases by
+ *      Region renders, so the page and the mailbox can never disagree about
+ *      whose queue the case is in. Nexus has no email transport, so the send
  *      happens on LIVHR (POST /api/luca/notify-region-ready), which already
  *      owns SendGrid and the owners' addresses via its escalation.* keys.
  *
@@ -27,12 +27,13 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, type MasterRow } from "./read-repository";
 import {
-  assignDistrictRegions,
   resolveCaseRegion,
   REGION_LABEL,
   REGION_OWNER,
   type Region,
 } from "./region";
+import { UNROUTED_OWNER } from "./annex-a-routing";
+import { loadTechHomeStates } from "./tech-home-states";
 import { isAutoTextOnReadyEnabled } from "./settings";
 import { sendPickupText } from "./pickup-sms";
 
@@ -54,25 +55,6 @@ export interface ReadyNotifyResult {
   owner: string;
   email: { attempted: boolean; sent: boolean; reason: string | null };
   autoText: { enabled: boolean; attempted: boolean; status: string | null; reason: string | null };
-}
-
-/**
- * Verbatim copy of region-routes' loadTechHomeStates (it is module-private
- * there). The trim + UPPER matter: regionForState only accepts clean 2-letter
- * codes, and the map key must match String(employee_id).trim() exactly or the
- * vote silently loses its primary signal.
- */
-async function loadTechHomeStates(): Promise<Map<string, string>> {
-  const res: any = await db.execute(sql`
-    SELECT employee_id, home_state
-    FROM all_techs
-    WHERE employee_id IS NOT NULL
-      AND home_state IS NOT NULL
-      AND btrim(home_state) <> ''`);
-  const rows = (res?.rows ?? res ?? []) as Array<{ employee_id: string; home_state: string }>;
-  const m = new Map<string, string>();
-  for (const r of rows) m.set(String(r.employee_id).trim(), String(r.home_state).trim().toUpperCase());
-  return m;
 }
 
 /** True when this case already got a pickup text (sent or queued) recently. */
@@ -127,7 +109,7 @@ export async function notifyReadyFlip(input: {
     caseKey: input.caseKey,
     region: null,
     regionLabel: "UNASSIGNED",
-    owner: "all regional owners",
+    owner: UNROUTED_OWNER,
     email: { attempted: false, sent: false, reason: null },
     autoText: { enabled: false, attempted: false, status: null, reason: null },
   };
@@ -135,25 +117,23 @@ export async function notifyReadyFlip(input: {
   let row: MasterRow | undefined;
   try {
     // Page-canonical region: same master rows, same home-state attach, same
-    // district vote as GET /by-region. The vote needs the WHOLE board (a
-    // district's region is decided by all its cases together), which is why
-    // this is not a single-row lookup.
+    // Annex A state-first resolution as GET /by-region. Still a full-board
+    // read: the redirect rule below needs the case's sibling fields anyway.
     const [model, homeStates] = await Promise.all([getRentalOpsMaster({}), loadTechHomeStates()]);
     const withState = model.rows.map((r) => ({
       ...r,
       tech_home_state: homeStates.get(String((r as any).employee_id ?? "").trim()) ?? null,
     }));
-    const districts = assignDistrictRegions(withState);
     const mine = withState.find((r) => r.case_key === input.caseKey);
     if (!mine) {
       out.email.reason = `case ${input.caseKey} not on the board`;
       return out;
     }
     row = mine;
-    const resolved = resolveCaseRegion(mine, districts);
+    const resolved = resolveCaseRegion(mine);
     out.region = resolved.region;
     out.regionLabel = resolved.region ? REGION_LABEL[resolved.region] : "UNASSIGNED";
-    out.owner = resolved.region ? REGION_OWNER[resolved.region] : "all regional owners";
+    out.owner = resolved.region ? REGION_OWNER[resolved.region] : UNROUTED_OWNER;
   } catch (e: any) {
     out.email.reason = `region resolution failed: ${e?.message || e}`;
     return out;
@@ -167,7 +147,23 @@ export async function notifyReadyFlip(input: {
 
   // ── 1. the email ──────────────────────────────────────────────────────────
   out.email.attempted = true;
-  if (input.dryRun) {
+  if (!out.region) {
+    // Annex A could not resolve a region (no tech/shop/plate state). SOP §4:
+    // route to Rob Anderson as needs-routing — NEVER broadcast to all owners.
+    // No LIVHR post: its lane keys recipients off a region we don't have.
+    out.email.reason = "no region resolvable — routed to Rob Anderson (needs-routing)";
+    if (!input.dryRun) {
+      try {
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, actor)
+          VALUES (${input.caseKey}, 'note',
+                  ${"READY flip could not resolve a region (no tech/shop/plate state) — routed to Rob Anderson via needs-routing"},
+                  'system:ready-notify')`);
+      } catch (e: any) {
+        console.error("[ReadyNotify] needs-routing note failed:", e?.message || e);
+      }
+    }
+  } else if (input.dryRun) {
     out.email.reason = "dry-run";
   } else {
     const r = await postNotify({

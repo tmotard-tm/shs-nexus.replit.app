@@ -11,11 +11,8 @@
  * population. All the regional logic lives in ./region.
  */
 import type { Router } from "express";
-import { db } from "../../db";
-import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, type MasterRow } from "./read-repository";
 import {
-  assignDistrictRegions,
   resolveCaseRegion,
   assertRegionCoverage,
   REGIONS,
@@ -24,6 +21,7 @@ import {
   type Region,
   type RegionBasis,
 } from "./region";
+import { loadTechHomeStates } from "./tech-home-states";
 import {
   loadWorkbookStates,
   loadWorkbookHistory,
@@ -81,30 +79,6 @@ const num = (v: unknown): number => {
   return Number.isFinite(n) ? n : 0;
 };
 
-/**
- * employee_id -> home_state, straight from the roster.
- *
- * Deliberately a separate small query rather than a new column on the big master
- * SELECT: this keeps the whole regional feature inside its own two files.
- * `all_techs.home_state` is clean 2-letter codes (verified: 13,503 non-empty
- * rows, every one length 2), so no state-name normalisation is needed — but it
- * is upper-cased anyway so a future dirty row cannot silently miss.
- */
-async function loadTechHomeStates(): Promise<Map<string, string>> {
-  const res: any = await db.execute(sql`
-    SELECT employee_id, home_state
-    FROM all_techs
-    WHERE employee_id IS NOT NULL
-      AND home_state IS NOT NULL
-      AND btrim(home_state) <> ''`);
-  const rows = (res?.rows ?? res ?? []) as Array<{ employee_id: string; home_state: string }>;
-  const m = new Map<string, string>();
-  for (const r of rows) {
-    m.set(String(r.employee_id).trim(), String(r.home_state).trim().toUpperCase());
-  }
-  return m;
-}
-
 export function registerRegionRoutes(router: Router): void {
   // Working state (status, notes, next action) lives in ./workbook.
   registerWorkbookRoutes(router);
@@ -113,9 +87,9 @@ export function registerRegionRoutes(router: Router): void {
    * GET /api/vrm/rental-operations/by-region
    *
    * Returns every open rental case tagged with its region, plus a per-region /
-   * per-district rollup. Districts are assigned a single region by a vote of
-   * their technicians' home states, so a district is never split across two
-   * regions even when its technicians live in different ones.
+   * per-district rollup. Regions resolve per case from the technician's home
+   * state (Annex A, state-first); a district whose techs span two regions now
+   * correctly appears under both, with separate tallies in each.
    */
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
@@ -126,17 +100,15 @@ export function registerRegionRoutes(router: Router): void {
         loadWorkbookStates(),
       ]);
 
-      // Attach the technician's home state BEFORE assigning regions — it is the
-      // primary signal and the district vote is built from it.
+      // Attach the technician's home state BEFORE resolving regions — it is
+      // the primary Annex A signal.
       const withState = model.rows.map((r) => ({
         ...r,
         tech_home_state: homeStates.get(String((r as any).employee_id ?? "").trim()) ?? null,
       }));
 
-      const districts = assignDistrictRegions(withState);
-
       const rows: RegionalRow[] = withState.map((r) => {
-        const resolved = resolveCaseRegion(r, districts);
+        const resolved = resolveCaseRegion(r);
         return {
           ...r,
           region: resolved.region,

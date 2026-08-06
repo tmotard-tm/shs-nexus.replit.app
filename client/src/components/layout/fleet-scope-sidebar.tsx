@@ -18,7 +18,6 @@ import {
   Clock,
   Home,
   ChevronLeft,
-  CheckSquare,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/hooks/use-auth";
@@ -75,8 +74,7 @@ const NAV: NavSection[] = [
     title: "Tools",
     items: [
       { label: "Holman Research", href: "/fleet-scope/holman-research", icon: Wrench },
-      { label: "Batch Caller", href: "/fleet-scope/batch-caller", icon: Phone },
-      { label: "Action Tracker", href: "/fleet-scope/action-tracker", icon: CheckSquare },
+      { label: "Call History", href: "/fleet-scope/call-history", icon: Phone },
     ],
   },
 ];

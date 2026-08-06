@@ -81,7 +81,6 @@ import { RoleBasedHome } from "@/components/role-based-home";
 import { SecurityQuestionsGate } from "@/components/security-questions-gate";
 import OffboardingQueue from "@/pages/offboarding-queue";
 import FleetScopeLayout from "@/pages/fleet-scope/FleetScopeLayout";
-import RawPOs from "@/pages/fleet-scope/RawPOs";
 import TruckDetail from "@/pages/fleet-scope/TruckDetail";
 import EditTruck from "@/pages/fleet-scope/EditTruck";
 import { UserProvider as FleetScopeUserProvider } from "@/context/FleetScopeUserContext";
@@ -577,12 +576,6 @@ function Router() {
             <TestRepairResults />
           </MainContent>
         </ProtectedRoute>
-      </Route>
-
-      <Route path="/fleet-scope/raw-pos/:truckNumber">
-        <RoleProtectedRoute>
-          <RawPOs />
-        </RoleProtectedRoute>
       </Route>
 
       <Route path="/fleet-scope/trucks/new">

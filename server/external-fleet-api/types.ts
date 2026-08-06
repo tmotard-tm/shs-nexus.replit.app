@@ -20,7 +20,6 @@ export type ExternalFleetModuleId =
   | "fleet_scope.executive_summary"
   | "fleet_scope.metrics_dashboard"
   | "fleet_scope.holman_research"
-  | "fleet_scope.batch_caller"
   | "fleet_scope.action_tracker"
   | "fleet_scope.procurement_history"
   | "fleet_scope.vehicle_search"

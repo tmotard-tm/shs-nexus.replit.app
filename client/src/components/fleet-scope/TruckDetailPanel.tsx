@@ -39,14 +39,12 @@ import {
   Check,
   CheckCircle,
   X,
-  Lightbulb,
   Car,
   PhoneCall,
   PhoneForwarded,
   Loader2,
   Navigation,
   Building2,
-  RefreshCw,
 } from "lucide-react";
 import { format } from "date-fns";
 
@@ -430,8 +428,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
   const { toast } = useToast();
   const [commentValue, setCommentValue] = useState("");
   const [isEditingComment, setIsEditingComment] = useState(false);
-  const [refreshingShopCall, setRefreshingShopCall] = useState(false);
-  const [refreshingTechCall, setRefreshingTechCall] = useState(false);
 
   const { data: truck, isLoading: truckLoading } = useQuery<Truck & { techAddress?: string }>({
     queryKey: ["/api/fs/trucks", truckId],
@@ -440,42 +436,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
 
   const { data: actions, isLoading: actionsLoading } = useQuery<Action[]>({
     queryKey: ["/api/fs/trucks", truckId, "actions"],
-    enabled: !!truckId && open,
-  });
-
-  const { data: scraperStatusMap } = useQuery<Record<string, { status: string; lastScraped: string; location: string; primaryIssue: string; priority: string; repairVendorPhone: string; repairVendorAddress: string; recommendation: string }>>({
-    queryKey: ["/api/fs/trucks/scraper-status"],
-    queryFn: async () => {
-      try {
-        const directRes = await fetch("https://web-scraper-tool-seanchen37.replit.app/api/public/vehicles", {
-          signal: AbortSignal.timeout(15000),
-        });
-        if (directRes.ok) {
-          const result = await directRes.json();
-          const vehicles = result.vehicles || [];
-          const vehicleMap: Record<string, any> = {};
-          for (const v of vehicles) {
-            const num = (v.vehicle_number || '').toString().padStart(6, '0');
-            vehicleMap[num] = {
-              status: v.status || '',
-              lastScraped: v.last_scraped || '',
-              location: v.location || '',
-              primaryIssue: v.primary_issue || '',
-              priority: v.priority || '',
-              repairVendorPhone: v.repair_vendor?.phone || '',
-              repairVendorAddress: v.repair_vendor?.address || '',
-              recommendation: v.recommendation || '',
-            };
-          }
-          return vehicleMap;
-        }
-      } catch (e) {
-        console.log("[Scraper] Direct fetch failed, falling back to server proxy");
-      }
-      const res = await fetch("/api/fs/trucks/scraper-status");
-      if (!res.ok) throw new Error("Failed to fetch scraper status");
-      return res.json();
-    },
     enabled: !!truckId && open,
   });
 
@@ -521,48 +481,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
 
   const owner = truck ? determineOwner(truck) : "Oscar S";
 
-  const handleRefreshShopCall = async () => {
-    if (!truck) return;
-    setRefreshingShopCall(true);
-    try {
-      const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
-        truckNumber: truck.truckNumber,
-        callType: "repair",
-        ...(truck.lastCallConversationId ? { conversationId: truck.lastCallConversationId } : {}),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Refresh failed");
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-      toast({ title: "Shop call refreshed", description: `Status: ${data.status}` });
-    } catch (err: any) {
-      toast({ title: "Could not refresh shop call", description: err.message, variant: "destructive" });
-    } finally {
-      setRefreshingShopCall(false);
-    }
-  };
-
-  const handleRefreshTechCall = async () => {
-    if (!truck) return;
-    setRefreshingTechCall(true);
-    try {
-      const res = await apiRequest("POST", "/api/fs/elevenlabs/backfill", {
-        truckNumber: truck.truckNumber,
-        callType: "tech",
-        ...(truck.lastTechCallConversationId ? { conversationId: truck.lastTechCallConversationId } : {}),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.message || "Refresh failed");
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks", truckId] });
-      queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
-      toast({ title: "Tech call refreshed", description: `Status: ${data.status}` });
-    } catch (err: any) {
-      toast({ title: "Could not refresh tech call", description: err.message, variant: "destructive" });
-    } finally {
-      setRefreshingTechCall(false);
-    }
-  };
-
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -592,20 +510,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                   <SheetTitle className="flex items-center gap-2" data-testid="panel-truck-title">
                     Truck <span className="font-mono">{truck.truckNumber}</span>
                   </SheetTitle>
-                  {truck.truckNumber && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      data-testid="button-raw-pos"
-                      onClick={() => {
-                        const num = (truck.truckNumber || '').toString().replace(/^0+/, '');
-                        window.open(`/fleet-scope/raw-pos/${num}`, '_blank', 'noopener,noreferrer');
-                      }}
-                    >
-                      <FileText className="w-3.5 h-3.5 mr-1.5" />
-                      Raw POs
-                    </Button>
-                  )}
                   {onUpdateAms && truck.truckNumber && (
                     <Button
                       variant="outline"
@@ -641,9 +545,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
             <ScrollArea className="flex-1 overflow-auto">
               <div className="px-6 py-4 space-y-5">
                 {(() => {
-                  const tNum = (truck.truckNumber || '').toString().padStart(6, '0');
-                  const scraperInfo = scraperStatusMap?.[tNum];
-                  const fullAddress = scraperInfo?.repairVendorAddress || '';
                   return (
                     <div>
                       <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
@@ -661,19 +562,15 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                             placeholder="Enter repair shop name or address..."
                             testIdPrefix="panel-repair-shop"
                           />
-                          <EditableInfoRow
+                          {/* repairPhone is VRM-owned (verified/locked shop phone
+                              mirrors down from VRM) — display only. */}
+                          <InfoRow
                             label="Phone"
                             value={truck.repairPhone}
                             icon={<Phone className="w-3.5 h-3.5" />}
-                            fieldName="repairPhone"
-                            truckId={truck.id}
-                            placeholder="Enter phone number..."
-                            testIdPrefix="panel-repair-phone"
+                            testId="panel-repair-phone"
                           />
                         </div>
-                        {fullAddress && (
-                          <InfoRow label="Vendor Address" value={fullAddress} icon={<MapPin className="w-3.5 h-3.5" />} testId="panel-vendor-address" />
-                        )}
                         {samsaraData?.REVERSE_GEO_FULL && (
                           <InfoRow label="Samsara Location" value={samsaraData.REVERSE_GEO_FULL} icon={<Navigation className="w-3.5 h-3.5" />} testId="panel-samsara-location" />
                         )}
@@ -703,14 +600,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
                     <PhoneCall className="w-4 h-4 text-muted-foreground" />
                     Latest Shop Call
-                    <button
-                      onClick={handleRefreshShopCall}
-                      disabled={refreshingShopCall}
-                      className="ml-auto text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
-                      title="Refresh shop call status"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingShopCall ? "animate-spin" : ""}`} />
-                    </button>
                   </h3>
                   <div className="rounded-md border p-3 space-y-1.5">
                     {truck.lastCallDate ? (
@@ -744,14 +633,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
                     <PhoneForwarded className="w-4 h-4 text-muted-foreground" />
                     Latest Tech Call
-                    <button
-                      onClick={handleRefreshTechCall}
-                      disabled={refreshingTechCall}
-                      className="ml-auto text-muted-foreground hover:text-foreground disabled:opacity-40 transition-colors"
-                      title="Refresh tech call status"
-                    >
-                      <RefreshCw className={`w-3.5 h-3.5 ${refreshingTechCall ? "animate-spin" : ""}`} />
-                    </button>
                   </h3>
                   <div className="rounded-md border p-3 space-y-1.5">
                     {truck.lastTechCallDate ? (
@@ -780,25 +661,6 @@ export function TruckDetailPanel({ truckId, open, onOpenChange, onUpdateAms, ams
                     )}
                   </div>
                 </div>
-
-                {(() => {
-                  const truckNum = (truck.truckNumber || '').toString().padStart(6, '0');
-                  const scraperData = scraperStatusMap?.[truckNum];
-                  if (!scraperData?.recommendation) return null;
-                  return (
-                    <div>
-                      <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-                        <Lightbulb className="w-4 h-4 text-muted-foreground" />
-                        AI Recommendation
-                      </h3>
-                      <div className="rounded-md border p-3">
-                        <p className="text-sm text-muted-foreground leading-relaxed" data-testid="panel-ai-recommendation">
-                          {scraperData.recommendation}
-                        </p>
-                      </div>
-                    </div>
-                  );
-                })()}
 
                 <div>
                   <h3 className="text-sm font-semibold mb-2 flex items-center gap-1.5">

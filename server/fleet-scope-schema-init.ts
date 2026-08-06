@@ -607,6 +607,18 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+DO $$ BEGIN
+  -- Tech-pickup date (YYYY-MM-DD), VRM-owned mirror written by the
+  -- schedule_pickup action (VRM Ops Queue). Drives the queue's
+  -- SCHEDULE TECH PICKUP step.
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'fs_trucks' AND column_name = 'scheduled_pickup_date'
+  ) THEN
+    ALTER TABLE "fs_trucks" ADD COLUMN "scheduled_pickup_date" text;
+  END IF;
+END $$;
+
 CREATE TABLE IF NOT EXISTS "fs_truck_status_events" (
   "id" varchar PRIMARY KEY DEFAULT gen_random_uuid(),
   "truck_id" varchar NOT NULL REFERENCES "fs_trucks"("id") ON DELETE CASCADE,
@@ -858,6 +870,46 @@ export async function initFleetScopeSchema(): Promise<void> {
     } catch (healErr: any) {
       // Non-fatal: display-side normalization still groups correctly.
       console.warn("[Fleet-Scope] Owner-name heal skipped:", healErr.message);
+    }
+    // Idempotent call-log lifecycle heal. Legacy LUCA write-back rows stored
+    // DISPLAY labels ("No Answer", "Ready", …) in the fs_call_logs.status
+    // LIFECYCLE column, which pins trucks to a phantom "Calling" state in
+    // Today's Queue and hides them from follow-up supersede logic. Rewrite
+    // those rows to status='completed' with the canonical outcome remapped
+    // from the label (Ready/Recovered → VEHICLE_READY, No Answer/Inconclusive
+    // → CALL_NO_CONTACT, else VEHICLE_NOT_READY — mirrors the LUCA worker's
+    // own outcome mapping). Also close out rows stranded 'in_progress' (or
+    // 'unknown') by the removed ElevenLabs batch-call engine: nothing writes
+    // those states anymore (LUCA writes 'completed' directly), so any such
+    // row is a dead dial. Value-guarded by the WHERE clauses → no-op once
+    // healed, safe on every boot, and it is how production data gets fixed
+    // after publish (deploys run no migrations).
+    try {
+      const labelHeal = await client.query(`
+        UPDATE fs_call_logs SET
+          outcome = CASE
+            WHEN status IN ('Ready', 'Recovered') THEN 'VEHICLE_READY'
+            WHEN status = 'No Answer' OR status LIKE 'Inconclusive%' THEN 'CALL_NO_CONTACT'
+            ELSE 'VEHICLE_NOT_READY'
+          END,
+          status = 'completed'
+        WHERE batch_id = 'LUCA'
+          AND status NOT IN ('completed', 'failed', 'in_progress', 'unknown', 'pending')
+      `);
+      const strandedHeal = await client.query(`
+        UPDATE fs_call_logs SET
+          status = 'failed',
+          outcome = COALESCE(outcome, 'CALL_FAILED')
+        WHERE status IN ('in_progress', 'unknown')
+      `);
+      if ((labelHeal.rowCount ?? 0) > 0 || (strandedHeal.rowCount ?? 0) > 0) {
+        console.log(
+          `[Fleet-Scope] Call-log lifecycle heal: ${labelHeal.rowCount} label rows → completed, ${strandedHeal.rowCount} stranded rows → failed`
+        );
+      }
+    } catch (healErr: any) {
+      // Non-fatal: the queue endpoint still serves, just with stale rows.
+      console.warn("[Fleet-Scope] Call-log lifecycle heal skipped:", healErr.message);
     }
   } catch (err: any) {
     console.error("[Fleet-Scope] Schema init error:", err.message);

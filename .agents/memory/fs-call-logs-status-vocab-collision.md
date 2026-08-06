@@ -1,17 +1,19 @@
 ---
-name: fs_call_logs.status vocabulary collision
-description: LUCA writeback stores analyzed display labels in fs_call_logs.status while Nexus consumers treat that column as a call lifecycle (in_progress/completed/failed).
+name: fs_call_logs.status vocabulary collision (resolved)
+description: fs_call_logs.status is lifecycle-only (completed/failed); a boot self-heal enforces it and LUCA is the sole caller after the old batch engine was removed (Aug 2026).
 ---
 
-Two vocabularies share one column, and each half of the LUCA feature assumes the other one:
+Two vocabularies used to share `fs_call_logs.status`: Nexus's own ElevenLabs caller wrote a lifecycle (`in_progress`→`completed`/`failed`) while LUCA write-back stored analyzed display labels ("Ready", "No Answer", …) in the SAME column. Queue code treated any status ∉ {completed, failed} as an in-flight call (phantom "Calling" forever), and `getPendingFollowUps()`'s `status='completed'` filter made LUCA rows invisible to supersede logic.
 
-- **Nexus's own caller** writes `fs_call_logs.status` as a lifecycle: `in_progress` → `completed`/`failed`.
-- **LUCA write-back** (`mapCallOutcome`) writes the analyzed display label ("Ready", "No Answer", "Recovered", "Needs Tow", "Inconclusive - call dropped", …) into the SAME column, with `outcome` from a 3-valued map that defaults to `VEHICLE_NOT_READY`.
+**End-state (resolved Aug 2026):**
+- The mapper writes lifecycle statuses only (unit-tested: "never a display label"); display labels live in `outcome`→UI mapping and `fs_trucks.lastCallStatus`.
+- An idempotent boot self-heal in the Fleet Scope schema init rewrites any legacy label rows (`batch_id='LUCA'`, label in status) to `status='completed'` with outcome remapped (Ready/Recovered→VEHICLE_READY; No Answer/Inconclusive→CALL_NO_CONTACT; else VEHICLE_NOT_READY) and closes stranded `in_progress`/`unknown` rows as `failed`. Deploys run no migrations, so prod heals on publish.
+- Fleet Scope no longer dials at all: the batch-call engine, ElevenLabs webhook/backfill, and per-truck call buttons are gone. LUCA (dispatched from VRM Rental Operations) is the only caller; the Batch Caller page became read-only Call History.
+- Follow-up board = latest `completed` row per truck+type, `VEHICLE_READY` excluded, scoped to active `fs_trucks` — healed-to-`failed` rows never appear; healed label rows now correctly participate in supersede.
 
-**Consequences (verified live in prod 2026-08-02):**
-- `/queue/today`'s `latestCallUnresolved()` treats any status ∉ {completed, failed} as an in-flight call → every truck whose latest shop/repair row is a LUCA row (189 trucks) is permanently "unresolved": queue shows "Calling" forever and `lucaReadyFor()` can never fire (LUCA READY trucks never reach the "retrieve ASAP" step via the luca path).
-- `getPendingFollowUps()` picks the "latest" call per truck with `WHERE status='completed'` → LUCA rows are invisible, so older Nexus follow-ups stay due after LUCA already resolved the truck (137 live stale follow-ups), and `outcome IS DISTINCT FROM 'VEHICLE_READY'` keeps RECOVERED trucks (logged as VEHICLE_NOT_READY) on the follow-up board.
+**Why:** the write/read contract was never reconciled; the collision pinned trucks to phantom "Calling" and kept stale follow-ups alive after LUCA resolved them.
 
-**Why:** the mapper's comment claims the latest `call_type='repair'` row is "the authoritative LUCA status source" while the queue code's comment asserts the column is lifecycle-only — the contract was never reconciled.
-
-**How to apply:** any fix or new consumer of `fs_call_logs` must decide per-row which vocabulary `status` holds (e.g. `batch_id='LUCA'` marks label rows), or the write path must move labels out of the lifecycle column. When extending `rental_call_outcome` values, update BOTH `OUTCOME_TO_STATUS` and `OUTCOME_TO_LOG_OUTCOME` — the latter's default (`VEHICLE_NOT_READY`) silently mislabels terminal outcomes like RECOVERED.
+**How to apply:**
+- Never write display labels into `fs_call_logs.status`; new writers must use the lifecycle vocab.
+- When extending `rental_call_outcome` values, update BOTH mapper outcome maps AND the Today's Queue `LUCA_STATUS_COLORS` map (unknown labels fall back to a muted pill, not broken styling).
+- Queue ready-step nuance: a LUCA-ready truck whose `fs_trucks.mainStatus` is still Repairing/Confirming Status/Decision Pending gets `isConflict=true` by design — the green "LUCA confirmed READY" note only renders when NOT conflicted; the row still reaches the "VEHICLE READY — RETRIEVE ASAP" step with a STATUS CONFLICT action text. Don't mistake this for a heal failure.

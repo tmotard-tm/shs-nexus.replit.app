@@ -6,6 +6,9 @@
 import { db } from "../db";
 import { sql } from "drizzle-orm";
 import { initRentalOperationsSchema } from "./rental-operations/schema";
+import { initPepBoysDirectory } from "./rental-operations/pepboys-directory";
+import { seedShsOwnerAssignments } from "./rental-operations/seed-shs-owner";
+import { reconcileFleetStatuses } from "./rental-operations/fleet-status";
 import { initRightsizeSchema } from "./rightsize/schema";
 import { initRightsizeComplianceSchema } from "./rightsize/compliance";
 import { initInboundSchema } from "./inbound/schema";
@@ -882,6 +885,26 @@ export async function initVrmSchema(): Promise<void> {
 
   // VRM Rental Operations V2 (clean-room) — additive tables, own module.
   await initRentalOperationsSchema();
+  // Pep Boys store directory (Tyler 2026-08-05): DDL + value-guarded seed from
+  // the operator-supplied sheet. Non-fatal — a directory hiccup must not stop
+  // the schema init; every consumer LEFT JOINs it.
+  await initPepBoysDirectory().catch((e: any) =>
+    console.error("[VRM/PepBoys] directory seed failed:", e?.message || e));
+  // Fleet-status ownership: seed open cases lacking a fleet_status action from
+  // current fs_trucks + adopt FS system-automation drift + mirror locked shop
+  // phones. Idempotent; non-fatal (schema init must never fail on it). Runs
+  // here at boot and lazily from the queue GET — never on a timer (autoscale).
+  // Ordering: routes.ts chains initVrmSchema() after the Fleet Scope schema
+  // init settles, so fs_trucks exists here even on a fresh deployment; if it
+  // still isn't ready the readiness guard throws and the lazy queue-GET
+  // reconcile (whose throttle is not consumed by failures) heals immediately.
+  await reconcileFleetStatuses("boot").catch((e: any) =>
+    console.error("[VRM/FleetStatus] boot reconcile failed:", e?.message || e));
+  // One-time persona-bucket owner seed from the historical fs_trucks.shs_owner
+  // column (guarded by an app_settings flag; append-only assign_owner rows, so
+  // later human assignments always win). Non-fatal by design.
+  await seedShsOwnerAssignments().catch((e: any) =>
+    console.error("[VRM/RentalOps] shs_owner seed failed:", e?.message || e));
   await initRightsizeSchema();
   await initRightsizeComplianceSchema();
   await initInboundSchema();

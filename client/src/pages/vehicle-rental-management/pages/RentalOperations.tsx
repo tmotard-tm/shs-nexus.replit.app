@@ -16,10 +16,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   Search, Download, RefreshCw, Upload, X, ArrowUp, ArrowDown, ArrowUpDown,
   AlertTriangle, CircleDollarSign, Wrench, Gavel, ChevronRight, PhoneCall, CornerDownRight,
-  MessageSquare, Pencil, Lock,
+  MessageSquare, Pencil, Lock, Bot,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
+import { TechTextModal } from "../components/tech-text-modal";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -109,6 +110,14 @@ interface MasterRow {
   mark_note: string | null;
   mark_actor: string | null;
   mark_at: string | null;
+  /** Manual "verified ready with the shop" mark (shared with the Ops Queue). */
+  ready_verified: boolean;
+  ready_verified_by: string | null;
+  ready_verified_at: string | null;
+  /** "Escalated to research" mark (shop can't be validated from POs/calls). */
+  research_active: boolean;
+  research_by: string | null;
+  research_at: string | null;
   present_in_latest: boolean;
   last_seen_at: string | null;
   // Working state from the shared VRM workbook (same rows Cases by Region
@@ -209,6 +218,7 @@ interface CallLogItem {
   dryRun: boolean | null;
   truck?: string | null;        // which truck the call was about (case or assigned)
   shopName?: string | null;
+  shopPhone?: string | null;    // the number LUCA actually dialed (dispatch rows only)
 }
 // An investigation note written ABOUT a truck (not about one rental case).
 // caseKey is the rental case it was written from — kept so provenance survives
@@ -224,6 +234,8 @@ interface CaseDetail {
   portal?: PortalData | null;
   assignedTruck?: AssignedTruckDetail | null;
   callLog?: CallLogItem[];
+  /** Server-reconciled shop-of-record — the SAME pick the board table/queue show. */
+  reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null;
 }
 
 type SortDir = "asc" | "desc" | null;
@@ -820,6 +832,26 @@ export default function RentalOperations() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }),
     onError: (e: any) => toast({ title: "Mark failed", description: String(e?.message || e), variant: "destructive" }),
   });
+  // Shared verification state (same rows the Ops Queue reads/writes): a human
+  // called the shop and confirmed READY, or escalated the case to research.
+  const verifyMut = useMutation({
+    mutationFn: (v: { caseKey: string; verified: boolean }) =>
+      apiRequest("POST", "/api/vrm/rental-operations/queue/ready-verified", { key: v.caseKey, verified: v.verified }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
+      toast({ title: v.verified ? "Marked verified ready" : "Verification undone", description: v.verified ? "Reflected on the Ops Queue and Cases by Region." : undefined });
+    },
+    onError: (e: any) => toast({ title: "Verify failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+  const researchMut = useMutation({
+    mutationFn: (v: { caseKey: string; active: boolean }) =>
+      apiRequest("POST", "/api/vrm/rental-operations/queue/research", { key: v.caseKey, active: v.active }),
+    onSuccess: (_r, v) => {
+      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
+      toast({ title: v.active ? "Escalated to research" : "Research escalation cleared", description: v.active ? "Reflected on the Ops Queue and Cases by Region." : undefined });
+    },
+    onError: (e: any) => toast({ title: "Research escalation failed", description: String(e?.message || e), variant: "destructive" }),
+  });
   const syncMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/sync"),
     onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); toast({ title: "Sync complete" }); },
@@ -1180,6 +1212,7 @@ export default function RentalOperations() {
               <Th col="ext" label="Ext" style={{ textAlign: "right" }} />
               <Th col="npos" label="POs" style={{ textAlign: "right" }} />
               <th style={{ ...thStyle, textAlign: "center" }}>Text</th>
+              <th style={{ ...thStyle, textAlign: "center" }} title="Shop verification — ✓ verified ready by phone · R escalate to research">Verify</th>
               <th style={{ ...thStyle, textAlign: "center" }}>Mark</th>
             </tr>
           </thead>
@@ -1199,6 +1232,12 @@ export default function RentalOperations() {
                         a truck that is already fixed. */}
                     {r.workbook_status === "ready_for_pickup" && (
                       <Chip text="READY" fg={colors.green} bg={colors.greenLight} />
+                    )}
+                    {r.ready_verified && (
+                      <Chip text="VERIFIED" fg={colors.green} bg={colors.greenLight} />
+                    )}
+                    {r.research_active && !r.ready_verified && (
+                      <Chip text="RESEARCH" fg={colors.amber} bg={colors.amberLight} />
                     )}
                   </td>
                   <td style={tdStyle}>
@@ -1293,6 +1332,24 @@ export default function RentalOperations() {
                   </td>
                   <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: "inline-flex", gap: 3 }}>
+                      <button type="button"
+                        title={r.ready_verified
+                          ? `Verified ready by ${r.ready_verified_by || "?"}${r.ready_verified_at ? ` on ${fmtDate(r.ready_verified_at)}` : ""} — click to undo`
+                          : "You called the shop and confirmed the truck IS ready (moves it to Vehicle ready on the Ops Queue)"}
+                        disabled={verifyMut.isPending}
+                        onClick={() => verifyMut.mutate({ caseKey: r.case_key, verified: !r.ready_verified })}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${r.ready_verified ? colors.green : colors.rule}`, background: r.ready_verified ? colors.green : "transparent", color: r.ready_verified ? "#fff" : colors.inkSoft, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>✓</button>
+                      <button type="button"
+                        title={r.research_active
+                          ? `Escalated to research by ${r.research_by || "?"}${r.research_at ? ` on ${fmtDate(r.research_at)}` : ""} — click to clear`
+                          : "Shop can't be validated from POs and calls on file — escalate to research"}
+                        disabled={researchMut.isPending}
+                        onClick={() => researchMut.mutate({ caseKey: r.case_key, active: !r.research_active })}
+                        style={{ width: 22, height: 22, borderRadius: 6, border: `1px solid ${r.research_active ? colors.amber : colors.rule}`, background: r.research_active ? colors.amber : "transparent", color: r.research_active ? "#fff" : colors.inkSoft, cursor: "pointer", fontSize: 11, fontWeight: 700 }}>R</button>
+                    </div>
+                  </td>
+                  <td style={{ ...tdStyle, textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: "inline-flex", gap: 3 }}>
                       {(["open", "closed", "pickup"] as const).map((m) => {
                         const on = r.operator_mark === m;
                         const c = m === "open" ? colors.green : m === "closed" ? colors.inkMuted : colors.amber;
@@ -1303,7 +1360,7 @@ export default function RentalOperations() {
                 </tr>
               );
             })}
-            {sorted.length === 0 && <tr><td colSpan={17} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
+            {sorted.length === 0 && <tr><td colSpan={18} style={{ ...tdStyle, textAlign: "center", color: colors.inkMuted, padding: 30 }}>No rentals match the current filters.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1311,7 +1368,7 @@ export default function RentalOperations() {
       {panelKey && <DetailPanel caseKey={panelKey} row={rows.find((r) => r.case_key === panelKey)} onClose={() => setPanelKey(null)} onMark={doMark} />}
       {phoneEdit && <ShopPhoneEditModal target={phoneEdit} onClose={() => setPhoneEdit(null)}
         onSaved={() => { qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] }); if (panelKey) qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${panelKey}`] }); }} />}
-      {pickupFor && <PickupTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
+      {pickupFor && <TechTextModal caseKey={pickupFor} onClose={() => setPickupFor(null)} />}
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
     </div>
   );
@@ -1803,8 +1860,21 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
   const curMark = (data?.actions || []).find((a) => a.action_type === "mark")?.mark_value ?? null;
   const notes = (data?.actions || []).filter((a) => a.action_type === "note");
   const poList = data?.poHistory || [];
-  // current shop = the most-recent APPROVED repair PO (open), else the latest repair PO (fallback)
-  const currentShop = poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED") || poList.find((p) => p.vendorType === "repair") || null;
+  // Anchor "Current shop" on the SERVER-reconciled shop-of-record — the same
+  // pick the board table, charts and Today's Queue show (portal-corrected
+  // effective status, APPROVED-first). Re-deriving it here from raw ETL
+  // poStatus is exactly what made the drawer disagree with the table. Fall
+  // back to the old raw pick when the payload predates the field.
+  const reconciled = data?.reconciledShop ?? null;
+  const currentShop =
+    (reconciled?.poNumber ? poList.find((p) => p.poNumber === reconciled.poNumber) : null)
+    || poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
+    || poList.find((p) => p.vendorType === "repair")
+    || null;
+  const effShopStatus: string | null = reconciled?.effStatus ?? currentShop?.poStatus ?? null;
+  // Newest LUCA dispatch about THIS rental truck — the shop LUCA actually dialed.
+  const lucaDial = (data?.callLog || []).find((cl) => cl.source === "luca_dispatch" &&
+    (!cl.truck || String(cl.truck).replace(/^0+/, "") === String(caseKey).replace(/^0+/, ""))) ?? null;
   const portal = data?.portal ?? null;
   const assigned = data?.assignedTruck ?? null;
   const addNote = useMutation({
@@ -1928,17 +1998,30 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                 {currentShop?.uploadTimestamp && <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: fonts.jetbrains, fontSize: 10 }}>PO data synced {fmtDateTime(currentShop.uploadTimestamp)}</span>}
               </div>
               {currentShop ? (
-                <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${currentShop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
+                <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${effShopStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
                   <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{currentShop.vendorName}
-                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: currentShop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{currentShop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
+                    <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: effShopStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>{effShopStatus === "APPROVED" ? "open ticket" : "last shop PO"}</span>
                   </div>
                   <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[currentShop.vendorAddress, currentShop.vendorCity, currentShop.vendorState].filter(Boolean).join(", ") || portal?.shop?.address || "no address on PO"}</div>
                   {(() => {
-                    // A manual number (locked or not) outranks the per-PO phone
-                    // from the scrape — the operator set it for THIS truck.
+                    // Precedence: manual/locked number (operator set it for
+                    // THIS truck) → reconciled board number (what the table
+                    // shows and LUCA's feed uses) → per-PO scrape → global
+                    // scrape. Showing the per-PO number first is what made
+                    // the drawer's phone disagree with the table.
                     const shopMeta = (portal?.shop ?? null) as any;
                     const manual = !!shopMeta && (shopMeta.phoneSource === "manual" || shopMeta.phoneLocked);
-                    const ph = manual ? shopMeta?.phone : (portal?.poDetail?.[currentShop.poNumber]?.vendorPhone || portal?.shop?.phone);
+                    // Junk gate on the raw-scrape fallbacks: per-PO vendorPhone
+                    // and the portal shop phone are unfiltered scrape values, so
+                    // repeated-digit fillers (2222222222…) must never render as
+                    // the contact. Server-cleaned values (manual/reconciled)
+                    // pass through untouched.
+                    const usable = (v: any) => {
+                      let d = String(v ?? "").replace(/\D/g, "");
+                      if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
+                      return d.length === 10 && !/^(\d)\1{9}$/.test(d) ? v : null;
+                    };
+                    const ph = manual ? shopMeta?.phone : (reconciled?.shopPhone || usable(portal?.poDetail?.[currentShop.poNumber]?.vendorPhone) || usable(portal?.shop?.phone));
                     const openEdit = () => setPhoneEdit({ truck: caseKey, caseKey, shopName: currentShop.vendorName, phone: shopMeta?.phone ?? ph ?? null, locked: !!shopMeta?.phoneLocked, editedBy: shopMeta?.phoneEditedBy, editedAt: shopMeta?.phoneEditedAt });
                     const editBtn = (
                       <button type="button" title="Edit shop phone (with optional lock against scrapes)" onClick={openEdit}
@@ -1965,6 +2048,33 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
                   <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {currentShop.poNumber} · dated {fmtDate(currentShop.poDate)}{currentShop.repairDate ? ` · repair ${fmtDate(currentShop.repairDate)}` : ""}{portal?.scrapedAt ? ` · Holman ${fmtDate(portal.scrapedAt)}` : ""}</div>
                 </div>
               ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
+              {/* Provenance: the shop LUCA actually dialed on its last dispatch.
+                  A mismatch vs. the current shop above means the call outcome
+                  may describe the WRONG shop — verify before acting on it. */}
+              {lucaDial && (() => {
+                const digits = (s?: string | null) => String(s ?? "").replace(/\D/g, "").replace(/^1(?=\d{10}$)/, "");
+                const fold = (s?: string | null) => String(s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+                const curPh = digits(reconciled?.shopPhone ?? portal?.shop?.phone);
+                const dialPh = digits(lucaDial.shopPhone);
+                const phoneMismatch = !!curPh && !!dialPh && curPh !== dialPh;
+                const nameMismatch = !!fold(lucaDial.shopName) && !!fold(currentShop?.vendorName) && fold(lucaDial.shopName) !== fold(currentShop?.vendorName);
+                const mismatch = phoneMismatch || nameMismatch;
+                return (
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6, fontSize: 11, color: colors.inkSoft }}>
+                    <Bot size={12} style={{ color: mismatch ? colors.red : colors.inkMuted, flexShrink: 0 }} />
+                    <span>
+                      LUCA last dialed{lucaDial.dryRun ? " (dry-run)" : ""}: <b style={{ color: colors.ink }}>{lucaDial.shopName || "unknown shop"}</b>
+                      {lucaDial.shopPhone ? <span style={{ fontFamily: fonts.jetbrains }}> · {fmtPhone(lucaDial.shopPhone)}</span> : null}
+                      {lucaDial.at ? <span style={{ color: colors.inkMuted }}> · {fmtDate(lucaDial.at)}</span> : null}
+                    </span>
+                    {mismatch && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: colors.red, backgroundColor: colors.redLight, padding: "1px 7px", borderRadius: 999 }}>
+                        <AlertTriangle size={10} /> differs from current shop — verify shop info
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
             </section>
             {/* marks */}
             <section>
@@ -2053,124 +2163,6 @@ function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string; row?:
  * so what this screen says WILL happen is what happens on Send. Nothing is sent
  * by opening it, and the operator sees the exact recipient and body first.
  */
-function PickupTextModal({ caseKey, onClose }: { caseKey: string; onClose: () => void }) {
-  const { toast } = useToast();
-  const [body, setBody] = useState<string | null>(null);
-  const [sent, setSent] = useState(false);
-
-  const { data, isLoading, error } = useQuery<any>({
-    queryKey: [`/api/vrm/rental-operations/master/${caseKey}/pickup-text`],
-    staleTime: 0,
-  });
-
-  const t = data?.target;
-  const effectiveBody = body ?? data?.body ?? "";
-  // 153 (not 160) once a message is multi-part: the UDH concatenation header
-  // eats 7 bits of every segment. Matches the server's countSegments.
-  const segments = effectiveBody.length <= 160 ? 1 : Math.ceil(effectiveBody.length / 153);
-  const lifecycle = (data?.warnings ?? []).find((w: any) => !w.blocking);
-
-  const sendMut = useMutation({
-    mutationFn: () =>
-      apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/pickup-text`, {
-        body: effectiveBody,
-        // The server demands this whenever the tech is termed or on leave; the
-        // operator has already been shown that warning above the button.
-        confirmed: true,
-      }),
-    onSuccess: async (res: any) => {
-      const j = await res.json().catch(() => ({}));
-      setSent(true);
-      toast({
-        title: j?.status === "queued" ? "Queued" : "Text sent",
-        description: j?.message || "",
-        variant: j?.ok === false ? "destructive" : undefined,
-      });
-      if (j?.ok !== false) onClose();
-    },
-    onError: async (e: any) => {
-      toast({ title: "Not sent", description: String(e?.message || e), variant: "destructive" });
-    },
-  });
-
-  const blocked = data && !data.canSend;
-  const label = sendMut.isPending
-    ? "Sending…"
-    : data?.wouldQueue
-      ? "Queue for the morning"
-      : "Send text";
-
-  return (
-    <div onClick={onClose}
-      style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.55)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div onClick={(e) => e.stopPropagation()}
-        style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 14, width: "min(560px, 100%)", maxHeight: "90vh", overflow: "auto", padding: 20 }}>
-        <div style={{ fontFamily: fonts.syne, fontSize: 16, fontWeight: 700, color: colors.ink, marginBottom: 4 }}>
-          Text the technician for pickup
-        </div>
-
-        {isLoading && <div style={{ color: colors.inkMuted, fontSize: 13, padding: "18px 0" }}>Checking who we would text…</div>}
-        {error && <div style={{ color: colors.red, fontSize: 13, padding: "18px 0" }}>Could not load the preview: {String((error as any)?.message || error)}</div>}
-
-        {data && (
-          <>
-            <div style={{ fontSize: 12.5, color: colors.inkSoft, marginBottom: 14, fontFamily: fonts.jetbrains }}>
-              {t?.tech_name || "unknown tech"}
-              {t?.phone ? <> · {t.phone}</> : <span style={{ color: colors.red }}> · no phone on file</span>}
-              <br />collect truck <b style={{ color: colors.ink }}>{t?.repair_truck}</b>
-              {t?.shop_name ? <> at {t.shop_name}</> : null}
-            </div>
-
-            {(data.warnings ?? []).map((w: any, i: number) => (
-              <div key={i} style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8,
-                color: w.blocking ? colors.red : colors.amber,
-                background: w.blocking ? colors.redLight : colors.amberLight }}>
-                {w.message}
-              </div>
-            ))}
-            {data.wouldSkipReason && (
-              <div style={{ fontSize: 12, borderRadius: 8, padding: "8px 10px", marginBottom: 8, color: colors.red, background: colors.redLight }}>
-                {data.wouldSkipReason}
-              </div>
-            )}
-
-            <textarea
-              value={effectiveBody}
-              onChange={(e) => setBody(e.target.value)}
-              disabled={blocked}
-              rows={4}
-              style={{ width: "100%", fontFamily: fonts.dmSans, fontSize: 13, lineHeight: 1.5, color: colors.ink, background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: 10, resize: "vertical" }}
-            />
-            <div style={{ fontSize: 11, color: segments > 1 ? colors.amber : colors.inkMuted, fontFamily: fonts.jetbrains, marginTop: 5 }}>
-              {effectiveBody.length} chars · {segments} SMS segment{segments === 1 ? "" : "s"}
-              {data.wouldQueue ? " · outside the tech's local send window, this will queue and go out automatically" : ""}
-            </div>
-
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, marginTop: 16 }}>
-              <button type="button" onClick={onClose}
-                style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.inkSoft, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 9, padding: "8px 14px", cursor: "pointer" }}>
-                Cancel
-              </button>
-              <button type="button" disabled={blocked || sendMut.isPending || sent || !effectiveBody.trim()}
-                onClick={() => sendMut.mutate()}
-                title={blocked ? "This technician cannot be texted from here" : lifecycle ? "Sending anyway — see the warning above" : undefined}
-                style={{ fontFamily: fonts.dmSans, fontSize: 13, fontWeight: 700, color: "#fff",
-                  background: blocked ? colors.inkMuted : colors.accent,
-                  border: `1px solid ${blocked ? colors.inkMuted : colors.accent}`,
-                  borderRadius: 9, padding: "8px 16px",
-                  cursor: blocked || sendMut.isPending ? "not-allowed" : "pointer",
-                  opacity: sendMut.isPending ? 0.7 : 1, display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <MessageSquare size={14} /> {label}
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  );
-}
-
-
 // ─── AMS comment mirror status ───────────────────────────────────────────────
 /**
  * Whether a comment typed here actually landed on the vehicle's AMS record.

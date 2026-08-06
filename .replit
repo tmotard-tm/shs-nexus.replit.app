@@ -58,6 +58,7 @@ localPort = 31191
 PORT = "5000"
 
 [workflows]
+runButton = "Project"
 
 [[workflows.workflow]]
 name = "Start application"
@@ -130,6 +131,67 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "npx tsx --test --test-force-exit tests/fleet-comms-integration.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "vrm-guard-unit"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "schedule-pickup-unit"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "annex-a-routing-unit"
+
+[[workflows.workflow]]
+name = "vrm-guard-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/vrm-fleet-status.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "schedule-pickup-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/vrm-schedule-pickup.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "annex-a-routing-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/annex-a-routing.test.ts"
+
+[workflows.workflow.metadata]
+outputType = "console"
+
+[[workflows.workflow]]
+name = "bucket-queue-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/bucket-queue-classify.test.ts"
 
 [workflows.workflow.metadata]
 outputType = "console"

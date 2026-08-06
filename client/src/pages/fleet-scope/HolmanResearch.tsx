@@ -1,10 +1,10 @@
 import { useState, useMemo } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
-import { type Truck, getCombinedStatus, MAIN_STATUSES, SUB_STATUSES, type MainStatus } from "@shared/fleet-scope-schema";
+import { type Truck, getCombinedStatus } from "@shared/fleet-scope-schema";
 
 import { StatusBadge } from "@/components/fleet-scope/StatusBadge";
-import { StatusReminder, useStatusReminder } from "@/components/fleet-scope/StatusReminder";
+import { useStatusReminder } from "@/components/fleet-scope/StatusReminder";
 import { useUser } from "@/context/FleetScopeUserContext";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,7 +49,7 @@ export default function HolmanResearch() {
   const { toast } = useToast();
   
   // Status change reminder
-  const { showReminder, hideReminder, shouldShowReminder } = useStatusReminder();
+  const { showReminder } = useStatusReminder();
 
   const { data: trucks, isLoading, error } = useQuery<Truck[]>({
     queryKey: ["/api/fs/trucks"],
@@ -120,14 +120,11 @@ export default function HolmanResearch() {
     setEditValue(currentValue === null || currentValue === undefined ? "" : String(currentValue));
   };
 
+  // Status fields are VRM-owned (edited in VRM Rental Operations, mirrored
+  // down) — this page edits research fields only.
   const saveEdit = (truckId: string, field: string, value: any) => {
     inlineEditMutation.mutate({ truckId, updates: { [field]: value } });
-    // Show reminder for non-status field changes
-    if (field !== "mainStatus" && field !== "subStatus") {
-      showReminder(truckId);
-    } else {
-      hideReminder(truckId);
-    }
+    showReminder(truckId);
   };
 
   const handleBooleanChange = (truckId: string, field: string, value: string) => {
@@ -140,25 +137,6 @@ export default function HolmanResearch() {
   const handleTextSave = (truckId: string, field: string) => {
     saveEdit(truckId, field, editValue.trim() || null);
     setEditingCell(null);
-  };
-
-  const handleStatusChange = (truckId: string, newMainStatus: string, currentSubStatus: string | null) => {
-    const validSubs = SUB_STATUSES[newMainStatus as MainStatus] || [];
-    const newSubStatus = validSubs.includes(currentSubStatus || "") ? currentSubStatus : null;
-    
-    inlineEditMutation.mutate({ 
-      truckId, 
-      updates: { mainStatus: newMainStatus, subStatus: newSubStatus }
-    });
-    hideReminder(truckId);
-  };
-
-  const handleSubStatusChange = (truckId: string, mainStatus: string, newSubStatus: string) => {
-    inlineEditMutation.mutate({ 
-      truckId, 
-      updates: { mainStatus, subStatus: newSubStatus === "_none_" ? null : newSubStatus } 
-    });
-    hideReminder(truckId);
   };
 
   if (isLoading) {
@@ -257,50 +235,22 @@ export default function HolmanResearch() {
                             {truck.truckNumber || "—"}
                           </div>
                         </TableCell>
-                        {/* Status column with inline editing */}
+                        {/* Status is VRM-owned: edited in VRM Rental Operations, mirrored here. */}
                         <TableCell>
-                          <div className="flex items-start gap-2">
-                            <div className="flex flex-col gap-1">
-                              <Select
-                                value={truck.mainStatus || ""}
-                                onValueChange={(value) => handleStatusChange(truck.id, value, truck.subStatus)}
-                              >
-                                <SelectTrigger className="h-auto p-0 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 [&>svg]:hidden" data-testid={`select-status-${index}`}>
-                                  <StatusBadge 
-                                    status={getCombinedStatus(truck.mainStatus || "", truck.subStatus)} 
-                                    mainStatus={truck.mainStatus}
-                                    subStatus={truck.subStatus}
-                                    showSubStatusOnly={false}
-                                  />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {MAIN_STATUSES.map((status) => (
-                                    <SelectItem key={status} value={status}>{status}</SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {truck.mainStatus && SUB_STATUSES[truck.mainStatus as MainStatus]?.length > 0 && (
-                                <Select
-                                  value={truck.subStatus || "_none_"}
-                                  onValueChange={(value) => handleSubStatusChange(truck.id, truck.mainStatus || "", value)}
-                                >
-                                  <SelectTrigger className="h-6 text-xs px-1 border-0 bg-transparent shadow-none hover:bg-muted/50 focus:ring-0 w-auto max-w-[180px] [&>svg]:hidden" data-testid={`select-substatus-${index}`}>
-                                    <SelectValue>{truck.subStatus || "No sub-status"}</SelectValue>
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="_none_">No sub-status</SelectItem>
-                                    {SUB_STATUSES[truck.mainStatus as MainStatus]?.map((sub) => (
-                                      <SelectItem key={sub} value={sub}>{sub}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              )}
-                            </div>
-                            <StatusReminder 
-                              show={shouldShowReminder(truck.id)} 
-                              onDismiss={() => hideReminder(truck.id)}
-                              position="inline"
+                          <div
+                            className="flex flex-col gap-1"
+                            title="Status is managed in VRM Rental Operations and mirrors to Fleet Scope automatically"
+                            data-testid={`status-display-${index}`}
+                          >
+                            <StatusBadge 
+                              status={getCombinedStatus(truck.mainStatus || "", truck.subStatus)} 
+                              mainStatus={truck.mainStatus}
+                              subStatus={truck.subStatus}
+                              showSubStatusOnly={false}
                             />
+                            {truck.subStatus && (
+                              <span className="text-xs text-muted-foreground">{truck.subStatus}</span>
+                            )}
                           </div>
                         </TableCell>
                         <TableCell>{truck.techName || "—"}</TableCell>

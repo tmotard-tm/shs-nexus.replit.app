@@ -4,11 +4,11 @@
 // assertion runs before any database connection can be opened.
 import { assertProdDatabaseHost } from "./guardrails/g8-env-drift-check";
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { createServer } from "http";
 import path from "path";
 import fs from "fs";
 import { registerRoutes } from "./routes";
-import { elevenLabsWebhookHandler } from "./fleet-scope-routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { storage } from "./storage";
 import { createTestUsers } from "./create-test-users";
@@ -54,19 +54,10 @@ const app = express();
 // This ensures rate limiting and security features work correctly in production
 app.set('trust proxy', 1);
 
-// ElevenLabs webhook routes must be registered BEFORE global express.json() so that
-// express.raw() can capture the original bytes for HMAC-SHA256 verification.
-// Without this, the global JSON parser consumes the request body stream first
-// and the HMAC computed over req.body won't match the signed payload bytes.
-// FS_ELEVENLABS_WEBHOOK_SECRET (Replit Secret) enables signature verification.
-if (!process.env.FS_ELEVENLABS_WEBHOOK_SECRET) {
-  console.warn("[ElevenLabs] WARNING: FS_ELEVENLABS_WEBHOOK_SECRET not set — signature verification DISABLED");
-}
-// Canonical URL (what ElevenLabs should call):
-app.post("/api/elevenlabs/webhook", express.raw({ type: "application/json", limit: "50mb" }), elevenLabsWebhookHandler);
-// Backwards-compat alias for tooling that already uses the /api/fs prefix:
-app.post("/api/fs/elevenlabs/webhook", express.raw({ type: "application/json", limit: "50mb" }), elevenLabsWebhookHandler);
-
+// Gzip JSON/text responses — heavy list endpoints (e.g. the ~500KB Today's
+// Queue payload) shrink ~10x. No SSE in this server, so the default filter is
+// safe; WebSocket upgrades bypass Express middleware entirely.
+app.use(compression());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: false, limit: '50mb' }));
 
