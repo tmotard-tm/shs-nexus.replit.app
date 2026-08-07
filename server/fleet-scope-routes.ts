@@ -13,7 +13,7 @@ import {
 import { sql, eq, desc, and, isNull, isNotNull, count } from "drizzle-orm";
 import { broadcastMessage, getNextAllowedSendTime, sendTwilioMessage } from "./fleet-scope-reg-messaging";
 import { insertTruckSchema, updateTruckSchema, insertTrackingRecordSchema } from "@shared/fleet-scope-schema";
-import { syncLogs } from "@shared/schema";
+import { syncLogs, holmanVehiclesCache } from "@shared/schema";
 import { z } from "zod";
 import { testConnection, executeQuery, getTableData, getTableSchema, lookupTpmsContactsByLdap } from "./fleet-scope-snowflake";
 import {
@@ -856,6 +856,24 @@ async function buildRegistrationData(): Promise<{
 
   for (const truckNum of tpmsLookup.keys()) allTruckNumbers.add(truckNum);
 
+  // 3b. Full-fleet registration dates from the Holman vehicle cache.
+  // fs_trucks only covers a few hundred rentals-adjacent trucks, so without
+  // this fallback most assigned trucks show no expiration date at all.
+  const holmanRegLookup = new Map<string, string>();
+  try {
+    const cacheRows = await getDb().select({
+      num: holmanVehiclesCache.holmanVehicleNumber,
+      reg: holmanVehiclesCache.regRenewalDate,
+    }).from(holmanVehiclesCache);
+    for (const row of cacheRows) {
+      const num = row.num?.toString().replace(/\D/g, '').padStart(6, '0');
+      const reg = row.reg?.trim();
+      if (num && num !== '000000' && reg) holmanRegLookup.set(num, reg);
+    }
+  } catch (e) {
+    console.warn('[Registration] Holman cache reg-date fallback unavailable:', e instanceof Error ? e.message : e);
+  }
+
   // 4. Registration tracking records
   const trackingData = await getDb().select().from(registrationTracking);
   const trackingLookup = new Map(trackingData.map(t => [t.truckNumber, t]));
@@ -868,6 +886,10 @@ async function buildRegistrationData(): Promise<{
     let regExpDate: string | null = null;
     const spareRegDate = spareRegDateLookup.get(truckNumber);
     if (spareRegDate) regExpDate = spareRegDate.toISOString().split('T')[0];
+    // Holman cache before fs_trucks: both are Holman-derived, but the cache is
+    // refreshed on every sync (incl. incremental) while fs_trucks values can be
+    // years stale — a stale fs date must not mask the current renewal date.
+    if (!regExpDate) regExpDate = holmanRegLookup.get(truckNumber) || null;
     if (!regExpDate) regExpDate = trucksRegDateLookup.get(truckNumber) || null;
     trucks.push({
       truckNumber,

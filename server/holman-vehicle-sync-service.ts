@@ -77,6 +77,21 @@ interface SyncResult {
 // background refresh fires immediately so the cache is warm for the next request.
 const FLEET_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
+/** Registration renewal date from a Holman /vehicles payload.
+ * Holman's current schema carries it as `renewalDate` (ISO timestamp); the
+ * legacy tagExpirationDate / registrationExpirationDate / regRenewalDate
+ * names no longer appear in responses (which is why the cache column sat
+ * empty). Normalized to M/D/YYYY to match every existing consumer
+ * (parseUsDate, the Registrations tab) without the timezone day-shift a
+ * Z-midnight ISO string would cause in `new Date()` bucketing. */
+export function holmanRenewalDate(v: any): string {
+  const legacy = v?.tagExpirationDate || v?.registrationExpirationDate || v?.regRenewalDate;
+  if (legacy) return String(legacy);
+  const iso = typeof v?.renewalDate === "string" ? v.renewalDate.slice(0, 10) : "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${Number(m[2])}/${Number(m[3])}/${m[1]}` : "";
+}
+
 class HolmanVehicleSyncService {
   private lastSyncAttempt: Date | null = null;
   private lastSuccessfulSync: Date | null = null;
@@ -292,7 +307,7 @@ class HolmanVehicleSyncService {
         odometer: v.odometer || 0,
         odometerDate: v.odometerDate || '',
         odometerSource: (v as any).odometerSource || undefined,
-        regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
+        regRenewalDate: holmanRenewalDate(v),
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
@@ -629,7 +644,7 @@ class HolmanVehicleSyncService {
         odometer: v.odometer || 0,
         odometerDate: v.odometerDate || '',
         odometerSource: (v as any).odometerSource || undefined,
-        regRenewalDate: v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || '',
+        regRenewalDate: holmanRenewalDate(v),
         branding: v.branding || 'Standard',
         interior: v.interior || 'Standard',
         tuneStatus: v.tuneStatus || 'Tuned',
@@ -703,7 +718,7 @@ class HolmanVehicleSyncService {
         if (!fsTruck) continue;
 
         const holmanRef = toHolmanRef(vehicleNumber);
-        const regExpiry = v.tagExpirationDate || v.registrationExpirationDate || v.regRenewalDate || null;
+        const regExpiry = holmanRenewalDate(v) || null;
         const updates: Record<string, any> = {};
 
         if (regExpiry && regExpiry !== fsTruck.holmanRegExpiry) {
