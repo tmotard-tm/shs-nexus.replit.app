@@ -29,8 +29,8 @@ import { sql } from "drizzle-orm";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { fsDb } from "./fleet-scope-db";
 import { db } from "./db";
-import { loadQueuePoContext, loadLatestLucaDispatches, amsBucketOf, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
-import { evaluateStep9Disposition, cleanDisplayPhone, phoneDigits, nameFold, STEP9_PROBLEM_LABELS } from "./vrm/rental-operations/shop-record-flags";
+import { loadQueuePoContext, loadLatestLucaDispatches, amsBucketOf, displayShopFor, cleanPhone, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
+import { evaluateStep9Disposition, phoneDigits, nameFold, STEP9_PROBLEM_LABELS } from "./vrm/rental-operations/shop-record-flags";
 import { loadWorkbookStates, WORKBOOK_CLOSED_STATUSES, type WorkbookState } from "./vrm/rental-operations/workbook";
 import { resolveOwnerRouting, OWNER_ROSTER, type Region } from "./vrm/rental-operations/annex-a-routing";
 import {
@@ -760,7 +760,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       label,
       pickShopName: p9?.shopName ?? null,
       pickShopPhone: p9?.shopPhone ?? null,
-      fallbackPhone: cleanDisplayPhone(t.repairPhone),
+      // Shared junk-gate (read-repository.cleanPhone) — the SAME rule the
+      // chips and both boards apply, so step 9 can never call a number
+      // "missing" that the card right above it is displaying.
+      fallbackPhone: cleanPhone(t.repairPhone),
       dial: dial9,
       lastCallDate: lastDate,
     });
@@ -1108,16 +1111,17 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     it.assignedTruckInRepair = assignedInRepair;
     it.amsStatus = amsStatusFor(t);
     it.amsBucket = (() => { const b = amsBucketOf(it.amsStatus ?? null); return b === 'unknown' ? null : b; })();
-    // Fallback repair_phone must not surface portal placeholder junk
-    // (222-222-2222 & friends) — the reconciled context phone is already
-    // junk-guarded server-side; the fs_trucks mirror is not.
-    const fallbackRepairPhone = cleanDisplayPhone(t.repairPhone);
+    // Display-shop assembly SHARED with both boards and the drawer
+    // (displayShopFor): reconciled pick first, junk-gated fs_trucks
+    // repair_phone as the display-only phone fallback. One assembly point =
+    // the queue card can never show a phone the boards blank, or vice versa.
+    const disp = displayShopFor(p, t.repairPhone);
     it.contextChips = {
-      effStatus: p?.effStatus ?? null,
-      openPoDate: p?.shopPoDate ?? null,
-      shopName: p?.shopName ?? null,
-      shopPhone: p?.shopPhone ?? fallbackRepairPhone,
-      portalAt: p?.portalAt ?? null,
+      effStatus: disp?.effStatus ?? null,
+      openPoDate: disp?.shopPoDate ?? null,
+      shopName: disp?.shopName ?? null,
+      shopPhone: disp?.shopPhone ?? null,
+      portalAt: disp?.portalAt ?? null,
       lastLucaOutcome: t.lastCallStatus ?? null,
       lastLucaDate: lastCall?.toISOString() ?? null,
       daysInRental: t.rentalStartDate ? daysSince(t.rentalStartDate) : null,

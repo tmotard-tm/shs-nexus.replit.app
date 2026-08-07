@@ -10,7 +10,7 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
-import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory, loadQueuePoContext, reconciledShopFor, type QueuePoContext } from "./read-repository";
+import { getRentalOpsMaster, getRentalOpsCase, getSourceHealth, getLucaFeed, getLucaRentalList, getClassifiedPoHistory, loadQueuePoContext, attachReconciledShops, loadFsShopPhoneFallbacks, type QueuePoContext } from "./read-repository";
 import { registerRegionRoutes } from "./region-routes";
 import { loadWorkbookStates, WORKBOOK_STATUSES, WORKBOOK_STATUS_LABEL, WORKBOOK_CLOSED_STATUSES } from "./workbook";
 import { getTodaysQueueCached, invalidateTodaysQueueCache } from "../../todays-queue";
@@ -103,6 +103,58 @@ function actorOf(req: any): string {
   const u = req.user ?? {};
   const b = req.body ?? {};
   return (u.username || u.id || b.actor || b.decidedByName || "unknown").toString().trim() || "unknown";
+}
+
+/**
+ * Assembles the EXACT master-board payload GET /rental-operations/master
+ * serves (rows + reconciledShop + workbook state + vocabulary). Exported so
+ * the surface-alignment test asserts on the real served object, not a
+ * re-derivation that could drift on its own.
+ */
+export async function buildMasterBoardPayload(includeDropped: boolean) {
+  // Workbook state rides along so Rental Operations can show Ready for
+  // Pickup (Tyler 2026-07-29). It is ONE grouped query for the whole board
+  // (loadWorkbookStates), not a per-row lookup, and it is attached here
+  // rather than inside getRentalOpsMaster so the LUCA feed and the external
+  // API - which share that read model - keep their existing contract.
+  const [model, workbooks, poCtx, fsPhones] = await Promise.all([
+    getRentalOpsMaster({ includeDropped }),
+    loadWorkbookStates(),
+    // Reconciled shop-of-record pick (same 5-min SWR cache the queue and
+    // case drawer read) — attached per row so the board displays the SAME
+    // phone LUCA dials, never the raw portal scrape (whose top-level phone
+    // can belong to a DIFFERENT vendor than the repair PO).
+    // On failure resolve to NULL, not an empty map: an empty map would
+    // stamp reconciledShop:null ("authoritatively no pick") on every row
+    // and blank all board phones; null skips the field so the client
+    // falls back to the raw portal number until the next request.
+    loadQueuePoContext().catch((): Map<string, QueuePoContext> | null => null),
+    // fs_trucks display-phone fallback — same junk-gate + precedence as the
+    // queue chips (displayShopFor), so a queue card can never show a phone
+    // this board blanks.
+    loadFsShopPhoneFallbacks().catch((): Map<string, string | null> | null => null),
+  ]);
+  // ONE shared attach (also used by the by-region route) — see
+  // attachReconciledShops for the poCtx=null skip semantics.
+  const withShops = attachReconciledShops((model.rows ?? []) as any[], poCtx, fsPhones);
+  const rows = withShops.map((r: any) => {
+    const wb = workbooks.get(String(r.case_key));
+    return {
+      ...r,
+      workbook_status: wb?.status ?? "new",
+      workbook_actor: wb?.actor ?? null,
+      workbook_updated_at: wb?.updated_at ?? null,
+      workbook_next_action: wb?.next_action ?? null,
+    };
+  });
+  return {
+    ...model,
+    rows,
+    readyForPickupCount: rows.filter((r: any) => r.workbook_status === "ready_for_pickup").length,
+    workbookStatuses: WORKBOOK_STATUSES.map((k) => ({
+      key: k, label: WORKBOOK_STATUS_LABEL[k], closed: WORKBOOK_CLOSED_STATUSES.has(k),
+    })),
+  };
 }
 
 export function registerRentalOperationsRoutes(router: Router): void {
@@ -401,48 +453,13 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
-  // GET master grid model (rich rows + cohorts + source health two-clock)
+  // GET master grid model (rich rows + cohorts + source health two-clock).
+  // Payload assembly lives in buildMasterBoardPayload (exported, above) so
+  // the surface-alignment test pins the EXACT object this route serves.
   router.get("/rental-operations/master", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      // Workbook state rides along so Rental Operations can show Ready for
-      // Pickup (Tyler 2026-07-29). It is ONE grouped query for the whole board
-      // (loadWorkbookStates), not a per-row lookup, and it is attached here
-      // rather than inside getRentalOpsMaster so the LUCA feed and the external
-      // API - which share that read model - keep their existing contract.
-      const [model, workbooks, poCtx] = await Promise.all([
-        getRentalOpsMaster({ includeDropped }),
-        loadWorkbookStates(),
-        // Reconciled shop-of-record pick (same 5-min SWR cache the queue and
-        // case drawer read) — attached per row so the board displays the SAME
-        // phone LUCA dials, never the raw portal scrape (whose top-level phone
-        // can belong to a DIFFERENT vendor than the repair PO).
-        // On failure resolve to NULL, not an empty map: an empty map would
-        // stamp reconciledShop:null ("authoritatively no pick") on every row
-        // and blank all board phones; null skips the field so the client
-        // falls back to the raw portal number until the next request.
-        loadQueuePoContext().catch((): Map<string, QueuePoContext> | null => null),
-      ]);
-      const canonKey = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
-      const rows = (model.rows ?? []).map((r: any) => {
-        const wb = workbooks.get(String(r.case_key));
-        return {
-          ...r,
-          ...(poCtx ? { reconciledShop: reconciledShopFor(poCtx.get(canonKey(r.case_key))) } : {}),
-          workbook_status: wb?.status ?? "new",
-          workbook_actor: wb?.actor ?? null,
-          workbook_updated_at: wb?.updated_at ?? null,
-          workbook_next_action: wb?.next_action ?? null,
-        };
-      });
-      res.json({
-        ...model,
-        rows,
-        readyForPickupCount: rows.filter((r: any) => r.workbook_status === "ready_for_pickup").length,
-        workbookStatuses: WORKBOOK_STATUSES.map((k) => ({
-          key: k, label: WORKBOOK_STATUS_LABEL[k], closed: WORKBOOK_CLOSED_STATUSES.has(k),
-        })),
-      });
+      res.json(await buildMasterBoardPayload(includeDropped));
     } catch (e: any) {
       console.error("[VRM/RentalOps] master failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "master read failed" });

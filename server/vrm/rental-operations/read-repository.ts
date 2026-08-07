@@ -790,8 +790,11 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
            THEN po.open_portal_at IS NOT NULL AND po.open_portal_at >= po.open_evidence_at
            ELSE po.repair_portal_at IS NOT NULL AND po.repair_portal_at >= po.repair_evidence_at
       END AS po_evidence_from_portal,
-      COALESCE(ph.shop_name_override, shop.vendor_name) AS shop_name,
-      (ph.shop_name_override IS NOT NULL) AS shop_name_overridden,
+      -- NULLIF(TRIM(...)) mirrors buildQueuePoContext's TS rule exactly
+      -- (trim, empty = no override) so board shop_name and reconciledShop
+      -- .shopName can never disagree on a whitespace-only override.
+      COALESCE(NULLIF(TRIM(ph.shop_name_override), ''), shop.vendor_name) AS shop_name,
+      (NULLIF(TRIM(ph.shop_name_override), '') IS NOT NULL) AS shop_name_overridden,
       ph.shop_name_override_by,
       to_char(ph.shop_name_override_at,'YYYY-MM-DD"T"HH24:MI:SSZ') AS shop_name_override_at,
       shop.vendor_address AS shop_address, shop.vendor_city AS shop_city,
@@ -811,7 +814,7 @@ export async function getRentalOpsMaster(opts: { includeDropped?: boolean } = {}
       aph.shop_phone AS assigned_portal_phone,
       aph.shop_phone_locked AS assigned_phone_locked,
       apo.open_po_count AS assigned_open_po,
-      COALESCE(aph.shop_name_override, ashop.vendor_name) AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
+      COALESCE(NULLIF(TRIM(aph.shop_name_override), ''), ashop.vendor_name) AS assigned_shop_name, ashop.vendor_address AS assigned_shop_address,
       ashop.vendor_city AS assigned_shop_city, ashop.vendor_state AS assigned_shop_state,
       ashop.vendor_zip AS assigned_shop_zip, ashop.po_number AS assigned_shop_po_number,
       ashop.po_status AS assigned_shop_po_status, ashop.po_date AS assigned_shop_po_date
@@ -1508,8 +1511,11 @@ function vendorKey(s: string | null | undefined): string {
   return String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 /** 10-digit US phone or null. Rejects the portal's placeholder junk (5555555555,
- * 0000000000 and friends) so LUCA never dials a filler number. */
-function cleanPhone(s: string | null | undefined): string | null {
+ * 0000000000 and friends) so LUCA never dials a filler number. Strips a
+ * leading US "1" from 11-digit numbers. THE one junk-gate for every VRM
+ * surface — queue chips, boards, drawer — so no surface can accept a number
+ * another surface refused (exported for that reason; do not fork it). */
+export function cleanPhone(s: string | null | undefined): string | null {
   let d = String(s ?? "").replace(/\D/g, "");
   if (d.length === 11 && d.startsWith("1")) d = d.slice(1);
   if (d.length !== 10) return null;
@@ -2058,6 +2064,106 @@ export function reconciledShopFor(ctx: QueuePoContext | undefined | null) {
   } : null;
 }
 
+/** Canonical truck/case key for cross-source joins (digits, no leading zeros). */
+export const canonTruckKey = (s: unknown): string =>
+  String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
+
+/** Fold fs_trucks rows into one display-fallback phone per canonical key.
+ * Same-number rows in different paddings agreeing (or one missing a phone) is
+ * the normal legacy-dup case and folds to the one phone. Two rows colliding on
+ * a canonical key with DIFFERENT valid phones is ambiguous — a display
+ * fallback must never guess between trucks, so the key is dropped for good
+ * (row order must not decide whose phone a board shows). */
+export function foldFallbackPhones(
+  rows: Array<{ truck_number?: unknown; repair_phone?: unknown }>,
+): Map<string, string | null> {
+  const m = new Map<string, string | null>();
+  const conflicted = new Set<string>();
+  for (const r of rows) {
+    const k = canonTruckKey(r.truck_number);
+    if (!k || conflicted.has(k)) continue;
+    const p = cleanPhone(r.repair_phone as string | null | undefined);
+    if (!m.has(k)) {
+      m.set(k, p);
+      continue;
+    }
+    const prev = m.get(k) ?? null;
+    if (p == null || p === prev) continue; // dup row adds nothing new
+    if (prev == null) {
+      m.set(k, p); // fill a hole left by a phone-less dup
+      continue;
+    }
+    conflicted.add(k); // two different valid phones → refuse to pick
+    m.set(k, null);
+  }
+  return m;
+}
+
+/** fs_trucks repair-shop phone per canonical truck number — the DISPLAY-ONLY
+ * phone fallback every case surface applies when the reconciled pick has no
+ * phone. Junk-gated through the SAME cleanPhone() the reconciled context uses.
+ * Read failure returns an empty map: the fallback quietly disappears, the
+ * reconciled pick still renders. */
+export async function loadFsShopPhoneFallbacks(): Promise<Map<string, string | null>> {
+  try {
+    const res = await db.execute(sql`SELECT truck_number, repair_phone FROM fs_trucks`);
+    return foldFallbackPhones(((res as any).rows ?? []) as any[]);
+  } catch (e: any) {
+    console.warn("[VRM/RentalOps] fs shop-phone fallback read failed (non-fatal):", e?.message || e);
+    return new Map();
+  }
+}
+
+/** THE display-shop assembly every surface ships: reconciled pick first,
+ * fs_trucks repair phone as the display-only fallback when the pick has no
+ * phone (exactly what the queue chips historically did on their own — now the
+ * boards and the drawer agree instead of blanking). The fallback fills the
+ * PHONE slot only: it never invents a shop name and it must never feed
+ * call_* fields, callable, or LUCA dial semantics. */
+export function displayShopFor(
+  ctx: QueuePoContext | undefined | null,
+  fsRepairPhone?: string | null,
+) {
+  const base = reconciledShopFor(ctx);
+  const fallback = cleanPhone(fsRepairPhone);
+  if (!base) {
+    if (!fallback) return null;
+    return {
+      shopName: null as string | null,
+      shopPhone: fallback as string | null,
+      effStatus: null as string | null,
+      shopPoDate: null as string | null,
+      poNumber: null as string | null,
+      openPoCount: 0,
+      portalAt: null as string | null,
+      shopPhoneIsFallback: true,
+    };
+  }
+  if (base.shopPhone) return { ...base, shopPhoneIsFallback: false };
+  return { ...base, shopPhone: fallback, shopPhoneIsFallback: fallback != null };
+}
+export type ReconciledShopView = NonNullable<ReturnType<typeof displayShopFor>>;
+
+/** Stamp reconciledShop on board rows — the ONE attach shared by the master
+ * board route and the by-region route (previously duplicated inline in both).
+ * poCtx=null (context read failed) keeps the field ABSENT on every row so the
+ * client falls back to the raw portal number; stamping null instead would
+ * read as "authoritatively no pick" and blank every phone on the board. */
+export function attachReconciledShops<T extends Record<string, any>>(
+  rows: T[],
+  poCtx: Map<string, QueuePoContext> | null,
+  fsPhones: Map<string, string | null> | null,
+): T[] {
+  if (!poCtx) return rows;
+  return rows.map((r) => ({
+    ...r,
+    reconciledShop: displayShopFor(
+      poCtx.get(canonTruckKey(r.case_key)),
+      fsPhones?.get(canonTruckKey(r.case_key)) ?? null,
+    ),
+  }));
+}
+
 /** Newest LUCA dispatch per key — the shop name/number LUCA actually dialed.
  * Queue + drawers show this next to the current reconciled shop pick so a human
  * can see at a glance whether LUCA called the shop we NOW believe has the
@@ -2203,7 +2309,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   // PO history (Snowflake live w/ cached fallback) + portal snapshot for the
   // rental-case truck AND the renter's assigned truck, plus the merged call
   // log — all in parallel so the two Snowflake fetches never serialize.
-  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms, assignedNotes, poCtx] = await Promise.all([
+  const [casePo, assignedPo, casePortal, assignedPortal, callLog, assignedAms, assignedNotes, poCtx, fsPhones] = await Promise.all([
     fetchPoHistoryWithFallback(caseKey),
     hasAssigned ? fetchPoHistoryWithFallback(assignedTruckNo!) : Promise.resolve(null),
     readPortalSnapshot(caseKey),
@@ -2218,10 +2324,15 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     // exactly the table-vs-drawer mismatch this field kills). Served from the
     // 5-min SWR cache, so this costs ~0ms.
     loadQueuePoContext().catch((): Map<string, QueuePoContext> => new Map()),
+    // fs_trucks display-phone fallback — the drawer must ship the SAME phone
+    // the queue chips and both boards show (displayShopFor), never a blank
+    // where another surface has a number.
+    loadFsShopPhoneFallbacks(),
   ]);
 
-  const canonKey = (s: string) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
-  const toReconciled = (ctx: QueuePoContext | undefined) => reconciledShopFor(ctx);
+  const canonKey = canonTruckKey;
+  const toReconciled = (ctx: QueuePoContext | undefined, truckNo: string) =>
+    displayShopFor(ctx, fsPhones.get(canonTruckKey(truckNo)) ?? null);
 
   return {
     case: caseRow,
@@ -2231,9 +2342,9 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poSource: casePo.poSource,
     portal: casePortal,
     /** Board/queue-aligned shop of record for the rental truck (null = none). */
-    reconciledShop: toReconciled(poCtx.get(canonKey(caseKey))),
+    reconciledShop: toReconciled(poCtx.get(canonKey(caseKey)), caseKey),
     ...(hasAssigned && assignedPo
-      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms, notes: assignedNotes, reconciledShop: toReconciled(poCtx.get(canonKey(assignedTruckNo!))) } }
+      ? { assignedTruck: { truck: assignedTruckNo, poHistory: assignedPo.poHistory, poSource: assignedPo.poSource, portal: assignedPortal, amsStatus: assignedAms, notes: assignedNotes, reconciledShop: toReconciled(poCtx.get(canonKey(assignedTruckNo!)), assignedTruckNo!) } }
       : {}),
     callLog,
   };

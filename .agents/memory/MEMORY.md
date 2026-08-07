@@ -89,3 +89,4 @@
 - [Shop-from-comments LLM fallback](shop-llm-fallback.md) — LLM runs only when header pick is empty or superseded by a newer payment PO; same gates as scraped headers; evidence-hash cache; force = cap-exempt.
 - [LUCA activity ledger semantics](luca-activity-ledger.md) — ledger logs first sightings + run heartbeats, not every poll; a quiet ledger with healthy heartbeats is working as designed.
 - [SSO-gated UI verification](sso-gated-verification.md) — screenshots hit the SSO wall; mint a temp sessions row (server reads DATABASE_URL, NOT DEV_DATABASE_URL), curl the API, replay client predicates on real rows, then delete it.
+- [VRM surface alignment](vrm-surface-alignment.md) — all case surfaces share ONE displayShopFor/attach + cleanPhone gate; fs fallback is display-only (never call_*/LUCA); conflicting canon phones drop the fallback.

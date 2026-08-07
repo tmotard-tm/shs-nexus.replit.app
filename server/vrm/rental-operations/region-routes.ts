@@ -11,7 +11,7 @@
  * population. All the regional logic lives in ./region.
  */
 import type { Router } from "express";
-import { getRentalOpsMaster, loadQueuePoContext, reconciledShopFor, type MasterRow, type QueuePoContext } from "./read-repository";
+import { getRentalOpsMaster, loadQueuePoContext, attachReconciledShops, loadFsShopPhoneFallbacks, type MasterRow, type QueuePoContext } from "./read-repository";
 import {
   resolveCaseRegion,
   assertRegionCoverage,
@@ -94,7 +94,21 @@ export function registerRegionRoutes(router: Router): void {
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      const [model, homeStates, workbooks, poCtx] = await Promise.all([
+      res.json(await buildByRegionPayload(includeDropped));
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] by-region failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "by-region read failed" });
+    }
+  });
+}
+
+/**
+ * Assembles the ENTIRE by-region payload (rows + rollups) — the exact object
+ * the route serves. Exported so the surface-alignment test can pin "region
+ * rows are the master rows" against the real payload, not a re-derivation.
+ */
+export async function buildByRegionPayload(includeDropped: boolean) {
+      const [model, homeStates, workbooks, poCtx, fsPhones] = await Promise.all([
         getRentalOpsMaster({ includeDropped }),
         loadTechHomeStates(),
         loadWorkbookStates(),
@@ -103,15 +117,21 @@ export function registerRegionRoutes(router: Router): void {
         // On failure resolve NULL (skip the field → client portal fallback),
         // never an empty map (= reconciledShop:null = blanks every phone).
         loadQueuePoContext().catch((): Map<string, QueuePoContext> | null => null),
+        // fs_trucks display-phone fallback, junk-gated by the shared
+        // cleanPhone(). Rides through attachReconciledShops exactly as on the
+        // master board, so the two boards fall back identically too.
+        loadFsShopPhoneFallbacks().catch((): Map<string, string | null> | null => null),
       ]);
-      const canonKey = (s: unknown) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "") || "";
+
+      // ONE shared attach (also used by the master board route). Inline
+      // stamping here and there is exactly how boards drift apart.
+      const withShops = attachReconciledShops(model.rows, poCtx, fsPhones);
 
       // Attach the technician's home state BEFORE resolving regions — it is
       // the primary Annex A signal.
-      const withState = model.rows.map((r) => ({
+      const withState = withShops.map((r) => ({
         ...r,
         tech_home_state: homeStates.get(String((r as any).employee_id ?? "").trim()) ?? null,
-        ...(poCtx ? { reconciledShop: reconciledShopFor(poCtx.get(canonKey((r as any).case_key))) } : {}),
       }));
 
       const rows: RegionalRow[] = withState.map((r) => {
@@ -179,7 +199,7 @@ export function registerRegionRoutes(router: Router): void {
       const regions = REGIONS.map(summarise);
       const unassigned = summarise("unassigned");
 
-      res.json({
+      return {
         generatedAt: (model as any).generatedAt ?? new Date().toISOString(),
         sourceHealth: (model as any).sourceHealth ?? null,
         total: rows.length,
@@ -193,12 +213,7 @@ export function registerRegionRoutes(router: Router): void {
           key: k, label: WORKBOOK_STATUS_LABEL[k], closed: WORKBOOK_CLOSED_STATUSES.has(k),
         })),
         rows,
-      });
-    } catch (e: any) {
-      console.error("[VRM/RentalOps] by-region failed:", e?.message || e);
-      res.status(500).json({ error: e?.message || "by-region read failed" });
-    }
-  });
+      };
 }
 
 /* ------------------------------------------------------------------------ *
