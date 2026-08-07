@@ -153,9 +153,10 @@ export function workloadBucketOf(r: { ams_bucket: string; workload_bucket?: stri
 }
 
 /** "New hire" as the boards define it: Active and in the first 270 days.
- * (The Executive Summary currently uses a 60-day window for its new-hire
- * callout — a DIFFERENT business definition under the same label; flagged to
- * Tyler rather than silently unified here.) */
+ * DELIBERATELY different from the Executive Summary's ≤60-day new-hire bucket
+ * (Tyler, 2026-08-07: both windows serve different purposes — keep both).
+ * Each surface's label carries its own window ("(≤9 mo)" here, "(≤60 days)"
+ * on exec), so do not unify these or hoist a shared window constant. */
 export function isNewHire(r: { employee_status: string | null; employee_status_date: string | null }): boolean {
   const d = daysSince(r.employee_status_date);
   return r.employee_status === "Active" && d != null && d <= 270;

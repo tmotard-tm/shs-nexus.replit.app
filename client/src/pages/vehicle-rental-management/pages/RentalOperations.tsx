@@ -951,7 +951,7 @@ export default function RentalOperations() {
                style={{ fontSize: 12, color: wrongTruckCount > 0 ? colors.red : colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={wrongTruckOnly} onChange={(e) => setWrongTruckOnly(e.target.checked)} /> wrong truck ({wrongTruckCount})
         </label>
-        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire</label>
+        <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={newHireOnly} onChange={(e) => setNewHireOnly(e.target.checked)} /> new hire (≤9 mo)</label>
         <label style={{ fontSize: 12, color: colors.inkSoft, display: "inline-flex", gap: 5, alignItems: "center", cursor: "pointer" }}><input type="checkbox" checked={urgentEmpOnly} onChange={(e) => setUrgentEmpOnly(e.target.checked)} /> term/leave</label>
         <span style={{ marginLeft: "auto", fontFamily: fonts.jetbrains, fontSize: 12, color: colors.inkMuted }}>{sorted.length} shown{isFetching ? " · refreshing…" : ""}</span>
       </div>

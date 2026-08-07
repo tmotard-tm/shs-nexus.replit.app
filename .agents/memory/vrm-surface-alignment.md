@@ -19,6 +19,6 @@ An alignment test suite + console workflow pins all of it (field-for-field board
 
 **How to apply:** any new case surface or shared field: serve it through the shared builders/attach, add it to the shared client model, extend the alignment test. Never hand-roll a per-surface shop/phone pick.
 
-OPEN policy questions flagged to Tyler (2026-08-07), intentionally NOT silently unified:
-- Exec Summary counts PENDED cases in openTotal/dailySpend; boards exclude PENDED by default.
-- "New hire" = ≤60 days in exec vs ≤270 days on boards — same label, different windows.
+Deliberate cross-surface DIFFERENCES (Tyler, 2026-08-07 — do NOT "fix" these as drift):
+- Exec Summary counts PENDED cases in openTotal/dailySpend; boards hide PENDED by default. Both intended: exec counts everything, boards stay filtered.
+- Two "new hire" windows coexist on purpose: exec bucket = ≤60 days (label carries "(≤60 days)"), board filter = ≤270 days (label carries "(≤9 mo)"). Labels self-describe; keep windows out of shared code.
