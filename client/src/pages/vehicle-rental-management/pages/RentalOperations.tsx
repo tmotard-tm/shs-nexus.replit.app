@@ -19,7 +19,7 @@ import {
   MessageSquare, Pencil, Lock, Bot,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
-import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours } from "../lib/format";
+import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours, phoneSearchMatches } from "../lib/format";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { DetailPanel } from "../components/case-detail-panel";
 import { TechTextModal } from "../components/tech-text-modal";
@@ -712,7 +712,13 @@ export default function RentalOperations() {
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
         const hay = `${r.case_key} ${r.renter_name_raw} ${r.shop_name || ""} ${r.veh_desc || ""} ${r.rental_class || ""} ${r.tech_name || ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+        // Shop-phone match (find the case from caller ID). Additive (OR) with
+        // the text haystack, covering EITHER truck on the case: the rental
+        // truck's shop-of-record phone — the reconciled pick with the legacy
+        // portal fallback, exactly the number the row displays — and the
+        // assigned/redirect ("call assigned #") truck's shop phone.
+        const rentalShopPhone = r.reconciledShop !== undefined ? r.reconciledShop?.shopPhone : r.portal_shop_phone;
+        if (!hay.includes(q) && !phoneSearchMatches(q, [rentalShopPhone, r.call_shop_phone])) return false;
       }
       if (amsF.length > 0 && !amsF.includes(r.ams_status || "NOT IN VIEW")) return false;
       if (catF && (r.class_bucket || r.actual_bucket || "unknown") !== catF) return false;
@@ -1034,7 +1040,7 @@ export default function RentalOperations() {
       <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ position: "relative" }}>
           <Search size={14} style={{ position: "absolute", left: 10, top: 9, color: colors.inkMuted }} />
-          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="filter truck, tech, shop, vehicle, phone…" style={{ ...selStyle, paddingLeft: 30, width: 240 }} />
         </div>
         <MultiSelect label="AMS statuses" options={amsOptions} values={amsF} onChange={setAmsF} style={selStyle} />
         <select value={catF} onChange={(e) => setCatF(e.target.value)} style={selStyle}>

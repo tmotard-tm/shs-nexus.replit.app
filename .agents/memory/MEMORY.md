@@ -74,7 +74,7 @@
 - [tpms_tech_profiles tech_id NOT unique](tpms-techid-not-unique.md) — multiple techs share one tech_id; any read/write keyed on tech_id corrupts (name-stamping); always key on enterprise_id; heal via run-tpms-name-heal.ts.
 - [Rightsize rate policy](rightsize-rate-policy.md) — rate OR vehicle OR SMS are independent compliance paths (rate-secured = right-sized even in a larger unit); rate talk proposes DONE/review; confirm policy pivots with Tyler before rewiring math.
 - [Standard Activities route-block dark launch](standard-activities-route-block.md) — TEST prefix ≠ no POST; live gate is an env flag (default off, ActivityType unconfirmed); 409 never re-fire; no cancel API → warn on supersede; record date BEFORE filing.
-- [Queue triage lanes & red policy](queue-triage-lanes.md) — server-stamped lane+whyText; closed PO ≠ pickup; "Scheduling" needs LUCA/manual validation; AMS declined/auction terminal overrides; step-9 demotes on evidence only.
+- [Queue triage lanes & red policy](queue-triage-lanes.md) — server-stamped lane+whyText; closed PO ≠ pickup urgency; "Scheduling" needs LUCA/manual validation; AMS declined/auction terminal overrides; step 9 demotes on hard evidence only (dialable pick / dial≠pick provenance, never date-only).
 - [Todays-queue perf layering](todays-queue-perf-layering.md) — 30s queue cache + 5min SWR PO-context + 5s spare-pool timeout; every new queue-mutating route must bust the cache or the settle refetch reads stale.
 - [Shop-of-record single source](shop-of-record-single-source.md) — every surface incl. boards shows the server-reconciled pick (portal fallback only when field absent); dispatch map = namespaced truck:/case: keys.
 - [Ready = phone-confirmed only](ready-phone-confirmed-only.md) — closed PO/ERD is a "confirm with shop" signal, never ready; verify/research marks are shared append-only rows across all three VRM views.
@@ -88,3 +88,4 @@
 - [Bedrock reasoning eats maxTokens](bedrock-reasoning-budget.md) — tight maxTokens returns EMPTY text (not truncated) on big prompts; never read content[0], take the first block with .text.
 - [Shop-from-comments LLM fallback](shop-llm-fallback.md) — LLM runs only when header pick is empty or superseded by a newer payment PO; same gates as scraped headers; evidence-hash cache; force = cap-exempt.
 - [LUCA activity ledger semantics](luca-activity-ledger.md) — ledger logs first sightings + run heartbeats, not every poll; a quiet ledger with healthy heartbeats is working as designed.
+- [SSO-gated UI verification](sso-gated-verification.md) — screenshots hit the SSO wall; mint a temp sessions row (server reads DATABASE_URL, NOT DEV_DATABASE_URL), curl the API, replay client predicates on real rows, then delete it.

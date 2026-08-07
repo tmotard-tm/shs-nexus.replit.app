@@ -20,7 +20,7 @@ import {
   MessageSquare, Pencil, Lock, Bot,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
-import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours } from "../lib/format";
+import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesSince, fmtAgo, fmtHours, phoneSearchMatches } from "../lib/format";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { DetailPanel } from "../components/case-detail-panel";
 import { apiRequest } from "@/lib/queryClient";
@@ -818,7 +818,13 @@ export default function RegionalCases() {
       else if (cohort !== "all" && r.repair_cohort !== cohort) return false;
       if (q) {
         const hay = `${r.case_key} ${r.renter_name_raw} ${r.shop_name || ""} ${r.veh_desc || ""} ${r.rental_class || ""} ${r.tech_name || ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
+        // Shop-phone match (find the case from caller ID). Additive (OR) with
+        // the text haystack, covering EITHER truck on the case: the rental
+        // truck's shop-of-record phone — the reconciled pick with the legacy
+        // portal fallback, exactly the number the row displays — and the
+        // assigned/redirect ("call assigned #") truck's shop phone.
+        const rentalShopPhone = r.reconciledShop !== undefined ? r.reconciledShop?.shopPhone : r.portal_shop_phone;
+        if (!hay.includes(q) && !phoneSearchMatches(q, [rentalShopPhone, r.call_shop_phone])) return false;
       }
       if (amsF.length > 0 && !amsF.includes(r.ams_status || "NOT IN VIEW")) return false;
       if (catF && (r.class_bucket || r.actual_bucket || "unknown") !== catF) return false;
@@ -1046,7 +1052,7 @@ export default function RegionalCases() {
         <div style={{ flex: 1 }} />
 
         <input value={search} onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search truck, tech, shop…"
+          placeholder="Search truck, tech, shop, phone…"
           style={{ fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink, background: colors.surface,
             border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "7px 11px", minWidth: 230, outline: "none" }} />
         {/* Rental booked on a truck that is not the renter's own. Counted off

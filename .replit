@@ -152,6 +152,10 @@ args = "schedule-pickup-unit"
 task = "workflow.run"
 args = "annex-a-routing-unit"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "vrm-phone-search-unit"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -195,6 +199,17 @@ args = "npx tsx --test tests/bucket-queue-classify.test.ts"
 
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow]]
+name = "vrm-phone-search-unit"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/vrm-phone-search.test.ts"
+
+[workflows.workflow.metadata]
+isValidation = true
 
 [agent]
 integrations = ["javascript_mem_db:1.0.0", "javascript_database:1.0.0", "javascript_log_in_with_replit:1.0.0", "javascript_auth_all_persistance:1.0.0", "javascript_sendgrid:1.0.0", "javascript_object_storage:1.0.0", "javascript_openai:1.0.0", "javascript_gemini:1.0.0"]

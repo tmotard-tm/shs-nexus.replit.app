@@ -83,3 +83,32 @@ export function fmtHours(h: number | null | undefined): string {
   const n = Number(h);
   return n >= 48 ? `${Math.round(n / 24)}d` : `${Math.round(n * 10) / 10}h`;
 }
+
+/** Minimum digits before a search query is treated as a phone lookup. Below
+ * this, digit-substring matching would light up on truck numbers, street
+ * numbers and PO fragments — noise, not phone search. Four = "last 4 of the
+ * number", the shortest fragment an operator realistically has off caller ID. */
+const PHONE_SEARCH_MIN_DIGITS = 4;
+
+/** Digits-only normalization for phone matching: "(555) 123-4567" → "5551234567".
+ * Null/undefined → "". */
+export function phoneDigits(s: string | null | undefined): string {
+  return String(s ?? "").replace(/\D/g, "");
+}
+
+/** Whether a search query matches any of a row's candidate phone numbers by
+ * digit substring. Format-tolerant on BOTH sides — query and stored value are
+ * each reduced to digits — so "(555) 123-4567", "555-123-4567", "5551234567"
+ * and the partial "123-4567" all hit the same stored number regardless of how
+ * it was scraped or typed. Queries with fewer than PHONE_SEARCH_MIN_DIGITS
+ * digits NEVER match (a text query like "smith" must behave exactly as it did
+ * before phone search existed). Callers use this ADDITIVELY (OR) alongside
+ * their text haystack, never instead of it. */
+export function phoneSearchMatches(query: string, candidates: ReadonlyArray<string | null | undefined>): boolean {
+  const q = phoneDigits(query);
+  if (q.length < PHONE_SEARCH_MIN_DIGITS) return false;
+  return candidates.some((c) => {
+    const d = phoneDigits(c);
+    return d.length > 0 && d.includes(q);
+  });
+}
