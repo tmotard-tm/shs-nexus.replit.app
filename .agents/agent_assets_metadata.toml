@@ -137,3 +137,10 @@ id = "Mgv5FlCcW3lblCmEF0cw4"
 uri = "file://exports/agent-skills.zip"
 type = "unspecified"
 title = "Agent skills bundle (8 skills, ready to upload)"
+
+[[outputs]]
+id = "_vKZuZNI8g9YdrrkPBQSD"
+uri = "file://attached_assets/training/vrm-transition-training.mp4"
+type = "video"
+title = "From FleetScope to VRM — Rental Recovery Training"
+description = "4:41 walkthrough video: the FleetScope → VRM transition story, the three rules of the new workflow, and a narrated tour of every VRM page (Executive Summary, New Rental Full Log, Denial Tracker, Rental Operations, Ops Queue, Cases by Region, Rightsize Tracker, Inbound Calls & LUCA)."
