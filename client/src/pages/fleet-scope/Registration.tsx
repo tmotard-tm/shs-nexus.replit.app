@@ -110,6 +110,8 @@ function getOwnerFromDistrict(district: string): string {
 
 interface RegistrationTruck {
   truckNumber: string;
+  // AMS truck status when it is "Declined Repair" or "Sent To Auction"; null otherwise.
+  amsAlert?: string | null;
   tagState: string;
   district: string;
   assignmentStatus: 'Assigned' | 'Unassigned';
@@ -156,7 +158,9 @@ interface RegistrationTruck {
 
 interface RegistrationResponse {
   trucks: RegistrationTruck[];
-  declinedTrucks: string[];
+  // False while the server's AMS truck-status cache is still warming (amsAlert
+  // labels omitted); the query polls until this flips true.
+  amsStatusReady?: boolean;
   summary: {
     total: number;
     assigned: number;
@@ -164,23 +168,8 @@ interface RegistrationResponse {
   };
 }
 
-// Declined repair vehicles - normalized to 6-digit format with leading zeros
-const DECLINED_TRUCKS = new Set([
-  '006611', '021526', '021547', '023150', '023254', '023796', '023966', '036023', '036031', '036040',
-  '036185', '036568', '036597', '036605', '036606', '036770', '036845', '036902', '036988', '037032',
-  '046153', '046307', '046313', '046371', '046528', '046546', '046643', '046748', '046838', '046873',
-  '046957', '046961', '046972', '046976', '047078', '047091', '047135', '047154', '047163', '047209',
-  '047252', '047280', '047315', '061100', '061192', '061208', '061212', '061257', '061306', '061360',
-  '061370', '061432', '061462', '061564', '061607', '061679', '061688', '061755', '061784', '061865',
-  '061544', '022360', '023282', '061307', '061786', '047075', '046453', '246091', '021148', '046159',
-  '037139', '061687', '061475', '061272', '047344', '046136', '061465', '036674', '061265', '061603',
-  '046866', '021705', '036667', '022380', '061546', '061569', '021704', '037125', '021537', '061137',
-  '061768', '036628', '061311', '037002', '036464', '047287', '022090', '061849', '023780', '047079',
-  '021696', '037041', '023004', '061578', '021380', '006588', '046658', '037256', '061629', '047169',
-  '047037', '037082', '036345', '046716', '061823', '022391', '021190', '036676', '023170', '047087',
-  '046990', '046880', '046502', '046245', '046106', '036269', '046551', '047291', '023823', '047052',
-  '036096', '036024', '023302'
-]);
+// "Declined Repair" / "Sent To Auction" labels now come from live AMS truck
+// status (truck.amsAlert, resolved server-side) — no hardcoded truck list.
 
 function UnassignedView({ trucks, trackingMutation }: { trucks: RegistrationTruck[]; trackingMutation: any }) {
   const [search, setSearch] = useState("");
@@ -466,6 +455,11 @@ export default function Registration() {
 
   const { data, isLoading, error, refetch, isFetching } = useQuery<RegistrationResponse>({
     queryKey: ["/api/fs/registration"],
+    // After a cold server start the AMS truck-status cache takes ~2 minutes to
+    // warm and amsAlert labels are omitted (amsStatusReady=false). Poll until
+    // the labels arrive, then stop.
+    refetchInterval: (query) =>
+      query.state.data && query.state.data.amsStatusReady === false ? 45_000 : false,
   });
 
   const { data: pmfStickersData } = useQuery<{ success: boolean; assetIds: string[] }>({
@@ -1829,8 +1823,8 @@ export default function Registration() {
                                 </button>
                                 <span>{truck.truckNumber}</span>
                               </div>
-                              {(DECLINED_TRUCKS.has(truck.truckNumber) || data?.declinedTrucks?.includes(truck.truckNumber)) ? (
-                                <span className="text-xs text-red-600 dark:text-red-400 font-normal">Declined</span>
+                              {truck.amsAlert ? (
+                                <span className={`text-xs font-normal ${truck.amsAlert.toLowerCase().includes('auction') ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{truck.amsAlert}</span>
                               ) : rentalVehicleSet.has((truck.truckNumber.replace(/^0+/, '') || '0').padStart(5, '0')) ? (
                                 <span className="text-xs text-blue-600 dark:text-blue-400 font-normal">Rental</span>
                               ) : null}

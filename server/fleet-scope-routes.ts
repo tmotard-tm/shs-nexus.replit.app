@@ -707,6 +707,7 @@ function getDb() {
 async function buildRegistrationData(): Promise<{
   trucks: {
     truckNumber: string;
+    amsAlert: string | null;
     tagState: string;
     district: string;
     assignmentStatus: string;
@@ -739,7 +740,7 @@ async function buildRegistrationData(): Promise<{
     holmanEta: string | null;
     holmanReceivedTags: boolean;
   }[];
-  declinedTrucks: string[];
+  amsStatusReady: boolean;
 }> {
   // 1. TPMS_EXTRACT — tech assignments + contact details
   const tpmsQuery = `
@@ -860,18 +861,46 @@ async function buildRegistrationData(): Promise<{
   // fs_trucks only covers a few hundred rentals-adjacent trucks, so without
   // this fallback most assigned trucks show no expiration date at all.
   const holmanRegLookup = new Map<string, string>();
+  // Padded truck number → VIN, used to join the VIN-keyed AMS status map.
+  const truckVinLookup = new Map<string, string>();
   try {
     const cacheRows = await getDb().select({
       num: holmanVehiclesCache.holmanVehicleNumber,
       reg: holmanVehiclesCache.regRenewalDate,
+      vin: holmanVehiclesCache.vin,
     }).from(holmanVehiclesCache);
     for (const row of cacheRows) {
       const num = row.num?.toString().replace(/\D/g, '').padStart(6, '0');
+      if (!num || num === '000000') continue;
       const reg = row.reg?.trim();
-      if (num && num !== '000000' && reg) holmanRegLookup.set(num, reg);
+      if (reg) holmanRegLookup.set(num, reg);
+      const vin = row.vin?.trim().toUpperCase();
+      if (vin && !truckVinLookup.has(num)) truckVinLookup.set(num, vin);
     }
   } catch (e) {
     console.warn('[Registration] Holman cache reg-date fallback unavailable:', e instanceof Error ? e.message : e);
+  }
+
+  // 3c. AMS truck-status labels ("Declined repair" / "Sent to Auction").
+  // Serve from the in-memory 30-min AMS bulk map only — never block this
+  // route on a cold ~2-minute AMS rebuild. If the map isn't built yet, kick
+  // a background build and render without labels; the client's next refetch
+  // picks them up. The AMS map is VIN-keyed; trucks are joined via the Holman
+  // cache VIN (AMS itself stores truck numbers without leading zeros, which
+  // the VIN join sidesteps entirely).
+  const { pickAmsAlert, computeAmsStatusReady } = await import("./ams-truck-status-labels");
+  let amsStatusByVin: Record<string, string | null> | null = null;
+  let amsCacheStale = true;
+  try {
+    const { getAmsTruckStatusMapCachedOnly, getAmsTruckStatusMap, isAmsTruckStatusCacheStale } = await import("./ams-truck-status-cache");
+    amsStatusByVin = getAmsTruckStatusMapCachedOnly();
+    amsCacheStale = isAmsTruckStatusCacheStale();
+    if (!amsStatusByVin || amsCacheStale) {
+      // Fire-and-forget (deduped internally); stale map is still served now.
+      getAmsTruckStatusMap().catch(() => {});
+    }
+  } catch (e) {
+    console.warn('[Registration] AMS status map unavailable:', e instanceof Error ? e.message : e);
   }
 
   // 4. Registration tracking records
@@ -893,6 +922,10 @@ async function buildRegistrationData(): Promise<{
     if (!regExpDate) regExpDate = trucksRegDateLookup.get(truckNumber) || null;
     trucks.push({
       truckNumber,
+      amsAlert: (() => {
+        const vin = truckVinLookup.get(truckNumber);
+        return pickAmsAlert(vin && amsStatusByVin ? amsStatusByVin[vin] : null);
+      })(),
       tagState: tagStateLookup.get(truckNumber) || '',
       district: tpmsInfo?.district || '',
       assignmentStatus: tpmsInfo ? 'Assigned' : 'Unassigned',
@@ -939,25 +972,10 @@ async function buildRegistrationData(): Promise<{
   }
   trucks.sort((a, b) => a.truckNumber.localeCompare(b.truckNumber));
 
-  // 6. Declined trucks from POs
-  const allPurchaseOrders = await fleetScopeStorage.getAllPurchaseOrders();
-  const declinedTrucks: string[] = [];
-  for (const po of allPurchaseOrders) {
-    if (po.finalApproval === "Decline and Submit for Sale") {
-      try {
-        const rawData = po.rawData ? JSON.parse(po.rawData) : {};
-        const vehicleNo = rawData["Vehicle_No"] || rawData["Vehicle No"] || rawData["VEHICLE_NO"] || rawData["vehicle_no"] || "";
-        if (vehicleNo) {
-          const normalized = vehicleNo.toString().padStart(6, '0');
-          if (normalized !== '000000') declinedTrucks.push(normalized);
-        }
-      } catch (e) {
-        // skip invalid JSON
-      }
-    }
-  }
-
-  return { trucks, declinedTrucks };
+  // amsStatusReady=false means the AMS status map was cold (labels omitted)
+  // or stale (labels served, rebuild in flight) when this payload was built;
+  // the client polls until it flips true on a fresh in-TTL map.
+  return { trucks, amsStatusReady: computeAmsStatusReady(amsStatusByVin !== null, amsCacheStale) };
 }
 
 // Configure multer for file uploads (memory storage for processing)
@@ -11968,11 +11986,11 @@ export function registerFleetScopeRoutes(requireAuth: (req: any, res: any, next:
   app.get("/registration", async (_req, res) => {
     try {
       console.log("[Registration] Fetching registration data...");
-      const { trucks, declinedTrucks } = await buildRegistrationData();
+      const { trucks, amsStatusReady } = await buildRegistrationData();
       console.log(`[Registration] Total unique trucks: ${trucks.length}`);
       res.json({
         trucks,
-        declinedTrucks,
+        amsStatusReady,
         summary: {
           total: trucks.length,
           assigned: trucks.filter(t => t.assignmentStatus === 'Assigned').length,

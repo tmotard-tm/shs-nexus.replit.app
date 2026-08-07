@@ -32,6 +32,31 @@ export const AMS_TRUCK_STATUS_LABELS: Record<string, string> = {
 //
 // Returns null only when the input is null/empty (callers treat null as "no
 // status known for this VIN", which the scorecard endpoint buckets as Unknown).
+// Statuses that surface as an alert label under the truck number on the
+// Fleet Scope Registrations tab. Matched case-insensitively on the resolved
+// label so both AMS-lookup casing ("Declined Repair") and Snowflake text
+// ("Declined repair") qualify.
+const AMS_ALERT_STATUSES = new Set(["declined repair", "sent to auction"]);
+
+// Given a resolved AMS truck-status label, return the trimmed label when it
+// is one of the alert-worthy statuses, else null.
+export function pickAmsAlert(label: string | null | undefined): string | null {
+  if (!label) return null;
+  const trimmed = label.trim();
+  return AMS_ALERT_STATUSES.has(trimmed.toLowerCase()) ? trimmed : null;
+}
+
+// Readiness contract for the Registrations tab: labels are "ready" only when
+// a cached map exists AND it is within its TTL. A stale map is still served
+// (labels shown), but ready=false keeps the client polling until the
+// background rebuild lands fresh data.
+export function computeAmsStatusReady(
+  hasMap: boolean,
+  isStale: boolean,
+): boolean {
+  return hasMap && !isStale;
+}
+
 export function resolveTruckStatusLabel(
   rawStatus: string | number | null | undefined,
   lookupMap?: Map<string, string>,
