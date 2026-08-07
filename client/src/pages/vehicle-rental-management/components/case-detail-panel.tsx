@@ -586,6 +586,21 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
     },
     onError: (e: any) => toast({ title: "Override failed", description: String(e?.message || e), variant: "destructive" }),
   });
+  // "View Rental Request" — the only Holman surface keyed to the RENTAL rather
+  // than the truck. Result is held in component state and never persisted; only
+  // an explicit approve writes anything. See the route for the full reasoning.
+  const [rentalReq, setRentalReq] = useState<any>(null);
+  const rentalReqMut = useMutation({
+    mutationFn: () => apiRequest("POST", `/api/vrm/rental-operations/master/${caseKey}/rental-request-scrape`, {}),
+    onSuccess: (r: any) => {
+      setRentalReq(r);
+      if (r?.found === false) toast({ title: "No rental request on the last portal scrape", description: r?.reason || "" });
+      else if (r?.differs) toast({ title: "Name differs from the rental request", description: `Holman says ${r.rentalRequestName || "(unparsed)"}`, variant: "destructive" });
+      else toast({ title: "Rental request matches the name on file" });
+    },
+    onError: (e: any) => toast({ title: "Rental request lookup failed", description: String(e?.message || e), variant: "destructive" }),
+  });
+
   const label = panelLabel;
   const val: CSSProperties = { fontFamily: fonts.dmSans, fontSize: 13, color: colors.ink };
 
@@ -630,6 +645,55 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                   style={{ marginTop: 5, fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, padding: "2px 8px", cursor: "pointer" }}>
                   clear manual override
                 </button>
+              )}
+              <div style={{ marginTop: 8 }}>
+                <button type="button" disabled={rentalReqMut.isPending} onClick={() => { setRentalReq(null); rentalReqMut.mutate(); }}
+                  title="Open the Holman rental request behind this PO and read the renter off it. Reads live, stores nothing."
+                  style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "4px 10px", cursor: rentalReqMut.isPending ? "wait" : "pointer", display: "inline-flex", alignItems: "center", gap: 5 }}>
+                  <RefreshCw size={12} style={{ animation: rentalReqMut.isPending ? "spin 1s linear infinite" : undefined }} />
+                  {rentalReqMut.isPending ? "Reading rental request…" : "View Rental Request"}
+                </button>
+              </div>
+              {rentalReq?.found === false && (
+                <div style={{ marginTop: 6, fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.inkMuted }}>{rentalReq.reason}</div>
+              )}
+              {rentalReq?.found && (
+                <div style={{ marginTop: 8, border: `1px solid ${rentalReq.differs ? colors.amber : colors.rule}`, background: rentalReq.differs ? colors.amberLight : colors.surface, borderRadius: 10, padding: 10 }}>
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink, fontWeight: 600 }}>
+                    {rentalReq.differs ? "Rental request names a different person" : "Rental request agrees with the name on file"}
+                  </div>
+                  <div style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, color: colors.inkSoft, marginTop: 4, lineHeight: 1.6 }}>
+                    <div>on file&nbsp;&nbsp;: {rentalReq.shownName || "(none)"}</div>
+                    <div>feed&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;: {rentalReq.feedRenterName || "(none)"}</div>
+                    <div>request&nbsp;&nbsp;: {rentalReq.rentalRequestName || "(could not parse, read the screenshot)"}</div>
+                    <div>from PO&nbsp;&nbsp;: {rentalReq.sourcePoNumber || "(unknown)"}</div>
+                  </div>
+                  {rentalReq.screenshot && (
+                    <a href={rentalReq.screenshot} target="_blank" rel="noreferrer" title="Open full size">
+                      <img src={rentalReq.screenshot} alt="Holman rental request"
+                        style={{ marginTop: 8, width: "100%", border: `1px solid ${colors.rule}`, borderRadius: 8, display: "block" }} />
+                    </a>
+                  )}
+                  <div style={{ fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, marginTop: 6 }}>
+                    Read live from Holman. Nothing stored unless you approve a name below.
+                  </div>
+                  {rentalReq.differs && (
+                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+                      <input placeholder="employee id to pin" id="rr-emp"
+                        style={{ fontFamily: fonts.jetbrains, fontSize: 11.5, padding: "4px 8px", border: `1px solid ${colors.rule}`, borderRadius: 6, background: colors.surface, color: colors.ink }} />
+                      <button type="button" disabled={overrideMut.isPending}
+                        onClick={() => {
+                          const el = document.getElementById("rr-emp") as HTMLInputElement | null;
+                          const eid = (el?.value || "").trim();
+                          if (!eid) { toast({ title: "Enter the employee id to pin" }); return; }
+                          if (window.confirm(`Pin this rental to employee ${eid}? It stays until PO ${rentalReq.poNumber || "(none)"} is turned in, then auto-clears.`)) overrideMut.mutate(eid);
+                        }}
+                        style={{ fontFamily: fonts.dmSans, fontSize: 11.5, color: colors.accent, background: "transparent", border: `1px solid ${colors.accent}`, borderRadius: 6, padding: "4px 10px", cursor: "pointer" }}>
+                        Approve &amp; pin to PO {rentalReq.poNumber || "(none)"}
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </section>
             {/* ── TRUCK TABS: the rental van, and the truck this tech is

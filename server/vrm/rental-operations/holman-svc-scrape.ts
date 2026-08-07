@@ -90,3 +90,121 @@ export async function scrapeVehicleHistories(vehicles: string[]): Promise<SvcHis
   }
   return results;
 }
+
+
+/** One "View Rental Request" page, read behind a rental PO. */
+export interface RentalRequestResult {
+  vehicle: string;
+  url: string;
+  /** Best-effort renter parsed off the page. NULL means "could not parse", never "nobody". */
+  renterName: string | null;
+  /** Every label/value pair we could see, so the caller can decide without a reparse. */
+  fields: Record<string, string>;
+  /** Full visible text, for auditing a parse that looks wrong. */
+  text: string | null;
+  /** PNG data URI. Held in memory and returned to the caller; NOT persisted here. */
+  screenshot: string | null;
+  error?: string;
+}
+
+/**
+ * Open the "View Rental Request" page that hangs off a rental PO and read the
+ * renter off it.
+ *
+ * WHY THIS EXISTS. Every other name Nexus can reach is keyed to the TRUCK
+ * (Holman assigned driver, TPMS, roster truck_lu, PO driver-of-record) and a
+ * truck outlives its drivers, so all of them go stale the moment a rental
+ * changes hands. This page is the only surface keyed to the RENTAL itself.
+ * Verified 2026-08-06: truck 36177 shows Mike Schaeffer in the assigned-driver
+ * field, in the PO notes and in the PO driver stamp, and the rental request
+ * itself is Matthew Nish.
+ *
+ * The parse is DELIBERATELY best-effort and the screenshot is the real payload.
+ * We do not control this page's markup and it is not worth pretending a regex
+ * over someone else's ASP.NET form is authoritative. A null renterName with a
+ * screenshot is an honest answer; a confident wrong name is not.
+ */
+export async function scrapeRentalRequests(
+  items: { vehicle: string; url: string }[],
+): Promise<RentalRequestResult[]> {
+  const user = process.env.HOLMAN_PORTAL_USER?.trim();
+  const pass = process.env.HOLMAN_PORTAL_PASS;
+  if (!user || !pass) throw new Error("HOLMAN_PORTAL_USER / HOLMAN_PORTAL_PASS not set");
+
+  const executablePath = requireChromiumPath("HolmanRentalRequest");
+  console.error(`[HolmanRentalRequest] reading ${items.length} rental request page(s)`);
+  let browser: Browser | null = null;
+  const results: RentalRequestResult[] = [];
+  try {
+    browser = await chromium.launch({
+      executablePath, headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu",
+        "--no-zygote", "--disable-software-rasterizer", "--disable-extensions",
+        "--disable-background-networking", "--mute-audio", "--no-first-run", "--no-default-browser-check", "--disable-breakpad"],
+    });
+    const ctx = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+      viewport: { width: 1280, height: 900 },
+    });
+    const page = await ctx.newPage();
+
+    const onLoginForm = async () => page.evaluate(() => !!document.getElementById("txtCXLoginLogonId")).catch(() => false);
+    const doLogin = async () => {
+      await page.waitForSelector("#txtCXLoginLogonId", { state: "visible", timeout: 20000 });
+      await page.fill("#txtCXLoginLogonId", user);
+      await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 30000 }).catch(() => {}), page.click("#btnLogonId")]);
+      await page.waitForSelector('input[type="password"]', { state: "visible", timeout: 20000 });
+      await page.fill('input[type="password"]', pass);
+      await Promise.all([page.waitForLoadState("domcontentloaded", { timeout: 35000 }).catch(() => {}),
+        page.click('input[type="submit"], button[type="submit"], input[name="LoginButton1"]')]);
+      await page.waitForTimeout(2500);
+    };
+
+    for (const { vehicle, url } of items) {
+      try {
+        await page.goto(url, { waitUntil: "networkidle", timeout: 40000 });
+        if (await onLoginForm()) { await doLogin(); await page.goto(url, { waitUntil: "networkidle", timeout: 40000 }); }
+        await page.waitForTimeout(800);
+
+        const scraped: { fields: Record<string, string>; text: string } = await page.evaluate(() => {
+          const fields: Record<string, string> = {};
+          // ASP.NET detail forms render either <label>/<span> pairs or 2-cell <tr>s.
+          document.querySelectorAll("tr").forEach((tr) => {
+            const cells = Array.from(tr.querySelectorAll("td,th")).map((c) => (c.textContent || "").trim());
+            if (cells.length === 2 && cells[0] && cells[1] && cells[0].length < 60) {
+              fields[cells[0].replace(/[:*]\s*$/, "")] = cells[1];
+            }
+          });
+          document.querySelectorAll("label").forEach((l) => {
+            const key = (l.textContent || "").trim().replace(/[:*]\s*$/, "");
+            if (!key || key.length > 60) return;
+            const forId = l.getAttribute("for");
+            const el = forId ? document.getElementById(forId) : (l.nextElementSibling as HTMLElement | null);
+            const val = el ? ((el as HTMLInputElement).value || el.textContent || "").trim() : "";
+            if (val) fields[key] = val;
+          });
+          return { fields, text: (document.body.innerText || "").slice(0, 20000) };
+        });
+
+        // Prefer an explicitly driver/renter-labelled field. Anything else is a guess.
+        const NAME_LABEL = /(driver|renter|operator|employee|contact)\s*(name)?/i;
+        let renterName: string | null = null;
+        for (const [k, v] of Object.entries(scraped.fields)) {
+          if (NAME_LABEL.test(k) && /[A-Za-z]{2,}/.test(v) && v.length < 60) { renterName = v.trim(); break; }
+        }
+
+        const shot = await page.screenshot({ fullPage: true, type: "png" }).catch(() => null);
+        results.push({
+          vehicle, url, renterName, fields: scraped.fields, text: scraped.text,
+          screenshot: shot ? `data:image/png;base64,${shot.toString("base64")}` : null,
+        });
+      } catch (e: any) {
+        results.push({ vehicle, url, renterName: null, fields: {}, text: null, screenshot: null,
+          error: e?.message || String(e) });
+      }
+    }
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+  return results;
+}

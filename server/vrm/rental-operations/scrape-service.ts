@@ -120,6 +120,72 @@ export const isRealShopPo = (p: any) =>
 const isRealShop = isRealShopPo;
 function parseDate(s: any): number { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; }
 
+import type { RentalRequestResult } from "./holman-svc-scrape";
+
+/**
+ * Read the "View Rental Request" page(s) for a truck, in the isolated worker.
+ *
+ * Same containment contract as spawnScrape: Chromium never runs in the Express
+ * process. Payload goes over argv base64-encoded because the URLs carry an
+ * encrypted `key` query param with characters a bare shell arg mangles.
+ */
+export function spawnRentalRequests(items: { vehicle: string; url: string }[]): Promise<RentalRequestResult[]> {
+  return new Promise((resolve) => {
+    const cwd = process.cwd();
+    const tsxBin = path.join(cwd, "node_modules/.bin/tsx");
+    const workerTs = "server/vrm/rental-operations/holman-svc-scrape-worker.ts";
+    const workerJs = "dist/vrm/rental-operations/holman-svc-scrape-worker.js";
+    const payload = Buffer.from(JSON.stringify(items), "utf8").toString("base64");
+    const fail = (msg: string) => items.map((i) => ({ ...i, renterName: null, fields: {}, text: null, screenshot: null, error: msg }));
+    let cmd: string, args: string[];
+    if (existsSync(path.join(cwd, workerJs))) { cmd = process.execPath; args = [workerJs, "--rental-requests", payload]; }
+    else if (existsSync(tsxBin)) { cmd = tsxBin; args = [workerTs, "--rental-requests", payload]; }
+    else { return resolve(fail("scrape worker unavailable: run `npm run build:workers`")); }
+    let child: ReturnType<typeof spawn>;
+    try { child = spawn(cmd, args, { cwd, detached: true, stdio: ["ignore", "pipe", "pipe"], env: process.env }); }
+    catch (e: any) { return resolve(fail(`spawn failed: ${e?.message}`)); }
+    let out = "", settled = false;
+    const done = (r: RentalRequestResult[]) => { if (!settled) { settled = true; clearTimeout(t); resolve(r); } };
+    const t = setTimeout(() => { try { process.kill(-(child.pid as number), "SIGKILL"); } catch {} done(fail("rental request worker timeout")); }, WORKER_TIMEOUT_MS);
+    child.stdout!.on("data", (d) => { out += d.toString(); });
+    child.stderr!.on("data", (d) => process.stderr.write(d));
+    child.on("error", (e) => done(fail(`worker error: ${e.message}`)));
+    child.on("close", () => {
+      const line = out.trim().split("\n").filter(Boolean).pop() || "";
+      try { const j = JSON.parse(line); done(j.ok ? j.results : fail(j.error || "worker failed")); }
+      catch { done(fail("unparseable worker output")); }
+    });
+  });
+}
+
+/**
+ * The rental-request deep links Holman already handed us on the last scrape.
+ * They live per-PO inside the stored portal blob as openRentalRequestWindow and
+ * are only present where rentalRequestExists is true. Newest PO first, because
+ * the current rental is the one being asked about.
+ */
+export async function rentalRequestLinksFor(caseKey: string): Promise<{ poNumber: string | null; url: string; poDate: string | null }[]> {
+  const truck = toDisplayNumber(caseKey);
+  const res = await db.execute(sql`SELECT hist FROM vrm_holman_portal_hist WHERE truck_no = ${truck} LIMIT 1`);
+  const hist = (res.rows?.[0] as any)?.hist;
+  if (!hist) return [];
+  const arr: any[] = Array.isArray(hist) ? hist : (Array.isArray(hist?.events) ? hist.events : []);
+  const out: { poNumber: string | null; url: string; poDate: string | null }[] = [];
+  const walk = (o: any) => {
+    if (!o || typeof o !== "object") return;
+    if (Array.isArray(o)) { o.forEach(walk); return; }
+    const url = o.openRentalRequestWindow;
+    if (typeof url === "string" && /RentalRequest\.aspx/i.test(url) && o.rentalRequestExists) {
+      out.push({ poNumber: o.poNumber ?? null, url, poDate: o.repairDate ?? o.poMsgDate ?? null });
+    }
+    Object.values(o).forEach(walk);
+  };
+  walk(arr);
+  const seen = new Set<string>();
+  return out.filter((r) => (seen.has(r.url) ? false : (seen.add(r.url), true)))
+            .sort((a, b) => String(b.poDate || "").localeCompare(String(a.poDate || "")));
+}
+
 function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
   return new Promise((resolve) => {
     const cwd = process.cwd();

@@ -542,6 +542,25 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
           resolved_at=NOW(), updated_at=NOW()
       `);
     }
+
+    // ── expire human identity overrides whose rental has been turned in ────
+    // case_key is the VEHICLE number, so an override approved on this truck
+    // would otherwise leak onto the NEXT rental once this one is turned in and
+    // a new PO opens against the same unit. The override carries the po_number
+    // it was approved against; a different PO means the approval no longer
+    // describes the rental on screen. Runs AFTER the case upsert above, so
+    // c.po_number is already current and there is no window in which a stale
+    // override can be read.
+    await tx.execute(sql`
+      UPDATE vrm_rental_identity_resolutions i
+      SET override_employee_id=NULL, override_status=NULL, override_tech_name=NULL,
+          override_by=NULL, override_at=NULL, override_po_number=NULL, updated_at=NOW()
+      FROM vrm_rental_operations_cases c
+      WHERE c.case_key = i.case_key
+        AND i.override_employee_id IS NOT NULL
+        AND i.override_po_number IS NOT NULL
+        AND i.override_po_number IS DISTINCT FROM c.po_number
+    `);
   });
 
   // sweep only the sources this run fully covers: anything of those sources not

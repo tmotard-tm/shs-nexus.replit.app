@@ -22,6 +22,7 @@ import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
 import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED } from "../../luca-writeback/mapper";
 import { readLucaActivity, lucaActivityHealth, lucaConfigSummary } from "./luca-activity";
+import { spawnRentalRequests, rentalRequestLinksFor } from "./scrape-service";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -722,6 +723,76 @@ export function registerRentalOperationsRoutes(router: Router): void {
     }
   });
 
+  // POST — open the Holman "View Rental Request" page for this case and read the
+  // renter off it. This is the ONLY source keyed to the RENTAL; every other name
+  // Nexus holds (Holman assigned driver, PO driver stamp, TPMS, roster truck_lu,
+  // the PO notes) is keyed to the TRUCK, and a truck outlives its drivers.
+  //
+  // Verified 2026-08-06 on truck 36177: assigned driver, notes and PO stamp all
+  // said Mike Schaeffer; the rental request said Matthew Nish, and Schaeffer had
+  // already moved to truck 88214.
+  //
+  // DELIBERATELY STORES NOTHING. Returns the screenshot inline for the operator
+  // to read. Only an explicit approve (identity-override below) leaves a trace,
+  // because this is an edge-case lookup tool and the DB should not accumulate a
+  // scrape blob every time somebody double-checks a name.
+  router.post("/rental-operations/master/:caseKey/rental-request-scrape", async (req, res) => {
+    try {
+      const caseKey = req.params.caseKey;
+      const cur = await db.execute(sql`
+        SELECT c.case_key, c.vehicle_number, c.po_number, c.renter_name_raw,
+               COALESCE(i.override_tech_name, i.resolved_tech_name) AS shown_name,
+               COALESCE(i.override_employee_id, i.resolved_employee_id) AS shown_employee_id
+        FROM vrm_rental_operations_cases c
+        LEFT JOIN vrm_rental_identity_resolutions i ON i.case_key = c.case_key
+        WHERE c.case_key = ${caseKey} LIMIT 1
+      `);
+      if (!cur.rows.length) return res.status(404).json({ error: "case not found" });
+      const c = cur.rows[0] as any;
+
+      const links = await rentalRequestLinksFor(caseKey);
+      if (!links.length) {
+        // No link means the last portal scrape saw no rental request on this
+        // truck. That is NOT proof there is none now: the blob may predate the
+        // current rental leg. Say which, rather than implying "no rental".
+        return res.json({
+          ok: true, found: false,
+          reason: "no rental-request link in the stored portal scrape for this truck; re-scrape the truck first if the snapshot predates this rental",
+          shownName: c.shown_name ?? null, poNumber: c.po_number ?? null,
+        });
+      }
+      const [best] = links;
+      const [result] = await spawnRentalRequests([{ vehicle: c.vehicle_number, url: best.url }]);
+      if (!result || result.error) {
+        return res.status(502).json({ error: result?.error || "rental request scrape failed", url: best.url });
+      }
+
+      // Surname-level comparison only. This decides whether to SHOW a difference,
+      // never whether to write one; the operator reads the screenshot and calls it.
+      const norm = (v: unknown) => String(v ?? "").toUpperCase().replace(/[^A-Z ]/g, " ").split(/\s+/).filter(Boolean);
+      const shown = norm(c.shown_name);
+      const found = norm(result.renterName);
+      const differs = !!(found.length && shown.length && !found.some((f) => shown.some((t) => f === t)));
+
+      res.json({
+        ok: true, found: true, differs,
+        caseKey, poNumber: c.po_number ?? null,
+        shownName: c.shown_name ?? null,
+        shownEmployeeId: c.shown_employee_id ?? null,
+        feedRenterName: c.renter_name_raw ?? null,
+        rentalRequestName: result.renterName,
+        fields: result.fields,
+        screenshot: result.screenshot,
+        sourceUrl: best.url,
+        sourcePoNumber: best.poNumber,
+        scrapeNote: "read live from Holman; nothing stored. Approve below to pin the name to PO " + String(c.po_number ?? "(none)") + ".",
+      });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] rental-request-scrape failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "rental-request-scrape failed" });
+    }
+  });
+
   // POST an identity override — pin an employee_id when auto-resolution is
   // REVIEW/EXCEPTION or wrong. Empty employee_id clears the override.
   router.post("/rental-operations/master/:caseKey/identity-override", async (req, res) => {
@@ -733,7 +804,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
         await db.execute(sql`
           UPDATE vrm_rental_identity_resolutions
           SET override_employee_id=NULL, override_status=NULL, override_tech_name=NULL,
-              override_by=NULL, override_at=NULL, updated_at=NOW()
+              override_by=NULL, override_at=NULL, override_po_number=NULL, updated_at=NOW()
           WHERE case_key=${caseKey}
         `);
         invalidateTodaysQueueCache("identity-override-clear");
@@ -747,12 +818,18 @@ export function registerRentalOperationsRoutes(router: Router): void {
       if (!tech.rows.length) return res.status(404).json({ error: "employee_id not found in roster" });
       const t = tech.rows[0] as any;
       const statusMap: Record<string, string> = { A: "Active", T: "Terminated", L: "On Leave", NEW: "New", P: "Pending", R: "Rehire", RPE: "Rehire pending", RCS: "Rehire contingent" };
+      // Stamp the PO this approval was made against. The override applies ONLY
+      // while the case still carries this po_number: case_key is the VEHICLE
+      // number, so without the stamp an approved name would carry over onto the
+      // next rental on the same truck. ingest.ts clears it when the PO changes.
       const upd = await db.execute(sql`
-        UPDATE vrm_rental_identity_resolutions
+        UPDATE vrm_rental_identity_resolutions i
         SET override_employee_id=${t.employee_id}, override_status=${statusMap[t.employment_status] ?? t.employment_status},
-            override_tech_name=${t.tech_name}, override_by=${actor}, override_at=NOW(), updated_at=NOW()
-        WHERE case_key=${caseKey}
-        RETURNING case_key, override_employee_id, override_status, override_tech_name
+            override_tech_name=${t.tech_name}, override_by=${actor}, override_at=NOW(),
+            override_po_number=c.po_number, updated_at=NOW()
+        FROM vrm_rental_operations_cases c
+        WHERE i.case_key=${caseKey} AND c.case_key=i.case_key
+        RETURNING i.case_key, i.override_employee_id, i.override_status, i.override_tech_name, i.override_po_number
       `);
       if (!upd.rows.length) return res.status(404).json({ error: "case has no resolution row yet" });
       invalidateTodaysQueueCache("identity-override");

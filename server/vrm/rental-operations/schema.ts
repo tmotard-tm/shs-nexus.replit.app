@@ -123,6 +123,11 @@ export async function initRentalOperationsSchema(): Promise<void> {
       override_tech_name    TEXT,
       override_by           VARCHAR(120),
       override_at           TIMESTAMPTZ,
+      -- the PO the override was approved against. The override applies ONLY while
+      -- the case still carries this po_number; when the rental is turned in and a
+      -- new PO opens on the same truck the override self-expires, because case_key
+      -- is the VEHICLE number and would otherwise leak onto the next renter.
+      override_po_number    VARCHAR(40),
       resolved_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
@@ -210,6 +215,8 @@ export async function initRentalOperationsSchema(): Promise<void> {
   await db.execute(sql`ALTER TABLE vrm_rental_operations_cases ADD COLUMN IF NOT EXISTS ams_status VARCHAR(60);`);
   await db.execute(sql`ALTER TABLE vrm_rental_operations_cases ADD COLUMN IF NOT EXISTS ams_status_at TIMESTAMPTZ;`);
   await db.execute(sql`ALTER TABLE vrm_rental_operations_cases ADD COLUMN IF NOT EXISTS vin VARCHAR(30);`);
+  // identity override expiry key (see the column comment above)
+  await db.execute(sql`ALTER TABLE vrm_rental_identity_resolutions ADD COLUMN IF NOT EXISTS override_po_number VARCHAR(40);`);
 
   // ── shop_verifications: on-demand scrape runs (Phase 3; created empty now) ─
   await db.execute(sql`
