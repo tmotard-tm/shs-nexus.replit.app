@@ -31,7 +31,6 @@ import {
   isOptedOut,
   appendMessage,
 } from "./storage";
-import { checkHvacGate, GATED_CATEGORIES } from "./hvac-gate";
 
 function publicBaseUrl(): string | null {
   return (
@@ -65,13 +64,6 @@ export interface SendMessageInput {
   senderName?: string | null;
   force?: boolean; // bypass quiet-hours (send now)
   dryRun?: boolean; // resolve + gate checks only; no thread/queue/Twilio side effects
-  /**
-   * Deliberately NOT covered by `force`. `force` means "skip quiet hours", and
-   * folding a trade-policy carve-out into a timing flag is exactly how the 8/4
-   * leak would quietly come back. A caller with a legitimate reason to text an
-   * HVAC tech on a gated category has to say so explicitly, and it is logged.
-   */
-  allowHvac?: boolean;
 }
 
 export interface SendMessageResult {
@@ -151,20 +143,13 @@ export async function sendMessage(input: SendMessageInput): Promise<SendMessageR
   }
   const { contact, phone, phoneDigits, state } = await resolveTarget(input);
 
-  // THE HVAC GATE. Runs before the phone/opt-out checks and before the dry-run
-  // return, so a preview shows exactly who would be refused rather than the
-  // block only surfacing on the live send. Checked against the resolved contact
-  // as well as the caller-supplied ldap, so a phone-only send that resolves to
-  // an HVAC tech is still caught.
-  if (!input.allowHvac) {
-    const gate = await checkHvacGate(input.ldap ?? contact?.ldap ?? null, input.category);
-    if (gate.blocked) {
-      console.warn(`[Fleet-Comms] BLOCKED ${input.category} -> ${input.ldap ?? (phoneDigits || "unknown")}: ${gate.reason}`);
-      return { status: "blocked", reason: gate.reason, dryRun: input.dryRun || undefined };
-    }
-  } else if (GATED_CATEGORIES.has(String(input.category || "").trim())) {
-    console.warn(`[Fleet-Comms] HVAC gate BYPASSED by caller for ${input.ldap ?? "phone-only"} on ${input.category} (allowHvac=true, actor=${input.sentBy ?? "?"})`);
-  }
+  // NOTE: the HVAC send gate that lived here (Aug 2026) is intentionally gone.
+  // It over-implemented a ONE-TIME prohibition scoped to the 8/4 rental
+  // right-size campaign as if it were standing policy. Fleet director
+  // directive (Aug 6 2026): every tech on the current roster is messageable
+  // regardless of position/trade. The HVAC carve-out survives ONLY in
+  // right-size compliance REPORTING (compliance.ts) — do not reintroduce it
+  // in the send path.
 
   if (!phone || phoneDigits.length < 10) {
     return { status: "skipped", reason: "no valid phone on file" };

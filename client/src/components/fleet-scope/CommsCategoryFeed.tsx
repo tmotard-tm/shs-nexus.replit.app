@@ -134,10 +134,15 @@ export function CommsCategoryFeed({
     },
     onSuccess: async (res: any) => {
       const data = await res.json();
-      setBody("");
-      if (data.status === "queued") toast({ title: "Message queued", description: "Will send after quiet hours." });
-      else if (data.status === "skipped") toast({ title: "Not sent", description: data.reason || "Skipped", variant: "destructive" });
-      else toast({ title: "Message sent" });
+      // Success allow-list: only a real send/queue clears the draft. "blocked"
+      // (HVAC gate) and "skipped" refusals keep it so the agent can adjust.
+      if (data.status === "sent" || data.status === "queued") {
+        setBody("");
+        if (data.status === "queued") toast({ title: "Message queued", description: "Will send after quiet hours." });
+        else toast({ title: "Message sent" });
+      } else {
+        toast({ title: data.status === "blocked" ? "Blocked — not sent" : "Not sent", description: data.reason || `Send returned status "${data.status}"`, variant: "destructive" });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
       if (selectedId) queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads", selectedId] });
     },

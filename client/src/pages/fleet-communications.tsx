@@ -574,11 +574,21 @@ export default function FleetCommunications() {
     },
     onSuccess: async (res: any) => {
       const data = await res.json();
-      setBody("");
-      setAttachment(null);
-      if (data.status === "queued") toast({ title: "Message queued", description: "Will send after quiet hours." });
-      else if (data.status === "skipped") toast({ title: "Not sent", description: data.reason || "Skipped", variant: "destructive" });
-      else toast({ title: "Message sent" });
+      // Only a real send/queue clears the composer — on a refusal the draft
+      // survives so the agent can re-categorize or re-target instead of
+      // retyping. "blocked" (HVAC gate) previously fell through to the success
+      // toast: two gated sends showed "Message sent" while nothing was sent or
+      // persisted (VPRAK, Aug 6 2026).
+      if (data.status === "sent" || data.status === "queued") {
+        setBody("");
+        setAttachment(null);
+        if (data.status === "queued") toast({ title: "Message queued", description: "Will send after quiet hours." });
+        else toast({ title: "Message sent" });
+      } else if (data.status === "blocked") {
+        toast({ title: "Blocked — not sent", description: data.reason || "Refused by a send-path policy gate.", variant: "destructive" });
+      } else {
+        toast({ title: "Not sent", description: data.reason || `Send returned status "${data.status}"`, variant: "destructive" });
+      }
       queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
       if (selectedId) queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads", selectedId] });
     },
@@ -1795,6 +1805,11 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
       apiRequest("POST", "/api/fs/comms/send", { ldap: selectedList[0]?.ldap, category: cat, body: body.trim(), managerCc, confirmed }),
     onSuccess: async (res: any) => {
       const data = await res.json();
+      if (data.status !== "sent" && data.status !== "queued") {
+        // Refused (HVAC gate / opt-out / no phone): keep the dialog + draft.
+        toast({ title: "Blocked — not sent", description: data.reason || `Send returned status "${data.status}"`, variant: "destructive" });
+        return;
+      }
       toast({ title: data.status === "queued" ? "Queued" : "Sent" });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
       onOpenChange(false);
@@ -1847,6 +1862,10 @@ function ComposeDialog({ open, onOpenChange, categories, health, rentalLdaps, on
       apiRequest("POST", "/api/fs/comms/send", { phone: phoneE164, category: cat, body: body.trim() }),
     onSuccess: async (res: any) => {
       const data = await res.json();
+      if (data.status !== "sent" && data.status !== "queued") {
+        toast({ title: "Blocked — not sent", description: data.reason || `Send returned status "${data.status}"`, variant: "destructive" });
+        return;
+      }
       toast({ title: data.status === "queued" ? "Queued" : "Sent" });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
       onOpenChange(false);

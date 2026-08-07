@@ -228,11 +228,12 @@ export function QuickSendDialog({
     },
     onSuccess: async (res: any) => {
       const data = await res.json();
-      if (data.status === "skipped") {
-        toast({ title: "Not sent", description: data.reason || "Skipped", variant: "destructive" });
-      } else {
-        toast({ title: data.status === "queued" ? "Queued (quiet hours)" : "Message sent" });
+      if (data.status !== "sent" && data.status !== "queued") {
+        // Refused (HVAC gate / opt-out / no phone): keep the dialog + draft.
+        toast({ title: data.status === "blocked" ? "Blocked — not sent" : "Not sent", description: data.reason || `Send returned status "${data.status}"`, variant: "destructive" });
+        return;
       }
+      toast({ title: data.status === "queued" ? "Queued (quiet hours)" : "Message sent" });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/comms/threads"] });
       reset();
       onClose();

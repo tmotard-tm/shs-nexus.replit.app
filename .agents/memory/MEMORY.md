@@ -84,3 +84,4 @@
 - [Stale vite page kills React dispatch](vite-stale-page-react-dispatch.md) — handler on fiber, clicks bubble, nothing fires, no errors = hard-reload the dev page before debugging app code.
 - [VRM exec-summary freshness](vrm-exec-summary-freshness.md) — freshness clock = completed scheduled_sync runs ONLY (partial imports must not advance it); view-triggered auto-sync needs the durable import_runs 30-min guard, not just in-memory; ingest busts summary cache via leaf module.
 - [Comms live phone pin](comms-live-phone-pin.md) — live_tpms history rows pin a contact's phone vs the lagging snapshot until FILE_DATE strictly passes the ET pull day; all phone writers share the pin xact lock.
+- [Comms send-status contract](comms-send-status-contract.md) — refusals persist NOTHING, branch on ALL statuses; policy: no trade-based send blocking (HVAC gate removed; filter campaign lists instead).
