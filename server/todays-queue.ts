@@ -107,6 +107,12 @@ export type QueueItem = {
   research?: { by: string; at: string } | null;
   /** YYYY-MM-DD tech-pickup date (VRM-owned mirror) — set on step-2 items. */
   scheduledPickupDate?: string | null;
+  /** ElevenLabs conversation id for the call this row's status rests on.
+   *  The call RECORD lives on LIVHR, not in Nexus: all 21 Scheduling trucks
+   *  carry an id and none of them resolve in vrm_luca_activity_log or
+   *  vrm_rental_operations_call_log. Carrying the id is what lets the card
+   *  link out instead of asserting a call the operator cannot read. */
+  lastCallConversationId?: string | null;
   // ── persona-bucket decoration (additive; stamped in one post-pass) ────────
   /** Owner/dismiss key: caseKey when the truck has a rental case, else the
    *  canonical (unpadded) truck number. Fits case_key VARCHAR(10). */
@@ -624,6 +630,21 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     assigned.add(t.id);
     const sp = t.scheduledPickupDate ?? null;
     const validated = lucaReadyFor(t) || !!readyVerifiedFor(t);
+    // Fleet Scope's OWN row can contradict its own pickup claim two ways, and
+    // both were invisible on the card (Tyler 2026-08-07). Measured that day on
+    // the 21 Scheduling trucks: repair_completed was false on 13 of them, and
+    // scheduled_pickup_date was NULL on ALL 21 including the six whose
+    // sub-status literally reads "Scheduled, awaiting tech pickup".
+    // Surfaced, never silently upgraded: a shop call saying Ready does not make
+    // an unfinished repair finished, and a sub-status is not a booking.
+    // repairCompleted null/undefined means UNKNOWN, so only an explicit false
+    // is treated as a contradiction — absence of a flag is not evidence.
+    const repairNotDone = t.repairCompleted === false;
+    const claimsScheduled = /awaiting tech pickup/i.test(t.subStatus ?? '');
+    const scheduledWithoutDate = claimsScheduled && !sp;
+    const selfConflicts: string[] = [];
+    if (repairNotDone) selfConflicts.push('Fleet Scope still has repair_completed = false on this van');
+    if (scheduledWithoutDate) selfConflicts.push(`the sub-status reads "${t.subStatus}" but no pickup date has ever been set`);
     const amsRaw = amsStatusFor(t);
     const amsTerminal = amsTerminalFor(t);
     const warn = isAuthPending(t)
@@ -644,6 +665,15 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         ? `Fleet status says "Scheduling", but the last call on file (${label}${lastD ? `, ${fmtDay(lastD)}` : ''}) does not confirm the truck is ready.`
         : 'Fleet status says "Scheduling", but there is no shop call on file confirming the truck is ready.';
       actionText = warn + 'Validate before booking: call the shop (or check LUCA history) to confirm the truck is ready, then mark it Verified ready — pickup scheduling unlocks once validated.';
+    } else if (selfConflicts.length) {
+      // The call confirmed readiness but the fleet record disagrees with itself.
+      // This is a VERIFY task, not pickup work: dispatching a tech on it is how
+      // somebody drives to a shop for a van that is not finished.
+      lane = 'action';
+      const label2 = lucaStatusFor(t);
+      const lastD2 = lastCallDateFor(t);
+      whyText = `A shop call${label2 ? ` (${label2}${lastD2 ? `, ${fmtDay(lastD2)}` : ''})` : ''} says this truck is ready, but ${selfConflicts.join(' and ')}.`;
+      actionText = warn + 'Resolve the contradiction before booking: confirm with the shop that the repair is actually finished, then set the pickup date on this row. Do not dispatch the tech on the call alone.';
     } else {
       whyText = bucket === 'due'
         ? `Pickup was scheduled for ${formatDateOnly(sp!)} and that date has arrived.`
@@ -665,10 +695,13 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
       actionText,
       sortKey: daysInStatus(t),
-      isConflict: amsTerminal || undefined,
+      isConflict: (amsTerminal || (validated && selfConflicts.length > 0)) || undefined,
       repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
       scheduledPickupDate: sp,
-      schedulingValidated: validated && !amsTerminal,
+      lastCallConversationId: t.lastCallConversationId ?? null,
+      // A row that contradicts itself is NOT validated pickup work, whatever
+      // the call said. This is what keeps it out of the 'ready' cohort counts.
+      schedulingValidated: validated && !amsTerminal && selfConflicts.length === 0,
     });
   }
 

@@ -89,6 +89,7 @@ interface QueueItem {
   /** "Escalated to research" mark in effect for this case. */
   research?: { by: string; at: string } | null;
   scheduledPickupDate?: string | null;
+  lastCallConversationId?: string | null;
   // Persona-bucket decoration (Plan B)
   key?: string;
   caseKey: string | null;
@@ -1274,6 +1275,19 @@ function BucketRow({
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
                   <LucaBadge status={item.lucaStatus} />
                   {chips?.lastLucaDate && <span style={{ color: colors.inkMuted }}>{formatShortDate(chips.lastLucaDate)}</span>}
+                  {item.lastCallConversationId && (
+                    <span
+                      title={`Call ${item.lastCallConversationId}\nThe recording and transcript live on the Fleet Agents app, not in Nexus. Click to copy the id.`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigator.clipboard?.writeText(item.lastCallConversationId!);
+                      }}
+                      style={{ fontFamily: "ui-monospace, monospace", fontSize: 10, color: colors.inkMuted,
+                               border: `1px solid ${colors.rule}`, borderRadius: 5, padding: "0 4px", cursor: "copy" }}
+                    >
+                      call id
+                    </span>
+                  )}
                 </span>
               ),
             }
