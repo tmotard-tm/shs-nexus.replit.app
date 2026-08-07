@@ -29,7 +29,7 @@ import { sql } from "drizzle-orm";
 import { fleetScopeStorage } from "./fleet-scope-storage";
 import { fsDb } from "./fleet-scope-db";
 import { db } from "./db";
-import { loadQueuePoContext, loadLatestLucaDispatches, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
+import { loadQueuePoContext, loadLatestLucaDispatches, amsBucketOf, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
 import { evaluateStep9Disposition, cleanDisplayPhone, phoneDigits, nameFold, STEP9_PROBLEM_LABELS } from "./vrm/rental-operations/shop-record-flags";
 import { loadWorkbookStates, WORKBOOK_CLOSED_STATUSES, type WorkbookState } from "./vrm/rental-operations/workbook";
 import { resolveOwnerRouting, OWNER_ROSTER, type Region } from "./vrm/rental-operations/annex-a-routing";
@@ -149,6 +149,15 @@ export type QueueItem = {
   /** True when what LUCA dialed no longer matches the current reconciled shop
    *  pick (name or phone) — "verify shop info before trusting the call". */
   shopInfoMismatch?: boolean;
+  /** AMS status of THIS case's van (vrm case enrichment; null when no case or
+   *  no AMS value). Called out on every Step Board card. */
+  amsStatus?: string | null;
+  /** Server-computed bucket of amsStatus (auction/declined/in_repair/…);
+   *  null when unknown. */
+  amsBucket?: string | null;
+  /** Step-2 rows: readiness behind "Scheduling" is phone-confirmed (LUCA Ready
+   *  or manual verify). False = the row is a validation task, not a pickup. */
+  schedulingValidated?: boolean;
 };
 
 /**
@@ -292,7 +301,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // precedence as read-repository's renter_own_truck). The assigned truck is
     // what splits "source a replacement" from "replacement already assigned".
     db.execute(sql`
-      SELECT c.case_key, c.vehicle_number_padded, c.vehicle_number,
+      SELECT c.case_key, c.vehicle_number_padded, c.vehicle_number, c.ams_status,
              i.resolved_district AS tech_district,
              UPPER(TRIM(atr.tech_racfid)) AS tech_ldap,
              COALESCE(rt.tpms_truck, atr.truck_lu, atr.last_known_truck_lu) AS assigned_truck
@@ -361,12 +370,14 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   const districtByCase = new Map<string, string | null>();
   const ldapByCase = new Map<string, string>();
   const assignedTruckByCase = new Map<string, string>();
+  const amsStatusByCase = new Map<string, string | null>();
   for (const r of ((caseResult as any).rows ?? []) as any[]) {
     const ck = String(r.case_key);
     caseKeyByCanon.set(canon(r.vehicle_number_padded ?? r.vehicle_number ?? r.case_key), ck);
     districtByCase.set(ck, r.tech_district != null ? String(r.tech_district) : null);
     if (r.tech_ldap) ldapByCase.set(ck, String(r.tech_ldap));
     if (r.assigned_truck) assignedTruckByCase.set(ck, String(r.assigned_truck));
+    amsStatusByCase.set(ck, r.ams_status != null ? String(r.ams_status) : null);
   }
 
   const phoneByLdap = new Map<string, string>();
@@ -542,6 +553,20 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     return resolvedAfter ? null : r;
   }
 
+  // AMS status of THIS case's van (vrm_rental_operations_cases.ams_status,
+  // rental-board enrichment). Declined / sent-to-auction per AMS is TERMINAL:
+  // that van is never scheduled for pickup — the real work is fixing the
+  // status record and running the replacement/retrieval path on the tech's
+  // assigned truck (user directive 2026-08-07).
+  function amsStatusFor(t: Truck): string | null {
+    const ck = caseKeyByCanon.get(canon(t.truckNumber));
+    return ck ? amsStatusByCase.get(ck) ?? null : null;
+  }
+  function amsTerminalFor(t: Truck): boolean {
+    const b = amsBucketOf(amsStatusFor(t));
+    return b === 'declined' || b === 'auction';
+  }
+
   const items: QueueItem[] = [];
   const assigned = new Set<string>();
   /** "Aug 5" for whyText evidence lines. */
@@ -589,32 +614,61 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       if (a.bucket === 'unscheduled') return daysInStatus(b.t) - daysInStatus(a.t); // longest-waiting first
       return String(a.t.scheduledPickupDate).localeCompare(String(b.t.scheduledPickupDate)); // date ascending
     });
+  // VALIDATION GATE (user directive 2026-08-07): "Scheduling" is seeded from
+  // Fleet Scope and is a CLAIM, not evidence. A row only presents as pickup
+  // work when readiness is phone-confirmed (LUCA Ready or a manual verify);
+  // otherwise it is an action-lane validation task. AMS terminal states
+  // (declined / sent to auction) override everything: that van is never
+  // picked up — fix the record and work the replacement/retrieval path.
   for (const { t, bucket } of schedulingTrucks) {
     assigned.add(t.id);
     const sp = t.scheduledPickupDate ?? null;
-    const base = bucket === 'due'
-      ? `Pickup was scheduled for ${formatDateOnly(sp!)} — confirm the tech returned the rental and collected the truck, then update the status`
-      : bucket === 'future'
-        ? `Pickup scheduled for ${formatDateOnly(sp!)} — no action needed until then`
-        : 'No pickup scheduled — set the date on this row in VRM Ops Queue (books the rental-return block on the tech\'s route)';
+    const validated = lucaReadyFor(t) || !!readyVerifiedFor(t);
+    const amsRaw = amsStatusFor(t);
+    const amsTerminal = amsTerminalFor(t);
     const warn = isAuthPending(t)
       ? '⚠️ Holman PO shows authorization pending — confirm with Rob before proceeding. '
       : '';
-    items.push({
-      step: 2, stepTitle: 'SCHEDULE TECH PICKUP',
-      lane: 'ready',
-      whyText: bucket === 'due'
+    let lane: QueueLane = 'ready';
+    let whyText: string;
+    let actionText: string;
+    if (amsTerminal) {
+      lane = 'action';
+      whyText = `AMS says this van is "${amsRaw}" — a declined/auction unit is never picked up, yet the fleet status still says "Scheduling".`;
+      actionText = warn + "Fix the status conflict: correct the fleet status and work the replacement/retrieval path on the tech's assigned truck — do not book a pickup for this van.";
+    } else if (!validated) {
+      const label = lucaStatusFor(t);
+      const lastD = lastCallDateFor(t);
+      lane = 'action';
+      whyText = label
+        ? `Fleet status says "Scheduling", but the last call on file (${label}${lastD ? `, ${fmtDay(lastD)}` : ''}) does not confirm the truck is ready.`
+        : 'Fleet status says "Scheduling", but there is no shop call on file confirming the truck is ready.';
+      actionText = warn + 'Validate before booking: call the shop (or check LUCA history) to confirm the truck is ready, then mark it Verified ready — pickup scheduling unlocks once validated.';
+    } else {
+      whyText = bucket === 'due'
         ? `Pickup was scheduled for ${formatDateOnly(sp!)} and that date has arrived.`
         : bucket === 'future'
           ? `Pickup is booked for ${formatDateOnly(sp!)}.`
-          : 'The truck is in "Scheduling" but no pickup date has been set yet.',
+          : 'The truck is in "Scheduling" but no pickup date has been set yet.';
+      actionText = warn + (bucket === 'due'
+        ? `Pickup was scheduled for ${formatDateOnly(sp!)} — confirm the tech returned the rental and collected the truck, then update the status`
+        : bucket === 'future'
+          ? `Pickup scheduled for ${formatDateOnly(sp!)} — no action needed until then`
+          : 'No pickup scheduled — set the date on this row in VRM Ops Queue (books the rental-return block on the tech\'s route)');
+    }
+    items.push({
+      step: 2, stepTitle: 'SCHEDULE TECH PICKUP',
+      lane,
+      whyText,
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
-      actionText: warn + base,
+      actionText,
       sortKey: daysInStatus(t),
+      isConflict: amsTerminal || undefined,
       repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
       scheduledPickupDate: sp,
+      schedulingValidated: validated && !amsTerminal,
     });
   }
 
@@ -628,7 +682,11 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // exclude them here so they are not absorbed before reaching their step.
     ['Tags', 'Declined Repair'].includes(t.mainStatus ?? '') ||
     // If authorization is still pending, let it fall to Step 4.
-    isAuthPending(t);
+    isAuthPending(t) ||
+    // AMS-terminal (declined/auction) vans are never pickup candidates even
+    // when a call said Ready — the classifier pivots them to the status-
+    // conflict / replacement path instead (post-pass).
+    amsTerminalFor(t);
   const step3Candidates = [...allTrucks].filter(t => {
     if (assigned.has(t.id) || stepReadyExcluded(t)) return false;
     // Ready only if the latest call actually confirms it — a newer in-flight call must not let
@@ -953,6 +1011,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       noQualifyingPo: false, // SOP: source not yet available (workload mismatch lives on the case board)
       decommission: decomSet.has(cKey),
       declinedOrAuction: ms === 'Declined Repair' || ms === 'Approved for sale',
+      amsTerminal: amsTerminalFor(t),
       replacementAssigned: assignedDiffers,
       assignedTruckInRepair: assignedInRepair,
       readyGuardDowngraded: false, // SOP: source not yet available (no ready-guard downgrade ledger)
@@ -1042,8 +1101,13 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     it.techLdap = ldap;
     it.techPhone = (ldap ? phoneByLdap.get(ldap) ?? null : null) ?? t.techPhone ?? null;
     it.assignedTruck = assignedDiffers ? assignedRaw : null;
-    it.replacementAssigned = assignedDiffers && input.declinedOrAuction;
+    // AMS terminal counts the same as a declined/auction fleet status here:
+    // either way the van is gone and the tech being on a different truck
+    // means the replacement leg is already done.
+    it.replacementAssigned = assignedDiffers && (input.declinedOrAuction || input.amsTerminal);
     it.assignedTruckInRepair = assignedInRepair;
+    it.amsStatus = amsStatusFor(t);
+    it.amsBucket = (() => { const b = amsBucketOf(it.amsStatus ?? null); return b === 'unknown' ? null : b; })();
     // Fallback repair_phone must not surface portal placeholder junk
     // (222-222-2222 & friends) — the reconciled context phone is already
     // junk-guarded server-side; the fs_trucks mirror is not.

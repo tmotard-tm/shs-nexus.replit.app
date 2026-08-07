@@ -74,7 +74,7 @@
 - [tpms_tech_profiles tech_id NOT unique](tpms-techid-not-unique.md) — multiple techs share one tech_id; any read/write keyed on tech_id corrupts (name-stamping); always key on enterprise_id; heal via run-tpms-name-heal.ts.
 - [Rightsize rate policy](rightsize-rate-policy.md) — rate OR vehicle OR SMS are independent compliance paths (rate-secured = right-sized even in a larger unit); rate talk proposes DONE/review; confirm policy pivots with Tyler before rewiring math.
 - [Standard Activities route-block dark launch](standard-activities-route-block.md) — TEST prefix ≠ no POST; live gate is an env flag (default off, ActivityType unconfirmed); 409 never re-fire; no cancel API → warn on supersede; record date BEFORE filing.
-- [Queue triage lanes & red policy](queue-triage-lanes.md) — server-stamped lane+whyText; closed PO ≠ pickup urgency; step 9 evidence-aware: demote only on dialable pick or dial≠pick provenance, never date-only.
+- [Queue triage lanes & red policy](queue-triage-lanes.md) — server-stamped lane+whyText; closed PO ≠ pickup; "Scheduling" needs LUCA/manual validation; AMS declined/auction terminal overrides; step-9 demotes on evidence only.
 - [Todays-queue perf layering](todays-queue-perf-layering.md) — 30s queue cache + 5min SWR PO-context + 5s spare-pool timeout; every new queue-mutating route must bust the cache or the settle refetch reads stale.
 - [Shop-of-record single source](shop-of-record-single-source.md) — every surface incl. boards shows the server-reconciled pick (portal fallback only when field absent); dispatch map = namespaced truck:/case: keys.
 - [Ready = phone-confirmed only](ready-phone-confirmed-only.md) — closed PO/ERD is a "confirm with shop" signal, never ready; verify/research marks are shared append-only rows across all three VRM views.
@@ -85,3 +85,6 @@
 - [VRM exec-summary freshness](vrm-exec-summary-freshness.md) — freshness clock = completed scheduled_sync runs ONLY (partial imports must not advance it); view-triggered auto-sync needs the durable import_runs 30-min guard, not just in-memory; ingest busts summary cache via leaf module.
 - [Comms live phone pin](comms-live-phone-pin.md) — live_tpms history rows pin a contact's phone vs the lagging snapshot until FILE_DATE strictly passes the ET pull day; all phone writers share the pin xact lock.
 - [Comms send-status contract](comms-send-status-contract.md) — refusals persist NOTHING, branch on ALL statuses; policy: no trade-based send blocking (HVAC gate removed; filter campaign lists instead).
+- [Bedrock reasoning eats maxTokens](bedrock-reasoning-budget.md) — tight maxTokens returns EMPTY text (not truncated) on big prompts; never read content[0], take the first block with .text.
+- [Shop-from-comments LLM fallback](shop-llm-fallback.md) — LLM runs only when header pick is empty or superseded by a newer payment PO; same gates as scraped headers; evidence-hash cache; force = cap-exempt.
+- [LUCA activity ledger semantics](luca-activity-ledger.md) — ledger logs first sightings + run heartbeats, not every poll; a quiet ledger with healthy heartbeats is working as designed.

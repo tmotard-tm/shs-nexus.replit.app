@@ -131,8 +131,9 @@ const panelLabel: CSSProperties = { fontFamily: fonts.dmSans, fontSize: 10.5, co
 const money2 = (n: any) => (n == null || n === "" ? "" : `$${Number(n).toFixed(2)}`);
 
 // AMS label -> bucket/colour, mirroring the server's amsBucketOf so the assigned
-// truck's pill reads the same as the AMS pills in the grid.
-function amsBucketOfLabel(status: string | null): string {
+// truck's pill reads the same as the AMS pills in the grid. Exported: the Ops
+// Queue AMS callout pill uses the same vocabulary.
+export function amsBucketOfLabel(status: string | null): string {
   const s = (status || "").toLowerCase();
   if (!s) return "unknown";
   if (s.includes("auction")) return "auction";
@@ -145,13 +146,13 @@ function amsBucketOfLabel(status: string | null): string {
   if (s.includes("assign")) return "assigned";
   return "other";
 }
-function amsColorOf(b: string): string {
+export function amsColorOf(b: string): string {
   return b === "auction" || b === "declined" ? colors.red
     : b === "in_repair" ? colors.amber
     : b === "assigned" || b === "in_use" ? colors.green
     : colors.inkSoft;
 }
-function amsTintOf(b: string): string {
+export function amsTintOf(b: string): string {
   return b === "auction" || b === "declined" ? colors.redLight
     : b === "in_repair" ? colors.amberLight
     : b === "assigned" || b === "in_use" ? colors.greenLight

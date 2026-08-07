@@ -37,6 +37,12 @@ export const CLASSIFICATIONS: readonly ClassificationDef[] = [
     actionHint: "The tech is already assigned a different truck — nothing to source. Confirm the rental went back and close the case." },
   { key: "retrieval_pending", label: "Retrieval pending (decommission / sold)", priority: 1, slaBusinessDays: 5, ownerRule: "jennifer",
     actionHint: "Decommissioned / sold — arrange retrieval of the unit and close the rental." },
+  // AMS is an equal terminal authority: when AMS says the van was declined /
+  // sent to auction but the fleet status has NOT caught up, the record
+  // conflict itself is the work — fix the status, then the case follows the
+  // replacement/retrieval path above. Never pickup scheduling.
+  { key: "ams_status_conflict", label: "AMS declined/auction — fix status conflict", priority: 2, slaBusinessDays: 1, ownerRule: "regional",
+    actionHint: "AMS says this van was declined / sent to auction, but the fleet status hasn't caught up. Correct the fleet status — the case follows the replacement/retrieval path, never pickup scheduling." },
   { key: "luca_escalated", label: "LUCA escalated", priority: 2, slaBusinessDays: 2, ownerRule: "regional",
     actionHint: "LUCA escalated this case — read the last call summary, then take over the shop conversation." },
   { key: "unverified_confirm", label: "Unverified — confirm by phone", priority: 2, slaBusinessDays: 2, ownerRule: "regional",
@@ -51,6 +57,11 @@ export const CLASSIFICATIONS: readonly ClassificationDef[] = [
     actionHint: "Shop could not be validated from POs and calls on file — research where the truck is and its repair status." },
   { key: "schedule_tech_pickup", label: "Schedule tech pickup", priority: 2, slaBusinessDays: 2, ownerRule: "regional",
     actionHint: "Set (or chase) the tech's pickup date — use the Schedule button to book the route block." },
+  // "Scheduling" seeded from Fleet Scope is a CLAIM, not evidence (user
+  // directive 2026-08-07): without a phone-confirmed ready the row is a
+  // validation task, and schedule_tech_pickup stays locked until it clears.
+  { key: "scheduling_unvalidated", label: "Scheduling — validate with shop first", priority: 2, slaBusinessDays: 2, ownerRule: "regional",
+    actionHint: "Status says Scheduling, but no phone-confirmed call backs it up. Call the shop to confirm the truck is ready; if it is, mark it Verified ready — pickup scheduling unlocks once validated." },
   { key: "confirm_rental_returned", label: "Confirm rental returned", priority: 2, slaBusinessDays: null, ownerRule: "regional",
     actionHint: "Confirm the rental was actually returned, then close the case out." },
   { key: "pickup_follow_up", label: "Pickup follow-up", priority: 2, slaBusinessDays: null, ownerRule: "regional",
@@ -162,6 +173,9 @@ export interface ClassifyInput {
   noQualifyingPo: boolean;
   decommission: boolean;
   declinedOrAuction: boolean;
+  /** AMS says the rental's van was declined for repair / sent to auction —
+   *  terminal for the van regardless of what the fleet status claims. */
+  amsTerminal: boolean;
   /** TPMS shows the tech currently assigned a DIFFERENT truck than this case's. */
   replacementAssigned: boolean;
   /** …and that assigned truck itself carries an open qualifying repair PO. */
@@ -186,7 +200,10 @@ export function classify(x: ClassifyInput): string[] {
   // assigned; replacement itself in the shop → LUCA already tracks that repair
   // on the VRM pages. Both dead-end to [] (Jennifer's decommission retrieval
   // still fires — that flow is hers regardless).
-  if (x.declinedOrAuction) {
+  if (x.declinedOrAuction || x.amsTerminal) {
+    // AMS disagreeing with the fleet status is itself the actionable finding —
+    // surface the conflict instead of letting the case dead-end invisibly.
+    if (x.amsTerminal && !x.declinedOrAuction) out.push("ams_status_conflict");
     if (x.replacementAssigned && !x.assignedTruckInRepair) out.push("replacement_assigned");
     if (x.decommission) out.push("retrieval_pending");
     return out.sort((a, b) => CLASSIFICATION_BY_KEY.get(a)!.priority - CLASSIFICATION_BY_KEY.get(b)!.priority);
@@ -201,8 +218,14 @@ export function classify(x: ClassifyInput): string[] {
   const confirmedReady = x.lucaReady || x.readyVerified;
   if (confirmedReady) out.push("vehicle_ready_schedule");
   if (x.researchActive && !confirmedReady) out.push("research_truck_status");
-  if ((x.poClosedWhileInRepair || x.erdPassed) && !confirmedReady && !x.researchActive) out.push("po_closed_confirm");
-  if (x.schedulingDue || x.schedulingUnscheduled) out.push("schedule_tech_pickup");
+  // "Scheduling" seeded from Fleet Scope is a CLAIM, not evidence: without a
+  // phone-confirmed ready (LUCA call or manual verification) the row is a
+  // validation task and pickup scheduling stays locked (directive 2026-08-07).
+  // Research absorbs the chase the same way it absorbs po_closed_confirm.
+  const schedulingUnvalidated = x.fleetScopeStatus === "Scheduling" && !confirmedReady && !x.researchActive;
+  if (schedulingUnvalidated) out.push("scheduling_unvalidated");
+  if ((x.poClosedWhileInRepair || x.erdPassed) && !confirmedReady && !x.researchActive && !schedulingUnvalidated) out.push("po_closed_confirm");
+  if ((x.schedulingDue || x.schedulingUnscheduled) && confirmedReady) out.push("schedule_tech_pickup");
   if (x.returnInFlight) out.push("confirm_rental_returned");
   if (x.pickupDatePassed) out.push("pickup_follow_up");
   if ((x.subStatus ?? "").toLowerCase().includes("authorization") || x.lucaStatus === "In Authorization" || x.fleetScopeStatus === "Decision Pending") out.push("authorization_needed");

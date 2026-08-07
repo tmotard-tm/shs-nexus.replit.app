@@ -35,6 +35,7 @@ import { sql } from "drizzle-orm";
 import { toCanonical, toDisplayNumber } from "../../vehicle-number-utils";
 import type { SvcHistoryResult } from "./holman-svc-scrape";
 import { classifyPoVendor, isNeverShopVendor, type PoClassLine } from "./vendor-class";
+import { maybeExtractShopFromComments } from "./shop-comment-extract";
 // THE reconciliation, imported — never re-typed here. See the note above
 // findScrapeTargets for what the previous hand-copy cost.
 import { poEffectiveCte, SHOP_PICK_CTE } from "./read-repository";
@@ -113,9 +114,10 @@ function trimEvent(e: any) {
 // never be picked as the shop at all, parts/labor or not (isNeverShopVendor,
 // same test the shop_pick/shop_strict CTEs apply on the ETL side).
 // The portal's lineItems carry `typeDesc` (PARTS | LABOR | RENTAL | ROADSIDE | …).
-const isRealShop = (p: any) =>
+export const isRealShopPo = (p: any) =>
   !isNeverShopVendor(p?.vendorName)
   && classifyPoVendor({ vendorName: p?.vendorName ?? null, lines: (p?.lineItems as PoClassLine[]) ?? null }).vendorType === "repair";
+const isRealShop = isRealShopPo;
 function parseDate(s: any): number { const m = String(s ?? "").match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[1] - 1, +m[2]).getTime() : 0; }
 
 function spawnScrape(vehicles: string[]): Promise<SvcHistoryResult[]> {
@@ -210,6 +212,23 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
   const histJson = JSON.stringify(events);
   const next = pickShopFromEvents(events);
 
+  // LLM COMMENT FALLBACK (Tyler 8/6): when the headers cannot name a callable
+  // shop — nothing eligible, or the newest PO is a payment instrument (Single
+  // Use CC) that superseded the last shop PO — ask Bedrock to read the PO
+  // notes / message trail for where the van actually is. Evidence-hash cached
+  // and rate-capped inside; never throws; a null keeps the deterministic
+  // answer. Runs BEFORE the lock/sticky guards below so an operator lock
+  // still beats the model.
+  let phoneFromLlm = false;
+  const llmShop = await maybeExtractShopFromComments(caseKey, events, { shopName: next.shopName });
+  if (llmShop) {
+    next.shopName = llmShop.shopName;
+    next.shopPhone = llmShop.shopPhone;
+    next.shopAddress = llmShop.shopAddress;
+    next.shopSrc = "llm_comments";
+    phoneFromLlm = true;
+  }
+
   // DELTA WRITE. "Only bring in from the scraper what's different" applies to the
   // table too, not just to which trucks we visit.
   //
@@ -267,7 +286,9 @@ export async function upsertTruck(caseKey: string, rawHist: any[], scrapedAt: st
   // value is genuinely replaced by portal content it becomes 'scrape'.
   const nextPhoneSource: string | null = phoneLocked
     ? (prev?.shop_phone_source ?? "manual")
-    : (prev && (prev.shop_phone ?? null) === next.shopPhone ? (prev.shop_phone_source ?? null) : "scrape");
+    : (prev && (prev.shop_phone ?? null) === next.shopPhone
+        ? (prev.shop_phone_source ?? null)
+        : (phoneFromLlm ? "llm_comments" : "scrape"));
   if (prev) {
     // A false "changed" only costs one UPDATE we would otherwise have written
     // anyway, so err toward writing.

@@ -306,8 +306,12 @@ export async function invokeBedrock(
     });
     if (res.ok) {
       const data: any = await res.json();
+      // Current-gen Claude profiles can prepend reasoning blocks to `content`;
+      // take the first block that actually carries text, not blindly [0].
+      const blocks: any[] = Array.isArray(data?.output?.message?.content) ? data.output.message.content : [];
+      const textBlock = blocks.find((b) => typeof b?.text === "string" && b.text.trim() !== "");
       return {
-        text: String(data?.output?.message?.content?.[0]?.text ?? "").trim(),
+        text: String(textBlock?.text ?? "").trim(),
         modelId,
         usage: data?.usage,
       };

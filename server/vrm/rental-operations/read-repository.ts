@@ -738,7 +738,7 @@ export interface MasterModel {
   generatedAt: string;
 }
 
-function amsBucketOf(status: string | null): string {
+export function amsBucketOf(status: string | null): string {
   const s = (status || "").toLowerCase();
   if (!s) return "unknown";
   if (s.includes("auction")) return "auction";

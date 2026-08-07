@@ -36,6 +36,7 @@ import { UNROUTED_OWNER } from "./annex-a-routing";
 import { loadTechHomeStates } from "./tech-home-states";
 import { isAutoTextOnReadyEnabled } from "./settings";
 import { sendPickupText } from "./pickup-sms";
+import { logLucaActivity } from "./luca-activity";
 
 const LIVHR_BASE_URL = (process.env.LUCA_BASE_URL || process.env.LIVHR_BASE_URL || "https://fleetagents.replit.app").replace(/\/+$/, "");
 const AGENT_TOKEN = process.env.AGENT_RUN_SECRET || process.env.LUCA_AGENT_TOKEN || "";
@@ -103,6 +104,38 @@ export async function notifyReadyFlip(input: {
   detail?: string | null;
   externalId?: string | number | null;
   /** Compute region + gates but touch nothing external. For tests. */
+  dryRun?: boolean;
+}): Promise<ReadyNotifyResult> {
+  const out = await notifyReadyFlipInner(input);
+  // Sync-health ledger (never throws). Skipped for dry-run: tests must stay
+  // side-effect free. The inner function has many returns; wrapping here
+  // guarantees exactly one ledger row per real flip regardless of which
+  // branch produced the result.
+  if (!input.dryRun) {
+    await logLucaActivity({
+      direction: "outbound",
+      eventType: "ready_notify",
+      status: out.email.sent
+        ? "ok"
+        : out.email.reason?.includes("needs-routing")
+          ? "fallback"
+          : "failed",
+      caseKey: out.caseKey,
+      externalId: input.externalId ?? null,
+      actor: "system:ready-notify",
+      summary:
+        `region ${out.regionLabel} → ${out.owner}: email ${out.email.sent ? "sent" : `not sent (${out.email.reason ?? "?"})`}` +
+        `; auto-text ${out.autoText.enabled ? (out.autoText.status ?? out.autoText.reason ?? "?") : "off"}`,
+      detail: { region: out.region, owner: out.owner, email: out.email, autoText: out.autoText },
+    });
+  }
+  return out;
+}
+
+async function notifyReadyFlipInner(input: {
+  caseKey: string;
+  detail?: string | null;
+  externalId?: string | number | null;
   dryRun?: boolean;
 }): Promise<ReadyNotifyResult> {
   const out: ReadyNotifyResult = {

@@ -62,6 +62,7 @@ import {
   runUnderAdvisoryLock,
   AdvisoryLockUnavailableError,
 } from "../fleetscope-snowflake-sync-lock";
+import { logLucaActivity } from "../vrm/rental-operations/luca-activity";
 import {
   mapOutboxTask,
   mapCallOutcome,
@@ -254,10 +255,25 @@ async function markTaskSynced(
           `(dedup row protects against re-apply; will re-PATCH next poll)`,
       );
     }
+    // Consuming a task is THE destructive outbound action (only the deployment
+    // may do it) — every attempt gets a ledger row, success or not.
+    await logLucaActivity({
+      direction: "outbound", eventType: "mark_synced",
+      status: res.ok ? "ok" : "failed",
+      externalId: taskId, actor: "LUCA-writeback",
+      summary: res.ok
+        ? `outbox task ${taskId} consumed on LIVHR (${nexusTaskId})`
+        : `mark-synced FAILED for task ${taskId}: HTTP ${res.status} — will re-PATCH next poll`,
+    });
   } catch (err: any) {
     console.warn(
       `[LUCA-Writeback] mark-synced error for task ${taskId}: ${err?.message ?? err}`,
     );
+    await logLucaActivity({
+      direction: "outbound", eventType: "mark_synced", status: "failed",
+      externalId: taskId, actor: "LUCA-writeback",
+      summary: `mark-synced ERROR for task ${taskId}: ${err?.message ?? err}`,
+    });
   }
 }
 
@@ -389,23 +405,44 @@ async function routeTerminalViaVrm(
   const norm = normalizeTruckNumber(mapped.truckNumberDisplay ?? mapped.truckNumberCanonical);
   if (!norm) {
     console.warn(`[LUCA-Writeback] ${label}: terminal status but unusable truck number — using direct fs_trucks write`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_terminal_status", status: "failed",
+      truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId, actor: "LUCA",
+      summary: `terminal status but unusable truck number — direct fs_trucks write only`,
+    });
     return false;
   }
   const caseKey = norm.display;
   const desc = `${terminal.mainStatus}${terminal.subStatus ? ` / ${terminal.subStatus}` : ""}`;
   if (!apply) {
     console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD append VRM fleet-status ${caseKey} -> ${desc} (mirror would update fs_trucks)`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_terminal_status", status: "log_only",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA", summary: `LOG-ONLY: would append ${caseKey} → ${desc}`,
+    });
     return true;
   }
   try {
     await appendFleetStatus(caseKey, terminal.mainStatus, terminal.subStatus, "LUCA");
     invalidateTodaysQueueCache("luca-terminal-status");
     console.log(`[LUCA-Writeback] ${label}: VRM fleet-status ${caseKey} -> ${desc} (mirrored to fs_trucks)`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_terminal_status", status: "ok",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA", summary: `${caseKey} → ${desc} (mirrored to fs_trucks)`,
+    });
     return true;
   } catch (err: any) {
     console.warn(
       `[LUCA-Writeback] ${label}: VRM fleet-status append failed for ${caseKey} (${err?.message ?? err}) — falling back to direct fs_trucks write`,
     );
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_terminal_status", status: "failed",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA",
+      summary: `append FAILED for ${caseKey} → ${desc}: ${err?.message ?? err} — falling back to direct fs_trucks write`,
+    });
     return false;
   }
 }
@@ -438,12 +475,22 @@ async function routeReadyStatusViaVrm(
   const norm = normalizeTruckNumber(mapped.truckNumberDisplay ?? mapped.truckNumberCanonical);
   if (!norm) {
     console.warn(`[LUCA-Writeback] ${label}: ready status but unusable truck number — leaving fleet status as-is`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_ready_status", status: "failed",
+      truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId, actor: "LUCA",
+      summary: `ready status but unusable truck number — fleet status left as-is`,
+    });
     return false;
   }
   const caseKey = norm.display;
   const desc = `${FS_MAIN_SCHEDULING} / ${FS_SUB_TO_BE_SCHEDULED}`;
   if (!apply) {
     console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD append VRM fleet-status ${caseKey} -> ${desc} (ready call resolves "${truck.mainStatus}")`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_ready_status", status: "log_only",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA", summary: `LOG-ONLY: would append ${caseKey} → ${desc} (resolves "${truck.mainStatus}")`,
+    });
     return true;
   }
   try {
@@ -460,15 +507,31 @@ async function routeReadyStatusViaVrm(
     );
     if (!g.applied) {
       console.log(`[LUCA-Writeback] ${label}: ready-status append skipped for ${caseKey} — ${g.skippedReason}`);
+      await logLucaActivity({
+        direction: "inbound", eventType: "vrm_ready_status", status: "skipped",
+        caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+        actor: "LUCA", summary: `append skipped for ${caseKey} — ${g.skippedReason}`,
+      });
       return false;
     }
     invalidateTodaysQueueCache("luca-ready-status");
     console.log(`[LUCA-Writeback] ${label}: VRM fleet-status ${caseKey} -> ${desc} (ready call resolves "${truck.mainStatus}")`);
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_ready_status", status: "ok",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA", summary: `${caseKey} → ${desc} (ready call resolves "${truck.mainStatus}")`,
+    });
     return true;
   } catch (err: any) {
     console.warn(
       `[LUCA-Writeback] ${label}: VRM ready-status append failed for ${caseKey} (${err?.message ?? err}) — status left as-is; the queue keeps showing the conflict`,
     );
+    await logLucaActivity({
+      direction: "inbound", eventType: "vrm_ready_status", status: "failed",
+      caseKey, truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+      actor: "LUCA",
+      summary: `append FAILED for ${caseKey}: ${err?.message ?? err} — queue keeps showing the conflict`,
+    });
     return false;
   }
 }
@@ -493,9 +556,22 @@ async function processItem(
 ): Promise<void> {
   const label = `${mapped.source} ${mapped.externalId}`;
 
+  // First-sighting gate for the activity ledger: the feed re-serves items on
+  // every poll, so per-item ledger rows are written only when the outcome is
+  // NEW (see luca-activity.ts noise policy). Fetched before the skip branch
+  // so structurally unusable items get the same gate.
+  const priorOutcome = await getDedupOutcome(mapped.source, mapped.externalId);
+
   if (mapped.skip) {
     result.noOp++;
     console.log(`[LUCA-Writeback] ${label}: SKIP (${mapped.skip})`);
+    if (priorOutcome !== "no_op") {
+      await logLucaActivity({
+        direction: "inbound", eventType: "writeback_skip", status: "skipped",
+        truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+        actor: "LUCA-writeback", summary: `${label}: ${mapped.skip}`,
+      });
+    }
     if (cfg.apply) {
       await upsertWritebackLog({
         source: mapped.source,
@@ -515,10 +591,22 @@ async function processItem(
     return;
   }
 
-  const dedup = decideRedelivery(await getDedupOutcome(mapped.source, mapped.externalId));
+  const dedup = decideRedelivery(priorOutcome);
   if (dedup === "skip") {
     result.duplicates++;
     console.log(`[LUCA-Writeback] ${label}: duplicate delivery — already applied, skipping`);
+    // Ledger: only outbox-task duplicates. A TASK re-appearing means the LIVHR
+    // consume PATCH failed — signal. Call-outcome duplicates are the feed's
+    // normal full re-serve (~170/poll) and stay out of the ledger; the run
+    // heartbeat carries their count.
+    if (mapped.source === "outbox_task") {
+      await logLucaActivity({
+        direction: "inbound", eventType: "writeback_duplicate", status: "skipped",
+        truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+        actor: "LUCA-writeback",
+        summary: `${label}: re-delivered after a prior apply — re-consuming`,
+      });
+    }
     // The apply happened on a prior run; if the LIVHR PATCH failed back then,
     // re-consume so the task stops re-appearing in the PENDING feed.
     if (cfg.apply && mapped.source === "outbox_task" && cfg.markSynced) {
@@ -546,6 +634,13 @@ async function processItem(
         if (vrm.outcome === "applied") {
           result.vrmReadyApplied = (result.vrmReadyApplied ?? 0) + 1;
           console.log(`[LUCA-Writeback] ${label}: VRM case ${vrm.caseKey} -> Ready for pickup`);
+          await logLucaActivity({
+            direction: "inbound", eventType: "vrm_ready_flip", status: "ok",
+            caseKey: vrm.caseKey ?? null, truckNumber: mapped.truckNumberDisplay,
+            externalId: mapped.externalId, actor: "LUCA",
+            summary: `case ${vrm.caseKey} → Ready for pickup (${rawReasonOf(rawItem) ?? "ready"})`,
+            detail: { detail: (rawItem as any)?.detail ?? null },
+          });
           // Region-owner email + (if the toggle is on) the automatic pickup
           // text. AWAITED on purpose: the scheduled-deployment trigger exits
           // right after the poll, and a fire-and-forget here would silently
@@ -568,10 +663,25 @@ async function processItem(
           }
         } else {
           console.log(`[LUCA-Writeback] ${label}: VRM ready no-op (${vrm.outcome}: ${vrm.detail})`);
+          // No-op recurs on every re-delivery (e.g. unknown-truck items are
+          // never consumed) — ledger only the first sighting.
+          if (priorOutcome == null) {
+            await logLucaActivity({
+              direction: "inbound", eventType: "vrm_ready_flip", status: "skipped",
+              caseKey: vrm.caseKey ?? null, truckNumber: mapped.truckNumberDisplay,
+              externalId: mapped.externalId, actor: "LUCA",
+              summary: `ready no-op (${vrm.outcome}: ${vrm.detail})`,
+            });
+          }
         }
       } catch (err: any) {
         // Never fatal: the FleetScope half of this run must still complete.
         console.warn(`[LUCA-Writeback] ${label}: VRM ready write failed: ${err?.message}`);
+        await logLucaActivity({
+          direction: "inbound", eventType: "vrm_ready_flip", status: "failed",
+          truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+          actor: "LUCA", summary: `ready write FAILED: ${err?.message ?? err}`,
+        });
       }
     } else {
       console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD flip VRM case for truck ${mapped.truckNumberDisplay} to Ready for pickup`);
@@ -603,12 +713,32 @@ async function processItem(
         if (vrm.outcome === "applied") {
           result.vrmAttentionApplied = (result.vrmAttentionApplied ?? 0) + 1;
           console.log(`[LUCA-Writeback] ${label}: VRM case ${vrm.caseKey} -> Escalated (${reason})`);
+          await logLucaActivity({
+            direction: "inbound", eventType: "vrm_attention_flag", status: "ok",
+            caseKey: vrm.caseKey ?? null, truckNumber: mapped.truckNumberDisplay,
+            externalId: mapped.externalId, actor: "LUCA",
+            summary: `case ${vrm.caseKey} → Escalated (${reason})`,
+            detail: { detail: (rawItem as any)?.detail ?? null },
+          });
         } else {
           console.log(`[LUCA-Writeback] ${label}: VRM attention no-op (${vrm.outcome}: ${vrm.detail})`);
+          if (priorOutcome == null) {
+            await logLucaActivity({
+              direction: "inbound", eventType: "vrm_attention_flag", status: "skipped",
+              caseKey: vrm.caseKey ?? null, truckNumber: mapped.truckNumberDisplay,
+              externalId: mapped.externalId, actor: "LUCA",
+              summary: `attention no-op (${vrm.outcome}: ${vrm.detail})`,
+            });
+          }
         }
       } catch (err: any) {
         // Never fatal: the FleetScope half of this run must still complete.
         console.warn(`[LUCA-Writeback] ${label}: VRM attention write failed: ${err?.message}`);
+        await logLucaActivity({
+          direction: "inbound", eventType: "vrm_attention_flag", status: "failed",
+          truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+          actor: "LUCA", summary: `attention write FAILED (${reason}): ${err?.message ?? err}`,
+        });
       }
     } else {
       console.log(`[LUCA-Writeback][LOG-ONLY] ${label}: WOULD flag VRM case for truck ${mapped.truckNumberDisplay} as Escalated (${reason})`);
@@ -622,6 +752,14 @@ async function processItem(
       `[LUCA-Writeback] ${label}: truck ${mapped.truckNumberDisplay} not in fs_trucks — ` +
         `left un-consumed (will retry; truck may appear on the next rental sync)`,
     );
+    if (priorOutcome !== "skipped_unknown_truck") {
+      await logLucaActivity({
+        direction: "inbound", eventType: "writeback_unknown_truck", status: "skipped",
+        truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+        actor: "LUCA-writeback",
+        summary: `truck ${mapped.truckNumberDisplay} not in fs_trucks — left un-consumed, retries after the next rental sync`,
+      });
+    }
     if (cfg.apply) {
       await upsertWritebackLog({
         source: mapped.source,
@@ -704,6 +842,17 @@ async function processItem(
         `(fs id ${truck.id}): ${JSON.stringify(finalWrite)}` +
         (mapped.callLog ? ` + create fs_call_logs row (${mapped.callLog.status})` : ""),
     );
+    // Ledger: outbox tasks only — log-only mode writes no dedup rows, so call
+    // outcomes would re-ledger on every poll.
+    if (mapped.source === "outbox_task") {
+      await logLucaActivity({
+        direction: "inbound", eventType: "writeback_preview", status: "log_only",
+        truckNumber: mapped.truckNumberDisplay, externalId: mapped.externalId,
+        actor: "LUCA-writeback",
+        summary: `LOG-ONLY: would update truck ${mapped.truckNumberDisplay}${mapped.callLog ? " + call log" : ""}`,
+        detail: { write: finalWrite },
+      });
+    }
     return;
   }
 
@@ -752,6 +901,14 @@ async function processItem(
   console.log(
     `[LUCA-Writeback] ${label}: APPLIED to truck ${mapped.truckNumberDisplay} (fs id ${truck.id})`,
   );
+  await logLucaActivity({
+    direction: "inbound", eventType: "writeback_applied", status: "ok",
+    truckNumber: mapped.truckNumberDisplay,
+    conversationId: mapped.source === "call_outcome" ? mapped.externalId : null,
+    externalId: mapped.externalId, actor: "LUCA-writeback",
+    summary: `applied to truck ${mapped.truckNumberDisplay}: ${Object.keys(finalWrite).join(", ") || "no fields"}${mapped.callLog ? " + call log" : ""}`,
+    detail: { fields: finalWrite, note: mapped.actionNote },
+  });
 
   if (mapped.source === "outbox_task" && cfg.markSynced) {
     await markTaskSynced(cfg.baseUrl, cfg.token, mapped.externalId, `fs-luca-writeback-${logId}`);
@@ -836,6 +993,26 @@ async function runInner(
         `applied=${result.applied} wouldApply=${result.wouldApply} unknownTruck=${result.unknownTruck} ` +
         `duplicates=${result.duplicates} noOp=${result.noOp} errors=${result.errors}`,
     );
+    // Heartbeat — 0-task runs INCLUDED: "the poller is alive" is the point.
+    // Item errors mark the run failed so the health card surfaces them.
+    await logLucaActivity({
+      direction: "internal", eventType: "writeback_run",
+      status: result.errors > 0 ? "failed" : "ok",
+      actor: `luca-writeback:${triggeredBy}`,
+      summary:
+        `run complete — tasks=${result.tasksFetched} outcomes=${result.outcomesFetched} ` +
+        `applied=${result.applied} wouldApply=${result.wouldApply} unknownTruck=${result.unknownTruck} ` +
+        `duplicates=${result.duplicates} noOp=${result.noOp} errors=${result.errors}`,
+      detail: {
+        apply: cfg.apply, markSynced: cfg.markSynced,
+        tasksFetched: result.tasksFetched, outcomesFetched: result.outcomesFetched,
+        applied: result.applied, wouldApply: result.wouldApply,
+        unknownTruck: result.unknownTruck, duplicates: result.duplicates,
+        noOp: result.noOp, errors: result.errors,
+        vrmReadyApplied: result.vrmReadyApplied ?? 0,
+        vrmAttentionApplied: result.vrmAttentionApplied ?? 0,
+      },
+    });
     return result;
   } catch (err: any) {
     const message = err?.message ?? String(err);
@@ -854,6 +1031,10 @@ async function runInner(
       // scheduled job is visible in sync_logs, not only in its own run log.
       await recordFailedLucaWriteback(message, triggeredBy);
     }
+    await logLucaActivity({
+      direction: "internal", eventType: "writeback_run", status: "failed",
+      actor: `luca-writeback:${triggeredBy}`, summary: `run FAILED: ${message}`,
+    });
     throw err;
   }
 }

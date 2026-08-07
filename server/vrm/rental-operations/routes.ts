@@ -21,6 +21,7 @@ import { CLASSIFICATIONS, todayET } from "./bucket-classify";
 import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
 import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED } from "../../luca-writeback/mapper";
+import { readLucaActivity, lucaActivityHealth, lucaConfigSummary } from "./luca-activity";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
 let syncInFlight = false;
@@ -107,6 +108,35 @@ export function registerRentalOperationsRoutes(router: Router): void {
   // EAST / CENTRAL / WEST split of the rental cases. Logic lives in
   // ./region + ./region-routes so this shared file takes one line.
   registerRegionRoutes(router);
+
+  // ── LUCA activity ledger (sync-health viewer) ─────────────────────────────
+  // Read-only. Rows come from vrm_luca_activity_log (30-day retention);
+  // health derives from the same table; config is PRESENCE booleans only —
+  // never secret values.
+  router.get("/rental-operations/luca-activity", async (req, res) => {
+    try {
+      const q = req.query as Record<string, string | undefined>;
+      const num = (v?: string) => {
+        const n = parseInt(v ?? "", 10);
+        return Number.isFinite(n) ? n : undefined;
+      };
+      const [rows, health] = await Promise.all([
+        readLucaActivity({
+          limit: num(q.limit),
+          direction: q.direction || null,
+          eventType: q.eventType || null,
+          status: q.status || null,
+          truck: q.truck || null,
+          sinceHours: num(q.sinceHours) ?? null,
+        }),
+        lucaActivityHealth(),
+      ]);
+      res.json({ rows, health, config: lucaConfigSummary() });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] luca-activity read failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "luca-activity read failed" });
+    }
+  });
 
   // ── Fleet status (VRM-owned) + Ops Queue ──────────────────────────────────
   // VRM is the authority for rental fleet status; FleetScope mirrors it
@@ -1008,6 +1038,71 @@ export function registerRentalOperationsRoutes(router: Router): void {
     } catch (e: any) {
       console.error("[VRM/RentalOps] shop-info save failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "shop-info save failed" });
+    }
+  });
+
+  // POST Bedrock shop-from-comments extraction for ONE truck (Tyler 8/6) — for
+  // paid Single-Use-CC POs where the vendor header names a card processor and
+  // the real shop only appears in the PO notes / message trail. Reads the
+  // STORED portal history (run a portal refresh first if it's stale),
+  // force-runs the model (cache- and rate-cap-exempt: a human clicked), and
+  // applies the result without touching operator-owned fields: a locked phone
+  // stays, and a shop_name_override keeps display precedence (only the base
+  // column is updated).
+  router.post("/rental-operations/master/:truck/extract-shop", async (req, res) => {
+    try {
+      const digits = String(req.params.truck ?? "").replace(/\D/g, "");
+      const truck = digits ? digits.replace(/^0+/, "").padStart(5, "0") : "";
+      if (!truck || truck === "00000") return res.status(400).json({ error: "invalid truck number" });
+      const cur = await db.execute(sql`
+        SELECT hist, shop_phone_locked, shop_name_override
+        FROM vrm_holman_portal_hist WHERE truck_no = ${truck}`);
+      const row = (cur.rows as any[])[0];
+      const events = Array.isArray(row?.hist) ? (row.hist as any[]) : [];
+      if (!row || events.length === 0) {
+        return res.status(404).json({ error: "no portal history stored for this truck — run a portal refresh first" });
+      }
+      const { extractShopFromComments } = await import("./shop-comment-extract");
+      const extraction = await extractShopFromComments(truck, events, { force: true });
+      if (!extraction) {
+        // The extraction table has the why (no_shop / rejected / error) — surface it.
+        const why = await db.execute(sql`SELECT status, reason FROM vrm_shop_comment_extractions WHERE truck_no = ${truck}`);
+        const w = (why.rows as any[])[0];
+        return res.json({ ok: true, applied: false, extraction: null, status: w?.status ?? "no_result", reason: w?.reason ?? "model not configured or no evidence" });
+      }
+      const upd = await db.execute(sql`
+        UPDATE vrm_holman_portal_hist SET
+          shop_name = ${extraction.shopName},
+          shop_address = ${extraction.shopAddress},
+          shop_src = 'llm_comments',
+          shop_phone = CASE WHEN shop_phone_locked THEN shop_phone ELSE ${extraction.shopPhone} END,
+          shop_phone_source = CASE WHEN shop_phone_locked THEN shop_phone_source ELSE 'llm_comments' END,
+          imported_at = NOW()
+        WHERE truck_no = ${truck}
+        RETURNING shop_phone_locked`);
+      // Derive the flags from the row the UPDATE itself returned — the earlier
+      // SELECT is stale if an operator locked the phone mid-request, and the
+      // CASE above evaluates the lock at update time.
+      const after = (upd.rows as any[])[0];
+      const phoneLocked = after?.shop_phone_locked === true;
+      // Durable audit trail — same table/convention as shop_phone_edit.
+      try {
+        const actor = actorOf(req);
+        const caseRow: any = await db.execute(sql`SELECT id FROM vrm_rental_operations_cases WHERE case_key = ${truck} LIMIT 1`);
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+          VALUES (${truck}, ${(caseRow.rows[0] as any)?.id ?? null}, 'shop_llm_extract', ${truck}, ${actor},
+                  ${JSON.stringify({ shop_name: extraction.shopName, phone: phoneLocked ? "(locked, kept)" : extraction.shopPhone, source_po: extraction.sourcePo, confidence: extraction.confidence, reason: extraction.reason })}::jsonb)`);
+      } catch (ae: any) {
+        console.warn("[VRM/RentalOps] extract-shop audit write failed (non-fatal):", ae?.message || ae);
+      }
+      console.log(`[VRM/RentalOps] extract-shop ${truck} -> "${extraction.shopName}" ${phoneLocked ? "(phone locked, kept)" : extraction.shopPhone} (conf ${extraction.confidence.toFixed(2)})`);
+      invalidateQueuePoContextCache("extract-shop");
+      invalidateTodaysQueueCache("extract-shop");
+      res.json({ ok: true, applied: !!after, phoneApplied: !!after && !phoneLocked, nameOverrideActive: !!row.shop_name_override, extraction });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] extract-shop failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "extract-shop failed" });
     }
   });
 

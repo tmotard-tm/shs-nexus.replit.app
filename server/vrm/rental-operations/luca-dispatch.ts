@@ -15,6 +15,7 @@
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster, type MasterRow } from "./read-repository";
+import { logLucaActivity } from "./luca-activity";
 
 const LUCA_BASE_URL = (process.env.LUCA_BASE_URL || process.env.LIVHR_BASE_URL || "https://fleetagents.replit.app").replace(/\/+$/, "");
 const AGENT_TOKEN = process.env.AGENT_RUN_SECRET || process.env.LUCA_AGENT_TOKEN || "";
@@ -102,15 +103,54 @@ async function logDispatch(row: MasterRow, result: any, actor?: string | null): 
   } catch (e: any) {
     console.warn("[VRM/RentalOps] call-log insert failed (non-fatal):", e?.message || e);
   }
+  // Sync-health ledger (never throws). The call-log row above is the vehicle
+  // record; this is the LUCA activity trail the viewer page reads.
+  await logLucaActivity({
+    direction: "outbound",
+    eventType: "dispatch_call",
+    status: result?.ok ? (result?.dryRun === true ? "dry_run" : "ok") : "failed",
+    caseKey: row.case_key,
+    truckNumber: row.call_target_truck ?? row.case_key,
+    conversationId: result?.conversationId ?? null,
+    actor: actor ?? null,
+    summary:
+      `${result?.ok ? (result?.dryRun ? "dry-run dispatch" : result?.dialed ? "dialed" : "dispatched") : "dispatch failed"}` +
+      ` — ${row.call_shop_name ?? "unknown shop"}${row.call_shop_phone ? ` ${row.call_shop_phone}` : ""}` +
+      (result?.message ? ` (${result.message})` : ""),
+    detail: {
+      dialed: result?.dialed === true,
+      dryRun: result?.dryRun === true,
+      message: result?.message ?? null,
+      shopName: row.call_shop_name ?? null,
+      shopPhone: row.call_shop_phone ?? null,
+      redirectToAssigned: row.redirect_to_assigned === true,
+      httpStatus: result?.status ?? null,
+      notDeployed: result?.notDeployed === true,
+      notConfigured: result?.notConfigured === true,
+    },
+  });
 }
 
 /** Hand ONE callable case to LUCA. */
 export async function dispatchCall(caseKey: string, actor?: string | null): Promise<any> {
   const m = await getRentalOpsMaster({});
   const row = m.rows.find((r) => r.case_key === caseKey);
-  if (!row) return { ok: false, message: `case ${caseKey} not found` };
+  if (!row) {
+    await logLucaActivity({
+      direction: "outbound", eventType: "dispatch_refused", status: "refused",
+      caseKey, actor: actor ?? null,
+      summary: `case ${caseKey} not found on the board — nothing dispatched`,
+    });
+    return { ok: false, message: `case ${caseKey} not found` };
+  }
   if (!row.callable || !row.call_shop_phone) {
-    return { ok: false, message: `case ${caseKey} is not callable (no verified shop phone${row.redirect_to_assigned ? " on the assigned truck" : ""})` };
+    const msg = `case ${caseKey} is not callable (no verified shop phone${row.redirect_to_assigned ? " on the assigned truck" : ""})`;
+    await logLucaActivity({
+      direction: "outbound", eventType: "dispatch_refused", status: "refused",
+      caseKey, truckNumber: row.call_target_truck ?? caseKey, actor: actor ?? null,
+      summary: msg,
+    });
+    return { ok: false, message: msg };
   }
   const result = await postToLuca(buildCallSpec(row));
   await logDispatch(row, result, actor);
@@ -122,6 +162,18 @@ export async function dispatchBatch(caseKeys: string[], actor?: string | null): 
   const m = await getRentalOpsMaster({});
   const wanted = new Set(caseKeys);
   const targets = m.rows.filter((r) => wanted.has(r.case_key) && r.callable && r.call_shop_phone);
+  // Requested-but-filtered keys would otherwise vanish without a trace: the
+  // batch result reports totals, but nothing durable says WHICH cases were
+  // silently dropped. One ledger row for the whole batch (not one per key).
+  const droppedKeys = caseKeys.filter((k) => !targets.some((t) => t.case_key === k));
+  if (droppedKeys.length > 0) {
+    await logLucaActivity({
+      direction: "outbound", eventType: "dispatch_refused", status: "refused",
+      actor: actor ?? null,
+      summary: `batch: ${droppedKeys.length} of ${caseKeys.length} case(s) not callable — ${droppedKeys.slice(0, 8).join(", ")}${droppedKeys.length > 8 ? "…" : ""}`,
+      detail: { requested: caseKeys.length, dispatched: targets.length, dropped: droppedKeys },
+    });
+  }
   const results: any[] = [];
   let dispatched = 0, dialed = 0, dryRun = 0, failed = 0, anyDryRun = false;
   for (let i = 0; i < targets.length; i += CONCURRENCY) {

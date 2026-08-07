@@ -329,5 +329,53 @@ export async function initRentalOperationsSchema(): Promise<void> {
           AND substring(regexp_replace(shop_phone, '\\D', '', 'g') from 2) !~ '^([0-9])\\1{9}$')
       );`);
 
-  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/call_log/portal_hist)");
+  // ── luca_activity_log: VRM ⇄ LUCA sync-health ledger. Keep the CREATE in
+  // lockstep with ENSURE_SQL in luca-activity.ts (its lazy ensure is the
+  // dev-safety net; THIS is the boot path deploys rely on). 30-day retention,
+  // pruned on boot below and on first lazy ensure per process.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_luca_activity_log (
+      id              BIGSERIAL PRIMARY KEY,
+      occurred_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      direction       VARCHAR(10) NOT NULL,        -- outbound | inbound | internal
+      event_type      VARCHAR(40) NOT NULL,        -- dispatch_call | ready_notify | vrm_ready_flip | writeback_run | ...
+      status          VARCHAR(12) NOT NULL,        -- ok | failed | skipped | refused | dry_run | log_only | fallback
+      case_key        VARCHAR(10),
+      truck_number    VARCHAR(30),
+      conversation_id VARCHAR(80),
+      external_id     VARCHAR(80),
+      actor           VARCHAR(120),
+      summary         TEXT NOT NULL,
+      detail          JSONB
+    );
+  `);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_luca_activity_at ON vrm_luca_activity_log (occurred_at DESC);`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_luca_activity_case ON vrm_luca_activity_log (case_key, occurred_at DESC) WHERE case_key IS NOT NULL;`);
+  await db.execute(sql`CREATE INDEX IF NOT EXISTS idx_vrm_luca_activity_event ON vrm_luca_activity_log (event_type, occurred_at DESC);`);
+  await db.execute(sql`DELETE FROM vrm_luca_activity_log WHERE occurred_at < NOW() - INTERVAL '30 days';`);
+
+  // ── shop_comment_extractions: Bedrock shop-from-PO-comments cache. Keep the
+  // CREATE in lockstep with ENSURE_SQL in shop-comment-extract.ts (its lazy
+  // ensure is the dev-safety net; THIS is the boot path deploys rely on).
+  // evidence_hash NULL means "retry next look" (transient error); a pinned
+  // hash means the verdict is final for that exact evidence.
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_shop_comment_extractions (
+      truck_no      VARCHAR(10) PRIMARY KEY,
+      evidence_hash VARCHAR(64),
+      status        VARCHAR(12) NOT NULL,            -- ok | no_shop | rejected | error
+      shop_name     VARCHAR(160),
+      shop_phone    VARCHAR(20),
+      shop_address  TEXT,
+      source_po     VARCHAR(30),
+      confidence    REAL,
+      reason        TEXT,
+      model_id      VARCHAR(80),
+      raw_response  TEXT,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+
+  console.log("[VRM/RentalOps] schema ensured (vrm_rental_operations_* + identity/actions/source_health/po_history/shop/projections/call_log/portal_hist/luca_activity/shop_comment_extractions)");
 }

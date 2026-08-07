@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { TechTextModal } from "../components/tech-text-modal";
 import { ShopInfoPanel } from "../components/shop-info-panel";
-import { DetailPanel } from "../components/case-detail-panel";
+import { DetailPanel, amsBucketOfLabel, amsColorOf, amsTintOf } from "../components/case-detail-panel";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -112,6 +112,12 @@ interface QueueItem {
   lucaDialed?: { shopName: string | null; shopPhone: string | null; at: string | null; dialed: boolean; dryRun: boolean } | null;
   /** Dialed shop no longer matches the current reconciled shop pick. */
   shopInfoMismatch?: boolean;
+  /** AMS status of the van this case is built on (null when unknown). */
+  amsStatus?: string | null;
+  /** Server-computed bucket of amsStatus (auction/declined/in_repair/…). */
+  amsBucket?: string | null;
+  /** Step-2 rows: "Scheduling" is backed by phone-confirmed readiness. */
+  schedulingValidated?: boolean;
   fleetStatus: FleetStatusState | null;
 }
 
@@ -1089,6 +1095,23 @@ function QueueRow({
       <FactsCell rows={[
         item.lucaStatus ? { label: "LUCA", node: <LucaBadge status={item.lucaStatus} /> } : null,
         item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        // AMS callout — same rule as the bucket view: every case row shows
+        // what AMS says about the van (declined/auction reads red).
+        item.caseKey
+          ? {
+              label: "AMS",
+              node: item.amsStatus
+                ? (() => {
+                    const b = amsBucketOfLabel(item.amsStatus);
+                    return (
+                      <span style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 700, color: amsColorOf(b), background: amsTintOf(b), border: `1px solid ${amsColorOf(b)}`, borderRadius: 999, padding: "0 7px", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: "15px", whiteSpace: "nowrap" }}>
+                        {item.amsStatus}
+                      </span>
+                    );
+                  })()
+                : <span style={{ color: colors.inkMuted }}>—</span>,
+            }
+          : null,
         item.holmanStatus ? { label: "PO", node: item.holmanStatus } : null,
         {
           label: "Shop",
@@ -1256,6 +1279,25 @@ function BucketRow({
             }
           : null,
         item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        // AMS callout (user directive 2026-08-07): every case row shows what
+        // AMS says about the van — declined/auction reads red, so a status
+        // conflict is visible at a glance. "—" = case exists but AMS has no
+        // status on file; rows with no rental case skip the line entirely.
+        item.caseKey
+          ? {
+              label: "AMS",
+              node: item.amsStatus
+                ? (() => {
+                    const b = amsBucketOfLabel(item.amsStatus);
+                    return (
+                      <span style={{ display: "inline-block", fontFamily: fonts.dmSans, fontSize: 10, fontWeight: 700, color: amsColorOf(b), background: amsTintOf(b), border: `1px solid ${amsColorOf(b)}`, borderRadius: 999, padding: "0 7px", textTransform: "uppercase", letterSpacing: "0.04em", lineHeight: "15px", whiteSpace: "nowrap" }}>
+                        {item.amsStatus}
+                      </span>
+                    );
+                  })()
+                : <span style={{ color: colors.inkMuted }}>—</span>,
+            }
+          : null,
         (chips?.effStatus || item.holmanStatus)
           ? {
               label: "PO",

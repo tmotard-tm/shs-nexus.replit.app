@@ -43,16 +43,17 @@ const base: ClassifyInput = {
   noQualifyingPo: false,
   decommission: false,
   declinedOrAuction: false,
+  amsTerminal: false,
   replacementAssigned: false,
   assignedTruckInRepair: false,
   readyGuardDowngraded: false,
   shopPhoneBad: false,
 };
 
-test("table: 22 defs, unique keys, valid priorities and owner rules", () => {
-  assert.equal(CLASSIFICATIONS.length, 22);
+test("table: 24 defs, unique keys, valid priorities and owner rules", () => {
+  assert.equal(CLASSIFICATIONS.length, 24);
   const keys = new Set(CLASSIFICATIONS.map((c) => c.key));
-  assert.equal(keys.size, 22, "keys must be unique");
+  assert.equal(keys.size, 24, "keys must be unique");
   for (const c of CLASSIFICATIONS) {
     assert.ok([1, 2, 3, 4].includes(c.priority), `${c.key} priority`);
     assert.ok(["regional", "rob", "jennifer", "district_team"].includes(c.ownerRule), `${c.key} ownerRule`);
@@ -65,6 +66,7 @@ test("each classification fires from its minimal input", () => {
   const cases: Array<[string, Partial<ClassifyInput>]> = [
     ["replacement_assigned", { declinedOrAuction: true, replacementAssigned: true }],
     ["retrieval_pending", { decommission: true }],
+    ["ams_status_conflict", { amsTerminal: true }],
     ["luca_escalated", { escalated: true }],
     ["unverified_confirm", { lucaStatus: "Unverified - confirm by phone" }],
     ["ready_guard_review", { readyGuardDowngraded: true }],
@@ -73,8 +75,12 @@ test("each classification fires from its minimal input", () => {
     ["po_closed_confirm", { erdPassed: true }],
     ["po_closed_confirm", { poClosedWhileInRepair: true }],
     ["research_truck_status", { researchActive: true }],
-    ["schedule_tech_pickup", { schedulingDue: true }],
-    ["schedule_tech_pickup", { schedulingUnscheduled: true }],
+    // Pickup scheduling only presents once readiness is phone-confirmed
+    // (LUCA Ready or manual verification) — directive 2026-08-07.
+    ["schedule_tech_pickup", { schedulingDue: true, lucaReady: true }],
+    ["schedule_tech_pickup", { schedulingUnscheduled: true, readyVerified: true }],
+    ["scheduling_unvalidated", { fleetScopeStatus: "Scheduling" }],
+    ["scheduling_unvalidated", { fleetScopeStatus: "Scheduling", schedulingDue: true }],
     ["confirm_rental_returned", { returnInFlight: true }],
     ["pickup_follow_up", { pickupDatePassed: true }],
     ["authorization_needed", { subStatus: "In Authorization" }],
@@ -145,6 +151,47 @@ test("declined/auction is terminal — only a healthy replacement is actionable"
   // Jennifer's decommission retrieval still fires through the dead-end.
   const decom = classify({ ...base, declinedOrAuction: true, decommission: true });
   assert.deepEqual(decom, ["retrieval_pending"]);
+});
+
+test("Scheduling without phone-confirmed evidence is a validation task, not pickup work", () => {
+  // Unvalidated: fires the validation task and LOCKS schedule_tech_pickup.
+  const un = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingUnscheduled: true });
+  assert.ok(un.includes("scheduling_unvalidated"), `got ${un}`);
+  assert.ok(!un.includes("schedule_tech_pickup"), "pickup scheduling must stay locked until validated");
+  const due = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingDue: true });
+  assert.ok(due.includes("scheduling_unvalidated") && !due.includes("schedule_tech_pickup"), `got ${due}`);
+  // LUCA Ready or a manual verify validates → pickup unlocks, task clears.
+  const luca = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingDue: true, lucaReady: true });
+  assert.ok(luca.includes("schedule_tech_pickup") && !luca.includes("scheduling_unvalidated"), `got ${luca}`);
+  const ver = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingUnscheduled: true, readyVerified: true });
+  assert.ok(ver.includes("schedule_tech_pickup") && !ver.includes("scheduling_unvalidated"), `got ${ver}`);
+  // Research escalation absorbs the validation chase (same rule as PO confirm).
+  const res = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingUnscheduled: true, researchActive: true });
+  assert.ok(res.includes("research_truck_status") && !res.includes("scheduling_unvalidated"), `got ${res}`);
+  // No double-stacked confirm task: ERD-passed on an unvalidated Scheduling row.
+  const erd = classify({ ...base, fleetScopeStatus: "Scheduling", schedulingDue: true, erdPassed: true });
+  assert.ok(erd.includes("scheduling_unvalidated") && !erd.includes("po_closed_confirm"), `got ${erd}`);
+  // A pickup date that already passed still surfaces — validation task leads.
+  const passed = classify({ ...base, fleetScopeStatus: "Scheduling", pickupDatePassed: true });
+  assert.equal(passed[0], "scheduling_unvalidated");
+  assert.ok(passed.includes("pickup_follow_up"));
+});
+
+test("AMS declined/auction is terminal — conflict surfaces until the record is fixed", () => {
+  // AMS terminal + fleet status disagrees → the conflict is THE work; every
+  // other signal (ready, scheduling, tags) is suppressed by the terminal branch.
+  const conflict = classify({ ...base, amsTerminal: true, fleetScopeStatus: "Scheduling", schedulingDue: true, lucaReady: true, tagsHold: true });
+  assert.deepEqual(conflict, ["ams_status_conflict"]);
+  // Fleet status already agrees (Declined Repair / Approved for sale) → no
+  // conflict to report; the existing dead-end/replacement logic rules.
+  const agree = classify({ ...base, amsTerminal: true, declinedOrAuction: true });
+  assert.deepEqual(agree, []);
+  // Replacement path rides along with the conflict (still actionable work).
+  const repl = classify({ ...base, amsTerminal: true, replacementAssigned: true });
+  assert.deepEqual(repl, ["ams_status_conflict", "replacement_assigned"]);
+  // Decommission retrieval (P1) sorts ahead of the conflict (P2).
+  const decom = classify({ ...base, amsTerminal: true, decommission: true });
+  assert.deepEqual(decom, ["retrieval_pending", "ams_status_conflict"]);
 });
 
 test("results are deduped and sorted highest priority first", () => {
