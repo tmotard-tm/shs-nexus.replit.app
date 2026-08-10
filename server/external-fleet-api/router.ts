@@ -15,6 +15,8 @@ import {
 } from "./auth";
 import {
   buildOpenRentalsReadModel,
+  computeOpenRentalEidSet,
+  getRentalOpsCache,
   OpenRentalsSourceUnavailableError,
   type OpenRentalsInput,
   type OpenRentalsReadModel,
@@ -53,6 +55,15 @@ const openRentalsQuerySchema = z.object({
   includeOos: z.enum(["true", "false"]).default("false"),
   view: z.enum(["business_logic", "raw"]).default("business_logic"),
 }).strict();
+
+const openRentalEidQuerySchema = z.object({
+  fileDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+}).strict();
+
+type OpenRentalEidSetBuilder = (
+  managedScope: boolean,
+  fileDate?: string,
+) => Promise<string[]>;
 
 const fleetManagementListingQuery = z.object({
   page: z.coerce.number().int().min(1).default(1),
@@ -145,6 +156,7 @@ export function createExternalFleetReadRouter(
   openRentalsBuilder: OpenRentalsBuilder = buildOpenRentalsReadModel,
   fleetManagementListingBuilder: FleetManagementListingBuilder = buildFleetManagementListing,
   profileBuilders: ProfileBuilders = defaultProfileBuilders,
+  openRentalEidSetBuilder: OpenRentalEidSetBuilder = computeOpenRentalEidSet,
 ): Router {
   const router = express.Router();
 
@@ -245,6 +257,66 @@ export function createExternalFleetReadRouter(
           error: {
             code: "INTERNAL_ERROR",
             message: "The rental operations request could not be completed",
+          },
+        });
+      }
+    },
+  );
+
+  router.get(
+    "/modules/open-rental-enterprise-ids",
+    requireExternalFleetScope("modules:read"),
+    async (req, res) => {
+      const parsed = openRentalEidQuerySchema.safeParse(req.query);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: {
+            code: "INVALID_QUERY",
+            message: "The query parameters are invalid",
+          },
+        });
+      }
+
+      try {
+        // Managed scope: the exact set that drives the internal Weekly
+        // Offboarding "Rental" badge (scope=managed semantics). Reuses the
+        // internal computation and its cache, so internal and external
+        // callers can never diverge.
+        const enterpriseIds = await openRentalEidSetBuilder(
+          true,
+          parsed.data.fileDate,
+        );
+        const cacheKey = `open-eid:${parsed.data.fileDate || "latest"}:managed`;
+        const cached = getRentalOpsCache(cacheKey);
+        const computedAt = cached
+          ? new Date(cached.cachedAt).toISOString()
+          : new Date().toISOString();
+        return res.json(
+          createEnvelope({
+            sourceUpdatedAt: computedAt,
+            freshness: rentalOpsFreshness(computedAt),
+            warnings: [],
+            data: {
+              enterpriseIds,
+              total: enterpriseIds.length,
+              scope: "managed",
+              computedAt,
+            },
+          }),
+        );
+      } catch (error) {
+        if (error instanceof OpenRentalsSourceUnavailableError) {
+          return res.status(503).json({
+            error: {
+              code: "SOURCE_UNAVAILABLE",
+              message: "The rental operations source is unavailable",
+            },
+          });
+        }
+        return res.status(500).json({
+          error: {
+            code: "INTERNAL_ERROR",
+            message: "The open rental enterprise IDs request could not be completed",
           },
         });
       }

@@ -52,6 +52,7 @@ import { registerNearbyTltProxy } from "./nearby-tlt-route";
 import {
   buildOpenRentalsReadModel,
   calcDaysOpen,
+  computeOpenRentalEidSet,
   entOriginalStart,
   getRentalOpsCache,
   getOosVehicleSet,
@@ -19302,101 +19303,6 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     }
   });
 
-  // Returns the set of Enterprise IDs currently in open rentals (for cross-app badge on Weekly Offboarding).
-  // Uses the same TPMS name-matching logic as the main open-rentals endpoint.
-  // Shared computation of the open-rental Enterprise-ID set. Used by the
-  // /api/rental-ops/open-enterprise-ids route (UI "Rental" badge) AND the
-  // Weekly Offboarding XLSX export so both always show the same population.
-  // Cached under the same key as the route; throws when Snowflake is unavailable.
-  async function computeOpenRentalEidSet(managedScope: boolean, fileDate?: string): Promise<string[]> {
-    const { getSnowflakeService, isSnowflakeConfigured } = await import("./snowflake-service");
-    if (!isSnowflakeConfigured()) throw new Error("Snowflake not configured");
-    const sf = getSnowflakeService();
-    await sf.connect();
-
-    const eidCacheKey = `open-eid:${fileDate || 'latest'}:${managedScope ? 'managed' : 'all'}`;
-    const eidCached = getRentalOpsCache(eidCacheKey);
-    if (eidCached) return ((eidCached.data as any).enterpriseIds || []) as string[];
-
-    const normV = (v: string) => (v || '').trim().replace(/^0+/, '');
-    // Mirrors isEntVendor in server/rental-ops-sync.ts: empty, Enterprise, and Toll
-    // vendors are all treated as "Enterprise" (excluded from the Holman segment).
-    const isEntVendor = (v: string | null | undefined) => {
-      const s = (v || '').trim();
-      return !s || /enterprise/i.test(s) || /toll/i.test(s);
-    };
-
-    const [ticketRows, holmanRows] = await Promise.all([
-      sf.executeQuery(`SELECT VEHICLE_NUMBER, RENTER_NAME, RENTAL_START_DATE FROM ${RENTAL_TICKET_TABLE} WHERE ${ticketDateFilter(fileDate)} AND TICKET_STATUS='OPEN' LIMIT 5000`) as Promise<any[]>,
-      sf.executeQuery(`SELECT VEHICLE_NUMBER, ENTERPRISE_ID, RENTAL_VENDOR FROM ${RENTAL_OPEN_TABLE} WHERE ${openDateFilter(fileDate)} LIMIT 5000`) as Promise<any[]>,
-    ]);
-
-    // Deduplicate enterprise ticket rows by vehicle (keep latest rental start date)
-    const entByVehicle = new Map<string, any>();
-    for (const r of ticketRows) {
-      const vn = normV(r.VEHICLE_NUMBER || '');
-      if (!vn) continue;
-      const existing = entByVehicle.get(vn);
-      const rDate = new Date(r.RENTAL_START_DATE || '2000-01-01').getTime();
-      const eDate = existing ? new Date(existing.RENTAL_START_DATE || '2000-01-01').getTime() : 0;
-      if (!existing || rDate > eDate) entByVehicle.set(vn, r);
-    }
-
-    // NOTE (2026-07-24): the out-of-service exclusion that used to run here for
-    // managed scope has been REMOVED. This helper answers "is this technician
-    // currently in an open rental?" for the Fleet Communications "In rental"
-    // badge and the Weekly Offboarding Rental column. An Enterprise ticket's
-    // Vehicle Number is the tech's OWN fleet truck, and that truck being marked
-    // out-of-service in Holman is frequently the very reason they are in a
-    // rental — so dropping OOS vehicles here silently un-flagged ~38 active
-    // technicians who really are renting. The OOS filter still applies on the
-    // Rental Operations tab (/api/rental-ops/open, includeOos=false), which is
-    // the "count of live rental vehicles" surface where it belongs.
-
-    // Build rows for TPMS name enrichment. vehicleNumber is threaded through so
-    // rentalEnrichEnterpriseIds can fall back to the truck -> assigned-tech
-    // index when a renter name is ambiguous or unmatched.
-    const enrichRows: any[] = Array.from(entByVehicle.values()).map(r => ({
-      renterName: (r.RENTER_NAME || '').trim(),
-      vehicleNumber: r.VEHICLE_NUMBER,
-      enterpriseId: null as string | null,
-      source: 'enterprise',
-    }));
-    await rentalEnrichEnterpriseIds(sf, enrichRows);
-
-    // Collect all resolved Enterprise IDs (normalized to upper-case for consistent matching)
-    const entIds = new Set<string>();
-    for (const row of enrichRows) {
-      if (row.enterpriseId) entIds.add(String(row.enterpriseId).trim().toUpperCase());
-    }
-
-    // Add Holman segment direct Enterprise IDs. This is a membership Set, so the
-    // list-only de-dupe guards (vendor=Enterprise, or vehicle already covered by an
-    // Enterprise ticket) must NOT drop rows here — doing so silently loses real
-    // open-rental renters from the badge set. Only exclude Toll rows, which are
-    // toll charges rather than vehicle rentals.
-    for (const r of holmanRows) {
-      const vendor = r.RENTAL_VENDOR || '';
-      if (managedScope) {
-        // Fleet Scope parity (server/rental-ops-sync.ts SEGMENT 2): keep only Holman
-        // NON-Enterprise-vendor rows whose vehicle isn't already covered by an
-        // Enterprise open ticket. This drops the Holman Enterprise-vendor rows that
-        // inflate the default membership set. (Out-of-service vehicles are NOT
-        // excluded — see the note above; an OOS truck out on rental is still a
-        // rental for the person-in-rental surfaces this set feeds.)
-        if (isEntVendor(vendor)) continue;
-        if (entByVehicle.has(normV(r.VEHICLE_NUMBER || ''))) continue;
-      } else {
-        if (/toll/i.test(vendor)) continue;
-      }
-      const eid = (r.ENTERPRISE_ID || '').trim().toUpperCase();
-      if (eid) entIds.add(eid);
-    }
-
-    const eidResult = { enterpriseIds: Array.from(entIds) };
-    setRentalOpsCache(eidCacheKey, eidResult);
-    return eidResult.enterpriseIds;
-  }
 
   app.get("/api/rental-ops/open-enterprise-ids", requireAuth, async (req: any, res) => {
     try {
@@ -19421,6 +19327,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       const enterpriseIds = await computeOpenRentalEidSet(managedScope, req.query?.fileDate as string | undefined);
       res.json({ enterpriseIds });
     } catch (err: any) {
+      if (err instanceof OpenRentalsSourceUnavailableError) {
+        if (err.reason === "not_configured") {
+          return res.status(503).json({ message: "Snowflake not configured", enterpriseIds: [] });
+        }
+        return handleSnowflakeError(err.sourceCause, res);
+      }
       return handleSnowflakeError(err, res);
     }
   });
