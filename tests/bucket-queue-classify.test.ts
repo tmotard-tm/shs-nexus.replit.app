@@ -3,7 +3,7 @@
  * (server/vrm/rental-operations/bucket-classify.ts) — spec §6/§7.
  * Pure module: no DB, no network. Run: npx tsx --test tests/bucket-queue-classify.test.ts
  */
-import { test } from "node:test";
+import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
 import {
   CLASSIFICATIONS,
@@ -50,10 +50,10 @@ const base: ClassifyInput = {
   shopPhoneBad: false,
 };
 
-test("table: 24 defs, unique keys, valid priorities and owner rules", () => {
-  assert.equal(CLASSIFICATIONS.length, 24);
+test("table: 25 defs, unique keys, valid priorities and owner rules", () => {
+  assert.equal(CLASSIFICATIONS.length, 25);
   const keys = new Set(CLASSIFICATIONS.map((c) => c.key));
-  assert.equal(keys.size, 24, "keys must be unique");
+  assert.equal(keys.size, 25, "keys must be unique");
   for (const c of CLASSIFICATIONS) {
     assert.ok([1, 2, 3, 4].includes(c.priority), `${c.key} priority`);
     assert.ok(["regional", "rob", "jennifer", "district_team"].includes(c.ownerRule), `${c.key} ownerRule`);
@@ -66,6 +66,11 @@ test("each classification fires from its minimal input", () => {
   const cases: Array<[string, Partial<ClassifyInput>]> = [
     ["replacement_assigned", { declinedOrAuction: true, replacementAssigned: true }],
     ["retrieval_pending", { decommission: true }],
+    // Terminal truck + no replacement assigned → locate a spare (both the
+    // terminal branch and the decommission-pipeline path fire it).
+    ["needs_replacement", { declinedOrAuction: true }],
+    ["needs_replacement", { amsTerminal: true }],
+    ["needs_replacement", { decommission: true }],
     ["ams_status_conflict", { amsTerminal: true }],
     ["luca_escalated", { escalated: true }],
     ["unverified_confirm", { lucaStatus: "Unverified - confirm by phone" }],
@@ -134,23 +139,41 @@ test("research escalation supersedes the confirm task and unreachable-callback",
   assert.ok(!v.includes("research_truck_status"));
 });
 
-test("declined/auction is terminal — only a healthy replacement is actionable", () => {
+test("declined/auction is terminal — replacement close-out or locate-a-spare", () => {
   // Tech already on a different, healthy truck: close out the rental. The
   // branch is terminal, so the dead truck's other signals are suppressed too.
   const assigned = classify({ ...base, declinedOrAuction: true, replacementAssigned: true, tagsHold: true, etaSlips: 5 });
   assert.deepEqual(assigned, ["replacement_assigned"]);
-  // No replacement yet → nothing to action today (queue routes to no-action).
-  const stranded = classify({ ...base, declinedOrAuction: true });
-  assert.deepEqual(stranded, []);
-  // Replacement itself in the shop → LUCA's to track, not a queue item.
+  // No replacement yet → locate a spare (user directive 2026-08-10, reversing
+  // the old []/"no action" dead-end). Other signals stay suppressed.
+  const stranded = classify({ ...base, declinedOrAuction: true, tagsHold: true, lucaReady: true });
+  assert.deepEqual(stranded, ["needs_replacement"]);
+  // Replacement itself in the shop → LUCA's to track, not a queue item. The
+  // ONLY remaining [] dead-end.
   const inRepair = classify({ ...base, declinedOrAuction: true, replacementAssigned: true, assignedTruckInRepair: true });
   assert.deepEqual(inRepair, []);
-  // assignedTruckInRepair without a truck-number mismatch means nothing.
+  // assignedTruckInRepair without a truck-number mismatch means nothing — the
+  // tech still has no replacement, so the spare hunt fires.
   const noMismatch = classify({ ...base, declinedOrAuction: true, assignedTruckInRepair: true });
-  assert.deepEqual(noMismatch, []);
-  // Jennifer's decommission retrieval still fires through the dead-end.
+  assert.deepEqual(noMismatch, ["needs_replacement"]);
+  // Jennifer's decommission retrieval stays PRIMARY (both P1, stable sort);
+  // the spare hunt rides second.
   const decom = classify({ ...base, declinedOrAuction: true, decommission: true });
-  assert.deepEqual(decom, ["retrieval_pending"]);
+  assert.deepEqual(decom, ["retrieval_pending", "needs_replacement"]);
+});
+
+test("needs_replacement: availability-driven work — no SLA clock, regional owner", () => {
+  const def = CLASSIFICATION_BY_KEY.get("needs_replacement")!;
+  assert.equal(def.priority, 1);
+  assert.equal(def.slaBusinessDays, null, "no red/overdue nag while no spare exists");
+  assert.equal(def.ownerRule, "regional");
+  // Decommission pipeline before the fleet status flips terminal: retrieval
+  // still primary, spare hunt second.
+  const pipeline = classify({ ...base, decommission: true });
+  assert.deepEqual(pipeline, ["retrieval_pending", "needs_replacement"]);
+  // A replacement in hand ends the spare hunt on the pipeline path too.
+  const covered = classify({ ...base, decommission: true, replacementAssigned: true });
+  assert.deepEqual(covered, ["retrieval_pending"]);
 });
 
 test("Scheduling without phone-confirmed evidence is a validation task, not pickup work", () => {
@@ -181,17 +204,18 @@ test("AMS declined/auction is terminal — conflict surfaces until the record is
   // AMS terminal + fleet status disagrees → the conflict is THE work; every
   // other signal (ready, scheduling, tags) is suppressed by the terminal branch.
   const conflict = classify({ ...base, amsTerminal: true, fleetScopeStatus: "Scheduling", schedulingDue: true, lucaReady: true, tagsHold: true });
-  assert.deepEqual(conflict, ["ams_status_conflict"]);
+  assert.deepEqual(conflict, ["needs_replacement", "ams_status_conflict"]);
   // Fleet status already agrees (Declined Repair / Approved for sale) → no
-  // conflict to report; the existing dead-end/replacement logic rules.
+  // conflict to report; no replacement yet → the spare hunt is the work.
   const agree = classify({ ...base, amsTerminal: true, declinedOrAuction: true });
-  assert.deepEqual(agree, []);
+  assert.deepEqual(agree, ["needs_replacement"]);
   // Replacement path rides along with the conflict (still actionable work).
   const repl = classify({ ...base, amsTerminal: true, replacementAssigned: true });
   assert.deepEqual(repl, ["ams_status_conflict", "replacement_assigned"]);
-  // Decommission retrieval (P1) sorts ahead of the conflict (P2).
+  // Decommission retrieval (P1) sorts ahead of the conflict (P2); the spare
+  // hunt (P1, pushed after retrieval) slots between them.
   const decom = classify({ ...base, amsTerminal: true, decommission: true });
-  assert.deepEqual(decom, ["retrieval_pending", "ams_status_conflict"]);
+  assert.deepEqual(decom, ["retrieval_pending", "needs_replacement", "ams_status_conflict"]);
 });
 
 test("results are deduped and sorted highest priority first", () => {
@@ -254,4 +278,64 @@ test("shopStateFromAddress", () => {
   assert.equal(shopStateFromAddress(""), null);
   assert.equal(shopStateFromAddress(null), null);
   assert.equal(shopStateFromAddress("TX 75201 not at end,"), null);
+});
+
+// ── Work-type bucket claim (workBucketForItem, server/todays-queue.ts) ──────
+// One bucket per item, server-stamped; both UIs group and count by it. Lazy
+// import mirrors vrm-schedule-pickup.test.ts (todays-queue pulls heavier deps).
+describe("work-type bucket claim (workBucketForItem from todays-queue)", () => {
+  let workBucketForItem: typeof import("../server/todays-queue").workBucketForItem;
+  before(async () => {
+    workBucketForItem = (await import("../server/todays-queue")).workBucketForItem;
+  });
+  const cl = (...keys: string[]) => keys.map((key) => ({ key }) as any);
+
+  test("primary needs_replacement always claims the locate-a-spare pile", () => {
+    assert.equal(
+      workBucketForItem({ lane: "monitor", classifications: cl("needs_replacement") }),
+      "needs_replacement");
+    // Phone-confirmed evidence never moves a terminal truck into Ready.
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "luca", classifications: cl("needs_replacement", "aged_open_case") }),
+      "needs_replacement");
+  });
+
+  test("phone-confirmed ready lane claims the Ready pile", () => {
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "luca", classifications: cl("vehicle_ready_schedule") }),
+      "vehicle_ready_schedule");
+    // The claim overrides a non-terminal primary — a paperwork sub-state must
+    // not hide a shop-confirmed truck from the pickup pile.
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "manual", classifications: cl("tags_registration_hold", "vehicle_ready_schedule") }),
+      "vehicle_ready_schedule");
+  });
+
+  test("inference and non-ready lanes never claim Ready (phone-confirmed only)", () => {
+    // Closed-PO / ERD inference rows are lane monitor with holman/date reasons.
+    assert.equal(
+      workBucketForItem({ lane: "monitor", readyReason: "holman", classifications: cl("po_closed_verify") }),
+      "po_closed_verify");
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "date", classifications: cl("aged_open_case") }),
+      "aged_open_case");
+    assert.equal(
+      workBucketForItem({ lane: "action", readyReason: "luca", classifications: cl("luca_escalated") }),
+      "luca_escalated");
+  });
+
+  test("terminal-family classifications block the Ready claim", () => {
+    // Jennifer's retrieval pile keeps decommission rows even when phone-ready.
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "luca", classifications: cl("retrieval_pending", "vehicle_ready_schedule") }),
+      "retrieval_pending");
+    assert.equal(
+      workBucketForItem({ lane: "ready", readyReason: "manual", classifications: cl("aged_open_case", "ams_status_conflict") }),
+      "aged_open_case");
+  });
+
+  test("no classifications → safety bucket", () => {
+    assert.equal(workBucketForItem({ lane: "monitor", classifications: [] }), "other");
+    assert.equal(workBucketForItem({ lane: "monitor" }), "other");
+  });
 });

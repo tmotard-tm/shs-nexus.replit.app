@@ -119,7 +119,32 @@ interface QueueItem {
   amsBucket?: string | null;
   /** Step-2 rows: "Scheduling" is backed by phone-confirmed readiness. */
   schedulingValidated?: boolean;
+  /** Unassigned-spare availability (needs_replacement rows; undefined =
+   *  lookup unavailable at build time — never rendered as "0 spares"). */
+  spareAvailability?: SpareAvailability;
+  /** Server-stamped work-type bucket (claim rules incl. the phone-confirmed
+   *  ready pile). Grouping/counting always uses this field. */
+  workBucket?: string;
   fleetStatus: FleetStatusState | null;
+}
+
+interface SpareAvailability {
+  district: string | null;
+  districtCount: number | null;
+  totalCount: number;
+  /** Up to 3 candidate truck numbers, district matches first. */
+  candidates: string[];
+}
+
+/** Work-type bucket rollup (server: one bucket per PRIMARY classification). */
+interface WorkTypeBucket {
+  key: string;
+  label: string;
+  priority: number;
+  open: number;
+  dismissed: number;
+  featured: boolean;
+  description: string | null;
 }
 
 interface NoActionItem {
@@ -147,9 +172,16 @@ interface QueueResponse {
   items: QueueItem[];
   noAction: NoActionItem[];
   buckets?: Bucket[];
+  workTypeBuckets?: WorkTypeBucket[];
   classificationDefs?: Array<{ key: string; label: string; priority: number; slaBusinessDays: number | null; ownerRule: string; actionHint?: string }>;
   generatedAt: string;
   vocabulary: { mainStatuses: string[]; subStatuses: Record<string, string[]> };
+}
+
+/** An item's work-type bucket — the server-stamped claim (never recomputed
+ *  here; primary classification is only a fallback for stale payloads). */
+function workBucketOf(item: QueueItem): string | null {
+  return item.workBucket ?? item.classifications?.[0]?.key ?? null;
 }
 
 // ─── Region filter (server-computed item.region; Annex A vocabulary) ─────────
@@ -992,6 +1024,151 @@ function FactsCell({ rows }: { rows: Array<{ label: string; node: React.ReactNod
   );
 }
 
+// ─── Work-type bucket strip + featured-bucket card chips ─────────────────────
+
+const WORK_BUCKET_FG: Record<string, string> = {
+  vehicle_ready_schedule: colors.green,
+  needs_replacement: colors.blue,
+};
+
+function WorkTypeStrip({
+  buckets,
+  active,
+  onPick,
+}: {
+  buckets: WorkTypeBucket[];
+  active: string | null;
+  onPick: (key: string | null) => void;
+}) {
+  // Featured buckets always render (zero state included); the rest only when
+  // they hold items today.
+  const visible = buckets.filter((b) => b.featured || b.open + b.dismissed > 0);
+  if (visible.length === 0) return null;
+  return (
+    <div data-testid="workbucket-strip" style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginRight: 2 }}>
+        Work type
+      </span>
+      {visible.map((b) => {
+        const isActive = active === b.key;
+        const fg = WORK_BUCKET_FG[b.key] ?? colors.inkSoft;
+        return (
+          <button
+            key={b.key}
+            onClick={() => onPick(b.key)}
+            data-testid={`workbucket-${b.key}`}
+            title={b.description ?? `${b.label} — pick to work just this bucket`}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              fontFamily: fonts.dmSans, fontSize: 13, fontWeight: b.featured ? 700 : 600,
+              padding: "4px 11px", borderRadius: 999, cursor: "pointer",
+              border: b.featured ? `1.5px solid ${fg}` : `1px solid ${isActive ? colors.accent : colors.rule}`,
+              color: isActive ? "#fff" : b.featured ? fg : colors.inkSoft,
+              backgroundColor: isActive ? (b.featured ? fg : colors.accent) : colors.background,
+            }}
+          >
+            {b.key === "vehicle_ready_schedule" && <PhoneCall size={12} style={{ flexShrink: 0 }} />}
+            {b.key === "needs_replacement" && <Truck size={12} style={{ flexShrink: 0 }} />}
+            <span>{b.label}</span>
+            <span style={{
+              fontSize: 12, fontWeight: 700, borderRadius: 999, padding: "0 6px",
+              backgroundColor: isActive ? "rgba(255,255,255,0.25)" : colors.surface,
+              border: isActive ? "none" : `1px solid ${colors.rule}`,
+              color: isActive ? "#fff" : colors.inkSoft,
+            }}>
+              {b.open}
+            </span>
+          </button>
+        );
+      })}
+      {active !== null && (
+        <button
+          onClick={() => onPick(null)}
+          data-testid="workbucket-clear"
+          style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: colors.inkMuted, textDecoration: "underline", textUnderlineOffset: 2 }}
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** Copyable pointer to the call the readiness rests on — the recording lives
+ *  on the Fleet Agents app; the case file's call log carries the history. */
+function TranscriptChip({ conversationId }: { conversationId: string }) {
+  return (
+    <span
+      data-testid="transcript-chip"
+      title={`Call ${conversationId}\nThe recording and transcript live on the Fleet Agents app, not in Nexus. Click to copy the id — the case file (click the row) shows the call log.`}
+      onClick={(e) => { e.stopPropagation(); navigator.clipboard?.writeText(conversationId); }}
+      style={{ fontFamily: "ui-monospace, monospace", fontSize: 10, fontWeight: 400, color: colors.inkMuted, backgroundColor: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 5, padding: "0 4px", cursor: "copy" }}
+    >
+      call id
+    </span>
+  );
+}
+
+/** Shop-confirmed ready evidence: phone confirmation only (LUCA Ready call or
+ *  a staff verify) — closed-PO / date inference never renders this pill. */
+function ReadyEvidence({ item }: { item: QueueItem }) {
+  if (item.isConflict) return null;
+  if (item.readyReason === "luca") {
+    return (
+      <span data-testid={`ready-evidence-${item.truckNumber}`} style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.greenLight, fontSize: 13, fontWeight: 700, color: colors.green }}>
+        <Bot size={13} style={{ flexShrink: 0 }} />
+        Shop-confirmed ready — LUCA Ready call{item.lastCallDate ? ` · ${formatShortDate(item.lastCallDate)}` : ""}
+        {item.lastCallConversationId && <TranscriptChip conversationId={item.lastCallConversationId} />}
+      </span>
+    );
+  }
+  if (item.readyReason === "manual") {
+    return (
+      <span data-testid={`ready-evidence-${item.truckNumber}`} style={{ display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.greenLight, fontSize: 13, fontWeight: 700, color: colors.green }}>
+        <PhoneCall size={13} style={{ flexShrink: 0 }} />
+        Shop-confirmed ready — verified by {item.readyVerified?.by ?? "staff"}{item.readyVerified?.at ? ` · ${formatShortDate(item.readyVerified.at)}` : ""}
+      </span>
+    );
+  }
+  return null;
+}
+
+/** Spare-availability chip for needs-replacement rows: locate here, assign in
+ *  the Spares flow. Absent pool data reads "lookup unavailable" — never "0". */
+function SpareChip({ item }: { item: QueueItem }) {
+  if (!item.classifications?.some((c) => c.key === "needs_replacement")) return null;
+  const sa = item.spareAvailability;
+  const avail = !!sa && sa.totalCount > 0;
+  const label = !sa
+    ? "Spare lookup unavailable — check the Spares page"
+    : sa.districtCount != null && sa.districtCount > 0
+      ? `${sa.districtCount} unassigned spare${sa.districtCount === 1 ? "" : "s"} in district ${sa.district}`
+      : sa.totalCount > 0
+        ? `${sa.totalCount} unassigned spare${sa.totalCount === 1 ? "" : "s"} fleet-wide${sa.district ? ` · none in district ${sa.district} yet` : ""}`
+        : "No spares yet — monitoring";
+  return (
+    <span
+      data-testid={`spare-availability-${item.truckNumber}`}
+      title="Live unassigned-spare pool, district first. Locate a candidate here — the assignment itself happens in the Spares flow."
+      style={{
+        display: "inline-flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6,
+        fontSize: 13, fontWeight: 700,
+        backgroundColor: avail ? colors.blueLight : colors.surface,
+        color: avail ? colors.blue : colors.inkMuted,
+        border: avail ? "none" : `1px dashed ${colors.rule}`,
+      }}
+    >
+      <Truck size={13} style={{ flexShrink: 0 }} />
+      {label}
+      {avail && sa.candidates.length > 0 && (
+        <span style={{ fontFamily: fonts.jetbrains, fontSize: 12, fontWeight: 600, color: colors.inkSoft }}>
+          e.g. {sa.candidates.join(", ")}
+        </span>
+      )}
+    </span>
+  );
+}
+
 function QueueRow({
   item,
   editing,
@@ -1011,7 +1188,8 @@ function QueueRow({
   const dismissed = !!item.dismissedToday;
   const hasFooter =
     dismissed ||
-    (item.step === 3 && !item.isConflict && (item.readyReason === "luca" || item.readyReason === "manual")) ||
+    (!item.isConflict && (item.readyReason === "luca" || item.readyReason === "manual")) ||
+    (item.classifications?.some((c) => c.key === "needs_replacement") ?? false) ||
     ((item.step === 8 || item.step === 9) && item.research) ||
     (editing && item.caseKey) ||
     (schedEditing && item.caseKey);
@@ -1055,18 +1233,8 @@ function QueueRow({
             {dismissed && (
               <span style={ROW_LABEL}>dismissed today by {item.dismissedToday?.by ?? "?"}</span>
             )}
-            {item.step === 3 && item.readyReason === "luca" && !item.isConflict && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.greenLight, fontSize: 13, fontWeight: 700, color: colors.green }}>
-                <Bot size={13} style={{ flexShrink: 0 }} />
-                LUCA confirmed READY via phone call
-              </span>
-            )}
-            {item.step === 3 && item.readyReason === "manual" && !item.isConflict && (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.greenLight, fontSize: 13, fontWeight: 700, color: colors.green }}>
-                <PhoneCall size={13} style={{ flexShrink: 0 }} />
-                Verified ready by {item.readyVerified?.by ?? "staff"}{item.readyVerified?.at ? ` · ${formatShortDate(item.readyVerified.at)}` : ""}
-              </span>
-            )}
+            <ReadyEvidence item={item} />
+            <SpareChip item={item} />
             {(item.step === 8 || item.step === 9) && item.research && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.amberLight, fontSize: 13, fontWeight: 700, color: colors.amber }}>
                 <SearchIcon size={13} style={{ flexShrink: 0 }} />
@@ -1223,6 +1391,8 @@ function BucketRow({
             {dismissed && (
               <span style={ROW_LABEL}>dismissed today by {item.dismissedToday?.by ?? "?"}</span>
             )}
+            <ReadyEvidence item={item} />
+            <SpareChip item={item} />
             {/* Provenance: the shop LUCA actually dialed on its last call, vs.
                 the current reconciled shop pick in the facts column. A mismatch
                 means the call outcome may describe the wrong shop. */}
@@ -1362,7 +1532,18 @@ export default function OpsQueue() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const [activeBucket, setActiveBucket] = useState<string | null>(null);
-  const [view, setView] = useState<"people" | "board">("people");
+  const [view, setView] = useState<"buckets" | "people" | "board">("buckets");
+  // Work-type bucket filter — one person owns one bucket. Composes with the
+  // owner drill-down and the region filter; null = all work types.
+  const [activeWorkBucket, setActiveWorkBucket] = useState<string | null>(null);
+  const [collapsedWorkBuckets, setCollapsedWorkBuckets] = useState<Set<string>>(new Set());
+  const toggleWorkBucket = useCallback((key: string) => {
+    setCollapsedWorkBuckets((cur) => {
+      const next = new Set(cur);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }, []);
   const [collapsedSteps, setCollapsedSteps] = useState<Set<number>>(new Set());
   // Monitoring is watch-only noise for most sessions — start it collapsed.
   const [collapsedLanes, setCollapsedLanes] = useState<Set<Lane>>(new Set<Lane>(["monitor"]));
@@ -1551,7 +1732,15 @@ export default function OpsQueue() {
   const allItems = data?.items ?? [];
   const noAction = data?.noAction ?? [];
   const buckets = data?.buckets ?? [];
+  const workTypeBuckets = data?.workTypeBuckets ?? [];
   const rosterOwners = buckets.map((b) => b.owner);
+
+  const onPickWorkBucket = useCallback((key: string | null) => {
+    setActiveWorkBucket((cur) => (key === null || cur === key ? null : key));
+    // People landing has no item lists — jump to the step board so the picked
+    // bucket's rows are immediately visible (owner drill-down keeps its view).
+    if (key !== null) setView("buckets");
+  }, []);
 
   // classification key → action directive (rendered on every bucket-view card)
   const hints: Record<string, string> = {};
@@ -1589,15 +1778,21 @@ export default function OpsQueue() {
     researchPending: researchMut.isPending,
   };
 
-  // Everyone view: region filter on the server-computed item.region
-  const items = selectedRegions.size === 0
+  // Everyone view: region filter on the server-computed item.region, then the
+  // work-type bucket filter (an item's bucket = its PRIMARY classification).
+  const regionItems = selectedRegions.size === 0
     ? allItems
     : allItems.filter((item) => item.region != null && selectedRegions.has(item.region));
+  const items = activeWorkBucket === null
+    ? regionItems
+    : regionItems.filter((i) => workBucketOf(i) === activeWorkBucket);
 
   const needsRoutingItems = allItems.filter((i) => i.needsRouting && !i.dismissedToday);
 
-  // Bucket view: this owner's items, grouped by top-classification priority
-  const bucketItems = activeBucket === null ? [] : allItems.filter((i) => i.owner === activeBucket);
+  // Bucket view: this owner's items (work-type filter composes), grouped by
+  // top-classification priority
+  const bucketItems = activeBucket === null ? [] : allItems.filter((i) =>
+    i.owner === activeBucket && (activeWorkBucket === null || workBucketOf(i) === activeWorkBucket));
   const bucketOpen = bucketItems.filter((i) => !i.dismissedToday);
   const bucketDismissed = bucketItems.filter((i) => !!i.dismissedToday);
   const priorityGroups = bucketOpen.reduce<Record<number, QueueItem[]>>((acc, item) => {
@@ -1616,6 +1811,25 @@ export default function OpsQueue() {
     });
   }
   const priorityNumbers = Object.keys(priorityGroups).map(Number).sort((a, b) => a - b);
+
+  // Bucket-board grouping: one section per work-type bucket over the filtered
+  // item set. Inside a section: pipeline step first (the Ready pile reads
+  // 1 → 2 → 3), then primary priority; the builder's order breaks ties.
+  const workGroups = (() => {
+    const m = new Map<string, QueueItem[]>();
+    for (const it of items) {
+      const k = workBucketOf(it) ?? "other";
+      const arr = m.get(k);
+      if (arr) arr.push(it); else m.set(k, [it]);
+    }
+    m.forEach((arr) => {
+      arr.sort((a, b) => {
+        if (a.step !== b.step) return a.step - b.step;
+        return (a.classifications?.[0]?.priority ?? 3) - (b.classifications?.[0]?.priority ?? 3);
+      });
+    });
+    return m;
+  })();
 
   const dismissedCount = allItems.filter((i) => !!i.dismissedToday).length;
   const openCount = allItems.length - dismissedCount;
@@ -1688,7 +1902,7 @@ export default function OpsQueue() {
           </div>
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 0" }}>
-            {([["people", "By person"], ["board", "Step board"]] as const).map(([v, label]) => (
+            {([["buckets", "Bucket board"], ["people", "By person"], ["board", "Step board"]] as const).map(([v, label]) => (
               <button
                 key={v}
                 onClick={() => setView(v)}
@@ -1708,8 +1922,34 @@ export default function OpsQueue() {
         )
       )}
 
-      {/* Region filter — step board only */}
-      {activeBucket === null && view === "board" && (
+      {/* Work-type bucket strip — same server rollup both surfaces render, so
+          counts here always match Fleet Scope's Today's Queue. */}
+      {!isLoading && data?.success && (
+        <WorkTypeStrip buckets={workTypeBuckets} active={activeWorkBucket} onPick={onPickWorkBucket} />
+      )}
+
+      {/* Featured-bucket banner: states the bucket's confidence/mission. */}
+      {!isLoading && activeWorkBucket !== null && (() => {
+        const wb = workTypeBuckets.find((b) => b.key === activeWorkBucket);
+        if (!wb?.featured || !wb.description) return null;
+        const fg = WORK_BUCKET_FG[wb.key] ?? colors.inkSoft;
+        const bg = wb.key === "vehicle_ready_schedule" ? colors.greenLight : colors.blueLight;
+        return (
+          <div
+            data-testid={`workbucket-banner-${wb.key}`}
+            style={{ marginBottom: 14, padding: "10px 14px", borderRadius: 8, border: `1px solid ${fg}`, backgroundColor: bg }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 700, color: fg, marginBottom: 3, display: "flex", alignItems: "center", gap: 6 }}>
+              {wb.key === "vehicle_ready_schedule" ? <PhoneCall size={13} /> : <Truck size={13} />}
+              {wb.label}
+            </div>
+            <div style={{ fontSize: 13.5, color: colors.inkSoft }}>{wb.description}</div>
+          </div>
+        );
+      })()}
+
+      {/* Region filter — bucket + step boards */}
+      {activeBucket === null && (view === "board" || view === "buckets") && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
           {REGION_CODES.map((region) => {
             const active = selectedRegions.has(region);
@@ -1782,7 +2022,15 @@ export default function OpsQueue() {
           /* ── One person's queue (drill-down) ── */
           bucketItems.length === 0 ? (
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 180, gap: 8, fontSize: 15, color: colors.inkMuted }}>
-              <span>Nothing in {activeBucket}'s bucket right now.</span>
+              <span>Nothing in {activeBucket}'s bucket{activeWorkBucket !== null ? " for this work type" : ""} right now.</span>
+              {activeWorkBucket !== null && (
+                <button
+                  onClick={() => setActiveWorkBucket(null)}
+                  style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: colors.inkMuted, textDecoration: "underline", textUnderlineOffset: 2 }}
+                >
+                  Clear work-type filter
+                </button>
+              )}
               <button
                 onClick={() => setActiveBucket(null)}
                 style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: colors.inkMuted, textDecoration: "underline", textUnderlineOffset: 2 }}
@@ -1857,15 +2105,87 @@ export default function OpsQueue() {
         ) : view === "people" ? (
           /* ── People landing: category summary per person ── */
           <PeopleCards summaries={ownerSummaries} onPick={setActiveBucket} />
-        ) : items.length === 0 && selectedRegions.size > 0 ? (
+        ) : items.length === 0 && (selectedRegions.size > 0 || activeWorkBucket !== null) ? (
           <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", height: 180, gap: 8, fontSize: 15, color: colors.inkMuted }}>
-            <span>No items in the selected region{selectedRegions.size > 1 ? "s" : ""}.</span>
+            <span>
+              {activeWorkBucket !== null && selectedRegions.size === 0
+                ? "Nothing in this work-type bucket right now."
+                : `No items match the selected filter${selectedRegions.size > 1 ? "s" : ""}.`}
+            </span>
             <button
-              onClick={() => setSelectedRegions(new Set())}
+              onClick={() => { setSelectedRegions(new Set()); setActiveWorkBucket(null); }}
               style={{ background: "none", border: "none", cursor: "pointer", fontSize: 13, color: colors.inkMuted, textDecoration: "underline", textUnderlineOffset: 2 }}
             >
-              Clear filter
+              Clear filter{selectedRegions.size > 0 && activeWorkBucket !== null ? "s" : ""}
             </button>
+          </div>
+        ) : view === "buckets" ? (
+          /* ── Bucket board: one clear pile per work type ── */
+          <div>
+            {workTypeBuckets.map((wb) => {
+              // Focused via the strip → show only that pile.
+              if (activeWorkBucket !== null && wb.key !== activeWorkBucket) return null;
+              const group = workGroups.get(wb.key) ?? [];
+              if (group.length === 0 && !wb.featured) return null;
+              const featured = wb.featured;
+              const fg = WORK_BUCKET_FG[wb.key] ?? colors.inkSoft;
+              const bg = wb.key === "vehicle_ready_schedule"
+                ? colors.greenLight
+                : wb.key === "needs_replacement" ? colors.blueLight : colors.surface;
+              const open = group.filter((i) => !i.dismissedToday).length;
+              const dismissed = group.length - open;
+              const collapsed = collapsedWorkBuckets.has(wb.key);
+              return (
+                <div key={wb.key}>
+                  <button
+                    onClick={() => toggleWorkBucket(wb.key)}
+                    data-testid={`workbucket-section-${wb.key}`}
+                    aria-expanded={!collapsed}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between",
+                      gap: 12, padding: featured ? "14px 16px" : "11px 16px", cursor: "pointer", textAlign: "left",
+                      backgroundColor: bg, border: "none",
+                      borderBottom: `1px solid ${colors.rule}`, borderLeft: `5px solid ${fg}`,
+                    }}
+                  >
+                    <span style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        {wb.key === "vehicle_ready_schedule" ? <PhoneCall size={15} style={{ color: fg, flexShrink: 0 }} />
+                          : wb.key === "needs_replacement" ? <Truck size={15} style={{ color: fg, flexShrink: 0 }} /> : null}
+                        <span style={{ fontFamily: fonts.syne, fontSize: featured ? 17 : 14.5, fontWeight: 800, letterSpacing: 0.5, color: featured ? fg : colors.ink, textTransform: "uppercase" }}>
+                          {wb.label}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: featured ? fg : colors.inkSoft, border: `1px solid ${colors.rule}`, borderRadius: 999, padding: "1px 9px", backgroundColor: colors.background }}>
+                          {open} open{dismissed > 0 ? ` · ${dismissed} dismissed` : ""}
+                        </span>
+                      </span>
+                      {featured && wb.description && (
+                        <span style={{ fontSize: 13.5, color: colors.inkSoft }}>{wb.description}</span>
+                      )}
+                    </span>
+                    {collapsed ? <ChevronRight size={17} style={{ color: fg, flexShrink: 0 }} /> : <ChevronDown size={17} style={{ color: fg, flexShrink: 0 }} />}
+                  </button>
+                  {!collapsed && group.length === 0 && (
+                    <div style={{ padding: "14px 16px", fontSize: 14, color: colors.inkMuted, borderBottom: `1px solid ${colors.rule}` }}>
+                      {wb.key === "vehicle_ready_schedule"
+                        ? "No shop-confirmed trucks right now. Trucks land here the moment a shop call (LUCA Ready or a manual verify) confirms readiness."
+                        : "No decommissioned techs are waiting on a spare right now."}
+                    </div>
+                  )}
+                  {!collapsed && group.map((item) => (
+                    <QueueRow
+                      key={item.truckId}
+                      item={item}
+                      editing={editingRows.has(item.truckId)}
+                      schedEditing={schedRows.has(item.truckId)}
+                      vocabulary={vocabulary}
+                      actions={rowActions}
+                      onOpenCase={setPanelKey}
+                    />
+                  ))}
+                </div>
+              );
+            })}
           </div>
         ) : (
           /* ── Everyone view (triage-lane board) ── */

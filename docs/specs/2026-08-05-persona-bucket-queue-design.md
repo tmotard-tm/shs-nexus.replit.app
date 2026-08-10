@@ -171,3 +171,66 @@ Notes:
 - Queue UIs: `client/src/pages/vehicle-rental-management/pages/OpsQueue.tsx`, `client/src/pages/fleet-scope/TodaysQueue.tsx`.
 - LUCA vocab: `server/luca-writeback/mapper.ts`; pill styling added in the batch-caller removal task.
 - Env/process: typecheck via workflow (baseline 213), tests via configured workflows, no migrations on deploy (boot-DDL/self-heal pattern), autoscale kills in-process timers.
+
+## 14. Work-type buckets (2026-08-10 addendum)
+
+Every item carries a server-stamped **`workBucket`** — the ONE pile it lives
+in. Claim rules (`workBucketForItem`, in order): (1) primary
+`needs_replacement` → the locate-a-spare pile (retrieval-primary decommission
+rows stay in Jennifer's `retrieval_pending`); (2) lane `ready` +
+phone-confirmed evidence (`readyReason` 'luca'|'manual') and no
+terminal-family classification (`needs_replacement`, `retrieval_pending`,
+`replacement_assigned`, `ams_status_conflict`) → `vehicle_ready_schedule`,
+even when a sub-state outranks it as primary; (3) else primary classification
+(`'other'` safety net). The net effect verified live: the Ready pile = exactly
+the phone-confirmed set — no inference row can enter, no confirmed truck can
+hide behind a scheduling/paperwork primary. Note the step engine's lanes are
+NOT "steps 1–3 = ready": live data shows step 1/3 → `ready` but step 2
+(Scheduling) → `action`, which is why membership is evidence-gated rather than
+lane- or step-shaped.
+
+The builder emits `workTypeBuckets`
+(`{ key, label, priority, open, dismissed, featured, description }`, counted
+off `workBucket`, sorted featured → featured order (Ready pinned first) →
+priority → open desc → label) in the shared payload. **Both UIs render the
+queue as bucket sections by default** — OpsQueue's "Bucket board" view
+(alongside By person and the Step board) and Today's Queue's Bucket/Step
+toggle — one clearly-labeled pile per work type, Ready first with its
+confidence line, needs-replacement second, rows sorted step → priority inside
+each section. The strip is navigation: picking a chip focuses that single
+section (composes with the owner drill-down and the region filter). Counts are
+identical on both surfaces by construction — grouping and rollup both ride the
+server-stamped field; clients never recompute membership.
+
+Two **featured** buckets are always present, even at zero:
+
+1. `vehicle_ready_schedule` — "Ready for pickup — shop-confirmed". Membership
+   is phone-confirmed only (`lucaReady || readyVerified`), never closed-PO/ERD
+   inference — enforced by the claim rule above (unit-tested in
+   tests/bucket-queue-classify.test.ts). Items carry the card evidence explicitly:
+   `readyReason` ('luca' | 'manual'), `lastCallDate`, `lastCallConversationId`
+   (transcript reference — LUCA call records live on the Fleet Agents app, so
+   the chip is a copyable id; row click opens the case file / truck panel),
+   `readyVerified {by, at}`. The bucket banner states the confidence claim.
+2. `needs_replacement` — "Decommissioned — needs replacement (locate a spare)".
+   **Policy reversal (user directive, 2026-08-10):** terminal-truck cases
+   (declined/auction fleet status incl. 'Approved for sale', or AMS-terminal)
+   with no replacement assigned previously dead-ended into "No action today"
+   (`classify()` returned `[]`); they are now a workable bucket whose job is to
+   locate a spare. P1 with `slaBusinessDays: null` — the work is
+   availability-driven, so no red overdue nag (red stays reserved, §7);
+   owner rule regional. Pushed AFTER `retrieval_pending` so retrieval stays the
+   primary directive on decommission-pipeline rows. Lane: `monitor` by default;
+   upgraded to `action` only when the item's classifications are exactly
+   `[needs_replacement]` AND spares exist. The only remaining `[]` dead-end:
+   terminal + replacement assigned + that replacement itself in the shop.
+
+Spare decoration: bucket items get `spareAvailability { district, districtCount,
+totalCount, candidates (≤3, district-first) }` from a PG-only spares-pool lite
+read (no Snowflake), kicked off at build start and raced against a 5 s timeout
+at attach time — a cold pool never blocks the build (decorate phase measured
+~30 ms with the full fleet). An absent field renders "lookup unavailable",
+never a false zero.
+
+Out of scope kept: auto-assigning spares from the queue, rack/INTERIOR spare
+matching, persona/Annex-A/SLA changes for existing classifications.

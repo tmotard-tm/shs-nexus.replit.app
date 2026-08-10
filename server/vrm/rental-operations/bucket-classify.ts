@@ -28,13 +28,19 @@ export interface ClassificationDef {
 }
 
 export const CLASSIFICATIONS: readonly ClassificationDef[] = [
-  // Declined/auction cases are only actionable once the tech ALREADY has a
-  // replacement truck (close out the rental). Without one there is nothing the
-  // queue user can do today, and a replacement that is itself in the shop is
-  // LUCA's to track on the VRM pages — both of those dead-end out of the
-  // queue entirely (see classify()).
+  // Declined/auction terminal work splits three ways: the tech already has a
+  // replacement (close out the rental); no replacement yet (locate a spare —
+  // first-class queue work per user directive 2026-08-10, reversing the old
+  // "sourcing is not this queue's job" dead-end); or the replacement itself is
+  // in the shop — that one is LUCA's to track on the VRM pages and still
+  // dead-ends out of the queue (see classify()).
   { key: "replacement_assigned", label: "Replacement assigned — close out rental", priority: 2, slaBusinessDays: 3, ownerRule: "regional",
     actionHint: "The tech is already assigned a different truck — nothing to source. Confirm the rental went back and close the case." },
+  // No SLA clock on purpose: the work is availability-driven (a spare may not
+  // exist for weeks) and red/overdue is reserved for real urgency — an
+  // un-actionable countdown would nag without a next step (see spec appendix).
+  { key: "needs_replacement", label: "Decommissioned — needs replacement (locate a spare)", priority: 1, slaBusinessDays: null, ownerRule: "regional",
+    actionHint: "The truck is gone (decommissioned / declined / sold) and the tech is sitting in a rental. Locate an unassigned spare — district first — and start the assignment in the Spares flow; assignment itself stays there." },
   { key: "retrieval_pending", label: "Retrieval pending (decommission / sold)", priority: 1, slaBusinessDays: 5, ownerRule: "jennifer",
     actionHint: "Decommissioned / sold — arrange retrieval of the unit and close the rental." },
   // AMS is an equal terminal authority: when AMS says the van was declined /
@@ -187,28 +193,39 @@ export interface ClassifyInput {
 /**
  * All classifications that apply, deduped, highest priority first. Empty
  * signals degrade to aged_open_case (P3) — every open truck belongs to
- * exactly one bucket owner — EXCEPT declined/auction dead-ends, which return
- * [] on purpose: the builder routes those cases to "No action required today"
- * instead of the actionable queue.
+ * exactly one bucket owner — EXCEPT one dead-end that returns [] on purpose:
+ * a declined/auction case whose replacement truck is itself in the shop
+ * (LUCA already tracks that repair); the builder routes it to "No action
+ * required today" instead of the actionable queue.
  */
 export function classify(x: ClassifyInput): string[] {
   const out: string[] = [];
   // Declined/auction is a TERMINAL branch: the truck is gone (sold/declined),
-  // so every other signal on it (stalled repair, ready, tags…) is noise. The
-  // only immediate action is closing out the rental when the tech already has
-  // a healthy replacement. No replacement yet → nothing to do until one is
-  // assigned; replacement itself in the shop → LUCA already tracks that repair
-  // on the VRM pages. Both dead-end to [] (Jennifer's decommission retrieval
-  // still fires — that flow is hers regardless).
+  // so every other signal on it (stalled repair, ready, tags…) is noise.
+  // Three work states remain: tech already on a healthy replacement → close
+  // out the rental; no replacement yet → locate a spare (needs_replacement,
+  // user directive 2026-08-10 — reversing the old "nothing to do until one is
+  // assigned" dead-end); replacement itself in the shop → LUCA already tracks
+  // that repair on the VRM pages, so it stays a [] dead-end (Jennifer's
+  // decommission retrieval still fires — that flow is hers regardless).
   if (x.declinedOrAuction || x.amsTerminal) {
     // AMS disagreeing with the fleet status is itself the actionable finding —
     // surface the conflict instead of letting the case dead-end invisibly.
     if (x.amsTerminal && !x.declinedOrAuction) out.push("ams_status_conflict");
     if (x.replacementAssigned && !x.assignedTruckInRepair) out.push("replacement_assigned");
     if (x.decommission) out.push("retrieval_pending");
+    // Pushed AFTER retrieval_pending on purpose: both are P1 and the sort is
+    // stable, so decommission retrieval (Jennifer's flow) stays primary.
+    if (!x.replacementAssigned) out.push("needs_replacement");
     return out.sort((a, b) => CLASSIFICATION_BY_KEY.get(a)!.priority - CLASSIFICATION_BY_KEY.get(b)!.priority);
   }
-  if (x.decommission) out.push("retrieval_pending");
+  if (x.decommission) {
+    out.push("retrieval_pending");
+    // Decommission pipeline without a replacement: locating a spare is queue
+    // work even before the fleet status flips terminal (after retrieval_pending
+    // so the stable sort keeps Jennifer's retrieval primary — both P1).
+    if (!x.replacementAssigned) out.push("needs_replacement");
+  }
   if (x.escalated) out.push("luca_escalated");
   if (x.lucaStatus === "Unverified - confirm by phone") out.push("unverified_confirm");
   if (x.readyGuardDowngraded) out.push("ready_guard_review");

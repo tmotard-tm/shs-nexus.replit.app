@@ -45,6 +45,7 @@ import {
   type ClassificationDef,
   type ClassifyInput,
 } from "./vrm/rental-operations/bucket-classify";
+import { getSparePoolLite, type SparePoolLite } from "./spares-pool";
 
 type Truck = Awaited<ReturnType<typeof fleetScopeStorage.getAllTrucks>>[number];
 
@@ -123,6 +124,10 @@ export type QueueItem = {
   region?: Region | null;
   needsRouting?: boolean;
   classifications?: ItemClassification[];
+  /** The ONE work-type bucket this item lives in (server-stamped claim rules —
+   *  see workBucketForItem). Both UIs group by this field; never recompute
+   *  membership client-side. */
+  workBucket?: string;
   dismissedToday?: { by: string } | null;
   contextChips?: {
     effStatus: string | null;
@@ -164,6 +169,21 @@ export type QueueItem = {
   /** Step-2 rows: readiness behind "Scheduling" is phone-confirmed (LUCA Ready
    *  or manual verify). False = the row is a validation task, not a pickup. */
   schedulingValidated?: boolean;
+  /** Unassigned-spare availability, attached to needs_replacement rows only.
+   *  undefined = lookup unavailable at build time (rendered as "lookup
+   *  unavailable", never as a false "0 spares" claim). */
+  spareAvailability?: SpareAvailability;
+};
+
+/** Lite spare-pool availability for one needs-replacement row. */
+export type SpareAvailability = {
+  /** Tech's district (VRM identity layer); null when unknown. */
+  district: string | null;
+  /** Spares in that district; null when the district is unknown. */
+  districtCount: number | null;
+  totalCount: number;
+  /** Up to 3 candidate truck numbers, district matches first. */
+  candidates: string[];
 };
 
 /**
@@ -190,11 +210,78 @@ export type NoActionItem = {
   reason?: string | null;
 };
 
+/** One work-type bucket (grouped by PRIMARY classification) for the strip. */
+export type WorkTypeBucket = {
+  key: string;
+  label: string;
+  priority: number;
+  open: number;
+  dismissed: number;
+  /** First-class buckets the team asked for — rendered prominently. */
+  featured: boolean;
+  /** Confidence/purpose blurb shown on the featured buckets' banner. */
+  description: string | null;
+};
+
+// The two first-class buckets (task 2026-08-10). Labels override the def
+// label with the team's phrasing; descriptions state the confidence contract.
+const FEATURED_WORK_BUCKETS: Record<string, { label: string; description: string }> = {
+  vehicle_ready_schedule: {
+    label: "Ready for pickup — shop-confirmed",
+    description:
+      "Readiness was confirmed by an actual shop call — a LUCA Ready call or a staff member's manual verify. " +
+      "Closed-PO / date inference never qualifies. There is no reason to believe these trucks are not ready.",
+  },
+  needs_replacement: {
+    label: "Decommissioned — needs replacement (locate a spare)",
+    description:
+      "The tech is sitting in a rental because their truck is decommissioned / declined / sold and no replacement " +
+      "is assigned. The job here is locating a spare when one is available — assignment itself stays in the Spares flow.",
+  },
+};
+/** Featured display order = insertion order above: Ready pile first. */
+const FEATURED_ORDER = Object.keys(FEATURED_WORK_BUCKETS);
+
+/** Classifications that mean the truck itself is leaving the fleet — a row
+ *  carrying any of these is never "available for pickup", no matter what a
+ *  shop call once said about the repair. */
+const TERMINAL_FAMILY = new Set([
+  "needs_replacement",
+  "retrieval_pending",
+  "replacement_assigned",
+  "ams_status_conflict",
+]);
+
+/** The ONE work-type bucket an item lives in. Claim rules, in order:
+ *  1. Terminal truck with no replacement (primary needs_replacement) →
+ *     the locate-a-spare pile. Retrieval-primary decommission rows stay in
+ *     retrieval_pending — Jennifer's pile is separate by design.
+ *  2. Phone-confirmed ready-pipeline rows → the Ready pile. Membership is the
+ *     board's READY lane (server-stamped lane 'ready') gated on luca/manual
+ *     evidence — i.e. exactly the set operators see as "available for pickup"
+ *     in production, INCLUDING rows whose top label is a scheduling/paperwork
+ *     sub-state. Closed-PO/date inference (readyReason 'holman'/'date', lane
+ *     monitor) never qualifies.
+ *  3. Everything else → its primary classification.
+ */
+export function workBucketForItem(
+  it: Pick<QueueItem, "lane" | "readyReason" | "classifications">,
+): string {
+  const keys = (it.classifications ?? []).map((c) => c.key);
+  if (keys[0] === "needs_replacement") return "needs_replacement";
+  const phoneConfirmed = it.readyReason === "luca" || it.readyReason === "manual";
+  if (it.lane === "ready" && phoneConfirmed && !keys.some((k) => TERMINAL_FAMILY.has(k))) {
+    return "vehicle_ready_schedule";
+  }
+  return keys[0] ?? "other";
+}
+
 export type TodaysQueue = {
   success: true;
   items: QueueItem[];
   noAction: NoActionItem[];
   buckets: OwnerBucket[];
+  workTypeBuckets: WorkTypeBucket[];
   classificationDefs: readonly ClassificationDef[];
   generatedAt: string;
 };
@@ -204,6 +291,11 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   // every map in this builder (po context, case keys, decommissioning) so a
   // padded/unpadded mismatch cannot silently drop a join.
   const canon = (s: unknown): string => String(s ?? '').trim().replace(/\D/g, '').replace(/^0+/, '') || '0';
+
+  // Spare-availability decoration (needs_replacement bucket): kicked off up
+  // front so its two PG reads overlap the heavy base reads, then raced against
+  // a short timeout at attach time — a cold pool can never stall the build.
+  const sparePoolPromise: Promise<SparePoolLite | null> = getSparePoolLite().catch(() => null);
 
   const tStart = Date.now();
   const baseMs: Record<string, number> = {};
@@ -630,20 +722,19 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     assigned.add(t.id);
     const sp = t.scheduledPickupDate ?? null;
     const validated = lucaReadyFor(t) || !!readyVerifiedFor(t);
-    // Fleet Scope's OWN row can contradict its own pickup claim two ways, and
-    // both were invisible on the card (Tyler 2026-08-07). Measured that day on
-    // the 21 Scheduling trucks: repair_completed was false on 13 of them, and
-    // scheduled_pickup_date was NULL on ALL 21 including the six whose
-    // sub-status literally reads "Scheduled, awaiting tech pickup".
-    // Surfaced, never silently upgraded: a shop call saying Ready does not make
-    // an unfinished repair finished, and a sub-status is not a booking.
-    // repairCompleted null/undefined means UNKNOWN, so only an explicit false
-    // is treated as a contradiction — absence of a flag is not evidence.
-    const repairNotDone = t.repairCompleted === false;
+    // Fleet Scope's OWN row can contradict its pickup claim (Tyler 2026-08-07:
+    // surfaced, never silently upgraded — a sub-status is not a booking).
+    // NOTE (2026-08-10): the original check had a second leg on
+    // fs_trucks.repair_completed; removed per user. That flag is a dead
+    // FS-era field for rentals: VRM owns rental state (2026-08-04), the
+    // Rental Ops mirror sync never writes it, and mirror-created rows sit at
+    // the column DEFAULT false forever (measured: 345/357 rows false, incl.
+    // 14/15 Scheduling — even the original "13 of 21" reading was this
+    // artifact). A schema default is not evidence the repair is unfinished,
+    // so it must never contradict a live shop call.
     const claimsScheduled = /awaiting tech pickup/i.test(t.subStatus ?? '');
     const scheduledWithoutDate = claimsScheduled && !sp;
     const selfConflicts: string[] = [];
-    if (repairNotDone) selfConflicts.push('Fleet Scope still has repair_completed = false on this van');
     if (scheduledWithoutDate) selfConflicts.push(`the sub-status reads "${t.subStatus}" but no pickup date has ever been set`);
     const amsRaw = amsStatusFor(t);
     const amsTerminal = amsTerminalFor(t);
@@ -662,9 +753,9 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       const lastD = lastCallDateFor(t);
       lane = 'action';
       whyText = label
-        ? `Fleet status says "Scheduling", but the last call on file (${label}${lastD ? `, ${fmtDay(lastD)}` : ''}) does not confirm the truck is ready.`
-        : 'Fleet status says "Scheduling", but there is no shop call on file confirming the truck is ready.';
-      actionText = warn + 'Validate before booking: call the shop (or check LUCA history) to confirm the truck is ready, then mark it Verified ready — pickup scheduling unlocks once validated.';
+        ? `Fleet status says "Scheduling", but the last call on file (${label}${lastD ? `, ${fmtDay(lastD)}` : ''}) does not confirm truck ${t.truckNumber} is ready.`
+        : `Fleet status says "Scheduling", but there is no shop call on file confirming truck ${t.truckNumber} is ready.`;
+      actionText = warn + `Validate before booking: call the shop (or check LUCA history) to confirm truck ${t.truckNumber} is ready, then mark it Verified ready — pickup scheduling unlocks once validated.`;
     } else if (selfConflicts.length) {
       // The call confirmed readiness but the fleet record disagrees with itself.
       // This is a VERIFY task, not pickup work: dispatching a tech on it is how
@@ -672,8 +763,8 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       lane = 'action';
       const label2 = lucaStatusFor(t);
       const lastD2 = lastCallDateFor(t);
-      whyText = `A shop call${label2 ? ` (${label2}${lastD2 ? `, ${fmtDay(lastD2)}` : ''})` : ''} says this truck is ready, but ${selfConflicts.join(' and ')}.`;
-      actionText = warn + 'Resolve the contradiction before booking: confirm with the shop that the repair is actually finished, then set the pickup date on this row. Do not dispatch the tech on the call alone.';
+      whyText = `A shop call${label2 ? ` (${label2}${lastD2 ? `, ${fmtDay(lastD2)}` : ''})` : ''} says truck ${t.truckNumber} is ready, but ${selfConflicts.join(' and ')}.`;
+      actionText = warn + `Resolve the contradiction before booking: confirm with the shop that the repair on truck ${t.truckNumber} is actually finished, then set the pickup date on this row. Do not dispatch the tech on the call alone.`;
     } else {
       whyText = bucket === 'due'
         ? `Pickup was scheduled for ${formatDateOnly(sp!)} and that date has arrived.`
@@ -734,17 +825,17 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     const verified = readyVerifiedFor(t);
     const readyReason: 'luca' | 'manual' = lucaReady ? 'luca' : 'manual';
     const actionText = isConflict
-      ? 'STATUS CONFLICT — call/verification shows ready but FleetScope not updated. Correct all systems then arrange pickup.'
+      ? `STATUS CONFLICT — call/verification shows truck ${t.truckNumber} ready but FleetScope not updated. Correct all systems then arrange pickup.`
       : readyReason === 'luca'
-        ? 'LUCA confirmed vehicle is READY — arrange same-day pickup'
-        : `Verified ready by ${verified?.by ?? 'staff'} — arrange same-day pickup`;
+        ? `LUCA confirmed truck ${t.truckNumber} is READY — arrange same-day pickup`
+        : `Truck ${t.truckNumber} verified ready by ${verified?.by ?? 'staff'} — arrange same-day pickup`;
     const lastCallD = lastCallDateFor(t);
     items.push({
       step: 3, stepTitle: 'VEHICLE READY — RETRIEVE ASAP',
       lane: 'ready',
       whyText: readyReason === 'luca'
-        ? `LUCA phone-confirmed with the shop${lastCallD ? ` on ${fmtDay(lastCallD)}` : ''}: the truck is READY for pickup.`
-        : `${verified?.by ?? 'Staff'} called the shop and verified the truck is ready${verified ? ` (${fmtDay(verified.at)})` : ''}.`,
+        ? `LUCA phone-confirmed with the shop${lastCallD ? ` on ${fmtDay(lastCallD)}` : ''}: truck ${t.truckNumber} is READY for pickup.`
+        : `${verified?.by ?? 'Staff'} called the shop and verified truck ${t.truckNumber} is ready${verified ? ` (${fmtDay(verified.at)})` : ''}.`,
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
@@ -845,10 +936,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     const holmanReady = poClosedWhileInRepair(t);
     const readyReason: 'holman' | 'date' = holmanReady ? 'holman' : 'date';
     const actionText = research
-      ? `Escalated to research by ${research.by} — locate the truck and its repair status.`
+      ? `Escalated to research by ${research.by} — locate truck ${t.truckNumber} and its repair status.`
       : readyReason === 'holman'
-        ? 'Holman PO closed but readiness is UNCONFIRMED — call the shop; if ready, mark Verified ready. Can\'t validate the shop? Escalate to research.'
-        : 'Estimated ready date has passed — call the shop to confirm; if ready, mark Verified ready.';
+        ? `Holman PO closed but readiness is UNCONFIRMED — call the shop to confirm truck ${t.truckNumber} is ready; if so, mark Verified ready. Can't validate the shop? Escalate to research.`
+        : `Estimated ready date has passed — call the shop to confirm truck ${t.truckNumber} is ready; if so, mark Verified ready.`;
     items.push({
       step: 8, stepTitle: 'PO CLOSED — CONFIRM WITH SHOP',
       // Research escalations are live human work; the rest is billing/date
@@ -857,8 +948,8 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
       whyText: research
         ? `${research.by} escalated this case to research on ${fmtDay(research.at)} — the shop couldn't be validated from POs and calls.`
         : readyReason === 'holman'
-          ? 'Holman closed the PO, but that is billing paperwork — no one has phone-confirmed the truck is ready.'
-          : `The shop's estimated ready date${erd ? ` (${fmtDay(new Date(erd))})` : ''} has passed without a confirming call.`,
+          ? `Holman closed the PO, but that is billing paperwork — no one has phone-confirmed truck ${t.truckNumber} is ready.`
+          : `The shop's estimated ready date${erd ? ` (${fmtDay(new Date(erd))})` : ''} has passed without a confirming call on truck ${t.truckNumber}.`,
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
@@ -915,8 +1006,8 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     assigned.add(t.id);
     const lastDate = lastCallDateFor(t);
     const actionText = lastDate
-      ? `Last attempted: ${lastDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. LUCA could not reach the shop — call back manually.`
-      : 'No call on record. Call the shop directly for a status.';
+      ? `Last attempted: ${lastDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}. LUCA could not reach the shop about truck ${t.truckNumber} — call back manually.`
+      : `No call on record. Call the shop directly for a status on truck ${t.truckNumber}.`;
     items.push({
       step: 5, stepTitle: 'SHOP UNREACHABLE — CALL BACK',
       lane: 'monitor',
@@ -949,13 +1040,15 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     });
   }
 
-  // --- STEP 7: DECLINED REPAIR — REPLACEMENT CLOSE-OUT ---
-  // Declined/sold trucks only carry queue work when the tech ALREADY has a
-  // replacement (close out the rental). The old spare-van sourcing suggestions
-  // are gone: sourcing is not this queue's job, so trucks without a
-  // replacement classify to nothing in the decoration pass below and land in
-  // "No action required today" instead.
-  const step7Trucks = [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Declined Repair').sort((a, b) => daysInStatus(b) - daysInStatus(a));
+  // --- STEP 7: DECLINED / SOLD — REPLACEMENT ---
+  // Two work states (user directive 2026-08-10, reversing the old "sourcing is
+  // not this queue's job" dead-end): the tech ALREADY has a replacement →
+  // close out the rental; no replacement yet → the row stays queued as
+  // "needs replacement — locate a spare" (spare availability attached in the
+  // decoration pass below). Only the replacement-itself-in-the-shop case still
+  // dead-ends to "No action required today" (LUCA tracks that repair).
+  // 'Approved for sale' is the auction-side terminal status — same treatment.
+  const step7Trucks = [...allTrucks].filter(t => !assigned.has(t.id) && (t.mainStatus === 'Declined Repair' || t.mainStatus === 'Approved for sale')).sort((a, b) => daysInStatus(b) - daysInStatus(a));
   const step7AssignedTruck = step7Trucks.map(t => {
     const ck = caseKeyByCanon.get(canon(t.truckNumber));
     const a = ck ? assignedTruckByCase.get(ck) ?? null : null;
@@ -968,18 +1061,21 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     if (assigned.has(t.id)) continue;
     assigned.add(t.id);
     const already = step7AssignedTruck[i];
+    const gone = t.mainStatus === 'Approved for sale' ? 'Truck was approved for sale' : 'Repair was declined';
     items.push({
-      step: 7, stepTitle: 'DECLINED REPAIR — REPLACEMENT CLOSE-OUT',
+      step: 7, stepTitle: 'DECLINED / SOLD — REPLACEMENT',
+      // No-replacement rows default to 'monitor'; the spare-availability pass
+      // upgrades them to 'action' when an unassigned spare actually exists.
       lane: already ? 'action' : 'monitor',
       whyText: already
-        ? `Repair was declined and the tech is already driving truck ${already} — the rental is the only thing left open.`
-        : 'Repair was declined; no replacement truck assigned yet.',
+        ? `${gone} and the tech is already driving truck ${already} — the rental is the only thing left open.`
+        : `${gone} — the tech is stuck in a rental until a replacement is assigned.`,
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
       actionText: already
         ? `Tech is already assigned truck ${already} — no replacement to source. Confirm the rental went back and close out.`
-        : 'Repair declined — no replacement assigned yet; nothing to action today.',
+        : 'No replacement assigned yet — check spare availability and start the assignment in Spares.',
       sortKey: daysInStatus(t),
       repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
     });
@@ -1064,9 +1160,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
 
     const classificationKeys = classify(input);
     if (classificationKeys.length === 0) {
-      // Sold/declined with nothing to close out: either no replacement is
-      // assigned yet (nothing the queue user can do) or the replacement is
-      // itself in the shop (LUCA already tracks that repair on the VRM pages).
+      // The one remaining dead-end: sold/declined and the tech's replacement
+      // is itself in the shop — LUCA already tracks that repair on the VRM
+      // pages. (No-replacement rows now classify needs_replacement and stay
+      // queued — user directive 2026-08-10.)
       droppedIds.add(it.truckId);
       noActionExtras.push({
         truckId: it.truckId,
@@ -1077,7 +1174,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
         caseKey,
         reason: assignedDiffers && assignedInRepair
           ? `Sold/declined — tech's replacement ${assignedRaw} is in the shop (LUCA tracking)`
-          : 'Sold/declined — no action until a replacement is assigned',
+          : 'No queue-actionable classification today',
       });
       continue;
     }
@@ -1127,11 +1224,21 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     it.caseKey = caseKey;
     it.readyVerified = verified ? { by: verified.by, at: verified.at.toISOString() } : null;
     it.research = research ? { by: research.by, at: research.at.toISOString() } : null;
+    // Phone-confirmed ready evidence (shop-confirmed bucket): every confirmed-
+    // ready row carries WHY it's ready plus the call reference, whatever step
+    // built it (step 3 already stamps readyReason; step-1/2 rows lack it).
+    if ((input.lucaReady || input.readyVerified) && it.readyReason !== 'luca' && it.readyReason !== 'manual') {
+      it.readyReason = input.lucaReady ? 'luca' : 'manual';
+    }
+    if (it.lastCallConversationId === undefined) {
+      it.lastCallConversationId = t.lastCallConversationId ?? null;
+    }
     it.owner = top.owner;
     it.ownerBasis = routing.basis === 'manual' ? 'manual' : (topDef.ownerRule === 'regional' ? routing.basis : topDef.ownerRule);
     it.region = routing.region;
     it.needsRouting = top.needsRouting;
     it.classifications = classifications;
+    it.workBucket = workBucketForItem(it);
     it.dismissedToday = dismissedByKey.get(key) ?? null;
     const ldap = caseKey ? ldapByCase.get(caseKey) ?? null : null;
     it.techLdap = ldap;
@@ -1179,6 +1286,58 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     }
   }
 
+  // ── Spare-availability attach (needs_replacement rows only) ───────────────
+  // Awaited AFTER the sync decoration pass so the pool query ran concurrently
+  // with everything above; the race caps the added wait on a cold pool at 5s
+  // (the queue's historic spare-lookup timeout). Skipped entirely when no row
+  // needs it.
+  const needsSpares = items.filter(it => !droppedIds.has(it.truckId) && (it.classifications ?? []).some(c => c.key === 'needs_replacement'));
+  if (needsSpares.length > 0) {
+    const SPARE_POOL_WAIT_MS = 5_000;
+    const sparePool = await Promise.race([
+      sparePoolPromise,
+      new Promise<null>((resolve) => { const timer = setTimeout(() => resolve(null), SPARE_POOL_WAIT_MS); (timer as any).unref?.(); }),
+    ]);
+    // Districts differ in padding across sources (VRM identity vs Holman
+    // cache) — compare digits-only, zero-stripped.
+    const normDistrict = (s: string | null | undefined): string => String(s ?? '').trim().replace(/\D/g, '').replace(/^0+/, '');
+    for (const it of needsSpares) {
+      const district = it.caseKey ? districtByCase.get(it.caseKey) ?? null : null;
+      const dNorm = normDistrict(district);
+      if (sparePool) {
+        const inDistrict = dNorm ? sparePool.vehicles.filter(v => normDistrict(v.district) === dNorm) : [];
+        const inDistrictSet = new Set(inDistrict);
+        const candidates = [...inDistrict, ...sparePool.vehicles.filter(v => !inDistrictSet.has(v))]
+          .slice(0, 3)
+          .map(v => v.truckNumber);
+        it.spareAvailability = {
+          district: (district ?? '').trim() || null,
+          districtCount: dNorm ? inDistrict.length : null,
+          totalCount: sparePool.vehicles.length,
+          candidates,
+        };
+      }
+      // Lane/action text only when locating a spare is the ONLY work on the
+      // row — never touch rows that also carry ams_status_conflict,
+      // retrieval_pending, etc. (their step/lane semantics stand).
+      const only = (it.classifications ?? []).length === 1 && it.classifications![0].key === 'needs_replacement';
+      if (!only) continue;
+      const sa = it.spareAvailability;
+      if (sa && sa.totalCount > 0) {
+        it.lane = 'action';
+        const where = sa.districtCount != null && sa.districtCount > 0
+          ? `${sa.districtCount} unassigned spare${sa.districtCount === 1 ? '' : 's'} in district ${sa.district}`
+          : `${sa.totalCount} unassigned spare${sa.totalCount === 1 ? '' : 's'} fleet-wide${sa.district ? ` (none in district ${sa.district} yet)` : ''}`;
+        it.actionText = `Spare available — ${where}. Pick a candidate and start the assignment in Spares.`;
+      } else {
+        it.lane = 'monitor';
+        it.actionText = sa
+          ? 'No unassigned spares right now — monitoring; assign one as soon as a unit frees up.'
+          : 'Spare lookup unavailable right now — monitoring; check the Spares page directly.';
+      }
+    }
+  }
+
   // First-seen anchors for classifications with no event date of their own —
   // fire-and-forget (a lost write degrades to a clock reset on rebuild, never
   // a 500; readers take MIN(created_at) so duplicates are harmless).
@@ -1211,6 +1370,48 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     if (it.needsRouting) b.needsRouting++;
   }
 
+  // Work-type bucket rollup, keyed off each item's server-stamped workBucket
+  // (claim rules in workBucketForItem — an item lives in exactly ONE bucket;
+  // both UIs group by the same field, so counts can never drift between
+  // surfaces). The two featured buckets are always present so their zero
+  // states still render. Ready is pinned first among featured.
+  const workMap = new Map<string, WorkTypeBucket>();
+  const ensureWorkBucket = (wkey: string): WorkTypeBucket => {
+    let b = workMap.get(wkey);
+    if (!b) {
+      const def = CLASSIFICATION_BY_KEY.get(wkey);
+      const feat = FEATURED_WORK_BUCKETS[wkey];
+      b = {
+        key: wkey,
+        label: feat?.label ?? def?.label ?? "Other / unclassified",
+        priority: def?.priority ?? 4,
+        open: 0,
+        dismissed: 0,
+        featured: !!feat,
+        description: feat?.description ?? null,
+      };
+      workMap.set(wkey, b);
+    }
+    return b;
+  };
+  for (const wkey of Object.keys(FEATURED_WORK_BUCKETS)) ensureWorkBucket(wkey);
+  for (const it of visibleItems) {
+    const wkey = it.workBucket ?? it.classifications?.[0]?.key;
+    if (!wkey) continue;
+    const b = ensureWorkBucket(wkey);
+    if (it.dismissedToday) b.dismissed++; else b.open++;
+  }
+  const featIdx = (k: string) => {
+    const i = FEATURED_ORDER.indexOf(k);
+    return i === -1 ? 99 : i;
+  };
+  const workTypeBuckets = Array.from(workMap.values()).sort((a, b) =>
+    (Number(b.featured) - Number(a.featured)) ||
+    (featIdx(a.key) - featIdx(b.key)) ||
+    (a.priority - b.priority) ||
+    ((b.open + b.dismissed) - (a.open + a.dismissed)) ||
+    a.label.localeCompare(b.label));
+
   // --- NO ACTION REQUIRED ---
   // Reasoned dead-ends first (sold/declined cases with nothing to action),
   // then trucks no step claimed at all.
@@ -1241,6 +1442,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     items: visibleItems,
     noAction,
     buckets: Array.from(bucketMap.values()),
+    workTypeBuckets,
     classificationDefs: CLASSIFICATIONS,
     generatedAt: new Date().toISOString(),
   };

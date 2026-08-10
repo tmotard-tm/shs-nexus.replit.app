@@ -391,3 +391,56 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
     occupiedCount: occupied.size,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Lite pool — for non-blocking decorations (Today's Queue "needs replacement")
+// ---------------------------------------------------------------------------
+
+export type SparePoolLite = {
+  /** Canonical (zero-stripped) truck numbers with their Holman district. */
+  vehicles: Array<{ truckNumber: string; district: string }>;
+  activeFleetCount: number;
+  occupiedCount: number;
+};
+
+/**
+ * Cheap PG-only view of the unassigned pool for decorations that must never
+ * stall (the Today's Queue build races this against a short timeout). Same
+ * derivation + sanity guards as getNexusUnassignedVehicles, but NO Snowflake
+ * fallback and NO AMS/mirror/zip enrichment: any guard failure returns null
+ * and the caller renders "lookup unavailable" — an absent decoration, never a
+ * false "0 spares" claim and never a queue-blocking wait.
+ */
+export async function getSparePoolLite(): Promise<SparePoolLite | null> {
+  try {
+    const [activeRows, occupied] = await Promise.all([
+      fetchActiveCacheRows(),
+      getOccupiedTruckSet(),
+    ]);
+    if (activeRows.length === 0 || occupied.size === 0) return null;
+    const pool = activeRows.filter((r) => {
+      const canon = canonicalTruckNumber(r.holmanVehicleNumber);
+      if (!canon) return false;
+      if (isByovNumber(r.holmanVehicleNumber)) return false;
+      const cacheSaysAssigned = !!(r.tpmsAssignedTechId || "").trim();
+      return !cacheSaysAssigned && !occupied.has(canon);
+    });
+    // Same guards as the full pool: an empty or implausibly large pool means
+    // the assignment data is broken — report "unavailable", not a wrong count.
+    if (pool.length === 0) return null;
+    if (pool.length > activeRows.length * MAX_POOL_RATIO) return null;
+    return {
+      vehicles: pool
+        .map((r) => ({
+          truckNumber: canonicalTruckNumber(r.holmanVehicleNumber),
+          district: (r.district || "").trim(),
+        }))
+        .sort((a, b) => a.truckNumber.localeCompare(b.truckNumber, undefined, { numeric: true })),
+      activeFleetCount: activeRows.length,
+      occupiedCount: occupied.size,
+    };
+  } catch (err: any) {
+    console.warn(`[SparesPool] lite pool unavailable: ${err?.message || err}`);
+    return null;
+  }
+}
