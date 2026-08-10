@@ -300,6 +300,29 @@ describe("VRM fleet-status authority (DB-backed)", { skip: !process.env.DATABASE
     assert.match((fsMoved as { reason: string }).reason, /FleetScope="Scheduling"/);
   });
 
+  test("guard predicate: write-time constraints (change-stamp bound + open case)", () => {
+    const SET = ["On Road", "Truck Swap"] as const;
+    const ok = { vrmMain: null, fsMain: "On Road", fsRowFound: true, fsChangedBeforeBound: true, caseOpen: true };
+    const C = { fsStatusChangedBefore: "2026-08-01", requireCaseOpen: true };
+    assert.equal(fs.evaluateGuardedAppend(ok, SET, C).pass, true);
+
+    // A change ON/AFTER the bound refuses even though it stays in the family.
+    const fresh = fs.evaluateGuardedAppend({ ...ok, fsChangedBeforeBound: false }, SET, C);
+    assert.equal(fresh.pass, false);
+    assert.match((fresh as { reason: string }).reason, /newer decision wins/);
+
+    // Unprovable staleness (no change stamp) refuses when a bound is required.
+    assert.equal(fs.evaluateGuardedAppend({ ...ok, fsChangedBeforeBound: null }, SET, C).pass, false);
+
+    // A case that left the rental report refuses when the caller requires it…
+    const closed = fs.evaluateGuardedAppend({ ...ok, caseOpen: false }, SET, C);
+    assert.equal(closed.pass, false);
+    assert.match((closed as { reason: string }).reason, /rental report/);
+
+    // …and constraint-free callers (LUCA routing et al.) are unaffected.
+    assert.equal(fs.evaluateGuardedAppend({ vrmMain: null, fsMain: "On Road", fsRowFound: true }, SET).pass, true);
+  });
+
   test("concurrent guarded writers serialize per case — exactly one appends", async () => {
     // A applies (current main is in its set); B is queued behind A on the same
     // case and must re-read AFTER A committed — its set excludes A's value, so
@@ -444,5 +467,118 @@ describe("VRM fleet-status authority (DB-backed)", { skip: !process.env.DATABASE
       }
       await dbMod.db.execute(sqlTag`DELETE FROM sessions WHERE id = ${SID}`);
     }
+  });
+
+  // ── One-time stale rental-status reset (Tyler 2026-08-10) ─────────────────
+  // Synthetic candidates prove each leg of the predicate: only a truck whose
+  // back-with-tech status predates the cutoff AND whose rental case is still
+  // open gets reset; post-cutoff, NULL-changed-at, and no-open-case trucks are
+  // untouched; a second run is a no-op (the set can only shrink).
+  describe("stale rental-status reset (one-time backlog heal)", () => {
+    const T_RESET = "999731";   // pre-cutoff + open case  → reset
+    const T_FRESH = "999732";   // post-cutoff + open case → untouched
+    const T_NODATE = "999733";  // NULL changed-at + case  → untouched (unprovable)
+    const T_NOCASE = "999734";  // pre-cutoff, no case     → untouched (not on report)
+    const ALL = [T_RESET, T_FRESH, T_NODATE, T_NOCASE];
+    const CASES = [T_RESET, T_FRESH, T_NODATE];
+
+    const truckRow = async (n: string): Promise<any> =>
+      rowsOf(await dbMod.db.execute(sqlTag`
+        SELECT main_status, sub_status, last_updated_by, main_status_changed_at
+        FROM fs_trucks WHERE truck_number = ${n}`))[0];
+
+    const healRows = async (ck: string): Promise<number> => {
+      const res = await dbMod.db.execute(sqlTag`
+        SELECT COUNT(*)::int AS n FROM vrm_rental_operation_actions
+        WHERE action_type = 'fleet_status' AND case_key = ${ck}
+          AND actor = ${"heal:stale-rental-reset"}`);
+      return Number(rowsOf(res)[0]?.n ?? 0);
+    };
+
+    before(async () => {
+      for (const n of ALL) {
+        const pre = await dbMod.db.execute(
+          sqlTag`SELECT id FROM fs_trucks WHERE truck_number = ${n}`);
+        assert.equal(rowsOf(pre).length, 0, `test truck ${n} must not pre-exist`);
+      }
+      const changedAt = (n: string): string | null =>
+        n === T_FRESH ? "2026-08-05 12:00:00" : n === T_NODATE ? null : "2026-07-01 12:00:00";
+      for (const n of ALL) {
+        await dbMod.db.execute(sqlTag`
+          INSERT INTO fs_trucks (truck_number, status, main_status, sub_status, main_status_changed_at, last_updated_at, last_updated_by)
+          VALUES (${n}, 'On Road', 'On Road', 'Delivered to technician', ${changedAt(n)}::timestamp, NOW(), 'stale-reset-test')`);
+      }
+      for (const n of CASES) {
+        await dbMod.db.execute(sqlTag`
+          INSERT INTO vrm_rental_operations_cases (case_key, vehicle_number, vehicle_number_padded, present_in_latest)
+          VALUES (${n}, ${n}, ${n}, true)`);
+      }
+    });
+
+    after(async () => {
+      // fs_pmf_status_events keys on the truck UUID (no FK); fs_truck_status_events
+      // cascades with the truck row; fs_actions may hold updateTruck audit rows.
+      await dbMod.db.execute(sqlTag`
+        DELETE FROM fs_pmf_status_events WHERE asset_id IN (
+          SELECT id FROM fs_trucks WHERE truck_number IN (${sqlTag.join(ALL.map((n) => sqlTag`${n}`), sqlTag`, `)}))`);
+      await dbMod.db.execute(sqlTag`
+        DELETE FROM fs_actions WHERE truck_id IN (
+          SELECT id FROM fs_trucks WHERE truck_number IN (${sqlTag.join(ALL.map((n) => sqlTag`${n}`), sqlTag`, `)}))`);
+      await dbMod.db.execute(sqlTag`
+        DELETE FROM fs_trucks WHERE truck_number IN (${sqlTag.join(ALL.map((n) => sqlTag`${n}`), sqlTag`, `)})`);
+      await dbMod.db.execute(sqlTag`
+        DELETE FROM vrm_rental_operation_actions WHERE case_key IN (${sqlTag.join(CASES.map((n) => sqlTag`${n}`), sqlTag`, `)})`);
+      await dbMod.db.execute(sqlTag`
+        DELETE FROM vrm_rental_operations_cases WHERE case_key IN (${sqlTag.join(CASES.map((n) => sqlTag`${n}`), sqlTag`, `)})`);
+    });
+
+    test("resets only the pre-cutoff truck that is still on the rental report", async () => {
+      const out = await fs.resetStaleRentalStatuses();
+      assert.ok(out.reset >= 1, `expected at least the synthetic candidate to reset (got ${JSON.stringify(out)})`);
+
+      const t = await truckRow(T_RESET);
+      assert.equal(t.main_status, fs.STALE_RENTAL_RESET_TO);
+      assert.equal(t.sub_status, null, "stale sub-status must be cleared with the reset");
+      assert.equal(t.last_updated_by, `VRM:${fs.STALE_RENTAL_RESET_ACTOR}`);
+      assert.equal(await healRows(T_RESET), 1, "authoritative history row must record the heal");
+
+      assert.equal((await truckRow(T_FRESH)).main_status, "On Road", "post-cutoff status must never be touched");
+      assert.equal((await truckRow(T_NODATE)).main_status, "On Road", "NULL changed-at cannot prove staleness — skip");
+      assert.equal((await truckRow(T_NOCASE)).main_status, "On Road", "no open rental case → not on the report → untouched");
+      assert.equal(await healRows(T_FRESH), 0);
+      assert.equal(await healRows(T_NODATE), 0);
+    });
+
+    test("second run is a no-op for already-reset trucks (backlog can only shrink)", async () => {
+      await fs.resetStaleRentalStatuses();
+      assert.equal(await healRows(T_RESET), 1, "re-running must not append a second heal row");
+      assert.equal((await truckRow(T_RESET)).main_status, fs.STALE_RENTAL_RESET_TO);
+      assert.equal((await truckRow(T_FRESH)).main_status, "On Road");
+    });
+
+    // Write-time constraint plumbing, end-to-end through the real guard SQL:
+    // the candidate scan can never produce these rows, so call the guard
+    // directly the way a racing second instance would.
+    test("guard refuses a post-cutoff status at write time even within the family", async () => {
+      const g = await fs.appendFleetStatusIfMainIn(
+        T_FRESH, fs.STALE_RENTAL_MAINS, fs.STALE_RENTAL_RESET_TO, null, ACTOR,
+        { fsStatusChangedBefore: fs.STALE_RENTAL_CUTOFF },
+      );
+      assert.equal(g.applied, false);
+      assert.match(String(g.skippedReason), /newer decision wins/);
+      assert.equal((await truckRow(T_FRESH)).main_status, "On Road", "refusal must write nothing");
+    });
+
+    test("guard refuses when the case left the rental report at write time", async () => {
+      await dbMod.db.execute(sqlTag`
+        UPDATE vrm_rental_operations_cases SET present_in_latest = false WHERE case_key = ${T_NODATE}`);
+      const g = await fs.appendFleetStatusIfMainIn(
+        T_NODATE, fs.STALE_RENTAL_MAINS, fs.STALE_RENTAL_RESET_TO, null, ACTOR,
+        { requireCaseOpen: true },
+      );
+      assert.equal(g.applied, false);
+      assert.match(String(g.skippedReason), /rental report/);
+      assert.equal((await truckRow(T_NODATE)).main_status, "On Road", "refusal must write nothing");
+    });
   });
 });

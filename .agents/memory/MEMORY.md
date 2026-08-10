@@ -79,7 +79,7 @@
 - [Todays-queue perf layering](todays-queue-perf-layering.md) — 30s queue cache + 5min SWR PO-context + 5s spare-pool timeout; every new queue-mutating route must bust the cache or the settle refetch reads stale.
 - [Shop-of-record single source](shop-of-record-single-source.md) — every surface incl. boards shows the server-reconciled pick (portal fallback only when field absent); dispatch map = namespaced truck:/case: keys.
 - [Ready = phone-confirmed only](ready-phone-confirmed-only.md) — closed PO/ERD is a "confirm with shop" signal, never ready; verify/research marks are shared append-only rows across all three VRM views.
-- [Automated VRM status writes](vrm-automated-status-writes.md) — automation must use the guarded compare-at-write append (humans always win); absence rules asymmetric: null VRM history passes, missing/null fs_trucks refuses.
+- [Automated VRM status writes](vrm-automated-status-writes.md) — guarded compare-at-write append (humans win); asymmetric absence rules; set membership ≠ full guard — re-assert the caller's whole predicate via GuardConstraints.
 - [Queue tech-SMS single lane](queue-tech-sms-lane.md) — any "text the tech" surface reuses the pickup-text endpoints (Fleet Comms opt-out/quiet-hours/threading); never a raw Twilio send; phone = fs_comms_contacts by LDAP → fs_trucks fallback.
 - [VRM queue pre-mortem risks](vrm-queue-premortem-risks.md) — open risks at the Ops Queue merge: fleet-status append/reconcile lock gap + unclosed compensation, adopt skips vocab validation, UTC/ET anchor drift, P2 owner arbitration by table order.
 - [Stale vite page kills React dispatch](vite-stale-page-react-dispatch.md) — handler on fiber, clicks bubble, nothing fires, no errors = hard-reload the dev page before debugging app code.

@@ -233,6 +233,31 @@ export interface GuardObservation {
   fsMain: string | null;
   /** Whether a matching fs_trucks row existed at all at write time. */
   fsRowFound: boolean;
+  /**
+   * SQL-evaluated at the write-time re-read (tri-state): did the fs_trucks
+   * row's main_status_changed_at exist AND fall strictly before the caller's
+   * `fsStatusChangedBefore` bound? null when the caller requested no bound
+   * (or no truck row matched). Evaluated in SQL, not JS, to avoid timestamp
+   * timezone drift.
+   */
+  fsChangedBeforeBound?: boolean | null;
+  /** Whether the case is still on the latest rental report at write time. */
+  caseOpen?: boolean | null;
+}
+
+/**
+ * Optional extra write-time conditions. The base guard only proves the status
+ * is still SOMEWHERE in the replaceable set — a newer decision that stays
+ * within the set (e.g. "On Road" → "Truck Swap") would slip through it.
+ * Callers whose eligibility rests on MORE than set membership (the stale
+ * rental reset: status must predate a cutoff, case must still be on the
+ * rental report) re-assert those conditions here, at the same re-read.
+ */
+export interface GuardConstraints {
+  /** Refuse unless main_status_changed_at is present and strictly before this bound. */
+  fsStatusChangedBefore?: string;
+  /** Refuse unless the case is still present_in_latest. */
+  requireCaseOpen?: boolean;
 }
 
 /**
@@ -254,6 +279,7 @@ export interface GuardObservation {
 export function evaluateGuardedAppend(
   obs: GuardObservation,
   replaceableMains: readonly string[],
+  constraints?: GuardConstraints,
 ): { pass: true } | { pass: false; reason: string } {
   if (obs.vrmMain !== null && !replaceableMains.includes(obs.vrmMain)) {
     return { pass: false, reason: `status changed before write (VRM="${obs.vrmMain}") — the newer decision wins` };
@@ -263,6 +289,18 @@ export function evaluateGuardedAppend(
   }
   if (obs.fsMain === null || !replaceableMains.includes(obs.fsMain)) {
     return { pass: false, reason: `status changed before write (FleetScope="${obs.fsMain ?? "—"}") — the newer decision wins` };
+  }
+  // Constraint legs: a same-set change is still a NEWER decision when the
+  // caller's eligibility depends on the change stamp, and a case that left
+  // the rental report no longer satisfies a report-scoped caller.
+  if (constraints?.fsStatusChangedBefore !== undefined && obs.fsChangedBeforeBound !== true) {
+    return {
+      pass: false,
+      reason: `status changed on/after ${constraints.fsStatusChangedBefore} (or has no change stamp) — a newer decision wins`,
+    };
+  }
+  if (constraints?.requireCaseOpen && obs.caseOpen !== true) {
+    return { pass: false, reason: "case left the latest rental report before write" };
   }
   return { pass: true };
 }
@@ -285,14 +323,16 @@ export async function appendFleetStatusIfMainIn(
   mainStatus: string,
   subStatus: string | null,
   actor: string,
+  constraints?: GuardConstraints,
 ): Promise<GuardedAppendOutcome> {
+  const changedBound = constraints?.fsStatusChangedBefore ?? null;
   const prev = guardedAppendQueues.get(caseKey) ?? Promise.resolve();
   const run = prev
     .catch(() => {})
     .then(async (): Promise<GuardedAppendOutcome> => {
       const res = await db.execute(sql`
         WITH c AS (
-          SELECT case_key, vehicle_number, vehicle_number_padded
+          SELECT case_key, vehicle_number, vehicle_number_padded, present_in_latest
           FROM vrm_rental_operations_cases
           WHERE case_key = ${caseKey}
           LIMIT 1
@@ -304,7 +344,7 @@ export async function appendFleetStatusIfMainIn(
           LIMIT 1
         ),
         truck AS (
-          SELECT ft.main_status
+          SELECT ft.main_status, ft.main_status_changed_at
           FROM fs_trucks ft, c
           WHERE COALESCE(NULLIF(LTRIM(ft.truck_number, '0'), ''), '0')
               = COALESCE(NULLIF(LTRIM(COALESCE(c.vehicle_number_padded, c.vehicle_number, c.case_key), '0'), ''), '0')
@@ -313,9 +353,15 @@ export async function appendFleetStatusIfMainIn(
         )
         SELECT
           (SELECT case_key FROM c) AS case_key,
+          (SELECT present_in_latest FROM c) AS case_open,
           (SELECT mark_value FROM latest) AS vrm_main,
           (SELECT main_status FROM truck) AS fs_main,
-          EXISTS(SELECT 1 FROM truck) AS fs_row_found
+          EXISTS(SELECT 1 FROM truck) AS fs_row_found,
+          CASE WHEN ${changedBound}::text IS NULL THEN NULL
+               ELSE (SELECT main_status_changed_at IS NOT NULL
+                       AND main_status_changed_at < ${changedBound}::timestamp
+                     FROM truck)
+          END AS fs_changed_before_bound
       `);
       const row = rowsOf(res)[0];
       if (!row?.case_key) {
@@ -325,9 +371,12 @@ export async function appendFleetStatusIfMainIn(
         vrmMain: str(row.vrm_main),
         fsMain: str(row.fs_main),
         fsRowFound: Boolean(row.fs_row_found),
+        fsChangedBeforeBound:
+          row.fs_changed_before_bound == null ? null : String(row.fs_changed_before_bound) === "true",
+        caseOpen: row.case_open == null ? null : String(row.case_open) === "true",
       };
       const current = { vrmMain: obs.vrmMain, fsMain: obs.fsMain };
-      const verdict = evaluateGuardedAppend(obs, replaceableMains);
+      const verdict = evaluateGuardedAppend(obs, replaceableMains, constraints);
       if (!verdict.pass) {
         return { applied: false, skippedReason: verdict.reason, current, result: null };
       }
@@ -515,4 +564,104 @@ export async function maybeReconcileFleetStatuses(
       reconcileInFlight = null;
     });
   return reconcileInFlight;
+}
+
+// ── One-time stale rental-status reset (Tyler, 2026-08-10) ──────────────────
+// "If they're still on my rental report, they're not really on the road."
+// Trucks whose fleet status still claims back-with-tech (the queue's
+// CONFIRM-RENTAL-RETURNED family — keep STALE_RENTAL_MAINS in lockstep with
+// todays-queue STEP1_STATUSES) while their rental case is STILL open are
+// stale manual claims from the FleetScope era (set May–Jul 2026, before the
+// board fell out of use). Reset them to "Confirming Status" so the queue
+// re-establishes truth through the normal confirm flow.
+//
+// Deliberately a BACKLOG correction, not an ongoing policy (Tyler 2026-08-07:
+// surface, never silently upgrade): the fixed STALE_RENTAL_CUTOFF means only
+// statuses last changed BEFORE the cutoff qualify — a legitimate later
+// "On Road" (e.g. set while an Enterprise return is still being processed)
+// is never touched. Every reset (or any later status write) stamps
+// mainStatusChangedAt past the cutoff, so the candidate set can only shrink;
+// after the first boot per environment this is dormant. Rows with a NULL
+// changed-at are SKIPPED (staleness cannot be proven), and every candidate
+// predicate is RE-ASSERTED at write time via GuardConstraints (pre-cutoff
+// change stamp + case still on the report), so a newer decision landing
+// between the candidate SELECT and the append refuses — even one that stays
+// within the family, and even from another instance once its mirror commits
+// (the reset stamps mainStatusChangedAt past the cutoff). Two instances
+// interleaving inside the same per-case millisecond window can at worst
+// append the SAME value twice — a redundant history row, harmless under
+// newest-row-wins semantics and impossible to re-fire afterwards.
+export const STALE_RENTAL_MAINS: readonly string[] = [
+  "NLWC - Return Rental",
+  "On Road",
+  "Truck Swap",
+  "In Transit",
+  "Available to be assigned",
+];
+export const STALE_RENTAL_CUTOFF = "2026-08-01";
+export const STALE_RENTAL_RESET_ACTOR = "heal:stale-rental-reset";
+export const STALE_RENTAL_RESET_TO = "Confirming Status";
+
+export interface StaleRentalResetResult {
+  candidates: number;
+  reset: number;
+  skipped: number;
+}
+
+export async function resetStaleRentalStatuses(): Promise<StaleRentalResetResult> {
+  const res = await db.execute(sql`
+    SELECT c.case_key, t.truck_number, t.main_status, t.main_status_changed_at
+    FROM vrm_rental_operations_cases c
+    JOIN LATERAL (
+      SELECT ft.truck_number, ft.main_status, ft.main_status_changed_at
+      FROM fs_trucks ft
+      WHERE COALESCE(NULLIF(LTRIM(ft.truck_number, '0'), ''), '0')
+          = COALESCE(NULLIF(LTRIM(COALESCE(c.vehicle_number_padded, c.vehicle_number, c.case_key), '0'), ''), '0')
+      ORDER BY ft.last_updated_at DESC NULLS LAST
+      LIMIT 1
+    ) t ON true
+    WHERE c.present_in_latest = true
+      AND t.main_status IN (${sql.join(STALE_RENTAL_MAINS.map((m) => sql`${m}`), sql`, `)})
+      AND t.main_status_changed_at IS NOT NULL
+      AND t.main_status_changed_at < ${STALE_RENTAL_CUTOFF}::timestamp
+    ORDER BY t.main_status_changed_at ASC
+  `);
+  const rows = rowsOf(res);
+  let reset = 0;
+  let skipped = 0;
+  for (const r of rows) {
+    const caseKey = String(r.case_key);
+    try {
+      const out = await appendFleetStatusIfMainIn(
+        caseKey,
+        STALE_RENTAL_MAINS,
+        STALE_RENTAL_RESET_TO,
+        null,
+        STALE_RENTAL_RESET_ACTOR,
+        // Re-assert the full candidate predicate at write time: family
+        // membership alone would let a NEWER same-family decision (e.g.
+        // "On Road" → "Truck Swap" set after the scan) be clobbered, and a
+        // case closed mid-boot would be reset off-report.
+        { fsStatusChangedBefore: STALE_RENTAL_CUTOFF, requireCaseOpen: true },
+      );
+      if (out.applied) {
+        reset++;
+        console.log(
+          `[VRM/FleetStatus] stale-reset: truck ${r.truck_number} "${r.main_status}" (since ${String(r.main_status_changed_at).slice(0, 10)}) → "${STALE_RENTAL_RESET_TO}" (case ${caseKey})`,
+        );
+      } else {
+        skipped++;
+        console.log(`[VRM/FleetStatus] stale-reset: truck ${r.truck_number} skipped — ${out.skippedReason}`);
+      }
+    } catch (e: any) {
+      skipped++;
+      console.warn(`[VRM/FleetStatus] stale-reset: truck ${r.truck_number} failed — ${e?.message || e}`);
+    }
+  }
+  if (rows.length) {
+    console.log(
+      `[VRM/FleetStatus] stale rental-status reset: candidates=${rows.length} reset=${reset} skipped=${skipped}`,
+    );
+  }
+  return { candidates: rows.length, reset, skipped };
 }

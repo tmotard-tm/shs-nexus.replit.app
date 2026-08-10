@@ -8,7 +8,7 @@ import { sql } from "drizzle-orm";
 import { initRentalOperationsSchema } from "./rental-operations/schema";
 import { initPepBoysDirectory } from "./rental-operations/pepboys-directory";
 import { seedShsOwnerAssignments } from "./rental-operations/seed-shs-owner";
-import { reconcileFleetStatuses } from "./rental-operations/fleet-status";
+import { reconcileFleetStatuses, resetStaleRentalStatuses } from "./rental-operations/fleet-status";
 import { initRightsizeSchema } from "./rightsize/schema";
 import { initRightsizeComplianceSchema } from "./rightsize/compliance";
 import { initInboundSchema } from "./inbound/schema";
@@ -901,6 +901,14 @@ export async function initVrmSchema(): Promise<void> {
   // reconcile (whose throttle is not consumed by failures) heals immediately.
   await reconcileFleetStatuses("boot").catch((e: any) =>
     console.error("[VRM/FleetStatus] boot reconcile failed:", e?.message || e));
+  // One-time stale rental-status reset (Tyler 2026-08-10): back-with-tech
+  // statuses last changed before the cutoff on trucks STILL on the rental
+  // report are stale FleetScope-era claims — reset to "Confirming Status" so
+  // the queue's confirm flow re-establishes truth. Guarded compare-at-write
+  // appends (newer decisions win); dormant once the backlog clears. Runs at
+  // boot only — deliberately NOT part of the recurring reconcile. Non-fatal.
+  await resetStaleRentalStatuses().catch((e: any) =>
+    console.error("[VRM/FleetStatus] stale rental-status reset failed:", e?.message || e));
   // One-time persona-bucket owner seed from the historical fs_trucks.shs_owner
   // column (guarded by an app_settings flag; append-only assign_owner rows, so
   // later human assignments always win). Non-fatal by design.
