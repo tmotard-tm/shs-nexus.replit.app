@@ -189,6 +189,17 @@ test("never-shop is INDEPENDENT of Tyler's parts/labor exception", () => {
 test("RECOVERY names now classify 'tow' without parts/labor (TOW_RE extension)", () => {
   assert.equal(classifyPoVendor({ vendorName: "ABC RECOVERY LLC", lines: [L("ROADSIDE")] }).vendorType, "tow");
 });
+test("LOGISTICS names are never-shop and classify 'tow' (truck 36385's Premier Auto Logistics regression, Tyler 2026-08-10)", () => {
+  // Truck 36385 / PO 120013586: PREMIER AUTO LOGISTICS LLC (a transport/towing
+  // outfit, PO descr "ROADSIDE", no parts/labor) surfaced as the last-PO shop on
+  // Rental Ops. Logistics names carry no TOW token, so they need their own term.
+  assert.equal(isNeverShopVendor("PREMIER AUTO LOGISTICS LLC"), true);
+  assert.equal(classifyPoVendor({ vendorName: "PREMIER AUTO LOGISTICS LLC", hasPartsOrLabor: false }).vendorType, "tow");
+  // Tyler's parts/labor exception still promotes it to 'repair' for open-count
+  // purposes, but never-shop keeps it off every board/queue/feed.
+  assert.equal(classifyPoVendor({ vendorName: "PREMIER AUTO LOGISTICS LLC", lines: [L("PARTS"), L("LABOR")] }).vendorType, "repair");
+  assert.equal(isNeverShopVendor("PREMIER AUTO LOGISTICS LLC"), true);
+});
 test("JS and SQL never-shop patterns agree on every fixture", () => {
   // The SQL form uses Postgres \m/\M word boundaries; translate to JS \b and
   // verify both patterns give identical answers, so the CTE filter and the
@@ -200,6 +211,7 @@ test("JS and SQL never-shop patterns agree on every fixture", () => {
     "A-CLASS AUTO GLASS", "TRAC INTERSTAR", "TRACS", "JUMP START SERVICES",
     "PEP BOYS # 1649", "CASTLE CHEVROLET NORTH", "DAME ENTERPRISES LLC",
     "TRACY'S AUTO REPAIR", "FIRST CLASS AUTO REPAIR", "TRACTOR SUPPLY",
+    "PREMIER AUTO LOGISTICS LLC", "XPO LOGISTICS", "LOGISTICAL SOLUTIONS AUTO REPAIR",
   ]) assert.equal(sqlAsJs.test(name), NEVER_SHOP_RE.test(name), name);
 });
 

@@ -44,7 +44,11 @@ export type PoVendorType = "repair" | "tow" | "parts" | "rental_placeholder" | "
 
 // Name-only regexes. NEVER test these against a PO description / ATA group.
 export const TOLL_RE = /\bTOLL/i;
-export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH/i;
+// LOGISTICS (Tyler, 2026-08-10): "Premier Auto Logistics … is supposed to be one
+// of the excluded shops because it's a towing company." Logistics/transport
+// outfits move vans, they don't fix them — same class as tow/roadside, and the
+// same parts/labor exception applies if one ever actually performs the repair.
+export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH|\bLOGISTICS\b/i;
 
 // ── HARD RULE (Tyler, 2026-08-05): never the shop of record ─────────────────
 // "We recognize all the towing and recovery companies, and we never list those
@@ -63,9 +67,9 @@ export const TOW_RE = /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s
 // MUST stay in sync — the SQL form filters the shop_pick/shop_strict CTEs, the
 // JS form filters the portal-side picker. Unit-tested in ./vendor-class.test.ts.
 export const NEVER_SHOP_RE =
-  /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH|SAFELITE|\bGLASS\b|\bTRACS?\b/i;
+  /\bTRXNOW\b|\bTOW(ING)?\b|WRECKER|ROADSIDE|RECOVERY|JUMP\s?START|LOCKOUT|WINCH|SAFELITE|\bGLASS\b|\bTRACS?\b|\bLOGISTICS\b/i;
 export const NEVER_SHOP_SQL_RE =
-  String.raw`\mTRXNOW\M|\mTOW\M|\mTOWING\M|WRECKER|ROADSIDE|RECOVERY|JUMP ?START|LOCKOUT|WINCH|SAFELITE|\mGLASS\M|\mTRACS?\M`;
+  String.raw`\mTRXNOW\M|\mTOW\M|\mTOWING\M|WRECKER|ROADSIDE|RECOVERY|JUMP ?START|LOCKOUT|WINCH|SAFELITE|\mGLASS\M|\mTRACS?\M|\mLOGISTICS\M`;
 
 /** True when this vendor name may NEVER be listed/dialed as the current shop,
  * regardless of what its PO lines say. Null-safe; empty names are not banned

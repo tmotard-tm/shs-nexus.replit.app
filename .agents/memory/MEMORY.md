@@ -91,3 +91,4 @@
 - [LUCA activity ledger semantics](luca-activity-ledger.md) — ledger logs first sightings + run heartbeats, not every poll; a quiet ledger with healthy heartbeats is working as designed.
 - [SSO-gated UI verification](sso-gated-verification.md) — screenshots hit the SSO wall; mint a temp sessions row (server reads DATABASE_URL, NOT DEV_DATABASE_URL), curl the API, replay client predicates on real rows, then delete it.
 - [VRM surface alignment](vrm-surface-alignment.md) — all case surfaces share ONE displayShopFor/attach + cleanPhone gate; fs fallback is display-only (never call_*/LUCA); conflicting canon phones drop the fallback.
+- [Vendor never-shop changes](vendor-never-shop-changes.md) — new banned tokens need JS+SQL regex parity + stored vendor_type backfill; drawers treat reconciledShop null as "no pick", never raw-fallback.

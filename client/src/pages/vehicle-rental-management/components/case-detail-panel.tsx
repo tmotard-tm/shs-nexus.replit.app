@@ -66,7 +66,7 @@ export interface CallLogItem {
 // caseKey is the rental case it was written from — kept so provenance survives
 // when the same truck comes back under a different rental.
 export interface TruckNote { id: string; caseKey: string | null; note: string | null; actor: string | null; createdAt: string | null; }
-export interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; notes?: TruckNote[]; }
+export interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; notes?: TruckNote[]; reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null; }
 export interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
@@ -177,8 +177,18 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
       </div>
     );
   }
-  const shop = assigned.poHistory.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
-    || assigned.poHistory.find((p) => p.vendorType === "repair") || null;
+  // Anchor on the SERVER-reconciled shop-of-record, exactly like the rental
+  // tab: the server pick already applies the never-shop vendor gate (towing /
+  // logistics / glass names must not surface even when their PO carries
+  // parts/labor). `null` means "authoritatively no eligible shop" — do NOT
+  // fall back to raw poHistory then; only payloads predating the field
+  // (undefined) may use the legacy raw pick.
+  const rec = assigned.reconciledShop;
+  const shop = rec !== undefined
+    ? (rec?.poNumber ? assigned.poHistory.find((p) => p.poNumber === rec.poNumber) ?? null : null)
+    : assigned.poHistory.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
+      || assigned.poHistory.find((p) => p.vendorType === "repair") || null;
+  const shopEffStatus: string | null = rec?.effStatus ?? shop?.poStatus ?? null;
   const hasOpenRepair = assigned.poHistory.some((p) => p.vendorType === "repair" && p.poStatus === "APPROVED");
   const ams = assigned.amsStatus ?? null;
   const amsB = amsBucketOfLabel(ams);
@@ -206,10 +216,10 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
       <section>
         <div style={label}>Current shop</div>
         {shop ? (
-          <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${shop.poStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
+          <div style={{ marginTop: 4, background: colors.surface, border: `1px solid ${shopEffStatus === "APPROVED" ? colors.green : colors.rule}`, borderRadius: 10, padding: "10px 12px" }}>
             <div style={{ fontSize: 15, fontWeight: 600, color: colors.ink }}>{shop.vendorName}
-              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: shop.poStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>
-                {shop.poStatus === "APPROVED" ? "open ticket" : "last shop PO"}
+              <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: shopEffStatus === "APPROVED" ? colors.green : colors.inkMuted, textTransform: "uppercase" }}>
+                {shopEffStatus === "APPROVED" ? "open ticket" : "last shop PO"}
               </span>
             </div>
             <div style={{ fontSize: 12.5, color: colors.inkSoft, marginTop: 2 }}>{[shop.vendorAddress, shop.vendorCity, shop.vendorState].filter(Boolean).join(", ") || "no address on PO"}</div>
@@ -550,11 +560,15 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
   // poStatus is exactly what made the drawer disagree with the table. Fall
   // back to the old raw pick when the payload predates the field.
   const reconciled = data?.reconciledShop ?? null;
+  // `null` (present in the payload) means the server authoritatively found NO
+  // eligible shop — never fall back to a raw vendorType pick then, or banned
+  // vendors (tow/logistics with parts/labor stay vendorType='repair') resurface.
   const currentShop =
-    (reconciled?.poNumber ? poList.find((p) => p.poNumber === reconciled.poNumber) : null)
-    || poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
-    || poList.find((p) => p.vendorType === "repair")
-    || null;
+    data?.reconciledShop !== undefined
+      ? (reconciled?.poNumber ? poList.find((p) => p.poNumber === reconciled.poNumber) ?? null : null)
+      : poList.find((p) => p.vendorType === "repair" && p.poStatus === "APPROVED")
+        || poList.find((p) => p.vendorType === "repair")
+        || null;
   const effShopStatus: string | null = reconciled?.effStatus ?? currentShop?.poStatus ?? null;
   // Newest LUCA dispatch about THIS rental truck — the shop LUCA actually dialed.
   const lucaDial = (data?.callLog || []).find((cl) => cl.source === "luca_dispatch" &&
