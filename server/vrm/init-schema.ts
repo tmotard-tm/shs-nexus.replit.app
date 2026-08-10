@@ -12,6 +12,7 @@ import { reconcileFleetStatuses } from "./rental-operations/fleet-status";
 import { initRightsizeSchema } from "./rightsize/schema";
 import { initRightsizeComplianceSchema } from "./rightsize/compliance";
 import { initInboundSchema } from "./inbound/schema";
+import { initFormsSchema } from "./forms/schema";
 
 export async function initVrmSchema(): Promise<void> {
   await db.execute(sql`
@@ -908,6 +909,7 @@ export async function initVrmSchema(): Promise<void> {
   await initRightsizeSchema();
   await initRightsizeComplianceSchema();
   await initInboundSchema();
+  await initFormsSchema();
 
   console.log("[VRM] Schema initialised");
 }
