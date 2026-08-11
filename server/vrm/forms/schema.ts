@@ -90,6 +90,20 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS last_status_heard_at     date;
   `);
 
+  // ---------------------------------------------------------------------------
+  // TechHub parts / inventory status.
+  //
+  // Only asked when a decommissioned truck number came back with no
+  // reassignment. TRUE means parts and inventory are still transacting against
+  // a dead truck number; FALSE means the technician has no working truck number
+  // anywhere, which is the worse of the two and belongs to Inventory, not to
+  // the rental recovery queue.
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_tech_survey
+      ADD COLUMN IF NOT EXISTS techhub_still_using boolean;
+  `);
+
   // Derived flags. Added separately so re-runs against an existing table are safe.
   await db.execute(sql`
     ALTER TABLE vrm_rental_tech_survey
