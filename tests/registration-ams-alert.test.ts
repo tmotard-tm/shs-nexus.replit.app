@@ -9,6 +9,8 @@ import {
   pickAmsAlert,
   computeAmsStatusReady,
   resolveTruckStatusLabel,
+  isAmsDisposalStatus,
+  lookupVinStatus,
 } from "../server/ams-truck-status-labels";
 
 test("readiness lifecycle: cold → building, stale → keep polling, fresh → ready", () => {
@@ -68,4 +70,61 @@ test("numeric AMS codes resolve to alertable labels end-to-end", () => {
 test("live lookup map takes precedence over the constant backstop", () => {
   const lookup = new Map<string, string>([["5", "Declined repair"]]);
   assert.equal(pickAmsAlert(resolveTruckStatusLabel("5", lookup)), "Declined repair");
+});
+
+// --- Spare-pool disposal validation (isAmsDisposalStatus) -----------------
+// The spare pool must never recommend a van whose AMS status says it is
+// leaving the fleet, regardless of which shape the status arrives in.
+
+test("isAmsDisposalStatus flags declined/auction in every source shape", () => {
+  // Raw numeric AMS codes (5 = Declined Repair, 8 = Sent To Auction)
+  assert.equal(isAmsDisposalStatus("5"), true);
+  assert.equal(isAmsDisposalStatus(8), true);
+  // Resolved labels in AMS-lookup and Snowflake casings
+  assert.equal(isAmsDisposalStatus("Declined Repair"), true);
+  assert.equal(isAmsDisposalStatus("Declined repair"), true);
+  assert.equal(isAmsDisposalStatus("Sent To Auction"), true);
+  assert.equal(isAmsDisposalStatus("  sent to auction  "), true);
+  // Live lookup map wins over the constant backstop
+  const lookup = new Map<string, string>([["42", "Sent To Auction"]]);
+  assert.equal(isAmsDisposalStatus("42", lookup), true);
+});
+
+test("lookupVinStatus normalizes the VIN exactly like the cache keys (trim + uppercase)", () => {
+  // The AMS truck-status cache stores every key as trim().toUpperCase().
+  const map: Record<string, string | null> = {
+    "1FTBW3XM6PKB39838": "Declined Repair",
+    "3C6TRVDG5RE100200": "Spare",
+  };
+  // Whitespace-padded, lowercase source VIN (e.g. from the Holman cache) must
+  // still resolve — a miss here would let a disposal van back into the pool.
+  assert.equal(lookupVinStatus(map, "  1ftbw3xm6pkb39838  "), "Declined Repair");
+  assert.equal(isAmsDisposalStatus(lookupVinStatus(map, " 1FTBW3XM6PKB39838\n")), true);
+  assert.equal(lookupVinStatus(map, "3c6trvdg5re100200"), "Spare");
+  // Missing / blank VINs resolve to null (recommendable — no status claim).
+  assert.equal(lookupVinStatus(map, "5NPE24AF0FH000111"), null);
+  assert.equal(lookupVinStatus(map, ""), null);
+  assert.equal(lookupVinStatus(map, "   "), null);
+  assert.equal(lookupVinStatus(map, null), null);
+  assert.equal(lookupVinStatus(map, undefined), null);
+});
+
+test("isAmsDisposalStatus keeps every non-disposal van recommendable", () => {
+  for (const v of [
+    "Spare",
+    "In Repair",
+    "Assigned to Tech",
+    "Reserved For New Hire",
+    "1",
+    "4",
+    "6",
+    "Unknown",
+    "Declined", // partial token must NOT exclude
+    "Auction",
+    "",
+    null,
+    undefined,
+  ] as Array<string | null | undefined>) {
+    assert.equal(isAmsDisposalStatus(v), false, `expected ${String(v)} → recommendable`);
+  }
 });

@@ -46,6 +46,32 @@ export function pickAmsAlert(label: string | null | undefined): string | null {
   return AMS_ALERT_STATUSES.has(trimmed.toLowerCase()) ? trimmed : null;
 }
 
+// A truck whose AMS status is a disposal status (Declined Repair / Sent To
+// Auction) is leaving the fleet and must never be recommended as a spare.
+// Accepts raw numeric codes ("5"/"8"), AMS-lookup labels, or Snowflake text in
+// any casing — same resolution rules as the alert badge above.
+export function isAmsDisposalStatus(
+  rawStatus: string | number | null | undefined,
+  lookupMap?: Map<string, string>,
+): boolean {
+  return pickAmsAlert(resolveTruckStatusLabel(rawStatus, lookupMap)) !== null;
+}
+
+// VIN-keyed lookup into an AMS status map. The truck-status cache builds every
+// key as trim().toUpperCase(), so the lookup VIN must be normalized the same
+// way — an untrimmed VIN from a source system (e.g. the Holman cache) would
+// otherwise silently miss, and a disposal van would slip past the spare-pool
+// validation. Tries the normalized key first, then the trimmed raw key as a
+// defensive fallback.
+export function lookupVinStatus(
+  statusByVin: Record<string, string | null>,
+  vin: string | null | undefined,
+): string | null {
+  const trimmed = (vin ?? "").trim();
+  if (!trimmed) return null;
+  return statusByVin[trimmed.toUpperCase()] ?? statusByVin[trimmed] ?? null;
+}
+
 // Readiness contract for the Registrations tab: labels are "ready" only when
 // a cached map exists AND it is within its TTL. A stale map is still served
 // (labels shown), but ready=false keeps the client polling until the

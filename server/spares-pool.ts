@@ -12,6 +12,9 @@
 //                AND empty tpmsAssignedTechId
 //                AND canonical truck number NOT IN the occupied set from
 //                    tpms_tech_profiles.truck_no
+//                AND NOT in an AMS disposal status (Declined Repair / Sent To
+//                    Auction) — those vans are leaving the fleet and must
+//                    never be recommended as spares.
 // The cross-check against tpms_tech_profiles is REQUIRED, not optional:
 // fleet-operations-service never writes tpmsAssignedTechId, and
 // updateCacheTPMSAssignments never CLEARS it, so the cache column alone can
@@ -34,7 +37,8 @@ import { and, eq, inArray, isNotNull, ne, sql } from "drizzle-orm";
 import { executeQuery } from "./fleet-scope-snowflake";
 import { pgQueryWithRetry } from "./fleet-scope-all-vehicles-mirror";
 import { AmsApiService, batchFetchAmsCurrentLocation } from "./ams-api-service";
-import { getAmsTruckStatusMap } from "./ams-truck-status-cache";
+import { getAmsTruckStatusMap, getAmsTruckStatusMapCachedOnly } from "./ams-truck-status-cache";
+import { isAmsDisposalStatus, lookupVinStatus } from "./ams-truck-status-labels";
 import { getZipCoordinates } from "./fleet-scope-distance-calculator";
 
 // Matches the row shape previously returned by UNASSIGNED_VEHICLES so the
@@ -62,6 +66,11 @@ export type UnassignedPoolResult = {
   fallbackReason?: string;
   activeFleetCount: number;
   occupiedCount: number;
+  /** "applied" when the AMS disposal-status validation ran; "unavailable"
+   *  when the AMS status map could not be loaded (pool served unfiltered). */
+  disposalFilter?: "applied" | "unavailable";
+  /** Vans dropped because AMS says Declined Repair / Sent To Auction. */
+  disposalExcludedCount?: number;
 };
 
 // Pool larger than this fraction of the active fleet implies broken
@@ -182,7 +191,10 @@ async function fetchMirrorInteriorMap(): Promise<Map<string, string | null>> {
 }
 
 /** Legacy Snowflake pool, used only when the Nexus derivation fails a guard. */
-async function fetchSnowflakeFallbackPool(): Promise<UnassignedVehicleRow[]> {
+async function fetchSnowflakeFallbackPool(): Promise<{
+  vehicles: UnassignedVehicleRow[];
+  disposalExcludedCount: number;
+}> {
   const rows = await executeQuery<{
     VEHICLE_NUMBER: string;
     VIN: string;
@@ -223,7 +235,25 @@ async function fetchSnowflakeFallbackPool(): Promise<UnassignedVehicleRow[]> {
     /* Non-fatal */
   }
 
-  return rows.map((r) => {
+  // Disposal validation: the Snowflake row carries the AMS status as text
+  // ("Declined repair" / "Sent to auction" casings); the cached bulk map,
+  // when warm, additionally covers rows whose Snowflake text is stale.
+  const cachedMap = getAmsTruckStatusMapCachedOnly() ?? {};
+  const excluded: string[] = [];
+  const kept = rows.filter((r) => {
+    const disposal =
+      isAmsDisposalStatus(r.TRUCK_STATUS) ||
+      isAmsDisposalStatus(lookupVinStatus(cachedMap, r.VIN || null));
+    if (disposal) excluded.push(String(r.VEHICLE_NUMBER ?? "").trim());
+    return !disposal;
+  });
+  if (excluded.length > 0) {
+    console.log(
+      `[SparesPool] Fallback pool excluded ${excluded.length} disposal-status van(s): ${excluded.join(", ")}`,
+    );
+  }
+
+  const vehicles = kept.map((r) => {
     const canon = canonicalTruckNumber(r.VEHICLE_NUMBER);
     return {
       VEHICLE_NUMBER: String(r.VEHICLE_NUMBER ?? "").trim(),
@@ -242,6 +272,7 @@ async function fetchSnowflakeFallbackPool(): Promise<UnassignedVehicleRow[]> {
       AMS_ZIP_LON: r.AMS_ZIP_LON != null ? Number(r.AMS_ZIP_LON) : null,
     };
   });
+  return { vehicles, disposalExcludedCount: excluded.length };
 }
 
 /**
@@ -268,14 +299,16 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
     console.warn(
       `[SparesPool] Falling back to Snowflake UNASSIGNED_VEHICLES — ${reason}`,
     );
-    const vehicles = await fetchSnowflakeFallbackPool();
+    const { vehicles, disposalExcludedCount } = await fetchSnowflakeFallbackPool();
     console.log(
-      `[SparesPool] Snowflake fallback pool: ${vehicles.length} vehicles`,
+      `[SparesPool] Snowflake fallback pool: ${vehicles.length} vehicles (${disposalExcludedCount} disposal-status van(s) excluded)`,
     );
     return {
       vehicles,
       source: "snowflake_fallback",
       fallbackReason: reason,
+      disposalFilter: "applied",
+      disposalExcludedCount,
       activeFleetCount: activeRows.length,
       occupiedCount: occupied.size,
     };
@@ -321,12 +354,39 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
     console.warn(`[SparesPool] Mirror INTERIOR lookup unavailable: ${err?.message}`);
   }
 
-  // AMS truck status is keyed by VIN.
+  // AMS truck status is keyed by VIN. Unlike the rest of the enrichment this
+  // map is also a VALIDATION source: vans whose AMS status is a disposal
+  // status (Declined Repair / Sent To Auction) are leaving the fleet and are
+  // dropped from the pool here. When the map is unavailable the pool is
+  // served unfiltered (the Spares page must still render while the AMS cache
+  // warms) and the result is stamped disposalFilter: "unavailable".
   let statusByVin: Record<string, string | null> = {};
   try {
     statusByVin = await getAmsTruckStatusMap();
   } catch (err: any) {
     console.warn(`[SparesPool] AMS truck-status map unavailable: ${err?.message}`);
+  }
+  const disposalFilter: "applied" | "unavailable" =
+    Object.keys(statusByVin).length > 0 ? "applied" : "unavailable";
+  const disposalExcluded: string[] = [];
+  const recommendable =
+    disposalFilter === "applied"
+      ? pool.filter((r) => {
+          if (isAmsDisposalStatus(lookupVinStatus(statusByVin, r.vin))) {
+            disposalExcluded.push(canonicalTruckNumber(r.holmanVehicleNumber));
+            return false;
+          }
+          return true;
+        })
+      : pool;
+  if (disposalFilter === "unavailable") {
+    console.warn(
+      "[SparesPool] Disposal validation unavailable (empty AMS status map) — pool served unfiltered",
+    );
+  } else if (disposalExcluded.length > 0) {
+    console.log(
+      `[SparesPool] Excluded ${disposalExcluded.length} disposal-status van(s) from the spare pool: ${disposalExcluded.join(", ")}`,
+    );
   }
 
   // AMS current location (city/state/zip) from the hourly full-fleet cache;
@@ -334,7 +394,7 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
   let curLocMap = new Map<string, { city: string; state: string; zip: string }>();
   try {
     curLocMap = await batchFetchAmsCurrentLocation(
-      pool.map((r) => ({ truckNumber: r.holmanVehicleNumber, vin: r.vin })),
+      recommendable.map((r) => ({ truckNumber: r.holmanVehicleNumber, vin: r.vin })),
       amsService,
     );
   } catch (err: any) {
@@ -343,7 +403,7 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
 
   // ZIP → lat/lon (geocoder caches per-zip after first call).
   const uniqueZips = new Set<string>();
-  for (const r of pool) {
+  for (const r of recommendable) {
     const zip = curLocMap.get(r.holmanVehicleNumber)?.zip?.trim();
     if (zip && /^\d{5}/.test(zip)) uniqueZips.add(zip.slice(0, 5));
   }
@@ -359,7 +419,7 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
     }),
   );
 
-  const vehicles: UnassignedVehicleRow[] = pool
+  const vehicles: UnassignedVehicleRow[] = recommendable
     .map((r) => {
       const canon = canonicalTruckNumber(r.holmanVehicleNumber);
       const loc = curLocMap.get(r.holmanVehicleNumber);
@@ -371,7 +431,7 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
         MAKE_NAME: r.makeName || "",
         MODEL_NAME: r.modelName || "",
         TRUCK_DISTRICT: r.district || "",
-        TRUCK_STATUS: (r.vin && statusByVin[r.vin.toUpperCase()]) || statusByVin[r.vin || ""] || "",
+        TRUCK_STATUS: lookupVinStatus(statusByVin, r.vin) || "",
         INTERIOR: mirrorInterior.get(canon) ?? null,
         ODOMETER: r.odometer ?? null,
         AMS_CUR_ADDRESS: "", // full-fleet cache exposes city/state/zip only
@@ -387,6 +447,8 @@ export async function getNexusUnassignedVehicles(): Promise<UnassignedPoolResult
   return {
     vehicles,
     source: "nexus",
+    disposalFilter,
+    disposalExcludedCount: disposalExcluded.length,
     activeFleetCount: activeRows.length,
     occupiedCount: occupied.size,
   };
@@ -429,8 +491,16 @@ export async function getSparePoolLite(): Promise<SparePoolLite | null> {
     // the assignment data is broken — report "unavailable", not a wrong count.
     if (pool.length === 0) return null;
     if (pool.length > activeRows.length * MAX_POOL_RATIO) return null;
+    // Disposal validation, best-effort: cached-only AMS map (NEVER triggers a
+    // build — this pool decorates the queue and must not stall). Cold cache →
+    // unfiltered; the full pool behind the Spares page and the replacement
+    // suggestions re-validate against the real map.
+    const cachedStatus = getAmsTruckStatusMapCachedOnly();
+    const recommendable = cachedStatus
+      ? pool.filter((r) => !isAmsDisposalStatus(lookupVinStatus(cachedStatus, r.vin)))
+      : pool;
     return {
-      vehicles: pool
+      vehicles: recommendable
         .map((r) => ({
           truckNumber: canonicalTruckNumber(r.holmanVehicleNumber),
           district: (r.district || "").trim(),
