@@ -30,6 +30,7 @@ import { fleetScopeStorage } from "./fleet-scope-storage";
 import { fsDb } from "./fleet-scope-db";
 import { db } from "./db";
 import { loadQueuePoContext, loadLatestLucaDispatches, amsBucketOf, displayShopFor, cleanPhone, type QueuePoContext, type LucaDispatchInfo } from "./vrm/rental-operations/read-repository";
+import { invalidateBoardCaches } from "./vrm/rental-operations/board-cache";
 import { evaluateStep9Disposition, phoneDigits, nameFold, STEP9_PROBLEM_LABELS } from "./vrm/rental-operations/shop-record-flags";
 import { loadWorkbookStates, WORKBOOK_CLOSED_STATUSES, type WorkbookState } from "./vrm/rental-operations/workbook";
 import { resolveOwnerRouting, OWNER_ROSTER, type Region } from "./vrm/rental-operations/annex-a-routing";
@@ -1515,14 +1516,20 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   };
 }
 
-// ── Short-TTL result cache ───────────────────────────────────────────────────
-// The queue is rebuilt from ~12 queries on every GET, and
+// ── Short-TTL result cache (stale-while-revalidate) ─────────────────────────
+// The queue is rebuilt from ~12 queries on every GET (~5-9s cold), and
 // two routes serve the same payload (VRM Ops Queue + the FS read-only mirror).
-// A 30s TTL absorbs navigation and the settling refetches after each mutation
-// while staying fresh enough for ops work; the queue mutation routes bust it
-// explicitly so a client's refetch right after a write always sees that write.
-// Scheduler-driven data drift (LUCA write-back, rental sync) rides the TTL.
+// Semantics:
+//   · fresh (< 30s): serve cached — absorbs navigation and settling refetches;
+//   · stale (30s–10min): serve the last build IMMEDIATELY and rebuild in the
+//     background — opening the page never blocks on the rebuild once one
+//     build exists;
+//   · past 10min, cold boot, or right after invalidateTodaysQueueCache():
+//     BLOCKING rebuild — the queue mutation routes bust explicitly so a
+//     client's refetch right after a write always sees that write.
+// Scheduler-driven data drift (LUCA write-back, rental sync) rides the TTLs.
 const QUEUE_CACHE_TTL_MS = 30_000;
+const QUEUE_CACHE_MAX_STALE_MS = 10 * 60_000;
 let queueCacheEpoch = 0;
 let queueCache: { at: number; value: TodaysQueue } | null = null;
 let queueInflight: Promise<TodaysQueue> | null = null;
@@ -1535,10 +1542,13 @@ export function invalidateTodaysQueueCache(reason: string): void {
   // response; the next GET rebuilds fresh.
   queueInflight = null;
   console.log(`[Queue] cache invalidated (${reason})`);
+  // The VRM boards (master / by-region / scrape-targets) read the same case
+  // data — any queue-visible write is board-visible too. Transitive bust keeps
+  // every existing and future mutation route correct without re-wiring them.
+  invalidateBoardCaches(`queue:${reason}`);
 }
 
-export async function getTodaysQueueCached(): Promise<TodaysQueue> {
-  if (queueCache && Date.now() - queueCache.at < QUEUE_CACHE_TTL_MS) return queueCache.value;
+function refreshTodaysQueue(): Promise<TodaysQueue> {
   if (queueInflight) return queueInflight;
   const epoch = queueCacheEpoch;
   const promise = buildTodaysQueue()
@@ -1551,4 +1561,15 @@ export async function getTodaysQueueCached(): Promise<TodaysQueue> {
     });
   queueInflight = promise;
   return promise;
+}
+
+export async function getTodaysQueueCached(): Promise<TodaysQueue> {
+  const age = queueCache ? Date.now() - queueCache.at : Infinity;
+  if (queueCache && age < QUEUE_CACHE_TTL_MS) return queueCache.value;
+  if (queueCache && age < QUEUE_CACHE_MAX_STALE_MS) {
+    refreshTodaysQueue().catch((e: any) =>
+      console.warn("[Queue] background rebuild failed (serving stale):", e?.message || e));
+    return queueCache.value;
+  }
+  return refreshTodaysQueue();
 }

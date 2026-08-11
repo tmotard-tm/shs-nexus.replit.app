@@ -15,6 +15,7 @@ import { registerRegionRoutes } from "./region-routes";
 import { loadWorkbookStates, WORKBOOK_STATUSES, WORKBOOK_STATUS_LABEL, WORKBOOK_CLOSED_STATUSES } from "./workbook";
 import { getTodaysQueueCached, invalidateTodaysQueueCache } from "../../todays-queue";
 import { invalidateQueuePoContextCache } from "./read-repository";
+import { boardCacheGet } from "./board-cache";
 import { appendFleetStatus, appendFleetStatusIfMainIn, loadFleetStatusStates, maybeReconcileFleetStatuses } from "./fleet-status";
 import { appendSchedulePickup } from "./schedule-pickup";
 import { CLASSIFICATIONS, todayET } from "./bucket-classify";
@@ -438,7 +439,15 @@ export function registerRentalOperationsRoutes(router: Router): void {
   router.get("/rental-operations/master", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      res.json(await buildMasterBoardPayload(includeDropped));
+      // SWR cache: fresh 60s; up to 10min the last build is served instantly
+      // while a rebuild runs in the background; any mutation (queue-bust /
+      // PO-bust, both transitively wired) forces a blocking fresh build on the
+      // next read. Payload shape stays pinned by the surface-alignment test,
+      // which calls buildMasterBoardPayload directly.
+      res.json(await boardCacheGet(
+        `master:${includeDropped}`, 60_000, 10 * 60_000,
+        () => buildMasterBoardPayload(includeDropped),
+      ));
     } catch (e: any) {
       console.error("[VRM/RentalOps] master failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "master read failed" });
@@ -1253,10 +1262,18 @@ export function registerRentalOperationsRoutes(router: Router): void {
     try {
       const { findScrapeTargets } = await import("./scrape-service");
       const limit = req.query.limit ? Math.max(1, Math.min(500, Number(req.query.limit))) : undefined;
-      const { targets, totalFound, truncated, byReason, served } = await findScrapeTargets({ limit });
+      // SWR cache (fresh 5min = the client's own refetch cadence): targets only
+      // move when a scrape/ETL lands, and those paths bust this cache via
+      // invalidateQueuePoContextCache. generatedAt is stamped at BUILD time so
+      // a cached response reports its true age; inFlight stays live.
+      const built = await boardCacheGet(
+        `scrape-targets:${limit ?? "default"}`, 5 * 60_000, 30 * 60_000,
+        async () => ({ ...(await findScrapeTargets({ limit })), generatedAt: new Date().toISOString() }),
+      );
+      const { targets, totalFound, truncated, byReason, served, generatedAt } = built;
       res.json({
         ok: true, found: totalFound, served, truncated, byReason,
-        inFlight: scrapeSweepInFlight, generatedAt: new Date().toISOString(), targets,
+        inFlight: scrapeSweepInFlight, generatedAt, targets,
       });
     } catch (e: any) {
       console.error("[VRM/RentalOps] scrape-targets failed:", e?.message || e);

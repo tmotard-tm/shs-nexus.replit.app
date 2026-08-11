@@ -12,6 +12,7 @@
  */
 import type { Router } from "express";
 import { getRentalOpsMaster, loadQueuePoContext, attachReconciledShops, loadFsShopPhoneFallbacks, type MasterRow, type QueuePoContext } from "./read-repository";
+import { boardCacheGet } from "./board-cache";
 import {
   resolveCaseRegion,
   assertRegionCoverage,
@@ -94,7 +95,14 @@ export function registerRegionRoutes(router: Router): void {
   router.get("/rental-operations/by-region", async (req, res) => {
     try {
       const includeDropped = req.query.includeDropped === "true" || req.query.includeDropped === "1";
-      res.json(await buildByRegionPayload(includeDropped));
+      // Same SWR discipline as the master board (this payload embeds the same
+      // master rows): fresh 60s, serve-stale ≤10min with background rebuild,
+      // blocking rebuild after any mutation bust. Shape stays pinned by the
+      // surface-alignment test, which calls buildByRegionPayload directly.
+      res.json(await boardCacheGet(
+        `by-region:${includeDropped}`, 60_000, 10 * 60_000,
+        () => buildByRegionPayload(includeDropped),
+      ));
     } catch (e: any) {
       console.error("[VRM/RentalOps] by-region failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "by-region read failed" });

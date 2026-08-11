@@ -18,6 +18,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
+import { boardCacheGet, invalidateBoardCaches } from "../server/vrm/rental-operations/board-cache";
+import { getSummaryCache, setSummaryCache, clearSummaryCache, getSummaryCacheEpoch } from "../server/vrm/executive-summary/summary-cache";
+
 import {
   cleanPhone,
   displayShopFor,
@@ -368,4 +371,92 @@ test("activity labels: every known writer renders a sentence, unknown types neve
   const fb = at("shiny_new_thing", { note: "details here" });
   assert.equal(fb.label, "Shiny new thing");
   assert.equal(fb.detail, "details here");
+});
+
+// ── UNIT: board-cache SWR semantics (no DB) ─────────────────────────────────
+// The master/by-region/scrape-targets routes serve through this cache; these
+// pin the exact serve-stale / invalidate contract the routes document.
+test("board-cache: SWR semantics", async (t) => {
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+  await t.test("fresh entry serves without rebuilding; cold concurrent gets single-flight", async () => {
+    invalidateBoardCaches("test-reset");
+    let builds = 0;
+    const build = async () => { builds++; await sleep(20); return `v${builds}`; };
+    const [a, b] = await Promise.all([
+      boardCacheGet("t1", 1000, 5000, build),
+      boardCacheGet("t1", 1000, 5000, build),
+    ]);
+    assert.equal(a, "v1");
+    assert.equal(b, "v1");
+    assert.equal(builds, 1);
+    assert.equal(await boardCacheGet("t1", 1000, 5000, build), "v1");
+    assert.equal(builds, 1);
+  });
+
+  await t.test("stale entry serves immediately and refreshes in the background", async () => {
+    invalidateBoardCaches("test-reset");
+    let builds = 0;
+    const build = async () => { builds++; return `v${builds}`; };
+    assert.equal(await boardCacheGet("t2", 30, 5000, build), "v1");
+    await sleep(60); // past fresh, within maxStale
+    assert.equal(await boardCacheGet("t2", 30, 5000, build), "v1"); // stale served instantly
+    await sleep(20); // let the background refresh land
+    assert.equal(builds, 2);
+    assert.equal(await boardCacheGet("t2", 1000, 5000, build), "v2"); // fresh again
+  });
+
+  await t.test("past maxStale the read blocks and returns the NEW value", async () => {
+    invalidateBoardCaches("test-reset");
+    let builds = 0;
+    const build = async () => { builds++; return `v${builds}`; };
+    assert.equal(await boardCacheGet("t3", 20, 40, build), "v1");
+    await sleep(70); // past maxStale
+    assert.equal(await boardCacheGet("t3", 20, 40, build), "v2");
+    assert.equal(builds, 2);
+  });
+
+  await t.test("invalidate mid-flight detaches the build and forces a fresh rebuild", async () => {
+    invalidateBoardCaches("test-reset");
+    let builds = 0;
+    const slow = async () => { builds++; const v = `v${builds}`; await sleep(40); return v; };
+    const p = boardCacheGet("t4", 1000, 5000, slow); // in-flight build
+    await sleep(10);
+    invalidateBoardCaches("mid-flight write");
+    assert.equal(await p, "v1"); // the awaiting caller still gets its answer
+    // ...but the pre-write result must NOT have been cached: next read rebuilds.
+    assert.equal(await boardCacheGet("t4", 1000, 5000, slow), "v2");
+    assert.equal(builds, 2);
+  });
+
+  await t.test("background refresh failure keeps serving the last good value", async () => {
+    invalidateBoardCaches("test-reset");
+    let builds = 0;
+    const build = async () => { builds++; if (builds > 1) throw new Error("boom"); return "good"; };
+    assert.equal(await boardCacheGet("t5", 20, 5000, build), "good");
+    await sleep(40); // stale
+    assert.equal(await boardCacheGet("t5", 20, 5000, build), "good"); // stale-serve, bg refresh fails
+    await sleep(20);
+    assert.equal(await boardCacheGet("t5", 20, 5000, build), "good"); // last good value survives
+    assert.ok(builds >= 2);
+  });
+});
+
+// ── UNIT: exec-summary cache epoch guard (no DB) ────────────────────────────
+// Summary builds are multi-second; an ingest can clear the cache mid-build.
+// The guard must keep that pre-ingest build from re-caching over the clear.
+test("exec-summary cache: a build that started before an ingest clear must not publish", () => {
+  clearSummaryCache("test-reset");
+  const fake = { generatedAt: "test" } as any;
+
+  // Build starts (captures epoch) → ingest lands mid-build → build completes.
+  const buildEpoch = getSummaryCacheEpoch();
+  clearSummaryCache("ingest landed mid-build");
+  setSummaryCache(fake, buildEpoch);
+  assert.equal(getSummaryCache(), null); // pre-ingest data must NOT be recached
+
+  // A build from the current epoch publishes normally.
+  setSummaryCache(fake, getSummaryCacheEpoch());
+  assert.ok(getSummaryCache());
+  clearSummaryCache("test-cleanup"); // no cross-test residue
 });

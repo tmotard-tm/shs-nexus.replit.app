@@ -11,6 +11,7 @@ import { deriveWorkloadBucket, type WorkloadBucket } from "./workload";
 import { NEVER_SHOP_SQL_RE } from "./vendor-class";
 import { pepBoysPhoneLateral } from "./pepboys-directory";
 import { buildLucaDispatchMap, type LucaDispatchInfo } from "./shop-record-flags";
+import { invalidateBoardCaches } from "./board-cache";
 
 // ── board classifier (ported 1:1 from make_rental_fleet_gallery.py) ──────────
 const VAN_SUV_TRUCK = /SUV|VAN|P\/UP|PICKUP|TRUCK/i;
@@ -519,6 +520,9 @@ export function invalidateQueuePoContextCache(reason: string): void {
   poCtxCache = null;
   poCtxInflight = null; // detach: an in-flight build may hold pre-write data
   console.log(`[RentalOps] PO-context cache invalidated (${reason})`);
+  // PO evidence feeds the master/by-region boards and scrape-targets too —
+  // a PO-visible refresh must be board-visible on the next read.
+  invalidateBoardCaches(`po-context:${reason}`);
 }
 
 function refreshQueuePoContext(): Promise<Map<string, QueuePoContext>> {

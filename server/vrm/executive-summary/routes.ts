@@ -14,7 +14,7 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import { getRentalOpsMaster } from "../rental-operations/read-repository";
 import { requestRentalOpsAutoSync } from "../rental-operations/routes";
-import { getSummaryCache, setSummaryCache, clearSummaryCache } from "./summary-cache";
+import { getSummaryCache, setSummaryCache, clearSummaryCache, getSummaryCacheEpoch } from "./summary-cache";
 import { classifyBucket } from "./buckets";
 import {
   buildCaseFacts,
@@ -175,6 +175,28 @@ function maybeRequestAutoSync(payload: ExecSummaryPayload): void {
   }
 }
 
+// Single-flight background rebuild for the serve-stale path: mirrors the
+// blocking path's side effects (cache set, lazy rollup, auto-brief) so a
+// summary that is only ever read via stale-serve still rolls up history.
+let summaryRefreshInflight: Promise<void> | null = null;
+function refreshSummaryInBackground(): void {
+  if (summaryRefreshInflight) return;
+  const buildEpoch = getSummaryCacheEpoch(); // captured BEFORE the build
+  summaryRefreshInflight = getExecutiveSummary()
+    .then((payload) => {
+      setSummaryCache(payload, buildEpoch);
+      void upsertTodayIfStale(payload).catch((e) =>
+        console.error("[vrm-exec] lazy rollup failed (non-fatal):", (e as Error)?.message));
+      void maybeGenerateBriefOnce(payload).catch((e) =>
+        console.error("[vrm-exec] auto-brief failed (non-fatal):", (e as Error)?.message));
+    })
+    .catch((e) =>
+      console.warn("[vrm-exec] background summary refresh failed (serving stale):", (e as Error)?.message))
+    .finally(() => {
+      summaryRefreshInflight = null;
+    });
+}
+
 export function registerExecutiveSummaryRoutes(router: Router): void {
   router.get("/executive-summary", async (req, res) => {
     try {
@@ -186,8 +208,21 @@ export function registerExecutiveSummaryRoutes(router: Router): void {
         maybeRequestAutoSync(cached.payload);
         return res.json(cached.payload);
       }
+      if (!force && cached && Date.now() - cached.at < STALE_FALLBACK_MS) {
+        // TTL-expired but within the same bounded-stale window the error path
+        // already trusts: serve it NOW and rebuild in the background, so
+        // opening the module never blocks ~6s on the aggregate rebuild. An
+        // ingest landing clears the cache entirely (leaf-module bust), so the
+        // first read after new data still blocks and shows fresh numbers.
+        refreshSummaryInBackground();
+        maybeRequestAutoSync(cached.payload);
+        return res.json(cached.payload);
+      }
+      const buildEpoch = getSummaryCacheEpoch(); // captured BEFORE the build
       const payload = await getExecutiveSummary();
-      setSummaryCache(payload);
+      // If an ingest landed while we were building, this payload is pre-ingest:
+      // serve it to THIS caller but never re-cache it over the clear.
+      setSummaryCache(payload, buildEpoch);
       maybeRequestAutoSync(payload);
       void upsertTodayIfStale(payload).catch((e) =>
         console.error("[vrm-exec] lazy rollup failed (non-fatal):", (e as Error)?.message),
