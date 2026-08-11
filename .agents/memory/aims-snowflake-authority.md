@@ -20,3 +20,8 @@ Snowflake (account `SEARS_HS_PROD`, wh `SCIENTIST_PRD_WH`, role `SCIENTIST`), WM
 # Platform "Today is …" header is UTC, not ET
 The session date header is UTC; in ET it can still be the prior calendar day. AIMS `FILE_DATE` and the reconciler's date math are ET. A strict "max(FILE_DATE) == today ET" gate can falsely skip if the daily extract lands after the run time — use a tunable window.
 **Why:** an off-by-one calendar-day bug here silently disables the nightly reconciler; pin all date math to America/New_York.
+
+## Employment-status sources across surfaces (measured 2026-08-11)
+- ORA_TECH_TERM_ROSTER_VW_VIEW ≡ NS_TECH_TERM_ROSTER_VW — identical row counts and max dates (same underlying HR term data, two views). Term rosters carry FUTURE-dated separations (EFFDT ahead of today).
+- DRIVELINE_ALL_TECHS (retired authority) vs NS_TECH_ACTIVE_ROSTER_DAILY_VW on LOA (L/P/S): old table had 0 false positives but was missing 2/132 — it lags slightly, doesn't ghost.
+- Weekly Offboarding tab reads Snowflake LIVE per request (term: ORA view; LOA: DRIVELINE — still the retired table). VRM Exec Summary status is double-batched: NS views → all_techs (5am ET) → stamped on cases at VRM ingest (2pm/8pm ET) → up to ~1.5 days behind; per-case override_status wins over resolved_status.
