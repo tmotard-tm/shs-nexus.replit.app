@@ -52,6 +52,7 @@ import LoaDistributionList from "@/pages/loa-distribution-list";
 import ByovDriftCheck from "@/pages/byov-drift-check";
 import OffboardingReturn from "@/pages/offboarding-return";
 import LoaRentalForm from "@/pages/loa-rental-form";
+import RentalTechSurvey from "@/pages/rental-tech-survey";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
@@ -217,6 +218,12 @@ function Router() {
       {/* LOA Rental self-service form — public, tokenized (Task #543) */}
       <Route path="/loa-form/:token">
         <LoaRentalForm />
+      </Route>
+
+      {/* Rental technician survey — public, tokenized. Sits outside
+          ProtectedRoute: technicians have no Nexus login. */}
+      <Route path="/rental-survey/:token">
+        <RentalTechSurvey />
       </Route>
       
       {/* Task work routes - deep linking for specific task IDs */}

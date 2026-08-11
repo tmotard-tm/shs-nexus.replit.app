@@ -104,6 +104,24 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS techhub_still_using boolean;
   `);
 
+  // ---------------------------------------------------------------------------
+  // Rental pickup branch.
+  //
+  // Required to book the replacement reservation. A rental is picked up from a
+  // specific branch and the technician has to be able to walk back into that same
+  // branch, so city/state are mandatory on the form. Name and phone are captured
+  // when the technician knows them but are not required, because the branch can be
+  // resolved from city/state against the Enterprise location list.
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_tech_survey
+      ADD COLUMN IF NOT EXISTS rental_branch_name  text,
+      ADD COLUMN IF NOT EXISTS rental_branch_city  text,
+      ADD COLUMN IF NOT EXISTS rental_branch_state text,
+      ADD COLUMN IF NOT EXISTS rental_branch_phone text,
+      ADD COLUMN IF NOT EXISTS no_rental_reason    text;
+  `);
+
   // Derived flags. Added separately so re-runs against an existing table are safe.
   await db.execute(sql`
     ALTER TABLE vrm_rental_tech_survey

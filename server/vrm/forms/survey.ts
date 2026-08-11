@@ -1,0 +1,307 @@
+/**
+ * Rental technician survey — tokenised, public, no login.
+ *
+ * Mirrors the LOA form machinery (`/api/public/loa-form/:token`) rather than
+ * inventing a second pattern: token in the URL, LDAP + truck number typed by the
+ * technician as the identity check, then the questionnaire.
+ *
+ * Identity is deliberately typed rather than inferred. The token proves the link
+ * reached the right handset; the LDAP proves who is holding it. Both are stored,
+ * so a response can be trusted well enough to book a rental reservation against.
+ *
+ * Routes registered here mount on `app` directly, OUTSIDE the /api/vrm session
+ * gate, because technicians have no Nexus session. The admin read side mounts on
+ * the VRM router and is session-gated normally.
+ */
+import type { Express, Router } from "express";
+import { db } from "../../db";
+import { sql } from "drizzle-orm";
+import crypto from "crypto";
+
+/** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
+function normTruck(v: string): string {
+  const digits = String(v || "").replace(/\D/g, "").replace(/^0+/, "");
+  return digits || String(v || "").trim().toUpperCase();
+}
+
+const RENTAL_COMPANIES = new Set(["Enterprise", "Avis", "Hertz"]);
+
+// Every state the van can be in. There is deliberately no "not sure" value: a
+// technician is responsible for the whereabouts of their van, and an honest
+// "I don't know" is an escalation, not a survey answer.
+const VAN_STATUS = new Set([
+  "in_shop",
+  "decommissioned",
+  "totaled",
+  "with_me",
+  "unknown_escalate",
+]);
+
+const NO_RENTAL_REASONS = new Set([
+  "returned_it",
+  "never_had_one",
+  "back_in_my_van",
+]);
+
+export type SurveyTokenRow = {
+  id: string;
+  token: string;
+  ldap: string | null;
+  truck_number: string | null;
+  tech_name: string | null;
+  prefill: Record<string, any>;
+  submitted_at: string | null;
+  expires_at: string;
+};
+
+export function newToken(): string {
+  return crypto.randomBytes(16).toString("hex");
+}
+
+async function loadToken(token: string): Promise<SurveyTokenRow | null> {
+  const { rows } = await db.execute(sql`
+    SELECT id, token, ldap, truck_number, tech_name, prefill, submitted_at, expires_at
+    FROM vrm_form_tokens
+    WHERE token = ${token} AND form_type = 'rental_tech_survey'
+    LIMIT 1
+  `);
+  const row = (rows as any[])[0];
+  if (!row) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  return row as SurveyTokenRow;
+}
+
+/** Shared identity check for both verify and submit, so they cannot drift apart. */
+function checkIdentity(row: SurveyTokenRow, body: any) {
+  const ldap = String(body?.ldap || "").trim().toUpperCase();
+  const truck = String(body?.truckNumber || "").trim();
+  if (!ldap || !truck) {
+    return { ok: false as const, code: 400, message: "Please enter both your LDAP and your truck number." };
+  }
+  if (row.ldap && ldap !== String(row.ldap).trim().toUpperCase()) {
+    return { ok: false as const, code: 403, message: "That LDAP does not match this link. Check your entry and try again." };
+  }
+  const onFile = String(row.truck_number || "").trim();
+  if (onFile && normTruck(onFile) !== normTruck(truck)) {
+    return { ok: false as const, code: 403, message: "That truck number does not match our records for you." };
+  }
+  return { ok: true as const, ldap, truck: onFile || truck };
+}
+
+// ---------------------------------------------------------------------------
+// Public (unauthenticated) surface
+// ---------------------------------------------------------------------------
+export function registerRentalSurveyPublicRoutes(app: Express): void {
+  app.get("/api/public/rental-survey/:token", async (req, res) => {
+    try {
+      const row = await loadToken(req.params.token);
+      if (!row) {
+        return res.status(404).json({ valid: false, message: "This link is invalid or has expired." });
+      }
+      await db.execute(sql`
+        UPDATE vrm_form_tokens SET opened_at = COALESCE(opened_at, now()) WHERE id = ${row.id}
+      `);
+      res.json({
+        valid: true,
+        completed: !!row.submitted_at,
+        techName: row.tech_name || "",
+        hasTruckOnFile: !!String(row.truck_number || "").trim(),
+      });
+    } catch (error: any) {
+      console.error("[survey] load failed:", error?.message || error);
+      res.status(500).json({ valid: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  app.post("/api/public/rental-survey/:token/verify", async (req, res) => {
+    try {
+      const row = await loadToken(req.params.token);
+      if (!row) return res.status(404).json({ verified: false, message: "This link is invalid or has expired." });
+      if (row.submitted_at) {
+        return res.status(409).json({ verified: false, completed: true, message: "You have already completed this. Thank you." });
+      }
+      const id = checkIdentity(row, req.body);
+      if (!id.ok) return res.status(id.code).json({ verified: false, message: id.message });
+
+      const prefill = row.prefill || {};
+      res.json({
+        verified: true,
+        techName: row.tech_name || "",
+        truckNumber: id.truck,
+        prefill: {
+          rentalTruckNumber: prefill.rental_truck_number || row.truck_number || "",
+          assignedTruckNumber: prefill.assigned_truck_number || "",
+          shopName: prefill.shop_name || "",
+          shopPhone: prefill.shop_phone || "",
+          rentalCompany: prefill.rental_company || "",
+        },
+      });
+    } catch (error: any) {
+      console.error("[survey] verify failed:", error?.message || error);
+      res.status(500).json({ verified: false, message: "Something went wrong. Please try again." });
+    }
+  });
+
+  app.post("/api/public/rental-survey/:token/submit", async (req, res) => {
+    try {
+      const row = await loadToken(req.params.token);
+      if (!row) return res.status(404).json({ success: false, message: "This link is invalid or has expired." });
+      if (row.submitted_at) {
+        return res.status(409).json({ success: false, completed: true, message: "You have already completed this. Thank you." });
+      }
+      const id = checkIdentity(row, req.body);
+      if (!id.ok) return res.status(id.code).json({ success: false, message: id.message });
+
+      const b = req.body || {};
+      const s = (v: any, max = 200) => String(v ?? "").trim().slice(0, max) || null;
+      const hasRental = b.hasRental === true || b.hasRental === "yes";
+
+      const missing: string[] = [];
+      if (b.hasRental !== true && b.hasRental !== false && b.hasRental !== "yes" && b.hasRental !== "no") {
+        missing.push("whether you are in a rental");
+      }
+
+      let vanStatus: string | null = null;
+      let rentalCompany: string | null = null;
+      let noRentalReason: string | null = null;
+
+      if (hasRental) {
+        rentalCompany = s(b.rentalCompany, 40);
+        if (!rentalCompany || !RENTAL_COMPANIES.has(rentalCompany)) missing.push("the rental company");
+        if (!s(b.rentalBranchCity)) missing.push("the rental branch city");
+        if (!s(b.rentalBranchState, 2)) missing.push("the rental branch state");
+        if (!s(b.assignedTruckNumber, 30)) missing.push("your assigned truck number");
+        vanStatus = s(b.vanStatus, 40);
+        if (!vanStatus || !VAN_STATUS.has(vanStatus)) missing.push("what is happening with your van");
+        if (vanStatus === "in_shop") {
+          if (!s(b.shopName)) missing.push("the repair shop name");
+          if (!s(b.shopCity)) missing.push("the repair shop city");
+        }
+      } else {
+        noRentalReason = s(b.noRentalReason, 40);
+        if (!noRentalReason || !NO_RENTAL_REASONS.has(noRentalReason)) missing.push("what happened to the rental");
+      }
+
+      if (missing.length) {
+        return res.status(400).json({ success: false, message: `Please answer: ${missing.join(", ")}.` });
+      }
+
+      const promised = s(b.promisedReadyDate, 10);
+      const promisedDate = promised && /^\d{4}-\d{2}-\d{2}$/.test(promised) ? promised : null;
+      const decommissioned = vanStatus === "decommissioned";
+      // Only meaningful on the decommissioned branch with no reassignment: TRUE
+      // means parts and inventory are still transacting against a dead truck
+      // number, FALSE means the tech has no working truck number at all.
+      const techhubStillUsing =
+        decommissioned && !s(b.assignedTruckNumber, 30)
+          ? (b.techhubStillUsing === true || b.techhubStillUsing === "yes")
+          : null;
+
+      const prefill = row.prefill || {};
+
+      await db.execute(sql`
+        INSERT INTO vrm_rental_tech_survey (
+          token_id, ldap, truck_number, tech_name,
+          shop_name_on_file, shop_phone_on_file,
+          has_rental, shop_name, shop_city, shop_state, shop_phone,
+          van_status, promised_ready_date, still_in_rental, rental_company, blocker,
+          rental_truck_number, assigned_truck_number,
+          rental_truck_on_file, assigned_truck_on_file,
+          rental_vehicle_desc, truck_decommissioned, decomm_detail,
+          techhub_still_using,
+          rental_branch_name, rental_branch_city, rental_branch_state, rental_branch_phone,
+          no_rental_reason, response_channel
+        ) VALUES (
+          ${row.id}, ${id.ldap}, ${id.truck}, ${row.tech_name || null},
+          ${prefill.shop_name || null}, ${prefill.shop_phone || null},
+          ${hasRental}, ${s(b.shopName)}, ${s(b.shopCity, 80)}, ${s(b.shopState, 2)}, ${s(b.shopPhone, 30)},
+          ${vanStatus}, ${promisedDate}, ${hasRental}, ${rentalCompany}, ${s(b.blocker, 600)},
+          ${s(b.rentalTruckNumber, 30)}, ${s(b.assignedTruckNumber, 30)},
+          ${prefill.rental_truck_number || null}, ${prefill.assigned_truck_number || null},
+          ${s(b.rentalVehicleDesc, 120)}, ${decommissioned}, ${s(b.decommDetail, 300)},
+          ${techhubStillUsing},
+          ${s(b.rentalBranchName, 160)}, ${s(b.rentalBranchCity, 80)}, ${s(b.rentalBranchState, 2)}, ${s(b.rentalBranchPhone, 30)},
+          ${noRentalReason}, 'form'
+        )
+      `);
+
+      await db.execute(sql`
+        UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}
+      `);
+
+      res.json({ success: true, escalated: vanStatus === "unknown_escalate" });
+    } catch (error: any) {
+      console.error("[survey] submit failed:", error?.message || error);
+      res.status(500).json({ success: false, message: "Something went wrong. Please try again." });
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Admin (session-gated) surface — mounted on the VRM router
+// ---------------------------------------------------------------------------
+export function registerRentalSurveyAdminRoutes(router: Router): void {
+  /** Per-response rows, newest first, joined to send/open state. */
+  router.get("/forms/rental-survey/responses", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT r.*, t.sent_at, t.opened_at, t.batch, t.phone
+        FROM vrm_rental_tech_survey r
+        LEFT JOIN vrm_form_tokens t ON t.id = r.token_id
+        ORDER BY r.created_at DESC
+      `);
+      res.json({ responses: rows });
+    } catch (error: any) {
+      console.error("[survey] responses failed:", error?.message || error);
+      res.status(500).json({ message: "Failed to load responses." });
+    }
+  });
+
+  /** Send/response funnel plus the counts that drive the reservation queue. */
+  router.get("/forms/rental-survey/stats", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey')                        AS issued,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND sent_at IS NOT NULL)     AS sent,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND opened_at IS NOT NULL)   AS opened,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND submitted_at IS NOT NULL) AS submitted,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE has_rental)                                     AS still_in_rental,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE has_rental IS FALSE)                            AS no_longer_in_rental,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE truck_mismatch)                                 AS truck_mismatch,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE van_status='unknown_escalate')                  AS escalations,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE truck_decommissioned)                           AS decommissioned,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE techhub_still_using IS FALSE)                   AS no_truck_number
+      `);
+      res.json(rows[0] || {});
+    } catch (error: any) {
+      console.error("[survey] stats failed:", error?.message || error);
+      res.status(500).json({ message: "Failed to load stats." });
+    }
+  });
+
+  /**
+   * The reservation-ready view: everyone still in a rental who gave us a branch.
+   * This is the list that feeds ETD booking, which is why branch city/state are
+   * required fields on the form rather than nice-to-haves.
+   */
+  router.get("/forms/rental-survey/reservation-queue", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT ldap, tech_name,
+               COALESCE(assigned_truck_number, truck_number) AS truck_number,
+               rental_company, rental_vehicle_desc,
+               rental_branch_name, rental_branch_city, rental_branch_state, rental_branch_phone,
+               truck_mismatch, van_status, promised_ready_date, created_at
+        FROM vrm_rental_tech_survey
+        WHERE has_rental
+          AND rental_branch_city IS NOT NULL
+        ORDER BY rental_branch_state, rental_branch_city, tech_name
+      `);
+      res.json({ queue: rows });
+    } catch (error: any) {
+      console.error("[survey] reservation queue failed:", error?.message || error);
+      res.status(500).json({ message: "Failed to load reservation queue." });
+    }
+  });
+}

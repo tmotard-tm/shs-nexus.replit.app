@@ -1,6 +1,10 @@
 import type { Express, Response } from "express";
 import { createServer, type Server } from "http";
 import { registerVrmRoutes } from "./vrm/routes";
+import {
+  registerRentalSurveyPublicRoutes,
+  registerRentalSurveyAdminRoutes,
+} from "./vrm/forms/survey";
 import { initVrmSchema } from "./vrm/init-schema";
 import { initLogicalEntitiesSchema, seedLogicalEntities } from "./logical-entities-init";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
@@ -736,6 +740,12 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // a session cookie. The webhook authenticates via X-Twilio-Signature.
     registerVrmWebhooks(app);
     const vrmRouter = registerVrmRoutes();
+    // Rental technician survey. The admin read side rides the session-gated
+    // VRM router; the technician-facing form is registered on `app` below so it
+    // sits OUTSIDE that gate, because technicians have no Nexus session. The
+    // token in the URL plus a typed LDAP is the authentication.
+    registerRentalSurveyAdminRoutes(vrmRouter);
+    registerRentalSurveyPublicRoutes(app);
     // Dispatcher: the consolidated read-only mirror endpoint
     // /api/vrm/repair-tracker/full also accepts a Bearer token via the
     // VRM_REPAIR_TRACKER_API_KEY secret for server-to-server consumers.
