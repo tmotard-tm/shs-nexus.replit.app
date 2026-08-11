@@ -37,6 +37,26 @@ interface ContextChips {
   daysInRental: number | null;
 }
 
+/** Registration/tags context attached by the server when tag work is live —
+ *  the card lays out the real blocker + whose move it is (Tyler 2026-08-10). */
+type RegistrationInfo = {
+  tagsNeeded: boolean;
+  sticker: string | null;
+  haveTagsDate: string | null;
+  renewalDate: string | null;
+  renewalStep: string | null;
+  holmanCaseStatus: string | null;
+  blockerNote: string | null;
+  eta: string | null;
+  tagsInOffice: boolean;
+  tagsSentToTech: boolean;
+  holmanReceivedTags: boolean | null;
+  awaitingTechDocuments: boolean;
+  techAction: { required: boolean; summary: string };
+  asOf: string | null;
+  stale: boolean;
+};
+
 interface QueueItem {
   step: number;
   stepTitle: string;
@@ -57,6 +77,8 @@ interface QueueItem {
   isConflict?: boolean;
   repairPhone: string | null;
   techState: string | null;
+  /** Registration/tags context — present when tag work is live for this truck. */
+  registration?: RegistrationInfo;
   readyReason?: 'luca' | 'manual' | 'holman' | 'date';
   /** Manual "verified ready with the shop" mark (set on the VRM Ops Queue). */
   readyVerified?: { by: string; at: string } | null;
@@ -479,6 +501,55 @@ function TranscriptChip({ conversationId }: { conversationId: string }) {
 
 /** Shop-confirmed ready evidence: phone confirmation only (LUCA Ready call or
  *  a staff verify) — closed-PO / date inference never renders this pill. */
+/** Registration/tags block — the real blocker + whose move it is, so nobody
+ *  chases the tech over an office/Holman paperwork hold (or misses the tech's
+ *  required move when there is one). */
+function RegistrationBlock({ reg, truckNumber }: { reg: RegistrationInfo; truckNumber: string }) {
+  const facts: Array<[string, string]> = [];
+  const holmanCase = [reg.holmanCaseStatus, reg.renewalStep].filter(Boolean).join(" · ");
+  if (holmanCase) facts.push(["Holman case", holmanCase]);
+  if (reg.blockerNote) facts.push(["Blocker", reg.blockerNote]);
+  if (reg.sticker) facts.push(["Sticker", reg.sticker]);
+  if (reg.renewalDate) facts.push(["Renewal date", reg.renewalDate]);
+  if (reg.eta) facts.push(["ETA", reg.eta]);
+  const tags = [
+    reg.holmanReceivedTags ? "Holman received tags" : null,
+    reg.tagsInOffice ? "in office" : null,
+    reg.tagsSentToTech ? "sent to tech" : null,
+  ].filter(Boolean).join(" · ");
+  if (tags) facts.push(["Tags", tags]);
+  const asOfTxt = reg.asOf
+    ? new Date(reg.asOf).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+  return (
+    <div
+      data-testid={`registration-block-${truckNumber}`}
+      className="mt-0.5 flex flex-col gap-0.5 px-2.5 py-2 rounded-md bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-800 max-w-2xl"
+    >
+      <span className="text-[11px] font-extrabold tracking-wide text-amber-700 dark:text-amber-400">
+        TAGS / REGISTRATION
+        <span
+          className="font-semibold tracking-normal"
+          title={reg.stale ? "Newest registration signal is over 30 days old — re-check with Holman/the office before acting on it" : "Newest registration signal on file"}
+        >
+          {" "}· {asOfTxt ? `as of ${asOfTxt}` : "no dated signal"}{reg.stale ? " — verify before acting" : ""}
+        </span>
+      </span>
+      {facts.map(([l, v]) => (
+        <span key={l} className="text-[13px] leading-snug text-foreground">
+          <span className="font-bold text-muted-foreground">{l}:</span> {v}
+        </span>
+      ))}
+      <span className={cn(
+        "text-[13px] font-bold leading-snug",
+        reg.techAction.required ? "text-red-600 dark:text-red-400" : "text-emerald-700 dark:text-emerald-500",
+      )}>
+        {reg.techAction.required ? "Tech action required — " : "No tech action needed — don't chase the tech for this. "}{reg.techAction.summary}
+      </span>
+    </div>
+  );
+}
+
 function ReadyEvidence({ item }: { item: QueueItem }) {
   if (item.isConflict) return null;
   if (item.readyReason === "luca") {
@@ -724,6 +795,7 @@ function BucketRow({
             <DismissedNote item={item} />
             <ReadyEvidence item={item} />
             <SpareChip item={item} />
+            {!dismissed && item.registration && <RegistrationBlock reg={item.registration} truckNumber={item.truckNumber} />}
           </div>
         </div>
       </div>

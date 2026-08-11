@@ -2334,6 +2334,19 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   const toReconciled = (ctx: QueuePoContext | undefined, truckNo: string) =>
     displayShopFor(ctx, fsPhones.get(canonTruckKey(truckNo)) ?? null);
 
+  // Registration/tags context (Tyler 2026-08-10): when tag work is live for the
+  // rental truck, the case file lays out the real blocker + whose move it is —
+  // same assembly the queue cards use. Fail-soft: a fetch error degrades to
+  // "no block shown", never a 500 on the case detail.
+  let registrationContext = null as import("./registration-context").RegistrationContext | null;
+  try {
+    const { fetchRegistrationContextMap, canonReg } = await import("./registration-context");
+    const ctx = (await fetchRegistrationContextMap([{ truckNumber: caseKey }])).get(canonReg(caseKey));
+    registrationContext = ctx?.tagsNeeded ? ctx : null;
+  } catch (e: any) {
+    console.error(`[VRM/RentalOps] registration context for ${caseKey} failed:`, e?.message || e);
+  }
+
   return {
     case: caseRow,
     identity: ident.rows[0] ?? null,
@@ -2341,6 +2354,7 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poHistory: casePo.poHistory,
     poSource: casePo.poSource,
     portal: casePortal,
+    registrationContext,
     /** Board/queue-aligned shop of record for the rental truck (null = none). */
     reconciledShop: toReconciled(poCtx.get(canonKey(caseKey)), caseKey),
     ...(hasAssigned && assignedPo

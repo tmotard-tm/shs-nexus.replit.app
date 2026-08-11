@@ -156,6 +156,10 @@ args = "annex-a-routing-unit"
 task = "workflow.run"
 args = "vrm-phone-search-unit"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "bucket-queue-unit"
+
 [[workflows.workflow]]
 name = "vrm-guard-unit"
 author = "agent"
@@ -193,12 +197,12 @@ outputType = "console"
 name = "bucket-queue-unit"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "npx tsx --test tests/bucket-queue-classify.test.ts"
-
 [workflows.workflow.metadata]
 outputType = "console"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npx tsx --test tests/bucket-queue-classify.test.ts tests/rental-registration-context.test.ts"
 
 [[workflows.workflow]]
 name = "vrm-phone-search-unit"

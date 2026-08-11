@@ -63,6 +63,26 @@ interface ContextChips {
   shopNameOverridden?: boolean;
 }
 
+/** Registration/tags context attached by the server when tag work is live —
+ *  the card lays out the real blocker + whose move it is (Tyler 2026-08-10). */
+type RegistrationInfo = {
+  tagsNeeded: boolean;
+  sticker: string | null;
+  haveTagsDate: string | null;
+  renewalDate: string | null;
+  renewalStep: string | null;
+  holmanCaseStatus: string | null;
+  blockerNote: string | null;
+  eta: string | null;
+  tagsInOffice: boolean;
+  tagsSentToTech: boolean;
+  holmanReceivedTags: boolean | null;
+  awaitingTechDocuments: boolean;
+  techAction: { required: boolean; summary: string };
+  asOf: string | null;
+  stale: boolean;
+};
+
 interface QueueItem {
   step: number;
   stepTitle: string;
@@ -90,6 +110,8 @@ interface QueueItem {
   research?: { by: string; at: string } | null;
   scheduledPickupDate?: string | null;
   lastCallConversationId?: string | null;
+  /** Registration/tags context — present when tag work is live for this truck. */
+  registration?: RegistrationInfo;
   // Persona-bucket decoration (Plan B)
   key?: string;
   caseKey: string | null;
@@ -1135,6 +1157,48 @@ function ReadyEvidence({ item }: { item: QueueItem }) {
 
 /** Spare-availability chip for needs-replacement rows: locate here, assign in
  *  the Spares flow. Absent pool data reads "lookup unavailable" — never "0". */
+/** Registration/tags block — the real blocker + whose move it is, so nobody
+ *  chases the tech over an office/Holman paperwork hold (or misses the tech's
+ *  required move when there is one). */
+function RegistrationBlock({ reg, truckNumber }: { reg: RegistrationInfo; truckNumber: string }) {
+  const facts: Array<[string, string]> = [];
+  const holmanCase = [reg.holmanCaseStatus, reg.renewalStep].filter(Boolean).join(" · ");
+  if (holmanCase) facts.push(["Holman case", holmanCase]);
+  if (reg.blockerNote) facts.push(["Blocker", reg.blockerNote]);
+  if (reg.sticker) facts.push(["Sticker", reg.sticker]);
+  if (reg.renewalDate) facts.push(["Renewal date", reg.renewalDate]);
+  if (reg.eta) facts.push(["ETA", reg.eta]);
+  const tags = [
+    reg.holmanReceivedTags ? "Holman received tags" : null,
+    reg.tagsInOffice ? "in office" : null,
+    reg.tagsSentToTech ? "sent to tech" : null,
+  ].filter(Boolean).join(" · ");
+  if (tags) facts.push(["Tags", tags]);
+  const asOfTxt = reg.asOf
+    ? new Date(reg.asOf).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null;
+  return (
+    <div data-testid={`registration-block-${truckNumber}`}
+      style={{ display: "flex", flexDirection: "column", gap: 3, padding: "8px 10px", borderRadius: 8, backgroundColor: colors.amberLight, maxWidth: 660 }}>
+      <span style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: 0.5, color: colors.amber }}>
+        TAGS / REGISTRATION
+        <span style={{ fontWeight: 600, letterSpacing: 0 }}
+          title={reg.stale ? "Newest registration signal is over 30 days old — re-check with Holman/the office before acting on it" : "Newest registration signal on file"}>
+          {" "}· {asOfTxt ? `as of ${asOfTxt}` : "no dated signal"}{reg.stale ? " — verify before acting" : ""}
+        </span>
+      </span>
+      {facts.map(([l, v]) => (
+        <span key={l} style={{ fontSize: 12.5, lineHeight: "17px", color: colors.ink }}>
+          <b style={{ color: colors.inkMuted, fontWeight: 700 }}>{l}:</b> {v}
+        </span>
+      ))}
+      <span style={{ fontSize: 12.5, lineHeight: "17px", fontWeight: 700, color: reg.techAction.required ? colors.red : colors.green }}>
+        {reg.techAction.required ? "Tech action required — " : "No tech action needed — don't chase the tech for this. "}{reg.techAction.summary}
+      </span>
+    </div>
+  );
+}
+
 function SpareChip({ item }: { item: QueueItem }) {
   if (!item.classifications?.some((c) => c.key === "needs_replacement")) return null;
   const sa = item.spareAvailability;
@@ -1188,6 +1252,7 @@ function QueueRow({
   const dismissed = !!item.dismissedToday;
   const hasFooter =
     dismissed ||
+    !!item.registration ||
     (!item.isConflict && (item.readyReason === "luca" || item.readyReason === "manual")) ||
     (item.classifications?.some((c) => c.key === "needs_replacement") ?? false) ||
     ((item.step === 8 || item.step === 9) && item.research) ||
@@ -1235,6 +1300,7 @@ function QueueRow({
             )}
             <ReadyEvidence item={item} />
             <SpareChip item={item} />
+            {!dismissed && item.registration && <RegistrationBlock reg={item.registration} truckNumber={item.truckNumber} />}
             {(item.step === 8 || item.step === 9) && item.research && (
               <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "3px 8px", borderRadius: 6, backgroundColor: colors.amberLight, fontSize: 13, fontWeight: 700, color: colors.amber }}>
                 <SearchIcon size={13} style={{ flexShrink: 0 }} />

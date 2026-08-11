@@ -67,6 +67,27 @@ export interface CallLogItem {
 // when the same truck comes back under a different rental.
 export interface TruckNote { id: string; caseKey: string | null; note: string | null; actor: string | null; createdAt: string | null; }
 export interface AssignedTruckDetail { truck: string; poHistory: PoRecord[]; poSource?: string; portal?: PortalData | null; amsStatus?: string | null; notes?: TruckNote[]; reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null; }
+/** Registration/tags context — attached by the server when tag work is live
+ *  for the rental truck (Tyler 2026-08-10: lay out the real blocker + whose
+ *  move it is, so nobody chases the tech over office/Holman paperwork). */
+export interface RegistrationInfo {
+  tagsNeeded: boolean;
+  sticker: string | null;
+  haveTagsDate: string | null;
+  renewalDate: string | null;
+  renewalStep: string | null;
+  holmanCaseStatus: string | null;
+  blockerNote: string | null;
+  eta: string | null;
+  tagsInOffice: boolean;
+  tagsSentToTech: boolean;
+  holmanReceivedTags: boolean | null;
+  awaitingTechDocuments: boolean;
+  techAction: { required: boolean; summary: string };
+  asOf: string | null;
+  stale: boolean;
+}
+
 export interface CaseDetail {
   case: Record<string, any>;
   identity: Record<string, any> | null;
@@ -76,6 +97,7 @@ export interface CaseDetail {
   portal?: PortalData | null;
   assignedTruck?: AssignedTruckDetail | null;
   callLog?: CallLogItem[];
+  registrationContext?: RegistrationInfo | null;
   /** Server-reconciled shop-of-record — the SAME pick the board table/queue show. */
   reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null;
 }
@@ -842,6 +864,48 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                 );
               })()}
             </section>
+            {/* Registration / tags — only when tag work is live for this van.
+                Lays out the tracked blocker so nobody re-discovers it by
+                calling around, and says whose move it is. */}
+            {data?.registrationContext && (() => {
+              const reg = data.registrationContext!;
+              const facts: Array<[string, string]> = [];
+              const holmanCase = [reg.holmanCaseStatus, reg.renewalStep].filter(Boolean).join(" · ");
+              if (holmanCase) facts.push(["Holman case", holmanCase]);
+              if (reg.blockerNote) facts.push(["Blocker", reg.blockerNote]);
+              if (reg.sticker) facts.push(["Sticker", reg.sticker]);
+              if (reg.renewalDate) facts.push(["Renewal date", reg.renewalDate]);
+              if (reg.eta) facts.push(["ETA", reg.eta]);
+              const tags = [
+                reg.holmanReceivedTags ? "Holman received tags" : null,
+                reg.tagsInOffice ? "in office" : null,
+                reg.tagsSentToTech ? "sent to tech" : null,
+              ].filter(Boolean).join(" · ");
+              if (tags) facts.push(["Tags", tags]);
+              return (
+                <section data-testid="case-registration-section">
+                  <div style={{ ...panelLabel }}>Registration / tags{reg.asOf ? ` — as of ${fmtDate(reg.asOf)}` : " — no dated signal"}</div>
+                  <div style={{ marginTop: 4, background: colors.amberLight, borderRadius: 10, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {reg.stale && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: colors.amber }}>
+                        <AlertTriangle size={11} /> data is {reg.asOf ? "over 30 days old" : "undated"} — re-check with Holman/the office before acting
+                      </span>
+                    )}
+                    {facts.length === 0 && (
+                      <span style={{ fontSize: 12.5, color: colors.inkSoft }}>Status says tags, but no renewal details are on file yet.</span>
+                    )}
+                    {facts.map(([l, v]) => (
+                      <span key={l} style={{ fontSize: 12.5, lineHeight: "17px", color: colors.ink }}>
+                        <b style={{ color: colors.inkMuted, fontWeight: 700 }}>{l}:</b> {v}
+                      </span>
+                    ))}
+                    <span style={{ fontSize: 12.5, lineHeight: "17px", fontWeight: 700, color: reg.techAction.required ? colors.red : colors.green }}>
+                      {reg.techAction.required ? "Tech action required — " : "No tech action needed — don't chase the tech for this. "}{reg.techAction.summary}
+                    </span>
+                  </div>
+                </section>
+              );
+            })()}
             {/* marks */}
             <section>
               <div style={label}>Operator mark</div>

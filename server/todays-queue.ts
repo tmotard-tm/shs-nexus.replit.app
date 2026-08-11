@@ -46,6 +46,7 @@ import {
   type ClassifyInput,
 } from "./vrm/rental-operations/bucket-classify";
 import { getSparePoolLite, type SparePoolLite } from "./spares-pool";
+import { fetchRegistrationContextMap, canonReg, type RegistrationContext } from "./vrm/rental-operations/registration-context";
 
 type Truck = Awaited<ReturnType<typeof fleetScopeStorage.getAllTrucks>>[number];
 
@@ -129,6 +130,9 @@ export type QueueItem = {
    *  membership client-side. */
   workBucket?: string;
   dismissedToday?: { by: string } | null;
+  /** Registration/tags context — present when tag work is live for this truck,
+   *  so cards lay out the real blocker + whose move it is (display-only). */
+  registration?: RegistrationContext;
   contextChips?: {
     effStatus: string | null;
     openPoDate: string | null;
@@ -670,6 +674,32 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   /** "Aug 5" for whyText evidence lines. */
   const fmtDay = (d: Date): string => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
+  // --- Registration/tags context (Tyler 2026-08-10) ---
+  // One batch over every queue truck: when tag work is live, the card must lay
+  // out the REAL blocker (Holman renewal case + verbatim pending-task note) and
+  // whose move it is — so nobody chases the tech when the hold is office/Holman
+  // paperwork, and the tech IS looped in when the tag work needs them.
+  // Display-only; fs signals ride along from the already-loaded truck rows.
+  let regCtxByCanon = new Map<string, RegistrationContext>();
+  try {
+    regCtxByCanon = await fetchRegistrationContextMap(allTrucks.map(t => ({
+      truckNumber: t.truckNumber,
+      mainStatus: t.mainStatus ?? null,
+      fs: {
+        registrationStickerValid: t.registrationStickerValid,
+        registrationExpiryDate: t.registrationExpiryDate,
+        registrationLastUpdate: t.registrationLastUpdate,
+        tagsInOffice: t.tagsInOffice,
+        tagsSentToTech: t.tagsSentToTech,
+        awaitingTechDocuments: t.awaitingTechDocuments,
+        renewalProcessStarted: t.renewalProcessStarted,
+        registrationInProgress: t.registrationInProgress,
+      },
+    })));
+  } catch (e: any) {
+    console.error('[Queue] registration context fetch failed (cards degrade to plain):', e?.message || e);
+  }
+
   // --- STEP 1: CONFIRM RENTAL RETURNED ---
   const STEP1_STATUSES = new Set(['NLWC - Return Rental', 'On Road', 'Truck Swap', 'In Transit', 'Available to be assigned']);
   for (const t of [...allTrucks].filter(t => STEP1_STATUSES.has(t.mainStatus || '')).sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
@@ -1027,14 +1057,28 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
   // --- STEP 6: TAGS / REGISTRATION HOLD ---
   for (const t of [...allTrucks].filter(t => !assigned.has(t.id) && t.mainStatus === 'Tags').sort((a, b) => daysInStatus(b) - daysInStatus(a))) {
     assigned.add(t.id);
+    // When Nexus already knows the real blocker, the card says it — instead of
+    // a generic "waiting on paperwork" that sends someone to re-discover it.
+    const ctx = regCtxByCanon.get(canonReg(t.truckNumber));
+    const blockerBits: string[] = [];
+    if (ctx?.holmanCaseStatus || ctx?.renewalStep) blockerBits.push(`Holman renewal case: ${ctx.holmanCaseStatus ?? ctx.renewalStep}`);
+    if (ctx?.blockerNote) blockerBits.push(`"${ctx.blockerNote}"`);
+    const whyText = blockerBits.length
+      ? `Status "Tags" — ${blockerBits.join(' — ')}`
+      : 'Status "Tags" — the truck is waiting on tags/registration paperwork, not a repair.';
+    const actionText = ctx
+      ? (ctx.techAction.required
+          ? `Tech has a required move: ${ctx.techAction.summary}`
+          : `${ctx.techAction.summary} Don't chase the tech for this.`)
+      : 'Tags hold — routed to district team';
     items.push({
       step: 6, stepTitle: 'CONFIRM TAGS WITH CHERYL',
       lane: 'monitor',
-      whyText: 'Status "Tags" — the truck is waiting on tags/registration paperwork, not a repair.',
+      whyText,
       truckId: t.id, truckNumber: t.truckNumber, techName: t.techName ?? null,
       fleetScopeStatus: t.mainStatus ?? '', holmanStatus: getHolmanStatus(t.truckNumber),
       lucaStatus: lucaStatusFor(t), lastCallDate: lastCallDateFor(t)?.toISOString() ?? null,
-      actionText: 'Tags hold — routed to district team',
+      actionText,
       sortKey: daysInStatus(t),
       repairPhone: t.repairPhone ?? null, techState: t.techState ?? null,
     });
@@ -1353,6 +1397,14 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
 
   // Drop the declined/auction dead-ends from the actionable list — they were
   // pushed by the step logic but classified to nothing (no queue work today).
+  // Attach registration context to every card whose truck has live tag work —
+  // step 6 obviously, but ALSO e.g. a Scheduling truck with an expired sticker,
+  // so pickup isn't dispatched blind to a dead tag.
+  for (const it of items) {
+    const ctx = regCtxByCanon.get(canonReg(it.truckNumber));
+    if (ctx?.tagsNeeded) it.registration = ctx;
+  }
+
   const visibleItems = items.filter(it => !droppedIds.has(it.truckId));
 
   // Per-owner rollup (all roster owners always present, zero-filled; manual
