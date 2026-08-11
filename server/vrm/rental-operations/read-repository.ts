@@ -2341,10 +2341,26 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
   let registrationContext = null as import("./registration-context").RegistrationContext | null;
   try {
     const { fetchRegistrationContextMap, canonReg } = await import("./registration-context");
-    const ctx = (await fetchRegistrationContextMap([{ truckNumber: caseKey }])).get(canonReg(caseKey));
+    // AMS terminal authority (Tyler 2026-08-11): declined / sent-to-auction
+    // van → tag status is irrelevant; the case file must not show the block.
+    const amsB = amsBucketOf(caseRow?.ams_status ?? null);
+    const ctx = (await fetchRegistrationContextMap([
+      { truckNumber: caseKey, disposal: amsB === 'declined' || amsB === 'auction' },
+    ])).get(canonReg(caseKey));
     registrationContext = ctx?.tagsNeeded ? ctx : null;
   } catch (e: any) {
     console.error(`[VRM/RentalOps] registration context for ${caseKey} failed:`, e?.message || e);
+  }
+
+  // Call-ready plate/VIN for every truck in the case (Tyler 2026-08-11) —
+  // rental van AND assigned truck, so a call never starts with a records hunt.
+  // Fail-soft like the registration block: identity errors never 500 the case.
+  let vehicleIdentity: import("./registration-context").VehicleIdentity[] = [];
+  try {
+    const { fetchVehicleIdentityMap } = await import("./registration-context");
+    vehicleIdentity = [...(await fetchVehicleIdentityMap([caseKey, assignedTruckNo])).values()];
+  } catch (e: any) {
+    console.error(`[VRM/RentalOps] vehicle identity for ${caseKey} failed:`, e?.message || e);
   }
 
   return {
@@ -2355,6 +2371,8 @@ export async function getRentalOpsCase(caseKey: string): Promise<any | null> {
     poSource: casePo.poSource,
     portal: casePortal,
     registrationContext,
+    /** Plate/VIN per truck (canonical digits key) — rental van + assigned truck. */
+    vehicleIdentity,
     /** Board/queue-aligned shop of record for the rental truck (null = none). */
     reconciledShop: toReconciled(poCtx.get(canonKey(caseKey)), caseKey),
     ...(hasAssigned && assignedPo

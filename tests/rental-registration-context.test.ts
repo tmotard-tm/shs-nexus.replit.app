@@ -14,9 +14,51 @@ import {
   deriveRegistrationContext,
   canonReg,
   pickNewerTracking,
+  mergeIdentity,
 } from "../server/vrm/rental-operations/registration-context";
 
 const NOW = new Date("2026-08-11T12:00:00Z");
+
+test("AMS disposal (declined/auction) suppresses the block even at full trigger strength", () => {
+  const base = {
+    mainStatus: "Tags",
+    fs: { registrationStickerValid: "Expired 3/31/25", awaitingTechDocuments: true },
+    tracking: { holmanCaseStatus: "Rejected", holmanPendingTasks: "EMISSIONS INSPECTION - Please obtain", updatedAt: NOW },
+    now: NOW,
+  } as const;
+  const live = deriveRegistrationContext(base as any);
+  assert.equal(live.tagsNeeded, true, "sanity: without disposal this is a maxed-out live block");
+  assert.equal(live.suppressedByDisposal, false);
+  const gone = deriveRegistrationContext({ ...base, disposal: true } as any);
+  assert.equal(gone.tagsNeeded, false, "disposal van: tag status is irrelevant, nothing renders");
+  assert.equal(gone.suppressedByDisposal, true);
+  assert.equal(gone.techAction.required, false, "a disposal van must NEVER demand tech action for tags");
+  assert.match(gone.techAction.summary, /irrelevant/i);
+});
+
+test("disposal false/undefined leaves the badge gate untouched", () => {
+  const off = deriveRegistrationContext({ mainStatus: "Tags", disposal: false, now: NOW });
+  assert.equal(off.tagsNeeded, true);
+  assert.equal(off.suppressedByDisposal, false);
+  const undef = deriveRegistrationContext({ mainStatus: "Tags", now: NOW });
+  assert.equal(undef.tagsNeeded, true);
+  assert.equal(undef.suppressedByDisposal, false);
+});
+
+test("mergeIdentity: real values never clobbered; blanks normalize to null and fill later", () => {
+  const base = { truck: "22350", plate: null, plateState: null, vin: null };
+  const a = mergeIdentity(base, { plate: "1CH3635", plateState: "", vin: null });
+  assert.equal(a.plate, "1CH3635");
+  assert.equal(a.plateState, null, "blank string must normalize to null, not ''");
+  // Second Holman row for the same van (dual number-column formats): fills the
+  // gaps but must NOT replace a plate we already have.
+  const b = mergeIdentity(a, { plate: "ZZ99999", plateState: "NC", vin: "1FTBW3XM6PKB39616" });
+  assert.equal(b.plate, "1CH3635", "existing plate must NOT be clobbered by a later row");
+  assert.equal(b.plateState, "NC");
+  assert.equal(b.vin, "1FTBW3XM6PKB39616");
+  const c = mergeIdentity(b, { plate: null, plateState: undefined, vin: "   " });
+  assert.deepEqual(c, b, "nulls/whitespace never erase real values");
+});
 
 test("pickNewerTracking: last_scraped counts as recency; ties never decided by row order", () => {
   // Legacy dup: prev has newer updated_at=null but the candidate was scraped later.

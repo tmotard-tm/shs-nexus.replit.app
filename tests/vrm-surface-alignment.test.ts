@@ -324,3 +324,48 @@ test("executive summary headline re-derives from the master rows", { skip: !HAS_
   }
   assert.deepEqual(h.byVendor, byVendor, "byVendor ≠ master recount");
 });
+
+// ─── Activity log labels (shared case pop-up) ───────────────────────────────
+// Every board writes the same vrm_rental_operation_actions rows; the pop-up's
+// Activity log is where operators read them back. Labels must stay plain
+// language and never blank — including for writers added later.
+import { describeAction } from "../client/src/pages/vehicle-rental-management/lib/activity-log";
+
+test("activity labels: every known writer renders a sentence, unknown types never blank", () => {
+  const at = (action_type: string, extra: Partial<Parameters<typeof describeAction>[0]> = {}) =>
+    describeAction({ action_type, mark_value: null, note: null, actor: "t", created_at: "2026-08-11", ...extra });
+
+  assert.equal(at("mark", { mark_value: "pickup" }).label, "Marked PICKUP");
+  assert.equal(at("mark", { mark_value: "none" }).label, "Operator mark cleared");
+  assert.equal(at("ready_verified", { payload: { verified: "true" } }).label, "Ready verified with the shop");
+  assert.equal(at("ready_verified", { payload: { verified: "false" } }).label, "Ready verification undone");
+  assert.equal(at("research_escalation", { payload: { active: "true" } }).label, "Escalated to research");
+  assert.equal(at("research_escalation", { payload: { active: "false" } }).label, "Research escalation cleared");
+  assert.equal(at("assign_owner", { assigned_to: "jmorga1", payload: { auto: "false" } }).label, "Owner set to jmorga1");
+  assert.equal(at("assign_owner", { payload: { auto: "true" } }).label, "Owner returned to automatic routing");
+  assert.equal(at("queue_dismiss", { payload: { undo: "false", day: "2026-08-11" } }).label, "Dismissed from today's queue");
+  assert.equal(at("queue_dismiss", { payload: { undo: "true", day: "2026-08-11" } }).label, "Queue dismissal undone");
+  assert.equal(
+    at("fleet_status", { mark_value: "Vehicle Ready", payload: { sub_status: "At Shop" } }).label,
+    "Fleet status → Vehicle Ready — At Shop",
+  );
+  assert.equal(at("schedule_pickup", { mark_value: "cleared" }).label, "Pickup schedule cleared");
+  assert.equal(
+    at("schedule_pickup", { mark_value: "2026-08-12", payload: { route_block_requested: true } }).detail,
+    "route block requested",
+  );
+  const text = at("pickup_text", { note: "Pickup text sent to SMITH,JOHN", payload: { body: "Your van is ready" } });
+  assert.equal(text.label, "Pickup text sent to SMITH,JOHN");
+  assert.equal(text.detail, "Your van is ready");
+  assert.equal(at("identity_override", { payload: { cleared: "true" } }).label, "Renter identity override cleared");
+  assert.equal(
+    at("identity_override", { note: "Renter identity pinned to SMITH,J (PO 123)" }).label,
+    "Renter identity pinned to SMITH,J (PO 123)",
+  );
+  // payload arriving as a JSON string (driver/serialization variance) still parses
+  assert.equal(at("ready_verified", { payload: '{"verified":"true"}' }).label, "Ready verified with the shop");
+  // unknown/future action types: humanized fallback, never a blank row
+  const fb = at("shiny_new_thing", { note: "details here" });
+  assert.equal(fb.label, "Shiny new thing");
+  assert.equal(fb.detail, "details here");
+});

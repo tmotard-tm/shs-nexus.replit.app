@@ -14,14 +14,16 @@
  * text from the queue" path — the pickup wording is only the default.
  */
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { MessageSquare } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
+import { LIST_QUERY_KEYS, caseDetailKey } from "../lib/query-keys";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
 export function TechTextModal({ caseKey, onClose }: { caseKey: string; onClose: () => void }) {
   const { toast } = useToast();
+  const qc = useQueryClient();
   const [body, setBody] = useState<string | null>(null);
   const [sent, setSent] = useState(false);
 
@@ -48,6 +50,12 @@ export function TechTextModal({ caseKey, onClose }: { caseKey: string; onClose: 
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       setSent(true);
+      if (j?.ok !== false) {
+        // A sent/queued text is a case action — the pop-up's activity log and
+        // every board's texted state must show it immediately.
+        qc.invalidateQueries({ queryKey: caseDetailKey(caseKey) });
+        for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k });
+      }
       toast({
         title: j?.status === "queued" ? "Queued" : "Text sent",
         description: j?.message || "",

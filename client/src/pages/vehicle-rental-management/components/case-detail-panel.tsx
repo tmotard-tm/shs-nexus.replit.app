@@ -24,10 +24,12 @@ import { useState, useEffect } from "react";
 import type { CSSProperties } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  RefreshCw, X, Pencil, Lock, Bot, AlertTriangle, ChevronRight,
+  RefreshCw, X, Pencil, Lock, Bot, AlertTriangle, ChevronRight, Copy,
 } from "lucide-react";
 import { fonts, colors } from "../lib/constants";
 import { fmtDate, fmtDateTime, fmtPhone } from "../lib/format";
+import { LIST_QUERY_KEYS } from "../lib/query-keys";
+import { describeAction } from "../lib/activity-log";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "./shop-phone-edit";
@@ -98,6 +100,9 @@ export interface CaseDetail {
   assignedTruck?: AssignedTruckDetail | null;
   callLog?: CallLogItem[];
   registrationContext?: RegistrationInfo | null;
+  /** Call-ready plate/VIN per truck (`truck` = canonical digits) — rental van
+   *  + assigned truck (Tyler 2026-08-11). */
+  vehicleIdentity?: Array<{ truck: string; plate: string | null; plateState: string | null; vin: string | null }>;
   /** Server-reconciled shop-of-record — the SAME pick the board table/queue show. */
   reconciledShop?: { shopName: string | null; shopPhone: string | null; effStatus: string | null; shopPoDate: string | null; poNumber: string | null; openPoCount: number; portalAt: string | null } | null;
 }
@@ -117,13 +122,24 @@ export interface CaseRowContext {
   has_rental_auth?: boolean;
 }
 
-// Every board list that renders case state. A mark / identity override / shop
-// phone edit changes what all three show, so panel mutations refetch them all.
-const LIST_QUERY_KEYS: string[][] = [
-  ["/api/vrm/rental-operations/master"],
-  ["/api/vrm/rental-operations/by-region"],
-  ["/api/vrm/rental-operations/queue"],
-];
+// Board list keys now live in ../lib/query-keys so the boards, this panel and
+// the text modal all refetch the SAME three lists after every action.
+
+/** One row of the case Activity log — label + detail via describeAction. */
+function ActivityRow({ a }: {
+  a: { id: string; action_type: string; mark_value: string | null; note: string | null; assigned_to?: string | null; actor: string | null; created_at: string; payload?: any };
+}) {
+  const d = describeAction(a);
+  return (
+    <div style={{ padding: "6px 0", borderBottom: `1px solid ${colors.rule}` }}>
+      <div style={{ fontSize: 12, color: colors.ink, fontWeight: 600 }}>{d.label}</div>
+      {d.detail && <div style={{ fontSize: 11.5, color: colors.ink, whiteSpace: "pre-wrap", marginTop: 1 }}>{d.detail}</div>}
+      <div style={{ fontSize: 10.5, color: colors.inkMuted, marginTop: 2, fontFamily: fonts.jetbrains }}>
+        {a.actor || "system"} · {fmtDate(a.created_at)}
+      </div>
+    </div>
+  );
+}
 
 // ── shared VRM formatters — one impl for boards, queue, and this panel ───────
 
@@ -224,17 +240,8 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
     : shop ? (assigned.portal?.poDetail?.[shop.poNumber]?.vendorPhone || assigned.portal?.shop?.phone) : assigned.portal?.shop?.phone;
   return (
     <>
-      {/* summary grid — same shape as the rental tab's ticket/economics grid */}
-      <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div><div style={label}>Truck</div><div style={val}>{assigned.truck} · tech's assigned truck</div></div>
-        <div><div style={label}>AMS status</div><div style={{ ...val, color: ams ? amsColorOf(amsB) : colors.inkMuted }}>{ams || "unknown"}</div></div>
-        <div><div style={label}>Open repair PO</div><div style={{ ...val, color: hasOpenRepair ? colors.green : colors.red }}>{hasOpenRepair ? "yes — rental explained" : "none — escalate"}</div></div>
-        <div><div style={label}>PO history</div><div style={val}>{assigned.poHistory.length} POs · 3 years</div></div>
-        <div><div style={label}>Ticket</div><div style={{ ...val, color: colors.inkMuted }}>not a rental</div></div>
-        <div><div style={label}>Renting location</div><div style={{ ...val, color: colors.inkMuted }}>—</div></div>
-      </section>
-
-      {/* current shop contact (from the PO) */}
+      {/* current shop contact (from the PO) — FIRST on this tab too (Tyler
+          2026-08-11): shop info front and center, above everything else. */}
       <section>
         <div style={label}>Current shop</div>
         {shop ? (
@@ -262,6 +269,16 @@ function AssignedTruckTab({ assigned, assignedTruckNo, caseKey, onScrape, scrapi
             <div style={{ fontSize: 11, color: colors.inkMuted, marginTop: 4, fontFamily: fonts.jetbrains }}>from PO {shop.poNumber} · dated {fmtDate(shop.poDate)}</div>
           </div>
         ) : <div style={{ fontSize: 12, color: colors.inkMuted, marginTop: 4 }}>No repair-shop PO found in the last 3 years.</div>}
+      </section>
+
+      {/* summary grid — same shape as the rental tab's ticket/economics grid */}
+      <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div><div style={label}>Truck</div><div style={val}>{assigned.truck} · tech's assigned truck</div></div>
+        <div><div style={label}>AMS status</div><div style={{ ...val, color: ams ? amsColorOf(amsB) : colors.inkMuted }}>{ams || "unknown"}</div></div>
+        <div><div style={label}>Open repair PO</div><div style={{ ...val, color: hasOpenRepair ? colors.green : colors.red }}>{hasOpenRepair ? "yes — rental explained" : "none — escalate"}</div></div>
+        <div><div style={label}>PO history</div><div style={val}>{assigned.poHistory.length} POs · 3 years</div></div>
+        <div><div style={label}>Ticket</div><div style={{ ...val, color: colors.inkMuted }}>not a rental</div></div>
+        <div><div style={label}>Renting location</div><div style={{ ...val, color: colors.inkMuted }}>—</div></div>
       </section>
 
       <PoAndCallTabs truck={assigned.truck} poList={assigned.poHistory} poSource={assigned.poSource}
@@ -607,6 +624,8 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
       await qc.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${caseKey}`] });
+      // A scrape refreshes shop-of-record and PO context shown on all boards.
+      for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k });
       const rp = j?.report;
       toast({ title: rp?.stored ? "Refreshed from Holman" : "Holman returned no history", description: rp ? `${rp.stored} stored · ${rp.empty} empty` : "" });
     },
@@ -766,20 +785,42 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
               );
             })()}
 
+            {/* Call-ready vehicle IDs (Tyler 2026-08-11): plate + VIN for the
+                SELECTED van — rental or assigned — always on screen, so a call
+                to Holman/DMV/a shop never starts with a records hunt. */}
+            {(() => {
+              const canon = (s: any) => String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
+              const vid = (data?.vehicleIdentity ?? []).find((v) => v.truck === canon(activeTruck)) ?? null;
+              const mono: CSSProperties = { fontFamily: fonts.jetbrains, fontSize: 14.5, fontWeight: 700, color: colors.ink, letterSpacing: "0.03em" };
+              const copyBtn = (txt: string, what: string) => (
+                <button type="button" title={`Copy ${what}`}
+                  onClick={() => { navigator.clipboard?.writeText(txt).then(() => toast({ title: `${what} copied` })).catch(() => {}); }}
+                  style={{ background: "transparent", border: `1px solid ${colors.rule}`, borderRadius: 6, cursor: "pointer", color: colors.inkMuted, padding: "2px 6px", display: "inline-flex", alignItems: "center" }}>
+                  <Copy size={11} />
+                </button>
+              );
+              return (
+                <section data-testid="vehicle-id-strip" style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: "10px 14px", display: "flex", flexWrap: "wrap", gap: "8px 32px", alignItems: "flex-start" }}>
+                  <div>
+                    <div style={label}>License plate — truck {activeTruck}</div>
+                    {vid?.plate
+                      ? <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2 }}><span style={mono}>{vid.plate}{vid.plateState ? ` · ${vid.plateState}` : ""}</span>{copyBtn(vid.plate, "Plate")}</div>
+                      : <div style={{ fontSize: 12.5, color: colors.inkMuted, marginTop: 2 }}>no plate on file in the Holman feed</div>}
+                  </div>
+                  <div>
+                    <div style={label}>VIN</div>
+                    {vid?.vin
+                      ? <div style={{ display: "flex", alignItems: "center", gap: 7, marginTop: 2 }}><span style={mono}>{vid.vin}</span>{copyBtn(vid.vin, "VIN")}</div>
+                      : <div style={{ fontSize: 12.5, color: colors.inkMuted, marginTop: 2 }}>no VIN on file in the Holman feed</div>}
+                  </div>
+                </section>
+              );
+            })()}
+
             {truckTab === "rental" && (<>
-            {/* ticket + vehicle economics */}
-            <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div><div style={label}>Ticket</div><div style={val}>{c.ticket_number || c.po_number || "—"} · {c.ticket_status}</div></div>
-              <div><div style={label}>Rental start</div><div style={val}>{fmtDate(c.rental_start_date_s || c.rental_start_date)} · {c.days_open}d open · {c.number_of_extensions ?? 0} ext</div></div>
-              <div><div style={label}>Vehicle</div><div style={val}>{c.veh_desc || "—"}</div></div>
-              <div><div style={label}>Rental class</div><div style={val}>{c.rental_class || "—"}</div></div>
-              <div><div style={label}>Daily cost</div><div style={val}>{money2(c.rate_authorized)}</div></div>
-              <div><div style={label}>Renting location</div><div style={val}>{[c.renting_city, c.renting_state].filter(Boolean).join(", ") || "—"}</div></div>
-              <div><div style={label}>TPMS assigned</div><div style={{ ...val, color: row?.wrong_truck ? colors.red : colors.ink }}>{row?.tpms_tech || "none"}{row?.wrong_truck && row?.renter_own_truck ? ` · renter drives ${row.renter_own_truck}` : ""}</div></div>
-              <div><div style={label}>Odometer</div><div style={val}>{row?.odometer ? `${row.odometer.toLocaleString()} mi` : "—"}{row?.odometer_date ? ` (${fmtDate(row.odometer_date)})` : ""}</div></div>
-              <div><div style={label}>Last rental PO</div><div style={val}>{row?.last_rental_date ? fmtDate(row.last_rental_date) : "—"}{row && !row.has_rental_auth ? " · no approved rental auth" : ""}</div></div>
-            </section>
-            {/* current shop contact (from the PO) */}
+            {/* current shop contact (from the PO) — FIRST section by design
+                (Tyler 2026-08-11): shop info front and center at the top of the
+                pop-up, above the ticket grid and every comment feed. */}
             <section>
               <div style={{ ...label, display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
                 <span>Current shop</span>
@@ -864,6 +905,18 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                 );
               })()}
             </section>
+            {/* ticket + vehicle economics — below the shop block by design */}
+            <section style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div><div style={label}>Ticket</div><div style={val}>{c.ticket_number || c.po_number || "—"} · {c.ticket_status}</div></div>
+              <div><div style={label}>Rental start</div><div style={val}>{fmtDate(c.rental_start_date_s || c.rental_start_date)} · {c.days_open}d open · {c.number_of_extensions ?? 0} ext</div></div>
+              <div><div style={label}>Vehicle</div><div style={val}>{c.veh_desc || "—"}</div></div>
+              <div><div style={label}>Rental class</div><div style={val}>{c.rental_class || "—"}</div></div>
+              <div><div style={label}>Daily cost</div><div style={val}>{money2(c.rate_authorized)}</div></div>
+              <div><div style={label}>Renting location</div><div style={val}>{[c.renting_city, c.renting_state].filter(Boolean).join(", ") || "—"}</div></div>
+              <div><div style={label}>TPMS assigned</div><div style={{ ...val, color: row?.wrong_truck ? colors.red : colors.ink }}>{row?.tpms_tech || "none"}{row?.wrong_truck && row?.renter_own_truck ? ` · renter drives ${row.renter_own_truck}` : ""}</div></div>
+              <div><div style={label}>Odometer</div><div style={val}>{row?.odometer ? `${row.odometer.toLocaleString()} mi` : "—"}{row?.odometer_date ? ` (${fmtDate(row.odometer_date)})` : ""}</div></div>
+              <div><div style={label}>Last rental PO</div><div style={val}>{row?.last_rental_date ? fmtDate(row.last_rental_date) : "—"}{row && !row.has_rental_auth ? " · no approved rental auth" : ""}</div></div>
+            </section>
             {/* Registration / tags — only when tag work is live for this van.
                 Lays out the tracked blocker so nobody re-discovers it by
                 calling around, and says whose move it is. */}
@@ -939,6 +992,29 @@ export function DetailPanel({ caseKey, row, onClose, onMark }: { caseKey: string
                   </div>
                 ))}
               </div>
+            </section>
+            {/* Activity log — the full audit trail for this case: every mark,
+                ready verification, research escalation, owner change, queue
+                dismissal, pickup text, schedule change, fleet-status write and
+                shop/identity edit, newest first — the same rows no matter which
+                board the action was taken from (Tyler 2026-08-11). */}
+            <section data-testid="section-activity-log">
+              <div style={label}>Activity log ({(data?.actions || []).length})</div>
+              {(data?.actions || []).length === 0 ? (
+                <div style={{ marginTop: 6, color: colors.inkMuted, fontSize: 12 }}>No actions recorded on this case yet.</div>
+              ) : (
+                <div style={{ marginTop: 6, border: `1px solid ${colors.rule}`, borderRadius: 8, padding: "2px 10px", maxHeight: 300, overflowY: "auto" }}>
+                  {(data?.actions || []).slice(0, 12).map((a) => <ActivityRow key={a.id} a={a} />)}
+                  {(data?.actions || []).length > 12 && (
+                    <details>
+                      <summary style={{ cursor: "pointer", fontSize: 11.5, color: colors.inkMuted, padding: "6px 0" }}>
+                        Show all {(data?.actions || []).length} actions
+                      </summary>
+                      {(data?.actions || []).slice(12).map((a) => <ActivityRow key={a.id} a={a} />)}
+                    </details>
+                  )}
+                </div>
+              )}
             </section>
             {/* PO history — two ALWAYS-PRESENT tabs: the rental van, and the
                 truck this tech is actually assigned to. The assigned tab answers

@@ -23,6 +23,7 @@ import {
 import { TechTextModal } from "../components/tech-text-modal";
 import { ShopInfoPanel } from "../components/shop-info-panel";
 import { DetailPanel, amsBucketOfLabel, amsColorOf, amsTintOf } from "../components/case-detail-panel";
+import { LIST_QUERY_KEYS } from "../lib/query-keys";
 import { fonts, colors } from "../lib/constants";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -527,7 +528,7 @@ function FleetStatusEditor({
       }),
     onSuccess: () => {
       toast({ title: "Status updated", description: `${main}${sub ? ` — ${sub}` : ""} recorded and mirrored to Fleet Scope.` });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/queue/today"] });
       queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
       onClose();
@@ -616,7 +617,7 @@ function SchedulePickupEditor({
   const [fileBlock, setFileBlock] = useState(true);
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+    for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/queue/today"] });
     queryClient.invalidateQueries({ queryKey: ["/api/fs/trucks"] });
   };
@@ -1650,7 +1651,7 @@ export default function OpsQueue() {
         title: auto ? "Returned to Annex A routing" : "Owner reassigned",
         description: auto ? "The next queue refresh re-routes this item automatically." : `Item pinned to ${owner}.`,
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     },
     onError: (e: any) => {
       toast({ title: "Reassign failed", description: e?.message || "Unknown error", variant: "destructive" });
@@ -1664,7 +1665,7 @@ export default function OpsQueue() {
     },
     onSuccess: (_r, { key, undo }) => {
       patchItems((it) => it.key === key ? { ...it, dismissedToday: undo ? null : { by: "you" } } : it);
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     },
     onError: (e: any) => {
       toast({ title: "Dismiss failed", description: e?.message || "Unknown error", variant: "destructive" });
@@ -1696,8 +1697,7 @@ export default function OpsQueue() {
           ? "Truck moves to Vehicle ready — schedule pickup (reflected on all views on refresh)."
           : "Truck returns to PO closed — confirm with shop.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     },
     onError: (e: any) => {
       toast({ title: "Verify failed", description: e?.message || "Unknown error", variant: "destructive" });
@@ -1719,8 +1719,7 @@ export default function OpsQueue() {
           ? "Case flagged for manual research — find where the truck is and its repair status."
           : "Case returns to the normal confirmation flow.",
       });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     },
     onError: (e: any) => {
       toast({ title: "Research escalation failed", description: e?.message || "Unknown error", variant: "destructive" });
@@ -1745,8 +1744,7 @@ export default function OpsQueue() {
       apiRequest("POST", `/api/vrm/rental-operations/master/${v.caseKey}/actions`, { action_type: "mark", mark_value: v.mark }),
     onSuccess: (_r, v) => {
       queryClient.invalidateQueries({ queryKey: [`/api/vrm/rental-operations/master/${v.caseKey}`] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/master"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/queue"] });
+      for (const k of LIST_QUERY_KEYS) queryClient.invalidateQueries({ queryKey: k });
     },
     onError: (e: any) => toast({ title: "Mark failed", description: e?.message || "Unknown error", variant: "destructive" }),
   });

@@ -685,6 +685,10 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     regCtxByCanon = await fetchRegistrationContextMap(allTrucks.map(t => ({
       truckNumber: t.truckNumber,
       mainStatus: t.mainStatus ?? null,
+      // AMS terminal authority (Tyler 2026-08-11): a declined / sent-to-auction
+      // van never gets its tags chased — suppress the block. The fleet terminal
+      // pair covers cases AMS hasn't caught up to yet.
+      disposal: amsTerminalFor(t) || t.mainStatus === 'Declined Repair' || t.mainStatus === 'Approved for sale',
       fs: {
         registrationStickerValid: t.registrationStickerValid,
         registrationExpiryDate: t.registrationExpiryDate,
@@ -1060,17 +1064,28 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     // When Nexus already knows the real blocker, the card says it — instead of
     // a generic "waiting on paperwork" that sends someone to re-discover it.
     const ctx = regCtxByCanon.get(canonReg(t.truckNumber));
-    const blockerBits: string[] = [];
-    if (ctx?.holmanCaseStatus || ctx?.renewalStep) blockerBits.push(`Holman renewal case: ${ctx.holmanCaseStatus ?? ctx.renewalStep}`);
-    if (ctx?.blockerNote) blockerBits.push(`"${ctx.blockerNote}"`);
-    const whyText = blockerBits.length
-      ? `Status "Tags" — ${blockerBits.join(' — ')}`
-      : 'Status "Tags" — the truck is waiting on tags/registration paperwork, not a repair.';
-    const actionText = ctx
-      ? (ctx.techAction.required
-          ? `Tech has a required move: ${ctx.techAction.summary}`
-          : `${ctx.techAction.summary} Don't chase the tech for this.`)
-      : 'Tags hold — routed to district team';
+    let whyText: string;
+    let actionText: string;
+    if (ctx?.suppressedByDisposal) {
+      // AMS terminal authority (Tyler 2026-08-11): the van is declined / sent
+      // to auction — tag paperwork is moot; the real work is fixing the status
+      // record and running replacement/close-out, not chasing tags.
+      const amsRaw = amsStatusFor(t);
+      whyText = `Status "Tags" — but AMS says this van is ${amsRaw ? `"${amsRaw}"` : 'declined / sent to auction'}, so tag paperwork no longer matters for this case.`;
+      actionText = `Skip the tag chase — a declined/auction van never gets tags renewed. Fix the status record and work the replacement/close-out path instead. Don't chase the tech for this.`;
+    } else {
+      const blockerBits: string[] = [];
+      if (ctx?.holmanCaseStatus || ctx?.renewalStep) blockerBits.push(`Holman renewal case: ${ctx.holmanCaseStatus ?? ctx.renewalStep}`);
+      if (ctx?.blockerNote) blockerBits.push(`"${ctx.blockerNote}"`);
+      whyText = blockerBits.length
+        ? `Status "Tags" — ${blockerBits.join(' — ')}`
+        : 'Status "Tags" — the truck is waiting on tags/registration paperwork, not a repair.';
+      actionText = ctx
+        ? (ctx.techAction.required
+            ? `Tech has a required move: ${ctx.techAction.summary}`
+            : `${ctx.techAction.summary} Don't chase the tech for this.`)
+        : 'Tags hold — routed to district team';
+    }
     items.push({
       step: 6, stepTitle: 'CONFIRM TAGS WITH CHERYL',
       lane: 'monitor',

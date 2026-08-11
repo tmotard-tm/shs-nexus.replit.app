@@ -24,6 +24,7 @@ import { fmtDate, fmtDateTime, fmtPhone, fmtDuration, fmtLocalDateTime, minutesS
 import { workloadBucketOf, isNewHire, isUrgentEmp, isDeclinedAuction, daysSince, type MasterRow } from "../lib/case-model";
 import { ShopPhoneEditModal, type ShopPhoneEditTarget } from "../components/shop-phone-edit";
 import { DetailPanel } from "../components/case-detail-panel";
+import { LIST_QUERY_KEYS } from "../lib/query-keys";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 
@@ -758,7 +759,7 @@ export default function RegionalCases() {
     mutationFn: (v: { caseKey: string; verified: boolean }) =>
       apiRequest("POST", "/api/vrm/rental-operations/queue/ready-verified", { key: v.caseKey, verified: v.verified }),
     onSuccess: (_r, v) => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] });
+      for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k });
       toast({ title: v.verified ? "Marked verified ready" : "Verification undone", description: v.verified ? "Reflected on the Ops Queue and Rental Operations." : undefined });
     },
     onError: (e: any) => toast({ title: "Verify failed", description: String(e?.message || e), variant: "destructive" }),
@@ -767,7 +768,7 @@ export default function RegionalCases() {
     mutationFn: (v: { caseKey: string; active: boolean }) =>
       apiRequest("POST", "/api/vrm/rental-operations/queue/research", { key: v.caseKey, active: v.active }),
     onSuccess: (_r, v) => {
-      qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] });
+      for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k });
       toast({ title: v.active ? "Escalated to research" : "Research escalation cleared", description: v.active ? "Reflected on the Ops Queue and Rental Operations." : undefined });
     },
     onError: (e: any) => toast({ title: "Research escalation failed", description: String(e?.message || e), variant: "destructive" }),
@@ -775,19 +776,19 @@ export default function RegionalCases() {
   const markMut = useMutation({
     mutationFn: (v: { caseKey: string; mark: string }) =>
       apiRequest("POST", `/api/vrm/rental-operations/master/${v.caseKey}/actions`, { action_type: "mark", mark_value: v.mark }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] }),
+    onSuccess: () => { for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k }); },
     onError: (e: any) => toast({ title: "Mark failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const syncMut = useMutation({
     mutationFn: () => apiRequest("POST", "/api/vrm/rental-operations/sync"),
-    onSuccess: async () => { await qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] }); toast({ title: "Sync complete" }); },
+    onSuccess: async () => { await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k }))); toast({ title: "Sync complete" }); },
     onError: (e: any) => toast({ title: "Sync failed", description: String(e?.message || e), variant: "destructive" }),
   });
   const importMut = useMutation({
     mutationFn: (file: File) => { const fd = new FormData(); fd.append("file", file); return apiRequest("POST", "/api/vrm/rental-operations/imports/enterprise", fd); },
     onSuccess: async (res: any) => {
       const j = await res.json().catch(() => ({}));
-      await qc.invalidateQueries({ queryKey: ["/api/vrm/rental-operations/by-region"] });
+      await Promise.all(LIST_QUERY_KEYS.map((k) => qc.invalidateQueries({ queryKey: k })));
       toast({ title: "Report imported", description: `${j?.result?.totalCases ?? "?"} cases, ${j?.result?.dropped ?? 0} closed` });
     },
     onError: (e: any) => toast({ title: "Import failed", description: String(e?.message || e), variant: "destructive" }),
@@ -1244,6 +1245,8 @@ function WorkbookEditor({ caseKey, row, statuses, onClose, onSaved }: {
       }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: [historyKey] });
+      // Recovery status shows on the boards too — refetch all three.
+      for (const k of LIST_QUERY_KEYS) qc.invalidateQueries({ queryKey: k });
       onSaved();
       toast({ title: `Saved · ${caseKey}` });
       onClose();

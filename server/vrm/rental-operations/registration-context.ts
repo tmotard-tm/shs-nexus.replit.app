@@ -89,6 +89,9 @@ export interface RegistrationTechAction {
 export interface RegistrationContext {
   /** Registration/tags work is live for this truck (drives whether UIs render the block). */
   tagsNeeded: boolean;
+  /** AMS/fleet says the van is declined or sent to auction — tag status is
+   *  irrelevant for the case, so tagsNeeded is forced false (Tyler 2026-08-11). */
+  suppressedByDisposal: boolean;
   sticker: string | null;
   haveTagsDate: string | null;
   renewalDate: string | null; // tracking wins, Holman feed fallback
@@ -123,6 +126,10 @@ const OPEN_STEPS = new Set(["new", "prerequisites", "sent to state", "rejected"]
 
 export function deriveRegistrationContext(args: {
   mainStatus?: string | null;
+  /** Case van is declined / sent to auction (AMS bucket declined|auction, or
+   *  the fleet terminal pair). AMS is terminal authority — this suppresses
+   *  the tag block entirely. */
+  disposal?: boolean | null;
   fs?: FsRegSignals | null;
   tracking?: TrackingSignals | null;
   holmanRenewalDate?: string | null;
@@ -162,6 +169,12 @@ export function deriveRegistrationContext(args: {
     awaitingTechDocuments ||
     contactedTech;
 
+  // AMS is terminal authority (user directives 2026-08-07 / 2026-08-11): a van
+  // that is declined or sent to auction is never getting its tags chased — the
+  // tag status is irrelevant to the case no matter what the renewal data says,
+  // so the block must not render at all.
+  const suppressedByDisposal = args.disposal === true;
+
   // Whose move is it? First match wins; every branch is deliberately
   // explainable in one sentence (these lines render verbatim on cards).
   let techAction: RegistrationTechAction;
@@ -182,6 +195,9 @@ export function deriveRegistrationContext(args: {
   } else {
     techAction = { required: false, summary: "No tech step on file — work the renewal with the office/Holman." };
   }
+  if (suppressedByDisposal) {
+    techAction = { required: false, summary: "Van is declined / sent to auction per AMS — tag status is irrelevant for this case." };
+  }
 
   const times = [
     parseWhen(tr.updatedAt ?? null),
@@ -192,7 +208,8 @@ export function deriveRegistrationContext(args: {
   const stale = asOfMs == null || now.getTime() - asOfMs > STALE_AFTER_DAYS * 24 * 60 * 60 * 1000;
 
   return {
-    tagsNeeded,
+    tagsNeeded: suppressedByDisposal ? false : tagsNeeded,
+    suppressedByDisposal,
     sticker,
     haveTagsDate: fs.registrationExpiryDate?.trim() || null,
     renewalDate: tr.renewalDate?.trim() || args.holmanRenewalDate?.trim() || null,
@@ -217,11 +234,11 @@ export function deriveRegistrationContext(args: {
  * (tracking rows are padded, holman cache numbers vary).
  */
 export async function fetchRegistrationContextMap(
-  trucks: Array<{ truckNumber: string; mainStatus?: string | null; fs?: FsRegSignals | null }>,
+  trucks: Array<{ truckNumber: string; mainStatus?: string | null; disposal?: boolean | null; fs?: FsRegSignals | null }>,
   now?: Date,
 ): Promise<Map<string, RegistrationContext>> {
   const out = new Map<string, RegistrationContext>();
-  const byCanon = new Map<string, { truckNumber: string; mainStatus?: string | null; fs?: FsRegSignals | null }>();
+  const byCanon = new Map<string, { truckNumber: string; mainStatus?: string | null; disposal?: boolean | null; fs?: FsRegSignals | null }>();
   for (const t of trucks) {
     const c = canonReg(t.truckNumber);
     if (c) byCanon.set(c, t);
@@ -302,11 +319,73 @@ export async function fetchRegistrationContextMap(
     const fromDb = fsBy.get(c);
     out.set(c, deriveRegistrationContext({
       mainStatus: t.mainStatus ?? fromDb?.mainStatus ?? null,
+      disposal: t.disposal ?? null,
       fs: t.fs ?? fromDb?.fs ?? null,
       tracking: trackBy.get(c) ?? null,
       holmanRenewalDate: holmanBy.get(c) ?? null,
       now,
     }));
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Call-ready vehicle identity (Tyler 2026-08-11): if we ever have to call the
+// DMV / Holman / a shop ourselves we need the van's license plate + VIN on
+// screen for EVERY truck in the case — the rental van and the assigned truck
+// alike, whichever is selected. Source: holman_vehicles_cache (the Holman
+// feed) — the only table with full-fleet plate/VIN coverage. Same canonical
+// digit matching + dual-number-column rules as the registration fetch above.
+
+export interface VehicleIdentity {
+  /** Canonical truck digits (non-digits stripped, leading zeros trimmed). */
+  truck: string;
+  plate: string | null;
+  plateState: string | null;
+  vin: string | null;
+}
+
+/** Null-filling merge: a real value is NEVER clobbered by a later null/blank —
+ * the Holman cache can hold the same van under both number columns (legacy
+ * dup formats) and only one row may carry the plate. Exported for tests. */
+export function mergeIdentity(
+  base: VehicleIdentity,
+  cand: { plate?: string | null; plateState?: string | null; vin?: string | null },
+): VehicleIdentity {
+  const pick = (cur: string | null, next?: string | null) => {
+    if (cur != null && cur !== "") return cur;
+    const v = String(next ?? "").trim();
+    return v ? v : null;
+  };
+  return {
+    truck: base.truck,
+    plate: pick(base.plate, cand.plate),
+    plateState: pick(base.plateState, cand.plateState),
+    vin: pick(base.vin, cand.vin),
+  };
+}
+
+export async function fetchVehicleIdentityMap(
+  truckNumbers: Array<string | null | undefined>,
+): Promise<Map<string, VehicleIdentity>> {
+  const out = new Map<string, VehicleIdentity>();
+  const canons = [...new Set(truckNumbers.map((t) => canonReg(t ?? "")).filter(Boolean))];
+  if (!canons.length) return out;
+  const inList = sql.join(canons.map((c) => sql`${c}`), sql`, `);
+  const canonExpr = (col: string) => sql.raw(`ltrim(regexp_replace(${col}, '[^0-9]', '', 'g'), '0')`);
+  const res = await db.execute(sql`
+    SELECT vehicle_number_display, holman_vehicle_number, license_plate, license_state, vin
+    FROM holman_vehicles_cache
+    WHERE ${canonExpr("vehicle_number_display")} IN (${inList})
+       OR ${canonExpr("holman_vehicle_number")} IN (${inList})`);
+  const want = new Set(canons);
+  for (const r of (res.rows ?? []) as any[]) {
+    for (const rawKey of [r.vehicle_number_display, r.holman_vehicle_number]) {
+      const key = canonReg(rawKey ?? "");
+      if (!key || !want.has(key)) continue;
+      const prev = out.get(key) ?? { truck: key, plate: null, plateState: null, vin: null };
+      out.set(key, mergeIdentity(prev, { plate: r.license_plate, plateState: r.license_state, vin: r.vin }));
+    }
   }
   return out;
 }

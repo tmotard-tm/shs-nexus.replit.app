@@ -496,6 +496,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
     try {
       const { dispatchCall } = await import("./luca-dispatch");
       const result = await dispatchCall(req.params.caseKey, actorOf(req));
+      // Queue cards show LUCA dial state — rebuild on next read.
+      invalidateTodaysQueueCache("luca-call");
       res.json({ ok: result?.ok !== false, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] call failed:", e?.message || e);
@@ -510,6 +512,7 @@ export function registerRentalOperationsRoutes(router: Router): void {
       if (!caseKeys.length) return res.status(400).json({ error: "caseKeys[] required" });
       const { dispatchBatch } = await import("./luca-dispatch");
       const result = await dispatchBatch(caseKeys, actorOf(req));
+      invalidateTodaysQueueCache("luca-call-batch");
       res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] call-batch failed:", e?.message || e);
@@ -547,6 +550,8 @@ export function registerRentalOperationsRoutes(router: Router): void {
         confirmed: req.body?.confirmed === true,
         force: req.body?.force === true,
       });
+      // A sent text changes the queue's texted/last-contact state — refresh it.
+      if (result.ok) invalidateTodaysQueueCache("pickup-text");
       res.status(result.ok ? 200 : 409).json(result);
     } catch (e: any) {
       console.error("[VRM/RentalOps] pickup-text send failed:", e?.message || e);
@@ -584,6 +589,17 @@ export function registerRentalOperationsRoutes(router: Router): void {
       const actor = actorOf(req);
       await setSetting(SETTING_AUTO_TEXT_ON_READY, { enabled }, actor);
       console.log(`[VRM/RentalOps] auto_text_on_ready -> ${enabled} (by ${actor})`);
+      // Append-only audit of the flip itself (the settings table only keeps
+      // the latest state). '_global' = not tied to one case.
+      try {
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, payload, actor)
+          VALUES ('_global', 'setting', ${`auto_text_on_ready → ${enabled ? "ON" : "OFF"}`},
+                  ${JSON.stringify({ setting: "auto_text_on_ready", enabled: enabled ? "true" : "false" })}::jsonb, ${actor})
+        `);
+      } catch (logErr: any) {
+        console.warn("[VRM/RentalOps] settings audit insert failed (non-fatal):", logErr?.message || logErr);
+      }
       res.json({ ok: true, auto_text_on_ready: { enabled, updated_by: actor } });
     } catch (e: any) {
       res.status(500).json({ error: e?.message || "settings write failed" });
@@ -824,6 +840,15 @@ export function registerRentalOperationsRoutes(router: Router): void {
               override_by=NULL, override_at=NULL, override_po_number=NULL, updated_at=NOW()
           WHERE case_key=${caseKey}
         `);
+        try {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, payload, actor)
+            VALUES (${caseKey}, 'identity_override', 'Renter identity override cleared',
+                    ${JSON.stringify({ cleared: "true" })}::jsonb, ${actor})
+          `);
+        } catch (logErr: any) {
+          console.warn("[VRM/RentalOps] identity-override audit insert failed (non-fatal):", logErr?.message || logErr);
+        }
         invalidateTodaysQueueCache("identity-override-clear");
         return res.json({ ok: true, cleared: true });
       }
@@ -849,6 +874,17 @@ export function registerRentalOperationsRoutes(router: Router): void {
         RETURNING i.case_key, i.override_employee_id, i.override_status, i.override_tech_name, i.override_po_number
       `);
       if (!upd.rows.length) return res.status(404).json({ error: "case has no resolution row yet" });
+      const ov = upd.rows[0] as any;
+      try {
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, action_type, note, payload, actor)
+          VALUES (${caseKey}, 'identity_override',
+                  ${`Renter identity pinned to ${ov.override_tech_name || ov.override_employee_id}${ov.override_po_number ? ` (PO ${ov.override_po_number})` : ""}`},
+                  ${JSON.stringify({ employee_id: ov.override_employee_id ?? null, tech_name: ov.override_tech_name ?? null, po_number: ov.override_po_number ?? null })}::jsonb, ${actor})
+        `);
+      } catch (logErr: any) {
+        console.warn("[VRM/RentalOps] identity-override audit insert failed (non-fatal):", logErr?.message || logErr);
+      }
       invalidateTodaysQueueCache("identity-override");
       res.json({ ok: true, override: upd.rows[0], actor });
     } catch (e: any) {
@@ -984,7 +1020,9 @@ export function registerRentalOperationsRoutes(router: Router): void {
     try {
       const full = req.query.full === "1" || req.query.full === "true";
       const { enrichCasesWithAms } = await import("./ams-enrich");
-      res.json({ ok: true, result: await enrichCasesWithAms({ cachedOnly: !full }) });
+      const result = await enrichCasesWithAms({ cachedOnly: !full });
+      invalidateTodaysQueueCache("refresh-ams");
+      res.json({ ok: true, result });
     } catch (e: any) {
       console.error("[VRM/RentalOps] refresh-ams failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "refresh-ams failed" });
