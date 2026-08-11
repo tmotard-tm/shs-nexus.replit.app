@@ -20,7 +20,8 @@ import { appendSchedulePickup } from "./schedule-pickup";
 import { CLASSIFICATIONS, todayET } from "./bucket-classify";
 import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
-import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED } from "../../luca-writeback/mapper";
+import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED, READY_REPLACEABLE_MAIN_STATUSES } from "../../luca-writeback/mapper";
+import { runReadyConflictHeal, maybeAutoHealReadyConflicts } from "./ready-conflict-heal";
 import { readLucaActivity, lucaActivityHealth, lucaConfigSummary } from "./luca-activity";
 import { spawnRentalRequests, rentalRequestLinksFor } from "./scrape-service";
 
@@ -33,11 +34,6 @@ let syncInFlight = false;
 // full set of concurrent browser sessions on the same box. Module-level rather
 // than a DB lock because the sweep is in-process and this is a single instance.
 let scrapeSweepInFlight = false;
-
-// One heal sweep at a time: a double-fired request would re-classify from the
-// same cached queue snapshot and race its sibling. (The per-case guard inside
-// appendFleetStatusIfMainIn makes the appends themselves safe regardless.)
-let healReadyConflictsInFlight = false;
 
 // ── background auto-sync (Executive Summary stale-data self-heal) ───────────
 // The exec summary computes from vrm_rental_operations_* tables, so it is only
@@ -226,6 +222,12 @@ export function registerRentalOperationsRoutes(router: Router): void {
         noAction,
         vocabulary: { mainStatuses: MAIN_STATUSES, subStatuses: SUB_STATUSES, classifications: CLASSIFICATIONS },
       });
+      // Level-triggered self-heal (throttled, fire-and-forget, after the
+      // response): any red ready-vs-status conflict row in the payload just
+      // served gets its status aligned to Scheduling through the guarded
+      // append, so the next refetch shows it healed. Nobody "updates Fleet
+      // Scope" by hand — statuses are this system's job (Tyler 2026-08-11).
+      maybeAutoHealReadyConflicts("queue-get");
     } catch (e: any) {
       console.error("[VRM/RentalOps] queue failed:", e?.message || e);
       res.status(500).json({ success: false, error: e?.message || "queue failed" });
@@ -305,77 +307,54 @@ export function registerRentalOperationsRoutes(router: Router): void {
         VALUES (${key}, 'ready_verified',
                 ${JSON.stringify({ verified: verified ? "true" : "false" })}::jsonb, ${actorOf(req)})
       `);
+      // Completing the human's own action (Tyler 2026-08-11: statuses are the
+      // system's job, nobody edits Fleet Scope): a Verified-ready mark on a
+      // conflict-set status moves the case to Scheduling right here, actor =
+      // the verifier. Best-effort — the guard refuses when the status was
+      // deliberately set elsewhere, and the lazy queue sweep re-covers misses.
+      let statusAligned = false;
+      if (verified) {
+        try {
+          const g = await appendFleetStatusIfMainIn(
+            key,
+            READY_REPLACEABLE_MAIN_STATUSES,
+            FS_MAIN_SCHEDULING,
+            FS_SUB_TO_BE_SCHEDULED,
+            actorOf(req),
+          );
+          statusAligned = g.applied;
+          if (!g.applied && g.skippedReason && !/unknown case/i.test(g.skippedReason)) {
+            console.log(`[VRM/RentalOps] ready-verified: status not aligned for ${key} — ${g.skippedReason}`);
+          }
+        } catch (e: any) {
+          console.warn(`[VRM/RentalOps] ready-verified: status align failed for ${key} —`, e?.message || e);
+        }
+      }
       invalidateTodaysQueueCache("ready-verified");
-      res.json({ ok: true, key, verified });
+      res.json({ ok: true, key, verified, statusAligned });
     } catch (e: any) {
       console.error("[VRM/RentalOps] ready-verified failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "ready-verified failed" });
     }
   });
 
-  // POST /rental-operations/queue/heal-ready-conflicts — one-shot backfill for
-  // trucks LUCA phone-confirmed READY while FleetScope still says Repairing /
-  // Confirming Status / Decision Pending (the step board's red STATUS CONFLICT
-  // rows). Going forward the LUCA writeback appends this status itself
-  // (routeReadyStatusViaVrm); this heals rows whose calls landed BEFORE that
-  // existed. Dry-run by default — body { apply: true } to write. Only
-  // LUCA-confirmed rows are touched (manual verified marks stay human-owned),
-  // and only via the vocab-validated VRM append, actor = the requester.
+  // POST /rental-operations/queue/heal-ready-conflicts — manual sweep of the
+  // step board's red STATUS CONFLICT rows: phone-confirmed ready (LUCA call or
+  // a human's Verified-ready mark) while the case status still says Repairing /
+  // Confirming Status / Decision Pending. Appends Scheduling through the
+  // compare-at-write guard (humans win). The SAME sweep now runs lazily after
+  // every queue GET (ready-conflict-heal.ts), so this route is for dry-run
+  // inspection and immediate manual runs. Dry-run by default — body
+  // { apply: true } to write; actor = the requester.
   router.post("/rental-operations/queue/heal-ready-conflicts", async (req, res) => {
-    if (healReadyConflictsInFlight) {
-      return res.status(409).json({ error: "a heal sweep is already running — retry when it finishes" });
-    }
-    healReadyConflictsInFlight = true;
     try {
       const apply = req.body?.apply === true || String(req.body?.apply ?? "") === "true";
-      const queue = await getTodaysQueueCached();
-      const candidates = (queue.items as any[]).filter(
-        (it) => it.step === 3 && it.isConflict && it.readyReason === "luca",
-      );
-      const results: Array<Record<string, unknown>> = [];
-      let healed = 0;
-      let skipped = 0;
-      for (const it of candidates) {
-        const caseKey = it.caseKey ?? null;
-        if (!caseKey) {
-          skipped++;
-          results.push({ truckNumber: it.truckNumber, ok: false, skipped: "no rental case — cannot append VRM fleet-status" });
-          continue;
-        }
-        if (!apply) {
-          results.push({ truckNumber: it.truckNumber, caseKey, ok: true, would: `${it.fleetScopeStatus} -> ${FS_MAIN_SCHEDULING} / ${FS_SUB_TO_BE_SCHEDULED}` });
-          continue;
-        }
-        try {
-          // Compare-at-write: the queue snapshot above may be up to 30s stale
-          // (plus loop time). The guard re-reads the effective status and
-          // refuses when an operator or LUCA moved it meanwhile — a newer
-          // decision always wins over this backfill.
-          const g = await appendFleetStatusIfMainIn(
-            caseKey,
-            ["Repairing", "Confirming Status", "Decision Pending"],
-            FS_MAIN_SCHEDULING,
-            FS_SUB_TO_BE_SCHEDULED,
-            actorOf(req),
-          );
-          if (g.applied) {
-            healed++;
-            results.push({ truckNumber: it.truckNumber, caseKey, ok: true, from: it.fleetScopeStatus });
-          } else {
-            skipped++;
-            results.push({ truckNumber: it.truckNumber, caseKey, ok: false, skipped: g.skippedReason });
-          }
-        } catch (e: any) {
-          results.push({ truckNumber: it.truckNumber, caseKey, ok: false, error: e?.message ?? String(e) });
-        }
-      }
-      if (apply && healed > 0) invalidateTodaysQueueCache("ready-conflict-heal");
-      res.json({ ok: true, dryRun: !apply, candidates: candidates.length, healed, skipped, results });
+      const out = await runReadyConflictHeal({ apply, actor: actorOf(req) });
+      res.json({ ok: true, dryRun: !apply, ...out });
     } catch (e: any) {
-      console.error("[VRM/RentalOps] heal-ready-conflicts failed:", e?.message || e);
-      res.status(500).json({ error: e?.message || "heal failed" });
-    } finally {
-      healReadyConflictsInFlight = false;
+      const code = Number(e?.statusCode) || 500;
+      if (code >= 500) console.error("[VRM/RentalOps] heal-ready-conflicts failed:", e?.message || e);
+      res.status(code).json({ error: e?.message || "heal failed" });
     }
   });
 

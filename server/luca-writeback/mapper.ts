@@ -172,10 +172,10 @@ export const FS_SUB_TO_BE_SCHEDULED = "To be scheduled for tech pickup";
 
 /**
  * Fleet-status mains a phone-confirmed Ready may replace — exactly the set the
- * Ops Queue flags as STATUS CONFLICT on a ready row (todays-queue step 3:
- * "call/verification shows ready but FleetScope not updated"). Anything else —
- * Scheduling and later pipeline states, terminal mains, deliberate ops states
- * like Relocate Van / Truck Swap — was set on purpose and must not be fought.
+ * Ops Queue flags as STATUS CONFLICT on a ready row (todays-queue step 3).
+ * Anything else — Scheduling and later pipeline states, terminal mains,
+ * deliberate ops states like Relocate Van / Truck Swap — was set on purpose
+ * and must not be fought.
  */
 export const READY_REPLACEABLE_MAIN_STATUSES: readonly string[] = [
   "Repairing",
@@ -186,8 +186,8 @@ export const READY_REPLACEABLE_MAIN_STATUSES: readonly string[] = [
 /**
  * True when a surviving phone-confirmed "Ready" should ALSO move the truck into
  * the pickup pipeline (Scheduling / "To be scheduled for tech pickup") — the
- * same correction a human makes when the step board says "Correct all systems
- * then arrange pickup". Gates the worker's VRM-first ready-status append:
+ * correction the step board's red STATUS CONFLICT row demands. Gates the
+ * worker's VRM-first ready-status append:
  *  - `finalWrite` must still carry lastCallStatus "Ready" AFTER the worker's
  *    monotonic stale-call guard ran — a stale Ready never flips status;
  *  - an item carrying a terminal status always outranks ready, whether the

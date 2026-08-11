@@ -93,3 +93,4 @@
 - [VRM surface alignment](vrm-surface-alignment.md) — all case surfaces share ONE displayShopFor/attach + cleanPhone gate; fs fallback is display-only (never call_*/LUCA); conflicting canon phones drop the fallback.
 - [Vendor never-shop changes](vendor-never-shop-changes.md) — new banned tokens need JS+SQL regex parity + stored vendor_type backfill; drawers treat reconciledShop null as "no pick", never raw-fallback.
 - [Registration/tags card context](registration-tags-context.md) — open renewal case ≠ tag blocker; AMS declined/auction van → tag status irrelevant (suppress block); recency = max(updated,scraped); Holman rows under both number cols.
+- [Ready→status self-heal](ready-status-self-heal.md) — edge-triggered ready writers strand conflicts; fix = level sweep on queue GET (guard-only, throttled+refund); Verify click now also sets Scheduling.

@@ -859,7 +859,7 @@ export async function buildTodaysQueue(): Promise<TodaysQueue> {
     const verified = readyVerifiedFor(t);
     const readyReason: 'luca' | 'manual' = lucaReady ? 'luca' : 'manual';
     const actionText = isConflict
-      ? `STATUS CONFLICT — call/verification shows truck ${t.truckNumber} ready but FleetScope not updated. Correct all systems then arrange pickup.`
+      ? `STATUS CONFLICT — the shop confirmed truck ${t.truckNumber} ready but the case status still says "${t.mainStatus}". The system moves it to Scheduling on its own (Fleet Scope needs no separate update); if this row stays red, open the case and set the status there.`
       : readyReason === 'luca'
         ? `LUCA confirmed truck ${t.truckNumber} is READY — arrange same-day pickup`
         : `Truck ${t.truckNumber} verified ready by ${verified?.by ?? 'staff'} — arrange same-day pickup`;

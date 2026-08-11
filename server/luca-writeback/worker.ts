@@ -452,8 +452,8 @@ async function routeTerminalViaVrm(
  * phone-confirmed Ready ALSO moves the truck out of the three mains the Ops
  * Queue flags as STATUS CONFLICT (Repairing / Confirming Status / Decision
  * Pending) into Scheduling / "To be scheduled for tech pickup" — the exact
- * correction a human makes when the board says "Correct all systems then
- * arrange pickup"; step 2 then prompts for the pickup date. Before this,
+ * correction the board's red STATUS CONFLICT row demands; step 2 then prompts
+ * for the pickup date. Before this,
  * EVERY LUCA-ready truck sat red forever because the writeback stamped only
  * call fields.
  *

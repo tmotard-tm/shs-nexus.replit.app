@@ -1330,7 +1330,7 @@ function QueueRow({
 
       <FactsCell rows={[
         item.lucaStatus ? { label: "LUCA", node: <LucaBadge status={item.lucaStatus} /> } : null,
-        item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        item.fleetScopeStatus ? { label: "Status", node: item.fleetScopeStatus } : null,
         // AMS callout — same rule as the bucket view: every case row shows
         // what AMS says about the van (declined/auction reads red).
         item.caseKey
@@ -1529,7 +1529,7 @@ function BucketRow({
               ),
             }
           : null,
-        item.fleetScopeStatus ? { label: "FS", node: item.fleetScopeStatus } : null,
+        item.fleetScopeStatus ? { label: "Status", node: item.fleetScopeStatus } : null,
         // AMS callout (user directive 2026-08-07): every case row shows what
         // AMS says about the van — declined/auction reads red, so a status
         // conflict is visible at a glance. "—" = case exists but AMS has no
@@ -2382,7 +2382,7 @@ export default function OpsQueue() {
                   >
                     <span style={{ fontFamily: fonts.jetbrains, fontSize: 14, color: colors.ink }}>{item.truckNumber}</span>
                     {item.techName && <span style={{ fontSize: 13, color: colors.inkMuted }}>{item.techName}</span>}
-                    <StatusPill label="FS" value={item.fleetScopeStatus} />
+                    <StatusPill label="Status" value={item.fleetScopeStatus} />
                     <StatusPill label="PO" value={item.holmanStatus} />
                     {item.reason && (
                       <span style={{ fontSize: 13, color: colors.inkMuted, fontStyle: "italic" }} data-testid={`no-action-reason-${item.truckNumber}`}>

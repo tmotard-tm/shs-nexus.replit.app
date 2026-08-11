@@ -582,3 +582,109 @@ describe("VRM fleet-status authority (DB-backed)", { skip: !process.env.DATABASE
     });
   });
 });
+
+// ── Ready-conflict heal (level-triggered sweep) ──────────────────────────────
+// Pure-core tests with stubbed deps: the sweep must cover BOTH phone-confirmed
+// ready reasons (LUCA call AND manual Verified-ready — Tyler 2026-08-11:
+// statuses are the system's job), stay dry-run safe, propagate the actor, and
+// only bust the queue cache when something was actually healed.
+import {
+  readyConflictCandidates,
+  runReadyConflictHeal,
+} from "../server/vrm/rental-operations/ready-conflict-heal";
+import {
+  FS_MAIN_SCHEDULING,
+  FS_SUB_TO_BE_SCHEDULED,
+  READY_REPLACEABLE_MAIN_STATUSES,
+} from "../server/luca-writeback/mapper";
+
+describe("ready-conflict heal core", () => {
+  const item = (over: Record<string, unknown>) => ({
+    step: 3, isConflict: true, readyReason: "luca", caseKey: "61309",
+    truckNumber: "61309", fleetScopeStatus: "Confirming Status", ...over,
+  });
+  const outcome = (applied: boolean, skippedReason: string | null = null) =>
+    ({ applied, skippedReason, current: null, result: null }) as any;
+
+  test("candidates: step-3 conflict rows for BOTH ready reasons, nothing else", () => {
+    const items = [
+      item({}),
+      item({ readyReason: "manual", caseKey: "60001", truckNumber: "60001" }),
+      item({ isConflict: false, caseKey: "60002" }),
+      item({ step: 2, caseKey: "60003" }),
+      item({ readyReason: undefined, caseKey: "60004" }),
+    ];
+    assert.deepEqual(readyConflictCandidates(items).map((i) => i.caseKey), ["61309", "60001"]);
+  });
+
+  test("dry-run reports would-writes and never appends or invalidates", async () => {
+    const calls: unknown[] = [];
+    const out = await runReadyConflictHeal({ apply: false, actor: "tester" }, {
+      getQueue: async () => ({ items: [item({}), item({ readyReason: "manual", caseKey: "60001" })] }),
+      appendGuarded: async (...a) => { calls.push(a); return outcome(true); },
+      invalidateCache: () => { calls.push("invalidate"); },
+    });
+    assert.equal(out.candidates, 2);
+    assert.equal(out.healed, 0);
+    assert.equal(calls.length, 0);
+    assert.match(String(out.results[0].would), /Scheduling/);
+  });
+
+  test("apply: guarded append per candidate (actor propagated), cache busted once", async () => {
+    const appends: any[] = [];
+    let invalidated = 0;
+    const out = await runReadyConflictHeal({ apply: true, actor: "system:ready-heal" }, {
+      getQueue: async () => ({
+        items: [
+          item({}),
+          item({ readyReason: "manual", caseKey: "60001", truckNumber: "60001", fleetScopeStatus: "Repairing" }),
+          item({ caseKey: null, truckNumber: "99999" }),
+          item({ caseKey: "60002", truckNumber: "60002" }),
+        ],
+      }),
+      appendGuarded: async (caseKey, mains, main, sub, actor) => {
+        appends.push({ caseKey, mains, main, sub, actor });
+        if (caseKey === "60002") throw new Error("db hiccup");
+        return caseKey === "61309" ? outcome(true) : outcome(false, "status changed before write");
+      },
+      invalidateCache: () => { invalidated++; },
+    });
+    assert.equal(out.candidates, 4);
+    assert.equal(out.healed, 1);
+    assert.equal(out.skipped, 2, "no-case row + guard refusal are skips");
+    assert.equal(out.errored, 1, "a THROWN append is an error, not a skip (throttle refund signal)");
+    assert.equal(invalidated, 1);
+    assert.equal(appends.length, 3);
+    assert.deepEqual(appends[0], {
+      caseKey: "61309",
+      mains: READY_REPLACEABLE_MAIN_STATUSES,
+      main: FS_MAIN_SCHEDULING,
+      sub: FS_SUB_TO_BE_SCHEDULED,
+      actor: "system:ready-heal",
+    });
+  });
+
+  test("apply with zero healed leaves the cache alone; overlapping run 409s", async () => {
+    let invalidated = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const first = runReadyConflictHeal({ apply: true, actor: "a" }, {
+      getQueue: async () => { await gate; return { items: [item({})] }; },
+      appendGuarded: async () => outcome(false, "nope"),
+      invalidateCache: () => { invalidated++; },
+    });
+    await assert.rejects(
+      () => runReadyConflictHeal({ apply: true, actor: "b" }, {
+        getQueue: async () => ({ items: [] }),
+        appendGuarded: async () => outcome(false),
+        invalidateCache: () => {},
+      }),
+      (e: any) => e?.statusCode === 409,
+    );
+    release();
+    const out = await first;
+    assert.equal(out.healed, 0);
+    assert.equal(out.skipped, 1);
+    assert.equal(invalidated, 0);
+  });
+});
