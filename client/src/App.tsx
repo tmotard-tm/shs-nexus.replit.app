@@ -53,6 +53,7 @@ import ByovDriftCheck from "@/pages/byov-drift-check";
 import OffboardingReturn from "@/pages/offboarding-return";
 import LoaRentalForm from "@/pages/loa-rental-form";
 import RentalTechSurvey from "@/pages/rental-tech-survey";
+import RentalRequestForm from "@/pages/rental-request-form";
 import TaskWorkPage from "@/pages/task-work";
 import TechRoster from "@/pages/tech-roster";
 import FleetManagement from "@/pages/fleet-management";
@@ -224,6 +225,12 @@ function Router() {
           ProtectedRoute: technicians have no Nexus login. */}
       <Route path="/rental-survey/:token">
         <RentalTechSurvey />
+      </Route>
+
+      {/* Rental REQUEST — public, tokenized. The front door that replaces the
+          technician's call to Holman. Outside ProtectedRoute by design. */}
+      <Route path="/rental-request/:token">
+        <RentalRequestForm />
       </Route>
       
       {/* Task work routes - deep linking for specific task IDs */}
