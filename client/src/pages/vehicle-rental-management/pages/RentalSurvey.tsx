@@ -214,8 +214,13 @@ function SendConsole() {
     setErr(""); setBusy(true);
     try {
       const r = await post("/api/vrm/forms/rental-survey/issue", { dryRun: false });
-      setMinted(r.recipients || []);
-      setProgress(`${r.issued} tokens issued. Nothing sent yet.`);
+      // Issue returns ONLY the tokens it just created. Sending that list skips
+      // everyone tokened in an earlier session, so the send target is every
+      // live unsent token, not the delta.
+      const p = await post("/api/vrm/forms/rental-survey/pending", {});
+      const all = (p.tokens && p.tokens.length ? p.tokens : (r.recipients || []));
+      setMinted(all);
+      setProgress(`${r.issued} new tokens issued. ${all.length} awaiting send.`);
     } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
   };
 

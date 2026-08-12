@@ -248,7 +248,9 @@ export default function RentalTechSurvey() {
             <CardHeader>
               <CardTitle className="text-lg">Confirm it&apos;s you</CardTitle>
               <CardDescription>
-                Enter your LDAP and your truck number so we know these answers are yours.
+                Enter your LDAP so we know these answers are yours. It is the same ID you
+                use every day to log into Tech Hub to order parts. If you are not sure what
+                it is, open Tech Hub and look under Settings.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -260,16 +262,6 @@ export default function RentalTechSurvey() {
                   value={ldap}
                   onChange={(e) => setLdap(e.target.value)}
                   placeholder="e.g. JSMITH1"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="truck">Your truck number</Label>
-                <Input
-                  id="truck"
-                  inputMode="numeric"
-                  value={truckNumber}
-                  onChange={(e) => setTruckNumber(e.target.value)}
-                  placeholder="e.g. 61843"
                 />
               </div>
               {verifyError && <p className="text-sm text-red-600">{verifyError}</p>}

@@ -74,19 +74,20 @@ async function loadToken(token: string): Promise<SurveyTokenRow | null> {
 
 /** Shared identity check for both verify and submit, so they cannot drift apart. */
 function checkIdentity(row: SurveyTokenRow, body: any) {
+  // LDAP only. The truck number used to be part of this gate, compared against
+  // the truck on the rental case. That truck comes out of the Holman feed and is
+  // very often NOT the truck the technician is driving today -- which is one of
+  // the things this survey exists to find out. Gating on it locked out exactly
+  // the people whose data is wrong. The form still asks for both truck numbers
+  // inside, where a mismatch is an answer instead of a locked door.
   const ldap = String(body?.ldap || "").trim().toUpperCase();
-  const truck = String(body?.truckNumber || "").trim();
-  if (!ldap || !truck) {
-    return { ok: false as const, code: 400, message: "Please enter both your LDAP and your truck number." };
+  if (!ldap) {
+    return { ok: false as const, code: 400, message: "Please enter your LDAP." };
   }
   if (row.ldap && ldap !== String(row.ldap).trim().toUpperCase()) {
     return { ok: false as const, code: 403, message: "That LDAP does not match this link. Check your entry and try again." };
   }
-  const onFile = String(row.truck_number || "").trim();
-  if (onFile && normTruck(onFile) !== normTruck(truck)) {
-    return { ok: false as const, code: 403, message: "That truck number does not match our records for you." };
-  }
-  return { ok: true as const, ldap, truck: onFile || truck };
+  return { ok: true as const, ldap, truck: String(row.truck_number || "").trim() };
 }
 
 // ---------------------------------------------------------------------------
@@ -378,7 +379,19 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           -- and racfids are alphabetic, so only one side can ever match.
           ON (a.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
            OR upper(a.tech_racfid) = upper(COALESCE(ir.override_employee_id, ir.resolved_employee_id)))
-        LEFT JOIN tpms_tech_profiles t ON upper(t.enterprise_id) = upper(a.tech_racfid)
+        -- 88 enterprise_ids have MORE THAN ONE tpms profile row, 79 of them with
+        -- conflicting mobile numbers. A plain LEFT JOIN let both through and the
+        -- outer DISTINCT ON kept whichever the planner emitted first, so the
+        -- number we texted was not stable. Pick one row here, preferring the one
+        -- that actually carries a mobile.
+        LEFT JOIN LATERAL (
+          SELECT tp.*
+          FROM tpms_tech_profiles tp
+          WHERE upper(tp.enterprise_id) = upper(a.tech_racfid)
+          ORDER BY (NULLIF(regexp_replace(COALESCE(tp.mobile_phone,''), '[^0-9]', '', 'g'), '') IS NULL),
+                   NULLIF(regexp_replace(COALESCE(tp.mobile_phone,''), '[^0-9]', '', 'g'), '')
+          LIMIT 1
+        ) t ON true
         -- Normalise the phone ONCE, here, and read home_phone as a last resort.
         --
         -- The character class is [^0-9] deliberately and must stay that way.
@@ -425,7 +438,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
               AND ft.submitted_at IS NULL
               AND ft.expires_at > now()
           )
-        ORDER BY upper(a.tech_racfid), c.days_open DESC NULLS LAST
+        ORDER BY upper(a.tech_racfid), c.days_open DESC NULLS LAST, c.vehicle_number
         LIMIT ${limit}
       `);
 
@@ -453,9 +466,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           token,
           url,
           body:
-            `${first}, Sears Fleet here. Quick form to confirm your rental and where your ` +
-            `van is: ${url} Takes under a minute. If you are out of the rental, tell us ` +
-            `there and you are done.`,
+            `${first}, Sears Fleet. URGENT - we are moving every rental to direct billing and need your answer back TODAY: ${url} Takes under a minute. Your LDAP is the same ID you use for Tech Hub (find it under Settings). Out of the rental? Say so and you are done.`,
         });
 
         if (!dryRun) {
@@ -504,6 +515,31 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * environment, so this flag is the only thing between a click and real text
    * messages going to real technicians.
    */
+  /**
+   * Every live token that has not been texted yet, regardless of which session
+   * minted it. Issue only ever returns the tokens IT created, so a console that
+   * sends what Issue handed back skips everyone tokened in an earlier session.
+   * On 2026-08-12 that would have been 310 of 349 technicians, reported as
+   * "Done. 39 of 39 sent."
+   */
+  router.post("/forms/rental-survey/pending", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT token, ldap, tech_name, phone, truck_number
+        FROM vrm_form_tokens
+        WHERE form_type = 'rental_tech_survey'
+          AND sent_at IS NULL
+          AND submitted_at IS NULL
+          AND expires_at > now()
+        ORDER BY ldap
+      `);
+      res.json({ count: rows.length, tokens: rows });
+    } catch (error: any) {
+      console.error("[survey] pending failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "pending failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/send-chunk", async (req, res) => {
     try {
       const confirm = req.body?.confirm === true;
@@ -544,9 +580,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           phone: String(t.phone || "").replace(/\D/g, "").replace(/^1/, ""),
           category: "rental_management",
           body:
-            `${first}, Sears Fleet here. Quick form to confirm your rental and where your ` +
-            `van is: ${base}/rental-survey/${t.token} Takes under a minute. If you are out ` +
-            `of the rental, tell us there and you are done.`,
+            `${first}, Sears Fleet. URGENT - we are moving every rental to direct billing and need your answer back TODAY: ${base}/rental-survey/${t.token} Takes under a minute. Your LDAP is the same ID you use for Tech Hub (find it under Settings). Out of the rental? Say so and you are done.`,
         };
       });
 
