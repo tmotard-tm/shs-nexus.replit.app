@@ -208,6 +208,16 @@ export interface StandardActivityArgs {
   /** YYYY-MM-DD, the day the block lands on. See nextBusinessDay(). */
   date: string;
   durationMinutes?: number;
+  /**
+   * What this block IS. Becomes the project name prefix and therefore the
+   * 409 duplicate key. Defaults to "Rental Return" so existing callers are
+   * unchanged.
+   */
+  projectLabel?: string;
+  /** Project-level note. Defaults to the rental-return wording. */
+  projectNotes?: string;
+  /** Row-level Notes the technician and dispatcher read. */
+  rowNotes?: string;
   submittedBy?: string | null;
   submitterEmail?: string | null;
   /**
@@ -267,17 +277,19 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
 } {
   const duration = args.durationMinutes ?? RENTAL_RETURN_DURATION_MIN;
   const where = args.shopName ? ` at ${args.shopName}` : "";
+  const label = args.projectLabel ?? "Rental Return";
   // Per-truck discriminator: many projects now fire on the same date, so
   // region/sequence naming from the batched design would collide.
   const projectName =
-    `${args.live ? "" : "TEST "}Rental Return - ${args.truckNumber} - ${mmddyy(args.date)}`;
+    `${args.live ? "" : "TEST "}${label} - ${args.truckNumber} - ${mmddyy(args.date)}`;
 
   const body: Record<string, unknown> = {
     submittedBy: args.submittedBy ?? defaultSubmittedBy(),
     submitterEmail: args.submitterEmail ?? defaultSubmitterEmail(),
     projectName,
     rowCount: "1", // string, per the guide
-    projectNotes: "Fleet rental return. Repair complete, van awaiting pickup.",
+    projectNotes: args.projectNotes
+      ?? "Fleet rental return. Repair complete, van awaiting pickup.",
     exportData: [
       {
         TechnicianId: args.techLdap,
@@ -291,7 +303,8 @@ export function buildStandardActivityPayload(args: StandardActivityArgs): {
         LocationType: "None",
         LocationValue: "",
         TravelBehavior: "None",
-        Notes: `Return rental, pick up truck ${args.truckNumber}${where}`,
+        Notes: args.rowNotes
+          ?? `Return rental, pick up truck ${args.truckNumber}${where}`,
         CheckJobs: "FALSE",
         CheckStdActs: "FALSE",
         CheckFrozen: "TRUE",

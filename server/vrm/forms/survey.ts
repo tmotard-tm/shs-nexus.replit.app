@@ -18,6 +18,8 @@ import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
 import { raiseRequestFromSurvey } from "./rental-request";
+import { sendStandardActivity } from "../dca-task-client";
+import { isRouteBlockLive } from "../rental-operations/schedule-pickup";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
@@ -73,6 +75,15 @@ async function loadToken(token: string): Promise<SurveyTokenRow | null> {
 }
 
 /** Shared identity check for both verify and submit, so they cannot drift apart. */
+/** Next Mon-Fri after today, as YYYY-MM-DD. Blocks land tomorrow, not today. */
+function nextBusinessDayISO(from: Date = new Date()): string {
+  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
+  do {
+    d.setUTCDate(d.getUTCDate() + 1);
+  } while (d.getUTCDay() === 0 || d.getUTCDay() === 6);
+  return d.toISOString().slice(0, 10);
+}
+
 function checkIdentity(row: SurveyTokenRow, body: any) {
   // LDAP only. The truck number used to be part of this gate, compared against
   // the truck on the rental case. That truck comes out of the Holman feed and is
@@ -578,6 +589,103 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
    * On 2026-08-12 that would have been 310 of 349 technicians, reported as
    * "Done. 39 of 39 sent."
    */
+  /**
+   * File a 30-minute route block per confirmed rental holder so they can sign
+   * the replacement Enterprise agreement.
+   *
+   * Safe to re-run. projectName is deterministic (label + truck + date), so a
+   * second pass for the same day produces the same name, the route API answers
+   * 409, and sendStandardActivity reports it as skipped/not-retryable rather
+   * than filing a second block on someone's route.
+   *
+   * TWO switches must both be on before anything real is filed: this route's
+   * `dryRun` must be false AND LUCA_ROUTE_BLOCK_ENABLED must be set. With
+   * either off the project name carries a TEST prefix and the receiving system
+   * does not process it.
+   */
+  router.post("/forms/rental-survey/file-route-blocks", async (req, res) => {
+    try {
+      const dryRun = req.body?.dryRun !== false;
+      const limit = Math.min(Number(req.body?.limit) || 500, 500);
+      const date = String(req.body?.date || "").trim() || nextBusinessDayISO();
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+        return res.status(400).json({ message: "date must be YYYY-MM-DD" });
+      }
+      const live = !dryRun && isRouteBlockLive();
+
+      const { rows } = await db.execute(sql`
+        SELECT DISTINCT ON (upper(s.ldap))
+               upper(s.ldap)                                   AS ldap,
+               s.tech_name,
+               COALESCE(NULLIF(btrim(s.assigned_truck_number),''),
+                        NULLIF(btrim(s.rental_truck_number),''),
+                        s.truck_number)                        AS truck_number,
+               COALESCE(NULLIF(btrim(a.district_no::text),''),
+                        NULLIF(btrim(a.unit::text),''))        AS unit
+        FROM vrm_rental_tech_survey s
+        JOIN all_techs a ON upper(a.tech_racfid) = upper(s.ldap)
+        WHERE s.has_rental
+          AND upper(COALESCE(s.ldap,'')) <> 'ZZTEST'
+          AND COALESCE(s.van_status,'') <> 'unknown_escalate'
+          AND a.employment_status = 'A'
+        ORDER BY upper(s.ldap), s.created_at DESC
+        LIMIT ${limit}
+      `);
+
+      const results: any[] = [];
+      let filed = 0, skipped = 0, failed = 0;
+      for (const r of rows as any[]) {
+        const truck = String(r.truck_number || "").trim() || "n/a";
+        const unit = String(r.unit || "").trim();
+        if (!unit) {
+          failed++;
+          results.push({ ldap: r.ldap, ok: false, reason: "no district on the roster; Unit is required" });
+          continue;
+        }
+        const out = await sendStandardActivity({
+          techLdap: r.ldap,
+          unit,
+          truckNumber: truck,
+          date,
+          durationMinutes: 30,
+          live,
+          projectLabel: "Enterprise Contract Change",
+          projectNotes:
+            "Fleet direct-billing cutover. 30 minutes for the technician to stop by "
+            + "their Enterprise branch and sign the replacement rental agreement. The "
+            + "block can be taken any time during the day.",
+          rowNotes:
+            `Stop by your Enterprise branch any time during the day to sign the new `
+            + `rental agreement. You keep the same vehicle. Truck ${truck}. `
+            + `Takes about 30 minutes.`,
+        });
+        if (out.ok) filed++;
+        else if (out.skipReason) skipped++;
+        else failed++;
+        results.push({
+          ldap: r.ldap, tech_name: r.tech_name, truck_number: truck, unit,
+          ok: out.ok, skipReason: out.skipReason ?? null,
+          projectName: out.projectName, projectId: out.projectId,
+          httpStatus: out.httpStatus, error: out.errorMessage,
+        });
+      }
+
+      res.json({
+        date, dryRun, live,
+        note: live
+          ? "LIVE. Blocks were filed on real routes."
+          : (dryRun
+             ? "Dry run. Project names carry a TEST prefix and are not processed."
+             : "LUCA_ROUTE_BLOCK_ENABLED is off, so this went out as TEST and will not be processed."),
+        candidates: rows.length, filed, skipped, failed,
+        results,
+      });
+    } catch (error: any) {
+      console.error("[survey] file-route-blocks failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "file-route-blocks failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/pending", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
