@@ -483,17 +483,44 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const out = await resp.json();
       if (!resp.ok) return res.status(502).json({ message: "comms rejected the batch", detail: out });
 
-      if (confirm) {
+      // Trust the per-message results, not the HTTP status. comms answers 200
+      // while individually skipping opt-outs and unusable numbers, so stamping
+      // the whole chunk would mark people as texted who never were — and the
+      // eligibility query filters on sent_at IS NULL, so they would never be
+      // retried either.
+      //
+      // 'queued' counts as sent: TCPA quiet hours hold it (West Coast and
+      // Hawaii before 8am local) but it does go out. Anything else does not.
+      const results: any[] = Array.isArray(out?.results) ? out.results : [];
+      const DELIVERABLE = new Set(["sent", "queued"]);
+      const byLdap = new Map<string, string>();
+      for (const r of results) {
+        byLdap.set(String(r?.ldap || "").toUpperCase(), String(r?.status || "").toLowerCase());
+      }
+      // No results array at all means we cannot tell who went out. Stamping
+      // nothing is the recoverable failure; stamping everything is not.
+      const actuallySent = results.length
+        ? targets.filter((t) => DELIVERABLE.has(byLdap.get(String(t.ldap).toUpperCase()) ?? ""))
+        : [];
+      const notSent = targets.filter((t) => !actuallySent.includes(t));
+
+      if (confirm && actuallySent.length) {
         await db.execute(sql`
           UPDATE vrm_form_tokens SET sent_at = now()
-          WHERE token = ANY(${targets.map((t) => t.token)})
+          WHERE token = ANY(${actuallySent.map((t) => t.token)})
         `);
       }
 
       res.json({
         dryRun: !confirm,
         attempted: messages.length,
-        sent: confirm ? messages.length : 0,
+        sent: confirm ? actuallySent.length : 0,
+        notSent: confirm ? notSent.length : messages.length,
+        // Named so a caller can see WHY someone did not go out rather than
+        // just that the count came up short.
+        notSentDetail: confirm
+          ? notSent.map((t) => ({ ldap: t.ldap, status: byLdap.get(String(t.ldap).toUpperCase()) ?? "no result returned" }))
+          : undefined,
         commsResult: out,
       });
     } catch (error: any) {

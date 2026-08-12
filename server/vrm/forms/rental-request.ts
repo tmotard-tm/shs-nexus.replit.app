@@ -133,7 +133,21 @@ export function evaluate(f: RequestFacts): Eligibility {
   }
 
   // 4 — a same-day job is a wait, not a rental.
-  const days = Number(f.shopEstimatedDays ?? 0);
+  //
+  // Absent is NOT the same as zero. Denying a missing estimate with "the shop
+  // expects this back the same day" puts words in the shop's mouth and refuses
+  // a technician on a fact nobody established.
+  if (f.shopEstimatedDays == null) {
+    return {
+      decision: "DEFER",
+      rule: 4,
+      reason: "no shop estimate supplied; cannot set a return date",
+      script:
+        "We need the shop's estimate of how many days it will take. Ask them, " +
+        "then finish this request.",
+    };
+  }
+  const days = Number(f.shopEstimatedDays);
   if (!Number.isFinite(days) || days <= 0) {
     return {
       decision: "DENY",
@@ -213,6 +227,8 @@ async function factsFor(ldap: string) {
              WHERE v.ldap = upper(a.tech_racfid)
                AND upper(coalesce(v.status,'')) = 'ENROLLED') AS byov_count,
            (SELECT max(synced_at) FROM vrm_byov_status)        AS byov_synced_at,
+           (SELECT count(*) FROM vrm_byov_status v2
+             WHERE v2.ldap = upper(a.tech_racfid))              AS byov_row_present,
            (SELECT count(*) FROM vrm_rental_operations_cases c
               JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
              WHERE c.present_in_latest AND upper(c.ticket_status) = 'OPEN'
@@ -349,7 +365,12 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
       const isByov = Number(facts?.byov_count ?? 0) > 0;
       // A mirror older than a day cannot be trusted to say someone is NOT byov.
       const syncedAt = facts?.byov_synced_at ? new Date(facts.byov_synced_at).getTime() : 0;
-      const byovFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
+      const mirrorFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
+      // A fresh mirror that simply has no row for this person does NOT mean
+      // "not BYOV". The roster endpoint joins to the active roster, so a new
+      // hire can be enrolled and still absent. Global freshness alone would
+      // re-create exactly the false negative the stale table caused.
+      const byovFresh = mirrorFresh && Number(facts?.byov_row_present ?? 0) > 0;
 
       const verdict = evaluate({
         ldap,
@@ -388,6 +409,13 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
 
       const ip = String(req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
 
+      // One row per token. A technician who was deferred and has now come back
+      // supersedes their own earlier deferral rather than adding a duplicate.
+      await db.execute(sql`
+        DELETE FROM vrm_rental_request
+        WHERE token_id = ${row.id} AND status = 'deferred'
+      `);
+
       const { rows: ins } = await db.execute(sql`
         INSERT INTO vrm_rental_request (
           token_id, ldap, tech_name, truck_number, district, home_state, mobile_phone,
@@ -419,7 +447,12 @@ export function registerRentalRequestPublicRoutes(app: Express): void {
         RETURNING request_no
       `);
 
-      await db.execute(sql`UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}`);
+      // A DEFER tells the technician to go book an appointment and come back.
+      // Consuming the token here would make that instruction impossible to
+      // follow, so the link stays live and the next submit supersedes this row.
+      if (verdict.decision !== "DEFER") {
+        await db.execute(sql`UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}`);
+      }
 
       res.json({
         success: true,
