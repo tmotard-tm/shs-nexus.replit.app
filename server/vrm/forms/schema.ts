@@ -122,6 +122,151 @@ export async function initFormsSchema(): Promise<void> {
       ADD COLUMN IF NOT EXISTS no_rental_reason    text;
   `);
 
+  // ---------------------------------------------------------------------------
+  // Rental REQUEST — the front door that replaces the technician's call to
+  // Holman. Spec: Fleet/ETD/REQUEST_FORM.md.
+  //
+  // One record, cradle to grave: the request becomes the reservation becomes the
+  // recovery case. The ETD booking columns live on this row on purpose, so
+  // nothing is re-keyed and nothing has to be rediscovered from a vendor feed
+  // later, which is how renter identity became a guess in the first place.
+  //
+  // The default answer is NO. Most requests should end at the eligibility rules,
+  // and the DENIALS are the number worth reporting.
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_rental_request (
+      id                      uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      token_id                uuid REFERENCES vrm_form_tokens(id),
+      request_no              bigserial,
+
+      -- Section A: identity, prefilled and CONFIRMED rather than typed.
+      ldap                    text NOT NULL,
+      tech_name               text,
+      truck_number            text,
+      district                text,
+      home_state              text,
+      mobile_phone            text,
+      supervisor_email        text,
+      -- A correction raises a data-quality flag; it never silently overwrites.
+      identity_corrected      boolean NOT NULL DEFAULT false,
+      identity_correction     text,
+
+      -- BYOV technicians have no company truck going to a shop, so section C
+      -- does not apply to them and the whole premise changes.
+      is_byov                 boolean NOT NULL DEFAULT false,
+
+      -- Section B: the problem.
+      problem_category        text,
+      symptom                 text,
+      is_drivable             boolean,
+      is_safe_to_drive        boolean,
+      occurred_at             timestamptz,
+      jobs_affected           integer,
+      what_was_tried          text,
+
+      -- Section C: where the vehicle is going.
+      shop_name               text,
+      shop_known              boolean,
+      shop_address            text,
+      shop_city               text,
+      shop_state              text,
+      shop_postal             text,
+      shop_lat                numeric,
+      shop_lon                numeric,
+      shop_phone              text,
+      has_appointment         boolean,
+      appointment_at          timestamptz,
+      shop_estimated_days     integer,
+
+      -- Section D: policy acknowledgement. The audit trail, not a formality.
+      policy_version          text,
+      policy_acknowledged_at  timestamptz,
+      policy_ip               text,
+      ack_not_maintenance     boolean NOT NULL DEFAULT false,
+      ack_cannot_drive_safely boolean NOT NULL DEFAULT false,
+      ack_has_appointment     boolean NOT NULL DEFAULT false,
+      ack_last_resort         boolean NOT NULL DEFAULT false,
+      ack_return_one_day      boolean NOT NULL DEFAULT false,
+      ack_accurate            boolean NOT NULL DEFAULT false,
+
+      -- Section E: system-derived, never shown to the technician.
+      reason_code             text,
+      approved_vehicle_class  text,
+      nearest_branch_code     text,
+      nearest_branch_name     text,
+      estimated_cost          numeric,
+      region_owner            text,
+
+      -- Decision. auto_* is what the rules engine concluded at submit time;
+      -- decided_* is the human, who may overrule it and must say why.
+      status                  text NOT NULL DEFAULT 'submitted',
+      auto_decision           text,
+      auto_reason             text,
+      auto_rule               integer,
+      decided_by              text,
+      decided_at              timestamptz,
+      decision_note           text,
+
+      -- ETD booking, same row.
+      etd_reference           text,
+      etd_reservation_id      text,
+      etd_booked_at           timestamptz,
+      etd_error               text,
+
+      created_at              timestamptz NOT NULL DEFAULT now(),
+      updated_at              timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_ldap_idx    ON vrm_rental_request (ldap);
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_status_idx  ON vrm_rental_request (status);
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_created_idx ON vrm_rental_request (created_at DESC);
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_auto_idx    ON vrm_rental_request (auto_decision);
+  `);
+
+  // Every acknowledgement ticked. Stored rather than recomputed so a later
+  // change to the policy text cannot retroactively alter what someone agreed to.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS policy_complete boolean
+      GENERATED ALWAYS AS (
+        ack_not_maintenance AND ack_cannot_drive_safely AND ack_has_appointment
+        AND ack_last_resort AND ack_return_one_day AND ack_accurate
+      ) STORED;
+  `);
+
+  // The audit loop the spec asks for: what the technician claimed against what
+  // the shop actually did. Populated on close, null until then.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS actual_days_down integer,
+      ADD COLUMN IF NOT EXISTS claim_variance_days integer
+      GENERATED ALWAYS AS (actual_days_down - shop_estimated_days) STORED;
+  `);
+
+  // ---------------------------------------------------------------------------
+  // BYOV mirror.
+  //
+  // Nexus's own `byov_enrollments` is DEAD: 70 rows, all stamped 2026-04-10,
+  // nothing maintains it. Truth lives in the byovdashboard database (183
+  // permanent as of 2026-08-11), reachable without credentials through its
+  // /api/external/tech-truck-roster endpoint. This table is a local mirror so
+  // the eligibility engine does not make an HTTP call per request.
+  //
+  // `synced_at` is load-bearing: a stale mirror must fail to UNKNOWN, never to
+  // "not BYOV".
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_byov_status (
+      ldap        text PRIMARY KEY,
+      status      text,
+      is_new_hire boolean,
+      pilot_tier  text,
+      started_on  text,
+      synced_at   timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS vrm_byov_status_status_idx ON vrm_byov_status (status);
+  `);
+
   // Derived flags. Added separately so re-runs against an existing table are safe.
   await db.execute(sql`
     ALTER TABLE vrm_rental_tech_survey

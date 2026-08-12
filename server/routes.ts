@@ -5,6 +5,10 @@ import {
   registerRentalSurveyPublicRoutes,
   registerRentalSurveyAdminRoutes,
 } from "./vrm/forms/survey";
+import {
+  registerRentalRequestPublicRoutes,
+  registerRentalRequestAdminRoutes,
+} from "./vrm/forms/rental-request";
 import { initVrmSchema } from "./vrm/init-schema";
 import { initLogicalEntitiesSchema, seedLogicalEntities } from "./logical-entities-init";
 import { startNotificationDispatcher } from "./vrm/notification-dispatcher";
@@ -746,6 +750,10 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
     // token in the URL plus a typed LDAP is the authentication.
     registerRentalSurveyAdminRoutes(vrmRouter);
     registerRentalSurveyPublicRoutes(app);
+    // Rental REQUEST: the front door that replaces the call to Holman. Same
+    // split as the survey — technicians have no session, Fleet does.
+    registerRentalRequestAdminRoutes(vrmRouter);
+    registerRentalRequestPublicRoutes(app);
     // Dispatcher: the consolidated read-only mirror endpoint
     // /api/vrm/repair-tracker/full also accepts a Bearer token via the
     // VRM_REPAIR_TRACKER_API_KEY secret for server-to-server consumers.
