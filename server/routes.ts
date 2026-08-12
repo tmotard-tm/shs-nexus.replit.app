@@ -779,6 +779,18 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // holman-po-queue/cron-refresh rides the same internal-cron convention:
       // the ARGUS 30-min heartbeat replaced the on-page-load Holman scrape
       // (Tyler 2026-07-29). The route itself gates in-flight + freshness.
+      // Rental request booking hand-off. Booking runs OUTSIDE Nexus (the box
+      // has no ETD credentials and no browser to mint an Azure B2C token), so
+      // the Python runner pulls the queue and posts results back using the same
+      // internal-cron convention. Scoped to these two paths only.
+      if ((req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
+        || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))) {
+        const t = req.headers["x-internal-cron"];
+        if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)
+               || (process.env.NEXUS_CRON_SECRET && t === process.env.NEXUS_CRON_SECRET))) {
+          return next();
+        }
+      }
       if (req.method === "POST" && (req.path === "/rental-operations/cron/run" || req.path === "/holman-po-queue/cron-refresh")) {
         const internalToken = req.headers["x-internal-cron"];
         const expectedInternal = process.env.SESSION_SECRET;

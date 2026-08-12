@@ -486,6 +486,86 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Approved requests waiting on a reservation.
+   *
+   * Everything the ETD booking chain needs, resolved server-side so the runner
+   * does not re-derive business rules:
+   *   pickup   - the SHOP, not the technician's home. They drop the van and
+   *              collect the rental nearby.
+   *   start    - the appointment. A rental starts when the van goes in.
+   *   end      - appointment + the SHOP's estimate + a one day buffer. Never
+   *              open-ended; an open-ended rental is one nobody closes.
+   *
+   * Reachable with a session OR the internal-cron header, so the Python runner
+   * can pull it without a browser login.
+   */
+  router.get("/forms/rental-request/booking-queue", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
+               r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
+               r.appointment_at,
+               r.shop_estimated_days,
+               COALESCE(r.approved_vehicle_class, 'sedan')          AS vehicle_class,
+               to_char(r.appointment_at, 'YYYY-MM-DD"T"HH24:MI:SS')  AS start_dt,
+               to_char(r.appointment_at + ((COALESCE(r.shop_estimated_days,1) + 1) * interval '1 day'),
+                       'YYYY-MM-DD"T"HH24:MI:SS')                    AS end_dt,
+               r.ldap || '-' || COALESCE(r.truck_number,'NA')        AS reference
+        FROM vrm_rental_request r
+        WHERE r.status = 'approved'
+          AND r.etd_booked_at IS NULL
+          AND r.appointment_at IS NOT NULL
+          AND COALESCE(r.is_byov, false) = false
+        ORDER BY r.appointment_at
+      `);
+      res.json({ queue: rows, count: (rows as any[]).length });
+    } catch (e: any) {
+      console.error("[rental-request] booking-queue failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "Failed to load booking queue." });
+    }
+  });
+
+  /**
+   * Record the outcome of a booking attempt. Success stamps the reservation and
+   * moves the request to `booked`; failure stores the error and LEAVES the row
+   * approved so the next run retries it rather than losing it silently.
+   */
+  router.post("/forms/rental-request/:requestNo/booked", async (req, res) => {
+    try {
+      const no = Number(req.params.requestNo);
+      if (!Number.isFinite(no)) return res.status(400).json({ message: "bad request number" });
+      const ref = String(req.body?.etdReference || "").trim();
+      const resId = String(req.body?.etdReservationId || "").trim();
+      const error = String(req.body?.error || "").trim();
+
+      if (error) {
+        await db.execute(sql`
+          UPDATE vrm_rental_request
+          SET etd_error = ${error.slice(0, 500)}, updated_at = now()
+          WHERE request_no = ${no}
+        `);
+        return res.json({ ok: true, recorded: "error" });
+      }
+      if (!ref && !resId) {
+        return res.status(400).json({ message: "supply etdReference/etdReservationId, or error" });
+      }
+      const { rows } = await db.execute(sql`
+        UPDATE vrm_rental_request
+        SET etd_reference = ${ref || null}, etd_reservation_id = ${resId || null},
+            etd_booked_at = now(), etd_error = NULL,
+            status = 'booked', updated_at = now()
+        WHERE request_no = ${no}
+        RETURNING request_no, status
+      `);
+      if (!(rows as any[]).length) return res.status(404).json({ message: "request not found" });
+      res.json({ ok: true, ...(rows as any[])[0] });
+    } catch (e: any) {
+      console.error("[rental-request] booked failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "Failed to record booking." });
+    }
+  });
+
   /** Human decision. May overrule the engine, and must say why when it does. */
   router.post("/forms/rental-request/:requestNo/decide", async (req, res) => {
     try {
