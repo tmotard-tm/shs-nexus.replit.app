@@ -1,11 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { Truck, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { navItems, fonts, colors } from "../lib/constants";
 import { useVrmAccess } from "../lib/use-vrm-access";
 
 const COLLAPSE_KEY = "vrm_sidebar_collapsed";
+const SURVEY_SEEN_KEY = "vrm_survey_seen_count";
+const SURVEY_PATH = "/vehicle-rental-management/rental-survey";
 
 export function RouteReadySidebar() {
   // Restricted pages are hidden unless the SERVER says this session may see
@@ -14,6 +17,37 @@ export function RouteReadySidebar() {
   const visibleNavItems = navItems.filter((n) => !n.restricted || canSeeNewRentals);
   const [location, setLocation] = useLocation();
   const { toast } = useToast();
+
+  // Live survey response counter. Polls rather than pushes: the volume is a few
+  // hundred over a day, so a minute of staleness costs nothing and a socket
+  // would be a lot of machinery for a number.
+  const { data: surveyStats } = useQuery<{ submitted?: number }>({
+    queryKey: ["/api/vrm/forms/rental-survey/stats"],
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  });
+  const surveyCount = Number(surveyStats?.submitted ?? 0);
+
+  const [surveySeen, setSurveySeen] = useState<number>(() => {
+    try {
+      return Number(localStorage.getItem(SURVEY_SEEN_KEY) ?? 0);
+    } catch {
+      return 0;
+    }
+  });
+  // Standing on the page IS reading it, so clear the unread state there.
+  useEffect(() => {
+    if (!location.startsWith(SURVEY_PATH)) return;
+    if (surveyCount === surveySeen) return;
+    try {
+      localStorage.setItem(SURVEY_SEEN_KEY, String(surveyCount));
+    } catch {
+      /* private mode: the badge just stays lit, which is the safe direction */
+    }
+    setSurveySeen(surveyCount);
+  }, [location, surveyCount, surveySeen]);
+
+  const surveyUnread = Math.max(0, surveyCount - surveySeen);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(COLLAPSE_KEY) === "true";
@@ -93,7 +127,7 @@ export function RouteReadySidebar() {
                 setLocation(item.path);
               }}
               title={collapsed ? item.label : undefined}
-              className={`flex items-center rounded-md text-left w-full transition-colors duration-100 ${collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"}`}
+              className={`relative flex items-center rounded-md text-left w-full transition-colors duration-100 ${collapsed ? "justify-center px-0 py-2.5" : "gap-3 px-3 py-2"}`}
               style={{
                 fontFamily: fonts.dmSans,
                 fontWeight: 400,
@@ -106,6 +140,39 @@ export function RouteReadySidebar() {
             >
               <Icon className="h-4 w-4 shrink-0" style={{ opacity: active ? 1 : 0.6 }} />
               {!collapsed && <span className="flex-1">{item.label}</span>}
+              {!collapsed && item.path === SURVEY_PATH && surveyCount > 0 && (
+                <span
+                  title={surveyUnread > 0 ? `${surveyUnread} new since you last looked` : `${surveyCount} responses`}
+                  style={{
+                    fontFamily: fonts.jetbrains,
+                    fontWeight: 600,
+                    fontSize: 10.5,
+                    color: surveyUnread > 0 ? "#FFFFFF" : colors.inkMuted,
+                    backgroundColor: surveyUnread > 0 ? colors.accent : "transparent",
+                    border: surveyUnread > 0 ? "none" : `1px solid ${colors.rule}`,
+                    borderRadius: 999,
+                    padding: "1px 7px",
+                    minWidth: 20,
+                    textAlign: "center",
+                  }}
+                >
+                  {surveyCount}
+                </span>
+              )}
+              {collapsed && item.path === SURVEY_PATH && surveyUnread > 0 && (
+                <span
+                  title={`${surveyUnread} new survey responses`}
+                  style={{
+                    position: "absolute",
+                    top: 6,
+                    right: 10,
+                    width: 7,
+                    height: 7,
+                    borderRadius: 999,
+                    backgroundColor: colors.accent,
+                  }}
+                />
+              )}
               {!collapsed && item.wip && (
                 <span
                   className="px-1.5 py-0.5 rounded-md"
