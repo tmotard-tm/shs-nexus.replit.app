@@ -368,17 +368,37 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
                c.feed_json->>'RENTING_CITY_NAME'        AS branch_city,
                c.feed_json->>'RENTING_STATE'            AS branch_state,
                c.rental_vendor,
-               COALESCE(
-                 NULLIF(regexp_replace(COALESCE(t.mobile_phone,''), '\D', '', 'g'), ''),
-                 NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '\D', '', 'g'), ''),
-                 NULLIF(regexp_replace(COALESCE(a.cell_phone,''), '\D', '', 'g'), ''),
-                 NULLIF(regexp_replace(COALESCE(a.main_phone,''), '\D', '', 'g'), '')
-               )                                        AS phone
+               p.phone                                  AS phone
         FROM vrm_rental_operations_cases c
         JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
         JOIN all_techs a
-          ON a.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+          -- Some resolution rows carry an LDAP where the employee_id belongs
+          -- ('ASIMANO'), which matched nothing and silently dropped a real,
+          -- reachable technician. Accept either key. Employee ids are numeric
+          -- and racfids are alphabetic, so only one side can ever match.
+          ON (a.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+           OR upper(a.tech_racfid) = upper(COALESCE(ir.override_employee_id, ir.resolved_employee_id)))
         LEFT JOIN tpms_tech_profiles t ON upper(t.enterprise_id) = upper(a.tech_racfid)
+        -- Normalise the phone ONCE, here, and read home_phone as a last resort.
+        --
+        -- The character class is [^0-9] deliberately and must stay that way.
+        -- The regex shorthand for a non-digit, written inside a drizzle tagged
+        -- template, is cooked by JavaScript down to the bare letter D before
+        -- drizzle ever sees the string. The previous expression therefore
+        -- stripped the letter D out of phone numbers and left every slash and
+        -- dash in place. Numbers stored like 432/978-0182 failed the length
+        -- check and 39 technicians with working phones were reported to the
+        -- operator as having no phone at all. Proven on the box 2026-08-12.
+        -- Do not reintroduce the shorthand here.
+        CROSS JOIN LATERAL (
+          SELECT COALESCE(
+            NULLIF(regexp_replace(COALESCE(t.mobile_phone,''),            '[^0-9]', '', 'g'), ''),
+            NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '[^0-9]', '', 'g'), ''),
+            NULLIF(regexp_replace(COALESCE(a.cell_phone,''),              '[^0-9]', '', 'g'), ''),
+            NULLIF(regexp_replace(COALESCE(a.main_phone,''),              '[^0-9]', '', 'g'), ''),
+            NULLIF(regexp_replace(COALESCE(a.home_phone,''),              '[^0-9]', '', 'g'), '')
+          ) AS phone
+        ) p
         WHERE c.present_in_latest
           AND upper(c.ticket_status) = 'OPEN'
           AND a.employment_status = 'A'
@@ -392,12 +412,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           -- action, because the form still verifies LDAP and truck.
           AND (ir.override_employee_id IS NOT NULL
                OR (ir.confidence IN ('high','medium') AND upper(ir.state) = 'RESOLVED'))
-          AND COALESCE(
-                NULLIF(regexp_replace(COALESCE(t.mobile_phone,''), '\D', '', 'g'), ''),
-                NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '\D', '', 'g'), ''),
-                NULLIF(regexp_replace(COALESCE(a.cell_phone,''), '\D', '', 'g'), ''),
-                NULLIF(regexp_replace(COALESCE(a.main_phone,''), '\D', '', 'g'), '')
-              ) IS NOT NULL
+          -- Phone validity is enforced HERE, in SQL, ahead of the LIMIT.
+          -- Doing it in JS afterwards under-fills every batch by however many
+          -- of the first N rows happen to be unreachable.
+          AND p.phone IS NOT NULL
+          AND (length(p.phone) = 10
+               OR (length(p.phone) = 11 AND left(p.phone, 1) = '1'))
           AND NOT EXISTS (
             SELECT 1 FROM vrm_form_tokens ft
             WHERE ft.form_type = 'rental_tech_survey'
