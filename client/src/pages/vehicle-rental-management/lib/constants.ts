@@ -3,6 +3,7 @@ import {
   MessagesSquare,
   PhoneIncoming,
   ClipboardList,
+  ClipboardCheck,
   ListChecks,
   Wrench,
   Gauge,
@@ -122,5 +123,6 @@ export const navItems: NavItem[] = [
   { label: "Rightsize Tracker", path: "/vehicle-rental-management/rightsize-tracker", icon: MessagesSquare },
   { label: "Inbound Calls", path: "/vehicle-rental-management/inbound-calls", icon: PhoneIncoming },
   { label: "LUCA Activity", path: "/vehicle-rental-management/luca-activity", icon: Activity },
+  { label: "Rental Survey", path: "/vehicle-rental-management/rental-survey", icon: ClipboardCheck },
   { label: "Settings", path: "/vehicle-rental-management/settings", icon: Settings2 },
 ];
