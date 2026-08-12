@@ -510,15 +510,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           token,
           url,
           body:
-            `${first}, this is Sears Fleet. Thank you for everything you do out `
-            + `there. We are moving every technician rental to direct billing: Sears `
-            + `will pay Enterprise directly instead of going through a third party, so `
-            + `you will no longer have to call ARI to get a rental. This is not a `
-            + `vehicle swap. You keep the vehicle you are driving and it costs you `
-            + `nothing. We need one minute from you today: ${url} Without this `
-            + `form we cannot move your rental over correctly. Your LDAP is your Tech `
-            + `Hub login, under Settings. Already out of a rental? Tell us there and `
-            + `you are done. Please reply only if the form will not work. Thank you.`,
+            `Hi ${first}, this is Tyler with Sears Fleet. Thank you for everything you `
+            + `do out there. We are moving every technician rental to direct billing: `
+            + `Sears will pay Enterprise directly instead of going through a third `
+            + `party, so you will no longer have to call ARI to get a rental. This is `
+            + `not a vehicle swap. You keep the vehicle you are driving and it costs `
+            + `you nothing.\n\n`
+            + `We need one minute from you today: ${url} Without it we cannot `
+            + `move your rental over correctly. Your LDAP is your Tech Hub login, under `
+            + `Settings. Already out of a rental? Tell us there and you are done. `
+            + `Please reply only if the form will not work.\n\n`
+            + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,
         });
 
         if (!dryRun) {
@@ -643,15 +645,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           phone: String(t.phone || "").replace(/\D/g, "").replace(/^1/, ""),
           category: "rental_management",
           body:
-            `${first}, this is Sears Fleet. Thank you for everything you do out `
-            + `there. We are moving every technician rental to direct billing: Sears `
-            + `will pay Enterprise directly instead of going through a third party, so `
-            + `you will no longer have to call ARI to get a rental. This is not a `
-            + `vehicle swap. You keep the vehicle you are driving and it costs you `
-            + `nothing. We need one minute from you today: ${base}/rental-survey/${t.token} Without this `
-            + `form we cannot move your rental over correctly. Your LDAP is your Tech `
-            + `Hub login, under Settings. Already out of a rental? Tell us there and `
-            + `you are done. Please reply only if the form will not work. Thank you.`,
+            `Hi ${first}, this is Tyler with Sears Fleet. Thank you for everything you `
+            + `do out there. We are moving every technician rental to direct billing: `
+            + `Sears will pay Enterprise directly instead of going through a third `
+            + `party, so you will no longer have to call ARI to get a rental. This is `
+            + `not a vehicle swap. You keep the vehicle you are driving and it costs `
+            + `you nothing.\n\n`
+            + `We need one minute from you today: ${base}/rental-survey/${t.token} Without it we cannot `
+            + `move your rental over correctly. Your LDAP is your Tech Hub login, under `
+            + `Settings. Already out of a rental? Tell us there and you are done. `
+            + `Please reply only if the form will not work.\n\n`
+            + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,
         };
       });
 
