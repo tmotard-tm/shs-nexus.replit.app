@@ -510,14 +510,15 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           token,
           url,
           body:
-            `${first}, Sears Fleet. We are moving your rental to direct billing TODAY. `
-            + `Please complete this exact form now, it takes under a minute: ${url} `
-            + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
-            + `Say so there and you are done. Please do not reply with questions, the `
-            + `link is the only step. Once your reservation is made WE WILL TEXT YOU `
-            + `WITH NEXT STEPS: stop by your Enterprise branch, sign one new form, and in `
-            + `most cases keep the same vehicle. A block will be added to your route `
-            + `for it, so stand by.`,
+            `${first}, this is Sears Fleet. Thank you for everything you do out `
+            + `there. We are moving every technician rental to direct billing with `
+            + `Enterprise: Sears pays Enterprise directly instead of going through a `
+            + `third party. It costs you nothing and does not change the vehicle you `
+            + `drive. We need one minute from you today so your rental transfers `
+            + `correctly: ${url} This form is how we confirm the rental is `
+            + `yours, and without it we cannot move yours over. Your LDAP is your Tech `
+            + `Hub login, under Settings. Already out of a rental? Tell us there and `
+            + `you are done. Please reply only if the form will not work. Thank you.`,
         });
 
         if (!dryRun) {
@@ -642,14 +643,15 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           phone: String(t.phone || "").replace(/\D/g, "").replace(/^1/, ""),
           category: "rental_management",
           body:
-            `${first}, Sears Fleet. We are moving your rental to direct billing TODAY. `
-            + `Please complete this exact form now, it takes under a minute: ${base}/rental-survey/${t.token} `
-            + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
-            + `Say so there and you are done. Please do not reply with questions, the `
-            + `link is the only step. Once your reservation is made WE WILL TEXT YOU `
-            + `WITH NEXT STEPS: stop by your Enterprise branch, sign one new form, and in `
-            + `most cases keep the same vehicle. A block will be added to your route `
-            + `for it, so stand by.`,
+            `${first}, this is Sears Fleet. Thank you for everything you do out `
+            + `there. We are moving every technician rental to direct billing with `
+            + `Enterprise: Sears pays Enterprise directly instead of going through a `
+            + `third party. It costs you nothing and does not change the vehicle you `
+            + `drive. We need one minute from you today so your rental transfers `
+            + `correctly: ${base}/rental-survey/${t.token} This form is how we confirm the rental is `
+            + `yours, and without it we cannot move yours over. Your LDAP is your Tech `
+            + `Hub login, under Settings. Already out of a rental? Tell us there and `
+            + `you are done. Please reply only if the form will not work. Thank you.`,
         };
       });
 
