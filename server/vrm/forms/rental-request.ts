@@ -282,6 +282,92 @@ export async function syncByovStatus(): Promise<{ synced: number; enrolled: numb
   return { synced: rows.length, enrolled };
 }
 
+/**
+ * Raise a rental request from a survey answer.
+ *
+ * Runs the SAME eligibility engine as a typed request, so a survey-raised one
+ * gets no easier a ride. In practice it will DEFER for want of a shop
+ * appointment, which is the honest outcome: it becomes a visible item in the
+ * Fleet queue instead of a row in survey data nobody actions.
+ *
+ * source='survey' and a null token_id mark it as not technician-typed. It
+ * carries no policy acknowledgement, because they never saw that form — and the
+ * review screen must not imply they agreed to anything.
+ *
+ * Idempotent: one open request per technician. Re-submitting a survey, or two
+ * responses from the same person, will not stack requests.
+ */
+export async function raiseRequestFromSurvey(input: {
+  surveyId: string;
+  ldap: string;
+  truckNumber: string | null;
+  techName: string | null;
+  vanStatus: string | null;
+  shopName: string | null;
+  shopCity: string | null;
+  shopState: string | null;
+  shopPhone: string | null;
+  symptom: string;
+}): Promise<number | null> {
+  const ldap = input.ldap.toUpperCase();
+
+  const { rows: existing } = await db.execute(sql`
+    SELECT request_no FROM vrm_rental_request
+    WHERE ldap = ${ldap}
+      AND status NOT IN ('denied', 'closed')
+    LIMIT 1
+  `);
+  if ((existing as any[]).length) return null;
+
+  const facts = await factsFor(ldap);
+  const isByov = Number(facts?.byov_count ?? 0) > 0;
+  const syncedAt = facts?.byov_synced_at ? new Date(facts.byov_synced_at).getTime() : 0;
+  const mirrorFresh = syncedAt > 0 && Date.now() - syncedAt < 36 * 3600 * 1000;
+
+  const verdict = evaluate({
+    ldap,
+    isByov,
+    isByovKnown: mirrorFresh && Number(facts?.byov_row_present ?? 0) > 0,
+    employmentStatus: facts?.employment_status ?? null,
+    openRentalCount: Number(facts?.open_rentals ?? 0),
+    problemCategory: input.vanStatus === "decommissioned" ? "decom_replacement" : "breakdown",
+    isDrivable: false,
+    isSafeToDrive: false,
+    // The survey never asks about a shop appointment, so we genuinely do not
+    // know. Leaving it null lets the engine DEFER rather than inventing one.
+    hasAppointment: null,
+    shopEstimatedDays: null,
+  });
+
+  const status =
+    verdict.decision === "APPROVE" ? "approved"
+    : verdict.decision === "DENY" ? "denied"
+    : verdict.decision === "DEFER" ? "deferred"
+    : "screened";
+
+  const { rows } = await db.execute(sql`
+    INSERT INTO vrm_rental_request (
+      source, origin_survey_id, ldap, tech_name, truck_number,
+      district, home_state, is_byov,
+      problem_category, symptom, is_drivable, is_safe_to_drive,
+      shop_name, shop_city, shop_state, shop_phone,
+      status, auto_decision, auto_reason, auto_rule
+    ) VALUES (
+      'survey', ${input.surveyId || null}::uuid, ${ldap}, ${input.techName},
+      ${input.truckNumber}, ${facts?.district_no ?? null}, ${facts?.home_state ?? null},
+      ${isByov},
+      ${input.vanStatus === "decommissioned" ? "decom_replacement" : "breakdown"},
+      ${input.symptom}, false, false,
+      ${input.shopName}, ${input.shopCity}, ${input.shopState}, ${input.shopPhone},
+      ${status}, ${verdict.decision}, ${`raised from survey — ${verdict.reason}`}, ${verdict.rule}
+    )
+    RETURNING request_no
+  `);
+  const no = (rows as any[])[0]?.request_no ?? null;
+  console.log(`[survey->request] ${ldap} raised request #${no} (${verdict.decision})`);
+  return no;
+}
+
 // ---------------------------------------------------------------------------
 // Public surface
 // ---------------------------------------------------------------------------
@@ -504,7 +590,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          // The concurrency guards. Omitted from the first version of this list,
          // which then reported ok:true while claimed_at did not exist — the one
          // failure mode a pre-flight check must never have.
-         "claimed_at", "claimed_by"]],
+         "claimed_at", "claimed_by", "source", "origin_survey_id"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
     ];

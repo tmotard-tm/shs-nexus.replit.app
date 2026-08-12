@@ -17,6 +17,7 @@ import type { Express, Router } from "express";
 import { db } from "../../db";
 import { sql } from "drizzle-orm";
 import crypto from "crypto";
+import { raiseRequestFromSurvey } from "./rental-request";
 
 /** Truck numbers arrive with stray zeros, spaces and dashes. Compare on digits. */
 function normTruck(v: string): string {
@@ -191,6 +192,11 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
       } else {
         noRentalReason = s(b.noRentalReason, 40);
         if (!noRentalReason || !NO_RENTAL_REASONS.has(noRentalReason)) missing.push("what happened to the rental");
+        // Also ask where the van is on this path. Without it we cannot tell a
+        // technician whose van is fixed from one who is stranded with nothing,
+        // and the second group is exactly who needs a rental raised for them.
+        const vs = s(b.vanStatus, 40);
+        if (vs && VAN_STATUS.has(vs)) vanStatus = vs;
       }
 
       if (missing.length) {
@@ -210,7 +216,7 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
 
       const prefill = row.prefill || {};
 
-      await db.execute(sql`
+      const { rows: surveyIns } = await db.execute(sql`
         INSERT INTO vrm_rental_tech_survey (
           token_id, ldap, truck_number, tech_name,
           shop_name_on_file, shop_phone_on_file,
@@ -234,13 +240,53 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
           ${s(b.rentalBranchName, 160)}, ${s(b.rentalBranchCity, 80)}, ${s(b.rentalBranchState, 2)}, ${s(b.rentalBranchPhone, 30)},
           ${noRentalReason}, 'form'
         )
+        RETURNING id
       `);
+      const surveyId = (surveyIns as any[])[0]?.id ?? null;
 
       await db.execute(sql`
         UPDATE vrm_form_tokens SET submitted_at = now() WHERE id = ${row.id}
       `);
 
-      res.json({ success: true, escalated: vanStatus === "unknown_escalate" });
+      // Tyler's ruling 2026-08-12: a survey answer that needs a rental raises a
+      // request rather than sitting in survey data. Narrow on purpose — this
+      // must not manufacture demand.
+      const STRANDED = new Set(["in_shop", "decommissioned", "totaled"]);
+      const needsRental = !hasRental && (
+        (vanStatus != null && STRANDED.has(vanStatus))
+        || noRentalReason === "never_had_one"
+      );
+
+      let raisedRequestNo: number | null = null;
+      if (needsRental) {
+        try {
+          raisedRequestNo = await raiseRequestFromSurvey({
+            surveyId: String(surveyId ?? ""),
+            ldap: id.ldap,
+            truckNumber: id.truck,
+            techName: row.tech_name || null,
+            vanStatus,
+            shopName: s(b.shopName),
+            shopCity: s(b.shopCity, 80),
+            shopState: s(b.shopState, 2),
+            shopPhone: s(b.shopPhone, 30),
+            symptom: s(b.blocker, 600)
+              || (noRentalReason === "never_had_one"
+                ? "Survey: says a rental was never received"
+                : "Survey: no rental and the van is not available"),
+          });
+        } catch (e: any) {
+          // A failure here must not lose the survey answer the technician just
+          // gave us. Log it and move on; Fleet can raise the request by hand.
+          console.error("[survey] could not raise a request:", e?.message || e);
+        }
+      }
+
+      res.json({
+        success: true,
+        escalated: vanStatus === "unknown_escalate",
+        requestRaised: raisedRequestNo,
+      });
     } catch (error: any) {
       console.error("[survey] submit failed:", error?.message || error);
       res.status(500).json({ success: false, message: "Something went wrong. Please try again." });

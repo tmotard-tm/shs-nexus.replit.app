@@ -247,6 +247,16 @@ export async function initFormsSchema(): Promise<void> {
       ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL;
   `);
 
+  // Where a request came from. A survey-originated request has no token and no
+  // policy acknowledgement, because the technician never saw that form — so it
+  // must be visibly distinguishable from one they actually filled in.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS source           text NOT NULL DEFAULT 'form',
+      ADD COLUMN IF NOT EXISTS origin_survey_id uuid REFERENCES vrm_rental_tech_survey(id);
+    CREATE INDEX IF NOT EXISTS vrm_rental_request_source_idx ON vrm_rental_request (source);
+  `);
+
   // Every acknowledgement ticked. Stored rather than recomputed so a later
   // change to the policy text cannot retroactively alter what someone agreed to.
   await db.execute(sql`

@@ -55,6 +55,7 @@ export default function RentalTechSurvey() {
   const [verifyError, setVerifyError] = useState("");
   const [submitError, setSubmitError] = useState("");
   const [escalated, setEscalated] = useState(false);
+  const [requestRaised, setRequestRaised] = useState<number | null>(null);
 
   const [hasRental, setHasRental] = useState<"" | "yes" | "no">("");
   const [noRentalReason, setNoRentalReason] = useState("");
@@ -143,6 +144,7 @@ export default function RentalTechSurvey() {
       postJson(`/api/public/rental-survey/${encodeURIComponent(token)}/submit`, buildPayload(override)),
     onSuccess: (data: any) => {
       setEscalated(!!data?.escalated);
+      setRequestRaised(data?.requestRaised ?? null);
       setStep("done");
     },
     onError: (e: any) => setSubmitError(e.message),
@@ -223,6 +225,8 @@ export default function RentalTechSurvey() {
             <CardDescription>
               {escalated
                 ? "We have flagged your van as unaccounted for. Someone from Fleet will contact you directly to track it down."
+                : requestRaised
+                ? `Your answers are recorded, and we have raised rental request #${requestRaised} for you. Fleet will follow up.`
                 : "Your answers are recorded. If anything needs to change we will reach out."}
             </CardDescription>
           </CardHeader>
@@ -323,6 +327,30 @@ export default function RentalTechSurvey() {
                     </SelectContent>
                   </Select>
                   {fieldErrors.noRentalReason && <p className="text-sm text-red-600">{fieldErrors.noRentalReason}</p>}
+
+                  {/* Asked on this path too. Out of a rental with a working van
+                      is fine; out of a rental with the van still in a shop means
+                      the technician has nothing to drive, and Fleet needs to
+                      know that today rather than next week. */}
+                  <div className="space-y-2">
+                    <Label>Where is your van right now?</Label>
+                    <Select value={vanStatus} onValueChange={setVanStatus}>
+                      <SelectTrigger><SelectValue placeholder="Select one" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="with_me">I have it and it runs</SelectItem>
+                        <SelectItem value="in_shop">Still in a repair shop</SelectItem>
+                        <SelectItem value="decommissioned">Turned in / decommissioned</SelectItem>
+                        <SelectItem value="totaled">Totaled in an accident</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {(vanStatus === "in_shop" || vanStatus === "decommissioned" || vanStatus === "totaled") && (
+                      <p className="rounded-md bg-amber-50 p-2 text-xs text-amber-900">
+                        You have told us you have no rental and no working van. We will raise a
+                        rental request for you and Fleet will follow up.
+                      </p>
+                    )}
+                  </div>
+
                   <div className="space-y-2">
                     <Label htmlFor="blocker-no">Anything else we should know?</Label>
                     <Textarea id="blocker-no" value={blocker} onChange={(e) => setBlocker(e.target.value)} rows={2} />

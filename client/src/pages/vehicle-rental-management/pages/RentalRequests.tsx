@@ -32,6 +32,7 @@ interface Req {
   has_appointment: boolean | null; appointment_at: string | null; shop_estimated_days: number | null;
   policy_complete: boolean | null; policy_version: string | null;
   approved_vehicle_class: string | null;
+  source?: string | null; origin_survey_id?: string | null;
   status: string; auto_decision: string | null; auto_reason: string | null; auto_rule: number | null;
   decided_by: string | null; decided_at: string | null; decision_note: string | null;
   actual_days_down: number | null; claim_variance_days: number | null;
@@ -340,6 +341,13 @@ export default function RentalRequests() {
                     <td style={tdBase} title={r.tech_name ?? ""}>
                       {r.tech_name || "—"}
                       {r.is_byov && <span style={{ marginLeft: 6 }}><Pill text="BYOV" fg={colors.accent} bg={colors.accentLight} /></span>}
+                      {/* A survey-raised request carries no policy acknowledgement,
+                          because the technician never saw that form. Say so. */}
+                      {r.source === "survey" && (
+                        <span style={{ marginLeft: 6 }}>
+                          <Pill text="from survey" fg={colors.inkMuted} bg={colors.background} />
+                        </span>
+                      )}
                     </td>
                     <td style={{ ...tdBase, fontFamily: fonts.jetbrains }}>{r.truck_number || "—"}</td>
                     <td style={tdBase}>{CATEGORY_LABEL[r.problem_category ?? ""] ?? r.problem_category ?? "—"}</td>
