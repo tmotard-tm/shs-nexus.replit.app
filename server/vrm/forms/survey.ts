@@ -165,7 +165,18 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
       let rentalCompany: string | null = null;
       let noRentalReason: string | null = null;
 
-      if (hasRental) {
+      // "I don't know where my van is" is an escape hatch, and an escape hatch
+      // that demands the form it bypasses is not one. A technician who cannot
+      // account for their van has not filled in the branch city or the truck
+      // number they are assigned, so an escalation is accepted as a complete
+      // answer on its own and whatever they DID manage to enter is kept.
+      const escalating = s(b.vanStatus, 40) === "unknown_escalate";
+
+      if (hasRental && escalating) {
+        vanStatus = "unknown_escalate";
+        rentalCompany = s(b.rentalCompany, 40);
+        if (rentalCompany && !RENTAL_COMPANIES.has(rentalCompany)) rentalCompany = null;
+      } else if (hasRental) {
         rentalCompany = s(b.rentalCompany, 40);
         if (!rentalCompany || !RENTAL_COMPANIES.has(rentalCompany)) missing.push("the rental company");
         if (!s(b.rentalBranchCity)) missing.push("the rental branch city");
