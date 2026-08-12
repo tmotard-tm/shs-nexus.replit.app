@@ -686,6 +686,116 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Who completed the survey and has NOT yet had the follow-up.
+   *
+   * "Already had it" is read from the comms log rather than a new column, so
+   * this is idempotent with no schema change: the marker phrase only ever
+   * appears in the follow-up body.
+   */
+  router.post("/forms/rental-survey/followup-pending", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT t.ldap, t.tech_name, t.phone
+        FROM vrm_form_tokens t
+        WHERE t.form_type = 'rental_tech_survey'
+          AND COALESCE(t.batch,'') <> 'TEST'
+          AND t.submitted_at IS NOT NULL
+          AND NULLIF(btrim(COALESCE(t.phone,'')),'') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM fs_comms_messages m
+            WHERE upper(m.ldap) = upper(t.ldap)
+              AND m.body ILIKE '%Thank you for completing the survey%'
+          )
+        ORDER BY t.ldap
+      `);
+      res.json({ count: rows.length, recipients: rows });
+    } catch (error: any) {
+      console.error("[survey] followup-pending failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "followup-pending failed" });
+    }
+  });
+
+  /**
+   * Send the follow-up to at most 20 LDAPs. Requires `confirm: true`.
+   *
+   * Same single-flight, same DELIVERABLE-status rule as the survey send: a
+   * message is only counted as sent when comms reports sent or queued, never
+   * from the HTTP status alone.
+   */
+  router.post("/forms/rental-survey/followup-chunk", async (req, res) => {
+    try {
+      const confirm = req.body?.confirm === true;
+      const ldaps: string[] = Array.isArray(req.body?.ldaps)
+        ? req.body.ldaps.map((x: any) => String(x).trim().toUpperCase()).filter(Boolean).slice(0, 20)
+        : [];
+      if (!ldaps.length) return res.status(400).json({ message: "ldaps[] is required" });
+
+      const key = process.env.COMMS_SEND_API_KEY;
+      if (!key) return res.status(500).json({ message: "COMMS_SEND_API_KEY is not configured." });
+
+      const { rows } = await db.execute(sql`
+        SELECT DISTINCT ON (upper(t.ldap)) upper(t.ldap) AS ldap, t.tech_name, t.phone
+        FROM vrm_form_tokens t
+        WHERE t.form_type = 'rental_tech_survey'
+          AND COALESCE(t.batch,'') <> 'TEST'
+          AND t.submitted_at IS NOT NULL
+          AND upper(t.ldap) = ANY(string_to_array(${ldaps.join(",")}, ','))
+          AND NULLIF(btrim(COALESCE(t.phone,'')),'') IS NOT NULL
+        ORDER BY upper(t.ldap), t.submitted_at DESC
+      `);
+      const targets = rows as any[];
+      if (!targets.length) return res.json({ sent: 0, note: "nothing eligible in this chunk" });
+
+      const messages = targets.map((t) => {
+        const raw = String(t.tech_name || "").trim().split(/\s+/)[0] || "there";
+        const first = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        return {
+          ldap: t.ldap,
+          phone: String(t.phone || "").replace(/[^0-9]/g, "").replace(/^1/, ""),
+          category: "rental_management",
+          body:
+            `Hi ${first}, Tyler with Sears Fleet. Thank you for completing the survey, `
+            + `that is exactly what we needed.\n\n`
+            + `Here is what happens next. We are creating a new reservation for you and `
+            + `blocking time on your route so you can stop by Enterprise and sign a new `
+            + `contract at our final rate. You will hear from us with those details `
+            + `before you need to do anything.\n\n`
+            + `Very soon a new process goes out to the field and you will no longer have `
+            + `to contact ARI. Thank you again for helping us get this done.`,
+        };
+      });
+
+      if (!confirm) {
+        return res.json({ dryRun: true, would_send: messages.length, messages });
+      }
+
+      const selfPort = process.env.PORT || "5000";
+      const host = process.env.COMMS_SEND_BASE_URL || `http://localhost:${selfPort}`;
+      const resp = await fetch(`${host}/api/fs/comms/api/send-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-comms-api-key": key },
+        body: JSON.stringify({ category: "rental_management", messages, confirm: true }),
+      });
+      const ctype = resp.headers.get("content-type") || "";
+      if (!ctype.includes("application/json")) {
+        return res.status(502).json({
+          message: `comms returned ${resp.status} ${ctype || "no content-type"} — not JSON.`,
+        });
+      }
+      const out = await resp.json();
+      if (!resp.ok) return res.status(502).json({ message: "comms rejected the batch", detail: out });
+
+      const DELIVERABLE = new Set(["sent", "queued"]);
+      const results = (out?.results || out?.commsResult?.results || []) as any[];
+      const good = results.filter((r) => DELIVERABLE.has(String(r?.status || "").toLowerCase()));
+      res.json({ sent: good.length, attempted: messages.length, commsResult: out });
+    } catch (error: any) {
+      console.error("[survey] followup-chunk failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "followup-chunk failed" });
+    }
+  });
+
   router.post("/forms/rental-survey/pending", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
