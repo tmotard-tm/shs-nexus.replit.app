@@ -643,8 +643,21 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
    * Reachable with a session OR the internal-cron header, so the Python runner
    * can pull it without a browser login.
    */
-  router.get("/forms/rental-request/booking-queue", async (_req, res) => {
+  router.get("/forms/rental-request/booking-queue", async (req, res) => {
     try {
+      // Lease what we hand out. A second runner starting while the first is
+      // mid-flight would otherwise pull the same rows and create a second real
+      // reservation for the same technician. Claims older than 30 minutes are
+      // reclaimable so a crashed runner does not park work forever.
+      const runner = String((req as any).query?.runner || "runner").slice(0, 60);
+      await db.execute(sql`
+        UPDATE vrm_rental_request
+        SET claimed_at = now(), claimed_by = ${runner}
+        WHERE status = 'approved' AND etd_booked_at IS NULL
+          AND appointment_at IS NOT NULL
+          AND COALESCE(is_byov, false) = false
+          AND (claimed_at IS NULL OR claimed_at < now() - interval '30 minutes')
+      `);
       const { rows } = await db.execute(sql`
         SELECT r.request_no, r.ldap, r.tech_name, r.truck_number, r.mobile_phone,
                r.shop_name, r.shop_address, r.shop_city, r.shop_state, r.shop_postal,
@@ -660,6 +673,7 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
           AND r.etd_booked_at IS NULL
           AND r.appointment_at IS NOT NULL
           AND COALESCE(r.is_byov, false) = false
+          AND r.claimed_by = ${runner}
         ORDER BY r.appointment_at
       `);
       res.json({ queue: rows, count: (rows as any[]).length });
@@ -683,25 +697,41 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
       const error = String(req.body?.error || "").trim();
 
       if (error) {
+        // Never stamp an error onto a row that already booked. A late failure
+        // report from a retry would otherwise mark a live reservation as broken.
         await db.execute(sql`
           UPDATE vrm_rental_request
-          SET etd_error = ${error.slice(0, 500)}, updated_at = now()
-          WHERE request_no = ${no}
+          SET etd_error = ${error.slice(0, 500)}, claimed_at = NULL, updated_at = now()
+          WHERE request_no = ${no} AND etd_booked_at IS NULL
         `);
         return res.json({ ok: true, recorded: "error" });
       }
       if (!ref && !resId) {
         return res.status(400).json({ message: "supply etdReference/etdReservationId, or error" });
       }
+      // Conditional transition, not a blind overwrite. A replayed writeback
+      // must not re-stamp a row that already booked, and must not resurrect one
+      // a human has since denied.
       const { rows } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET etd_reference = ${ref || null}, etd_reservation_id = ${resId || null},
             etd_booked_at = now(), etd_error = NULL,
-            status = 'booked', updated_at = now()
-        WHERE request_no = ${no}
+            status = 'booked', claimed_at = NULL, updated_at = now()
+        WHERE request_no = ${no} AND status = 'approved' AND etd_booked_at IS NULL
         RETURNING request_no, status
       `);
-      if (!(rows as any[]).length) return res.status(404).json({ message: "request not found" });
+      if (!(rows as any[]).length) {
+        const { rows: cur } = await db.execute(sql`
+          SELECT status, etd_reference, etd_booked_at FROM vrm_rental_request WHERE request_no = ${no}
+        `);
+        const c = (cur as any[])[0];
+        if (!c) return res.status(404).json({ message: "request not found" });
+        return res.status(409).json({
+          message: `not writable: status is '${c.status}'` +
+                   (c.etd_booked_at ? ` and it already booked as ${c.etd_reference}` : ""),
+          status: c.status, etdReference: c.etd_reference,
+        });
+      }
       res.json({ ok: true, ...(rows as any[])[0] });
     } catch (e: any) {
       console.error("[rental-request] booked failed:", e?.message || e);
@@ -730,13 +760,23 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         });
       }
 
-      await db.execute(sql`
+      // Never overwrite a booked row. Denying one would leave a live ETD
+      // reservation attached to a request the record says was refused, and
+      // nothing downstream would ever go cancel it.
+      const { rows: upd } = await db.execute(sql`
         UPDATE vrm_rental_request
         SET status = ${decision === "APPROVE" ? "approved" : decision === "DENY" ? "denied" : "deferred"},
             decided_by = ${actor}, decided_at = now(), decision_note = ${note || null},
             updated_at = now()
-        WHERE request_no = ${Number(req.params.requestNo)}
+        WHERE request_no = ${Number(req.params.requestNo)} AND status <> 'booked'
+        RETURNING request_no
       `);
+      if (!(upd as any[]).length) {
+        return res.status(409).json({
+          message: "This request is already BOOKED. Cancel the reservation in ETD first; "
+                 + "changing the decision here would leave a live rental on a denied request.",
+        });
+      }
       res.json({ ok: true, decision });
     } catch (e: any) {
       res.status(500).json({ message: e?.message || "decide failed" });

@@ -339,6 +339,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           AND a.tech_racfid IS NOT NULL
           AND (ir.override_employee_id IS NOT NULL
                OR (ir.confidence = 'high' AND upper(ir.state) = 'RESOLVED'))
+          AND COALESCE(
+                NULLIF(regexp_replace(COALESCE(t.mobile_phone,''), '\D', '', 'g'), ''),
+                NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '\D', '', 'g'), ''),
+                NULLIF(regexp_replace(COALESCE(a.cell_phone,''), '\D', '', 'g'), ''),
+                NULLIF(regexp_replace(COALESCE(a.main_phone,''), '\D', '', 'g'), '')
+              ) IS NOT NULL
           AND NOT EXISTS (
             SELECT 1 FROM vrm_form_tokens ft
             WHERE ft.form_type = 'rental_tech_survey'
@@ -433,6 +439,16 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
 
       const key = process.env.COMMS_SEND_API_KEY;
       if (!key) return res.status(500).json({ message: "COMMS_SEND_API_KEY is not configured." });
+
+      // Single-flight. Two overlapping send-chunk calls would both see the same
+      // tokens as unsent and text the same technicians twice. The advisory lock
+      // is session-scoped and released in the finally below.
+      const LOCK = 918273645;
+      const { rows: lk } = await db.execute(sql`SELECT pg_try_advisory_lock(${LOCK}) AS got`);
+      if (!(lk as any[])[0]?.got) {
+        return res.status(409).json({ message: "A send is already running. Wait for it to finish." });
+      }
+      try {
 
       const { rows } = await db.execute(sql`
         SELECT token, ldap, phone, tech_name
@@ -529,6 +545,9 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           : undefined,
         commsResult: out,
       });
+      } finally {
+        await db.execute(sql`SELECT pg_advisory_unlock(${LOCK})`);
+      }
     } catch (error: any) {
       console.error("[survey] send-chunk failed:", error?.message || error);
       res.status(500).json({ message: error?.message || "send-chunk failed" });

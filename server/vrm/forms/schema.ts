@@ -223,6 +223,30 @@ export async function initFormsSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS vrm_rental_request_auto_idx    ON vrm_rental_request (auto_decision);
   `);
 
+  // Booking lease + one-row-per-token.
+  //
+  // Without the lease two booking runners both pull the same approved request
+  // and create two real reservations. Without the unique index a technician
+  // who double-taps Submit gets two rows from one token, which becomes two ETD
+  // bookings. Duplicates are collapsed first (newest wins) so the index can be
+  // created on an existing table.
+  await db.execute(sql`
+    ALTER TABLE vrm_rental_request
+      ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
+      ADD COLUMN IF NOT EXISTS claimed_by text;
+  `);
+  await db.execute(sql`
+    DELETE FROM vrm_rental_request a
+    USING vrm_rental_request b
+    WHERE a.token_id IS NOT NULL
+      AND a.token_id = b.token_id
+      AND a.created_at < b.created_at;
+  `);
+  await db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS vrm_rental_request_token_uniq
+      ON vrm_rental_request (token_id) WHERE token_id IS NOT NULL;
+  `);
+
   // Every acknowledgement ticked. Stored rather than recomputed so a later
   // change to the policy text cannot retroactively alter what someone agreed to.
   await db.execute(sql`
