@@ -511,15 +511,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           url,
           body:
             `Hi ${first}, this is Tyler with Sears Fleet. Thank you for everything you `
-            + `do out there. We are moving every technician rental to direct billing: `
+            + `do out there. We are moving every technician rental to direct billing. `
             + `Sears will pay Enterprise directly instead of going through a third `
             + `party, so you will no longer have to call ARI to get a rental. This is `
             + `not a vehicle swap. You keep the vehicle you are driving and it costs `
             + `you nothing.\n\n`
-            + `We need one minute from you today: ${url} Without it we cannot `
-            + `move your rental over correctly. Your LDAP is your Tech Hub login, under `
-            + `Settings. Already out of a rental? Tell us there and you are done. `
-            + `Please reply only if the form will not work.\n\n`
+            + `It is VERY important that you complete this form TODAY. It only takes `
+            + `one minute: ${url}`
+            + ` We are creating the new reservations today and we cannot make yours `
+            + `without it. Your LDAP is your Tech Hub login, under Settings. Already `
+            + `out of a rental? Tell us there and you are done. Please reply only if `
+            + `the form will not work.\n\n`
             + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,
         });
 
@@ -646,15 +648,17 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           category: "rental_management",
           body:
             `Hi ${first}, this is Tyler with Sears Fleet. Thank you for everything you `
-            + `do out there. We are moving every technician rental to direct billing: `
+            + `do out there. We are moving every technician rental to direct billing. `
             + `Sears will pay Enterprise directly instead of going through a third `
             + `party, so you will no longer have to call ARI to get a rental. This is `
             + `not a vehicle swap. You keep the vehicle you are driving and it costs `
             + `you nothing.\n\n`
-            + `We need one minute from you today: ${base}/rental-survey/${t.token} Without it we cannot `
-            + `move your rental over correctly. Your LDAP is your Tech Hub login, under `
-            + `Settings. Already out of a rental? Tell us there and you are done. `
-            + `Please reply only if the form will not work.\n\n`
+            + `It is VERY important that you complete this form TODAY. It only takes `
+            + `one minute: ${base}/rental-survey/${t.token}`
+            + ` We are creating the new reservations today and we cannot make yours `
+            + `without it. Your LDAP is your Tech Hub login, under Settings. Already `
+            + `out of a rental? Tell us there and you are done. Please reply only if `
+            + `the form will not work.\n\n`
             + `On behalf of Rob Gerlach, thank you for being the hero of the home.`,
         };
       });
