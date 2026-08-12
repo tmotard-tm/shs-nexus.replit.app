@@ -179,6 +179,45 @@ function Card({ label, value, hint, fg }: { label: string; value: string; hint?:
   );
 }
 
+/**
+ * Send-to-response funnel.
+ *
+ * Deliberately does NOT show a "delivered" figure. Every outbound comms row is
+ * status='sent' and no Twilio status callback is wired, so a delivered count
+ * would be a number we cannot back up. "Opened" is the honest reach signal:
+ * the token stamps opened_at when the link is actually loaded, which proves a
+ * human tapped it rather than proving a carrier accepted a message.
+ */
+function Funnel({ issued, sent, opened, submitted }: {
+  issued: number; sent: number; opened: number; submitted: number;
+}) {
+  if (!issued && !sent) return null;
+  const pct = (n: number) => (sent ? `${Math.round((n / sent) * 100)}%` : "—");
+  const steps: Array<[string, number, string, string]> = [
+    ["Issued", issued, "tokens minted", colors.inkMuted],
+    ["Texted", sent, "handed to Twilio", colors.inkMuted],
+    ["Opened", opened, `${pct(opened)} of texted — proof it reached them`, colors.accent],
+    ["Responded", submitted, `${pct(submitted)} of texted`, colors.green],
+  ];
+  return (
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "stretch", marginBottom: 12 }}>
+      {steps.map(([label, n, hint, fg], i) => (
+        <div key={label} style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 10, padding: "9px 13px", minWidth: 130 }}>
+            <div style={{ fontFamily: fonts.dmSans, fontSize: 10, color: colors.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</div>
+            <div style={{ fontFamily: fonts.syne, fontSize: 20, fontWeight: 700, color: fg }}>{n}</div>
+            <div style={{ fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted }}>{hint}</div>
+          </div>
+          {i < steps.length - 1 && <ChevronRight size={14} style={{ color: colors.inkMuted, flexShrink: 0 }} />}
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", fontFamily: fonts.dmSans, fontSize: 10.5, color: colors.inkMuted, maxWidth: 250 }}>
+        No "delivered" figure: no Twilio status callback is wired, so every message reads "sent" whether it landed or not.
+      </div>
+    </div>
+  );
+}
+
 function Pill({ text, fg, bg }: { text: string; fg: string; bg: string }) {
   return (
     <span style={{ fontFamily: fonts.dmSans, fontSize: 11, fontWeight: 600, color: fg, background: bg, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap" }}>{text}</span>
@@ -333,6 +372,13 @@ export default function RentalSurvey() {
         <Card label="Escalations" value={String(s.escalations ?? 0)}
               hint="van location unknown" fg={colors.redDeep} />
       </div>
+
+      <Funnel
+        issued={Number(s.issued ?? 0)}
+        sent={sent}
+        opened={Number(s.opened ?? 0)}
+        submitted={submitted}
+      />
 
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 12 }}>
         <div style={{ display: "inline-flex", border: `1px solid ${colors.rule}`, borderRadius: 8, overflow: "hidden" }}>
