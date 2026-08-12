@@ -1,37 +1,5 @@
 [
   {
-    "deployedAt": "2026-05-06T04:06:02.798Z",
-    "bundleHash": "5ytMwyy2",
-    "gitSha": "c496192c",
-    "snapshotKey": null,
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql"
-    ],
-    "fingerprint": "cbc970638dcc"
-  },
-  {
-    "deployedAt": "2026-05-11T01:59:12.289Z",
-    "bundleHash": "CtXEDAVu",
-    "gitSha": "eeeec4f4",
-    "snapshotKey": null,
-    "migrationsApplied": [
-      "0000_chemical_dormammu.sql",
-      "0001_add_is_tlt_to_queue_items.sql",
-      "0002_add_last_observed_tech_to_holman_submissions.sql",
-      "0003_add_bulk_fix_runs.sql",
-      "0004_add_vin_license_plate_to_trucks.sql",
-      "0005_add_automation_detail_to_queue_items.sql",
-      "0006_add_offboarding_return_tokens.sql"
-    ],
-    "fingerprint": "624a50914863"
-  },
-  {
     "deployedAt": "2026-05-12T12:16:56.769Z",
     "bundleHash": "DpCrjd3X",
     "gitSha": "5255920f",
@@ -891,5 +859,41 @@
       "0008_add_logical_entities.sql"
     ],
     "fingerprint": "510790bf95d1"
+  },
+  {
+    "deployedAt": "2026-08-12T20:29:02.970Z",
+    "bundleHash": "DmhEWw7x",
+    "gitSha": "463656c9",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-12T20-28-32-935Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "c73f4034c193"
+  },
+  {
+    "deployedAt": "2026-08-12T23:09:26.028Z",
+    "bundleHash": "DmhEWw7x",
+    "gitSha": "9bdc33a5",
+    "snapshotKey": "guardrails/snapshots/snapshot-2026-08-12T23-08-56-950Z.json",
+    "migrationsApplied": [
+      "0000_chemical_dormammu.sql",
+      "0001_add_is_tlt_to_queue_items.sql",
+      "0002_add_last_observed_tech_to_holman_submissions.sql",
+      "0003_add_bulk_fix_runs.sql",
+      "0004_add_vin_license_plate_to_trucks.sql",
+      "0005_add_automation_detail_to_queue_items.sql",
+      "0006_add_offboarding_return_tokens.sql",
+      "0007_add_byov_intent_to_onboarding_hires.sql",
+      "0008_add_logical_entities.sql"
+    ],
+    "fingerprint": "d6c4de21cef5"
   }
 ]
