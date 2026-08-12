@@ -466,7 +466,13 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       const payload: Record<string, unknown> = { category: "rental_management", messages };
       if (confirm) payload.confirm = true; else payload.dryRun = true;
 
-      const host = process.env.COMMS_SEND_BASE_URL || "http://localhost:5000";
+      // Loopback to OUR OWN port, not a literal 5000. server/index.ts binds
+      // process.env.PORT and the deployment sets it, so a hardcoded 5000 would
+      // quietly connect to nothing in prod: every send would fail with
+      // ECONNREFUSED AFTER the tokens had already been minted, leaving the
+      // batch half-issued and nothing sent.
+      const selfPort = process.env.PORT || "5000";
+      const host = process.env.COMMS_SEND_BASE_URL || `http://localhost:${selfPort}`;
       const resp = await fetch(`${host}/api/fs/comms/api/send-batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json", "x-comms-api-key": key },

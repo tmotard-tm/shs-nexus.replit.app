@@ -481,6 +481,74 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Did the boot migration actually land?
+   *
+   * initFormsSchema() runs last inside initVrmSchema(), and that chain is
+   * attached with a non-fatal .catch(). An earlier failure means these objects
+   * silently do not exist and every submit 500s. Check this after every publish
+   * and BEFORE sending anything to a technician.
+   *
+   * Deliberately reachable with the internal-cron header as well as a session,
+   * so it can be checked from a script without a browser login.
+   */
+  router.get("/forms/schema-health", async (_req, res) => {
+    const REQUIRED: Array<[string, string[]]> = [
+      ["vrm_form_tokens", ["token", "form_type", "sent_at", "opened_at", "submitted_at"]],
+      ["vrm_rental_tech_survey",
+        ["rental_branch_city", "rental_branch_state", "no_rental_reason",
+         "techhub_still_using", "truck_mismatch"]],
+      ["vrm_rental_request",
+        ["request_no", "auto_decision", "auto_rule", "status", "is_byov",
+         "appointment_at", "shop_estimated_days", "etd_booked_at", "policy_complete"]],
+      ["vrm_byov_status", ["ldap", "status", "synced_at"]],
+      ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
+    ];
+    try {
+      const problems: string[] = [];
+      for (const [table, cols] of REQUIRED) {
+        const { rows } = await db.execute(sql`
+          SELECT column_name FROM information_schema.columns
+          WHERE table_schema = 'public' AND table_name = ${table}
+        `);
+        const have = new Set((rows as any[]).map((r) => r.column_name));
+        if (!have.size) {
+          problems.push(`TABLE MISSING: ${table}`);
+          continue;
+        }
+        for (const c of cols) {
+          if (!have.has(c)) problems.push(`${table}.${c} missing`);
+        }
+      }
+
+      // A mirror that exists but is empty is not usable: every request would
+      // route to REVIEW. Worth surfacing here rather than as a surprise.
+      let byovRows = 0;
+      try {
+        const { rows } = await db.execute(sql`SELECT count(*)::int AS n FROM vrm_byov_status`);
+        byovRows = Number((rows as any[])[0]?.n ?? 0);
+      } catch { /* covered by the table-missing check above */ }
+
+      const warnings: string[] = [];
+      if (!problems.length && byovRows === 0) {
+        warnings.push("vrm_byov_status is EMPTY — run POST /forms/rental-request/sync-byov "
+          + "or every rental request routes to REVIEW");
+      }
+
+      res.status(problems.length ? 503 : 200).json({
+        ok: problems.length === 0,
+        problems,
+        warnings,
+        byovMirrorRows: byovRows,
+        note: problems.length
+          ? "Boot migration did NOT fully land. Do not send anything. Restart the deployment and re-check."
+          : "Schema is in place.",
+      });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, problems: [String(e?.message || e)] });
+    }
+  });
+
   /** Record a churn-sync run. Posted by scripts/churn_sync.py. */
   router.post("/forms/etd-churn/record", async (req2, res) => {
     try {

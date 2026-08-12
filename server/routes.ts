@@ -783,7 +783,8 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // has no ETD credentials and no browser to mint an Azure B2C token), so
       // the Python runner pulls the queue and posts results back using the same
       // internal-cron convention. Scoped to these two paths only.
-      if ((req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
+      if ((req.method === "GET" && req.path === "/forms/schema-health")
+        || (req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
         || (req.method === "POST" && req.path === "/forms/etd-churn/record")
         || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
