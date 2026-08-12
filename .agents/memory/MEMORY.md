@@ -97,3 +97,6 @@
 - [VRM board read caching](vrm-board-read-caching.md) — heavy board reads serve-stale + bg rebuild; mutation busts ride the queue/PO-context invalidators one-way; cold concurrent builds can trip PG statement timeout.
 - [Publish liveness verification](publish-liveness-verification.md) — deploys/history.json entry ≠ promoted; /api route answering SPA HTML = route absent; boot-DDL tables missing in prod = module never booted there.
 - [Rental request/ETD pre-mortem debts](rental-request-etd-premortem.md) — open gaps: no booking claim/lease or state predicates, non-atomic token consume (dup bookings), over-broad cron bearer, prod-dead syncs, survey↛request seam.
+- [Drizzle sql-tag regex escaping](drizzle-sql-tag-regex-escaping.md) — `\D` inside a drizzle sql`` template cooks to literal `D`; write `\\D` or bind params; audit by running both variants against prod counts.
+- [Pooled advisory locks don't single-flight](pooled-advisory-lock-not-single-flight.md) — pool-issued pg_try_advisory_lock is re-entrant across requests sharing a connection + unlock leaks; use one dedicated client or row-level CAS.
+- [Rental survey send audit findings](rental-survey-send-audit.md) — no vendor filter, submitted≠blocked re-issue, send never re-checks book, LDAP-in-employee_id join drops, home_phone unread, prod schema-health = deploy-liveness oracle.
