@@ -15,3 +15,11 @@ description: "Inbox previews but empty threads" = thread/message table generatio
 - NEVER copy prod `fs_comms_send_queue` pending/claimed rows into dev without cancelling them — dev's dispatcher would re-send texts prod already owns (double-SMS to real techs).
 - After any table copy with explicit serial ids, `setval` the sequence to max(id) or later app inserts collide.
 - The comms integration test suite runs the legacy migrate; against a prod-copied messages table its inserts dedupe-conflict and it leaves a few EMPTY threads behind — benign test byproduct, not corruption.
+
+**Stranded rows also break JOIN/EXISTS features in dev (Aug 2026):** after an
+interrupted dev-from-prod refresh, ALL historical user-sent outbound rows can
+point at thread ids absent from fs_comms_threads — so any EXISTS-per-thread
+feature (e.g. the participant filter) legitimately returns 0 in dev while being
+correct. Verify such features with (1) a synthetic probe row attached to a real
+active thread via the live API + minted session, then delete it, and (2) the same
+JOIN as read-only SQL against PROD_DATABASE_URL for real-data counts.

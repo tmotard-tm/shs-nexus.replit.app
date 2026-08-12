@@ -479,3 +479,95 @@ test("category-scoped inbox preview and ordering use that category's newest mess
   assert.equal(rows[1].lastCategory, "rental_management");
   assert.equal(new Date(rows[1].lastMessageAt!).getTime(), rentalOlderAt.getTime());
 });
+
+// ── Multi-photo MMS semantics (review follow-up): attachments 2..n persist as
+// their own rows but must NOT re-bump the thread summary — preview stays the
+// sender's text, unread increments once per MMS, activity timestamp stable,
+// and a webhook retry of the same synthetic SIDs double-inserts nothing. ──────
+test("multi-photo MMS: extra attachments persist without re-bumping thread summary/unread", async () => {
+  const { appendAttachmentMessage } = await import("../server/fleet-comms/storage.js");
+
+  const [thread] = await fsDb
+    .select()
+    .from(commsThreads)
+    .where(sql`${commsThreads.ldap} LIKE 'ZZT524%'`)
+    .limit(1);
+  assert.ok(thread, "expected a ZZT524 test thread from earlier tests");
+
+  const primary = await appendMessage({
+    threadId: thread.id,
+    ldap: thread.ldap,
+    category: "general_fleet",
+    direction: "inbound",
+    contactRole: "tech",
+    body: "multi photo text ZZT524",
+    phone: "+15550001111",
+    status: "received",
+    twilioSid: "ZZT524-MMS-PRIMARY",
+    mediaUrl: "fs-comms-mms/zzt524-1.jpg",
+    mediaType: "image/jpeg",
+  });
+  assert.equal(primary.deduped, false);
+
+  const [afterPrimary] = await fsDb.select().from(commsThreads).where(eq(commsThreads.id, thread.id));
+  assert.equal(afterPrimary.lastMessagePreview, "multi photo text ZZT524");
+  const unreadAfterPrimary = afterPrimary.unreadCount;
+
+  for (let i = 1; i <= 2; i++) {
+    const r = await appendAttachmentMessage({
+      threadId: thread.id,
+      ldap: thread.ldap,
+      category: "general_fleet",
+      direction: "inbound",
+      contactRole: "tech",
+      body: "",
+      phone: "+15550001111",
+      status: "received",
+      twilioSid: `ZZT524-MMS-PRIMARY:m${i}`,
+      mediaUrl: `fs-comms-mms/zzt524-${i + 1}.jpg`,
+      mediaType: "image/jpeg",
+    });
+    assert.equal(r.deduped, false);
+  }
+
+  const [afterExtras] = await fsDb.select().from(commsThreads).where(eq(commsThreads.id, thread.id));
+  assert.equal(
+    afterExtras.lastMessagePreview,
+    "multi photo text ZZT524",
+    "extra attachments must not overwrite the text preview with '(image)'",
+  );
+  assert.equal(
+    afterExtras.unreadCount,
+    unreadAfterPrimary,
+    "unread bumps once per received MMS, not once per photo",
+  );
+  assert.equal(
+    String(afterExtras.lastMessageAt),
+    String(afterPrimary.lastMessageAt),
+    "extra attachments must not advance the thread activity timestamp",
+  );
+
+  // Webhook retry: identical synthetic SID dedupes instead of double-inserting.
+  const retry = await appendAttachmentMessage({
+    threadId: thread.id,
+    ldap: thread.ldap,
+    category: "general_fleet",
+    direction: "inbound",
+    contactRole: "tech",
+    body: "",
+    phone: "+15550001111",
+    status: "received",
+    twilioSid: "ZZT524-MMS-PRIMARY:m1",
+    mediaUrl: "fs-comms-mms/zzt524-2.jpg",
+    mediaType: "image/jpeg",
+  });
+  assert.equal(retry.deduped, true);
+
+  const rows = await fsDb
+    .select()
+    .from(commsMessages)
+    .where(sql`${commsMessages.twilioSid} LIKE 'ZZT524-MMS-PRIMARY%'`);
+  assert.equal(rows.length, 3, "primary + exactly two attachment rows");
+
+  await fsDb.delete(commsMessages).where(sql`${commsMessages.twilioSid} LIKE 'ZZT524-MMS-PRIMARY%'`);
+});

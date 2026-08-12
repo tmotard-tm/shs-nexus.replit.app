@@ -19,6 +19,7 @@ import {
   getOrCreateTechThread,
   getOrCreateUnmatchedThread,
   appendMessage,
+  appendAttachmentMessage,
   setOptOut,
   isOptedOut,
   lastOutboundCategoryWithin,
@@ -215,15 +216,17 @@ export async function handleInbound(payload: InboundPayload): Promise<InboundRes
   });
 
   // Extra attachments: one row each, deduped independently via a synthetic SID
-  // suffix (`<MessageSid>:m<i>`) under the partial unique index — a webhook
-  // retry can't double-insert them even if a first pass crashed mid-way. A
-  // failed download skips that one attachment, never the whole message.
+  // suffix (`<MessageSid>:m<i>`) — a webhook retry can't double-insert them
+  // even if a first pass crashed mid-way, and a failed download skips that one
+  // attachment, never the whole message. appendAttachmentMessage deliberately
+  // skips the thread-summary refresh: the primary row above already set the
+  // preview (the sender's text) and bumped unread ONCE for the whole MMS.
   for (let i = 1; i < mediaItems.length; i++) {
     try {
       const extra = mediaItems[i];
       const key = await downloadTwilioMediaToStorage(extra.url, extra.contentType);
       if (!key) continue;
-      await appendMessage({
+      await appendAttachmentMessage({
         threadId,
         ldap,
         category,

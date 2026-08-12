@@ -955,6 +955,31 @@ export default function FleetCommunications() {
                   </SelectContent>
                 </Select>
               </div>
+              {/* Participant filter: scope the inbox to threads a given Nexus
+                  user has sent in — "My threads" pins the signed-in user. */}
+              <Select
+                value={participantFilter || "all"}
+                onValueChange={(v) => setParticipantFilter(v === "all" ? "" : v)}
+              >
+                <SelectTrigger className="h-8 text-sm w-full" data-testid="select-participant-filter">
+                  <SelectValue placeholder="Sent by: everyone" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Sent by: everyone</SelectItem>
+                  {authUser?.id && (
+                    <SelectItem value={authUser.id} data-testid="option-my-threads">
+                      My threads{authUser.username ? ` — ${authUser.username}` : ""}
+                    </SelectItem>
+                  )}
+                  {participantOptions
+                    .filter((p) => p.id !== authUser?.id)
+                    .map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
               <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   onClick={() => setInRentalOnly((v) => !v)}
@@ -1278,7 +1303,7 @@ export default function FleetCommunications() {
                           </Select>
                           {m.contactRole === "manager" && <Badge variant="outline" className="text-[10px] px-1 py-0">lead</Badge>}
                         </div>
-                        {m.mediaUrl && m.mediaType?.startsWith("image/") && (
+                        {m.mediaUrl && isImageMedia(m.mediaUrl, m.mediaType) && (
                           <img
                             src={resolveMediaUrl(m.mediaUrl)}
                             alt="attachment"
@@ -1287,6 +1312,19 @@ export default function FleetCommunications() {
                             title="Click to view full size"
                             data-testid={`img-message-${m.id}`}
                           />
+                        )}
+                        {m.mediaUrl && !isImageMedia(m.mediaUrl, m.mediaType) && (
+                          // Non-image attachment (PDF, vcard, …): persisted the
+                          // same way, so surface it instead of hiding it.
+                          <a
+                            href={resolveMediaUrl(m.mediaUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="flex items-center gap-1 text-xs underline underline-offset-2 opacity-90 hover:opacity-100 mb-1"
+                            data-testid={`link-attachment-${m.id}`}
+                          >
+                            <ExternalLink className="w-3 h-3" /> View attachment
+                          </a>
                         )}
                         {m.body && <p className="whitespace-pre-wrap break-words">{m.body}</p>}
                         <div className="flex items-center gap-2 mt-1 text-[10px] opacity-70">

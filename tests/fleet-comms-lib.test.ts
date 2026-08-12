@@ -16,8 +16,30 @@ import {
   COMMS_API_SOURCES,
   resolveCommsApiSource,
   apiDefaultCategoryFor,
+  mediaTypeFromUrl,
 } from "../server/fleet-comms/lib.js";
 import { COMMS_CATEGORY_LABELS } from "../shared/fleet-scope-schema.js";
+
+test("mediaTypeFromUrl maps upload-key extensions to image MIME types (sender-side render gate)", () => {
+  assert.equal(
+    mediaTypeFromUrl("https://x.repl.co/api/fs/comms/public-media/fs-comms-outbound/123-abc.jpg"),
+    "image/jpeg",
+  );
+  assert.equal(mediaTypeFromUrl("fs-comms-outbound/123-abc.jpeg"), "image/jpeg");
+  assert.equal(mediaTypeFromUrl("fs-comms-mms/x.PNG"), "image/png");
+  assert.equal(mediaTypeFromUrl("a/b.gif"), "image/gif");
+  assert.equal(mediaTypeFromUrl("a/b.webp"), "image/webp");
+  assert.equal(mediaTypeFromUrl("a/b.heic"), "image/heic");
+});
+
+test("mediaTypeFromUrl ignores querystrings/fragments and returns null for unknowns", () => {
+  assert.equal(mediaTypeFromUrl("https://cdn/x/photo.jpg?sig=abc#frag"), "image/jpeg");
+  assert.equal(mediaTypeFromUrl("https://cdn/x/file.pdf"), null);
+  assert.equal(mediaTypeFromUrl("https://cdn/x/noext"), null);
+  assert.equal(mediaTypeFromUrl(""), null);
+  assert.equal(mediaTypeFromUrl(null), null);
+  assert.equal(mediaTypeFromUrl(undefined), null);
+});
 import { resolveComposerCategory } from "../client/src/lib/comms-category.js";
 
 /* ──────────────────────────────────────────────────────────────────────────

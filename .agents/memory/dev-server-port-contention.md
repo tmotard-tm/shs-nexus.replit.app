@@ -13,3 +13,10 @@ description: Why "Start application" fails with DIDNT_OPEN_A_PORT / EADDRINUSE e
 - Silent process death with zero error output + low PIDs on next check = container rebooted (`cat /proc/uptime`), not a code crash. No OOM was involved (check `/sys/fs/cgroup/memory.events`).
 - `pkill -f` self-kill trap: the pattern matches your own bash command line; use a character-class pattern like `'chrome-linu[x]/'`.
 - Startup takes 1–3 min pre-listen under CPU contention (tsx compile of the huge server graph); listen itself is fast and comes early per autoscale-listen-first.
+
+**pkill footgun (Aug 2026):** `pkill -9 -f "tsx server/index.ts"` matched the
+*calling shell's own command line* (the pattern string appears in the bash -c args)
+and killed the shell mid-script — while the real holder (cmdline is
+`node --require .../tsx/dist/preflight.cjs ... server/index.ts`, no literal
+"tsx server/index.ts") survived. Find the PID via `ps aux | grep server/index.ts`
+and `kill -9 <pid>` directly; verify with a curl probe (fuser/ss absent here).

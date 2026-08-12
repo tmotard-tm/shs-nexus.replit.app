@@ -295,15 +295,44 @@ export interface AppendMessageInput {
 export async function appendMessage(
   input: AppendMessageInput,
 ): Promise<{ message: CommsMessage; deduped: boolean }> {
-  if (input.twilioSid) {
-    const dup = await fsDb
-      .select()
-      .from(commsMessages)
-      .where(eq(commsMessages.twilioSid, input.twilioSid))
-      .limit(1);
-    if (dup[0]) return { message: dup[0], deduped: true };
-  }
+  const dup = await findMessageBySid(input.twilioSid);
+  if (dup) return { message: dup, deduped: true };
 
+  const message = await insertMessageRow(input);
+  await refreshThreadSummary(input.threadId, message, input);
+  return { message, deduped: false };
+}
+
+/**
+ * Insert an EXTRA-attachment row (SID-deduped) WITHOUT touching the thread
+ * summary. Attachments 2..n of a multi-photo MMS ride on the same received
+ * message: the primary row already advanced preview/lastMessageAt and bumped
+ * unread exactly once — running the summary again per photo would overwrite
+ * the text preview with "(image)" and inflate unreadCount per attachment.
+ */
+export async function appendAttachmentMessage(
+  input: AppendMessageInput,
+): Promise<{ message: CommsMessage; deduped: boolean }> {
+  const dup = await findMessageBySid(input.twilioSid);
+  if (dup) return { message: dup, deduped: true };
+
+  const message = await insertMessageRow(input);
+  return { message, deduped: false };
+}
+
+async function findMessageBySid(
+  twilioSid: string | null | undefined,
+): Promise<CommsMessage | null> {
+  if (!twilioSid) return null;
+  const dup = await fsDb
+    .select()
+    .from(commsMessages)
+    .where(eq(commsMessages.twilioSid, twilioSid))
+    .limit(1);
+  return dup[0] ?? null;
+}
+
+async function insertMessageRow(input: AppendMessageInput): Promise<CommsMessage> {
   const phoneDigits = normalizeDigits(input.phone);
   const [message] = await fsDb
     .insert(commsMessages)
@@ -326,9 +355,7 @@ export async function appendMessage(
       errorMessage: input.errorMessage ?? null,
     })
     .returning();
-
-  await refreshThreadSummary(input.threadId, message, input);
-  return { message, deduped: false };
+  return message;
 }
 
 async function refreshThreadSummary(
