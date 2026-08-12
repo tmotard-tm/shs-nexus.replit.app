@@ -511,12 +511,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           url,
           body:
             `${first}, this is Sears Fleet. Thank you for everything you do out `
-            + `there. We are moving every technician rental to direct billing with `
-            + `Enterprise: Sears pays Enterprise directly instead of going through a `
-            + `third party. It costs you nothing and does not change the vehicle you `
-            + `drive. We need one minute from you today so your rental transfers `
-            + `correctly: ${url} This form is how we confirm the rental is `
-            + `yours, and without it we cannot move yours over. Your LDAP is your Tech `
+            + `there. We are moving every technician rental to direct billing: Sears `
+            + `will pay Enterprise directly instead of going through a third party, so `
+            + `you will no longer have to call ARI to get a rental. This is not a `
+            + `vehicle swap. You keep the vehicle you are driving and it costs you `
+            + `nothing. We need one minute from you today: ${url} Without this `
+            + `form we cannot move your rental over correctly. Your LDAP is your Tech `
             + `Hub login, under Settings. Already out of a rental? Tell us there and `
             + `you are done. Please reply only if the form will not work. Thank you.`,
         });
@@ -644,12 +644,12 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           category: "rental_management",
           body:
             `${first}, this is Sears Fleet. Thank you for everything you do out `
-            + `there. We are moving every technician rental to direct billing with `
-            + `Enterprise: Sears pays Enterprise directly instead of going through a `
-            + `third party. It costs you nothing and does not change the vehicle you `
-            + `drive. We need one minute from you today so your rental transfers `
-            + `correctly: ${base}/rental-survey/${t.token} This form is how we confirm the rental is `
-            + `yours, and without it we cannot move yours over. Your LDAP is your Tech `
+            + `there. We are moving every technician rental to direct billing: Sears `
+            + `will pay Enterprise directly instead of going through a third party, so `
+            + `you will no longer have to call ARI to get a rental. This is not a `
+            + `vehicle swap. You keep the vehicle you are driving and it costs you `
+            + `nothing. We need one minute from you today: ${base}/rental-survey/${t.token} Without this `
+            + `form we cannot move your rental over correctly. Your LDAP is your Tech `
             + `Hub login, under Settings. Already out of a rental? Tell us there and `
             + `you are done. Please reply only if the form will not work. Thank you.`,
         };
