@@ -23,7 +23,8 @@ import { OWNER_ROSTER } from "./annex-a-routing";
 import { MAIN_STATUSES, SUB_STATUSES } from "@shared/fleet-scope-schema";
 import { FS_MAIN_SCHEDULING, FS_SUB_TO_BE_SCHEDULED, READY_REPLACEABLE_MAIN_STATUSES } from "../../luca-writeback/mapper";
 import { runReadyConflictHeal, maybeAutoHealReadyConflicts } from "./ready-conflict-heal";
-import { readLucaActivity, lucaActivityHealth, lucaConfigSummary } from "./luca-activity";
+import { readLucaActivity, lucaActivityHealth, lucaConfigSummary, logLucaActivity } from "./luca-activity";
+import { evaluateShopContactUpdate } from "./shop-contact-intake";
 import { spawnRentalRequests, rentalRequestLinksFor } from "./scrape-service";
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
@@ -604,6 +605,121 @@ export function registerRentalOperationsRoutes(router: Router): void {
     } catch (e: any) {
       console.error("[VRM/RentalOps] luca-rental-list failed:", e?.message || e);
       res.status(500).json({ error: e?.message || "luca-rental-list failed" });
+    }
+  });
+
+  // POST a LUCA-resolved shop contact back into VRM (Tyler 2026-08-12) — the
+  // inbound half of the shop-contact loop. LUCA's resolve_shop_contact finds a
+  // number VRM's pickers couldn't (24 no-dialable-phone rentals in the 8/12
+  // briefing); this stores it under the SAME semantics as an operator edit so
+  // the next luca-rental-list pull returns it — both sides synced from one
+  // column. Same agent-token guard as the two LUCA GETs (server/routes.ts).
+  //   body { truck, shop_name, phone, external_id? } — accepted contacts are
+  //   ALWAYS stored locked (episode-scoped expiry); see applyLucaShopContact.
+  // Decision table lives in shop-contact-intake.ts (pure, unit-tested):
+  //   vendor mismatch → 409 with the current pick (never a silent overwrite),
+  //   operator's locked number → kept (LUCA never overwrites a human),
+  //   same number → idempotent no-op (retries can't 409),
+  //   no shop of record (BYOV / no repair PO) → name+phone stored together.
+  router.post("/rental-operations/luca/shop-contact", async (req, res) => {
+    const b = req.body ?? {};
+    const externalId = b.external_id != null ? String(b.external_id).slice(0, 80) : null;
+    const actor = `luca:${externalId ?? "resolve_shop_contact"}`;
+    try {
+      const { toDisplayNumber } = await import("../../vehicle-number-utils");
+      const truckNo = toDisplayNumber(String(b.truck ?? ""));
+      if (!truckNo) return res.status(400).json({ error: "valid truck number required" });
+
+      // Known-truck gate: an active rental case OR an existing portal-hist row
+      // (redirect targets get scraped too). Keeps a misbehaving caller from
+      // materializing junk rows for trucks VRM has never heard of.
+      const known: any = await db.execute(sql`
+        SELECT
+          EXISTS(SELECT 1 FROM vrm_rental_operations_cases WHERE case_key = ${truckNo} AND present_in_latest = true) AS active_case,
+          EXISTS(SELECT 1 FROM vrm_holman_portal_hist WHERE truck_no = ${truckNo}) AS has_hist,
+          ph.shop_phone, ph.shop_phone_locked, ph.shop_phone_source
+        FROM (SELECT 1) one
+        LEFT JOIN vrm_holman_portal_hist ph ON ph.truck_no = ${truckNo}`);
+      const k = (known.rows as any[])[0] ?? {};
+      if (k.active_case !== true && k.has_hist !== true) {
+        await logLucaActivity({ direction: "inbound", eventType: "shop_contact_update", status: "refused", truckNumber: truckNo, actor, summary: `shop-contact refused: unknown truck ${truckNo}`, detail: { shop_name: b.shop_name ?? null } });
+        return res.status(404).json({ error: `truck ${truckNo} is not an active rental case and has no repair history in VRM` });
+      }
+
+      const canon = String(truckNo).replace(/\D/g, "").replace(/^0+/, "");
+      const ctx = (await loadQueuePoContext()).get(canon) ?? null;
+      const decision = evaluateShopContactUpdate(
+        { shopName: b.shop_name, phone: b.phone },
+        {
+          pickName: ctx?.shopName ?? null,
+          existingPhone: k.shop_phone ?? null,
+          existingLocked: k.shop_phone_locked === true,
+          existingSource: k.shop_phone_source ?? null,
+        },
+      );
+
+      if (decision.action === "invalid_name" || decision.action === "invalid_phone") {
+        return res.status(400).json({ error: decision.reason, action: decision.action });
+      }
+      if (decision.action === "vendor_mismatch") {
+        await logLucaActivity({ direction: "inbound", eventType: "shop_contact_update", status: "refused", truckNumber: truckNo, actor, summary: `shop-contact refused: '${decision.proposedName}' does not match pick '${decision.pickName}' on ${truckNo}`, detail: { proposed_name: decision.proposedName, pick_name: decision.pickName } });
+        return res.status(409).json({
+          error: `shop name does not match VRM's shop of record ('${decision.pickName}') — re-resolve, or have an operator override via the queue panel`,
+          action: decision.action, current_shop: decision.pickName,
+        });
+      }
+      if (decision.action === "unchanged" || decision.action === "kept_manual_lock") {
+        await logLucaActivity({ direction: "inbound", eventType: "shop_contact_update", status: "skipped", truckNumber: truckNo, actor, summary: `shop-contact ${decision.action} on ${truckNo}`, detail: { phone: decision.phone ?? null } });
+        return res.json({ ok: true, truck: truckNo, action: decision.action, phone: decision.phone ?? null });
+      }
+
+      // apply / apply_with_name — ONE atomic guarded write. The decision above
+      // ran on a snapshot; applyLucaShopContact re-checks the manual-lock and
+      // name-override predicates UNDER the row lock so an operator edit landing
+      // in the gap is never clobbered (code-review 2026-08-12). Accepted
+      // contacts are always stored locked — an unlocked luca number is
+      // invisible to the feed's precedence chain, which would break the sync
+      // contract; locks expire episode-scoped like operator edits.
+      const { applyLucaShopContact } = await import("./scrape-service");
+      const newName = decision.action === "apply_with_name" ? decision.shopName : null;
+      const saved = await applyLucaShopContact({ truck: truckNo, phone: decision.phone, shopName: newName, actor });
+
+      if (!saved.applied) {
+        // Lost the race to a human — report it exactly like the snapshot-time
+        // guards would have.
+        await logLucaActivity({ direction: "inbound", eventType: "shop_contact_update", status: "skipped", truckNumber: truckNo, actor, summary: `shop-contact ${saved.reason} (concurrent operator edit) on ${truckNo}`, detail: { reason: saved.reason, current_phone: saved.currentPhone, current_name: saved.currentName } });
+        if (saved.reason === "name_override_conflict") {
+          return res.status(409).json({ error: `an operator set the shop of record to '${saved.currentName}' — re-resolve against it`, action: "vendor_mismatch", current_shop: saved.currentName });
+        }
+        return res.json({ ok: true, truck: truckNo, action: "kept_manual_lock", phone: saved.currentPhone });
+      }
+
+      // Durable audit trail — same table/convention as the operator edits.
+      try {
+        const caseRow: any = await db.execute(sql`SELECT id FROM vrm_rental_operations_cases WHERE case_key = ${truckNo} LIMIT 1`);
+        const caseId = (caseRow.rows[0] as any)?.id ?? null;
+        if (newName) {
+          await db.execute(sql`
+            INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+            VALUES (${truckNo}, ${caseId}, 'shop_name_edit', ${truckNo}, ${actor},
+                    ${JSON.stringify({ shop_name: newName, previous_name: saved.previousName, source: "luca" })}::jsonb)`);
+        }
+        await db.execute(sql`
+          INSERT INTO vrm_rental_operation_actions (case_key, case_id, action_type, target_truck, actor, payload)
+          VALUES (${truckNo}, ${caseId}, 'shop_phone_edit', ${truckNo}, ${actor},
+                  ${JSON.stringify({ phone: decision.phone, locked: true, previous_phone: saved.previousPhone, previous_locked: saved.previousLocked, source: "luca", external_id: externalId })}::jsonb)`);
+      } catch (ae: any) {
+        console.warn("[VRM/RentalOps] luca shop-contact audit write failed (non-fatal):", ae?.message || ae);
+      }
+
+      await logLucaActivity({ direction: "inbound", eventType: "shop_contact_update", status: "ok", truckNumber: truckNo, actor, summary: `LUCA resolved shop contact for ${truckNo}: ${newName ? `${newName} · ` : ""}${decision.phone}`, detail: { action: decision.action, phone: decision.phone, locked: true, shop_name: newName, external_id: externalId } });
+      invalidateQueuePoContextCache("luca-shop-contact");
+      invalidateTodaysQueueCache("luca-shop-contact");
+      console.log(`[VRM/RentalOps] luca shop-contact ${truckNo} -> ${decision.phone}${newName ? ` (${newName})` : ""} [${decision.action}, LOCKED] (by ${actor})`);
+      res.json({ ok: true, truck: truckNo, action: decision.action, phone: decision.phone, shop_name: newName ?? ctx?.shopName ?? null, locked: true });
+    } catch (e: any) {
+      console.error("[VRM/RentalOps] luca shop-contact failed:", e?.message || e);
+      res.status(500).json({ error: e?.message || "luca shop-contact failed" });
     }
   });
 

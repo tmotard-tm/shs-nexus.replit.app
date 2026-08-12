@@ -479,8 +479,9 @@ function requireAuthOrRepairTrackerApiKey(req: any, res: any, next: any): any {
 
 // Auth middleware for the LUCA feed endpoints (server-to-server): a valid
 // session OR a Bearer/x-api-key matching VRM_LUCA_FEED_KEY (falls back to the
-// repair-tracker key so no new secret is strictly required). Scoped to the two
-// GET /api/vrm/rental-operations/luca-* endpoints only.
+// repair-tracker key so no new secret is strictly required). Scoped to the
+// GET /api/vrm/rental-operations/luca-* + po-history feeds and the ONE
+// inbound write, POST /rental-operations/luca/shop-contact (2026-08-12).
 function requireAuthOrLucaFeedKey(req: any, res: any, next: any): any {
   const expected = process.env.VRM_LUCA_FEED_KEY || process.env.VRM_REPAIR_TRACKER_API_KEY;
   const authHeader = req.headers.authorization;
@@ -770,6 +771,13 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
         req.path === "/rental-operations/luca-feed" ||
         req.path.startsWith("/rental-operations/po-history/")
       )) {
+        return requireAuthOrLucaFeedKey(req, res, next);
+      }
+      // LUCA shop-contact intake (Tyler 2026-08-12): the ONE write LUCA may
+      // push — a resolved shop phone for a rental VRM couldn't source a number
+      // for. Same agent token as the feeds; the route itself enforces the
+      // vendor-match / manual-lock / known-truck guards.
+      if (req.method === "POST" && req.path === "/rental-operations/luca/shop-contact") {
         return requireAuthOrLucaFeedKey(req, res, next);
       }
       // Fleet-Dispatcher internal-cron trigger for the Rental Ops ingest +

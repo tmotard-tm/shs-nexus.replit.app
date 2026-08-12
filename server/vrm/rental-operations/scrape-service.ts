@@ -38,7 +38,7 @@ import { classifyPoVendor, isNeverShopVendor, type PoClassLine } from "./vendor-
 import { maybeExtractShopFromComments } from "./shop-comment-extract";
 // THE reconciliation, imported — never re-typed here. See the note above
 // findScrapeTargets for what the previous hand-copy cost.
-import { poEffectiveCte, SHOP_PICK_CTE } from "./read-repository";
+import { poEffectiveCte, SHOP_PICK_CTE, cleanPhone } from "./read-repository";
 
 const BATCH = 8;                 // vehicles per worker invocation (Chromium is sequential)
 const WORKER_TIMEOUT_MS = 300_000;
@@ -818,6 +818,79 @@ export async function setShopName(opts: {
     previousName: prev?.shop_name_override ?? null,
     created: !prev,
   };
+}
+
+/**
+ * Atomic LUCA shop-contact writer (POST /luca/shop-contact). The route's
+ * decision table runs on a snapshot read, so an operator could save a locked
+ * manual number in the gap between that read and the write — and the central
+ * guarantee is "LUCA never overwrites a human". This function closes the race:
+ * it takes the portal-hist row lock (FOR UPDATE) and RE-CHECKS the guard
+ * predicates under that lock before writing, all in one transaction (name
+ * override + phone land together or not at all).
+ *
+ * Accepted LUCA contacts are ALWAYS stored locked (code-review 2026-08-12):
+ * an unlocked luca-source number is invisible to the feed's precedence chain
+ * (it only surfaces via the portal vendor-name match, which an override name
+ * defeats) — persisting a contact the feed won't return breaks the sync
+ * contract. Locks stay episode-scoped via expireStaleShopPhoneLocks.
+ */
+export async function applyLucaShopContact(opts: {
+  truck: string;
+  /** Already cleaned 10-digit phone (route runs cleanPhone before calling). */
+  phone: string;
+  /** Set ONLY for the no-pick case: stores the name override alongside. */
+  shopName?: string | null;
+  actor: string;
+}): Promise<
+  | { applied: true; previousPhone: string | null; previousLocked: boolean; previousName: string | null }
+  | { applied: false; reason: "manual_lock" | "name_override_conflict"; currentPhone: string | null; currentName: string | null }
+> {
+  const truckNo = toDisplayNumber(opts.truck);
+  if (!truckNo) throw new Error(`invalid truck number: ${JSON.stringify(opts.truck)}`);
+  return await db.transaction(async (tx) => {
+    // Materialize the row so FOR UPDATE has something to lock (first contact
+    // for a never-scraped truck).
+    await tx.execute(sql`
+      INSERT INTO vrm_holman_portal_hist (truck_no, hist, source, scraped_at, po_count, msg_count)
+      VALUES (${truckNo}, '[]'::jsonb, 'manual', NULL, 0, 0)
+      ON CONFLICT (truck_no) DO NOTHING`);
+    const cur = await tx.execute(sql`
+      SELECT shop_phone, shop_phone_locked, shop_phone_source, shop_name_override
+      FROM vrm_holman_portal_hist WHERE truck_no = ${truckNo} FOR UPDATE`);
+    const c = (cur.rows as any[])[0] ?? {};
+    const storedPhone = cleanPhone(c.shop_phone);
+    // Re-check under the row lock: a human's locked number (any non-luca
+    // source, incl. legacy null stamps) never falls to LUCA — unless LUCA is
+    // re-sending the very same digits (idempotent retries stay 200).
+    if (c.shop_phone_locked === true && c.shop_phone_source !== "luca" && storedPhone !== opts.phone) {
+      return { applied: false as const, reason: "manual_lock" as const, currentPhone: storedPhone, currentName: c.shop_name_override ?? null };
+    }
+    if (opts.shopName != null) {
+      // No-pick path: if an operator's name override appeared in the gap, the
+      // shop of record changed under us — abort so the route re-resolves
+      // instead of silently renaming the operator's shop.
+      const existingOverride = c.shop_name_override ? String(c.shop_name_override).trim() : null;
+      if (existingOverride && existingOverride.toUpperCase() !== opts.shopName.toUpperCase()) {
+        return { applied: false as const, reason: "name_override_conflict" as const, currentPhone: storedPhone, currentName: existingOverride };
+      }
+      await tx.execute(sql`
+        UPDATE vrm_holman_portal_hist
+        SET shop_name_override = ${opts.shopName}, shop_name_override_by = ${opts.actor}, shop_name_override_at = NOW()
+        WHERE truck_no = ${truckNo}`);
+    }
+    await tx.execute(sql`
+      UPDATE vrm_holman_portal_hist
+      SET shop_phone = ${opts.phone}, shop_phone_locked = true, shop_phone_source = 'luca',
+          shop_phone_edited_by = ${opts.actor}, shop_phone_edited_at = NOW()
+      WHERE truck_no = ${truckNo}`);
+    return {
+      applied: true as const,
+      previousPhone: storedPhone,
+      previousLocked: c.shop_phone_locked === true,
+      previousName: c.shop_name_override ?? null,
+    };
+  });
 }
 
 // ── Lock expiry ─────────────────────────────────────────────────────────────

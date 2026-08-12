@@ -1510,8 +1510,10 @@ export async function getLucaFeed(): Promise<any> {
   };
 }
 
-/** Normalized vendor key for cross-source identity checks (portal vs ETL). */
-function vendorKey(s: string | null | undefined): string {
+/** Normalized vendor key for cross-source identity checks (portal vs ETL).
+ * Exported for the LUCA shop-contact intake — the WRITE side must apply the
+ * same wrong-vendor protection the read side does (do not fork it). */
+export function vendorKey(s: string | null | undefined): string {
   return String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 /** 10-digit US phone or null. Rejects the portal's placeholder junk (5555555555,
@@ -1679,6 +1681,10 @@ export async function getLucaRentalList(): Promise<any> {
     // match outranks scrapes; a zip/city match backstops a missing/rejected
     // scrape phone (same chain as buildQueuePoContext — keep them in sync).
     let shopPhone: string | null = null;
+    // Provenance for the number LUCA is about to trust (additive key, 2026-08-12):
+    // 'manual' operator edit · 'luca' LUCA's own resolved contact pushed back via
+    // /luca/shop-contact · 'pepboys_directory' · 'po_scrape' · 'portal_scrape'.
+    let shopPhoneSource: string | null = null;
     if (shopName) {
       const manualPhone = (r.portal_phone_locked === true || r.portal_phone_source === "manual")
         ? cleanPhone(r.portal_shop_phone) : null;
@@ -1686,16 +1692,17 @@ export async function getLucaRentalList(): Promise<any> {
       const poPhone = cleanPhone(r.po_phone);
       if (manualPhone) {
         shopPhone = manualPhone; phoneManual++;
+        shopPhoneSource = r.portal_phone_source === "luca" ? "luca" : "manual";
       } else if (pbPhone && r.pb_matched_by === "store") {
-        shopPhone = pbPhone; phoneFromDirectory++;
+        shopPhone = pbPhone; phoneFromDirectory++; shopPhoneSource = "pepboys_directory";
       } else if (poPhone && vendorKey(r.po_phone_vendor) === vendorKey(shopName)) {
-        shopPhone = poPhone; phoneFromPo++;
+        shopPhone = poPhone; phoneFromPo++; shopPhoneSource = "po_scrape";
       } else if (pbPhone) {
-        shopPhone = pbPhone; phoneFromDirectory++;
+        shopPhone = pbPhone; phoneFromDirectory++; shopPhoneSource = "pepboys_directory";
       } else {
         const portalPhone = cleanPhone(r.portal_shop_phone);
         if (portalPhone && vendorKey(r.portal_shop_name) === vendorKey(shopName)) {
-          shopPhone = portalPhone; phoneFromPortal++;
+          shopPhone = portalPhone; phoneFromPortal++; shopPhoneSource = "portal_scrape";
         } else if (r.po_phone || r.portal_shop_phone) {
           phoneRejected++;   // a phone existed but belonged to a different vendor
         }
@@ -1726,6 +1733,12 @@ export async function getLucaRentalList(): Promise<any> {
     //    the truck has no qualifying repair PO. NEVER a parts/tow/rental vendor.
     SHOP_NAME: shopName,
     SHOP_PHONE: shopPhone,
+    // Additive provenance keys (LUCA ignores unknown keys until it consumes
+    // them): which picker produced SHOP_PHONE, and whether an operator/LUCA
+    // lock pins it. Lets LUCA rank verified numbers above scrapes when it
+    // creates shop contacts on its side.
+    SHOP_PHONE_SOURCE: shopPhone ? shopPhoneSource : null,
+    SHOP_PHONE_LOCKED: shopPhone ? r.portal_phone_locked === true : null,
     SHOP_ADDRESS: shopName ? composeAddress(r) : null,
     SHOP_PO_NUMBER: shopName ? (r.shop_po_number ?? null) : null,
     SHOP_PO_DATE: shopName ? (r.shop_po_date ?? null) : null,
