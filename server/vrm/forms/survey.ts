@@ -470,8 +470,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             + `Please complete this exact form now, it takes under a minute: ${url} `
             + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
             + `Say so there and you are done. Please do not reply with questions, the `
-            + `link is the only step. Once your reservation is made we will text you `
-            + `next steps: stop by your Enterprise branch, sign one new form, and in `
+            + `link is the only step. Once your reservation is made WE WILL TEXT YOU `
+            + `WITH NEXT STEPS: stop by your Enterprise branch, sign one new form, and in `
             + `most cases keep the same vehicle. A block will be added to your route `
             + `for it, so stand by.`,
         });
@@ -591,8 +591,8 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
             + `Please complete this exact form now, it takes under a minute: ${base}/rental-survey/${t.token} `
             + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
             + `Say so there and you are done. Please do not reply with questions, the `
-            + `link is the only step. Once your reservation is made we will text you `
-            + `next steps: stop by your Enterprise branch, sign one new form, and in `
+            + `link is the only step. Once your reservation is made WE WILL TEXT YOU `
+            + `WITH NEXT STEPS: stop by your Enterprise branch, sign one new form, and in `
             + `most cases keep the same vehicle. A block will be added to your route `
             + `for it, so stand by.`,
         };
