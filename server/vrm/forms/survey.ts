@@ -181,9 +181,12 @@ export function registerRentalSurveyPublicRoutes(app: Express): void {
       } else if (hasRental) {
         rentalCompany = s(b.rentalCompany, 40);
         if (!rentalCompany || !RENTAL_COMPANIES.has(rentalCompany)) missing.push("the rental company");
-        if (!s(b.rentalBranchCity)) missing.push("the rental branch city");
-        if (!s(b.rentalBranchState, 2)) missing.push("the rental branch state");
-        if (!s(b.assignedTruckNumber, 30)) missing.push("your assigned truck number");
+        // Branch city/state and the assigned truck number are recorded but NOT
+        // required, and the client stopped asking for them too -- the two must
+        // agree or the form accepts an answer the server then rejects with a
+        // 400 the fields are no longer marked for. We already hold the branch
+        // from the rental feed, and a technician whose van was totalled may
+        // have no current truck number to give.
         vanStatus = s(b.vanStatus, 40);
         if (!vanStatus || !VAN_STATUS.has(vanStatus)) missing.push("what is happening with your van");
         if (vanStatus === "in_shop") {
