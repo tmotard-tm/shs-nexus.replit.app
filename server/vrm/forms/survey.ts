@@ -403,6 +403,95 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
   });
 
   /**
+   * Send ONE chunk of survey texts. Caller loops.
+   *
+   * Chunked at 20 by hard-won experience: the comms endpoint sends
+   * sequentially and the deployment kills the request at 30s. A 192-message
+   * batch previously returned HTTP 500 after delivering 64 real messages, so
+   * it half-sent. Twenty completes in roughly ten seconds.
+   *
+   * Requires `confirm: true`. COMMS_SEND_LIVE is already true in this
+   * environment, so this flag is the only thing between a click and real text
+   * messages going to real technicians.
+   */
+  router.post("/forms/rental-survey/send-chunk", async (req, res) => {
+    try {
+      const confirm = req.body?.confirm === true;
+      const tokens: string[] = Array.isArray(req.body?.tokens) ? req.body.tokens.slice(0, 20) : [];
+      if (!tokens.length) return res.status(400).json({ message: "No tokens supplied." });
+
+      const key = process.env.COMMS_SEND_API_KEY;
+      if (!key) return res.status(500).json({ message: "COMMS_SEND_API_KEY is not configured." });
+
+      const { rows } = await db.execute(sql`
+        SELECT token, ldap, phone, tech_name
+        FROM vrm_form_tokens
+        WHERE form_type = 'rental_tech_survey'
+          AND token = ANY(${tokens})
+          AND sent_at IS NULL
+          AND submitted_at IS NULL
+          AND expires_at > now()
+      `);
+      const targets = rows as any[];
+      if (!targets.length) return res.json({ sent: 0, skipped: tokens.length, note: "nothing eligible in this chunk" });
+
+      const base = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
+      const messages = targets.map((t) => {
+        const raw = String(t.tech_name || "").trim().split(/\s+/)[0] || "there";
+        const first = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        return {
+          ldap: t.ldap,
+          phone: String(t.phone || "").replace(/\D/g, "").replace(/^1/, ""),
+          category: "rental_management",
+          body:
+            `${first}, Sears Fleet here. Quick form to confirm your rental and where your ` +
+            `van is: ${base}/rental-survey/${t.token} Takes under a minute. If you are out ` +
+            `of the rental, tell us there and you are done.`,
+        };
+      });
+
+      // category matters: replies inherit the THREAD's category, so anything
+      // other than rental_management lands where this tracker cannot see it.
+      const payload: Record<string, unknown> = { category: "rental_management", messages };
+      if (confirm) payload.confirm = true; else payload.dryRun = true;
+
+      const host = process.env.COMMS_SEND_BASE_URL || "http://localhost:5000";
+      const resp = await fetch(`${host}/api/fs/comms/api/send-batch`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-comms-api-key": key },
+        body: JSON.stringify(payload),
+      });
+      const ctype = resp.headers.get("content-type") || "";
+      if (!ctype.includes("application/json")) {
+        // The SPA fallback answers 200 with HTML, which reads exactly like a
+        // missing route. Treat a non-JSON body as a failure, never a success.
+        return res.status(502).json({
+          message: `comms returned ${resp.status} ${ctype || "no content-type"} — not JSON. Route or host wrong.`,
+        });
+      }
+      const out = await resp.json();
+      if (!resp.ok) return res.status(502).json({ message: "comms rejected the batch", detail: out });
+
+      if (confirm) {
+        await db.execute(sql`
+          UPDATE vrm_form_tokens SET sent_at = now()
+          WHERE token = ANY(${targets.map((t) => t.token)})
+        `);
+      }
+
+      res.json({
+        dryRun: !confirm,
+        attempted: messages.length,
+        sent: confirm ? messages.length : 0,
+        commsResult: out,
+      });
+    } catch (error: any) {
+      console.error("[survey] send-chunk failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "send-chunk failed" });
+    }
+  });
+
+  /**
    * The reservation-ready view: everyone still in a rental who gave us a branch.
    * This is the list that feeds ETD booking, which is why branch city/state are
    * required fields on the form rather than nice-to-haves.
