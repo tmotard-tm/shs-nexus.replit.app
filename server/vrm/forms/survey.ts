@@ -466,7 +466,14 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           token,
           url,
           body:
-            `${first}, Sears Fleet. URGENT - we are moving every rental to direct billing and need your answer back TODAY: ${url} Takes under a minute. Your LDAP is the same ID you use for Tech Hub (find it under Settings). Out of the rental? Say so and you are done.`,
+            `${first}, Sears Fleet. We are moving your rental to direct billing TODAY. `
+            + `Please complete this exact form now, it takes under a minute: ${url} `
+            + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
+            + `Say so there and you are done. Please do not reply with questions, the `
+            + `link is the only step. Once your reservation is made we will text you `
+            + `next steps: stop by your Enterprise branch, sign one new form, and in `
+            + `most cases keep the same vehicle. A block will be added to your route `
+            + `for it, so stand by.`,
         });
 
         if (!dryRun) {
@@ -580,7 +587,14 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           phone: String(t.phone || "").replace(/\D/g, "").replace(/^1/, ""),
           category: "rental_management",
           body:
-            `${first}, Sears Fleet. URGENT - we are moving every rental to direct billing and need your answer back TODAY: ${base}/rental-survey/${t.token} Takes under a minute. Your LDAP is the same ID you use for Tech Hub (find it under Settings). Out of the rental? Say so and you are done.`,
+            `${first}, Sears Fleet. We are moving your rental to direct billing TODAY. `
+            + `Please complete this exact form now, it takes under a minute: ${base}/rental-survey/${t.token} `
+            + `Your LDAP is your Tech Hub login (under Settings). Out of the rental? `
+            + `Say so there and you are done. Please do not reply with questions, the `
+            + `link is the only step. Once your reservation is made we will text you `
+            + `next steps: stop by your Enterprise branch, sign one new form, and in `
+            + `most cases keep the same vehicle. A block will be added to your route `
+            + `for it, so stand by.`,
         };
       });
 
