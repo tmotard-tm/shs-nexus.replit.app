@@ -267,6 +267,31 @@ export async function initFormsSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS vrm_byov_status_status_idx ON vrm_byov_status (status);
   `);
 
+  // ---------------------------------------------------------------------------
+  // ETD churn sync run log.
+  //
+  // The sync executes outside Nexus (this box has no ETD credentials and no
+  // browser to mint an Azure B2C token), so this table is how Fleet knows it
+  // ran at all. Without it a sync that silently stopped looks exactly like a
+  // sync with nothing to do.
+  // ---------------------------------------------------------------------------
+  await db.execute(sql`
+    CREATE TABLE IF NOT EXISTS vrm_etd_churn_log (
+      id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      ran_at        timestamptz NOT NULL DEFAULT now(),
+      dry_run       boolean NOT NULL DEFAULT true,
+      roster_count  integer,
+      etd_count     integer,
+      to_add        integer,
+      to_remove     integer,
+      added         integer,
+      removed       integer,
+      failed        integer,
+      note          text
+    );
+    CREATE INDEX IF NOT EXISTS vrm_etd_churn_log_ran_idx ON vrm_etd_churn_log (ran_at DESC);
+  `);
+
   // Derived flags. Added separately so re-runs against an existing table are safe.
   await db.execute(sql`
     ALTER TABLE vrm_rental_tech_survey

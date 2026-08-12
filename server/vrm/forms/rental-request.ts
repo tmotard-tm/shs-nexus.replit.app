@@ -481,6 +481,48 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
     }
   });
 
+  /** Record a churn-sync run. Posted by scripts/churn_sync.py. */
+  router.post("/forms/etd-churn/record", async (req2, res) => {
+    try {
+      const b = req2.body || {};
+      const n = (v: any) => (v == null || Number.isNaN(Number(v)) ? null : Number(v));
+      const { rows } = await db.execute(sql`
+        INSERT INTO vrm_etd_churn_log
+          (dry_run, roster_count, etd_count, to_add, to_remove, added, removed, failed, note)
+        VALUES (${b.dryRun !== false}, ${n(b.rosterCount)}, ${n(b.etdCount)},
+                ${n(b.toAdd)}, ${n(b.toRemove)}, ${n(b.added)}, ${n(b.removed)},
+                ${n(b.failed)}, ${String(b.note ?? "").slice(0, 400) || null})
+        RETURNING id, ran_at
+      `);
+      res.json({ ok: true, ...(rows as any[])[0] });
+    } catch (e: any) {
+      console.error("[etd-churn] record failed:", e?.message || e);
+      res.status(500).json({ message: e?.message || "record failed" });
+    }
+  });
+
+  /**
+   * Recent runs, newest first, plus how long since the last REAL one. A sync
+   * that quietly stopped three days ago is the failure mode worth surfacing,
+   * and a dry run does not count as having run.
+   */
+  router.get("/forms/etd-churn/log", async (_req, res) => {
+    try {
+      const { rows } = await db.execute(sql`
+        SELECT *, round(EXTRACT(EPOCH FROM (now() - ran_at)) / 3600.0) AS hours_ago
+        FROM vrm_etd_churn_log ORDER BY ran_at DESC LIMIT 30
+      `);
+      const live = (rows as any[]).filter((r) => r.dry_run === false);
+      res.json({
+        runs: rows,
+        lastRealRunHoursAgo: live.length ? Number(live[0].hours_ago) : null,
+        stale: !live.length || Number(live[0].hours_ago) > 36,
+      });
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || "log failed" });
+    }
+  });
+
   router.get("/forms/rental-request/list", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`

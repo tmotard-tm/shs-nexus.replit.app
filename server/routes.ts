@@ -784,6 +784,7 @@ export async function registerRoutes(app: Express, existingServer?: Server): Pro
       // the Python runner pulls the queue and posts results back using the same
       // internal-cron convention. Scoped to these two paths only.
       if ((req.method === "GET" && req.path === "/forms/rental-request/booking-queue")
+        || (req.method === "POST" && req.path === "/forms/etd-churn/record")
         || (req.method === "POST" && /^\/forms\/rental-request\/\d+\/booked$/.test(req.path))) {
         const t = req.headers["x-internal-cron"];
         if (t && ((process.env.SESSION_SECRET && t === process.env.SESSION_SECRET)
