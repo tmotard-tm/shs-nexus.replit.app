@@ -16,7 +16,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X,
+  ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Search, Download, X, Send, Loader2,
 } from "lucide-react";
 import { colors, fonts } from "../lib/constants";
 
@@ -165,6 +165,136 @@ function MultiSelect({ label, options, values, onChange }: {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+
+type Recipient = { ldap: string; name: string; phone: string; token: string; body: string; branch?: string };
+
+/**
+ * Preview -> mint -> send. Three steps on purpose.
+ *
+ * COMMS_SEND_LIVE is true in this environment, so `confirm:true` is the only
+ * thing standing between a click and real texts reaching real technicians.
+ * Sending also requires typing SEND, because an accidental click here is 345
+ * messages that cannot be recalled.
+ */
+function SendConsole() {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [preview, setPreview] = useState<{ issued: number; skippedNoPhone: number; recipients: Recipient[] } | null>(null);
+  const [minted, setMinted] = useState<Recipient[] | null>(null);
+  const [confirmText, setConfirmText] = useState("");
+  const [progress, setProgress] = useState("");
+  const [err, setErr] = useState("");
+
+  const post = async (path: string, body: unknown) => {
+    const res = await fetch(path, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const ct = res.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      // The SPA fallback answers 200 with HTML, which reads exactly like success.
+      throw new Error(`${path} returned ${res.status} ${ct || "no content-type"}, not JSON`);
+    }
+    const j = await res.json();
+    if (!res.ok) throw new Error(j?.message || `${path} failed`);
+    return j;
+  };
+
+  const doPreview = async () => {
+    setErr(""); setBusy(true); setMinted(null); setProgress("");
+    try {
+      setPreview(await post("/api/vrm/forms/rental-survey/issue", { dryRun: true }));
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const doMint = async () => {
+    setErr(""); setBusy(true);
+    try {
+      const r = await post("/api/vrm/forms/rental-survey/issue", { dryRun: false });
+      setMinted(r.recipients || []);
+      setProgress(`${r.issued} tokens issued. Nothing sent yet.`);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(false); }
+  };
+
+  const doSend = async () => {
+    if (!minted?.length) return;
+    setErr(""); setBusy(true);
+    let sent = 0;
+    try {
+      for (let i = 0; i < minted.length; i += 20) {
+        const chunk = minted.slice(i, i + 20);
+        const r = await post("/api/vrm/forms/rental-survey/send-chunk", {
+          tokens: chunk.map((x) => x.token), confirm: true,
+        });
+        sent += Number(r.sent ?? 0);
+        setProgress(`sent ${sent} of ${minted.length}…`);
+      }
+      setProgress(`Done. ${sent} of ${minted.length} sent.`);
+      setMinted(null); setConfirmText("");
+    } catch (e: any) {
+      setErr(`${e.message} — ${sent} were already sent before this failed.`);
+    } finally { setBusy(false); }
+  };
+
+  if (!open) {
+    return (
+      <button type="button" onClick={() => setOpen(true)}
+        style={{ ...ctrl, cursor: "pointer", display: "inline-flex", alignItems: "center", gap: 6 }}>
+        <Send size={13} /> Send survey
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ width: "100%", background: colors.surface, border: `1px solid ${colors.rule}`, borderRadius: 12, padding: 14, marginBottom: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div style={{ fontFamily: fonts.syne, fontSize: 15, fontWeight: 700, color: colors.ink }}>Send the survey</div>
+        <button type="button" onClick={() => setOpen(false)}
+                style={{ background: "transparent", border: "none", cursor: "pointer", color: colors.inkMuted }}>
+          <X size={16} />
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <button type="button" onClick={doPreview} disabled={busy} style={{ ...ctrl, cursor: "pointer" }}>
+          1 · Preview recipients
+        </button>
+        <button type="button" onClick={doMint} disabled={busy || !preview}
+                style={{ ...ctrl, cursor: preview ? "pointer" : "not-allowed", opacity: preview ? 1 : 0.5 }}>
+          2 · Issue {preview ? preview.issued : ""} tokens
+        </button>
+        <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
+               placeholder="type SEND to arm" disabled={!minted?.length}
+               style={{ ...ctrl, width: 150, opacity: minted?.length ? 1 : 0.5 }} />
+        <button type="button" onClick={doSend}
+                disabled={busy || !minted?.length || confirmText !== "SEND"}
+                style={{ ...ctrl, cursor: minted?.length && confirmText === "SEND" ? "pointer" : "not-allowed",
+                         opacity: minted?.length && confirmText === "SEND" ? 1 : 0.5,
+                         color: colors.red, borderColor: colors.red, fontWeight: 700 }}>
+          3 · Send to {minted?.length ?? 0}
+        </button>
+        {busy && <Loader2 size={14} style={{ color: colors.inkMuted }} className="animate-spin" />}
+      </div>
+
+      {preview && !minted && (
+        <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.ink }}>
+          <div><b>{preview.issued}</b> would be texted · <b>{preview.skippedNoPhone}</b> skipped, no usable phone</div>
+          {preview.recipients?.[0] && (
+            <div style={{ marginTop: 6, padding: 8, background: colors.background, border: `1px solid ${colors.rule}`, borderRadius: 8, fontSize: 12, color: colors.inkSoft }}>
+              {preview.recipients[0].body}
+            </div>
+          )}
+          <div style={{ marginTop: 6, fontSize: 11, color: colors.inkMuted }}>
+            Nothing has been written. Step 2 mints tokens; step 3 is the only thing that texts anyone.
+          </div>
+        </div>
+      )}
+
+      {progress && <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.green }}>{progress}</div>}
+      {err && <div style={{ marginTop: 10, fontFamily: fonts.dmSans, fontSize: 12.5, color: colors.red }}>{err}</div>}
     </div>
   );
 }
@@ -372,6 +502,8 @@ export default function RentalSurvey() {
         <Card label="Escalations" value={String(s.escalations ?? 0)}
               hint="van location unknown" fg={colors.redDeep} />
       </div>
+
+      <SendConsole />
 
       <Funnel
         issued={Number(s.issued ?? 0)}
