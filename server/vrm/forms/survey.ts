@@ -281,6 +281,128 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
   });
 
   /**
+   * Issue one survey token per eligible renter. Returns the recipient list with
+   * a ready-to-send message body. DOES NOT SEND. `dryRun` defaults to true, so
+   * the default call resolves and previews without writing a single token.
+   *
+   * Eligibility is deliberately strict:
+   *   - the rental case is OPEN and in the latest feed
+   *   - identity is confidence=high AND state=RESOLVED, or a human override
+   *     exists. Anything in REVIEW is a guess, and texting a guess sends a
+   *     stranger a link that verifies against someone else's LDAP.
+   *   - the technician is employment_status='A'. Someone terminated or on leave
+   *     with an open rental is a recovery case for a human, not a survey.
+   *   - a phone number exists.
+   * Anyone who already holds an unexpired, unsubmitted token is skipped, so
+   * re-running never double-texts.
+   */
+  router.post("/forms/rental-survey/issue", async (req, res) => {
+    try {
+      const dryRun = req.body?.dryRun !== false;
+      const baseUrl = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
+      const limit = Math.min(Number(req.body?.limit) || 1000, 1000);
+      const batch = String(req.body?.batch || "").trim() || null;
+
+      const { rows } = await db.execute(sql`
+        SELECT DISTINCT ON (upper(a.tech_racfid))
+               upper(a.tech_racfid)                     AS ldap,
+               a.first_name, a.last_name,
+               c.vehicle_number                         AS truck_number,
+               c.feed_json->>'RENTING_CITY_NAME'        AS branch_city,
+               c.feed_json->>'RENTING_STATE'            AS branch_state,
+               c.rental_vendor,
+               COALESCE(
+                 NULLIF(regexp_replace(COALESCE(t.mobile_phone,''), '\D', '', 'g'), ''),
+                 NULLIF(regexp_replace(COALESCE(split_part(t.email,'@',1),''), '\D', '', 'g'), ''),
+                 NULLIF(regexp_replace(COALESCE(a.cell_phone,''), '\D', '', 'g'), ''),
+                 NULLIF(regexp_replace(COALESCE(a.main_phone,''), '\D', '', 'g'), '')
+               )                                        AS phone
+        FROM vrm_rental_operations_cases c
+        JOIN vrm_rental_identity_resolutions ir ON ir.case_key = c.case_key
+        JOIN all_techs a
+          ON a.employee_id = COALESCE(ir.override_employee_id, ir.resolved_employee_id)
+        LEFT JOIN tpms_tech_profiles t ON upper(t.enterprise_id) = upper(a.tech_racfid)
+        WHERE c.present_in_latest
+          AND upper(c.ticket_status) = 'OPEN'
+          AND a.employment_status = 'A'
+          AND a.tech_racfid IS NOT NULL
+          AND (ir.override_employee_id IS NOT NULL
+               OR (ir.confidence = 'high' AND upper(ir.state) = 'RESOLVED'))
+          AND NOT EXISTS (
+            SELECT 1 FROM vrm_form_tokens ft
+            WHERE ft.form_type = 'rental_tech_survey'
+              AND upper(ft.ldap) = upper(a.tech_racfid)
+              AND ft.submitted_at IS NULL
+              AND ft.expires_at > now()
+          )
+        ORDER BY upper(a.tech_racfid), c.days_open DESC NULLS LAST
+        LIMIT ${limit}
+      `);
+
+      const eligible = (rows as any[]).filter((r) => {
+        const d = String(r.phone || "");
+        return d.length === 10 || (d.length === 11 && d.startsWith("1"));
+      });
+      const noPhone = (rows as any[]).length - eligible.length;
+
+      const out: any[] = [];
+      for (const r of eligible) {
+        const token = dryRun ? "(dry-run)" : newToken();
+        // The roster stores names in mixed case (ANGELO, Addison, aDLER), so a raw
+        // first name would shout at roughly a third of 345 recipients.
+        const raw = String(r.first_name || "").trim().split(/\s+/)[0] || "there";
+        const first = raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+        const url = `${baseUrl}/rental-survey/${token}`;
+        const phone = String(r.phone).replace(/^1/, "");
+        out.push({
+          ldap: r.ldap,
+          name: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+          phone,
+          truck_number: r.truck_number,
+          branch: [r.branch_city, r.branch_state].filter(Boolean).join(", "),
+          token,
+          url,
+          body:
+            `${first}, Sears Fleet here. Quick form to confirm your rental and where your ` +
+            `van is: ${url} Takes under a minute. If you are out of the rental, tell us ` +
+            `there and you are done.`,
+        });
+
+        if (!dryRun) {
+          await db.execute(sql`
+            INSERT INTO vrm_form_tokens
+              (token, form_type, ldap, truck_number, tech_name, phone, prefill, batch, expires_at)
+            VALUES (
+              ${token}, 'rental_tech_survey', ${r.ldap}, ${r.truck_number},
+              ${`${r.first_name ?? ""} ${r.last_name ?? ""}`.trim()}, ${phone},
+              ${JSON.stringify({
+                rental_truck_number: r.truck_number,
+                rental_company: r.rental_vendor,
+                branch_city: r.branch_city,
+                branch_state: r.branch_state,
+              })}::jsonb,
+              ${batch}, now() + interval '14 days'
+            )
+          `);
+        }
+      }
+
+      res.json({
+        dryRun,
+        issued: out.length,
+        skippedNoPhone: noPhone,
+        note: dryRun
+          ? "DRY RUN. No tokens written. Re-post with dryRun:false to issue."
+          : "Tokens issued. Nothing has been sent.",
+        recipients: out,
+      });
+    } catch (error: any) {
+      console.error("[survey] issue failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "Failed to issue tokens." });
+    }
+  });
+
+  /**
    * The reservation-ready view: everyone still in a rental who gave us a branch.
    * This is the list that feeds ETD booking, which is why branch city/state are
    * required fields on the form rather than nice-to-haves.
