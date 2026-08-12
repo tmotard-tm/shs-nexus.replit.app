@@ -608,11 +608,21 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       }
       try {
 
+      // Tokens go in as ONE comma-joined string and are split in SQL. Passing
+      // the JS array straight to ANY() makes Postgres answer "malformed array
+      // literal", which is why send-chunk had never once executed. Hex-only
+      // filter first, so the join stays unambiguous and nothing else rides in.
+      const tokenList = (tokens as any[])
+        .map((x) => String(x).trim())
+        .filter((x) => /^[0-9a-fA-F]{16,64}$/.test(x));
+      if (!tokenList.length) {
+        return res.json({ sent: 0, skipped: (tokens as any[]).length, note: "no well-formed tokens in this chunk" });
+      }
       const { rows } = await db.execute(sql`
         SELECT token, ldap, phone, tech_name
         FROM vrm_form_tokens
         WHERE form_type = 'rental_tech_survey'
-          AND token = ANY(${tokens})
+          AND token = ANY(string_to_array(${tokenList.join(",")}, ','))
           AND sent_at IS NULL
           AND submitted_at IS NULL
           AND expires_at > now()
@@ -692,7 +702,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
       if (confirm && actuallySent.length) {
         await db.execute(sql`
           UPDATE vrm_form_tokens SET sent_at = now()
-          WHERE token = ANY(${actuallySent.map((t) => t.token)})
+          WHERE token = ANY(string_to_array(${actuallySent.map((t: any) => String(t.token)).join(",")}, ','))
         `);
       }
 
