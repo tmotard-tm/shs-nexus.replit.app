@@ -315,21 +315,62 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
     }
   });
 
+  /**
+   * Mint ONE throwaway token pointed at an arbitrary phone, so the real message
+   * and the real form can be walked end to end before a live send. It goes out
+   * through the same send-chunk route as everything else on purpose: a test
+   * that uses its own code path tests nothing.
+   *
+   * Marked batch='TEST' and ldap='ZZTEST', and excluded from /pending and
+   * /stats, so it cannot be swept into a real send or inflate the funnel.
+   */
+  router.post("/forms/rental-survey/test", async (req, res) => {
+    try {
+      const phone = String(req.body?.phone || "").replace(/[^0-9]/g, "").replace(/^1/, "");
+      if (phone.length !== 10) {
+        return res.status(400).json({ message: "Give me a 10-digit phone." });
+      }
+      const truck = String(req.body?.truckNumber || "99999").trim();
+      const token = newToken();
+      const baseUrl = String(req.body?.baseUrl || "https://SHS-Nexus.replit.app").replace(/\/+$/, "");
+      await db.execute(sql`
+        INSERT INTO vrm_form_tokens
+          (token, form_type, ldap, truck_number, tech_name, phone, prefill, batch, expires_at)
+        VALUES (
+          ${token}, 'rental_tech_survey', 'ZZTEST', ${truck},
+          ${"TEST - do not action"}, ${phone},
+          ${JSON.stringify({
+            rental_truck_number: truck,
+            rental_company: "Enterprise Rent-A-Car",
+            branch_city: "TEST",
+            branch_state: "NC",
+          })}::jsonb,
+          'TEST', now() + interval '2 days'
+        )
+      `);
+      res.json({ token, url: `${baseUrl}/rental-survey/${token}`, phone,
+                 next: "POST /api/vrm/forms/rental-survey/send-chunk {tokens:[token],confirm:true}" });
+    } catch (error: any) {
+      console.error("[survey] test token failed:", error?.message || error);
+      res.status(500).json({ message: error?.message || "test token failed" });
+    }
+  });
+
   /** Send/response funnel plus the counts that drive the reservation queue. */
   router.get("/forms/rental-survey/stats", async (_req, res) => {
     try {
       const { rows } = await db.execute(sql`
         SELECT
-          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey')                        AS issued,
-          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND sent_at IS NOT NULL)     AS sent,
-          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND opened_at IS NOT NULL)   AS opened,
-          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND submitted_at IS NOT NULL) AS submitted,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE has_rental)                                     AS still_in_rental,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE has_rental IS FALSE)                            AS no_longer_in_rental,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE truck_mismatch)                                 AS truck_mismatch,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE van_status='unknown_escalate')                  AS escalations,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE truck_decommissioned)                           AS decommissioned,
-          (SELECT count(*) FROM vrm_rental_tech_survey WHERE techhub_still_using IS FALSE)                   AS no_truck_number
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND COALESCE(batch,'') <> 'TEST')                        AS issued,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND COALESCE(batch,'') <> 'TEST' AND sent_at IS NOT NULL)     AS sent,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND COALESCE(batch,'') <> 'TEST' AND opened_at IS NOT NULL)   AS opened,
+          (SELECT count(*) FROM vrm_form_tokens WHERE form_type='rental_tech_survey' AND COALESCE(batch,'') <> 'TEST' AND submitted_at IS NOT NULL) AS submitted,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND has_rental)                                     AS still_in_rental,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND has_rental IS FALSE)                            AS no_longer_in_rental,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND truck_mismatch)                                 AS truck_mismatch,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND van_status='unknown_escalate')                  AS escalations,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND truck_decommissioned)                           AS decommissioned,
+          (SELECT count(*) FROM vrm_rental_tech_survey WHERE upper(COALESCE(ldap,'')) <> 'ZZTEST' AND techhub_still_using IS FALSE)                   AS no_truck_number
       `);
       res.json(rows[0] || {});
     } catch (error: any) {
@@ -538,6 +579,7 @@ export function registerRentalSurveyAdminRoutes(router: Router): void {
           AND sent_at IS NULL
           AND submitted_at IS NULL
           AND expires_at > now()
+          AND COALESCE(batch, '') <> 'TEST'
         ORDER BY ldap
       `);
       res.json({ count: rows.length, tokens: rows });

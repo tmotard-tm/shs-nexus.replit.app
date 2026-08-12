@@ -158,9 +158,11 @@ export default function RentalTechSurvey() {
     if (hasRental === "no" && !noRentalReason) e.noRentalReason = "Please tell us what happened to it.";
     if (hasRental === "yes") {
       if (!rentalCompany) e.rentalCompany = "Please pick the rental company.";
-      if (!rentalBranchCity.trim()) e.rentalBranchCity = "Please enter the branch city.";
-      if (!rentalBranchState) e.rentalBranchState = "Please pick the branch state.";
-      if (!assignedTruckNumber.trim()) e.assignedTruckNumber = "Please enter your assigned truck number.";
+      // Branch city/state and the assigned truck number are NOT gated. We
+      // already hold the branch from the rental feed (RENTING_BRANCH maps to
+      // the ETD branch code, verified 14/14), and a technician whose van was
+      // totalled or turned in may have no current truck number to give. Making
+      // them mandatory only converts "I don't know" into an abandoned form.
       if (!vanStatus) e.vanStatus = "Please tell us what is happening with your van.";
       if (vanStatus === "in_shop") {
         if (!shopName.trim()) e.shopName = "Please enter the shop name.";
