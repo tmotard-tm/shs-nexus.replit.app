@@ -42,6 +42,8 @@ export interface RosterRow {
   effective_date: string | null; // YYYY-MM-DD (or Date-ish)
   last_day_worked: string | null;
   district_no?: string | null;
+  /** Home state, used only to break same-name ties against the pickup state. */
+  home_state?: string | null;
 }
 
 export interface OnboardingRow {
@@ -291,6 +293,8 @@ export interface ResolverInputs {
   onboarding?: OnboardingRow[];
   /** null when the truck maps to nobody */
   truckTech?: TruckTech | null;
+  /** Where the rental was picked up. Breaks same-name ties; safe to omit. */
+  pickupState?: string | null;
 }
 
 /** Employment-compatibility check shared by the name and truck paths. */
@@ -536,22 +540,64 @@ function resolveByName(inputs: ResolverInputs): IdentityResolution {
     };
   }
   if (compat.length > 1) {
-    // multiple compatible same-name — pick most-recent-activity but flag REVIEW
-    const best = compat.reduce((a, b) => {
-      const ea = eventDate(a)?.getTime() ?? 0;
-      const eb = eventDate(b)?.getTime() ?? 0;
-      return eb > ea ? b : a;
-    });
+    // Multiple compatible same-name matches. Rank on evidence, do not guess.
+    //
+    // This used to take the most recent `effective_date` and it was not merely
+    // weak, it was biased toward the wrong answer. `effective_date` is the date
+    // of the last STATUS CHANGE, and termination is a status change. A
+    // long-tenured active technician carries their hire date; someone who left
+    // last month carries their termination date. Recency therefore handed the
+    // rental to whoever had most recently departed.
+    //
+    // Observed on vehicle 46467: SCOTT E GREEN (terminated 2026-05-20, home NY)
+    // beat SCOTT A GREEN (active since 2014-11-24, home MD) for a rental picked
+    // up in Randallstown MD, ten miles from Scott A and 350 from Scott E.
+    const STATUS_RANK: Record<string, number> = {
+      A: 0, L: 1, R: 1, NEW: 2, P: 2, RPE: 2, RCS: 2, T: 9,
+    };
+    const rank = (t: RosterRow) =>
+      STATUS_RANK[(t.employment_status ?? "").trim().toUpperCase()] ?? 5;
+
+    const pickup = (inputs.pickupState ?? "").trim().toUpperCase();
+    const homeMiss = (t: RosterRow) =>
+      pickup && (t.home_state ?? "").trim().toUpperCase() === pickup ? 0 : 1;
+
+    const truckId = inputs.truckTech?.employee_id ?? null;
+    const notTruck = (t: RosterRow) => (truckId && t.employee_id === truckId ? 0 : 1);
+
+    const ranked = [...compat].sort((a, b) =>
+      // 1. the truck itself is the strongest evidence available
+      (notTruck(a) - notTruck(b))
+      // 2. someone who still works here is likelier to be holding a rental
+      || (rank(a) - rank(b))
+      // 3. a rental picked up in your home state is probably yours
+      || (homeMiss(a) - homeMiss(b))
+      // 4. recency last, and only so the result is deterministic
+      || ((eventDate(b)?.getTime() ?? 0) - (eventDate(a)?.getTime() ?? 0))
+    );
+
+    const best = ranked[0];
+    const next = ranked[1];
+    const why: string[] = [];
+    if (truckId && best.employee_id === truckId) why.push("assigned to the rental truck");
+    if (rank(best) !== rank(next)) why.push(`${STATUS[best.employment_status ?? ""] ?? best.employment_status} outranks ${STATUS[next.employment_status ?? ""] ?? next.employment_status}`);
+    if (homeMiss(best) !== homeMiss(next)) why.push(`home state matches pickup ${pickup}`);
+
+    // Separated by real evidence is a judgement; separated by nothing is a coin
+    // flip, and the confidence field should say which one this was.
+    const decisive = why.length > 0;
     return {
       state: "REVIEW",
       employee_id: best.employee_id,
       status: STATUS[best.employment_status ?? ""] ?? best.employment_status,
       status_date: dateStr(eventDate(best)),
-      confidence: "low",
+      confidence: decisive ? "medium" : "low",
       method,
       tech_name: best.tech_name,
       district_no: best.district_no ?? null,
-      reason: `${compat.length} same-name compatible; picked most-recent, needs review`,
+      reason: decisive
+        ? `${compat.length} same-name compatible; picked on ${why.join(" + ")}; confirm`
+        : `${compat.length} same-name compatible and NOTHING separates them; needs a human`,
       candidates: evidence(cands),
     };
   }

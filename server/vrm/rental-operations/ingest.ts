@@ -284,7 +284,7 @@ export async function loadRoster(): Promise<RosterRow[]> {
     SELECT employee_id, tech_name, employment_status,
            to_char(effective_date,'YYYY-MM-DD') AS effective_date,
            to_char(last_day_worked,'YYYY-MM-DD') AS last_day_worked,
-           district_no
+           district_no, home_state
     FROM all_techs
   `);
   return res.rows as unknown as RosterRow[];
@@ -466,6 +466,7 @@ export async function persistRentalCases(o: PersistOptions): Promise<PersistResu
     const r = resolveIdentity({
       renter: c.renter_name_raw, rentalStart: c.rental_start_date, rosterIndex, onboarding,
       truckTech: truckKey ? (truckTechs.get(truckKey) ?? null) : null,
+      pickupState: c.renting_state,
     });
     resolutions.set(c.case_key, r);
     if (r.state === "RESOLVED") resolved++;
