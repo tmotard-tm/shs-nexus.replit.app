@@ -500,7 +500,11 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
          "techhub_still_using", "truck_mismatch"]],
       ["vrm_rental_request",
         ["request_no", "auto_decision", "auto_rule", "status", "is_byov",
-         "appointment_at", "shop_estimated_days", "etd_booked_at", "policy_complete"]],
+         "appointment_at", "shop_estimated_days", "etd_booked_at", "policy_complete",
+         // The concurrency guards. Omitted from the first version of this list,
+         // which then reported ok:true while claimed_at did not exist — the one
+         // failure mode a pre-flight check must never have.
+         "claimed_at", "claimed_by"]],
       ["vrm_byov_status", ["ldap", "status", "synced_at"]],
       ["vrm_etd_churn_log", ["ran_at", "dry_run", "added", "removed"]],
     ];
@@ -519,6 +523,16 @@ export function registerRentalRequestAdminRoutes(router: Router): void {
         for (const c of cols) {
           if (!have.has(c)) problems.push(`${table}.${c} missing`);
         }
+      }
+
+      // Indexes are part of correctness here, not tuning: without the unique
+      // index a concurrent double-submit becomes two ETD bookings.
+      const requiredIndexes = ["vrm_rental_request_token_uniq"];
+      for (const idx of requiredIndexes) {
+        const { rows } = await db.execute(sql`
+          SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND indexname = ${idx}
+        `);
+        if (!(rows as any[]).length) problems.push(`INDEX MISSING: ${idx}`);
       }
 
       // A mirror that exists but is empty is not usable: every request would
