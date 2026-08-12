@@ -131,9 +131,14 @@ export default function RentalRequestForm() {
 
   /** Maintenance short-circuits: submit it so the denial is on record, then stop. */
   const submitMaintenance = () => {
+    // Carry identity even on the short-circuit. A denial with no district or
+    // state is useless in the denial-mix report, which is the number this whole
+    // form exists to produce.
     submitMutation.mutate({
       ldap, truckNumber, problemCategory: "scheduled_maintenance",
       symptom, isDrivable, isSafeToDrive,
+      district: identity?.district, homeState: identity?.homeState,
+      mobilePhone: identity?.mobilePhone,
     });
   };
 
